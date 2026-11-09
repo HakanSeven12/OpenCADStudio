@@ -7039,4 +7039,90 @@ mod batch5_tests {
         assert!(out.contains("DIMASZ"), "{out}");
     }
 
+    #[test]
+    fn associative_array_honours_the_base_point() {
+        use document::Entity as _;
+
+        let mut app = new_app();
+        let before: Vec<_> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .collect();
+        let reply = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .find(|handle| !before.contains(handle))
+            .unwrap();
+        app.handle_assoc_array(
+            vec![line],
+            crate::scene::assoc_array::AssocArraySpec::Rectangular {
+                columns: 2,
+                rows: 2,
+                column_spacing: 20.0,
+                row_spacing: 20.0,
+            },
+            Some(glam::DVec3::new(50.0, 50.0, 0.0)),
+        );
+        let inserts: Vec<document::types::Vector3> = app
+            .tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert.insert_point),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            inserts.contains(&document::types::Vector3::new(50.0, 50.0, 0.0)),
+            "the array insert is at the named base point: {inserts:?}"
+        );
+
+        let before: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .collect();
+        let reply = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .find(|handle| !before.contains(handle))
+            .unwrap();
+        app.handle_assoc_array(
+            vec![line],
+            crate::scene::assoc_array::AssocArraySpec::Rectangular {
+                columns: 2,
+                rows: 2,
+                column_spacing: 20.0,
+                row_spacing: 20.0,
+            },
+            None,
+        );
+        let inserts: Vec<document::types::Vector3> = app
+            .tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert.insert_point),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            inserts.contains(&document::types::Vector3::new(0.0, 0.0, 0.0)),
+            "the default anchors at the source's bounding corner: {inserts:?}"
+        );
+    }
 }

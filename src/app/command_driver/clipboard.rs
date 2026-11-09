@@ -72,6 +72,7 @@ impl OpenCADStudio {
         &mut self,
         mut handles: Vec<Handle>,
         spec: crate::scene::assoc_array::AssocArraySpec,
+        base_point: Option<glam::DVec3>,
     ) {
         let i = self.active_tab;
         handles.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
@@ -83,10 +84,13 @@ impl OpenCADStudio {
             return;
         }
         let label = self.history_label_from_active_cmd(i, "ARRAY");
-        let source_point = crate::app::helpers::entities_lower_left_by_bbox(
-            &self.tabs[i].scene.document,
-            &handles,
-        );
+        // A named base point wins; the bounding-box corner is only a fallback.
+        let source_point = base_point.unwrap_or_else(|| {
+            crate::app::helpers::entities_lower_left_by_bbox(
+                &self.tabs[i].scene.document,
+                &handles,
+            )
+        });
         self.push_undo_snapshot(i, label.clone());
         match crate::scene::assoc_array::create_from_spec(
             &mut self.tabs[i].scene,

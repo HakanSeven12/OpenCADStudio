@@ -2119,6 +2119,9 @@ pub enum CmdResult {
     AssocArray {
         handles: Vec<Handle>,
         spec: crate::scene::assoc_array::AssocArraySpec,
+        /// The point the array's reference node is anchored to; `None` keeps
+        /// the default (the source block's origin).
+        base_point: Option<glam::DVec3>,
     },
     /// Erase `handle` and replace with new entities; command stays active.
     ReplaceEntity(Handle, Vec<EntityType>),

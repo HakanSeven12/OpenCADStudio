@@ -113,6 +113,8 @@ pub struct ArrayRectCommand {
     default_col_sp: f64,
     associative: bool,
     plane: WorkingPlane,
+    base_point: Option<DVec3>,
+    awaiting_base: bool,
 }
 
 impl ArrayRectCommand {
@@ -127,6 +129,8 @@ impl ArrayRectCommand {
             default_col_sp: defaults::get_array_col_sp(),
             associative: defaults::get_array_assoc() != 0.0,
             plane: WorkingPlane::default(),
+            base_point: None,
+            awaiting_base: false,
         }
     }
 
@@ -159,7 +163,10 @@ impl CadCommand for ArrayRectCommand {
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
-        vec![associative_option(self.associative)]
+        vec![
+            associative_option(self.associative),
+            crate::command::CmdOption::new("Basepoint", "B"),
+        ]
     }
 
     fn set_working_plane(&mut self, plane: WorkingPlane) {
@@ -202,6 +209,27 @@ impl CadCommand for ArrayRectCommand {
             self.associative = !self.associative;
             defaults::set_array_assoc(f64::from(u8::from(self.associative)));
             return None;
+        }
+        if self.awaiting_base {
+            self.awaiting_base = false;
+            let mut parts = text.split(',');
+            let parsed = (|| {
+                let x = parts.next()?.trim().parse().ok()?;
+                let y = parts.next()?.trim().parse().ok()?;
+                let z = parts.next().and_then(|z| z.trim().parse().ok()).unwrap_or(0.0);
+                Some(DVec3::new(x, y, z))
+            })();
+            return Some(match parsed {
+                Some(pt) => {
+                    self.base_point = Some(pt);
+                    CmdResult::NeedPoint
+                }
+                None => CmdResult::ReportError("Enter a base point as x,y[,z].".to_string()),
+            });
+        }
+        if matches!(text.trim().to_ascii_uppercase().as_str(), "B" | "BASEPOINT" | "BP") {
+            self.awaiting_base = true;
+            return Some(CmdResult::NeedPoint);
         }
         let t = text.trim().replace(',', ".");
         let t = t.as_str();
@@ -262,6 +290,7 @@ impl CadCommand for ArrayRectCommand {
                 if self.associative && world_plane(self.plane) {
                     return Some(CmdResult::AssocArray {
                         handles: self.handles.clone(),
+                        base_point: self.base_point,
                         spec: crate::scene::assoc_array::AssocArraySpec::Rectangular {
                             columns: cols,
                             rows,
@@ -316,7 +345,11 @@ impl CadCommand for ArrayRectCommand {
             .collect()
     }
 
-    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        if self.awaiting_base {
+            self.base_point = Some(pt);
+            self.awaiting_base = false;
+        }
         CmdResult::NeedPoint
     }
 
@@ -446,6 +479,7 @@ impl CadCommand for ArrayPolarCommand {
                 if self.associative && world_plane(self.plane) {
                     return Some(CmdResult::AssocArray {
                         handles: self.handles.clone(),
+                        base_point: None,
                         spec: crate::scene::assoc_array::AssocArraySpec::Polar {
                             center,
                             items: count,
@@ -621,6 +655,7 @@ impl ArrayPathCommand {
     ) -> Option<CmdResult> {
         (self.associative && world_plane(self.plane)).then(|| CmdResult::AssocArray {
             handles: self.handles.clone(),
+            base_point: None,
             spec: crate::scene::assoc_array::AssocArraySpec::Path {
                 path: path_entity.common().handle,
                 items,

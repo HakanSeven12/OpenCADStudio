@@ -4842,6 +4842,22 @@ impl Scene {
         show_interaction: bool,
         force_rasterize: bool,
     ) -> Option<ViewportData> {
+        // Cumulative stage times for the PERF trace: which step of building a
+        // viewport's data is slow after an edit. The clock covers the whole
+        // body, the wire-source acquisition included — it used to start after
+        // that acquisition, one line below the `vp_mark("wires")` meant to
+        // report it, so `vp-build wires=` read 0.0 ms however long it took and
+        // an edit frame measured at `build=141.52ms` reported 0.0 ms for every
+        // stage it had.
+        let vp_started = crate::perf::enabled().then(iced::time::Instant::now);
+        let vp_mark = |stage: &str| {
+            if let Some(started) = vp_started {
+                crate::perf_record!(
+                    "[perf] vp-build {stage}={:.1}ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        };
         let display = self.viewport_display_settings(inst);
         let mut flags = render_mode_flags(inst.render_mode);
         if let Some(style) = display.visual_style.as_ref() {
@@ -4882,34 +4898,40 @@ impl Scene {
         // are all skipped while the content is unchanged, and
         // `render_signature` stays stable so paper hits the single-blit scene
         // cache exactly like Model.
-        let base_arc = if let Some(tile_idx) = inst.tile_idx {
+        let (base_arc, wire_source) = if let Some(tile_idx) = inst.tile_idx {
             let aspect = if full.height > 0.0 {
                 full.width / full.height
             } else {
                 1.0
             };
-            self.model_tile_wires_arc(tile_idx, &inst.camera, aspect, full.height)
+            (
+                self.model_tile_wires_arc(tile_idx, &inst.camera, aspect, full.height),
+                "tile",
+            )
         } else if inst.paper_sheet {
             // The sheet renders the paper block's own entities + viewport
             // borders — NOT the projected viewport content (the GPU content
             // viewports draw that themselves).
-            self.paper_sheet_wires_arc()
+            (self.paper_sheet_wires_arc(), "sheet")
         } else if inst.handle == document::Handle::NULL {
-            self.entity_wires_arc()
+            (self.entity_wires_arc(), "entity")
         } else {
-            self.model_wires_for_viewport_arc(inst.handle, full.height)
+            (
+                self.model_wires_for_viewport_arc(inst.handle, full.height),
+                "viewport",
+            )
         };
-        // Cumulative stage times for the PERF trace: which step of building a
-        // viewport's data is slow after an edit.
-        let vp_started = crate::perf::enabled().then(iced::time::Instant::now);
-        let vp_mark = |stage: &str| {
-            if let Some(started) = vp_started {
-                crate::perf_record!(
-                    "[perf] vp-build {stage}={:.1}ms",
-                    started.elapsed().as_secs_f64() * 1000.0
-                );
-            }
-        };
+        // Which source paid, and for how many wires: the four branches are
+        // very different amounts of work and the cumulative stage line cannot
+        // tell them apart.
+        if let Some(started) = vp_started {
+            crate::perf_record!(
+                "[perf] vp-wires {:>7.2}ms source={} wires={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                wire_source,
+                base_arc.len(),
+            );
+        }
         vp_mark("wires");
         let source_gen = self.last_model_wire_gen.get();
         let styled_fill_source = Arc::clone(&base_arc);

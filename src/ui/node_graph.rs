@@ -9,11 +9,13 @@
 use document::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::widget::{self, Widget};
-use iced::advanced::{renderer, Renderer as _, Shell};
+use iced::advanced::widget::operation::{Focusable, Operation, TextInput};
+use iced::advanced::widget::{self, tree, Widget};
+use iced::advanced::{overlay, renderer, Renderer as _, Shell};
+use iced::keyboard;
 use iced::widget::{
-    button, canvas, checkbox, column, container, mouse_area, opaque, pin, row, scrollable, slider,
-    stack, text, text_input, Space,
+    button, canvas, checkbox, column, container, hover, mouse_area, opaque, pin, row, scrollable,
+    slider, stack, text, text_input, tooltip, Space,
 };
 use iced::{
     mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme, Transformation,
@@ -34,6 +36,8 @@ const PORT_W: f32 = 14.0;
 const PORT_HIT: f32 = 10.0;
 const ZOOM_STEP: f32 = 1.1;
 const ZOOM_STEPS: std::ops::RangeInclusive<i32> = -15..=12;
+/// The ribbon's tooltip delay.
+const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// Drawing objects a node can create, and `Object`, which creates nothing
 /// and stands for whatever object is linked into it.
@@ -432,6 +436,25 @@ impl PaletteItem {
             PaletteItem::Op(spec) => spec.name,
         }
     }
+
+    /// Whether both are the same entry. Labels will not do: Point names both
+    /// a drawing object and a coordinate.
+    fn same(self, other: Self) -> bool {
+        match (self, other) {
+            (PaletteItem::Object(a), PaletteItem::Object(b)) => a == b,
+            (PaletteItem::Op(a), PaletteItem::Op(b)) => std::ptr::eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+/// The tint over the palette entry about to be added.
+fn palette_highlight(theme: &Theme) -> container::Style {
+    let tint = theme.palette().primary.base.color.scale_alpha(0.25);
+    container::Style {
+        background: Some(Background::Color(tint)),
+        ..Default::default()
+    }
 }
 
 /// Canvas state of one node.
@@ -446,6 +469,13 @@ pub struct NodeUi {
 
 pub enum RowWidget {
     Field,
+    /// A plain number: anything else is refused as it is typed.
+    Number,
+    /// A number written the way the Properties panel takes it, as an
+    /// expression or with units; checked when it is committed.
+    Measure,
+    /// A point, typed as `x,y,z` with or without parentheses.
+    Coordinate,
     /// A coordinate group's summary row; its label folds the components.
     Group,
     Slider { min: f64, max: f64, step: f64 },
@@ -519,6 +549,8 @@ pub enum GraphMsg {
     InPress(Port),
     Input(Port, String),
     Commit(Port),
+    /// The pointer went elsewhere: commit every draft but the focused field's.
+    Leave(Option<Port>),
     /// A slider or toggle set an operation input.
     Set(Port, Value),
     Zoom(mouse::ScrollDelta),
@@ -536,6 +568,89 @@ pub enum GraphMsg {
 
 fn msg(m: GraphMsg) -> Message {
     Message::Graph(m)
+}
+
+/// `content` with a tooltip, styled like the node graph's own button on the
+/// command line. Cards are drawn through the canvas zoom, so what goes on them
+/// divides its sizes by `zoom` to come out the same size as any other tooltip.
+fn with_tip<'a>(
+    content: impl Into<Element<'a, Message>>,
+    tip: String,
+    zoom: f32,
+) -> Element<'a, Message> {
+    let bubble = container(text(tip).size(11.0 / zoom))
+        .padding([3.0 / zoom, 6.0 / zoom])
+        .style(container::bordered_box);
+    tooltip(content, bubble, tooltip::Position::Top)
+        .gap(4.0 / zoom)
+        .padding(5.0 / zoom)
+        .delay(TIP_DELAY)
+        .into()
+}
+
+/// A node's name, with its ports below it when it has a spec.
+fn node_tip(name: String, spec: Option<&Spec>) -> String {
+    match spec {
+        Some(spec) => {
+            let inputs: Vec<&str> = spec.inputs.iter().map(|input| input.name).collect();
+            format!("{name}\n{} → {}", inputs.join(", "), spec.outputs.join(", "))
+        }
+        None => name,
+    }
+}
+
+/// What a row's tooltip says: its name and whole value, which the card may
+/// have no room to show.
+fn row_tip(row: &NodeRow) -> String {
+    let value = display(&row.value);
+    if value.is_empty() {
+        row.label.clone()
+    } else {
+        format!("{}: {value}", row.label)
+    }
+}
+
+/// Whether an operation input takes a point or vector. The specs do not say:
+/// points, curves and objects are all inputs without a default, so this goes
+/// by name, and by the operation where a name means different things.
+fn is_coordinate(spec: &Spec, input: &graph::ops::Input) -> bool {
+    if input.list || !matches!(input.default, graph::ops::Initial::None) {
+        return false;
+    }
+    match input.name {
+        "first" | "second" => !matches!(spec.name, "Fillet" | "Chamfer" | "Centerline"),
+        "a" | "b" => spec.category == "Geometry",
+        "third" | "point" | "center" | "location" | "vector" | "corner" | "vertex" | "base"
+        | "side" | "keep" | "jog" | "feature" | "leader" => true,
+        name => {
+            name.starts_with("axis ")
+                || [" point", " corner", " source", " target"]
+                    .iter()
+                    .any(|end| name.ends_with(end))
+        }
+    }
+}
+
+/// The widget id of the text field on `port`.
+fn field_id(port: &Port) -> widget::Id {
+    widget::Id::from(format!("node-graph-field:{}:{}", port.node, port.field))
+}
+
+/// Whether `text` is a number, or could still become one with more typing.
+fn number_prefix(text: &str) -> bool {
+    let digits = |part: &str| part.chars().all(|c| c.is_ascii_digit());
+    let unsigned = text.strip_prefix('-').unwrap_or(text);
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (unsigned, None),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    digits(whole)
+        && digits(fraction)
+        && exponent.is_none_or(|exponent| {
+            mantissa.chars().any(|c| c.is_ascii_digit())
+                && digits(exponent.strip_prefix(['-', '+']).unwrap_or(exponent))
+        })
 }
 
 /// Compact display of a port value.
@@ -737,6 +852,8 @@ impl Graph {
                         step: param("step").unwrap_or(0.0),
                     },
                     ("Boolean", "value") => RowWidget::Toggle,
+                    _ if matches!(input.default, graph::ops::Initial::Num(_)) => RowWidget::Number,
+                    _ if is_coordinate(spec, input) => RowWidget::Coordinate,
                     _ => RowWidget::Field,
                 };
                 let output = spec.outputs.contains(&input.name);
@@ -905,7 +1022,63 @@ impl Graph {
             })
     }
 
+    /// The rows of node `id` that a link supplies, and so cannot be typed in.
+    /// One value can have several ports: a coordinate is also its group's
+    /// row, and a section's header carries all of its rows. A row is driven
+    /// by a link to any port that includes it, and a group by a link to any
+    /// of its components.
+    pub(crate) fn driven_fields(&self, id: NodeId, sections: &[NodeSection]) -> HashSet<String> {
+        let linked = |field: &str| {
+            self.engine.is_linked(&Port {
+                node: id,
+                field: field.to_owned(),
+            })
+        };
+        let mut driven = HashSet::default();
+        for section in sections {
+            let whole = section.header.as_ref().is_some_and(|h| linked(&h.field));
+            for row in &section.rows {
+                if whole
+                    || row.group.as_ref().is_some_and(|group| linked(group))
+                    || linked(&row.field)
+                    || row.field.split('|').any(linked)
+                {
+                    driven.insert(row.field.clone());
+                }
+            }
+        }
+        driven
+    }
+
+    /// Every text field a user can type in, each card's in Tab order: its
+    /// rows from the top.
+    pub(crate) fn tab_order(&self, sections: &[Vec<NodeSection>]) -> Vec<Port> {
+        let mut fields = Vec::new();
+        for (node, node_sections) in self.engine.nodes.iter().zip(sections) {
+            let id = node.id;
+            let driven = self.driven_fields(id, node_sections);
+            for section in node_sections.iter().filter(|s| self.is_open(id, s)) {
+                for row in &section.rows {
+                    let typed = !matches!(row.widget, RowWidget::Slider { .. } | RowWidget::Toggle);
+                    if typed
+                        && row.input
+                        && self.is_shown(id, row)
+                        && !driven.contains(&row.field)
+                    {
+                        fields.push(Port {
+                            node: id,
+                            field: row.field.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        fields
+    }
+
     pub fn view(&self, sections: Vec<Vec<NodeSection>>) -> Element<'_, Message> {
+        let fields = self.tab_order(&sections);
+        let drafts = self.drafts.keys().cloned().collect();
         let wires = self
             .engine
             .links
@@ -950,6 +1123,8 @@ impl Graph {
             Zoomed {
                 content: nodes.width(Length::Fill).height(Length::Fill).into(),
                 zoom,
+                fields,
+                drafts,
             },
         ];
         if let Some(Drag::Palette(item)) = self.drag {
@@ -977,19 +1152,48 @@ impl Graph {
                 ),
             PaletteItem::Op(_) => Space::new().width(14.0).into(),
         };
-        mouse_area(
-            container(
-                row![icon, text(t!(item.label())).size(12)]
-                    .spacing(6)
-                    .align_y(iced::Center),
-            )
-            .padding([3, 10])
-            .width(Length::Fill),
+        let held = match self.drag {
+            Some(Drag::Palette(held)) => Some(held),
+            _ => None,
+        };
+        let selected = held.is_some_and(|held| held.same(item));
+        let entry = container(
+            row![icon, text(t!(item.label())).size(12)]
+                .spacing(6)
+                .align_y(iced::Center),
         )
-        .on_press(msg(GraphMsg::PalettePress(item)))
-        .on_release(msg(GraphMsg::PaletteRelease))
-        .interaction(mouse::Interaction::Grab)
-        .into()
+        .padding([3, 10])
+        .width(Length::Fill)
+        .style(move |theme: &Theme| {
+            if selected {
+                palette_highlight(theme)
+            } else {
+                container::Style::default()
+            }
+        });
+        // While an entry is being dragged, only that entry stays lit.
+        let dragging = held.is_some();
+        let hovered = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |theme: &Theme| {
+                if dragging {
+                    container::Style::default()
+                } else {
+                    palette_highlight(theme)
+                }
+            });
+        let spec = match item {
+            PaletteItem::Op(spec) => Some(spec),
+            PaletteItem::Object(_) => None,
+        };
+        with_tip(
+            mouse_area(hover(entry, hovered))
+                .on_press(msg(GraphMsg::PalettePress(item)))
+                .on_release(msg(GraphMsg::PaletteRelease)),
+            node_tip(t!(item.label()).into_owned(), spec),
+            1.0,
+        )
     }
 
     /// The node library as a docked panel: title bar, a search box with the
@@ -1101,19 +1305,32 @@ impl Graph {
                 }
             }
         };
+        let zoom = self.zoom();
+        let spec = match &node.kind {
+            Kind::Op(spec) => Some(*spec),
+            Kind::Object(_) => None,
+        };
+        let title_tip = node_tip(title.clone(), spec);
         let header = row![
-            mouse_area(
-                container(text(title).size(12))
-                    .padding([4, 8])
-                    .width(Length::Fill)
-                    .height(HEADER_H),
-            )
-            .on_press(msg(GraphMsg::NodePress(id)))
-            .interaction(mouse::Interaction::Grab),
-            button(crate::ui::icons::themed(crate::ui::icons::CLOSE, 10.0))
-                .on_press(msg(GraphMsg::NodeDelete(id)))
-                .style(button::text)
-                .padding([6, 8]),
+            with_tip(
+                mouse_area(
+                    container(text(title).size(12))
+                        .padding([4, 8])
+                        .width(Length::Fill)
+                        .height(HEADER_H),
+                )
+                .on_press(msg(GraphMsg::NodePress(id))),
+                title_tip,
+                zoom,
+            ),
+            with_tip(
+                button(crate::ui::icons::themed(crate::ui::icons::CLOSE, 10.0))
+                    .on_press(msg(GraphMsg::NodeDelete(id)))
+                    .style(button::text)
+                    .padding([6, 8]),
+                t!("Delete").into_owned(),
+                zoom,
+            ),
         ]
         .height(HEADER_H);
         let header = container(header).style(|theme: &Theme| container::Style {
@@ -1121,6 +1338,7 @@ impl Graph {
             text_color: Some(theme.palette().primary.weak.text),
             ..Default::default()
         });
+        let driven = self.driven_fields(id, &sections);
         let mut col = column![header];
         if sections.is_empty() {
             col = col.push(
@@ -1152,17 +1370,20 @@ impl Graph {
                 .width(Length::Fill)
                 .height(SECTION_H)
                 .padding([0, 6]);
-                col = col.push(
+                col = col.push(with_tip(
                     row![in_port, toggle, out_port]
                         .spacing(2)
                         .height(SECTION_H)
                         .align_y(iced::Center),
-                );
+                    section.title.clone(),
+                    zoom,
+                ));
             }
             if open {
                 for node_row in section.rows {
                     if self.is_shown(id, &node_row) {
-                        col = col.push(self.row_view(id, node_row));
+                        let locked = driven.contains(&node_row.field);
+                        col = col.push(self.row_view(id, node_row, locked));
                     }
                 }
             }
@@ -1206,7 +1427,8 @@ impl Graph {
         (in_port, out_port)
     }
 
-    fn row_view(&self, id: NodeId, node_row: NodeRow) -> Element<'_, Message> {
+    fn row_view(&self, id: NodeId, node_row: NodeRow, locked: bool) -> Element<'_, Message> {
+        let tip = row_tip(&node_row);
         let (in_port, out_port) = self.port_views(id, &node_row);
         let label: Element<'_, Message> = match node_row.widget {
             RowWidget::Group => {
@@ -1234,9 +1456,8 @@ impl Graph {
             node: id,
             field: node_row.field,
         };
-        let linked_in = self.engine.is_linked(&port);
         let shown = display(&node_row.value);
-        let value: Element<'_, Message> = if node_row.input && !linked_in {
+        let value: Element<'_, Message> = if node_row.input && !locked {
             match node_row.widget {
                 RowWidget::Slider { min, max, step } => {
                     let current = graph::value::num(&node_row.value).unwrap_or(min);
@@ -1261,11 +1482,22 @@ impl Graph {
                         .width(Length::Fill)
                         .into()
                 }
-                RowWidget::Field | RowWidget::Group => {
+                RowWidget::Field
+                | RowWidget::Number
+                | RowWidget::Measure
+                | RowWidget::Coordinate
+                | RowWidget::Group => {
+                    let numeric = matches!(node_row.widget, RowWidget::Number);
                     let draft = self.drafts.get(&port).cloned().unwrap_or(shown);
                     let edit = port.clone();
+                    let held = draft.clone();
                     text_input("", &draft)
-                        .on_input(move |s| msg(GraphMsg::Input(edit.clone(), s)))
+                        .id(field_id(&port))
+                        .on_input(move |s| {
+                            let accepted = !numeric || number_prefix(&s);
+                            let s = if accepted { s } else { held.clone() };
+                            msg(GraphMsg::Input(edit.clone(), s))
+                        })
                         .on_submit(msg(GraphMsg::Commit(port)))
                         .size(11)
                         .padding([2, 4])
@@ -1276,11 +1508,14 @@ impl Graph {
         } else {
             text(shown).size(11).width(Length::Fill).into()
         };
-        row![in_port, label, value, out_port]
-        .spacing(2)
-        .height(ROW_H)
-        .align_y(iced::Center)
-        .into()
+        with_tip(
+            row![in_port, label, value, out_port]
+                .spacing(2)
+                .height(ROW_H)
+                .align_y(iced::Center),
+            tip,
+            self.zoom(),
+        )
     }
 
     /// Pure canvas state; document and evaluation work is the app's.
@@ -1432,9 +1667,121 @@ impl canvas::Program<Message> for Wires {
 
 /// Lays its content out in graph space and draws and hit-tests it through
 /// `zoom`, so every widget inside scales as one picture.
+///
+/// It also sees every event before the cards do, which is what gives the text
+/// fields Tab order and commit-on-leave: a text input has no focus-lost event.
 struct Zoomed<'a> {
     content: Element<'a, Message>,
     zoom: f32,
+    /// The text fields in Tab order.
+    fields: Vec<Port>,
+    /// Fields holding uncommitted text.
+    drafts: Vec<Port>,
+}
+
+#[derive(Default)]
+struct ZoomedState {
+    /// A field a press has just focused. Its text is selected when the button
+    /// comes up, as a press and any drag during it place the cursor themselves.
+    select_on_release: Option<Port>,
+}
+
+/// The tooltips of the cards, drawn through the same zoom as the cards. Its
+/// content is laid out relative to the canvas's top-left corner, `origin`.
+struct ZoomedOverlay<'a> {
+    inner: overlay::Element<'a, Message, Theme, iced::Renderer>,
+    zoom: f32,
+    origin: Point,
+}
+
+impl overlay::Overlay<Message, Theme, iced::Renderer> for ZoomedOverlay<'_> {
+    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
+        let room = Size::new(
+            (bounds.width - self.origin.x).max(0.0) / self.zoom,
+            (bounds.height - self.origin.y).max(0.0) / self.zoom,
+        );
+        self.inner.as_overlay_mut().layout(renderer, room)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        let transformation = Transformation::translate(self.origin.x, self.origin.y)
+            * Transformation::scale(self.zoom);
+        renderer.with_transformation(transformation, |renderer| {
+            self.inner
+                .as_overlay()
+                .draw(renderer, theme, style, layout, cursor);
+        });
+    }
+}
+
+/// Finds the focused field.
+#[derive(Default)]
+struct FindFocused(Option<widget::Id>);
+
+impl Operation for FindFocused {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if state.is_focused() {
+            self.0 = id.cloned();
+        }
+    }
+}
+
+/// Moves focus to one field.
+struct FocusField(widget::Id);
+
+impl Operation for FocusField {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if id == Some(&self.0) {
+            state.focus();
+        } else {
+            state.unfocus();
+        }
+    }
+}
+
+/// Selects one field's text, so that typing replaces it.
+struct SelectField(widget::Id);
+
+impl Operation for SelectField {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn text_input(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn TextInput,
+    ) {
+        if id == Some(&self.0) {
+            state.select_all();
+        }
+    }
 }
 
 impl Zoomed<'_> {
@@ -1444,9 +1791,64 @@ impl Zoomed<'_> {
             * Transformation::scale(self.zoom)
             * Transformation::translate(-origin.x, -origin.y)
     }
+
+    fn run(
+        &mut self,
+        tree: &mut widget::Tree,
+        content: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], content, renderer, operation);
+    }
+
+    fn focused(
+        &mut self,
+        tree: &mut widget::Tree,
+        content: Layout<'_>,
+        renderer: &iced::Renderer,
+    ) -> Option<Port> {
+        let mut find = FindFocused::default();
+        self.run(tree, content, renderer, &mut find);
+        let id = find.0?;
+        self.fields.iter().find(|port| field_id(port) == id).cloned()
+    }
+
+    /// Focuses `port` and selects its text.
+    fn enter_field(
+        &mut self,
+        tree: &mut widget::Tree,
+        content: Layout<'_>,
+        renderer: &iced::Renderer,
+        port: &Port,
+    ) {
+        // Focusing puts the cursor at the end, so it has to come first.
+        self.run(tree, content, renderer, &mut FocusField(field_id(port)));
+        self.run(tree, content, renderer, &mut SelectField(field_id(port)));
+    }
+
+    /// The field Tab goes to from `from`: the next on the same card, wrapping
+    /// at its ends.
+    fn tab_target(&self, from: &Port, backward: bool) -> Option<Port> {
+        let card: Vec<&Port> = self.fields.iter().filter(|port| port.node == from.node).collect();
+        let at = card.iter().position(|port| *port == from)?;
+        let count = card.len();
+        let next = if backward { at + count - 1 } else { at + 1 } % count;
+        card.get(next).map(|port| (*port).clone())
+    }
 }
 
 impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<ZoomedState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(ZoomedState::default())
+    }
+
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fill, Length::Fill)
     }
@@ -1484,6 +1886,27 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
         let Some(content) = layout.children().next() else {
             return;
         };
+        if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Tab),
+            modifiers,
+            ..
+        }) = event
+        {
+            if let Some(from) = self.focused(tree, content, renderer) {
+                if let Some(to) = self.tab_target(&from, modifiers.shift()) {
+                    self.enter_field(tree, content, renderer, &to);
+                }
+                shell.publish(msg(GraphMsg::Commit(from)));
+                shell.capture_event();
+                shell.request_redraw();
+                return;
+            }
+        }
+        let pressed = matches!(
+            event,
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        );
+        let before = pressed.then(|| self.focused(tree, content, renderer)).flatten();
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -1493,6 +1916,49 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
             shell,
             &(*viewport * inverse),
         );
+        if pressed {
+            let now = self.focused(tree, content, renderer);
+            if self.drafts.iter().any(|port| Some(port) != now.as_ref()) {
+                shell.publish(msg(GraphMsg::Leave(now.clone())));
+            }
+            tree.state.downcast_mut::<ZoomedState>().select_on_release =
+                now.filter(|port| Some(port) != before.as_ref());
+        } else if matches!(
+            event,
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+        ) {
+            let entered = tree.state.downcast_mut::<ZoomedState>().select_on_release.take();
+            if let Some(port) = entered {
+                self.run(tree, content, renderer, &mut SelectField(field_id(&port)));
+                shell.request_redraw();
+            }
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+        let origin = layout.position() + translation;
+        let inverse = self.transformation(layout.position()).inverse();
+        let shift = Point::ORIGIN - layout.position();
+        let zoom = self.zoom;
+        let inner = self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next()?,
+            renderer,
+            &(*viewport * inverse),
+            shift,
+        )?;
+        Some(overlay::Element::new(Box::new(ZoomedOverlay {
+            inner,
+            zoom,
+            origin,
+        })))
     }
 
     fn mouse_interaction(
@@ -1508,13 +1974,20 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
             .children()
             .next()
             .map_or(mouse::Interaction::None, |content| {
-                self.content.as_widget().mouse_interaction(
+                let interaction = self.content.as_widget().mouse_interaction(
                     &tree.children[0],
                     content,
                     cursor * inverse,
                     &(*viewport * inverse),
                     renderer,
-                )
+                );
+                // Card buttons, checkboxes and sliders show the plain arrow.
+                match interaction {
+                    mouse::Interaction::Pointer
+                    | mouse::Interaction::Grab
+                    | mouse::Interaction::Grabbing => mouse::Interaction::Idle,
+                    other => other,
+                }
             })
     }
 
@@ -1570,5 +2043,45 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
 impl<'a> From<Zoomed<'a>> for Element<'a, Message> {
     fn from(zoomed: Zoomed<'a>) -> Self {
         Element::new(zoomed)
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+
+    fn op(name: &str) -> PaletteItem {
+        PaletteItem::Op(graph::spec(name).expect("library node"))
+    }
+
+    #[test]
+    fn same_entry_is_not_decided_by_the_label() {
+        let object = PaletteItem::Object(ObjectKind::Point);
+        assert!(object.same(object));
+        assert!(op("Point").same(op("Point")));
+        assert!(!object.same(op("Point")), "both are called Point");
+        assert!(!op("Point").same(op("Add")));
+    }
+
+    #[test]
+    fn tooltips_name_a_node_and_its_ports() {
+        let spec = graph::spec("Add");
+        assert_eq!(node_tip("Add".to_owned(), spec), "Add\na, b → result");
+        assert_eq!(node_tip("Line".to_owned(), None), "Line");
+    }
+
+    #[test]
+    fn a_row_tooltip_shows_the_whole_value() {
+        let row = |value: Value| NodeRow {
+            field: "x".to_owned(),
+            label: "x".to_owned(),
+            value,
+            input: true,
+            output: false,
+            widget: RowWidget::Number,
+            group: None,
+        };
+        assert_eq!(row_tip(&row(json!(-12.75))), "x: -12.75");
+        assert_eq!(row_tip(&row(Value::Null)), "x");
     }
 }

@@ -11,6 +11,9 @@
 
 pub(crate) mod ops;
 
+#[cfg(test)]
+mod field_tests;
+
 use super::{Message, OpenCADStudio};
 use crate::scene::model::object::PropSection;
 use crate::ui::node_graph::{Drag, GraphMsg, NodeRow, NodeSection, ObjectKind, RowWidget};
@@ -50,6 +53,87 @@ fn typed_point(value: &Value) -> Option<[f64; 3]> {
 fn row_number(value: &Value) -> Option<f64> {
     graph::value::num(value)
         .or_else(|| super::block_parameter_properties::parse_value(value.as_str()?))
+}
+
+/// Whether `text` is a number as the Properties panel reads one.
+fn is_measure(text: &str) -> bool {
+    crate::app::expr_eval::eval_number(text).is_some_and(f64::is_finite)
+        || row_number(&Value::String(text.to_owned())).is_some()
+}
+
+/// What typing `raw` into `row` sets its input to; `None` when `row` cannot
+/// take it.
+fn typed_value(row: &NodeRow, raw: &str) -> Option<Value> {
+    let text = raw.trim();
+    // Typed text is protocol JSON when it parses (numbers, true,
+    // {"rgb":[..]}), otherwise a plain string.
+    let parsed = || serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_owned()));
+    match row.widget {
+        RowWidget::Number => text
+            .parse()
+            .ok()
+            .filter(|x: &f64| x.is_finite())
+            .map(graph::value::number),
+        // Written as its value: a stored expression would not be evaluated.
+        RowWidget::Measure => match crate::app::expr_eval::eval_number(text) {
+            Some(x) if x.is_finite() => Some(graph::value::number(x)),
+            _ => is_measure(text).then(parsed),
+        },
+        RowWidget::Coordinate if text.is_empty() => Some(Value::Null),
+        RowWidget::Coordinate | RowWidget::Group => match parsed() {
+            // A typed list of points runs the node once per point.
+            Value::Array(points)
+                if matches!(row.widget, RowWidget::Coordinate)
+                    && points.iter().all(|point| typed_point(point).is_some()) =>
+            {
+                Some(Value::Array(points))
+            }
+            value => typed_point(&value).map(graph::value::point_value),
+        },
+        _ => Some(parsed()),
+    }
+}
+
+/// Makes room for a value typed into `field`. A coordinate group and its
+/// components are the same numbers, and whichever sorts last would win on
+/// every run: a group replaces its components, and a component takes its
+/// group apart so that its siblings keep their values.
+fn settle_coordinates(params: &mut std::collections::BTreeMap<String, Value>, field: &str) {
+    if components(field).is_some() {
+        for member in field.split('|') {
+            params.remove(member);
+        }
+        return;
+    }
+    let group = params
+        .keys()
+        .find(|key| components(key).is_some_and(|mut members| members.any(|m| m == field)))
+        .cloned();
+    let Some(group) = group else {
+        return;
+    };
+    let point = params.remove(&group).as_ref().and_then(typed_point);
+    for (member, x) in group.split('|').zip(point.into_iter().flatten()) {
+        if member != field {
+            params.insert(member.to_owned(), graph::value::number(x));
+        }
+    }
+}
+
+/// Whether `value`, typed as `raw`, is what `row` already holds.
+fn unchanged(row: &NodeRow, raw: &str, value: &Value) -> bool {
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * a.abs().max(1.0);
+    raw.trim() == crate::ui::node_graph::display(&row.value)
+        || row.value == *value
+        || match row.widget {
+            RowWidget::Group | RowWidget::Coordinate => typed_point(&row.value)
+                .zip(typed_point(value))
+                .is_some_and(|(a, b)| a.iter().zip(b).all(|(a, b)| close(*a, b))),
+            RowWidget::Number | RowWidget::Measure => row_number(&row.value)
+                .zip(row_number(value))
+                .is_some_and(|(a, b)| close(a, b)),
+            _ => false,
+        }
 }
 
 impl OpenCADStudio {
@@ -100,7 +184,11 @@ impl OpenCADStudio {
                         input: !matches!(json["kind"].as_str(), Some("readonly" | "specialized")),
                         output: true,
                         value: json["value"].clone(),
-                        widget: RowWidget::Field,
+                        widget: if json["kind"] == "number" {
+                            RowWidget::Measure
+                        } else {
+                            RowWidget::Field
+                        },
                         group,
                     }
                 };
@@ -333,6 +421,7 @@ impl OpenCADStudio {
         self.graph_undo_open = true;
         self.graph_unwind(i);
         let mut tasks = edit(self);
+        self.graph_drop_driven_params(i);
         let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
         let mut host = AppHost {
             app: self,
@@ -378,6 +467,38 @@ impl OpenCADStudio {
             tab.scene.erase_entities(&live);
         }
         tab.dirty = true;
+    }
+
+    /// A link beats a value typed by hand, but an object node applies its
+    /// typed values after its links. So the typed values of everything a link
+    /// supplies go; values of a coordinate's siblings stay.
+    fn graph_drop_driven_params(&mut self, i: usize) {
+        let graph = &self.tabs[i].graph;
+        let is_object = |id: NodeId| {
+            graph
+                .engine
+                .node(id)
+                .is_some_and(|node| matches!(node.kind, Kind::Object(_)))
+        };
+        if !graph.engine.links.iter().any(|link| is_object(link.to.node)) {
+            return;
+        }
+        let sections = self.graph_all_sections(i);
+        let graph = &mut self.tabs[i].graph;
+        let ids: Vec<NodeId> = graph.engine.nodes.iter().map(|node| node.id).collect();
+        for (index, id) in ids.into_iter().enumerate() {
+            let driven = graph.driven_fields(id, &sections[index]);
+            let Some(node) = graph.engine.node_mut(id) else {
+                continue;
+            };
+            if !matches!(node.kind, Kind::Object(_)) {
+                continue;
+            }
+            for field in driven.iter().filter(|field| components(field).is_none()) {
+                settle_coordinates(&mut node.params, field);
+            }
+            node.params.retain(|field, _| !driven.contains(field));
+        }
     }
 
     pub(super) fn graph_run(&mut self, i: usize) -> Task<Message> {
@@ -451,14 +572,16 @@ impl OpenCADStudio {
                     Vec::new()
                 });
             }
-            GraphMsg::Commit(port) => {
-                let Some(raw) = self.tabs[i].graph.drafts.remove(&port) else {
-                    return Task::none();
-                };
-                // Typed text is protocol JSON when it parses (numbers, true,
-                // {"rgb":[..]}), otherwise a plain string.
-                let value = serde_json::from_str(raw.trim()).unwrap_or(Value::String(raw));
-                return self.graph_set(i, port, value);
+            GraphMsg::Commit(port) => return self.graph_commit(i, vec![port]),
+            GraphMsg::Leave(focused) => {
+                let ports = self.tabs[i]
+                    .graph
+                    .drafts
+                    .keys()
+                    .filter(|port| Some(*port) != focused.as_ref())
+                    .cloned()
+                    .collect();
+                return self.graph_commit(i, ports);
             }
             GraphMsg::Set(port, value) => return self.graph_set(i, port, value),
             // The last evaluation's edits stay in the drawing as they are.
@@ -595,6 +718,45 @@ impl OpenCADStudio {
     /// An edited input, kept as the node's parameter: an operation reads it
     /// while nothing is linked, an object node writes it to every entity it
     /// stands for on each evaluation.
+    /// Turns the drafts of `ports` into the values of their inputs, then runs
+    /// the graph once. A draft that is invalid or changes nothing is dropped,
+    /// so the field shows its value again and no undo step is made.
+    fn graph_commit(&mut self, i: usize, ports: Vec<Port>) -> Task<Message> {
+        let sections = self.graph_all_sections(i);
+        let graph = &mut self.tabs[i].graph;
+        let mut changed = false;
+        for port in ports {
+            let Some(raw) = graph.drafts.remove(&port) else {
+                continue;
+            };
+            let row = graph
+                .engine
+                .nodes
+                .iter()
+                .position(|node| node.id == port.node)
+                .into_iter()
+                .flat_map(|index| sections[index].iter())
+                .flat_map(|section| section.rows.iter())
+                .find(|row| row.input && row.field == port.field);
+            let value = row.and_then(|row| {
+                typed_value(row, &raw).filter(|value| !unchanged(row, &raw, value))
+            });
+            let Some(value) = value else {
+                continue;
+            };
+            if let Some(node) = graph.engine.node_mut(port.node) {
+                settle_coordinates(&mut node.params, &port.field);
+                node.params.insert(port.field, value);
+                changed = true;
+            }
+        }
+        if changed {
+            self.graph_run(i)
+        } else {
+            Task::none()
+        }
+    }
+
     fn graph_set(&mut self, i: usize, port: Port, value: Value) -> Task<Message> {
         let Some(node) = self.tabs[i].graph.engine.node_mut(port.node) else {
             return Task::none();

@@ -784,6 +784,14 @@ impl CadCommand for RevCloudCommand {
         })
     }
 
+    fn samples_motion(&self) -> bool {
+        // The freehand trace appends a point every quarter arc-length; the
+        // rectangular and object modes read only the current corner.
+        matches!(self.stage, Stage::Create)
+            && self.creation == CreationMode::Freehand
+            && self.tracing
+    }
+
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         match &mut self.stage {
             Stage::Create if self.creation == CreationMode::Freehand && self.tracing => {

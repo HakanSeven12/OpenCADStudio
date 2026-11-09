@@ -3786,6 +3786,13 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // A withheld move may be the last one: the pointer can stop, and then
+        // no further move arrives to answer it. Drive frames until it is.
+        let move_coalesce = if self.move_owed.is_some() {
+            crate::app::tool_windows::main_window_frames().map(|_| Message::MoveCoalesceTick)
+        } else {
+            Subscription::none()
+        };
         let snap_dwell = if self
             .snap_dwell
             .as_ref()
@@ -3970,6 +3977,7 @@ impl OpenCADStudio {
             grip_dwell,
             hover_dwell,
             snap_dwell,
+            move_coalesce,
             nav_settle,
             gpu_probe,
             thumbnail_capture,

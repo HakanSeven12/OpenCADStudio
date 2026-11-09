@@ -1713,12 +1713,126 @@ impl OpenCADStudio {
                 .is_some_and(|session| session.document_id == self.tabs[i].id)
     }
 
+    /// A pointer move straight from the window, which may be coalesced.
+    ///
+    /// Only genuine input comes through here. Everything that replays a
+    /// position it already decided to answer — the snap dwell tick, a
+    /// navigation replay, the drag that has just started — calls
+    /// [`Self::on_viewport_move`] and is never withheld.
+    pub(in crate::app) fn on_pointer_move_coalesced(&mut self, p: Point) -> Task<Message> {
+        if self.defer_pointer_move(p) {
+            return Task::none();
+        }
+        self.on_viewport_move(p)
+    }
+
+    /// Whether to leave this position for a later frame instead of answering
+    /// it now.
+    ///
+    /// Nothing used to drop a pointer move. On a large drawing a full pass
+    /// costs ~15 ms and a mouse reports every few, so the queue could only
+    /// grow: a measured drag spent 13.5 s across seven frames working through
+    /// 986 positions the cursor had long left, every one of them computed and
+    /// then overwritten before any frame drew it.
+    ///
+    /// A withheld position is not lost, and nothing reads a cursor it did not
+    /// write. [`Message::MoveCoalesceTick`] answers it once the gap has
+    /// passed; a newer move supersedes it, which only ever drops a position no
+    /// frame showed; a press that carries its own position supersedes it in
+    /// `set_cursor_for_press`; and anything else is preceded by
+    /// [`Self::flush_owed_pointer_move`], so a bare `ViewportLeftPress`
+    /// resolving through `last_move_pos` still sees where the pointer went.
+    fn defer_pointer_move(&mut self, p: Point) -> bool {
+        // `None` until a pass expensive enough to need coalescing: on a
+        // drawing where the pass fits inside a frame, no move is ever withheld.
+        let Some(due) = self.move_pass_due else {
+            return false;
+        };
+        if Instant::now() >= due {
+            return false;
+        }
+        let i = self.active_tab;
+        // SKETCH and freehand REVCLOUD build their result from the path the
+        // pointer took, so for them a withheld move is a vertex the drawing
+        // never gets.
+        if i >= self.tabs.len()
+            || self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.samples_motion())
+        {
+            return false;
+        }
+        self.move_owed = Some((p, i));
+        self.move_withheld = self.move_withheld.saturating_add(1);
+        true
+    }
+
+    /// Answer a withheld pointer move before a message that may read the
+    /// cursor position it would have written.
+    ///
+    /// A move and its own tick are exempt: the first supersedes the withheld
+    /// position and the second is what finally answers it.
+    pub(in crate::app) fn flush_owed_pointer_move(&mut self, msg: &Message) -> Task<Message> {
+        if self.move_owed.is_none()
+            || matches!(
+                msg,
+                Message::ViewportMove(_) | Message::PaneMove(..) | Message::MoveCoalesceTick
+            )
+        {
+            return Task::none();
+        }
+        let Some((p, tab)) = self.move_owed.take() else {
+            return Task::none();
+        };
+        if tab >= self.tabs.len() || tab != self.active_tab {
+            return Task::none();
+        }
+        self.on_viewport_move(p)
+    }
+
+    /// Answer the position a coalesced move withheld.
+    pub(super) fn on_move_coalesce_tick(&mut self) -> Task<Message> {
+        let Some((p, tab)) = self.move_owed else {
+            return Task::none();
+        };
+        if tab >= self.tabs.len() || tab != self.active_tab {
+            self.move_owed = None;
+            return Task::none();
+        }
+        // Still resting. The subscription brings another frame, and the
+        // position stays owed until one of them is past the gap.
+        if self.move_pass_due.is_some_and(|due| Instant::now() < due) {
+            return Task::none();
+        }
+        self.on_viewport_move(p)
+    }
+
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
         // While a cell is typed in the cursor moves (and pans) as usual but
         // takes no snaps.
         let typing =
             self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none();
+        let started = Instant::now();
         let task = self.on_viewport_move_inner(p);
+        let cost = started.elapsed();
+        // Give the next pass as long to arrive as this one took to answer.
+        // The moves that arrive meanwhile cost nothing, so the queue drains
+        // instead of growing, and the one that outlives the gap is the only
+        // position the cursor is actually at. A pass under the threshold
+        // leaves the gate shut: it is already keeping up.
+        self.move_pass_due = (cost.as_millis() as u64 >= crate::app::MOVE_COALESCE_FROM_MS)
+            .then(|| Instant::now() + cost);
+        if crate::perf::enabled() {
+            crate::perf_record!(
+                "[perf] move-pass {:>7.2}ms withheld={} gate={}",
+                cost.as_secs_f64() * 1000.0,
+                self.move_withheld,
+                self.move_pass_due.is_some(),
+            );
+        }
+        self.move_withheld = 0;
+        self.move_owed = None;
         if typing {
             self.tabs[self.active_tab].snap_result = None;
             self.snap_dwell = None;
@@ -5495,6 +5609,10 @@ impl OpenCADStudio {
             command.set_ctrl(self.ctrl_down);
             command.set_shift(self.shift_down);
         }
+        // This position supersedes anything the gate withheld; answering the
+        // older one after the press would send the cursor backwards, the
+        // hazard `on_snap_dwell_tick` documents for its own replay.
+        self.move_owed = None;
         self.tabs[i].last_cursor_world = self.cursor_world_at(i, position);
         self.tabs[i].last_cursor_screen = position;
         self.tabs[i]
@@ -12982,5 +13100,123 @@ mod grip_mtp_tests {
         assert!(app.tabs[i].active_grip.is_none(), "the grip was placed");
         let end = line_end(&app, handle);
         assert!(end.distance(DVec3::new(200.0, 80.0, 0.0)) < 0.5, "{end:?}");
+    }
+}
+
+#[cfg(test)]
+mod pointer_move_coalescing_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use iced::time::Instant;
+    use iced::Point;
+    use std::time::Duration;
+
+    /// A drawing-sized app. `gate` arms the coalescing gate the way a pass of
+    /// that cost would have left it; `None` leaves it as a fresh app has it.
+    fn app(gate: Option<Duration>) -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        app.move_pass_due = gate.map(|cost| Instant::now() + cost);
+        app
+    }
+
+    #[test]
+    fn a_pass_that_keeps_up_leaves_the_gate_shut() {
+        let mut app = app(None);
+        // An empty drawing answers a move far inside `MOVE_COALESCE_FROM_MS`,
+        // so nothing about this path may change for it.
+        let _ = app.on_viewport_move(Point::new(100.0, 100.0));
+        assert!(
+            app.move_pass_due.is_none(),
+            "a pass that fits inside a frame must not arm the gate"
+        );
+        let _ = app.on_pointer_move_coalesced(Point::new(101.0, 101.0));
+        assert!(
+            app.move_owed.is_none(),
+            "with the gate shut every move runs its own pass"
+        );
+    }
+
+    #[test]
+    fn a_withheld_move_keeps_only_the_latest_position() {
+        let mut app = app(Some(Duration::from_millis(50)));
+        let tab = app.active_tab;
+        let _ = app.on_pointer_move_coalesced(Point::new(10.0, 20.0));
+        assert_eq!(
+            app.move_owed,
+            Some((Point::new(10.0, 20.0), tab)),
+            "a withheld move must keep the position it was asked about"
+        );
+        let _ = app.on_pointer_move_coalesced(Point::new(30.0, 40.0));
+        assert_eq!(
+            app.move_owed,
+            Some((Point::new(30.0, 40.0), tab)),
+            "the older position is where the cursor no longer is: it is dropped, \
+             not queued behind the newer one"
+        );
+    }
+
+    #[test]
+    fn the_tick_waits_for_the_gap_and_then_answers() {
+        let mut app = app(Some(Duration::from_millis(50)));
+        let _ = app.on_pointer_move_coalesced(Point::new(10.0, 20.0));
+        let _ = app.on_move_coalesce_tick();
+        assert!(
+            app.move_owed.is_some(),
+            "a tick inside the gap must leave the position owed — answering it \
+             there is the queue the gate exists to prevent"
+        );
+        app.move_pass_due = Some(Instant::now() - Duration::from_millis(1));
+        let _ = app.on_move_coalesce_tick();
+        assert!(
+            app.move_owed.is_none(),
+            "past the gap the withheld position must be answered, or a pointer \
+             that stopped never gets its last move"
+        );
+    }
+
+    #[test]
+    fn a_message_that_reads_the_cursor_answers_the_withheld_move_first() {
+        let mut app = app(Some(Duration::from_millis(50)));
+        let i = app.active_tab;
+        let _ = app.on_pointer_move_coalesced(Point::new(10.0, 20.0));
+        assert!(app.move_owed.is_some(), "the move must be withheld first");
+        // A bare press carries no position and resolves from `last_move_pos`,
+        // which only an answered move writes.
+        let _ = app.flush_owed_pointer_move(&Message::ViewportLeftPress);
+        assert!(
+            app.move_owed.is_none(),
+            "a message that reads the cursor must not find the move still owed"
+        );
+        assert_eq!(
+            app.tabs[i].scene.selection.borrow().input.last_move_pos,
+            Some(Point::new(10.0, 20.0)),
+            "the flush must answer the withheld position, not skip it"
+        );
+    }
+
+    #[test]
+    fn a_newer_move_does_not_flush_the_one_it_supersedes() {
+        let mut app = app(Some(Duration::from_millis(50)));
+        let _ = app.on_pointer_move_coalesced(Point::new(10.0, 20.0));
+        let _ = app.flush_owed_pointer_move(&Message::ViewportMove(Point::new(30.0, 40.0)));
+        assert!(
+            app.move_owed.is_some(),
+            "flushing for the next move would answer a position it replaces"
+        );
+    }
+
+    #[test]
+    fn a_press_drops_the_position_the_gate_withheld() {
+        let mut app = app(Some(Duration::from_millis(50)));
+        let _ = app.on_pointer_move_coalesced(Point::new(10.0, 20.0));
+        assert!(app.move_owed.is_some(), "the move must be withheld first");
+        app.set_cursor_for_press(Point::new(300.0, 300.0));
+        assert!(
+            app.move_owed.is_none(),
+            "answering a pre-press position after the press would send the \
+             cursor backwards"
+        );
     }
 }

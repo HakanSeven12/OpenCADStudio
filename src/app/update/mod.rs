@@ -66,6 +66,7 @@ fn perf_message_label(msg: &Message) -> &'static str {
         Message::DeleteSelected => "delete",
         Message::HoverDwellTick => "hover-dwell",
         Message::SnapDwellTick => "snap-dwell",
+        Message::MoveCoalesceTick => "move-coalesce",
         Message::InteractionIndexReady { .. } => "interaction-index-ready",
         _ => "other",
     }
@@ -977,7 +978,15 @@ impl OpenCADStudio {
         };
         #[cfg(not(target_arch = "wasm32"))]
         let command_before = active_command(self);
-        let task = self.update_inner(msg);
+        // A coalesced pointer move may still be owed an answer, and
+        // `last_move_pos` carries the cursor for whoever asks next: a bare
+        // `ViewportLeftPress` (the overlay click-catchers, and the presses the
+        // control API scripts) resolves its point from there, and only an
+        // answered move writes it. Answer the withheld position first, so the
+        // order stays the order the pointer reported — the hazard
+        // `on_snap_dwell_tick` documents is a replay that lands *after*.
+        let owed = self.flush_owed_pointer_move(&msg);
+        let task = Task::batch([owed, self.update_inner(msg)]);
         let perf_dispatch_ms = crate::perf::elapsed_ms(perf_started);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -5879,7 +5888,7 @@ impl OpenCADStudio {
                 None => self.update_navigation_passthrough(Message::ViewportRightRelease),
             },
 
-            Message::ViewportMove(p) => self.on_viewport_move(p),
+            Message::ViewportMove(p) => self.on_pointer_move_coalesced(p),
 
             Message::ViewportExit => self.on_viewport_exit(),
 
@@ -5901,7 +5910,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 self.focus_model_pane(idx);
-                self.on_viewport_move(p)
+                self.on_pointer_move_coalesced(p)
             }
             Message::ViewportHighlightToggle => {
                 let on = !self.model_space.viewport_hover_highlight;
@@ -6353,6 +6362,7 @@ impl OpenCADStudio {
             }
 
             Message::HoverDwellTick => self.on_hover_dwell_tick(),
+            Message::MoveCoalesceTick => self.on_move_coalesce_tick(),
 
             Message::SnapDwellTick => self.on_snap_dwell_tick(),
 

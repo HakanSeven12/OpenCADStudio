@@ -2729,6 +2729,7 @@ common =
     .parametric-symmetric = Symmétrique
     .parametric-equal = Égal
     .parametric-fix = Fix
+    .slice-the-plane-does-not-cross-the-solid-on-th = SLICE : le plan ne traverse pas le solide du côté conservé.
 
 errors =
     .save-warning = Enregistrer l' avertissement
@@ -3435,6 +3436,7 @@ draw =
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Spécifiez la direction tangente au point de départ de l'arc :
     .arc-specify-radius-of-arc = ARC  Spécifiez le rayon de l'arc :
     .chord-length = Longueur de corde
+    .slice-offset-along-z = SLICE  décalage suivant Z :
 
 modify =
     .add-vertex = Ajouter un sommet
@@ -4841,6 +4843,7 @@ insert =
     .field-prop-yscalefactor = YScaleFactor
     .field-prop-zscalefactor = ZScaleFactor
     .field-prop-linetypescale = LinetypeScale
+    .path = Chemin :
 
 model =
     .create = Créer
@@ -5042,6 +5045,7 @@ model =
     .torus-specify-second-end-point-of-tube-diameter = TORUS  { common.specify }: { common.tube } · { common.diameter } · { common.endpoint-2 }:
     .value-2point = 2 points
     .cube = Cube
+    .select-a-solid-edge = Sélectionnez une arête du solide :
 
 layout =
     .mvsetup-select-objects-to-delete = MVSETUP  Sélectionnez les objets à supprimer :

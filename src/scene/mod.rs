@@ -10117,51 +10117,59 @@ impl Scene {
         sig ^ count
     }
 
+    /// Whether a wipeout-model set cached at `cached_epoch` is still current.
+    ///
+    /// The displayed set also contains masks expanded from INSERTs. COPY and
+    /// grip edits modify or add INSERT handles without changing the child
+    /// WIPEOUT entity, so both categories count, removed INSERTs included via
+    /// the recorded removal bits. Moving plain geometry touches neither and
+    /// leaves the set exactly as it was.
+    ///
+    /// Both cache paths ask through here, because they did not: the
+    /// per-viewport one compared `geometry_epoch` outright, so a drag of plain
+    /// geometry in a paper-space viewport rebuilt every mask in the drawing —
+    /// 96 ms a frame, 153 frames of one measured drag, 14.8 s in all — while
+    /// the same drag in model space kept them. Sharing the predicate is what
+    /// stops the two drifting apart again.
+    fn wipeout_cache_current(&self, cached_epoch: u64) -> bool {
+        let any_wipeout = std::cell::OnceCell::<bool>::new();
+        self.category_cache_valid(
+            cached_epoch,
+            CACHE_CATEGORY_WIPEOUT | CACHE_CATEGORY_INSERT_HATCH,
+            |h| {
+                // An INSERT only matters when a block it places holds a mask;
+                // moving plain geometry leaves the set as it was.
+                match self.document.get_entity(h) {
+                    Some(EntityType::Wipeout(_)) => true,
+                    // Without a single mask in the drawing no INSERT can place
+                    // one; skip walking the block tree of every edited INSERT.
+                    Some(EntityType::Insert(_))
+                        if !*any_wipeout.get_or_init(|| {
+                            self.document
+                                .entities()
+                                .any(|e| matches!(e, EntityType::Wipeout(_)))
+                        }) =>
+                    {
+                        false
+                    }
+                    // No host list is kept: the INSERT may have placed a mask
+                    // before the edit (its block repointed), so any INSERT
+                    // edit counts.
+                    Some(EntityType::Insert(_)) => true,
+                    _ => false,
+                }
+            },
+        )
+    }
+
     pub(crate) fn wipeout_models_arc(&self) -> Arc<Vec<HatchModel>> {
         let target_block = self.content_render_block_handle();
-        let any_wipeout = std::cell::OnceCell::<bool>::new();
         let key = (target_block, self.current_layout.clone());
         {
             let reuse = {
                 let cache = self.wipeout_cache.borrow();
                 match cache.get(&key) {
-                    Some((cached_epoch, arc))
-                        // The displayed wipeout set also contains masks
-                        // expanded from INSERTs. COPY and grip edits modify or
-                        // add INSERT handles without changing the child WIPEOUT
-                        // entity, so the old predicate reused stale positions
-                        // until REGEN. Track both categories, including
-                        // removed INSERTs via the recorded removal bits.
-                        if self.category_cache_valid(
-                            *cached_epoch,
-                            CACHE_CATEGORY_WIPEOUT | CACHE_CATEGORY_INSERT_HATCH,
-                            |h| {
-                                // An INSERT only matters when a block it
-                                // places holds a mask; moving plain geometry
-                                // leaves the set as it was.
-                                match self.document.get_entity(h) {
-                                    Some(EntityType::Wipeout(_)) => true,
-                                    // Without a single mask in the drawing no
-                                    // INSERT can place one; skip walking the
-                                    // block tree of every edited INSERT.
-                                    Some(EntityType::Insert(_))
-                                        if !*any_wipeout.get_or_init(|| {
-                                            self.document
-                                                .entities()
-                                                .any(|e| matches!(e, EntityType::Wipeout(_)))
-                                        }) =>
-                                    {
-                                        false
-                                    }
-                                    // No host list is kept: the INSERT may have
-                                    // placed a mask before the edit (its block
-                                    // repointed), so any INSERT edit counts.
-                                    Some(EntityType::Insert(_)) => true,
-                                    _ => false,
-                                }
-                            },
-                        ) =>
-                    {
+                    Some((cached_epoch, arc)) if self.wipeout_cache_current(*cached_epoch) => {
                         Some(Arc::clone(arc))
                     }
                     _ => None,
@@ -11437,9 +11445,22 @@ impl Scene {
             .render_space_layer_walk(target_block, (!viewport.is_null()).then_some(viewport));
         let sig = Self::frozen_layers_sig(frozen) ^ context_sig ^ Self::layer_walk_sig(layer_walk);
         let key = (target_block, self.current_layout.clone(), sig);
-        if let Some((e, arc)) = self.frozen_wipeout_cache.borrow().get(&key) {
-            if *e == self.geometry_epoch {
-                return Arc::clone(arc);
+        {
+            let reuse = match self.frozen_wipeout_cache.borrow().get(&key) {
+                Some((cached_epoch, arc)) if self.wipeout_cache_current(*cached_epoch) => {
+                    Some(Arc::clone(arc))
+                }
+                _ => None,
+            };
+            if let Some(arc) = reuse {
+                // Carry the entry forward, as the model-space path does: left
+                // at its original epoch it would eventually fall below
+                // `geometry_journal_floor`, where no delta can be replayed and
+                // every later edit rebuilds it again.
+                if let Some((e, _)) = self.frozen_wipeout_cache.borrow_mut().get_mut(&key) {
+                    *e = self.geometry_epoch;
+                }
+                return arc;
             }
         }
         let arc = Arc::new(self.wipeout_models(
@@ -19215,5 +19236,79 @@ mod world_box_handle_tests {
         assert!(handles.contains(&near_line) && handles.contains(&near_block));
         assert!(!handles.contains(&far_block), "far block copy joined the box");
         assert!(!handles.contains(&far_line), "far line joined the box");
+    }
+}
+
+/// The per-viewport wipeout cache must outlive an edit that cannot have moved
+/// a mask, and must not outlive one that can.
+#[cfg(test)]
+mod wipeout_viewport_cache_tests {
+    use super::*;
+    use document::entities::{Line, Wipeout};
+    use document::types::{Vector2, Vector3};
+
+    fn mask() -> EntityType {
+        EntityType::Wipeout(Wipeout::polygonal(
+            &[
+                Vector2::new(-1.0, -1.0),
+                Vector2::new(1.0, -1.0),
+                Vector2::new(1.0, 1.0),
+                Vector2::new(-1.0, 1.0),
+            ],
+            0.5,
+        ))
+    }
+
+    fn plain_line(x: f64) -> EntityType {
+        EntityType::Line(Line::from_points(
+            Vector3::new(x, 0.0, 0.0),
+            Vector3::new(x + 1.0, 1.0, 0.0),
+        ))
+    }
+
+    /// A frozen-layer set is what takes the per-viewport path: with a null
+    /// viewport and no frozen layers the function answers from the model-space
+    /// cache instead, which is not the one under test.
+    fn frozen() -> HashSet<Handle> {
+        let mut set: HashSet<Handle> = HashSet::default();
+        set.insert(Handle::new(41));
+        set
+    }
+
+    #[test]
+    fn moving_plain_geometry_keeps_the_viewport_masks() {
+        let mut scene = Scene::new();
+        scene.add_entity(mask());
+        let frozen = frozen();
+        let first = scene.wipeout_models_for_viewport(Handle::NULL, &frozen);
+        assert_eq!(first.len(), 1, "the mask belongs in the built set");
+
+        // A line is neither a WIPEOUT nor an INSERT, so it cannot have placed
+        // or moved a mask: the set cached before it is still the right answer.
+        scene.add_entity(plain_line(10.0));
+        let second = scene.wipeout_models_for_viewport(Handle::NULL, &frozen);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a plain-geometry edit rebuilt every mask in the drawing — 96 ms a \
+             frame, 153 frames of one measured drag — because this cache \
+             compared geometry_epoch outright instead of asking which \
+             category changed"
+        );
+    }
+
+    #[test]
+    fn adding_a_mask_still_rebuilds_the_viewport_masks() {
+        let mut scene = Scene::new();
+        scene.add_entity(mask());
+        let frozen = frozen();
+        let first = scene.wipeout_models_for_viewport(Handle::NULL, &frozen);
+
+        scene.add_entity(mask());
+        let second = scene.wipeout_models_for_viewport(Handle::NULL, &frozen);
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "holding the cache through a WIPEOUT edit would draw a stale mask"
+        );
+        assert_eq!(second.len(), 2, "both masks belong in the rebuilt set");
     }
 }

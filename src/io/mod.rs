@@ -2240,9 +2240,9 @@ mod save_failure_tests {
         std::fs::write(&path, b"another application's drawing").unwrap();
         let observed = super::edit_lock::FileFingerprint::capture(&path).unwrap();
         let error = super::save_owned_as_version_atomic(
-            codec::Document::new(),
+            document::Document::new(),
             &path,
-            codec::DxfVersion::AC1032,
+            document::DxfVersion::AC1032,
             true,
             Some(observed),
             None,

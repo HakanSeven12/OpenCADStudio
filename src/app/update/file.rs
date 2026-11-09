@@ -141,8 +141,19 @@ fn plot_render_mode_override(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) fn native_paths_match(left: &std::path::Path, right: &std::path::Path) -> bool {
-    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
-        (Ok(left), Ok(right)) => left == right,
+    let resolve = |path: &std::path::Path| {
+        std::fs::canonicalize(path).ok().or_else(|| {
+            // Preserve directory-alias identity after the current drawing
+            // disappears. Its opening fingerprint must still guard a save.
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            Some(std::fs::canonicalize(parent).ok()?.join(path.file_name()?))
+        })
+    };
+    match (resolve(left), resolve(right)) {
+        (Some(left), Some(right)) => left == right,
         _ => left == right,
     }
 }

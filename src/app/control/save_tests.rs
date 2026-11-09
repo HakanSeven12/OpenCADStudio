@@ -38,6 +38,10 @@ fn open_drawing(path: &Path, windowed: bool) -> OpenCADStudio {
         let saved = request(&mut seed, json!({"op":"save","path":path}));
         assert_eq!(saved["ok"], true, "{saved}");
     }
+    reopen_drawing(path, windowed)
+}
+
+fn reopen_drawing(path: &Path, windowed: bool) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.backup_on_save = false;
     let opened = request(&mut app, json!({"op":"open","path":path}));
@@ -305,4 +309,80 @@ fn control_save_directory_alias_keeps_the_external_change_guard() {
     assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
     assert_eq!(std::fs::read(&path).unwrap(), external);
     assert_eq!(app.tabs[app.active_tab].disk_fingerprint, original);
+}
+
+#[cfg(unix)]
+#[test]
+fn control_save_file_alias_preserves_the_target_and_symlink() {
+    for windowed in [false, true] {
+        for open_alias in [false, true] {
+            for save_alias in [false, true] {
+                let scratch = Scratch::new();
+                let path = scratch.0.join("current.dxf");
+                drop(open_drawing(&path, false));
+                let alias = scratch.0.join("alias.dxf");
+                std::os::unix::fs::symlink(&path, &alias).unwrap();
+                let source = if open_alias { &alias } else { &path };
+                let destination = if save_alias { &alias } else { &path };
+                let mut app = reopen_drawing(source, windowed);
+                let original = std::fs::read(&path).unwrap();
+                edit(&mut app);
+                let saved = request(&mut app, json!({"op":"save","path":destination}));
+                assert_eq!(saved["ok"], true, "{saved}");
+                assert!(alias.is_symlink());
+                assert_ne!(std::fs::read(&path).unwrap(), original);
+                assert_eq!(
+                    std::fs::read(&path).unwrap(),
+                    std::fs::read(&alias).unwrap()
+                );
+                assert!(!app.tabs[app.active_tab].dirty);
+                let count = app.tabs[app.active_tab].scene.document.entities().count();
+                drop(app);
+                let reopened = reopen_drawing(source, false);
+                assert_eq!(
+                    reopened.tabs[reopened.active_tab]
+                        .scene
+                        .document
+                        .entities()
+                        .count(),
+                    count
+                );
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn control_save_missing_current_file_through_directory_alias_keeps_fingerprint() {
+    for windowed in [false, true] {
+        for release_lease in [false, true] {
+            let scratch = Scratch::new();
+            let real = scratch.0.join("real");
+            let alias = scratch.0.join("alias");
+            std::fs::create_dir(&real).unwrap();
+            std::os::unix::fs::symlink(&real, &alias).unwrap();
+            let path = real.join("current.dxf");
+            let mut app = open_drawing(&path, windowed);
+            edit(&mut app);
+            let i = app.active_tab;
+            let original = app.tabs[i].disk_fingerprint.clone();
+            if release_lease {
+                let _ = app.tabs[i].edit_lease.take();
+            }
+            std::fs::remove_file(&path).unwrap();
+            let saved = request(
+                &mut app,
+                json!({"op":"save","path":alias.join("current.dxf"),"overwrite":true}),
+            );
+            assert_eq!(saved["ok"], false, "{saved}");
+            if windowed {
+                assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
+            }
+            assert!(!path.exists());
+            assert_eq!(app.tabs[i].disk_fingerprint, original);
+            assert_eq!(app.tabs[i].current_path.as_ref(), Some(&path));
+            assert!(app.tabs[i].dirty);
+        }
+    }
 }

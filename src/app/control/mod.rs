@@ -1443,6 +1443,13 @@ impl OpenCADStudio {
                     .current_path
                     .as_deref()
                     .is_some_and(|current| super::update::native_paths_match(current, &path));
+                // An atomic replacement must update the drawing a file alias
+                // names, rather than replacing the symlink itself.
+                let path = if destination_is_current {
+                    std::fs::canonicalize(&path).unwrap_or(path)
+                } else {
+                    path
+                };
                 let require_new_destination =
                     !destination_is_current && req["overwrite"].as_bool() != Some(true);
                 if require_new_destination && path.exists() {

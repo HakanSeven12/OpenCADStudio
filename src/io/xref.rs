@@ -2585,7 +2585,10 @@ fn bind_nested_closure(
     let children: Vec<(String, Handle, String)> = source
         .block_records
         .iter()
-        .filter(|br| (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty())
+        // An overlay never re-exports through the host: it has no business
+        // being bound when the host is bound. Only drawing attachments join
+        // the closure.
+        .filter(|br| br.flags.is_xref && !br.flags.is_xref_overlay && !br.xref_path.is_empty())
         .map(|br| (br.name.clone(), br.handle, br.xref_path.clone()))
         .collect();
     let mut taken = BindTaken::capture(source);
@@ -3976,6 +3979,51 @@ mod tests {
                 .block_records
                 .iter()
                 .any(|b| b.flags.is_xref || b.flags.is_xref_overlay));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn bind_skips_nested_overlays() {
+            let dir = bind_dir("overlay");
+            let detail_path = write_xref_file(&dir, "detail.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                doc.add_entity(line_on("WALLS")).unwrap();
+            });
+            let overlay_path = write_xref_file(&dir, "labels.dwg", |doc| {
+                add_layer(doc, "LABELS");
+                doc.add_entity(line_on("LABELS")).unwrap();
+            });
+            let plan_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "PLANLAYER");
+                doc.add_entity(line_on("PLANLAYER")).unwrap();
+                let mut detail = document::tables::BlockRecord::new("DETAIL");
+                detail.flags.is_xref = true;
+                detail.xref_path = detail_path.clone();
+                doc.block_records.add(detail).expect("add nested attach");
+                let mut labels = document::tables::BlockRecord::new("LABELS");
+                labels.flags.is_xref_overlay = true;
+                labels.xref_path = overlay_path.clone();
+                doc.block_records.add(labels).expect("add nested overlay");
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &plan_path);
+            let outcome = bind_reference(&mut host, key, &dir, &dir).expect("bind");
+            assert_eq!(outcome.name, "PLAN");
+            assert!(
+                host.layers.get("PLAN$0$DETAIL$0$WALLS").is_some(),
+                "the attachment's layers join the binding"
+            );
+            assert!(
+                !host.layers.get("PLAN$0$LABELS").is_some(),
+                "the overlay's layers stay out of the binding"
+            );
+            let overlay = host
+                .block_records
+                .iter()
+                .find(|record| record.name == "PLAN$0$LABELS");
+            assert!(
+                overlay.is_none(),
+                "an overlay reference is not rewritten by the binding"
+            );
             std::fs::remove_dir_all(&dir).ok();
         }
 

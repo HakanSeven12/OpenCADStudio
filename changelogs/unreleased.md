@@ -1,27 +1,20 @@
-# OpenCADStudio - Unreleased (2026-11-01 to Present)
+# OpenCADStudio - Unreleased (2026-11-08 to Present)
 
-> **Summary:** Added chained action sequencing to dynamic block parameters and corrected block attribute propagation and visibility-state behavior.
+> **Summary:** Added a parameter order cell to the Parameters Manager and the `EATTEDIT` command, and corrected named `ATTSYNC`, the attribute definition card and the attribute manager's labels.
 
 ### 🌟 Notable Release Notes
 
-* **Chained Parameter Actions:** A parameter can now chain its actions in a named order, authored from the Actions tab and named by its evaluation graph node. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
-* **Block Attribute Propagation:** Inserted references receive the attributes their definitions declare, bare references fill from their definition, and copies keep their own identity. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
-* **Visibility State Handling:** A state hides only the objects it names, objects outside the state set are left alone, and the first state keeps every object visible. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
+* **Parameters Manager Order:** Each parameter carries a whole-number rank that every one of its rows prints and that is kept with the parameter in the drawing, so it survives saving and reopening. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
+* **`EATTEDIT` and `ATTSYNC`:** `EATTEDIT` opens the attribute editor on a selected reference or starts the pick; `ATTSYNC <block>` synchronises a named block directly. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 
 ### 🚀 New Features
 
-* **Quad Cursor Menu:** A context-aware command menu at the cursor with panels per entity type, hover dwell, right-click moments, keyboard picking (`Enter`, `1-9`, `Tab`), and `QUAD`/`QUADWIDTH`/`QUADCOMMANDLAUNCH` sysvars. Off by default; opted into via `SHIFT+F12`, the status-bar QUAD pill, or Options → Quad Cursor Menu.
-* **Plugin Quad Surface (API v15):** Plugins register entity-type-bound quad panels with custom icons; command tiles dispatch host-side, callback tiles notify the owning plugin with the quad target.
-* **Chained Actions:** Chain a parameter's actions in the named order from the Actions tab, with the chained action named when it is authored and resolved through its evaluation graph node.
-* **Parameter Value Evaluation:** A written parameter value moves the reference it was set on.
+* **Parameter Order:** The Parameters Manager's Order cell takes a whole-number rank for the parameter its row names; both rows of an XY or polar parameter print the same rank; an emptied cell clears it; the listed rows stay alphabetical.
+* **`EATTEDIT`:** The command reaches the editor `ATTEDIT` opens, on a selected block reference or after the pick, and completes from the command line.
 
 ### 🐛 Bug Fixes
 
-* **Attribute Insertion:** Give inserted references the attributes their definitions declare, and fill a bare reference from its definition.
-* **Attribute Copies:** Keep a reference's own identity when it is copied.
-* **Attributed Marker:** Make the attributed marker follow the definition body.
-* **Visibility States:** Keep every object visible in the first state, and leave objects outside the state set alone.
-* **Explodable Flag:** Make the explodable flag decide against the explode command.
-* **Cross-document Copies:** Carry the block definition, styles and object graph the source holds for a copied reference, so the target is not left with a reference to a record it does not have.
-* **Parameters Manager Rows:** Keep a definition's lookup and visibility rows listed while its evaluation graph will not take an edit, instead of dropping those two rows with no reason for the shorter table.
-* **Block Editor Crash Recovery:** `BEDIT` "Save Block" writes the drawing's `.sv$` recovery copy at once instead of waiting for the next `SAVETIME` tick, so a crash before leaving the editor keeps the saved block, and opening a drawing whose recovery copy is newer than the file says where that copy is. *(Contributed by [@Ch4rlos](https://github.com/Ch4rlos))*
+* **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
+* **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.
+* **Attribute Definition Editor:** Card headings use the palettes' muted label colour and the pick buttons draw a dotted square over a crosshair.
+* **Attribute Manager:** The live toggle reads Auto preview changes; Constant shows as a disabled mode pill and the second tab reads Text Options; the properties tab lists a read-only Plot style row reporting the default.

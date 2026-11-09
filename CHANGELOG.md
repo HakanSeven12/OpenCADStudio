@@ -8,7 +8,8 @@
 
 | Release | Date | Highlights | Details |
 | :--- | :--- | :--- | :--- |
-| **[Unreleased](changelogs/unreleased.md)** | *2026-11-01 to Present* | Quad cursor menu with plugin quad surface, chained dynamic block parameter actions, plus block attribute propagation and visibility-state fixes | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[Unreleased](changelogs/unreleased.md)** | *2026-11-08 to Present* | Parameters Manager parameter order, `EATTEDIT`, named `ATTSYNC`, and attribute-editor labelling | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[v2026.45](changelogs/v2026.45.md)** | *2026-11-08* | Layer Manager with in-drawing filters & Quick Select/FILTER, tables overhaul (cell styles, in-place editing, fill grips), quad cursor menu with plugin surface, Flip parameters & Parameters Manager, `BLOCKREPLACE`/`XPLODE`, HATCH/OFFSET/MATCHPROP/SELECT parity, annotation scale & complex linetypes, SVG import, CUI/Quick Access Toolbar, TRIM/OSNAP/OTRACK performance | [changelogs/v2026.45.md](changelogs/v2026.45.md) |
 | **[v2026.44](changelogs/v2026.44.md)** | *2026-11-01* | Shared OpenCADDocument model with IFCX and converter interchange, dimension/multileader/text/table overhauls, ribbon redesign, layer tools, Plugin API 14, MCP intent tools, and plotting/import/performance fixes | [changelogs/v2026.44.md](changelogs/v2026.44.md) |
 | **[v2026.43](changelogs/v2026.43.md)** | *2026-10-25* | Dynamic block authoring, QuickCalc, HATCH editing, expanded import/export, plugin grips, drafting tools, and broad reliability improvements | [changelogs/v2026.43.md](changelogs/v2026.43.md) |
 | **[v2026.42](changelogs/v2026.42.md)** | *2026-10-18* | Dynamic block authoring, broad import support (DGN, PDF, STEP, IGES, SAT, WMF, 3DS), dockable palettes, web parity, and drafting/layout tools | [changelogs/v2026.42.md](changelogs/v2026.42.md) |
@@ -19,9 +20,13 @@
 
 ---
 
-## [Unreleased] - 2026-11-01
+## [Unreleased] - 2026-11-08
 
-> **Summary:** Added the quad cursor menu with a plugin quad surface, chained action sequencing to dynamic block parameters, and corrected block attribute propagation and visibility-state behavior. See the [full Unreleased notes](changelogs/unreleased.md).
+> **Summary:** Added a whole-number parameter order to the Parameters Manager and the `EATTEDIT` command; corrected named `ATTSYNC`, the attribute definition card and the attribute manager's labels. See the [full Unreleased notes](changelogs/unreleased.md).
+
+## [v2026.45] - 2026-11-08
+
+> **Summary:** Rebuilt the Layer Manager with in-drawing layer filters and a shared selection-filter engine, overhauled tables with cell styles, in-place editing and fill grips, added `BLOCKREPLACE`/`XPLODE` and the Quad cursor menu with a plugin quad surface, expanded dynamic block authoring (Flip parameters, ordered action follow-ups, Parameters Manager), advanced HATCH island/boundary handling, annotative scale and complex linetypes, added `COMPARE`, `BURST`, `XBIND`, `PREVIEW`/`PUBLISH` and SVG import, and delivered broad TRIM/OSNAP/OTRACK/viewport performance work. See the [full v2026.45 release notes](changelogs/v2026.45.md).
 
 ## [v2026.44] - 2026-11-01
 
@@ -43,8 +48,6 @@
 * **Drafting and Layout:** Added `-VIEW` presets, `DVIEW` twist, `MVSETUP`, `PUBLISH`, `TXT2MTXT`, `ATTMAN`, richer `REFEDIT`, layout viewport creation and copying, and improvements to selection, snapping, `STRETCH`, `TRIM`/`EXTEND`, and measurements. *(Contributed by [@ramox81](https://github.com/ramox81), [@HakanSeven12](https://github.com/HakanSeven12), and [@gianlucafiore](https://github.com/gianlucafiore))*
 * **Automation and Plugins:** Extended MCP preflight, dynamic entity schemas, batch bindings and specialist guides; added plugin reference-only entities and plugin-defined entity labels. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi), [@YsDirector](https://github.com/YsDirector), and [@schoeller](https://github.com/schoeller))*
 
-👉 **[View Full v2026.42 Release Notes](changelogs/v2026.42.md)**
-
 ---
 
 ## [v2026.41] - 2026-10-11
@@ -58,8 +61,6 @@
 * **Advanced Typography & Table Overrides:** Fully compliant right-to-left (RTL) text rendering in `MTEXT`, exact bounding boxes for shaped/rotated text fields, and in-place table cell style overrides with automated formula updates. *(Contributed by [@ramox81](https://github.com/ramox81))*
 * **Dimension Style Independent Arrowheads (`DIMBLK1`/`DIMBLK2`):** Supported independent arrowhead configurations for start and end leaders with real-time preview synchronization. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **GPU Platform Routing & Hardware Info:** Hardware-aware backend routing (Metal on macOS, OpenGL fallback for legacy hardware), hardware info in About dialog, and dedicated Graphics options tab. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
-
-👉 **[View Full v2026.41 Release Notes](changelogs/v2026.41.md)**
 
 ---
 
@@ -78,8 +79,6 @@
 * **Drawing Load Sentinel Recovery:** Materialized missing `BLOCK`/`ENDBLK` sentinels on load, preventing crashes and corrupt database states. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **PDF TrueType Font Embedding:** Subset TrueType font embedding directly in vector PDF export. *(Contributed by [@Chrisyeh1983](https://github.com/Chrisyeh1983))*
 
-👉 **[View Full v2026.40 / v2026.40.1 Release Notes](changelogs/v2026.40.md)**
-
 ---
 
 ## [v2026.39] - 2026-09-27
@@ -94,8 +93,6 @@
 * **Tessellation & Pipeline Performance:** Optimized polyline arc tessellation sampling, bypassed wide fills on thin polylines, memoized constraint glyphs, and capped selection grips at 4096. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **Boundary Clipping (`XCLIP`):** Polygonal and rectangular clipping boundaries for external references and block inserts. *(Contributed by [@ramox81](https://github.com/ramox81))*
 * **Trackpad Navigation Gestures:** Smooth two-finger panning and pinch-to-zoom gestures. *(Contributed by [@swit33](https://github.com/swit33))*
-
-👉 **[View Full v2026.39 Release Notes](changelogs/v2026.39.md)**
 
 ---
 
@@ -114,4 +111,3 @@
 * **3Dconnexion SpaceMouse Support:** Native 6-DOF controller navigation support on Windows. *(Contributed by [@HakanSeven12](https://github.com/HakanSeven12))*
 * **Windows Plotting & Printing Subsystem:** Reliable DEVMODE queries, custom paper routing, and lenient CTB loading. *(Contributed by [@HakanSeven12](https://github.com/HakanSeven12) and [@CiberNin](https://github.com/CiberNin))*
 
-👉 **[View Full v2026.38 Release Notes](changelogs/v2026.38.md)**

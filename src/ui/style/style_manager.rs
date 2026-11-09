@@ -419,6 +419,20 @@ pub(crate) fn tb_button(
         .into()
 }
 
+/// `tb_button` that is greyed out without a message.
+pub(crate) fn tb_button_maybe(
+    label: impl Into<Cow<'static, str>>,
+    msg: Option<Message>,
+    accent: bool,
+) -> Element<'static, Message> {
+    let pad = if accent { [4, 14] } else { [4, 10] };
+    button(text(label.into()).size(11))
+        .on_press_maybe(msg)
+        .style(btn_s(accent))
+        .padding(pad)
+        .into()
+}
+
 /// A toolbar button: icon and name, or (`compact`) the icon with its name as
 /// a hint. `None` leaves it off.
 fn tool_button(

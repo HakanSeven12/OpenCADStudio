@@ -19,6 +19,28 @@ use document::types::{Vector2, Vector3};
 use document::{Document, Handle};
 use std::borrow::Cow;
 
+static SELECTION_ANNO_DISPLAY: std::sync::atomic::AtomicI16 = std::sync::atomic::AtomicI16::new(1);
+static ANNO_MONITOR: std::sync::atomic::AtomicI16 = std::sync::atomic::AtomicI16::new(-2);
+
+/// SELECTIONANNODISPLAY, a profile setting: 1 shows a selected annotative
+/// object's other scale representations dimmed, 0 hides them.
+pub(crate) fn selection_anno_display() -> i16 {
+    SELECTION_ANNO_DISPLAY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn set_selection_anno_display(value: i16) {
+    SELECTION_ANNO_DISPLAY.store(value.clamp(0, 1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// ANNOMONITOR, a profile setting.
+pub(crate) fn anno_monitor() -> i16 {
+    ANNO_MONITOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn set_anno_monitor(value: i16) {
+    ANNO_MONITOR.store(value.clamp(-2, 2), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// MSLTSCALE: whether model-space linetypes follow the annotation scale. A
 /// drawing that doesn't store the variable gets its default, on.
 pub fn model_linetypes_follow_annotation(doc: &Document) -> bool {

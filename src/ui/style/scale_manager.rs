@@ -8,7 +8,9 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::form::field_style_with_radius;
-use crate::ui::style::style_manager::{hdivider, muted_text_style, tb_button, vsep};
+use crate::ui::style::style_manager::{
+    hdivider, muted_text_style, tb_button, tb_button_maybe, vsep,
+};
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Theme};
 use std::borrow::Cow;
@@ -18,9 +20,64 @@ pub fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("scale-rename-input")
 }
 
-/// `scales` is (name, "paper:drawing" ratio label). The editor buffers hold the
-/// name / paper / drawing of the row being added or edited.
+/// What the list buttons may do for the selected scale, and the line that
+/// describes it.
+#[derive(Clone)]
+pub struct ListState {
+    pub can_up: bool,
+    pub can_down: bool,
+    pub can_delete: bool,
+    pub units: String,
+    /// Reset asks which default list to restore.
+    pub reset_asking: bool,
+}
+
+/// `1 paper Millimeter = 2 drawing Meters`: the paper unit of the drawing's
+/// scale family and the drawing's own unit, plural past one.
+pub fn units_line(paper: f64, drawing: f64, paper_unit: i16, drawing_unit: i16) -> String {
+    let number = |value: f64| {
+        let text = format!("{value:.6}");
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    let one = |value: f64| (value - 1.0).abs() < 1e-12;
+    format!(
+        "{} {} {} = {} {} {}",
+        number(paper),
+        t!("paper"),
+        unit_name(paper_unit, !one(paper)),
+        number(drawing),
+        t!("drawing"),
+        unit_name(drawing_unit, !one(drawing))
+    )
+}
+
+fn unit_name(code: i16, plural: bool) -> Cow<'static, str> {
+    match (code, plural) {
+        (1, false) => t!("Inch"),
+        (1, true) => t!("Inches"),
+        (2, false) => t!("Foot"),
+        (2, true) => t!("Feet"),
+        (3, false) => t!("Mile"),
+        (3, true) => t!("Miles"),
+        (4, false) => t!("Millimeter"),
+        (4, true) => t!("Millimeters"),
+        (5, false) => t!("Centimeter"),
+        (5, true) => t!("Centimeters"),
+        (6, false) => t!("Meter"),
+        (6, true) => t!("Meters"),
+        (7, false) => t!("Kilometer"),
+        (7, true) => t!("Kilometers"),
+        (_, false) => t!("unit"),
+        (_, true) => t!("units"),
+    }
+}
+
+/// `scales` is (name, "paper:drawing" ratio label) in the drawing's list
+/// order. The editor buffers hold the paper / drawing units of the selected
+/// scale.
+#[allow(clippy::too_many_arguments)]
 pub fn view_window<'a, 'b>(
+    list: ListState,
     scales: &'b [(String, String)],
     selected: &'b str,
     current: &'b str,
@@ -30,15 +87,23 @@ pub fn view_window<'a, 'b>(
     drawing_buf: &'a str,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    // ── Toolbar: New / Delete | Set Current / Apply ───────────────────────
+    // ── Toolbar: Add / Delete / Move Up / Move Down | Reset ──────────────
     let toolbar = container(
         row![
-            tb_button(t!("New"), Message::ScaleManagerNew, false),
-            tb_button(t!("Copy"), Message::ScaleManagerCopy, false),
-            tb_button(t!("Delete"), Message::ScaleManagerDelete, false),
+            tb_button(t!("Add"), Message::ScaleManagerNew, false),
+            tb_button_maybe(
+                t!("Delete"),
+                list.can_delete.then_some(Message::ScaleManagerDelete),
+                false
+            ),
+            tb_button_maybe(t!("Move Up"), list.can_up.then_some(Message::ScaleManagerMove(-1)), false),
+            tb_button_maybe(
+                t!("Move Down"),
+                list.can_down.then_some(Message::ScaleManagerMove(1)),
+                false
+            ),
             Space::new().width(sizing.width),
-            tb_button(t!("Set Current"), Message::ScaleManagerSetCurrent, false),
-            tb_button(t!("Apply"), Message::ScaleManagerApply, true),
+            tb_button(t!("Reset"), Message::ScaleManagerReset, false),
         ]
         .spacing(4)
         .align_y(iced::Center),
@@ -150,7 +215,9 @@ pub fn view_window<'a, 'b>(
             field(t!("Paper units"), Cow::Borrowed("1"), paper_buf, Message::ScaleManagerPaperBuf),
             field(t!("Drawing units"), Cow::Borrowed("50"), drawing_buf, Message::ScaleManagerDrawingBuf),
             Space::new().height(6),
-            text(t!("Double-click a scale to rename it; edit its paper : drawing ratio here. New / Copy add a scale. Changes are kept only if you click Apply before closing."))
+            text(list.units.clone()).size(11),
+            Space::new().height(6),
+            text(t!("Double-click a scale to rename it; edit its paper : drawing ratio here. Add puts a new scale at the end of the list. Nothing is kept unless you click OK."))
                 .size(10)
                 .style(muted_text_style),
         ]
@@ -161,8 +228,36 @@ pub fn view_window<'a, 'b>(
     .padding(12);
 
     let body = row![list_panel, vsep(sizing.height), editor].height(sizing.height);
+    // Reset asks which default list to restore before it purges anything.
+    let footer: Element<'a, Message> = if list.reset_asking {
+        row![
+            text(t!("Restore which default list? Unreferenced scales are purged.")).size(11),
+            Space::new().width(sizing.width),
+            tb_button(t!("Metric"), Message::ScaleManagerResetChoice(0), false),
+            tb_button(t!("Imperial"), Message::ScaleManagerResetChoice(1), false),
+            tb_button(t!("Metric and Imperial"), Message::ScaleManagerResetChoice(2), false),
+            tb_button(t!("Cancel"), Message::ScaleManagerResetChoice(3), false),
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+        .into()
+    } else {
+        row![
+            Space::new().width(sizing.width),
+            tb_button(t!("Cancel"), Message::CloseModal, false),
+            tb_button(t!("OK"), Message::ScaleManagerOk, true),
+        ]
+        .spacing(4)
+        .into()
+    };
 
-    container(column![toolbar, hdivider(sizing.width), body])
+    container(column![
+        toolbar,
+        hdivider(sizing.width),
+        body,
+        hdivider(sizing.width),
+        container(footer).padding([6, 8]),
+    ])
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.base.color)),
             ..Default::default()

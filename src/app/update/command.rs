@@ -3847,6 +3847,24 @@ impl OpenCADStudio {
             return self.on_dynamic_dimension_choice(field, &value);
         }
         let i = self.active_tab;
+        // Match orientation to layout: an annotative text's AcadAnnoPO flag.
+        if field == "anno_po" {
+            let on = value == crate::t!("Yes").as_ref() || value.eq_ignore_ascii_case("Yes");
+            let handles = self.property_target_handles(i);
+            self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
+                let document = &mut app.tabs[i].scene.document;
+                crate::scene::block_metadata::ensure_application(document, "AcadAnnoPO");
+                crate::scene::view::dispatch::set_entity_xdata(
+                    document,
+                    handle,
+                    "AcadAnnoPO",
+                    on.then(|| vec![document::xdata::XDataValue::Integer16(1)]),
+                );
+            });
+            self.tabs[i].properties.edit_choice_open = None;
+            self.refresh_properties();
+            return Task::none();
+        }
         if field == "ole_lock_aspect" {
             self.set_ole_lock_aspect(i, &value);
             self.tabs[i].properties.edit_choice_open = None;
@@ -5600,7 +5618,7 @@ impl OpenCADStudio {
                                 }
                             }
                             // Annotative text: the row holds the paper height.
-                            "height"
+                            "height" | "att_h"
                                 if self.tabs[i]
                                     .scene
                                     .annotative_text_height_factor(handle)
@@ -5616,7 +5634,7 @@ impl OpenCADStudio {
                                 ) {
                                     crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
                                         entity,
-                                        "height",
+                                        field,
                                         &(paper * factor).to_string(),
                                         plane,
                                     );

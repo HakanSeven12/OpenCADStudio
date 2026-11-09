@@ -12,7 +12,6 @@ use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use document::Handle;
 use iced::Task;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicI16, Ordering};
 
 /// A localized message without the bidi isolation marks Fluent puts round
 /// its arguments; the command line shows them as stray characters.
@@ -22,26 +21,9 @@ macro_rules! trs {
     };
 }
 
-static SELECTION_ANNO_DISPLAY: AtomicI16 = AtomicI16::new(1);
-static ANNO_MONITOR: AtomicI16 = AtomicI16::new(-2);
-
-/// SELECTIONANNODISPLAY, a profile setting.
-pub(crate) fn selection_anno_display() -> i16 {
-    SELECTION_ANNO_DISPLAY.load(Ordering::Relaxed)
-}
-
-pub(crate) fn set_selection_anno_display(value: i16) {
-    SELECTION_ANNO_DISPLAY.store(value.clamp(0, 1), Ordering::Relaxed);
-}
-
-/// ANNOMONITOR, a profile setting.
-pub(crate) fn anno_monitor() -> i16 {
-    ANNO_MONITOR.load(Ordering::Relaxed)
-}
-
-pub(crate) fn set_anno_monitor(value: i16) {
-    ANNO_MONITOR.store(value.clamp(-2, 2), Ordering::Relaxed);
-}
+pub(crate) use crate::scene::annotative::{
+    anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display,
+};
 
 /// The integer variables of the panel and their ranges.
 const RANGED: &[(&str, i16, i16)] = &[
@@ -459,7 +441,7 @@ impl OpenCADStudio {
 
     /// Take `scale` off the annotative objects that have it. An object never
     /// loses its last scale. Without a named scale (`explicit` false) an
-    /// object lacking the current scale loses its latest one instead, as the
+    /// object lacking the current scale loses the one it was given first instead, as the
     /// reference's current-scale removal does.
     #[allow(clippy::too_many_arguments)]
     fn anno_remove_scale(
@@ -492,8 +474,11 @@ impl OpenCADStudio {
             if has {
                 removals.push((*handle, scale));
             } else if !explicit {
-                if let Some((_, latest)) = memberships.last() {
-                    removals.push((*handle, *latest));
+                // Without the current scale the object loses the scale it
+                // was given first (measured: 1:1, 1:2, 1:4 at 1:10 → 1:2,
+                // 1:4; a scale added later never goes first).
+                if let Some((_, first)) = memberships.first() {
+                    removals.push((*handle, *first));
                 }
             }
         }
@@ -528,6 +513,59 @@ impl OpenCADStudio {
                     .push_output(&trs!("anno-scale-cmd", "cannot-remove", count = cannot));
             }
         }
+    }
+
+    /// OK in the Annotation Object Scale window: each object gains the
+    /// scales staged for it and loses the ones taken off, as one undo step.
+    pub(crate) fn apply_anno_object_scale(&mut self) {
+        let i = self.active_tab;
+        let staged = std::mem::take(&mut self.anno_object_scale.staged);
+        let mut edits: Vec<(Handle, Vec<String>, Vec<Handle>)> = Vec::new();
+        for (handle, names) in staged {
+            if self.tabs[i].scene.is_layer_locked(handle) {
+                continue;
+            }
+            let current =
+                crate::scene::annotative::object_scale_memberships(&self.tabs[i].scene.document, handle);
+            let add: Vec<String> = names
+                .iter()
+                .filter(|name| !current.iter().any(|(have, _)| have.eq_ignore_ascii_case(name)))
+                .cloned()
+                .collect();
+            let remove: Vec<Handle> = current
+                .iter()
+                .filter(|(have, _)| !names.iter().any(|name| name.eq_ignore_ascii_case(have)))
+                .map(|(_, scale)| *scale)
+                .collect();
+            if !add.is_empty() || !remove.is_empty() {
+                edits.push((handle, add, remove));
+            }
+        }
+        if edits.is_empty() {
+            return;
+        }
+        self.push_undo_snapshot(i, "OBJECTSCALE");
+        for (handle, add, remove) in &edits {
+            for name in add {
+                if let Some(scale) = self.tabs[i].scene.scale_handle_ensuring(name) {
+                    crate::scene::annotative::create_annotation_context(
+                        &mut self.tabs[i].scene.document,
+                        *handle,
+                        scale,
+                    );
+                }
+            }
+            for scale in remove {
+                crate::scene::annotative::remove_annotation_context_for_scale(
+                    &mut self.tabs[i].scene.document,
+                    *handle,
+                    *scale,
+                );
+            }
+        }
+        let changed: Vec<Handle> = edits.iter().map(|(handle, _, _)| *handle).collect();
+        self.anno_bump(i, &changed);
+        self.refresh_properties();
     }
 
     fn anno_bump(&mut self, i: usize, handles: &[Handle]) {
@@ -661,7 +699,7 @@ impl OpenCADStudio {
 
     fn anno_print_table(&mut self, rows: &[(String, f64, f64)]) {
         for line in scale_table(rows) {
-            self.command_line.push_output(&line);
+            self.command_line.push_table(&line);
         }
     }
 
@@ -998,7 +1036,7 @@ impl OpenCADStudio {
     }
 
     /// The current scale and the scales objects use are referenced.
-    fn anno_scale_referenced(&self, i: usize, name: &str) -> bool {
+    pub(crate) fn anno_scale_referenced(&self, i: usize, name: &str) -> bool {
         let scene = &self.tabs[i].scene;
         scene
             .document

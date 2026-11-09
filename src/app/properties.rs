@@ -1815,8 +1815,14 @@ impl OpenCADStudio {
                         {
                             set_row(&mut sections, "annotative", t!("Yes").into_owned())
                         }
+                        // A block reference is annotative as its definition
+                        // is: read-only here, as the reference shows it.
+                        document::EntityType::Insert(_) => set_row(
+                            &mut sections,
+                            "annotative",
+                            if is_anno { t!("Yes") } else { t!("No") }.into_owned(),
+                        ),
                         document::EntityType::Text(_)
-                        | document::EntityType::Insert(_)
                         | document::EntityType::Leader(_)
                         | document::EntityType::Hatch(_)
                         | document::EntityType::Dimension(_)
@@ -1835,15 +1841,20 @@ impl OpenCADStudio {
                         doc,
                         entity.common().handle,
                     );
-                    let assigned_scales = if memberships.is_empty() {
-                        doc.header.current_annotation_scale.clone()
-                    } else {
+                    // The scale the object is shown at: the current one when
+                    // the object has it, else its default representation's.
+                    let assigned_scales = crate::scene::annotative::active_object_context_for_scale(
+                        doc,
+                        entity.common().handle,
+                        None,
+                    )
+                    .and_then(|context| {
                         memberships
-                            .into_iter()
-                            .map(|(name, _)| name)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    };
+                            .iter()
+                            .find(|(_, scale)| *scale == context.scale)
+                            .map(|(name, _)| name.clone())
+                    })
+                    .unwrap_or_else(|| doc.header.current_annotation_scale.clone());
                     insert_row_after(
                         &mut sections,
                         anno_field,
@@ -1853,6 +1864,20 @@ impl OpenCADStudio {
                             assigned_scales,
                         ),
                     );
+                    // A block reference shows its definition's orientation.
+                    if let document::EntityType::Insert(insert) = entity {
+                        let (_, oriented) =
+                            crate::scene::block_metadata::annotation_flags(doc, &insert.block_name);
+                        insert_row_after(
+                            &mut sections,
+                            "annotative_scale",
+                            crate::entities::common::ro_prop(
+                                t!("Match orientation to layout").as_ref(),
+                                "anno_po",
+                                if oriented { t!("Yes") } else { t!("No") }.into_owned(),
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -1883,6 +1908,7 @@ impl OpenCADStudio {
                     (stored, factor, aligned)
                 }
                 document::EntityType::MText(text) => (text.height, factor, false),
+                document::EntityType::AttributeDefinition(attribute) => (attribute.height, factor, false),
                 _ => unreachable!("annotative_text_height_factor is text-only"),
             };
             let ratio = crate::scene::annotative::text_context_ratio(
@@ -1892,8 +1918,14 @@ impl OpenCADStudio {
             )
             .unwrap_or(1.0);
             let paper_height = stored / model_factor;
+            // An attribute definition's height row has a field of its own.
+            let height_field = if matches!(entity, document::EntityType::AttributeDefinition(_)) {
+                "att_h"
+            } else {
+                "height"
+            };
             for section in sections.iter_mut() {
-                if let Some(row) = section.props.iter_mut().find(|row| row.field == "height") {
+                if let Some(row) = section.props.iter_mut().find(|row| row.field == height_field) {
                     let editable = !aligned
                         && !matches!(
                             row.value,
@@ -1901,7 +1933,7 @@ impl OpenCADStudio {
                         );
                     *row = crate::entities::common::num_prop(
                         t!("Paper text height").as_ref(),
-                        "height",
+                        height_field,
                         paper_height,
                         editable,
                     );
@@ -1909,13 +1941,31 @@ impl OpenCADStudio {
             }
             insert_row_after(
                 &mut sections,
-                "height",
+                height_field,
                 crate::entities::common::ro_prop(
                     t!("Model text height").as_ref(),
                     "model_text_height",
                     crate::entities::common::format_length(stored * ratio),
                 ),
             );
+            // Text and multiline text: Match orientation to layout, the
+            // AcadAnnoPO flag (an attribute definition has no such row).
+            if !matches!(entity, document::EntityType::AttributeDefinition(_)) {
+                let oriented = entity
+                    .common()
+                    .extended_data
+                    .get_record("AcadAnnoPO")
+                    .is_some();
+                insert_row_after(
+                    &mut sections,
+                    "model_text_height",
+                    crate::scene::model::object::Property {
+                        label: t!("Match orientation to layout").into_owned(),
+                        field: "anno_po",
+                        value: yes_no_choice(oriented),
+                    },
+                );
+            }
         }
 
         if !group_names.is_empty() {

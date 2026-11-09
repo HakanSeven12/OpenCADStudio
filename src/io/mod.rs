@@ -2059,7 +2059,6 @@ impl SaveFailure {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn externally_modified(path: &Path) -> Self {
         Self {
             message: format!("{} changed on disk after it was opened", path.display()),

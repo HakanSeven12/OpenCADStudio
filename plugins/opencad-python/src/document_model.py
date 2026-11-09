@@ -892,7 +892,7 @@ class _Modify:
             c.token("J")
             self._select(others)
             c.selection()
-            if c.waiting and "Join" in c.outcome["prompt"]:
+            if c.waiting:
                 c.enter()
         return self._pedit(entity, [join], at)
 

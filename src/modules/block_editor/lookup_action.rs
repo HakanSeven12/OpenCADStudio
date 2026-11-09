@@ -98,7 +98,7 @@ mod tests {
 
     fn context() -> PointPickContext {
         PointPickContext {
-            view: glam::Mat4::orthographic_rh_gl(-10., 10., -10., 10., -1., 1.),
+            view: glam::camera::rh::proj::opengl::orthographic(-10., 10., -10., 10., -1., 1.),
             eye: DVec3::ZERO,
             bounds: iced::Rectangle {
                 x: 0.,

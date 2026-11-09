@@ -386,10 +386,10 @@ fn parse_string_array(s: &str) -> Vec<String> {
 
 // ── Runtime loading (desktop only) ──────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use loader::{shutdown_plugins, with_manager};
 #[cfg(test)]
 pub(crate) use loader::PROCESS_TESTS_LOCK;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use loader::{shutdown_plugins, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};

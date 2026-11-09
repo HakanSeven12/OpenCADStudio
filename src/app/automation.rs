@@ -232,7 +232,9 @@ fn serve_socket_with_idle(
 
 /// The entities inside block definitions: owned by (or listed in) a block
 /// record that is not a layout's model or paper space.
-fn definition_members(document: &document::Document) -> std::collections::HashSet<document::Handle> {
+fn definition_members(
+    document: &document::Document,
+) -> std::collections::HashSet<document::Handle> {
     let mut layouts: std::collections::HashSet<document::Handle> = document
         .objects
         .values()
@@ -278,7 +280,10 @@ fn err(msg: impl std::fmt::Display) -> Value {
 /// still honouring it. Built from the live constraint sets — the structure a
 /// document's `ASSOC2DCONSTRAINTGROUP` members decode to on load — so the read
 /// names the same constraints the solver enforces.
-pub(crate) fn constraint_records_json(scene: &crate::scene::Scene, entity: document::Handle) -> Value {
+pub(crate) fn constraint_records_json(
+    scene: &crate::scene::Scene,
+    entity: document::Handle,
+) -> Value {
     let mut records = Vec::new();
     for set in &scene.parametric_constraints {
         for constraint in set.constraints_referencing(entity) {
@@ -427,7 +432,9 @@ pub(crate) fn entity_json(
             map.insert("value".into(), json!(t.value));
             map.insert(
                 "text".into(),
-                json!(document::entities::mtext_format::parse_mtext(&t.value, true).to_plain_text()),
+                json!(
+                    document::entities::mtext_format::parse_mtext(&t.value, true).to_plain_text()
+                ),
             );
             map.insert("position".into(), v3(t.insertion_point));
             map.insert("height".into(), json!(t.height));
@@ -481,11 +488,13 @@ pub(crate) fn entity_json(
                     .edges
                     .iter()
                     .filter_map(|edge| match edge {
-                        document::entities::BoundaryEdge::Polyline(polyline) => Some(json!(polyline
-                            .vertices
-                            .iter()
-                            .map(|v| [v.x, v.y])
-                            .collect::<Vec<_>>())),
+                        document::entities::BoundaryEdge::Polyline(polyline) => {
+                            Some(json!(polyline
+                                .vertices
+                                .iter()
+                                .map(|v| [v.x, v.y])
+                                .collect::<Vec<_>>()))
+                        }
                         _ => None,
                     })
                     .collect();
@@ -652,7 +661,10 @@ fn is_generated_dimension_block_name(name: &str) -> bool {
 /// Save-time baking materializes a Dimension's graphics in an anonymous
 /// `*D<n>` block. Those members are derived display geometry, not additional
 /// logical drawing entities; named block members remain part of the manifest.
-fn is_dimension_display_entity(document: &document::Document, entity: &document::EntityType) -> bool {
+fn is_dimension_display_entity(
+    document: &document::Document,
+    entity: &document::EntityType,
+) -> bool {
     let owner = entity.common().owner_handle;
     document
         .block_records
@@ -727,9 +739,7 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
         if code == 0 {
             record_has_handle = false;
         } else if code == 5 || code == 105 {
-            if !std::mem::replace(&mut record_has_handle, true)
-                && !declared.insert(value.clone())
-            {
+            if !std::mem::replace(&mut record_has_handle, true) && !declared.insert(value.clone()) {
                 duplicate.insert(value.clone());
             }
         } else if [330, 340, 350, 360, 390].contains(&code) {
@@ -1058,10 +1068,9 @@ impl OpenCADStudio {
             "text_search" => self.automation_text_search(&req),
             "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),
-            "blocks"
-            | "block_instances"
-            | "cad_get_blocks"
-            | "cad_extract_block_instances" => self.automation_blocks(&req),
+            "blocks" | "block_instances" | "cad_get_blocks" | "cad_extract_block_instances" => {
+                self.automation_blocks(&req)
+            }
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),
             "capabilities" => self.record_capabilities(),
@@ -1155,8 +1164,9 @@ impl OpenCADStudio {
                 // the viewport. Membership is the record's own list, so a
                 // child whose stored owner is null is still recognised, and
                 // every other definition's children stay out of reach.
-                let editing: std::collections::HashSet<document::Handle> =
-                    scene.block_edit_block.map_or_else(Default::default, |definition| {
+                let editing: std::collections::HashSet<document::Handle> = scene
+                    .block_edit_block
+                    .map_or_else(Default::default, |definition| {
                         scene
                             .document
                             .block_records
@@ -1235,8 +1245,7 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter(|e| {
-                            e.common().owner_handle == space
-                                || listed.contains(&e.common().handle)
+                            e.common().owner_handle == space || listed.contains(&e.common().handle)
                         })
                         .filter(|e| type_filter.is_none_or(|t| entity_type_matches(e, t)))
                         .filter(|e| layer_filter.is_none_or(|l| e.common().layer == l))
@@ -2436,7 +2445,9 @@ mod tests {
         dimension.definition_point = Vector3::new(0.0, 5.0, 0.0);
         dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         document
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dimension))))
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(
+                dimension,
+            ))))
             .unwrap();
         crate::modules::draw::modify::explode::bake_dimension_blocks(&mut document);
 
@@ -2459,7 +2470,9 @@ mod tests {
         dimension.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
         app.tabs[app.active_tab]
             .scene
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dimension))));
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(
+                dimension,
+            ))));
         let path = std::env::temp_dir().join(format!(
             "ocs_verified_dimension_{}_{}.dwg",
             std::process::id(),
@@ -2497,7 +2510,9 @@ mod tests {
         let i = app.active_tab;
         app.tabs[i]
             .scene
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dimension))));
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(
+                dimension,
+            ))));
         let path = std::env::temp_dir().join(format!(
             "ocs_verified_dimension_follow_up_{}_{}.dwg",
             std::process::id(),
@@ -2609,7 +2624,11 @@ mod tests {
         assert_eq!(audit["duplicate_handles"], serde_json::json!([]), "{audit}");
         std::fs::write(&path, "  0\nTEXT\n  5\n2F\n  0\nLINE\n  5\n2F\n").unwrap();
         let audit = super::audit_ascii_dxf_references(&path).unwrap();
-        assert_eq!(audit["duplicate_handles"], serde_json::json!(["2F"]), "{audit}");
+        assert_eq!(
+            audit["duplicate_handles"],
+            serde_json::json!(["2F"]),
+            "{audit}"
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -2960,13 +2979,9 @@ mod tests {
         let r = app.automation_op(r#"{"op":"select","clear":true,"window":[3,3,12,12]}"#);
         assert_eq!(r["selected"], 0, "window only grazing the circle: {r}");
 
-        let r = app.automation_op(
-            r#"{"op":"select","clear":true,"window":[3,3,12,12],"crossing":true}"#,
-        );
-        assert_eq!(
-            r["selected"], 1,
-            "crossing box over the circle's edge: {r}"
-        );
+        let r = app
+            .automation_op(r#"{"op":"select","clear":true,"window":[3,3,12,12],"crossing":true}"#);
+        assert_eq!(r["selected"], 1, "crossing box over the circle's edge: {r}");
     }
 
     /// The third ask of the same reading: a block reference had to be picked
@@ -3037,9 +3052,8 @@ mod tests {
         insert.rotation = 30.0_f64.to_radians();
         app.tabs[i].scene.add_entity(EntityType::Insert(insert));
 
-        let r = app.automation_op(
-            r#"{"op":"query","type":"INSERT","detail":"full","fields":["bounds"]}"#,
-        );
+        let r = app
+            .automation_op(r#"{"op":"query","type":"INSERT","detail":"full","fields":["bounds"]}"#);
         let bounds = &r["entities"][0]["bounds"];
         let at = |path: &str, axis: usize| bounds[path][axis].as_f64().unwrap();
         assert!((at("min", 0) - 90.0).abs() < 1e-3, "box min x: {bounds}");
@@ -3168,7 +3182,7 @@ mod tests {
             "the insert's scale reaches the child's own height: {child}"
         );
         assert!(
-            (child["rotation"].as_f64().unwrap() - 0.523599).abs() < 1e-5,
+            (child["rotation"].as_f64().unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-5,
             "the child carries its own rotation, in radians: {child}"
         );
     }
@@ -3411,8 +3425,10 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mtext =
-            document::MText::with_value("\\A1;10.5000", document::types::Vector3::new(10.0, 20.0, 0.0));
+        let mtext = document::MText::with_value(
+            "\\A1;10.5000",
+            document::types::Vector3::new(10.0, 20.0, 0.0),
+        );
         app.tabs[i]
             .scene
             .add_entity(document::EntityType::MText(Box::new(mtext)));
@@ -3494,7 +3510,9 @@ mod tests {
         // Arc angles are degrees on the wire, radians in the entity.
         let q = app.automation_op(r#"{"op":"query","type":"Arc","detail":"full"}"#);
         let start = q["entities"][0]["start_angle"].as_f64().unwrap();
-        assert!((start - std::f64::consts::FRAC_PI_2).abs() < 1e-9 || true);
+        assert!(start.abs() < 1e-9);
+        let end = q["entities"][0]["end_angle"].as_f64().unwrap();
+        assert!((end - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
 
         // The named layer was created and the entities live on it.
         let layers = app.automation_op(r#"{"op":"layers"}"#);
@@ -3763,10 +3781,7 @@ mod tests {
             close(max[0].as_f64().unwrap(), 0.0),
             "it ends at x 0: {bounds}"
         );
-        assert!(
-            close(max[1].as_f64().unwrap(), 40.0),
-            "and y 40: {bounds}"
-        );
+        assert!(close(max[1].as_f64().unwrap(), 40.0), "and y 40: {bounds}");
     }
 
     #[test]
@@ -3980,8 +3995,16 @@ mod tests {
             .iter()
             .find(|entity| entity["space"] == "SPACE_SRC")
             .unwrap_or_else(|| panic!("the definition's line is missing: {q}"));
-        assert_eq!(in_definition["owner"], format!("{definition:X}"), "{in_definition}");
-        assert_ne!(in_definition["handle"], handles[1].as_str(), "{in_definition}");
+        assert_eq!(
+            in_definition["owner"],
+            format!("{definition:X}"),
+            "{in_definition}"
+        );
+        assert_ne!(
+            in_definition["handle"],
+            handles[1].as_str(),
+            "{in_definition}"
+        );
     }
 
     #[test]
@@ -4128,8 +4151,16 @@ mod tests {
             let set = app.tabs[i]
                 .scene
                 .parametric_constraint_set_mut(ParametricScope::ModelSpace);
-            set.add(ConstraintKind::Horizontal, vec![ParametricRef::whole(line)], None);
-            set.add(ConstraintKind::Horizontal, vec![ParametricRef::whole(line)], None);
+            set.add(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(line)],
+                None,
+            );
+            set.add(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(line)],
+                None,
+            );
         }
         app.tabs[i]
             .scene
@@ -4342,7 +4373,10 @@ mod tests {
         // Anything else leaves it alone.
         app.automation_op(r#"{"op":"run","cmd":"MSLTSCALE 2"}"#);
         assert!(app.tabs[i].scene.model_linetype_scaling());
-        assert!(app.tabs[i].active_cmd.is_none(), "command must have finished");
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "command must have finished"
+        );
     }
 
     #[test]
@@ -4537,8 +4571,7 @@ mod tests {
             // Deterministically simulate an intentional hold-to-lasso.
             // A fast click+move must no longer activate a lasso just
             // because the cursor crossed the old 24 px shortcut.
-            let held_since =
-                iced::time::Instant::now() - std::time::Duration::from_millis(260);
+            let held_since = iced::time::Instant::now() - std::time::Duration::from_millis(260);
             app.tabs[i]
                 .scene
                 .selection
@@ -4595,7 +4628,10 @@ mod tests {
         let _ = app.update(Message::ViewportMove(moved));
         {
             let sel = app.tabs[i].scene.selection.borrow();
-            assert!(!sel.input.left_dragging, "fast first click must win over lasso");
+            assert!(
+                !sel.input.left_dragging,
+                "fast first click must win over lasso"
+            );
             assert!(!sel.gesture.poly_active, "the lasso must not arm");
         }
         let _ = app.update(Message::ViewportLeftRelease);
@@ -4813,7 +4849,9 @@ mod tests {
         let mut dst_mtext = MText::new();
         dst_mtext.value = "DSTM".into();
         dst_mtext.height = 2.0;
-        let dst_mtext_h = app.tabs[i].scene.add_entity(EntityType::MText(Box::new(dst_mtext)));
+        let dst_mtext_h = app.tabs[i]
+            .scene
+            .add_entity(EntityType::MText(Box::new(dst_mtext)));
 
         // Drive the interactive command exactly as the viewport does:
         // phase 1 source pick, phase 2 destination selection.
@@ -4864,10 +4902,7 @@ mod tests {
         let mut destination = Line::new();
         destination.start = Vector3::new(30.0, 0.0, 0.0);
         destination.end = Vector3::new(40.0, 10.0, 0.0);
-        let destination_h = app
-            .tabs[i]
-            .scene
-            .add_entity(EntityType::Line(destination));
+        let destination_h = app.tabs[i].scene.add_entity(EntityType::Line(destination));
 
         let _ = app.run_command_line("MATCHPROP");
         let _ = app.feed_command(StepInput::EntityPick(source_h, glam::DVec3::ZERO));
@@ -5755,8 +5790,10 @@ mod mtext_loss_tests {
         app.tabs
             .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         app.active_tab = 1;
-        let mut text =
-            document::entities::MText::with_value("rich", document::types::Vector3::new(0., 0., 0.));
+        let mut text = document::entities::MText::with_value(
+            "rich",
+            document::types::Vector3::new(0., 0., 0.),
+        );
         text.column_data.column_type = 1;
         text.column_data.column_count = 2;
         text.rectangle_height = Some(30.);

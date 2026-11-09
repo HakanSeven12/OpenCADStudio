@@ -140,7 +140,10 @@ impl OpenCADStudio {
             state.confirm_close = true;
             return Task::none();
         }
-        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Block Properties Table"));
+        self.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Block Properties Table"),
+        );
         self.tabs[i].scene.document = working;
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;

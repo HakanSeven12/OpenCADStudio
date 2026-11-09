@@ -388,9 +388,8 @@ pub(super) fn polar_constrain_if_near(
     xf: &UcsXform,
 ) -> Option<glam::DVec3> {
     let snapped = polar_constrain(pt, base, step_deg, xf);
-    let to_screen = |w: glam::DVec3| {
-        crate::scene::view::projection::project_screen(view_rot, eye, bounds, w)
-    };
+    let to_screen =
+        |w: glam::DVec3| crate::scene::view::projection::project_screen(view_rot, eye, bounds, w);
     // Behind the eye, screen distance says nothing about how close the
     // constrained point is to the cursor: leave the constraint disengaged.
     let (Some(cursor), Some(candidate)) = (to_screen(pt), to_screen(snapped)) else {

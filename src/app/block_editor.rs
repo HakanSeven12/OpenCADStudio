@@ -186,7 +186,13 @@ impl OpenCADStudio {
             // representations. The structure snapshot carries their records;
             // the entity delta must carry their bodies and markers.
             let prior: FxHashSet<_> = before_doc.block_records.iter().map(|b| b.handle).collect();
-            for record in tab.scene.document.block_records.iter().filter(|b| !prior.contains(&b.handle)) {
+            for record in tab
+                .scene
+                .document
+                .block_records
+                .iter()
+                .filter(|b| !prior.contains(&b.handle))
+            {
                 candidate_handles.extend(record.entity_handles.iter().copied());
                 candidate_handles.insert(record.block_entity_handle);
                 candidate_handles.insert(record.block_end_handle);
@@ -200,7 +206,9 @@ impl OpenCADStudio {
                     let definition = document.dynamic_definition_for_insert(insert.common.handle);
                     let record = document.block_records.get(&insert.block_name);
                     let nested_representation = insert.common.owner_handle == session.br_handle
-                        && record.is_some_and(|record| definition.is_some_and(|def| def != record.handle));
+                        && record.is_some_and(|record| {
+                            definition.is_some_and(|def| def != record.handle)
+                        });
                     if definition == Some(session.br_handle) || nested_representation {
                         candidate_handles.insert(insert.common.handle);
                         if let Some(record) = record {
@@ -321,8 +329,13 @@ impl OpenCADStudio {
             structure,
             parametric_constraints,
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters,
-            label: super::tab_document::HistoryLabel::formatted(format!("Edit block {}", session.block_name), "edit-block", session.block_name.to_owned().into()),
+            label: super::tab_document::HistoryLabel::formatted(
+                format!("Edit block {}", session.block_name),
+                "edit-block",
+                session.block_name.to_owned().into(),
+            ),
         })
     }
 
@@ -369,9 +382,8 @@ impl OpenCADStudio {
 
     pub(super) fn open_bedit_dialog(&mut self, i: usize) {
         if self.block_editor_preferences.locked {
-            self.command_line.push_error(
-                crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref());
             return;
         }
         if self.tabs[i].refedit_session.is_some() {
@@ -442,9 +454,8 @@ impl OpenCADStudio {
                 // `OK` is reachable with an empty field, and silence is not an
                 // answer: say what the field is short of.
                 let state = self.block_edit_picker.as_mut().unwrap();
-                state.error = Some(
-                    crate::t!("The name must be at least one character long.").into_owned(),
-                );
+                state.error =
+                    Some(crate::t!("The name must be at least one character long.").into_owned());
             }
             return Task::none();
         }
@@ -622,7 +633,11 @@ impl OpenCADStudio {
         let mut delta = self
             .block_edit_delta(i, true)
             .expect("a new definition changes the document");
-        delta.label = super::tab_document::HistoryLabel::formatted(format!("Save block as {name}"), "save-block", name.to_owned().into());
+        delta.label = super::tab_document::HistoryLabel::formatted(
+            format!("Save block as {name}"),
+            "save-block",
+            name.to_owned().into(),
+        );
         let mut history = self.tabs[i].block_edit_history.take().unwrap();
         std::mem::swap(&mut self.tabs[i].history, &mut history.main);
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));

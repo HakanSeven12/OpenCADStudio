@@ -273,7 +273,11 @@ fn page_number(token: &str) -> Option<usize> {
     if token.is_empty() || !token.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    Some(token.parse::<u64>().map_or(i32::MAX as u64, |n| n.min(i32::MAX as u64)) as usize)
+    Some(
+        token
+            .parse::<u64>()
+            .map_or(i32::MAX as u64, |n| n.min(i32::MAX as u64)) as usize,
+    )
 }
 
 pub struct PdfImportCommand {
@@ -617,9 +621,9 @@ impl CadCommand for PdfImportCommand {
             Step::Scale => match token.parse::<f64>() {
                 Ok(v) => self.scale(v),
                 Err(_) if token.is_empty() => self.scale(1.0),
-                Err(_) => CmdResult::ReportError(
-                    "Requires numeric distance or second point.".to_string(),
-                ),
+                Err(_) => {
+                    CmdResult::ReportError("Requires numeric distance or second point.".to_string())
+                }
             },
             Step::Rotation => match token.parse::<f64>() {
                 Ok(v) => self.rotation(v.to_radians()),
@@ -940,24 +944,26 @@ fn run_strokes(sp: &SubPath, close: Option<SubClose>) -> Vec<Piece> {
     let mut out = Vec::new();
     let mut points: Vec<[f64; 2]> = Vec::new();
     let mut bulges: Vec<f64> = Vec::new();
-    let flush = |points: &mut Vec<[f64; 2]>,
-                 bulges: &mut Vec<f64>,
-                 out: &mut Vec<Piece>,
-                 closed: bool| {
-        if points.len() == 1 {
-            // Only zero-length segments: a line from the point to itself.
-            out.push(Piece::Run(vec![points[0], points[0]], vec![0.0, 0.0], false));
-        } else if points.len() > 1 {
-            bulges.push(0.0);
-            out.push(Piece::Run(
-                std::mem::take(points),
-                std::mem::take(bulges),
-                closed,
-            ));
-        }
-        points.clear();
-        bulges.clear();
-    };
+    let flush =
+        |points: &mut Vec<[f64; 2]>, bulges: &mut Vec<f64>, out: &mut Vec<Piece>, closed: bool| {
+            if points.len() == 1 {
+                // Only zero-length segments: a line from the point to itself.
+                out.push(Piece::Run(
+                    vec![points[0], points[0]],
+                    vec![0.0, 0.0],
+                    false,
+                ));
+            } else if points.len() > 1 {
+                bulges.push(0.0);
+                out.push(Piece::Run(
+                    std::mem::take(points),
+                    std::mem::take(bulges),
+                    closed,
+                ));
+            }
+            points.clear();
+            bulges.clear();
+        };
     for seg in segments {
         let bulge = match seg {
             Segment::Line(..) => Some(0.0),
@@ -1212,7 +1218,13 @@ fn curve_of(points: &[[f64; 2]], bulges: &[f64], closed: bool, z: f64) -> Option
                 first.radius,
             ))
         } else {
-            arc(first.center, first.radius, points[0], points[n - 1], turn > 0.0)
+            arc(
+                first.center,
+                first.radius,
+                points[0],
+                points[n - 1],
+                turn > 0.0,
+            )
         });
     }
     if bulges.iter().any(|b| *b != 0.0) || segs < CURVE_MIN_SEGMENTS {
@@ -1225,7 +1237,13 @@ fn curve_of(points: &[[f64; 2]], bulges: &[f64], closed: bool, z: f64) -> Option
                 .iter()
                 .all(|p| ((p[0] - c[0]).hypot(p[1] - c[1]) - r).abs() <= ARC_TOLERANCE * r);
             if on {
-                return Some(arc(c, r, points[0], points[n - 1], sweep_sign(points, c) > 0.0));
+                return Some(arc(
+                    c,
+                    r,
+                    points[0],
+                    points[n - 1],
+                    sweep_sign(points, c) > 0.0,
+                ));
             }
         }
     }
@@ -1313,7 +1331,10 @@ fn join_strokes(strokes: Vec<Stroke>, join: bool) -> Vec<Stroke> {
     let cell = |p: [f64; 2]| ((p[0] / 1e-7).floor() as i64, (p[1] / 1e-7).floor() as i64);
     let mut ends: rustc_hash::FxHashMap<(i64, i64), Vec<usize>> = Default::default();
     for (index, stroke) in open.iter().enumerate() {
-        for p in [stroke.points[0], *stroke.points.last().expect("strokes have points")] {
+        for p in [
+            stroke.points[0],
+            *stroke.points.last().expect("strokes have points"),
+        ] {
             ends.entry(cell(p)).or_default().push(index);
         }
     }
@@ -1653,11 +1674,15 @@ pub fn convert(
                 // Arial stands in for a font no installed family answers
                 // to; once a style of its name maps to Arial, its runs are
                 // 0.72 of their size.
-                let arial_style = result.text_styles.iter().chain(&naming.styles).any(
-                    |(name, file)| {
-                        name.eq_ignore_ascii_case(&style) && file.eq_ignore_ascii_case("arial.ttf")
-                    },
-                );
+                let arial_style =
+                    result
+                        .text_styles
+                        .iter()
+                        .chain(&naming.styles)
+                        .any(|(name, file)| {
+                            name.eq_ignore_ascii_case(&style)
+                                && file.eq_ignore_ascii_case("arial.ttf")
+                        });
                 let ratio = match capital_a_height(&text.font) {
                     Some(ratio) => ratio,
                     None if arial_style => 0.72,
@@ -1810,7 +1835,9 @@ pub fn convert(
     }
     // In drawing order (the sort is stable: a subpath's pieces keep theirs).
     curves.sort_by_key(|(order, _)| *order);
-    result.entities.extend(curves.into_iter().map(|(_, entity)| entity));
+    result
+        .entities
+        .extend(curves.into_iter().map(|(_, entity)| entity));
     result.layers = layer_colors;
     layer_colours_by_majority(&mut result);
     for image in &result.images {

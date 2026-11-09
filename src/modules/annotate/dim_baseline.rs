@@ -495,7 +495,11 @@ impl CadCommand for DimBaselineCommand {
     fn prompt(&self) -> String {
         if self.offset_pending {
             let current = self.offset_override.unwrap_or(self.dimdli);
-            return crate::tr!("dim-cmd", "offset-distance", offset = format!("{current:.6}"));
+            return crate::tr!(
+                "dim-cmd",
+                "offset-distance",
+                offset = format!("{current:.6}")
+            );
         }
         if self.in_dim {
             return match &self.base {

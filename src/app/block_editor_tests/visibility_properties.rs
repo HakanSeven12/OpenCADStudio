@@ -32,7 +32,10 @@ fn batch_visibility_properties_isolate_copies_and_reject_stale_states() {
         panic!()
     };
     assert_eq!(copy.block_name, shared);
-    assert_eq!(scene.document.dynamic_definition_for_insert(other), Some(definition));
+    assert_eq!(
+        scene.document.dynamic_definition_for_insert(other),
+        Some(definition)
+    );
     app.apply_visibility_state(first, 1);
     app.finish_pending_history(i);
     app.tabs[i].scene.select_entity(first, true);
@@ -203,7 +206,8 @@ fn block_visibility_reference_description_survives_state_history_and_drawing_rel
             assert!(
                 matches!(&row.value, PropValue::ChoiceWithTooltip { selected, tooltip, .. }
                 if selected == "Alternative" && tooltip == &expected),
-                "{extension}, testing={testing}: {:?}", row.value
+                "{extension}, testing={testing}: {:?}",
+                row.value
             );
         }
         if !testing {
@@ -285,7 +289,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
     let doc = &mut app.tabs[i].scene.document;
 
     let pt = point::create(doc, def, Vector3::new(1., 1., 0.), Vector3::new(2., 2., 0.)).unwrap();
-    actions::create(doc, def, actions::Kind::Move, pt, &[targets[0]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Move,
+        pt,
+        &[targets[0]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let lin = distance::create(
         doc,
@@ -296,7 +308,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
         Vector3::new(5., -2., 0.),
     )
     .unwrap();
-    actions::create(doc, def, actions::Kind::Move, lin, &[targets[0]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Move,
+        lin,
+        &[targets[0]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let pol = distance::create(
         doc,
@@ -307,7 +327,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
         Vector3::new(2., 4., 0.),
     )
     .unwrap();
-    actions::create(doc, def, actions::Kind::Move, pol, &[targets[1]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Move,
+        pol,
+        &[targets[1]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let xy = distance::create(
         doc,
@@ -318,7 +346,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
         Vector3::new(3., 9., 0.),
     )
     .unwrap();
-    actions::create(doc, def, actions::Kind::Move, xy, &[targets[1]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Move,
+        xy,
+        &[targets[1]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let rot = orientation::create(
         doc,
@@ -329,7 +365,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
         Vector3::new(5., 0., 0.),
     )
     .unwrap();
-    actions::create(doc, def, actions::Kind::Rotate, rot, &[targets[0]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Rotate,
+        rot,
+        &[targets[0]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let flp = orientation::create(
         doc,
@@ -340,7 +384,15 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
         Vector3::new(2., 5., 0.),
     )
     .unwrap();
-    actions::create(doc, def, actions::Kind::Flip, flp, &[targets[0]], DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Flip,
+        flp,
+        &[targets[0]],
+        DVec3::ZERO,
+    )
+    .unwrap();
 
     let vis = block_visibility::create(doc, def, Vector3::new(-4., 4., 0.)).unwrap();
     block_visibility::add_state(doc, vis, "Alternate", 0).unwrap();
@@ -455,9 +507,12 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                                 properties::Input::Number(next),
                             );
                             match result {
-                                Ok(Some(_)) => {},
+                                Ok(Some(_)) => {}
                                 Ok(None) => fail(&prop.label, "different value produced no edit"),
-                                Err(err) => { fail(&prop.label, err); break; },
+                                Err(err) => {
+                                    fail(&prop.label, err);
+                                    break;
+                                }
                             }
                         }
                     } else {
@@ -478,7 +533,7 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                             properties::evaluate(&doc, None, key, properties::Input::Choice(next))
                         };
                         match result {
-                            Ok(Some(_)) => {},
+                            Ok(Some(_)) => {}
                             Ok(None) => fail(&prop.label, "different choice produced no edit"),
                             Err(err) => fail(&format!("{} -> {next}", prop.label), err),
                         }
@@ -513,7 +568,10 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                 let _ = app.feed_command(crate::command::StepInput::Point(
                     grip.world + direction * 3.,
                 ));
-                assert!(app.tabs[i].active_cmd.is_none(), "grip input must finish the command");
+                assert!(
+                    app.tabs[i].active_cmd.is_none(),
+                    "grip input must finish the command"
+                );
             }
             if app.tabs[i].scene.document == doc {
                 fail(&format!("grip {node}/{role}"), "grip produced no edit");
@@ -531,4 +589,3 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
     assert!(controls >= 20, "exercised {controls} controls");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
-

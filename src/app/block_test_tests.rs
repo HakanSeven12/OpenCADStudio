@@ -379,16 +379,10 @@ fn visibility_reference() -> (OpenCADStudio, usize, Handle, usize) {
     let (mut app, source, _) = fixture();
     let doc = &mut app.tabs[source].scene.document;
     let owner = doc.block_records.get("SAMPLE").unwrap().handle;
-    let mut frame = Line::from_points(
-        Vector3::new(10.0, 21.0, 0.0),
-        Vector3::new(15.0, 21.0, 0.0),
-    );
+    let mut frame = Line::from_points(Vector3::new(10.0, 21.0, 0.0), Vector3::new(15.0, 21.0, 0.0));
     frame.common.owner_handle = owner;
     let frame = doc.add_entity(EntityType::Line(frame)).unwrap();
-    let mut cat = Line::from_points(
-        Vector3::new(10.0, 22.0, 0.0),
-        Vector3::new(15.0, 22.0, 0.0),
-    );
+    let mut cat = Line::from_points(Vector3::new(10.0, 22.0, 0.0), Vector3::new(15.0, 22.0, 0.0));
     cat.common.owner_handle = owner;
     doc.add_entity(EntityType::Line(cat)).unwrap();
     let parameter = crate::scene::block_visibility::create(doc, owner, Vector3::ZERO).unwrap();
@@ -398,7 +392,11 @@ fn visibility_reference() -> (OpenCADStudio, usize, Handle, usize) {
 
     let _ = app.open_block_test(source);
     let test = app.active_tab;
-    let model = app.tabs[test].scene.document.header.model_space_block_handle;
+    let model = app.tabs[test]
+        .scene
+        .document
+        .header
+        .model_space_block_handle;
     let reference = app.tabs[test]
         .scene
         .document
@@ -450,17 +448,13 @@ fn block_visibility_state_leaves_a_definition_hidden_member_hidden() {
     let (shutter, hidden) = {
         let doc = &mut app.tabs[source].scene.document;
         let owner = doc.block_records.get("SAMPLE").unwrap().handle;
-        let mut shutter = Line::from_points(
-            Vector3::new(10.0, 24.0, 0.0),
-            Vector3::new(15.0, 24.0, 0.0),
-        );
+        let mut shutter =
+            Line::from_points(Vector3::new(10.0, 24.0, 0.0), Vector3::new(15.0, 24.0, 0.0));
         shutter.common.owner_handle = owner;
         shutter.common.invisible = true;
         let shutter = doc.add_entity(EntityType::Line(shutter)).unwrap();
-        let mut frame = Line::from_points(
-            Vector3::new(10.0, 21.0, 0.0),
-            Vector3::new(15.0, 21.0, 0.0),
-        );
+        let mut frame =
+            Line::from_points(Vector3::new(10.0, 21.0, 0.0), Vector3::new(15.0, 21.0, 0.0));
         frame.common.owner_handle = owner;
         let frame = doc.add_entity(EntityType::Line(frame)).unwrap();
         let parameter = block_visibility::create(doc, owner, Vector3::ZERO).unwrap();
@@ -586,8 +580,12 @@ fn block_visibility_state_is_shown_once_as_the_editable_row() {
     app.tabs[test].selected_handle = Some(reference);
     app.refresh_properties();
 
-    let rows: Vec<&crate::scene::model::object::Property> =
-        app.tabs[test].properties.sections.iter().flat_map(|s| &s.props).collect();
+    let rows: Vec<&crate::scene::model::object::Property> = app.tabs[test]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|s| &s.props)
+        .collect();
     let visibility: Vec<&&crate::scene::model::object::Property> = rows
         .iter()
         .filter(|row| row.field == "dyn_visibility")
@@ -675,7 +673,13 @@ fn block_test_lookup_choice_evaluates_temporary_reference_only() {
         .flat_map(|section| &section.props)
         .find(|property| property.field == "dyn_lookup")
         .expect("Test Block should expose the Lookup table choice");
-    let PropValue::BlockChoice { key, selected, options, .. } = &lookup_property.value else {
+    let PropValue::BlockChoice {
+        key,
+        selected,
+        options,
+        ..
+    } = &lookup_property.value
+    else {
         panic!("Lookup table property should be a choice")
     };
     assert_eq!(*selected, 0);
@@ -727,10 +731,7 @@ fn test_window_widgets_apply_visibility_and_lookup_to_the_reference() {
         .unwrap()
         .entity_handles[0];
     let doc = &mut app.tabs[source].scene.document;
-    let mut frame = Line::from_points(
-        Vector3::new(10.0, 21.0, 0.0),
-        Vector3::new(15.0, 21.0, 0.0),
-    );
+    let mut frame = Line::from_points(Vector3::new(10.0, 21.0, 0.0), Vector3::new(15.0, 21.0, 0.0));
     frame.common.owner_handle = definition;
     let frame = doc.add_entity(EntityType::Line(frame)).unwrap();
     let visibility =
@@ -1039,7 +1040,10 @@ fn open_lookup_list(
 ) -> crate::scene::model::object::BlockParameterKey {
     let key = lookup_choice_key(app, tab);
     let _ = app.update(Message::PropBlockPickerToggle { key, quick: false });
-    assert_eq!(app.tabs[tab].properties.open_block_picker, Some((key, false)));
+    assert_eq!(
+        app.tabs[tab].properties.open_block_picker,
+        Some((key, false))
+    );
     key
 }
 
@@ -1048,7 +1052,10 @@ fn dynamic_value_list_stays_open_across_a_rebuild_of_the_same_rows() {
     let (mut app, test) = lookup_choice_tab();
     let key = open_lookup_list(&mut app, test);
     app.refresh_properties();
-    assert_eq!(app.tabs[test].properties.open_block_picker, Some((key, false)));
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker,
+        Some((key, false))
+    );
 }
 
 #[test]
@@ -1064,7 +1071,10 @@ fn dynamic_value_list_closes_when_its_row_leaves_the_panel() {
 #[test]
 fn switching_tabs_closes_the_dynamic_value_list() {
     let (mut app, test) = lookup_choice_tab();
-    assert!(app.tabs.len() > 1, "the Test Block lives beside its drawing");
+    assert!(
+        app.tabs.len() > 1,
+        "the Test Block lives beside its drawing"
+    );
     open_lookup_list(&mut app, test);
     let other = (test + 1) % app.tabs.len();
     let _ = app.update(Message::TabSwitch(other));
@@ -1103,9 +1113,9 @@ fn choosing_a_row_closes_the_list() {
         .iter()
         .flat_map(|section| &section.props)
         .find_map(|property| match &property.value {
-            crate::scene::model::object::PropValue::BlockChoice { selected, options, .. } => {
-                Some(options.get(*selected).cloned())
-            }
+            crate::scene::model::object::PropValue::BlockChoice {
+                selected, options, ..
+            } => Some(options.get(*selected).cloned()),
             _ => None,
         });
     assert_eq!(value.flatten().as_deref(), Some("Large"));
@@ -1142,7 +1152,10 @@ fn a_hidden_quick_properties_copy_does_not_swallow_escape() {
     let (mut app, test) = lookup_choice_tab();
     let key = lookup_choice_key(&app, test);
     let _ = app.update(Message::PropBlockPickerToggle { key, quick: true });
-    assert_eq!(app.tabs[test].properties.open_block_picker, Some((key, true)));
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker,
+        Some((key, true))
+    );
     assert!(!app.quick_properties);
     let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
     assert!(app.tabs[test].scene.selected.is_empty());

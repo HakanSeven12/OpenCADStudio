@@ -21,8 +21,11 @@ impl OpenCADStudio {
     /// selection is next made, as in the reference.
     pub(super) fn group_display_setvar(&mut self, value: Option<&str>) {
         let ask = |app: &mut Self| {
-            app.command_line.push_output(&crate::ui::command_line::value_prompt("GROUPDISPLAYMODE", &group_display_mode()
-            ));
+            app.command_line
+                .push_output(&crate::ui::command_line::value_prompt(
+                    "GROUPDISPLAYMODE",
+                    &group_display_mode(),
+                ));
             app.pending_setvar = Some("GROUPDISPLAYMODE".to_string());
         };
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -63,7 +66,10 @@ impl OpenCADStudio {
         };
         // A larger whole number keeps its low 32 bits, as the reference does
         // (4294967296 → 0, 99999999999 → 1215752191).
-        let wrapped = value.parse::<u128>().ok().map(|v| (v % (1u128 << 32)) as u32);
+        let wrapped = value
+            .parse::<u128>()
+            .ok()
+            .map(|v| (v % (1u128 << 32)) as u32);
         match wrapped.ok_or(()) {
             Ok(mode) => {
                 if mode != match_mode() {
@@ -74,6 +80,37 @@ impl OpenCADStudio {
             Err(_) => {
                 self.command_line
                     .push_rejection(crate::t!("Requires an integer value.").as_ref());
+                ask(self);
+            }
+        }
+    }
+
+    /// `MEASUREMODE [value]`, a profile setting: 1 starts MEASUREGEOM in
+    /// quick measure (its Mode answer). Anything but 0 or 1 is refused and
+    /// asked for again.
+    pub(super) fn measure_mode_setvar(&mut self, value: Option<&str>) {
+        use crate::modules::draw::inquiry::measuregeom::{quick_default, set_quick_default};
+        let ask = |app: &mut Self| {
+            let (name, current) = ("MEASUREMODE", u8::from(quick_default()));
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some("MEASUREMODE".to_string());
+        };
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            ask(self);
+            return;
+        };
+        match value {
+            "0" | "1" => {
+                let quick = value == "1";
+                if quick != quick_default() {
+                    set_quick_default(quick);
+                    self.save_config();
+                }
+            }
+            _ => {
+                self.command_line
+                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                 ask(self);
             }
         }

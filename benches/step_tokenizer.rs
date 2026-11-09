@@ -66,9 +66,21 @@ fn build_step() -> String {
     let mut face_ids = Vec::with_capacity(TRIANGLES);
     for t in 0..TRIANGLES {
         let base = t * 2;
-        let p0 = emit(&mut out, &mut next, format!("CARTESIAN_POINT('',({base}.,0.,0.))"));
-        let p1 = emit(&mut out, &mut next, format!("CARTESIAN_POINT('',({},1.E-1,0.))", base + 1));
-        let p2 = emit(&mut out, &mut next, format!("CARTESIAN_POINT('',({base}.,1.,0.))"));
+        let p0 = emit(
+            &mut out,
+            &mut next,
+            format!("CARTESIAN_POINT('',({base}.,0.,0.))"),
+        );
+        let p1 = emit(
+            &mut out,
+            &mut next,
+            format!("CARTESIAN_POINT('',({},1.E-1,0.))", base + 1),
+        );
+        let p2 = emit(
+            &mut out,
+            &mut next,
+            format!("CARTESIAN_POINT('',({base}.,1.,0.))"),
+        );
         let v0 = emit(&mut out, &mut next, format!("VERTEX_POINT('',#{p0})"));
         let v1 = emit(&mut out, &mut next, format!("VERTEX_POINT('',#{p1})"));
         let v2 = emit(&mut out, &mut next, format!("VERTEX_POINT('',#{p2})"));
@@ -81,20 +93,56 @@ fn build_step() -> String {
         let l01 = emit(&mut out, &mut next, format!("LINE('',#{p0},#{v01})"));
         let l12 = emit(&mut out, &mut next, format!("LINE('',#{p1},#{v12})"));
         let l20 = emit(&mut out, &mut next, format!("LINE('',#{p2},#{v20})"));
-        let e01 = emit(&mut out, &mut next, format!("EDGE_CURVE('',#{v0},#{v1},#{l01},.T.)"));
-        let e12 = emit(&mut out, &mut next, format!("EDGE_CURVE('',#{v1},#{v2},#{l12},.T.)"));
-        let e20 = emit(&mut out, &mut next, format!("EDGE_CURVE('',#{v2},#{v0},#{l20},.T.)"));
-        let o01 = emit(&mut out, &mut next, format!("ORIENTED_EDGE('',*,*,#{e01},.T.)"));
-        let o12 = emit(&mut out, &mut next, format!("ORIENTED_EDGE('',*,*,#{e12},.T.)"));
-        let o20 = emit(&mut out, &mut next, format!("ORIENTED_EDGE('',*,*,#{e20},.T.)"));
+        let e01 = emit(
+            &mut out,
+            &mut next,
+            format!("EDGE_CURVE('',#{v0},#{v1},#{l01},.T.)"),
+        );
+        let e12 = emit(
+            &mut out,
+            &mut next,
+            format!("EDGE_CURVE('',#{v1},#{v2},#{l12},.T.)"),
+        );
+        let e20 = emit(
+            &mut out,
+            &mut next,
+            format!("EDGE_CURVE('',#{v2},#{v0},#{l20},.T.)"),
+        );
+        let o01 = emit(
+            &mut out,
+            &mut next,
+            format!("ORIENTED_EDGE('',*,*,#{e01},.T.)"),
+        );
+        let o12 = emit(
+            &mut out,
+            &mut next,
+            format!("ORIENTED_EDGE('',*,*,#{e12},.T.)"),
+        );
+        let o20 = emit(
+            &mut out,
+            &mut next,
+            format!("ORIENTED_EDGE('',*,*,#{e20},.T.)"),
+        );
         // One loop keyword written in lower case on purpose: the reader
         // must still match it against `EDGE_LOOP`, or this triangle loses
         // its loop (and its three vertices) from the built body.
         let loop_name = if t == 7 { "edge_loop" } else { "EDGE_LOOP" };
-        let loop_ = emit(&mut out, &mut next, format!("{loop_name}('',(#{o01},#{o12},#{o20}))"));
-        let axis = emit(&mut out, &mut next, format!("AXIS2_PLACEMENT_3D('',#{p0},#{z},#{d01})"));
+        let loop_ = emit(
+            &mut out,
+            &mut next,
+            format!("{loop_name}('',(#{o01},#{o12},#{o20}))"),
+        );
+        let axis = emit(
+            &mut out,
+            &mut next,
+            format!("AXIS2_PLACEMENT_3D('',#{p0},#{z},#{d01})"),
+        );
         let plane = emit(&mut out, &mut next, format!("PLANE('',#{axis})"));
-        let bound = emit(&mut out, &mut next, format!("FACE_OUTER_BOUND('',#{loop_},.T.)"));
+        let bound = emit(
+            &mut out,
+            &mut next,
+            format!("FACE_OUTER_BOUND('',#{loop_},.T.)"),
+        );
         face_ids.push(emit(
             &mut out,
             &mut next,
@@ -108,8 +156,16 @@ fn build_step() -> String {
         }
         shell_faces.push_str(&format!("#{face}"));
     }
-    let shell = emit(&mut out, &mut next, format!("CLOSED_SHELL('',({shell_faces}))"));
-    let solid = emit(&mut out, &mut next, format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    let shell = emit(
+        &mut out,
+        &mut next,
+        format!("CLOSED_SHELL('',({shell_faces}))"),
+    );
+    let solid = emit(
+        &mut out,
+        &mut next,
+        format!("MANIFOLD_SOLID_BREP('',#{shell})"),
+    );
 
     // The product: definition, shape and a representation holding the solid.
     let rep = emit(
@@ -117,7 +173,11 @@ fn build_step() -> String {
         &mut next,
         format!("SHAPE_REPRESENTATION('',(#{solid}),$)"),
     );
-    let prod = emit(&mut out, &mut next, "PRODUCT('P','Tessellated','',())".into());
+    let prod = emit(
+        &mut out,
+        &mut next,
+        "PRODUCT('P','Tessellated','',())".into(),
+    );
     let form = emit(
         &mut out,
         &mut next,
@@ -228,7 +288,8 @@ fn main() {
         let started = Instant::now();
         let mut value = 0u64;
         for _ in 0..ITERATIONS {
-            let model = read(black_box(&bytes)).expect("the synthesized STEP tessellation must import");
+            let model =
+                read(black_box(&bytes)).expect("the synthesized STEP tessellation must import");
             value = sink(black_box(&model));
         }
         let per_read = started.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;

@@ -370,7 +370,10 @@ impl OpenCADStudio {
         };
         let common = entity.common();
         let swatch = match common.color {
-            Color::ByLayer => doc.layers.get(&common.layer).and_then(|layer| layer.color.rgb()),
+            Color::ByLayer => doc
+                .layers
+                .get(&common.layer)
+                .and_then(|layer| layer.color.rgb()),
             Color::ByBlock => None,
             color => color.rgb(),
         }
@@ -861,9 +864,8 @@ impl OpenCADStudio {
                         crate::entities::match_props::set_match_mode(mode);
                         self.save_config();
                     }
-                    self.command_line.push_output(
-                        &crate::entities::match_props::active_settings_line(mode),
-                    );
+                    self.command_line
+                        .push_output(&crate::entities::match_props::active_settings_line(mode));
                     self.refresh_active_cmd_preview(i);
                 }
                 self.close_active_modal();

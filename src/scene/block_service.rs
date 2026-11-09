@@ -606,10 +606,7 @@ fn repoint_name_references(scene: &mut Scene, stored: &str, new: &str) {
     }
 }
 
-fn record_of<'a>(
-    document: &'a Document,
-    name: &str,
-) -> Result<&'a BlockRecord, BlockServiceError> {
+fn record_of<'a>(document: &'a Document, name: &str) -> Result<&'a BlockRecord, BlockServiceError> {
     let name = name.trim();
     if name.is_empty() {
         return Err(BlockServiceError::InvalidName(
@@ -788,7 +785,9 @@ mod tests {
         dimension.base.block_name = "SVC_TARGET".to_string();
         scene
             .document
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(dimension))))
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(
+                dimension,
+            ))))
             .unwrap();
 
         // A table's picture block and a block-valued cell, by handle.
@@ -894,7 +893,9 @@ mod tests {
         dimension.base.block_name = "SVC_RENAMED".to_string();
         scene
             .document
-            .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(dimension))))
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(
+                dimension,
+            ))))
             .unwrap();
         let mut style = DimStyle::new("SVC_STYLE");
         style.dimblk = target;

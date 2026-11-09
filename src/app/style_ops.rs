@@ -378,10 +378,12 @@ impl OpenCADStudio {
                     s.handle = handle;
                     s.raw_dxf_codes = None;
                     // The copy gets its own starting table.
-                    let template = s.template().and_then(|template| match doc.objects.get(&template) {
-                        Some(ObjectType::TableTemplate(table)) => Some(table.clone()),
-                        _ => None,
-                    });
+                    let template =
+                        s.template()
+                            .and_then(|template| match doc.objects.get(&template) {
+                                Some(ObjectType::TableTemplate(table)) => Some(table.clone()),
+                                _ => None,
+                            });
                     s.modern_cell_style_handle = document::Handle::NULL;
                     if let Some(mut table) = template {
                         let copy = doc.allocate_handle();
@@ -918,7 +920,9 @@ impl OpenCADStudio {
             .into_iter()
             .filter_map(|(handle, before)| {
                 let after = doc.get_entity_arc(handle);
-                let same = after.as_ref().is_some_and(|after| Arc::ptr_eq(after, &before));
+                let same = after
+                    .as_ref()
+                    .is_some_and(|after| Arc::ptr_eq(after, &before));
                 (!same).then_some((handle, Some(before), after))
             })
             .collect();
@@ -984,13 +988,7 @@ impl OpenCADStudio {
                 .map(|(handle, _, _)| (*handle, crate::scene::ChangeKind::Modified))
                 .collect();
             self.tabs[i].scene.bump_entities(&renamed);
-            self.commit_style_undo(
-                i,
-                stage.baseline,
-                edited,
-                entities,
-                stage.dirty_at_open,
-            );
+            self.commit_style_undo(i, stage.baseline, edited, entities, stage.dirty_at_open);
         } else {
             self.tabs[i].dirty = stage.dirty_at_open;
         }
@@ -1221,9 +1219,7 @@ pub(crate) fn style_in_use(
                     ]
                     .into_iter()
                     .any(|row| row.text_style_name.eq_ignore_ascii_case(name)),
-                    ObjectType::MultiLeaderStyle(style) => {
-                        style.text_style_handle == style_handle
-                    }
+                    ObjectType::MultiLeaderStyle(style) => style.text_style_handle == style_handle,
                     _ => false,
                 })
         }
@@ -1233,9 +1229,7 @@ pub(crate) fn style_in_use(
                     EntityType::Dimension(dimension) => {
                         dimension.base().style_name.eq_ignore_ascii_case(name)
                     }
-                    EntityType::Leader(leader) => {
-                        leader.dimension_style.eq_ignore_ascii_case(name)
-                    }
+                    EntityType::Leader(leader) => leader.dimension_style.eq_ignore_ascii_case(name),
                     EntityType::Tolerance(tolerance) => {
                         tolerance.dimension_style_name.eq_ignore_ascii_case(name)
                     }

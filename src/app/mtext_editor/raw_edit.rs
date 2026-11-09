@@ -221,7 +221,11 @@ impl crate::app::OpenCADStudio {
                 } else {
                     range.end = MTextEditorState::safe_caret(index, (range.end + 1).min(count), 1);
                 }
-                if let Some(whole) = ed.field_host.as_ref().and_then(|h| h.whole_field(index, range.clone())) {
+                if let Some(whole) = ed
+                    .field_host
+                    .as_ref()
+                    .and_then(|h| h.whole_field(index, range.clone()))
+                {
                     range = whole;
                 }
             }

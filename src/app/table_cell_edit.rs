@@ -80,7 +80,10 @@ impl OpenCADStudio {
             return false;
         };
         use document::entities::table::CellStateFlags as F;
-        if cell.state.intersects(F::CONTENT_LOCKED | F::CONTENT_READ_ONLY) {
+        if cell
+            .state
+            .intersects(F::CONTENT_LOCKED | F::CONTENT_READ_ONLY)
+        {
             return false;
         }
         let Some(picture) =
@@ -122,32 +125,65 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn refresh_table_cell_picture(&mut self) {
-        let Some(cell) = self.table_cell_editor.as_ref() else { return; };
+        let Some(cell) = self.table_cell_editor.as_ref() else {
+            return;
+        };
         let i = self.active_tab;
         let scene = &mut self.tabs[i].scene;
-        let Some(entity) = scene.document.get_entity(cell.handle) else { return; };
+        let Some(entity) = scene.document.get_entity(cell.handle) else {
+            return;
+        };
         let preview = if let Some(name) = cell.picture.block_name.as_deref() {
             let excluded = cell.picture.members.iter().copied().collect();
             let cache = crate::scene::cache::block_cache::BlockCache::build_for_block_excluding(
-                &scene.document, name, 1.0, None, true, scene.bg_color, None,
-                &Default::default(), &excluded,
+                &scene.document,
+                name,
+                1.0,
+                None,
+                true,
+                scene.bg_color,
+                None,
+                &Default::default(),
+                &excluded,
             );
-            crate::scene::tessellate_entity(&scene.document, &Default::default(), None,
-                scene.bg_color, 1.0, None, entity, Some(&cache), None, None, None, &Default::default())
+            crate::scene::tessellate_entity(
+                &scene.document,
+                &Default::default(),
+                None,
+                scene.bg_color,
+                1.0,
+                None,
+                entity,
+                Some(&cache),
+                None,
+                None,
+                None,
+                &Default::default(),
+            )
         } else if let EntityType::Table(table) = entity {
             let mut table = (**table).clone();
             if let Some(cell) = table.cell_mut(cell.row, cell.column) {
                 cell.contents.clear();
             }
-            crate::entities::table::tessellate_table(&table, &scene.document, false,
-                [0.92, 0.92, 0.92, 1.0], 1.0, 1.0)
-        } else { Vec::new() };
+            crate::entities::table::tessellate_table(
+                &table,
+                &scene.document,
+                false,
+                [0.92, 0.92, 0.92, 1.0],
+                1.0,
+                1.0,
+            )
+        } else {
+            Vec::new()
+        };
         scene.set_command_preview_hidden(&[cell.handle]);
         scene.set_preview_wires(preview);
     }
 
     pub(in crate::app) fn close_table_cell_editor(&mut self) {
-        let Some(cell) = self.table_cell_editor.take() else { return; };
+        let Some(cell) = self.table_cell_editor.take() else {
+            return;
+        };
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == cell.tab_id) {
             tab.scene.set_command_preview_hidden(&[]);
             tab.scene.set_preview_wires(Vec::new());
@@ -182,7 +218,11 @@ impl OpenCADStudio {
         if !self.table_cell_entry_typed
             && fields.is_none()
             && !crate::entities::table::typed_text_fits(
-                &self.tabs[i].scene.document, table, row, column, &value,
+                &self.tabs[i].scene.document,
+                table,
+                row,
+                column,
+                &value,
             )
         {
             self.ask_table_editor_value_type(handle, row, column, value);
@@ -192,7 +232,8 @@ impl OpenCADStudio {
             handle, table, row, column,
         );
         if std::mem::take(&mut self.table_cell_entry_typed) {
-            let (data_type, unit_type, picture) = crate::entities::table::entered_value_type(&value);
+            let (data_type, unit_type, picture) =
+                crate::entities::table::entered_value_type(&value);
             command = command.with_value_type(data_type, unit_type, &picture);
         }
         let Some(crate::command::CmdResult::ReplaceMany(mut replacements, _)) =
@@ -212,11 +253,21 @@ impl OpenCADStudio {
             if let Some(target) = self.tabs[i].scene.document.get_entity_mut(handle) {
                 *target = entity;
             }
-            fields.save_table_cell(&mut self.tabs[i].scene.document, handle, row, column, &value);
-            if let Some(EntityType::Table(table)) = self.tabs[i].scene.document.get_entity_mut(handle) {
+            fields.save_table_cell(
+                &mut self.tabs[i].scene.document,
+                handle,
+                row,
+                column,
+                &value,
+            );
+            if let Some(EntityType::Table(table)) =
+                self.tabs[i].scene.document.get_entity_mut(handle)
+            {
                 table.block_record_handle = None;
             }
-            self.tabs[i].scene.bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+            self.tabs[i]
+                .scene
+                .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         } else {
             self.tabs[i].scene.update_entity(entity);
         }
@@ -253,8 +304,16 @@ impl OpenCADStudio {
                 .map(|n| (n / columns, n % columns))
         } else {
             Some((
-                if dr > 0 { span.2 + 1 } else { row.saturating_add_signed(dr) },
-                if dc > 0 { span.3 + 1 } else { column.saturating_add_signed(dc) },
+                if dr > 0 {
+                    span.2 + 1
+                } else {
+                    row.saturating_add_signed(dr)
+                },
+                if dc > 0 {
+                    span.3 + 1
+                } else {
+                    column.saturating_add_signed(dc)
+                },
             ))
         };
         // Linear navigation skips merged followers and content-locked cells.
@@ -264,7 +323,9 @@ impl OpenCADStudio {
                 use document::entities::table::CellStateFlags as F;
                 if (owner.0, owner.1) == (r, c)
                     && table.cell(r, c).is_some_and(|cell| {
-                        !cell.state.intersects(F::CONTENT_LOCKED | F::CONTENT_READ_ONLY)
+                        !cell
+                            .state
+                            .intersects(F::CONTENT_LOCKED | F::CONTENT_READ_ONLY)
                     })
                 {
                     break;
@@ -286,7 +347,9 @@ impl OpenCADStudio {
             extended.rows.push(added);
             extended.block_record_handle = None;
             self.push_undo_snapshot(i, "TABLE INSERT ROW");
-            self.tabs[i].scene.update_entity(EntityType::Table(Box::new(extended)));
+            self.tabs[i]
+                .scene
+                .update_entity(EntityType::Table(Box::new(extended)));
             self.finish_pending_history(i);
             self.tabs[i].dirty = true;
             self.open_table_cell_editor(handle, rows, 0);
@@ -306,12 +369,23 @@ impl OpenCADStudio {
             return None;
         }
         let size = tab.scene.selection.borrow().view.vp_size;
-        let (camera, bounds) = tab.scene.viewport_edit_frame(size).unwrap_or_else(||
-            (tab.scene.camera.borrow().clone(), tab.scene.active_model_tile_bounds(size.0, size.1)));
-        let project = |p| camera.project(p, bounds).map(|p| iced::Point::new(p.x + bounds.x, p.y + bounds.y));
+        let (camera, bounds) = tab.scene.viewport_edit_frame(size).unwrap_or_else(|| {
+            (
+                tab.scene.camera.borrow().clone(),
+                tab.scene.active_model_tile_bounds(size.0, size.1),
+            )
+        });
+        let project = |p| {
+            camera
+                .project(p, bounds)
+                .map(|p| iced::Point::new(p.x + bounds.x, p.y + bounds.y))
+        };
         let world = |x, y| {
             let p = cell.picture.text.insertion_point;
-            let p = cell.picture.transform.apply(document::types::Vector3::new(p.x + x, p.y + y, p.z));
+            let p =
+                cell.picture
+                    .transform
+                    .apply(document::types::Vector3::new(p.x + x, p.y + y, p.z));
             DVec3::new(p.x, p.y, p.z)
         };
         let origin = project(world(0.0, 0.0))?;
@@ -321,14 +395,16 @@ impl OpenCADStudio {
             return None;
         }
         let corners = cell.picture.corners.map(project);
-        Some(CellCanvas { origin, x, y, height: ed.height_value() as f32,
-            corners: [corners[0]?, corners[1]?, corners[2]?, corners[3]?] })
+        Some(CellCanvas {
+            origin,
+            x,
+            y,
+            height: ed.height_value() as f32,
+            corners: [corners[0]?, corners[1]?, corners[2]?, corners[3]?],
+        })
     }
 
-    pub(in crate::app) fn table_editor_click(
-        &mut self,
-        point: iced::Point,
-    ) -> Task<Message> {
+    pub(in crate::app) fn table_editor_click(&mut self, point: iced::Point) -> Task<Message> {
         let Some(cell) = self.table_cell_editor.as_ref() else {
             return Task::none();
         };
@@ -336,14 +412,22 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let scene = &self.tabs[i].scene;
         let size = scene.selection.borrow().view.vp_size;
-        let (camera, bounds) = scene.viewport_edit_frame(size).unwrap_or_else(||
-            (scene.camera.borrow().clone(), scene.active_model_tile_bounds(size.0, size.1)));
+        let (camera, bounds) = scene.viewport_edit_frame(size).unwrap_or_else(|| {
+            (
+                scene.camera.borrow().clone(),
+                scene.active_model_tile_bounds(size.0, size.1),
+            )
+        });
         let world = camera.pick_on_target_plane(point, bounds);
         let next = match scene.document.get_entity(handle) {
             Some(EntityType::Table(table)) => {
-                let style = table.table_style_handle.and_then(|h| match scene.document.objects.get(&h) {
-                    Some(document::objects::ObjectType::TableStyle(s)) => Some(s), _ => None,
-                });
+                let style =
+                    table
+                        .table_style_handle
+                        .and_then(|h| match scene.document.objects.get(&h) {
+                            Some(document::objects::ObjectType::TableStyle(s)) => Some(s),
+                            _ => None,
+                        });
                 crate::modules::annotate::table_cmd::table_cell_at(table, style, world)
             }
             _ => None,

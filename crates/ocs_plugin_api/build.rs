@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+#[allow(dead_code)]
+#[path = "src/manifest.rs"]
+mod manifest;
+
 use cargo_lock::Lockfile;
 use serde::de::DeserializeOwned;
 use serde_reflection::{
@@ -51,6 +55,7 @@ fn main() {
     );
     println!("cargo:rerun-if-changed=entity_coverage_policy.json");
     println!("cargo:rerun-if-changed=src/entity_coverage_types.rs");
+    println!("cargo:rerun-if-changed=src/manifest.rs");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -68,7 +73,10 @@ fn generate_type_registry(out_dir: &Path) {
     let types: Vec<(&str, TraceFn)> = vec![
         ("EntityType", trace::<document::EntityType>),
         ("ObjectType", trace::<document::objects::ObjectType>),
-        ("HeaderVariables", trace::<document::document::HeaderVariables>),
+        (
+            "HeaderVariables",
+            trace::<document::document::HeaderVariables>,
+        ),
         ("SummaryInfo", trace::<document::document::SummaryInfo>),
         ("LineType", trace::<document::LineType>),
         ("TextStyle", trace::<document::TextStyle>),
@@ -85,7 +93,10 @@ fn generate_type_registry(out_dir: &Path) {
             trace::<document::objects::BlockVisibilityParameter>,
         ),
         ("FieldDef", trace::<document::document::FieldDef>),
-        ("DgnLsDefinition", trace::<document::objects::DgnLsDefinition>),
+        (
+            "DgnLsDefinition",
+            trace::<document::objects::DgnLsDefinition>,
+        ),
         ("DgnLsComponent", trace::<document::objects::DgnLsComponent>),
         (
             "NotificationCollection",
@@ -176,7 +187,10 @@ fn generate_type_registry(out_dir: &Path) {
             "AssocViewObjectActionParamKind",
             trace_simple::<document::objects::AssocViewObjectActionParamKind>,
         ),
-        ("AcisVersion", trace_simple::<document::entities::AcisVersion>),
+        (
+            "AcisVersion",
+            trace_simple::<document::entities::AcisVersion>,
+        ),
         (
             "AssociativeData",
             trace_simple::<document::objects::AssociativeData>,
@@ -361,7 +375,10 @@ fn generate_type_registry(out_dir: &Path) {
             "PlotPaperUnits",
             trace_simple::<document::objects::PlotPaperUnits>,
         ),
-        ("PlotRotation", trace_simple::<document::objects::PlotRotation>),
+        (
+            "PlotRotation",
+            trace_simple::<document::objects::PlotRotation>,
+        ),
         ("PlotType", trace_simple::<document::objects::PlotType>),
         (
             "PreviewFormat",
@@ -396,8 +413,14 @@ fn generate_type_registry(out_dir: &Path) {
             "SolidHistoryOperation",
             trace_simple::<document::objects::SolidHistoryOperation>,
         ),
-        ("SurfaceData", trace_simple::<document::entities::SurfaceData>),
-        ("SurfaceKind", trace_simple::<document::entities::SurfaceKind>),
+        (
+            "SurfaceData",
+            trace_simple::<document::entities::SurfaceData>,
+        ),
+        (
+            "SurfaceKind",
+            trace_simple::<document::entities::SurfaceKind>,
+        ),
         (
             "SurfaceSmoothType",
             trace_simple::<document::entities::SurfaceSmoothType>,
@@ -479,9 +502,18 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<document::entities::WipeoutClipType>,
         ),
         ("WireType", trace_simple::<document::entities::WireType>),
-        ("ArchKind", trace_simple::<document::classes::arch::ArchKind>),
-        ("NumberRole", trace_simple::<document::classes::arch::NumberRole>),
-        ("PreviewRecord", trace_simple::<document::classes::arch::PreviewRecord>),
+        (
+            "ArchKind",
+            trace_simple::<document::classes::arch::ArchKind>,
+        ),
+        (
+            "NumberRole",
+            trace_simple::<document::classes::arch::NumberRole>,
+        ),
+        (
+            "PreviewRecord",
+            trace_simple::<document::classes::arch::PreviewRecord>,
+        ),
     ];
     for (name, trace) in enums {
         trace(&mut tracer);
@@ -909,7 +941,10 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
         samples,
         &document::entities::SmoothSurfaceType::QuadraticBSpline,
     );
-    let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::CubicBSpline);
+    let _ = tracer.trace_value(
+        samples,
+        &document::entities::SmoothSurfaceType::CubicBSpline,
+    );
     let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::Bezier);
 
     let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::TopLeft);
@@ -934,8 +969,14 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
         samples,
         &document::xdata::XDataValue::ControlString(String::new()),
     );
-    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::LayerName(String::new()));
-    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::BinaryData(Vec::new()));
+    let _ = tracer.trace_value(
+        samples,
+        &document::xdata::XDataValue::LayerName(String::new()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &document::xdata::XDataValue::BinaryData(Vec::new()),
+    );
     let _ = tracer.trace_value(
         samples,
         &document::xdata::XDataValue::Handle(document::Handle::default()),
@@ -985,8 +1026,14 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
 
     // Proxy reference kinds pulled in by XRecord.object_references
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::Undefined);
-    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftOwnership);
-    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardOwnership);
+    let _ = tracer.trace_value(
+        samples,
+        &document::objects::ProxyReferenceKind::SoftOwnership,
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &document::objects::ProxyReferenceKind::HardOwnership,
+    );
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftPointer);
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardPointer);
 
@@ -1268,11 +1315,11 @@ fn generate_version_info(out_dir: &Path) {
     let info = serde_json::json!({
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
-        "api_version": 15,
+        "api_version": manifest::API_VERSION,
         "acadrust_version": document.version.to_string(),
         "acadrust_source": document.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,
-        "api_version_min_supported": 3,
+        "api_version_min_supported": manifest::API_VERSION_MIN_SUPPORTED,
         "build_timestamp": build_timestamp,
     });
     fs::write(out_dir.join("version_info.json"), info.to_string()).unwrap();

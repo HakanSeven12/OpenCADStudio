@@ -262,7 +262,9 @@ fn flatten_vector(vector: document::types::Vector3) -> Option<document::types::V
     use kernel::space::Plane;
 
     let vector = Plane::XY.vector_at(Plane::XY.project_vector([vector.x, vector.y, vector.z])?);
-    Some(document::types::Vector3::new(vector[0], vector[1], vector[2]))
+    Some(document::types::Vector3::new(
+        vector[0], vector[1], vector[2],
+    ))
 }
 
 fn positive_z_normal(normal: document::types::Vector3) -> bool {
@@ -341,7 +343,9 @@ mod flatten_tests {
     fn flattens_2d_polyline_vertices_and_elevation() {
         let mut pl = document::entities::Polyline2D::new();
         pl.vertices
-            .push(document::entities::Vertex2D::new(Vector3::new(3.0, 4.0, 9.0)));
+            .push(document::entities::Vertex2D::new(Vector3::new(
+                3.0, 4.0, 9.0,
+            )));
         pl.elevation = 9.0;
 
         let entity = EntityType::Polyline2D(pl);

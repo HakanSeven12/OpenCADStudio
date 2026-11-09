@@ -1322,7 +1322,17 @@ impl BlockWireGpu {
         target: BlockWireTarget<'_>,
         cache: Option<&mut BlockGeometryCache>,
     ) -> Vec<Self> {
-        Self::from_wires_impl(device, queue, wires, depth_map, color_override, target, cache, false).0
+        Self::from_wires_impl(
+            device,
+            queue,
+            wires,
+            depth_map,
+            color_override,
+            target,
+            cache,
+            false,
+        )
+        .0
     }
 
     /// `from_wires`, also reporting where every placement landed so a later
@@ -1378,7 +1388,12 @@ impl BlockWireGpu {
         // Definitions are resolved in order (the cache is mutable), then their
         // placements, which are independent of one another, are built across
         // the cores before being packed in that same order.
-        let mut prepared: Vec<(bool, Vec<BlockRef<'_>>, crate::scene::model::instance_model::RenderInstance, _)> = Vec::new();
+        let mut prepared: Vec<(
+            bool,
+            Vec<BlockRef<'_>>,
+            crate::scene::model::instance_model::RenderInstance,
+            _,
+        )> = Vec::new();
         for (mesh_edge, group) in groups {
             // A copy reached through a stub carries the prototype's
             // geometry at the prototype's placement, which is what `base`
@@ -1461,10 +1476,13 @@ impl BlockWireGpu {
                 continue;
             };
             let group_index = shapes.len() as u32;
-            shapes.push(group.first().map_or_else(Vec::new, |first| relative_points(first.wire).0));
+            shapes.push(
+                group
+                    .first()
+                    .map_or_else(Vec::new, |first| relative_points(first.wire).0),
+            );
             for (position, member) in group.iter().enumerate() {
-                let Some(handle) =
-                    crate::scene::Scene::handle_from_wire_name(&member.named().name)
+                let Some(handle) = crate::scene::Scene::handle_from_wire_name(&member.named().name)
                 else {
                     tracked = None;
                     break;
@@ -1783,7 +1801,9 @@ fn block_key(block: &BlockRef<'_>, color_override: Option<[f32; 4]>) -> Option<(
 /// points that is the relative one, so far from the origin a turned or scaled
 /// copy still differs from its old shape; without, the absolute one.
 pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
-    let translation = wire.render_instance.map_or([0.0; 3], |instance| instance.translation);
+    let translation = wire
+        .render_instance
+        .map_or([0.0; 3], |instance| instance.translation);
     let split = wire.points_low.len() == wire.points.len();
     let mut magnitude = 0.0f32;
     let points = wire
@@ -1796,7 +1816,11 @@ pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
             for axis in 0..3 {
                 let absolute = point[axis] as f64 + low[axis] as f64;
                 relative[axis] = (absolute - translation[axis]) as f32;
-                let rounded = if split { relative[axis] } else { absolute as f32 };
+                let rounded = if split {
+                    relative[axis]
+                } else {
+                    absolute as f32
+                };
                 magnitude = magnitude.max(rounded.abs());
             }
             relative
@@ -2386,7 +2410,13 @@ mod grouping_tests {
     #[test]
     fn sorted_grouping_matches_the_sequential_walk() {
         let mut state = 7;
-        for &(count, keys) in &[(0usize, 1u64), (1, 1), (50, 3), (5_000, 40), (40_000, 9_000)] {
+        for &(count, keys) in &[
+            (0usize, 1u64),
+            (1, 1),
+            (50, 3),
+            (5_000, 40),
+            (40_000, 9_000),
+        ] {
             let items: Vec<((u64, bool), u32)> = (0..count)
                 .map(|index| {
                     let key = (next(&mut state) % keys, next(&mut state) % 2 == 0);

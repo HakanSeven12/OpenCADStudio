@@ -143,7 +143,9 @@ fn far_from_origin_pattern_hatch_still_fills() {
     // the perpendicular index is |k| ≈ 4000·sin45°/0.3 ≈ 9400, well past the
     // 4096 clamp on both ends; the old absolute-index clamp inverts the range
     // (k_lo > k_hi) there and emits nothing.
-    scene.add_entity(EntityType::Hatch(Box::new(ansi31_stored_at(0.3, 1.0, 4000.0, 0.0))));
+    scene.add_entity(EntityType::Hatch(Box::new(ansi31_stored_at(
+        0.3, 1.0, 4000.0, 0.0,
+    ))));
     scene.populate_hatches_from_document();
 
     let hatches = scene.paper_plot_hatches();

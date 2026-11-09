@@ -560,12 +560,26 @@ fn parse_justify(s: &str) -> Option<(AHA, AVA)> {
     })
 }
 
+/// The text and frame of a single-line attribute, a definition (its tag)
+/// or a value, as its justification is worked out from.
+struct AttrRun<'a> {
+    text: &'a str,
+    text_style: &'a str,
+    height: f64,
+    width_factor: f64,
+    oblique_angle: f64,
+    rotation: f64,
+    horizontal_alignment: AHA,
+    vertical_alignment: AVA,
+}
+
 /// Offset of the justification anchor from the baseline start, in the
-/// text's own frame (the shown tag measured with its style's font).
-fn justify_offset(a: &AttributeDefinition) -> Option<(f64, f64)> {
+/// text's own frame (the shown text measured with its style's font).
+fn justify_offset(a: &AttrRun<'_>) -> Option<(f64, f64)> {
+    let font = crate::entities::common::style_font(a.text_style);
     let b = text_local_bounds(
-        &crate::entities::common::style_font(&a.text_style),
-        &a.tag,
+        &font,
+        a.text,
         a.height as f32,
         a.width_factor as f32,
         a.oblique_angle as f32,
@@ -580,16 +594,42 @@ fn justify_offset(a: &AttributeDefinition) -> Option<(f64, f64)> {
             (b.ink_min[1] + b.ink_max[1]) as f64 * 0.5
         }
         AVA::Baseline => 0.0,
-        AVA::Bottom => {
-            -a.height
-                * crate::entities::text_support::descent_ratio(
-                    &crate::entities::common::style_font(&a.text_style),
-                ) as f64
-        }
+        AVA::Bottom => -a.height * crate::entities::text_support::descent_ratio(&font) as f64,
         AVA::Middle => a.height * 0.5,
         AVA::Top => a.height,
     };
     Some((ax, ay))
+}
+
+/// The baseline start a justified attribute stores as its insertion point:
+/// the alignment point minus the justification offset.
+fn text_start(a: &AttrRun<'_>, alignment_point: Vector3) -> Vector3 {
+    let Some((x, y)) = justify_offset(a) else {
+        return alignment_point;
+    };
+    let (sin, cos) = a.rotation.sin_cos();
+    let (dx, dy) = (x * cos - y * sin, x * sin + y * cos);
+    let p = alignment_point;
+    Vector3::new(p.x - dx, p.y - dy, p.z)
+}
+
+/// The baseline start a justified definition stores as its insertion point
+/// (the alignment point minus the justification offset).
+pub fn definition_text_start(a: &AttributeDefinition) -> Vector3 {
+    text_start(&definition_run(a), a.alignment_point)
+}
+
+fn definition_run(a: &AttributeDefinition) -> AttrRun<'_> {
+    AttrRun {
+        text: &a.tag,
+        text_style: &a.text_style,
+        height: a.height,
+        width_factor: a.width_factor,
+        oblique_angle: a.oblique_angle,
+        rotation: a.rotation,
+        horizontal_alignment: a.horizontal_alignment,
+        vertical_alignment: a.vertical_alignment,
+    }
 }
 
 fn rotate(a: &AttributeDefinition, (x, y): (f64, f64)) -> (f64, f64) {
@@ -597,15 +637,28 @@ fn rotate(a: &AttributeDefinition, (x, y): (f64, f64)) -> (f64, f64) {
     (x * cos - y * sin, x * sin + y * cos)
 }
 
-/// The baseline start a justified definition stores as its insertion point
-/// (the alignment point minus the justification offset).
-pub fn definition_text_start(a: &AttributeDefinition) -> Vector3 {
-    let Some(offset) = justify_offset(a) else {
-        return a.alignment_point;
+/// [`definition_text_start`] for an attribute, measured on its value.
+pub fn attribute_text_start(a: &AttributeEntity) -> Vector3 {
+    let run = AttrRun {
+        text: &a.value,
+        text_style: &a.text_style,
+        height: a.height,
+        width_factor: a.width_factor,
+        oblique_angle: a.oblique_angle,
+        rotation: a.rotation,
+        horizontal_alignment: a.horizontal_alignment,
+        vertical_alignment: a.vertical_alignment,
     };
-    let (dx, dy) = rotate(a, offset);
-    let p = a.alignment_point;
-    Vector3::new(p.x - dx, p.y - dy, p.z)
+    text_start(&run, a.alignment_point)
+}
+
+/// Whether a single-line attribute's insertion point is derived from its
+/// alignment point: justified, but not Left-baseline (no alignment point)
+/// and not Align/Fit (both points are given).
+pub fn insertion_is_derived(h: AHA, v: AVA, multiline: bool) -> bool {
+    !multiline
+        && !matches!(h, AHA::Aligned | AHA::Fit)
+        && !(matches!(h, AHA::Left) && matches!(v, AVA::Baseline))
 }
 
 fn yes_no(flag: bool) -> PropValue {
@@ -885,7 +938,8 @@ impl PropertyEditable for AttributeDefinition {
                 // The text stays where it is: the baseline start is kept and
                 // the alignment point moves to the new anchor.
                 if !is_two_point(self) {
-                    let (dx, dy) = justify_offset(self).map_or((0.0, 0.0), |o| rotate(self, o));
+                    let (dx, dy) = justify_offset(&definition_run(self))
+                        .map_or((0.0, 0.0), |o| rotate(self, o));
                     let s = self.insertion_point;
                     self.alignment_point = Vector3::new(s.x + dx, s.y + dy, s.z);
                     return;
@@ -894,7 +948,8 @@ impl PropertyEditable for AttributeDefinition {
                     .hypot(self.alignment_point.y - self.insertion_point.y);
                 if !was_two_point || span < 1.0e-9 {
                     // A baseline as long as the tag.
-                    let length = justify_offset(self).map_or(self.height, |(advance, _)| advance);
+                    let length = justify_offset(&definition_run(self))
+                        .map_or(self.height, |(advance, _)| advance);
                     let (sin, cos) = self.rotation.sin_cos();
                     self.alignment_point = Vector3::new(
                         self.insertion_point.x + cos * length,

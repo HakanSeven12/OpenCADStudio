@@ -381,9 +381,7 @@ impl Scene {
         };
         update_carrier(line, &association);
         // The mark now points at `source_handle`; drop the indexed edge.
-        self.associative_centermark_source_cache
-            .borrow_mut()
-            .take();
+        self.associative_centermark_source_cache.borrow_mut().take();
         self.bump_entities(&[(target, ChangeKind::Modified)]);
         true
     }
@@ -396,11 +394,7 @@ impl Scene {
         &self,
         changed: &rustc_hash::FxHashSet<Handle>,
     ) -> Vec<Handle> {
-        if self
-            .associative_centermark_source_cache
-            .borrow()
-            .is_none()
-        {
+        if self.associative_centermark_source_cache.borrow().is_none() {
             let mut index: HashMap<Handle, Vec<Handle>> = HashMap::default();
             for entity in self.document.entities() {
                 let EntityType::Line(line) = entity else {
@@ -550,9 +544,7 @@ impl Scene {
             // The association flags just changed. Drop the index; the bump
             // below re-indexes from the new xdata (an all-disassociated bump
             // rebuilds an empty index and refreshes nothing).
-            self.associative_centermark_source_cache
-                .borrow_mut()
-                .take();
+            self.associative_centermark_source_cache.borrow_mut().take();
             let changes: Vec<_> = candidates
                 .iter()
                 .map(|(handle, _)| (*handle, ChangeKind::Modified))
@@ -610,10 +602,8 @@ mod tests {
             show_extensions: false,
             associated: true,
         };
-        let mut line = Line::from_points(
-            Vector3::new(9.5, 10.0, 0.0),
-            Vector3::new(10.5, 10.0, 0.0),
-        );
+        let mut line =
+            Line::from_points(Vector3::new(9.5, 10.0, 0.0), Vector3::new(10.5, 10.0, 0.0));
         association.write(&mut line.common.extended_data);
         EntityType::Line(line)
     }
@@ -622,7 +612,10 @@ mod tests {
         let Some(EntityType::Line(line)) = scene.document.get_entity(handle) else {
             panic!("carrier is not a line");
         };
-        assert!((line.start.y - line.end.y).abs() < 1e-9, "carrier not horizontal");
+        assert!(
+            (line.start.y - line.end.y).abs() < 1e-9,
+            "carrier not horizontal"
+        );
         line.start.y
     }
 

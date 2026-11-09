@@ -887,7 +887,10 @@ pub struct UserSettings {
     /// QUADWIDTH: columns the expanded quad lays out (2..=12, default 6).
     /// The reader is the tolerant one above: a hand-written out-of-range
     /// number loads clamped instead of failing the whole config parse.
-    #[serde(default = "default_quad_width", deserialize_with = "deserialize_quad_width")]
+    #[serde(
+        default = "default_quad_width",
+        deserialize_with = "deserialize_quad_width"
+    )]
     pub quad_width: u8,
     /// QUADCOMMANDLAUNCH: a right-click over an entity without entering the
     /// quad launches the entity's default command directly.
@@ -896,7 +899,10 @@ pub struct UserSettings {
     /// appears, in milliseconds (0..=2000; 0 = immediately). The reader is
     /// the tolerant one above: a negative or oversized hand-written number
     /// loads clamped instead of failing the whole config parse.
-    #[serde(default = "default_quad_hover_delay_ms", deserialize_with = "deserialize_quad_hover_delay_ms")]
+    #[serde(
+        default = "default_quad_hover_delay_ms",
+        deserialize_with = "deserialize_quad_hover_delay_ms"
+    )]
     pub quad_hover_delay_ms: u64,
     /// GRIPOBJLIMIT: past this many selected objects, no grips are drawn at
     /// all. 0 means no limit. The drawing header carries no slot for it.
@@ -1515,7 +1521,7 @@ impl Default for UserSettings {
             offset_gap_type: 0,
             trim_extend_quick: true,
             match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,
-            measuregeom_quick: true,
+            measuregeom_quick: false,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,
             revcloud_grips: true,
@@ -1840,8 +1846,7 @@ mod tests {
 
         // Absent keys keep the in-code defaults (struct-level serde
         // default untouched).
-        let minimal: UserSettings =
-            serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        let minimal: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
         assert_eq!(minimal.quad_width, 6);
         assert_eq!(minimal.quad_hover_delay_ms, 300);
     }

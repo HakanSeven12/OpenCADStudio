@@ -5,8 +5,8 @@ use iced::{Element, Fill, Theme};
 use super::collapse::{Level, Panel};
 use super::panel_frame::PanelFrame;
 use super::widgets::{
-    LARGE_H, LARGE_ICON, LARGE_W, PANEL_TITLE_H, PANEL_TITLE_SIZE, ROW_H, SMALL_ICON, SMALL_W,
-    TOOL_BAR_H, tool_btn_style,
+    tool_btn_style, LARGE_H, LARGE_ICON, LARGE_W, PANEL_TITLE_H, PANEL_TITLE_SIZE, ROW_H,
+    SMALL_ICON, SMALL_W, TOOL_BAR_H,
 };
 use crate::app::Message;
 use crate::modules::IconKind;

@@ -83,7 +83,10 @@ fn fixture() -> (Scene, Handle) {
             .clone()
     };
     // `add_layout` also gives the sheet its own viewport entity.
-    assert!(content.len() > VIEWPORTS, "every content viewport is registered");
+    assert!(
+        content.len() > VIEWPORTS,
+        "every content viewport is registered"
+    );
 
     // Model space: the many entities, plus one view-representation INSERT per
     // viewport, each bound to a different viewport than the ones it hides in.
@@ -169,13 +172,19 @@ fn main() {
         }
         let per_frame = started.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
         best = best.min(per_frame);
-        println!("paper_viewport_hidden_handles: run {run} {ITERATIONS} frames: {per_frame:.3} ms/frame");
+        println!(
+            "paper_viewport_hidden_handles: run {run} {ITERATIONS} frames: {per_frame:.3} ms/frame"
+        );
     }
 
     // The sheet still resolves its four content viewports, and each still
     // owns the empty VP-frozen list the fixture gave it.
     let listed = scene.viewport_list();
-    assert_eq!(listed.len(), VIEWPORTS, "the sheet keeps its content viewports");
+    assert_eq!(
+        listed.len(),
+        VIEWPORTS,
+        "the sheet keeps its content viewports"
+    );
     assert!(listed.iter().all(|vp| vp.frozen.is_empty()));
     assert!(listed.iter().any(|vp| vp.handle == first));
     assert_eq!(

@@ -439,7 +439,11 @@ mod tests {
             .with_control(DialogControl::Choice {
                 id: "material".to_string(),
                 label: "Material:".to_string(),
-                options: vec!["Concrete".to_string(), "Steel".to_string(), "Timber".to_string()],
+                options: vec![
+                    "Concrete".to_string(),
+                    "Steel".to_string(),
+                    "Timber".to_string(),
+                ],
                 default_index: 0,
             })
             .with_control(DialogControl::Checkbox {
@@ -482,7 +486,10 @@ mod tests {
         // API v15: the quad wire shape (owned strings, OwnedIconKind icon)
         // rides the same serializable-data discipline as PanelDef above.
         let panel = QuadPanelDef::new("align_tools", "Align")
-            .with_applies_to(vec!["LWPOLYLINE".to_string(), "PLUGIN_ALIGN_DISPLAY".to_string()])
+            .with_applies_to(vec![
+                "LWPOLYLINE".to_string(),
+                "PLUGIN_ALIGN_DISPLAY".to_string(),
+            ])
             .with_item(QuadItemDef {
                 control_id: "flip".to_string(),
                 label: "Flip".to_string(),
@@ -529,7 +536,11 @@ mod tests {
             .with_control(DialogControl::Table {
                 id: "bom".to_string(),
                 label: Some("Bill of Materials".to_string()),
-                headers: vec!["Item".to_string(), "Qty".to_string(), "Material".to_string()],
+                headers: vec![
+                    "Item".to_string(),
+                    "Qty".to_string(),
+                    "Material".to_string(),
+                ],
                 rows: vec![
                     vec!["Bolt M6".to_string(), "8".to_string(), "Steel".to_string()],
                     vec!["Nut M6".to_string(), "8".to_string(), "Steel".to_string()],
@@ -548,9 +559,14 @@ mod tests {
 
         let mut values = HashMap::new();
         values.insert("geom".to_string(), DialogValue::Fields(field_map));
-        values.insert("bom".to_string(), DialogValue::Table(vec![
-            vec!["Bolt M6".to_string(), "10".to_string(), "Steel".to_string()],
-        ]));
+        values.insert(
+            "bom".to_string(),
+            DialogValue::Table(vec![vec![
+                "Bolt M6".to_string(),
+                "10".to_string(),
+                "Steel".to_string(),
+            ]]),
+        );
         let response = DialogResponse::Submitted(values);
 
         let resp_bytes = bincode::serialize(&response).expect("serialize response");
@@ -559,4 +575,3 @@ mod tests {
         assert_eq!(response, restored_resp);
     }
 }
-

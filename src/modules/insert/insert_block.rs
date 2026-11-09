@@ -901,7 +901,11 @@ impl CadCommand for InsertBlockCommand {
             ),
             // The block stays at its point and turns with the cursor.
             Step::Rotation => match self.point {
-                Some(point) => (point, self.scale, self.plane.angle(point, pt).unwrap_or(0.0)),
+                Some(point) => (
+                    point,
+                    self.scale,
+                    self.plane.angle(point, pt).unwrap_or(0.0),
+                ),
                 None => return Vec::new(),
             },
             _ => return Vec::new(),
@@ -1121,7 +1125,11 @@ mod cycling_tests {
             DVec3::new(p[0] as f64, p[1] as f64, 0.0)
         };
         assert!(at(0).distance(point) < 1e-5);
-        assert!(at(1).distance(DVec3::new(10.0, 11.0, 0.0)) < 1e-5, "{:?}", at(1));
+        assert!(
+            at(1).distance(DVec3::new(10.0, 11.0, 0.0)) < 1e-5,
+            "{:?}",
+            at(1)
+        );
     }
 
     #[test]

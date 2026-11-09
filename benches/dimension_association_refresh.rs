@@ -62,7 +62,13 @@ fn main() {
     let changes = [(line, ChangeKind::Modified)];
     let refresh = |scene: &mut Scene| {
         let refreshed = scene.refresh_associative_dimensions(black_box(&changes));
-        (refreshed.len(), refreshed.iter().map(|(handle, _)| handle.value()).sum::<u64>())
+        (
+            refreshed.len(),
+            refreshed
+                .iter()
+                .map(|(handle, _)| handle.value())
+                .sum::<u64>(),
+        )
     };
 
     for _ in 0..WARMUP {
@@ -83,7 +89,11 @@ fn main() {
             "dimension_association_refresh: run {run} {ITERATIONS} edits: {per_edit_us:.3} us/edit"
         );
     }
-    assert_eq!(scene.document.objects.len(), objects, "the scan must not mutate the drawing");
+    assert_eq!(
+        scene.document.objects.len(),
+        objects,
+        "the scan must not mutate the drawing"
+    );
 
     println!(
         "dimension_association_refresh: {OBJECTS} XRecords, {objects} objects, no DIMASSOC; \

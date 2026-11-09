@@ -111,8 +111,7 @@ impl OpenCADStudio {
             .map(|h| (h, crate::scene::ChangeKind::Modified))
             .collect();
         match anchor {
-            Some(anchor) => self
-                .tabs[i]
+            Some(anchor) => self.tabs[i]
                 .scene
                 .bump_entities_with_initial_parametric_policy(
                     &changes,
@@ -224,10 +223,8 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .record_undo_before(moving.entity, Some(before.clone()));
-        if let Some(document::EntityType::Line(line)) = self.tabs[i]
-            .scene
-            .document
-            .get_entity_mut(moving.entity)
+        if let Some(document::EntityType::Line(line)) =
+            self.tabs[i].scene.document.get_entity_mut(moving.entity)
         {
             line.end = end;
         }
@@ -1271,7 +1268,8 @@ impl OpenCADStudio {
         let vertical = kind == ConstraintKind::Vertical;
         let axis = if vertical { "Vertical" } else { "Horizontal" };
         let scope = self.tabs[i].current_parametric_scope();
-        let to_world = |point: glam::DVec3| document::types::Vector3::new(point.x, point.y, point.z);
+        let to_world =
+            |point: glam::DVec3| document::types::Vector3::new(point.x, point.y, point.z);
         let (refs, initial_fixed) = match selection {
             HorizontalConstraintSelection::Reference(reference) => {
                 // The reference turns the object about its first
@@ -1348,8 +1346,11 @@ impl OpenCADStudio {
             ));
             return Some(Task::none());
         }
-        let direction =
-            document::types::Vector3::new(direction.x / axis_length, direction.y / axis_length, 0.0);
+        let direction = document::types::Vector3::new(
+            direction.x / axis_length,
+            direction.y / axis_length,
+            0.0,
+        );
         if let Err(message) = self.tabs[i]
             .scene
             .validate_parametric_constraint(kind, &refs, None)
@@ -1519,7 +1520,8 @@ impl OpenCADStudio {
         use crate::scene::parametric_constraints::ConstraintKind;
 
         let scope = self.tabs[i].current_parametric_scope();
-        let to_world = |point: glam::DVec3| document::types::Vector3::new(point.x, point.y, point.z);
+        let to_world =
+            |point: glam::DVec3| document::types::Vector3::new(point.x, point.y, point.z);
         let resolve_point = |pick: crate::command::CoincidentPick| {
             if let Some(handle) = pick.handle {
                 crate::scene::parametric_constraints::nearest_parametric_point_on_entity(
@@ -1833,11 +1835,11 @@ impl OpenCADStudio {
             line.end.y + ny * shift,
             line.end.z,
         );
-        self.tabs[i].scene.record_undo_before(moving.entity, Some(before.clone()));
-        if let Some(document::EntityType::Line(line)) = self.tabs[i]
+        self.tabs[i]
             .scene
-            .document
-            .get_entity_mut(moving.entity)
+            .record_undo_before(moving.entity, Some(before.clone()));
+        if let Some(document::EntityType::Line(line)) =
+            self.tabs[i].scene.document.get_entity_mut(moving.entity)
         {
             line.start = start;
             line.end = end;

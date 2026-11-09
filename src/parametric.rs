@@ -48,8 +48,8 @@
 use document::entities::{Arc, EntityType, Line, LwPolyline, LwVertex, Spline};
 use document::types::{Vector2, Vector3};
 use ocs_plugin_api::host::{
-    MAX_PLUGIN_LIVE_ENTITIES, ParametricChain, ParametricPlane, ParametricSample,
-    ParametricSegment, Ramp,
+    ParametricChain, ParametricPlane, ParametricSample, ParametricSegment, Ramp,
+    MAX_PLUGIN_LIVE_ENTITIES,
 };
 use std::f64::consts::PI;
 
@@ -262,7 +262,9 @@ fn validate_ramp(ramp: &Ramp) -> Result<(), String> {
                     return Err("a piecewise ramp knot is not finite".to_owned());
                 }
                 if !(0.0..=1.0).contains(xi) {
-                    return Err(format!("a piecewise ramp knot sits at xi {xi}, outside [0, 1]"));
+                    return Err(format!(
+                        "a piecewise ramp knot sits at xi {xi}, outside [0, 1]"
+                    ));
                 }
                 if *xi <= prev_xi {
                     return Err(format!(
@@ -960,7 +962,10 @@ fn chords_for(eval: &dyn Fn(f64) -> ParametricSample, length: f64, count: usize)
     for i in 0..=count {
         let u = length * i as f64 / count as f64;
         let sample = eval(u);
-        polyline.add_vertex(LwVertex::new(Vector2::new(sample.point[0], sample.point[1])));
+        polyline.add_vertex(LwVertex::new(Vector2::new(
+            sample.point[0],
+            sample.point[1],
+        )));
     }
     polyline
 }
@@ -1069,7 +1074,13 @@ mod tests {
     }
 
     fn profile_quadratic_slope_def(length: f64, c0: f64, c1: f64, c2: f64) -> CurveSegmentDef {
-        def_of(length, Ramp::Polynomial { degree: 2, coeffs: [c0, c1, c2, 0.0] })
+        def_of(
+            length,
+            Ramp::Polynomial {
+                degree: 2,
+                coeffs: [c0, c1, c2, 0.0],
+            },
+        )
     }
 
     fn piecewise_ramp(knots: &[(f64, f64)]) -> Ramp {
@@ -1120,7 +1131,12 @@ mod tests {
             plane: ParametricPlane::Plan,
             segments: vec![
                 segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0),
-                segment_of(ParametricPlane::Plan, plan_spiral_def(60.0, k1), [60.0, 0.0], 0.0),
+                segment_of(
+                    ParametricPlane::Plan,
+                    plan_spiral_def(60.0, k1),
+                    [60.0, 0.0],
+                    0.0,
+                ),
                 segment_of(
                     ParametricPlane::Plan,
                     plan_line_def(40.0),
@@ -1215,7 +1231,10 @@ mod tests {
         let eval = ramp_eval(&ramp, 0.25);
         assert!((eval - 0.5).abs() < 1.0 / 200.0);
         let total = ramp_integral(&ramp, 1.0);
-        assert!((total - 0.5).abs() < 1e-4, "sampled trapezoid integral: {total}");
+        assert!(
+            (total - 0.5).abs() < 1e-4,
+            "sampled trapezoid integral: {total}"
+        );
     }
 
     #[test]
@@ -1229,7 +1248,11 @@ mod tests {
         assert_eq!(a.to_bits(), b.to_bits(), "the eval must be bit-stable");
         let ia = ramp_integral(&ramp, 0.3);
         let ib = ramp_integral(&ramp, 0.3);
-        assert_eq!(ia.to_bits(), ib.to_bits(), "the integral must be bit-stable");
+        assert_eq!(
+            ia.to_bits(),
+            ib.to_bits(),
+            "the integral must be bit-stable"
+        );
         assert!((ramp_eval(&ramp, -2.0) - ramp_eval(&ramp, 0.0)).abs() < 1e-15);
         assert!((ramp_eval(&ramp, 5.0) - ramp_eval(&ramp, 1.0)).abs() < 1e-15);
         assert!((ramp_integral(&ramp, 5.0) - ramp_integral(&ramp, 1.0)).abs() < 1e-15);
@@ -1269,7 +1292,10 @@ mod tests {
         // A one-point sampled table and a one-knot piecewise law are the
         // CONSTANT law: the value everywhere, the integral its accumulation
         // (consistent eval/integral pairs, no 0.0 placeholders).
-        let sampled = Ramp::Sampled { n: 1, values: vec![0.02] };
+        let sampled = Ramp::Sampled {
+            n: 1,
+            values: vec![0.02],
+        };
         assert!((ramp_eval(&sampled, 0.3) - 0.02).abs() < 1e-15);
         assert!((ramp_eval(&sampled, 1.0) - 0.02).abs() < 1e-15);
         assert!((ramp_integral(&sampled, 1.0) - 0.02).abs() < 1e-15);
@@ -1293,7 +1319,12 @@ mod tests {
         // CCW-set writer).
         let line_chain = ParametricChain {
             plane: ParametricPlane::Plan,
-            segments: vec![segment_of(ParametricPlane::Plan, plan_line_def(60.0), [40.0, 7.0], 0.3)],
+            segments: vec![segment_of(
+                ParametricPlane::Plan,
+                plan_line_def(60.0),
+                [40.0, 7.0],
+                0.3,
+            )],
             layer: String::new(),
         };
         let (entities, carriers) = build_display_entities(&line_chain, 1e-3).unwrap();
@@ -1342,9 +1373,8 @@ mod tests {
             &vitals[0],
             60.0,
         );
-        let covers = |p: [f64; 2], q: [f64; 2]| {
-            (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9
-        };
+        let covers =
+            |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9;
         let curve_start = [0.0f64, 0.0];
         let curve_end = [evaluated.point[0], evaluated.point[1]];
         assert!(
@@ -1430,7 +1460,10 @@ mod tests {
         ];
         for (i, b_y) in b.iter().enumerate() {
             let x = l * i as f64 / 3.0;
-            assert!((spline.control_points[i].x - x).abs() < 1e-12, "control x {i}");
+            assert!(
+                (spline.control_points[i].x - x).abs() < 1e-12,
+                "control x {i}"
+            );
             assert!(
                 (spline.control_points[i].y - b_y).abs() < 1e-12,
                 "control y {i}: {} vs {b_y}",
@@ -1469,12 +1502,7 @@ mod tests {
         let front = ParametricChain {
             plane: ParametricPlane::Plan,
             segments: vec![
-                segment_of(
-                    ParametricPlane::Plan,
-                    plan_line_def(60.0),
-                    [0.0, 0.0],
-                    0.0,
-                ),
+                segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0),
                 segment_of(
                     ParametricPlane::Plan,
                     def_of(
@@ -1491,10 +1519,11 @@ mod tests {
             .unwrap()
             .expect("the front's own end samples");
         let realized = joint.direction[1].atan2(joint.direction[0]);
-        assert!((realized - 60.0 * 0.0115).abs() < 1e-9, "the piecewise law's end bearing {realized}");
-        let values: Vec<f64> = (0..41)
-            .map(|i| 0.005 - 0.001 * (i as f64 / 40.0))
-            .collect();
+        assert!(
+            (realized - 60.0 * 0.0115).abs() < 1e-9,
+            "the piecewise law's end bearing {realized}"
+        );
+        let values: Vec<f64> = (0..41).map(|i| 0.005 - 0.001 * (i as f64 / 40.0)).collect();
         let mut chain = front.clone();
         chain.segments.push(segment_of(
             ParametricPlane::Plan,
@@ -1533,7 +1562,10 @@ mod tests {
         // spiral's evaluated end.
         chain.segments[2].start_point[0] += 1e-2;
         let err = build_display_entities(&chain, 1e-3).unwrap_err();
-        assert!(err.contains("seam segment 1 to 2"), "names the audited pair: {err}");
+        assert!(
+            err.contains("seam segment 1 to 2"),
+            "names the audited pair: {err}"
+        );
         assert!(err.contains("not continuous"), "{err}");
 
         // A tangential break refuses too: flip the closing line's direction.
@@ -1586,7 +1618,10 @@ mod tests {
         assert!(sample_chain(&chain, -0.1).unwrap().is_none());
         let total: f64 = chain.segments.iter().map(|s| s.def.length).sum();
         assert!(sample_chain(&chain, total + 1e-3).unwrap().is_none());
-        assert!(sample_chain(&chain, total).unwrap().is_some(), "the end samples");
+        assert!(
+            sample_chain(&chain, total).unwrap().is_some(),
+            "the end samples"
+        );
         assert!(sample_chain(&chain, f64::NAN).is_err());
         assert!(sample_chain(&chain, f64::INFINITY).is_err());
     }
@@ -1616,15 +1651,16 @@ mod tests {
         assert!(err.contains("must be greater than zero"), "{err}");
 
         // Degree cap.
-        let mut seg =
-            segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
-        seg.def.ramp = Ramp::Polynomial { degree: 4, coeffs: [0.1; 4] };
+        let mut seg = segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
+        seg.def.ramp = Ramp::Polynomial {
+            degree: 4,
+            coeffs: [0.1; 4],
+        };
         let err = audit_chain(&single_chain(ParametricPlane::Plan, &seg), 1.0e-3).unwrap_err();
         assert!(err.contains("at-most-cubic envelope"), "{err}");
 
         // Piecewise windows.
-        let mut seg =
-            segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
+        let mut seg = segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
         seg.def.ramp = Ramp::Piecewise {
             count: 7,
             knots: [(0.0, 0.0); 6],
@@ -1639,15 +1675,23 @@ mod tests {
         assert!(err.contains("outside [0, 1]"), "{err}");
 
         // Sampled windows.
-        let mut seg =
-            segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
-        seg.def.ramp = Ramp::Sampled { n: 0, values: vec![] };
+        let mut seg = segment_of(ParametricPlane::Plan, plan_line_def(60.0), [0.0, 0.0], 0.0);
+        seg.def.ramp = Ramp::Sampled {
+            n: 0,
+            values: vec![],
+        };
         let err = audit_chain(&single_chain(ParametricPlane::Plan, &seg), 1.0e-3).unwrap_err();
         assert!(err.contains("the window is 1..=4096"), "{err}");
-        seg.def.ramp = Ramp::Sampled { n: 5000, values: vec![0.0; 5000] };
+        seg.def.ramp = Ramp::Sampled {
+            n: 5000,
+            values: vec![0.0; 5000],
+        };
         let err = audit_chain(&single_chain(ParametricPlane::Plan, &seg), 1.0e-3).unwrap_err();
         assert!(err.contains("the window is 1..=4096"), "{err}");
-        seg.def.ramp = Ramp::Sampled { n: 4, values: vec![0.1, 0.2, 0.3] };
+        seg.def.ramp = Ramp::Sampled {
+            n: 4,
+            values: vec![0.1, 0.2, 0.3],
+        };
         let err = audit_chain(&single_chain(ParametricPlane::Plan, &seg), 1.0e-3).unwrap_err();
         assert!(err.contains("but carries 3 values"), "{err}");
         seg.def.ramp = Ramp::Sampled {
@@ -1659,7 +1703,10 @@ mod tests {
 
         // Cross-slope data validates by the same rules.
         seg.def.ramp = ramp_const(0.1);
-        seg.def.cross_slope = Some(Ramp::Sampled { n: 0, values: vec![] });
+        seg.def.cross_slope = Some(Ramp::Sampled {
+            n: 0,
+            values: vec![],
+        });
         let err = audit_chain(&single_chain(ParametricPlane::Plan, &seg), 1.0e-3).unwrap_err();
         assert!(err.contains("cross-slope ramp is not structural"), "{err}");
 
@@ -1703,11 +1750,10 @@ mod tests {
             .expect("the tight tolerance refuses");
         assert!(err.contains("seam segment 0 to 1"), "{err}");
         assert!(err.contains("not continuous"), "{err}");
-        let (entities, _) = build_display_entities(&chain, 1.0e-3)
-            .expect("the declared tolerance honours the gap");
+        let (entities, _) =
+            build_display_entities(&chain, 1.0e-3).expect("the declared tolerance honours the gap");
         assert_eq!(entities.len(), 3);
-        audit_chain(&chain, 1.0e-9)
-            .expect_err("a 1e-9 demand refuses the same 5e-4 gap");
+        audit_chain(&chain, 1.0e-9).expect_err("a 1e-9 demand refuses the same 5e-4 gap");
     }
 
     #[test]
@@ -1745,7 +1791,8 @@ mod tests {
 
         // ---- the profile crest: ramp data in, joints propagated ----
         let vertical = demo_profile_chain();
-        audit_chain(&vertical, 1.0e-3).expect("the crest fixture audits (the mean-gradient seams are exact)");
+        audit_chain(&vertical, 1.0e-3)
+            .expect("the crest fixture audits (the mean-gradient seams are exact)");
 
         // THE DRAG: the crest's end gradient 0.06 -> 0.09 — the ramp data
         // itself ([0.01, 0.05] -> [0.01, 0.08]). The JOINT moved; the
@@ -1788,7 +1835,9 @@ mod tests {
 
         // The drag propagates the whole way: the tail's end rides the
         // moved joint (h = 11 + 0.09*80 = 18.2).
-        let tail_end = sample_chain(&edited, 380.0).expect("the edited chain samples").unwrap();
+        let tail_end = sample_chain(&edited, 380.0)
+            .expect("the edited chain samples")
+            .unwrap();
         assert!(
             (tail_end.point[1] - (11.0 + 0.09 * 80.0)).abs() < 1e-9,
             "the edited tail's end follows the moved joint"
@@ -1874,7 +1923,12 @@ mod tests {
         let mut cursor = [0.0f64, 0.0];
         let mut heading = 0.0f64;
         for _ in 0..25 {
-            segments.push(segment_of(ParametricPlane::Plan, plan_line_def(2.0), cursor, heading));
+            segments.push(segment_of(
+                ParametricPlane::Plan,
+                plan_line_def(2.0),
+                cursor,
+                heading,
+            ));
             cursor = [
                 cursor[0] + 2.0 * heading.cos(),
                 cursor[1] + 2.0 * heading.sin(),
@@ -1891,7 +1945,8 @@ mod tests {
                 layer: String::new(),
             };
             let vitals = audit_chain(&one, 1.0e-3).unwrap();
-            let end = evaluate_segment_at(ParametricPlane::Plan, &one.segments[0], &vitals[0], 60.0);
+            let end =
+                evaluate_segment_at(ParametricPlane::Plan, &one.segments[0], &vitals[0], 60.0);
             cursor = end.point;
             heading += 60.0 / (2.0 * -300.0);
         }
@@ -1941,8 +1996,9 @@ mod tests {
         // placement class the entity-bound records ride in).
         if let EntityType::LwPolyline(polyline) = &mut all_entities[1] {
             let mut record = document::xdata::ExtendedDataRecord::new("PLUGIN");
-            record
-                .add_value(document::xdata::XDataValue::String("alignment display carrier".into()));
+            record.add_value(document::xdata::XDataValue::String(
+                "alignment display carrier".into(),
+            ));
             record.add_value(document::xdata::XDataValue::Real(104.0));
             polyline.common.extended_data.add_record(record);
         }
@@ -1978,9 +2034,10 @@ mod tests {
             document::objects::XRecordEntry::double(140, 104.0),
             document::objects::XRecordEntry::int32(420, 7),
         ];
-        document
-            .objects
-            .insert(record_handle, document::objects::ObjectType::XRecord(record));
+        document.objects.insert(
+            record_handle,
+            document::objects::ObjectType::XRecord(record),
+        );
         let mut dict = document::objects::Dictionary::new();
         dict.handle = dict_handle;
         dict.owner = nod_handle;
@@ -1992,14 +2049,18 @@ mod tests {
         document
             .objects
             .insert(dict_handle, document::objects::ObjectType::Dictionary(dict));
-        if let Some(document::objects::ObjectType::Dictionary(nod)) = document.objects.get_mut(&nod_handle)
+        if let Some(document::objects::ObjectType::Dictionary(nod)) =
+            document.objects.get_mut(&nod_handle)
         {
             nod.add_entry("PLUGIN", dict_handle);
         }
 
         // 3) Round trips.
-        let original_record =
-            document.objects.get(&record_handle).cloned().expect("record present");
+        let original_record = document
+            .objects
+            .get(&record_handle)
+            .cloned()
+            .expect("record present");
         let original_kind_of =
             |h: document::Handle| document.get_entity(h).map(|e| std::mem::discriminant(e));
         let expected_kinds: Vec<_> = staged_handles
@@ -2073,12 +2134,19 @@ mod tests {
                 // The chain's layer attribution survives the file hop: the
                 // plan stages on PLUGIN_DISPLAY, the profile on
                 // PLUGIN_PROFILE.
-                let expected = if i < 3 { "PLUGIN_DISPLAY" } else { "PLUGIN_PROFILE" };
+                let expected = if i < 3 {
+                    "PLUGIN_DISPLAY"
+                } else {
+                    "PLUGIN_PROFILE"
+                };
                 assert_eq!(entity.common().layer, expected, "layer attribution lost");
             }
         }
 
-        fn assert_record_model(document: &document::Document, original: &document::objects::ObjectType) {
+        fn assert_record_model(
+            document: &document::Document,
+            original: &document::objects::ObjectType,
+        ) {
             // The XRecord's entries must survive BYTE-IDENTICAL, alongside
             // its dictionary and the NOD linkage (record + display live and
             // die together in the same file).
@@ -2106,7 +2174,9 @@ mod tests {
                 panic!("dictionary became another object");
             };
             assert!(
-                dict.entries.iter().any(|(name, _)| name == "PLUGIN_ALIGN_DISPLAY"),
+                dict.entries
+                    .iter()
+                    .any(|(name, _)| name == "PLUGIN_ALIGN_DISPLAY"),
                 "the dictionary entry survived"
             );
         }

@@ -244,7 +244,11 @@ impl CadCommand for SelectObjectsCommand {
         // The reference asks the same "Select objects:" however many are
         // picked; each pick's count is its own "N found" line.
         if self.auto_constrain_settings {
-            return t!("%{cmd}  Select objects or [Settings]:", cmd = self.prompt_cmd).into_owned();
+            return t!(
+                "%{cmd}  Select objects or [Settings]:",
+                cmd = self.prompt_cmd
+            )
+            .into_owned();
         }
         t!("%{cmd}  Select objects:", cmd = self.prompt_cmd).into_owned()
     }

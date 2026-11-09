@@ -24,8 +24,7 @@ pub fn tool() -> ToolDef {
 pub(crate) fn is_typed_point(text: &str) -> bool {
     let text = text.trim().trim_start_matches(['@', '*', '#']);
     let parts: Vec<&str> = text.split(',').collect();
-    (2..=3).contains(&parts.len())
-        && parts.iter().all(|part| part.trim().parse::<f64>().is_ok())
+    (2..=3).contains(&parts.len()) && parts.iter().all(|part| part.trim().parse::<f64>().is_ok())
 }
 
 /// The Layer option of CENTERMARK and CENTERLINE: the layer new centre
@@ -58,7 +57,12 @@ impl CenterLayerOption {
         } else {
             self.value.clone()
         };
-        crate::tr!("center-cmd", "layer", command = self.command, current = current)
+        crate::tr!(
+            "center-cmd",
+            "layer",
+            command = self.command,
+            current = current
+        )
     }
 
     pub(crate) fn options(&self) -> Vec<CmdOption> {
@@ -99,8 +103,7 @@ impl CenterLayerOption {
     }
 
     pub(crate) fn update(&self) -> Option<(&'static str, String)> {
-        self.changed
-            .then(|| ("CENTERLAYER", self.value.clone()))
+        self.changed.then(|| ("CENTERLAYER", self.value.clone()))
     }
 }
 
@@ -195,7 +198,10 @@ impl CadCommand for CenterLineCommand {
         }
         if self.first.is_none()
             && matches!(
-                text.trim().trim_start_matches('_').to_ascii_uppercase().as_str(),
+                text.trim()
+                    .trim_start_matches('_')
+                    .to_ascii_uppercase()
+                    .as_str(),
                 "L" | "LAYER"
             )
         {

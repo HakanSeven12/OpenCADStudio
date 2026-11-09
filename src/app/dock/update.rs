@@ -144,7 +144,15 @@ impl OpenCADStudio {
                     self.save_config();
                 }
             }
-            DockMsg::EdgeMenu(side) => self.dock_edge_menu = side,
+            DockMsg::EdgeMenu(side) => {
+                self.dock_edge_menu = side;
+                self.dock_edge_menu_y = None;
+            }
+            DockMsg::EdgeMenuAtPointer(side) => {
+                self.dock_edge_menu = Some(side);
+                self.dock_edge_menu_y = Some(self.dock_strip_pointer_y);
+            }
+            DockMsg::StripPointer(p) => self.dock_strip_pointer_y = p.y,
             DockMsg::StripLabels(on) => {
                 self.dock_edge_menu = None;
                 self.dock.strip_labels = on;
@@ -816,15 +824,17 @@ impl OpenCADStudio {
             // comes back when the pick ends or is cancelled.
             PanelId::Laywalk => {
                 let tab = &self.tabs[self.active_tab];
-                tab.layer_walk.is_some()
-                    && !(tab.layer_walk_picking && tab.active_cmd.is_some())
+                tab.layer_walk.is_some() && !(tab.layer_walk_picking && tab.active_cmd.is_some())
             }
             PanelId::QuickCalc => self.quick_calc.show,
             PanelId::CommandHistory => self.show_command_history,
             PanelId::GraphicAttributes => self.show_graphic_attributes,
             PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
-                    self.plugin_panels.get(panel_id).map(|p| p.visible).unwrap_or(false)
+                    self.plugin_panels
+                        .get(panel_id)
+                        .map(|p| p.visible)
+                        .unwrap_or(false)
                 } else {
                     false
                 }
@@ -943,7 +953,11 @@ impl OpenCADStudio {
                 (gi, cells)
             })
             .collect();
-        crate::ui::dock::strip_layout(&groups)
+        let (layout, plus_top) = crate::ui::dock::strip_layout(&groups);
+        (
+            layout,
+            crate::ui::dock::strip_plus_top(plus_top, self.dock_workspace_size().1),
+        )
     }
 
     /// The open pallets of `side`'s shown group, each as (position in the

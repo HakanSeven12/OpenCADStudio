@@ -549,8 +549,10 @@ fn join_touching(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec
     if let Some(joined) = join_chain(entities, true) {
         return Some(joined);
     }
-    let ends: Vec<Option<Vec<DVec3>>> =
-        entities.iter().map(|(_, entity)| endpoints(entity)).collect();
+    let ends: Vec<Option<Vec<DVec3>>> = entities
+        .iter()
+        .map(|(_, entity)| endpoints(entity))
+        .collect();
     fn root(group: &mut [usize], mut index: usize) -> usize {
         while group[index] != index {
             group[index] = group[group[index]];
@@ -924,7 +926,10 @@ mod join_tests {
     // Collinear lines with a gap join into one line spanning it (#2017).
     #[test]
     fn collinear_lines_join_across_a_gap() {
-        let (e1, e2) = (line(0.0, 0.0, 4.0, 0.0, 0.0), line(7.0, 0.0, 10.0, 0.0, 0.0));
+        let (e1, e2) = (
+            line(0.0, 0.0, 4.0, 0.0, 0.0),
+            line(7.0, 0.0, 10.0, 0.0, 0.0),
+        );
         let pairs = [(Handle::new(1), &e1), (Handle::new(2), &e2)];
         let (removed, out) = join_entities(&pairs).expect("gap joins");
         assert_eq!(removed.len(), 2);

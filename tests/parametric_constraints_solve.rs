@@ -797,9 +797,9 @@ fn midpoint_constraint_pulls_a_point_onto_a_lines_midpoint() {
 fn midpoint_constraint_supports_a_point_entity() {
     let mut scene = Scene::new();
     let base = add_line(&mut scene, 0.0, 0.0, 10.0, 6.0);
-    let point = scene.add_entity(EntityType::Point(document::entities::Point::at(Vector3::new(
-        20.0, 20.0, 0.0,
-    ))));
+    let point = scene.add_entity(EntityType::Point(document::entities::Point::at(
+        Vector3::new(20.0, 20.0, 0.0),
+    )));
     scene
         .parametric_constraint_set_mut(ParametricScope::ModelSpace)
         .add(
@@ -1967,8 +1967,7 @@ fn chain_layout(
     // Signed deflection from the incoming (b - a) direction to the outgoing
     // (c - b) one.
     let u_in = (-u1.0, -u1.1);
-    let mut deflection =
-        (u2.1.atan2(u2.0)) - (u_in.1.atan2(u_in.0));
+    let mut deflection = (u2.1.atan2(u2.0)) - (u_in.1.atan2(u_in.0));
     while deflection > std::f64::consts::PI {
         deflection -= std::f64::consts::TAU;
     }
@@ -2014,7 +2013,13 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
     // Baseline: the near-side graph, held by its own first bump like the
     // flip pin's first leg.
     let near = chain_layout(a, c, b0, radius, false);
-    let line1 = add_line(&mut scene, near.line1[0].0, near.line1[0].1, near.line1[1].0, near.line1[1].1);
+    let line1 = add_line(
+        &mut scene,
+        near.line1[0].0,
+        near.line1[0].1,
+        near.line1[1].0,
+        near.line1[1].1,
+    );
     let arc = add_arc(
         &mut scene,
         near.arc_center.0,
@@ -2023,7 +2028,13 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
         near.arc_start_angle,
         near.arc_end_angle,
     );
-    let line2 = add_line(&mut scene, near.line2[0].0, near.line2[0].1, near.line2[1].0, near.line2[1].1);
+    let line2 = add_line(
+        &mut scene,
+        near.line2[0].0,
+        near.line2[0].1,
+        near.line2[1].0,
+        near.line2[1].1,
+    );
     let start_marker = add_circle(&mut scene, a.0, a.1, 2.0);
     let middle_marker = add_circle(&mut scene, b0.0, b0.1, 2.0);
     let end_marker = add_circle(&mut scene, c.0, c.1, 2.0);
@@ -2031,7 +2042,10 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
     let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
     set.add(
         ConstraintKind::Coincident,
-        vec![ParametricRef::center(start_marker), ParametricRef::point(line1, 0)],
+        vec![
+            ParametricRef::center(start_marker),
+            ParametricRef::point(line1, 0),
+        ],
         None,
     );
     set.add(
@@ -2056,7 +2070,10 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
     );
     set.add(
         ConstraintKind::Coincident,
-        vec![ParametricRef::center(end_marker), ParametricRef::point(line2, 1)],
+        vec![
+            ParametricRef::center(end_marker),
+            ParametricRef::point(line2, 1),
+        ],
         None,
     );
     let _ = set;
@@ -2115,7 +2132,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
             far.line1[1]
         );
         assert!(
-            (arc_end.x - far.line2[0].0).abs() < 1.0e-9 && (arc_end.y - far.line2[0].1).abs() < 1.0e-9,
+            (arc_end.x - far.line2[0].0).abs() < 1.0e-9
+                && (arc_end.y - far.line2[0].1).abs() < 1.0e-9,
             "construction: arc end = leg 2's start: {arc_end:?} vs {:?}",
             far.line2[0]
         );
@@ -2124,7 +2142,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
             far.line1[1].1 - far.line1[0].1,
         );
         let leg1_len = (ux * ux + uy * uy).sqrt();
-        let h1 = (ux * (far.arc_center.1 - far.line1[0].1) - uy * (far.arc_center.0 - far.line1[0].0))
+        let h1 = (ux * (far.arc_center.1 - far.line1[0].1)
+            - uy * (far.arc_center.0 - far.line1[0].0))
             / leg1_len;
         assert!(
             (h1.abs() - radius).abs() < 1.0e-9,
@@ -2135,7 +2154,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
             far.line2[1].1 - far.line2[0].1,
         );
         let leg2_len = (vx * vx + vy * vy).sqrt();
-        let h2 = (vx * (far.arc_center.1 - far.line2[0].1) - vy * (far.arc_center.0 - far.line2[0].0))
+        let h2 = (vx * (far.arc_center.1 - far.line2[0].1)
+            - vy * (far.arc_center.0 - far.line2[0].0))
             / leg2_len;
         assert!(
             (h2.abs() - radius).abs() < 1.0e-9,
@@ -2160,7 +2180,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
         );
         let body_mid = |branch: &ChainLayout| {
             // the sweep midpoint's polar direction from the arc center
-            let mid_angle = branch.arc_start_angle + (branch.arc_end_angle - branch.arc_start_angle) / 2.0;
+            let mid_angle =
+                branch.arc_start_angle + (branch.arc_end_angle - branch.arc_start_angle) / 2.0;
             (
                 branch.arc_center.0 + radius * mid_angle.cos(),
                 branch.arc_center.1 + radius * mid_angle.sin(),
@@ -2205,7 +2226,11 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
     };
     let (line1_start, line1_end) = line_endpoints(&scene, line1);
     check_held("line 1 start", (line1_start.x, line1_start.y), far.line1[0]);
-    check_held("line 1 end (the written joint)", (line1_end.x, line1_end.y), far.line1[1]);
+    check_held(
+        "line 1 end (the written joint)",
+        (line1_end.x, line1_end.y),
+        far.line1[1],
+    );
     let (arc_center, arc_radius) = arc_geom(&scene, arc);
     check_held("arc center", (arc_center.x, arc_center.y), far.arc_center);
     assert!(
@@ -2213,7 +2238,11 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
         "written radius must hold: {arc_radius}"
     );
     let (line2_start, line2_end) = line_endpoints(&scene, line2);
-    check_held("line 2 start (the written joint)", (line2_start.x, line2_start.y), far.line2[0]);
+    check_held(
+        "line 2 start (the written joint)",
+        (line2_start.x, line2_start.y),
+        far.line2[0],
+    );
     check_held("line 2 end", (line2_end.x, line2_end.y), far.line2[1]);
     // The written sweep (the complement, the far-body ordering) survives:
     // the angles are held modulo the run's 2*pi lane drifts.
@@ -2222,7 +2251,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
             Some(EntityType::Arc(a)) => (a.start_angle, a.end_angle),
             other => panic!("expected an Arc, got {other:?}"),
         };
-        let (mut written, mut read) = (far.arc_end_angle - far.arc_start_angle, angles.1 - angles.0);
+        let (mut written, mut read) =
+            (far.arc_end_angle - far.arc_start_angle, angles.1 - angles.0);
         written = written.rem_euclid(std::f64::consts::TAU);
         read = read.rem_euclid(std::f64::consts::TAU);
         assert!(
@@ -2231,17 +2261,22 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
         );
     }
     let (start_marker_center, _) = circle_geom(&scene, start_marker);
-    check_held("start marker", (start_marker_center.x, start_marker_center.y), a);
+    check_held(
+        "start marker",
+        (start_marker_center.x, start_marker_center.y),
+        a,
+    );
     let (end_marker_center, _) = circle_geom(&scene, end_marker);
     check_held("end marker", (end_marker_center.x, end_marker_center.y), c);
     let (middle_center, _) = circle_geom(&scene, middle_marker);
-    check_held("corner PI marker (refresh-positioned, unwritten)", (middle_center.x, middle_center.y), b1);
+    check_held(
+        "corner PI marker (refresh-positioned, unwritten)",
+        (middle_center.x, middle_center.y),
+        b1,
+    );
     // The bulge side: same signed cross as the construction check.
     {
-        let (sx, sy) = (
-            line1_end.x - line1_start.x,
-            line1_end.y - line1_start.y,
-        );
+        let (sx, sy) = (line1_end.x - line1_start.x, line1_end.y - line1_start.y);
         let side_now = sx * (arc_center.y - line1_start.y) - sy * (arc_center.x - line1_start.x);
         assert!(
             (side_now - {
@@ -2249,7 +2284,8 @@ fn a_crossing_far_side_write_through_the_plugin_route_is_not_displaced() {
                     far.line1[1].0 - far.line1[0].0,
                     far.line1[1].1 - far.line1[0].1,
                 );
-                sx0 * (far.arc_center.1 - far.line1[0].1) - sy0 * (far.arc_center.0 - far.line1[0].0)
+                sx0 * (far.arc_center.1 - far.line1[0].1)
+                    - sy0 * (far.arc_center.0 - far.line1[0].0)
             })
             .abs()
                 < 1.0e-6,

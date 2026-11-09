@@ -72,8 +72,10 @@ fn block_reference_properties_hide_internal_records_and_name_the_definition() {
     app.refresh_properties();
     let sections = &app.tabs[i].properties.sections;
     assert!(
-        !sections.iter().any(|section| section.title == "Dynamic Block"
-            || section.title == "Dynamic Parameters / Actions"),
+        !sections
+            .iter()
+            .any(|section| section.title == "Dynamic Block"
+                || section.title == "Dynamic Parameters / Actions"),
         "{:?}",
         sections.iter().map(|s| &s.title).collect::<Vec<_>>()
     );
@@ -175,9 +177,11 @@ fn block_reference_name_typing_renames_the_authored_definition() {
         .unwrap()
         .read()
         .unwrap(),
-        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(&doc).unwrap()))
-            .read()
-            .unwrap(),
+        document::DwgReader::from_stream(Cursor::new(
+            document::DwgWriter::write_to_vec(&doc).unwrap(),
+        ))
+        .read()
+        .unwrap(),
     ] {
         assert!(
             saved.block_records.get("RENAMED").is_some(),
@@ -386,9 +390,11 @@ fn block_reference_name_pick_survives_a_save_and_reopen() {
         .unwrap()
         .read()
         .unwrap(),
-        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(&doc).unwrap()))
-            .read()
-            .unwrap(),
+        document::DwgReader::from_stream(Cursor::new(
+            document::DwgWriter::write_to_vec(&doc).unwrap(),
+        ))
+        .read()
+        .unwrap(),
     ] {
         let Some(EntityType::Insert(insert)) = saved.get_entity(reference) else {
             panic!("the reference vanished from the reopened drawing");

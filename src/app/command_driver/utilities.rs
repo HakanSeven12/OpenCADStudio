@@ -1,5 +1,35 @@
 use super::*;
 
+/// Whether a command's first point may align the UCS to a solid face. Commands
+/// that only pick points to measure a displacement or locate an edit have no
+/// use for a plane, and changing the UCS under them moves the UCS icon and
+/// reinterprets typed coordinates (#2721). ROTATE, MIRROR and ALIGN keep it:
+/// their result depends on the working plane.
+fn dynamic_ucs_applies(command: &str) -> bool {
+    !command.starts_with("UCS")
+        && !matches!(
+            command,
+            "SELECT"
+                | "MOVE"
+                | "COPY"
+                | "NCOPY"
+                | "SCALE"
+                | "STRETCH"
+                | "OFFSET"
+                | "TRIM"
+                | "EXTEND"
+                | "FILLET"
+                | "CHAMFER"
+                | "BREAK"
+                | "BREAKATPOINT"
+                | "LENGTHEN"
+                | "ARRAYRECT"
+                | "ARRAYPOLAR"
+                | "ARRAYPATH"
+                | "ARRAY3D"
+        )
+}
+
 impl OpenCADStudio {
     pub(in crate::app) fn reject_locked_edit(&mut self, i: usize, handle: Handle) -> bool {
         let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) else {
@@ -43,10 +73,16 @@ impl OpenCADStudio {
                     return Some(glam::DVec3::new(line.end.x, line.end.y, line.end.z));
                 }
                 document::EntityType::Arc(_) => Some(2),
-                document::EntityType::LwPolyline(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::LwPolyline(polyline) => {
+                    polyline.vertices.len().checked_sub(1)
+                }
                 document::EntityType::Polyline(polyline) => polyline.vertices.len().checked_sub(1),
-                document::EntityType::Polyline2D(polyline) => polyline.vertices.len().checked_sub(1),
-                document::EntityType::Polyline3D(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::Polyline2D(polyline) => {
+                    polyline.vertices.len().checked_sub(1)
+                }
+                document::EntityType::Polyline3D(polyline) => {
+                    polyline.vertices.len().checked_sub(1)
+                }
                 _ => None,
             }?;
             crate::scene::view::dispatch::grips(entity)
@@ -648,9 +684,9 @@ impl OpenCADStudio {
         {
             return StepInput::SelectionComplete(handles);
         }
-        let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles.into_iter().partition(|handle| {
-            !self.tabs[i].scene.is_layer_locked(*handle)
-        });
+        let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles
+            .into_iter()
+            .partition(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
         for handle in &dropped {
             self.tabs[i].scene.deselect_entity(*handle);
         }
@@ -677,12 +713,16 @@ impl OpenCADStudio {
         self.last_pick_groups = 0;
         let named = std::mem::take(&mut self.selection_group_named);
         let i = self.active_tab;
-        let (StepInput::SelectionComplete(_), Some((picked, remove))) = (&input, self.last_pick.as_ref())
+        let (StepInput::SelectionComplete(_), Some((picked, remove))) =
+            (&input, self.last_pick.as_ref())
         else {
             return input;
         };
         if named
-            || !self.tabs[i].active_cmd.as_ref().is_some_and(|c| c.is_selection_gathering())
+            || !self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.is_selection_gathering())
         {
             return input;
         }
@@ -705,7 +745,12 @@ impl OpenCADStudio {
         self.last_pick_groups = groups;
         self.refresh_properties();
         StepInput::SelectionComplete(
-            self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect(),
+            self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect(),
         )
     }
 
@@ -805,7 +850,7 @@ impl OpenCADStudio {
             || self.tabs[i]
                 .active_cmd
                 .as_ref()
-                .is_none_or(|command| command.name().starts_with("UCS"))
+                .is_none_or(|command| !dynamic_ucs_applies(command.name()))
         {
             return None;
         }
@@ -1116,8 +1161,16 @@ impl OpenCADStudio {
     /// unconsumed.
     fn run_command_line_impl(&mut self, cmd: &str, finish: bool, chain: bool) -> Task<Message> {
         let trimmed = cmd.trim_start();
-        if trimmed.split_whitespace().next().is_some_and(|verb| verb.eq_ignore_ascii_case("TABLEDIT")) {
-            return self.run_command_line_impl(&format!("-TABLEDIT{}", &trimmed[8..]), finish, chain);
+        if trimmed
+            .split_whitespace()
+            .next()
+            .is_some_and(|verb| verb.eq_ignore_ascii_case("TABLEDIT"))
+        {
+            return self.run_command_line_impl(
+                &format!("-TABLEDIT{}", &trimmed[8..]),
+                finish,
+                chain,
+            );
         }
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
@@ -1240,11 +1293,16 @@ impl OpenCADStudio {
                     return Task::batch([start_task, answer]);
                 }
                 if !chain {
-                    self.command_line.unconsumed = tokens[2..].iter().map(|s| s.to_string()).collect();
+                    self.command_line.unconsumed =
+                        tokens[2..].iter().map(|s| s.to_string()).collect();
                     return Task::batch([start_task, answer]);
                 }
                 let rest = tokens[2..].join(" ");
-                return Task::batch([start_task, answer, self.run_command_line_impl(&rest, finish, chain)]);
+                return Task::batch([
+                    start_task,
+                    answer,
+                    self.run_command_line_impl(&rest, finish, chain),
+                ]);
             }
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
             // The bare word only probed it: a step it kept without changing
@@ -1374,12 +1432,15 @@ impl OpenCADStudio {
             return None;
         }
         let kw = text.trim().to_ascii_uppercase();
-        let key = self.tabs[i]
-            .active_cmd
-            .as_ref()
-            .map(|command| &**command as *const dyn crate::command::CadCommand as *const () as usize);
+        let key = self.tabs[i].active_cmd.as_ref().map(|command| {
+            &**command as *const dyn crate::command::CadCommand as *const () as usize
+        });
         let reprompt = |app: &mut Self| {
-            if let Some(prompt) = app.tabs[app.active_tab].active_cmd.as_ref().map(|c| c.prompt()) {
+            if let Some(prompt) = app.tabs[app.active_tab]
+                .active_cmd
+                .as_ref()
+                .map(|c| c.prompt())
+            {
                 app.command_line.push_info(&prompt);
             }
         };
@@ -1390,7 +1451,8 @@ impl OpenCADStudio {
             let name = text.trim();
             if name.is_empty() {
                 let found = 0;
-                self.command_line.push_info(crate::tf!("{found} found").as_ref());
+                self.command_line
+                    .push_info(crate::tf!("{found} found").as_ref());
                 reprompt(self);
                 return Some(Task::none());
             }
@@ -1442,16 +1504,19 @@ impl OpenCADStudio {
         // SUbobject: picks take faces, edges and vertices of 3D objects
         // only; Object goes back to whole objects.
         if let "SU" | "SUBOBJECT" | "O" | "OBJECT" = kw.as_str() {
-            self.selection_subobject = matches!(kw.as_str(), "SU" | "SUBOBJECT").then_some(key).flatten();
+            self.selection_subobject = matches!(kw.as_str(), "SU" | "SUBOBJECT")
+                .then_some(key)
+                .flatten();
             reprompt(self);
             return Some(Task::none());
         }
         // A bare number is a direct distance: the point that far from the
         // last point toward the cursor, picked like a typed point.
         if !kw.contains(',') {
-            if let (Ok(distance), Some(anchor)) =
-                (kw.parse::<f64>(), self.last_point.or(self.last_entered_point))
-            {
+            if let (Ok(distance), Some(anchor)) = (
+                kw.parse::<f64>(),
+                self.last_point.or(self.last_entered_point),
+            ) {
                 let toward = self.tabs[i].last_cursor_world - anchor;
                 let toward = glam::DVec3::new(toward.x, toward.y, 0.0);
                 if distance.is_finite() {
@@ -1707,7 +1772,9 @@ impl OpenCADStudio {
         self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             command.is_selection_gathering()
                 && self.selection_subobject
-                    == Some(&**command as *const dyn crate::command::CadCommand as *const () as usize)
+                    == Some(
+                        &**command as *const dyn crate::command::CadCommand as *const () as usize,
+                    )
         })
     }
 
@@ -1718,8 +1785,12 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.last_pick = Some((handle.into_iter().collect(), false));
         self.refresh_properties();
-        let handles: Vec<Handle> =
-            self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+        let handles: Vec<Handle> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
         self.feed_command(StepInput::SelectionComplete(handles))
     }
 
@@ -1735,8 +1806,13 @@ impl OpenCADStudio {
         if let Some((pending, first)) = self.typed_window_corner.take() {
             // The box a typed corner opened may already be gone: a click
             // finished it, or Esc dropped it.
-            let still_open =
-                self.tabs[i].scene.selection.borrow().gesture.box_anchor_world == Some(first);
+            let still_open = self.tabs[i]
+                .scene
+                .selection
+                .borrow()
+                .gesture
+                .box_anchor_world
+                == Some(first);
             if gathering && pending == key && still_open {
                 let Some(second) = self.typed_wcs(i, token) else {
                     // Enter or a word where the opposite corner belongs: the

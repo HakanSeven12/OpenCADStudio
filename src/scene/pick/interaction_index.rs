@@ -1895,6 +1895,23 @@ impl InteractionCandidates {
         }
     }
 
+    /// Like [`Self::all`], but records the region the caller is about to
+    /// hit-test so the stub expansion can skip leaves outside it.
+    ///
+    /// The unindexed fallback used to drop the query region, and a pick on a
+    /// large un-indexed set then expanded every stub in the drawing — 47 352
+    /// wires into 202 830, ~190 ms — to hit-test an aperture a few pixels
+    /// wide. Every indexed path already carries `query_aabb`, so this makes
+    /// the fallback answer the same question they do instead of a larger one:
+    /// a leaf the filter drops cannot intersect the aperture, so it could not
+    /// have been hit.
+    pub fn all_near(wires: Arc<Vec<WireModel>>, query_aabb: [f64; 4]) -> Self {
+        Self {
+            query_aabb: Some(query_aabb),
+            ..Self::all(wires)
+        }
+    }
+
     /// Empty but explicitly indexed candidate set. Used while a large source
     /// is still being prepared off-thread so UI input never falls back to a
     /// full-scene scan.
@@ -1942,7 +1959,10 @@ impl InteractionCandidates {
 
     pub fn get(&self, index: usize) -> Option<&WireModel> {
         match &self.wire_indices {
-            Some(indices) => indices.get(index).copied().and_then(|wire| self.wires.slot(wire)),
+            Some(indices) => indices
+                .get(index)
+                .copied()
+                .and_then(|wire| self.wires.slot(wire)),
             None => self.wires.slot(index as u32),
         }
     }
@@ -2924,6 +2944,66 @@ mod area_query_tests {
         assert!(
             expanded.len() > arc.len(),
             "the stub must actually have added a copy, or this proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_local_expansion_keeps_every_leaf_the_aperture_could_hit() {
+        // Leaves 100 units apart, so a few-unit aperture excludes most of
+        // them and the restriction has something to skip.
+        let proto: Vec<WireModel> = [0.0f32, 100.0, 200.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &o)| {
+                wire(
+                    &format!("leaf{i}"),
+                    vec![[o, o, 0.0], [o + 1.0, o + 1.0, 0.0]],
+                    [o, o, o + 1.0, o + 1.0],
+                )
+            })
+            .collect();
+        let stub = crate::scene::model::instance_model::stub_wire(
+            Arc::new(proto),
+            [0.0, 0.0, 201.0, 201.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        let mut wires = sample();
+        wires.push(stub);
+        let arc = Arc::new(wires);
+
+        let aperture = [-5.0, -5.0, 5.0, 5.0];
+        assert!(
+            !InteractionCandidates::all_near(Arc::clone(&arc), aperture)
+                .expansion_is_unrestricted(),
+            "a region-bearing fallback must never be stored as a whole-set expansion"
+        );
+
+        let full = InteractionCandidates::all(Arc::clone(&arc)).materialize_stubs();
+        let local = InteractionCandidates::all_near(Arc::clone(&arc), aperture).materialize_stubs();
+
+        // Everything the aperture could actually hit, from either expansion.
+        let reachable = |c: &InteractionCandidates| {
+            let mut names: Vec<String> = c
+                .iter()
+                .filter(|w| {
+                    let [x0, y0, x1, y1] = w.aabb.map(f64::from);
+                    !(x1 < aperture[0] || x0 > aperture[2] || y1 < aperture[1] || y0 > aperture[3])
+                })
+                .map(|w| w.name.clone())
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert_eq!(
+            reachable(&local),
+            reachable(&full),
+            "restricting the expansion must not cost a candidate the caller could hit"
+        );
+        assert!(
+            local.iter().count() < full.iter().count(),
+            "the far leaves must actually have been skipped, or this proves nothing"
         );
     }
 

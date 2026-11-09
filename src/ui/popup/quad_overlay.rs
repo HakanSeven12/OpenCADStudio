@@ -168,7 +168,10 @@ fn owned_svg_handle(bytes: &std::sync::Arc<[u8]>) -> iced::advanced::svg::Handle
     handles
         .entry(std::sync::Arc::as_ptr(bytes) as *const u8 as usize)
         .or_insert_with(|| {
-            (bytes.clone(), iced::advanced::svg::Handle::from_memory(bytes.to_vec()))
+            (
+                bytes.clone(),
+                iced::advanced::svg::Handle::from_memory(bytes.to_vec()),
+            )
         })
         .1
         .clone()
@@ -189,7 +192,11 @@ struct OwnedSvg {
 }
 
 fn owned_svg(bytes: std::sync::Arc<[u8]>, size: f32, opacity: f32) -> OwnedSvg {
-    OwnedSvg { bytes, size, opacity }
+    OwnedSvg {
+        bytes,
+        size,
+        opacity,
+    }
 }
 
 impl<M> iced::advanced::Widget<M, Theme, iced::Renderer> for OwnedSvg {
@@ -203,11 +210,7 @@ impl<M> iced::advanced::Widget<M, Theme, iced::Renderer> for OwnedSvg {
         _renderer: &iced::Renderer,
         limits: &iced::advanced::layout::Limits,
     ) -> iced::advanced::layout::Node {
-        iced::advanced::layout::atomic(
-            limits,
-            Length::Fixed(self.size),
-            Length::Fixed(self.size),
-        )
+        iced::advanced::layout::atomic(limits, Length::Fixed(self.size), Length::Fixed(self.size))
     }
 
     fn draw(
@@ -220,10 +223,10 @@ impl<M> iced::advanced::Widget<M, Theme, iced::Renderer> for OwnedSvg {
         _cursor: iced::advanced::mouse::Cursor,
         _viewport: &iced::Rectangle,
     ) {
-        use iced::advanced::svg::Renderer as _;
         use iced::advanced::svg as core_svg;
-        use iced::{Point, Rectangle};
+        use iced::advanced::svg::Renderer as _;
         use iced::ContentFit;
+        use iced::{Point, Rectangle};
 
         let handle = owned_svg_handle(&self.bytes);
         let measured = renderer.measure_svg(&handle);

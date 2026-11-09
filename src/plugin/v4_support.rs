@@ -236,9 +236,7 @@ pub fn drain_channel_ready_acks() {
                     );
                 }
                 ocs_plugin_api::process::AttachOutcome::AlreadyAttached => {
-                    eprintln!(
-                        "[{plugin_id}] ChannelReady duplicate for a live channel; ignored"
-                    );
+                    eprintln!("[{plugin_id}] ChannelReady duplicate for a live channel; ignored");
                 }
                 ocs_plugin_api::process::AttachOutcome::Ambiguous(waiting) => {
                     eprintln!(
@@ -306,7 +304,10 @@ fn record_test_dispatch(notification: &HostNotification) {
             control_id,
             handles,
             ..
-        } => format!("QuadAction({panel_id}.{control_id}, {} handles)", handles.len()),
+        } => format!(
+            "QuadAction({panel_id}.{control_id}, {} handles)",
+            handles.len()
+        ),
         _ => "Other".to_string(),
     };
     TEST_DISPATCH_LOG.with(|log| log.borrow_mut().push(kind));

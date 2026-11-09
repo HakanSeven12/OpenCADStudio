@@ -13,7 +13,7 @@ async function visit(languages, saved, blocked = false) {
   const splash = { querySelector: () => caption, classList: { add() {} }, remove() {} };
   const document = { documentElement: {}, getElementById: () => splash, querySelector: () => ({}) };
   vm.runInNewContext(script, {
-    document, navigator: { languages, language: languages[0] }, Intl,
+    self: { origin: 'null' }, document, navigator: { languages, language: languages[0] }, Intl,
     localStorage: { getItem(key) {
       assert.equal(key, 'opencadstudio.settings');
       if (blocked) throw new Error('Storage disabled');

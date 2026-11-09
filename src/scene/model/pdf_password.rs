@@ -80,7 +80,8 @@ fn lock() -> std::sync::MutexGuard<'static, Session> {
 
 /// The file a derived source (`<file>#layers-off=…`) was made from.
 fn file_key(path: &str) -> &str {
-    path.split_once("#layers-off=").map_or(path, |(file, _)| file)
+    path.split_once("#layers-off=")
+        .map_or(path, |(file, _)| file)
 }
 
 /// Keep `typed` as the password that opened `path`.
@@ -89,7 +90,9 @@ fn grant(path: &str, security: &Security, bytes: &Arc<Vec<u8>>, typed: &str) {
         .user_password(bytes, typed)
         .unwrap_or_else(|| typed.to_string());
     let typed = typed.to_string();
-    lock().granted.insert(path.to_string(), Grant { typed, reader });
+    lock()
+        .granted
+        .insert(path.to_string(), Grant { typed, reader });
 }
 
 /// Open a PDF source, trying no password, then the one that unlocked it,
@@ -114,7 +117,10 @@ pub fn open(path: &str, bytes: Arc<Vec<u8>>) -> Result<Pdf, LoadPdfError> {
     for password in remembered {
         if let Some(user) = security.user_password(&bytes, &password) {
             if let Ok(pdf) = Pdf::new_with_password(bytes.clone(), &user) {
-                let grant = Grant { typed: password, reader: user };
+                let grant = Grant {
+                    typed: password,
+                    reader: user,
+                };
                 lock().granted.insert(key.to_string(), grant);
                 return Ok(pdf);
             }
@@ -185,9 +191,7 @@ pub fn gate(path: &str, owner: bool) -> Gate {
         list.extend(session.remembered.iter().cloned());
         list
     };
-    let access = |p: &str| {
-        security.is_owner(&bytes, p) || (!owner && security.is_user(&bytes, p))
-    };
+    let access = |p: &str| security.is_owner(&bytes, p) || (!owner && security.is_user(&bytes, p));
     if access("") {
         return Gate::Open;
     }
@@ -196,14 +200,24 @@ pub fn gate(path: &str, owner: bool) -> Gate {
         return Gate::Remembered;
     }
     if !owner {
-        return Gate::Ask { stage: Stage::Document, remembered: false };
+        return Gate::Ask {
+            stage: Stage::Document,
+            remembered: false,
+        };
     }
     if security.is_user(&bytes, "") {
-        return Gate::Ask { stage: Stage::Permission, remembered: false };
+        return Gate::Ask {
+            stage: Stage::Permission,
+            remembered: false,
+        };
     }
     let remembered = candidates.iter().any(|p| security.is_user(&bytes, p));
     Gate::Ask {
-        stage: if remembered { Stage::Permission } else { Stage::Document },
+        stage: if remembered {
+            Stage::Permission
+        } else {
+            Stage::Document
+        },
         remembered,
     }
 }
@@ -309,7 +323,9 @@ impl Security {
             return Some(password.to_string());
         }
         let user = self.recover_user(password.as_bytes())?;
-        Pdf::new_with_password(bytes.clone(), &user).is_ok().then_some(user)
+        Pdf::new_with_password(bytes.clone(), &user)
+            .is_ok()
+            .then_some(user)
     }
 
     fn is_user(&self, bytes: &Arc<Vec<u8>>, password: &str) -> bool {
@@ -479,7 +495,10 @@ fn parse_dict(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
         }
         let start = i + 1;
         i = start;
-        while data.get(i).is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c)) {
+        while data
+            .get(i)
+            .is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c))
+        {
             i += 1;
         }
         let key = String::from_utf8_lossy(&data[start..i]).into_owned();
@@ -543,7 +562,10 @@ fn value_end(data: &[u8], i: usize) -> Option<usize> {
         }
         b'/' => {
             let mut j = i + 1;
-            while data.get(j).is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c)) {
+            while data
+                .get(j)
+                .is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c))
+            {
                 j += 1;
             }
             Some(j)
@@ -551,7 +573,10 @@ fn value_end(data: &[u8], i: usize) -> Option<usize> {
         _ => {
             // A number, `true`/`false`, or a reference `n g R`.
             let mut j = i;
-            while data.get(j).is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c)) {
+            while data
+                .get(j)
+                .is_some_and(|c| !c.is_ascii_whitespace() && !b"/<>[]()".contains(c))
+            {
                 j += 1;
             }
             let save = j;

@@ -624,7 +624,8 @@ pub fn entity_text_info(
         }
         EntityType::MText(t) => {
             let raw = t.value.clone();
-            let plain_raw = document::entities::mtext_format::parse_mtext(&raw, true).to_plain_text();
+            let plain_raw =
+                document::entities::mtext_format::parse_mtext(&raw, true).to_plain_text();
             let plain = decode_dxf_escapes(&plain_raw);
             let pos = [
                 t.insertion_point.x,

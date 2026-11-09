@@ -893,7 +893,11 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn apply_continuous_constraints(&mut self, i: usize, new_handles: &[document::Handle]) {
+    pub(super) fn apply_continuous_constraints(
+        &mut self,
+        i: usize,
+        new_handles: &[document::Handle],
+    ) {
         let supported_creation = self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
             matches!(
                 command.name(),

@@ -32,7 +32,10 @@ impl OpenCADStudio {
                 tool.kind,
                 ModalKind::AssocPrompt | ModalKind::DonationPrompt | ModalKind::GpuWarning
             )
-        }) || self.pending_startup_modals.front().is_some_and(|kind| self.tool_open(*kind));
+        }) || self
+            .pending_startup_modals
+            .front()
+            .is_some_and(|kind| self.tool_open(*kind));
         if self.active_modal.is_none()
             && !showing
             && self.opening.is_none()

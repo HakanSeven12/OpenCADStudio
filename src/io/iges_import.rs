@@ -46,7 +46,11 @@ fn parameters(text: &str, delimiter: char, terminator: char) -> Vec<P> {
             i += 1;
         }
         if i > start && matches!(chars.get(i), Some('H' | 'h')) {
-            let count: usize = chars[start..i].iter().collect::<String>().parse().unwrap_or(0);
+            let count: usize = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0);
             let body: String = chars.iter().skip(i + 1).take(count).collect();
             i = i.saturating_add(1).saturating_add(count);
             out.push(P::Str(body));
@@ -58,7 +62,10 @@ fn parameters(text: &str, delimiter: char, terminator: char) -> Vec<P> {
             {
                 i += 1;
             }
-            let raw: String = chars[start..i].iter().collect::<String>().replace(['D', 'd'], "E");
+            let raw: String = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .replace(['D', 'd'], "E");
             out.push(P::Num(raw.trim().parse().unwrap_or(0.0)));
         }
         while chars.get(i).is_some_and(|c| *c == ' ') {
@@ -102,7 +109,11 @@ type Matrix = super::step_import::Placement;
 /// A transformation matrix entity's (124) matrix.
 fn matrix_of(entity: &Entity) -> Matrix {
     let v = |k: usize| entity.params.get(k).map_or(0.0, P::num);
-    [[v(1), v(2), v(3), v(4)], [v(5), v(6), v(7), v(8)], [v(9), v(10), v(11), v(12)]]
+    [
+        [v(1), v(2), v(3), v(4)],
+        [v(5), v(6), v(7), v(8)],
+        [v(9), v(10), v(11), v(12)],
+    ]
 }
 
 impl Doc {
@@ -129,7 +140,9 @@ impl Doc {
             8 => [255, 255, 255],
             n if n < 0 => match self.entities.get(&(-n as usize)).filter(|e| e.kind == 314) {
                 Some(e) => [1, 2, 3].map(|k| {
-                    (e.params.get(k).map_or(0.0, P::num) * 2.55).round().clamp(0.0, 255.0) as u8
+                    (e.params.get(k).map_or(0.0, P::num) * 2.55)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
                 }),
                 None => return Color::ByLayer,
             },
@@ -170,11 +183,15 @@ impl Doc {
 
     /// `entity`'s placement applied to a point it defines.
     fn place(&self, entity: &Entity) -> impl Fn([f64; 3]) -> [f64; 3] {
-        let m = (entity.transform != 0).then(|| self.matrix(entity.transform)).flatten();
+        let m = (entity.transform != 0)
+            .then(|| self.matrix(entity.transform))
+            .flatten();
         let scale = self.scale;
         move |p| {
             let p = match m {
-                Some(m) => [0, 1, 2].map(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3]),
+                Some(m) => {
+                    [0, 1, 2].map(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3])
+                }
                 None => p,
             };
             p.map(|c| c * scale)
@@ -200,7 +217,10 @@ impl Doc {
                 let x = place([v(2) + 1.0, v(3), v(1)]);
                 let y = place([v(2), v(3) + 1.0, v(1)]);
                 let start = place([v(4), v(5), v(1)]);
-                let radius = (0..3).map(|k| (start[k] - centre[k]).powi(2)).sum::<f64>().sqrt();
+                let radius = (0..3)
+                    .map(|k| (start[k] - centre[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
                 Curve3::Circle(Circle3 {
                     plane: Plane::orthonormal(
                         centre,
@@ -210,7 +230,11 @@ impl Doc {
                                 [x[0] - centre[0], x[1] - centre[1], x[2] - centre[2]],
                                 [y[0] - centre[0], y[1] - centre[1], y[2] - centre[2]],
                             );
-                            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+                            [
+                                a[1] * b[2] - a[2] * b[1],
+                                a[2] * b[0] - a[0] * b[2],
+                                a[0] * b[1] - a[1] * b[0],
+                            ]
                         },
                     )?,
                     radius,
@@ -326,10 +350,15 @@ impl Doc {
         let entity = self.get(pointer).filter(|e| e.kind == 123)?;
         let v = |k: usize| entity.params.get(k).map_or(0.0, P::num);
         let d = [v(1), v(2), v(3)];
-        Some(match (entity.transform != 0).then(|| self.matrix(entity.transform)).flatten() {
-            Some(m) => [0, 1, 2].map(|r| m[r][0] * d[0] + m[r][1] * d[1] + m[r][2] * d[2]),
-            None => d,
-        })
+        Some(
+            match (entity.transform != 0)
+                .then(|| self.matrix(entity.transform))
+                .flatten()
+            {
+                Some(m) => [0, 1, 2].map(|r| m[r][0] * d[0] + m[r][1] * d[1] + m[r][2] * d[2]),
+                None => d,
+            },
+        )
     }
 
     /// A curve as a spline: a line, an arc between its ends, or a spline.
@@ -396,7 +425,10 @@ impl Doc {
         };
         Some(if out.length() <= tolerance {
             let x = radial(at(0.5 * (a0 + a1))).normalize()?;
-            if [a0, a1].into_iter().any(|a| radial(at(a)).dot(x) < -tolerance) {
+            if [a0, a1]
+                .into_iter()
+                .any(|a| radial(at(a)).dot(x) < -tolerance)
+            {
                 return None;
             }
             Surface::Sphere(kernel::brep::Sphere {
@@ -428,7 +460,9 @@ impl Doc {
         };
         let x = match reference.and_then(|r| self.direction_of(r)) {
             Some(x) => x,
-            None => super::iges_surfaces::any_perpendicular(kernel::space::Vec3::from(axis)).to_array(),
+            None => {
+                super::iges_surfaces::any_perpendicular(kernel::space::Vec3::from(axis)).to_array()
+            }
         };
         Plane::orthonormal(origin, x, axis)
     }
@@ -456,7 +490,10 @@ impl Doc {
                 Surface::Nurbs(n) => spline(n),
                 _ => None,
             }),
-            190 => Some((Surface::Plane(self.frame(v(1), Some(v(2)), form1(3))?), None)),
+            190 => Some((
+                Surface::Plane(self.frame(v(1), Some(v(2)), form1(3))?),
+                None,
+            )),
             192 => Some((
                 Surface::Cylinder(kernel::brep::Cylinder {
                     base: self.frame(v(1), Some(v(2)), form1(4))?,
@@ -513,7 +550,10 @@ impl Doc {
                 let directrix = self.nurbs_curve(v(1))?;
                 let start = directrix.point_at_knot(directrix.domain().0);
                 let end = self.place(entity)([v(2), v(3), v(4)]);
-                spline(build::tabulate(&directrix, [end[0] - start[0], end[1] - start[1], end[2] - start[2]])?)
+                spline(build::tabulate(
+                    &directrix,
+                    [end[0] - start[0], end[1] - start[1], end[2] - start[2]],
+                )?)
             }
             118 => {
                 // ponytail: the rulings join points at equal relative
@@ -532,8 +572,14 @@ impl Doc {
                 // keeps a block for each break point, the last ones unused.
                 // The sizes come from the file: refuse ones its parameters
                 // cannot hold.
-                let blocks = m.checked_sub(1)?.checked_mul(n.checked_add(1)?)?.checked_add(n)?;
-                let end = m.checked_add(n)?.checked_add(7)?.checked_add(blocks.checked_mul(48)?)?;
+                let blocks = m
+                    .checked_sub(1)?
+                    .checked_mul(n.checked_add(1)?)?
+                    .checked_add(n)?;
+                let end = m
+                    .checked_add(n)?
+                    .checked_add(7)?
+                    .checked_add(blocks.checked_mul(48)?)?;
                 if n == 0 || end > entity.params.len() {
                     return None;
                 }
@@ -543,14 +589,28 @@ impl Doc {
                 let place = self.place(entity);
                 let coefficients: Vec<[[f64; 16]; 3]> = (0..m * n)
                     .map(|k| (k / n) * (n + 1) + k % n)
-                    .map(|k| [0, 1, 2].map(|axis| std::array::from_fn(|c| v(at + 48 * k + 16 * axis + c))))
+                    .map(|k| {
+                        [0, 1, 2]
+                            .map(|axis| std::array::from_fn(|c| v(at + 48 * k + 16 * axis + c)))
+                    })
                     .collect();
                 let raw = build::patches(&tu, &tv, &coefficients)?;
                 // The placement applies to the control points.
                 let (du, dv) = raw.degrees();
                 let (uk, vk) = raw.knots();
-                let rows = raw.control_points().iter().map(|row| row.iter().map(|p| place(*p)).collect()).collect();
-                spline(NurbsSurface3::new(du, dv, rows, uk.to_vec(), vk.to_vec(), None)?)
+                let rows = raw
+                    .control_points()
+                    .iter()
+                    .map(|row| row.iter().map(|p| place(*p)).collect())
+                    .collect();
+                spline(NurbsSurface3::new(
+                    du,
+                    dv,
+                    rows,
+                    uk.to_vec(),
+                    vk.to_vec(),
+                    None,
+                )?)
             }
             140 => {
                 // The base pushed along its own normal (u × v): a plane
@@ -563,31 +623,46 @@ impl Doc {
                     return None;
                 };
                 let distance = v(4) * self.scale;
-                if let Some((Surface::Plane(plane), agrees)) = kernel::brep::analytic_surface(&base) {
-                    let n = kernel::space::Vec3::from(plane.normal()?) * (if agrees { 1.0 } else { -1.0 });
+                if let Some((Surface::Plane(plane), agrees)) = kernel::brep::analytic_surface(&base)
+                {
+                    let n = kernel::space::Vec3::from(plane.normal()?)
+                        * (if agrees { 1.0 } else { -1.0 });
                     return spline(build::translated(&base, (n * distance).to_array())?);
                 }
                 let net = kernel::acis::offset_surface(&base, distance)?;
                 // A point of the offset, to read the new radius off.
                 let ((u0, u1), (v0, v1)) = net.domain();
-                let p = kernel::space::Vec3::from(net.point_at_knot(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
+                let p =
+                    kernel::space::Vec3::from(net.point_at_knot(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
                 let around = |frame: &Plane| {
-                    let (o, k) = (kernel::space::Vec3::from(frame.origin), kernel::space::Vec3::from(frame.normal()?));
+                    let (o, k) = (
+                        kernel::space::Vec3::from(frame.origin),
+                        kernel::space::Vec3::from(frame.normal()?),
+                    );
                     let q = p - o;
                     Some((q - k * q.dot(k)).length())
                 };
                 let offset = match surface {
-                    Surface::Cylinder(c) => Surface::Cylinder(kernel::brep::Cylinder { radius: around(&c.base)?, ..c }),
+                    Surface::Cylinder(c) => Surface::Cylinder(kernel::brep::Cylinder {
+                        radius: around(&c.base)?,
+                        ..c
+                    }),
                     Surface::Sphere(s) => Surface::Sphere(kernel::brep::Sphere {
                         radius: (p - kernel::space::Vec3::from(s.frame.origin)).length(),
                         ..s
                     }),
                     Surface::Torus(t) => {
-                        let (o, k) = (kernel::space::Vec3::from(t.frame.origin), kernel::space::Vec3::from(t.frame.normal()?));
+                        let (o, k) = (
+                            kernel::space::Vec3::from(t.frame.origin),
+                            kernel::space::Vec3::from(t.frame.normal()?),
+                        );
                         let q = p - o;
                         let radial = q - k * q.dot(k);
                         let tube = o + radial.normalize()? * t.major_radius;
-                        Surface::Torus(kernel::brep::Torus { minor_radius: (p - tube).length(), ..t })
+                        Surface::Torus(kernel::brep::Torus {
+                            minor_radius: (p - tube).length(),
+                            ..t
+                        })
                     }
                     // Any other base keeps the offset as such (base and
                     // distance), drawn through its approximation.
@@ -611,7 +686,11 @@ impl Doc {
     /// The model pieces of a curve given in a surface's parameters (x as u,
     /// y as v): straight where the carried points stay on a line, else a
     /// spline through them.
-    fn parameter_pieces(&self, curve: f64, surface: f64) -> Option<Vec<(Curve3, [f64; 3], [f64; 3])>> {
+    fn parameter_pieces(
+        &self,
+        curve: f64,
+        surface: f64,
+    ) -> Option<Vec<(Curve3, [f64; 3], [f64; 3])>> {
         let surface_at = self.parameter_surface(surface)?;
         let mut out = Vec::new();
         for piece in self.pieces_unplaced(curve)? {
@@ -622,9 +701,10 @@ impl Doc {
                 })
                 .collect::<Option<Vec<[f64; 3]>>>()?;
             let (a, b) = (samples[0], samples[24]);
-            let straight = samples
-                .iter()
-                .all(|p| kernel::space::Vec3::from(*p).distance_to_segment(a.into(), b.into()) <= self.resolution);
+            let straight = samples.iter().all(|p| {
+                kernel::space::Vec3::from(*p).distance_to_segment(a.into(), b.into())
+                    <= self.resolution
+            });
             let curve = if straight {
                 Curve3::Line(Line3 {
                     origin: a,
@@ -755,7 +835,13 @@ impl Doc {
         Some(
             self.pieces(pointer)?
                 .into_iter()
-                .map(|(c, a, b)| (unscale(c, scale), a.map(|x| x / scale), b.map(|x| x / scale)))
+                .map(|(c, a, b)| {
+                    (
+                        unscale(c, scale),
+                        a.map(|x| x / scale),
+                        b.map(|x| x / scale),
+                    )
+                })
                 .collect(),
         )
     }
@@ -819,7 +905,12 @@ impl Assembly<'_> {
             return Some(v);
         }
         let entity = self.doc.get(list).filter(|e| e.kind == 502)?;
-        let n = key.1.checked_sub(1)?.checked_mul(3)?.checked_add(2)?.min(entity.params.len());
+        let n = key
+            .1
+            .checked_sub(1)?
+            .checked_mul(3)?
+            .checked_add(2)?
+            .min(entity.params.len());
         let p = |k: usize| entity.params.get(k).map(P::num);
         let point = self.doc.place(entity)([p(n)?, p(n + 1)?, p(n + 2)?]);
         let v = self.build.vertex(point);
@@ -833,7 +924,12 @@ impl Assembly<'_> {
             return Some(e);
         }
         let entity = self.doc.get(list).filter(|e| e.kind == 504)?;
-        let n = key.1.checked_sub(1)?.checked_mul(5)?.checked_add(2)?.min(entity.params.len());
+        let n = key
+            .1
+            .checked_sub(1)?
+            .checked_mul(5)?
+            .checked_add(2)?
+            .min(entity.params.len());
         let p = |k: usize| entity.params.get(k).map(P::num);
         let curve = self.doc.curve(p(n)?)?;
         let start = self.vertex(p(n + 1)?, p(n + 2)?)?;
@@ -846,7 +942,11 @@ impl Assembly<'_> {
     /// The vertex at a point, shared with one already there.
     fn corner(&mut self, point: [f64; 3]) -> VertexKey {
         let tolerance = self.doc.resolution;
-        if let Some((_, v)) = self.corners.iter().find(|(p, _)| distance(*p, point) <= tolerance) {
+        if let Some((_, v)) = self
+            .corners
+            .iter()
+            .find(|(p, _)| distance(*p, point) <= tolerance)
+        {
             return *v;
         }
         let v = self.build.vertex(point);
@@ -855,14 +955,22 @@ impl Assembly<'_> {
     }
 
     /// A loop along curve pieces, in their order.
-    fn curve_ring(&mut self, pieces: Vec<(Curve3, [f64; 3], [f64; 3])>) -> Option<Vec<(EdgeKey, bool)>> {
+    fn curve_ring(
+        &mut self,
+        pieces: Vec<(Curve3, [f64; 3], [f64; 3])>,
+    ) -> Option<Vec<(EdgeKey, bool)>> {
         // Pieces of one loop follow on from each other: a piece starts where
         // the one before it ends (and the last runs back to the first) even
         // when the file's points part by more than its resolution, up to a
         // ten-thousandth of the loop's size.
         let (lo, hi) = pieces.iter().flat_map(|(_, f, t)| [*f, *t]).fold(
             ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
-            |(lo, hi), p| ([0, 1, 2].map(|k| lo[k].min(p[k])), [0, 1, 2].map(|k| hi[k].max(p[k]))),
+            |(lo, hi), p| {
+                (
+                    [0, 1, 2].map(|k| lo[k].min(p[k])),
+                    [0, 1, 2].map(|k| hi[k].max(p[k])),
+                )
+            },
         );
         let gap = (1e-4 * distance(lo, hi)).max(self.doc.resolution);
         let mut ring = Vec::new();
@@ -902,15 +1010,23 @@ impl Assembly<'_> {
         let mut ring = Vec::new();
         for (k, (axis, at)) in sides.into_iter().enumerate() {
             let (a, b) = (corners[k], corners[(k + 1) % 4]);
-            let (from, to) = (surface.point_at_knot(a.0, a.1), surface.point_at_knot(b.0, b.1));
+            let (from, to) = (
+                surface.point_at_knot(a.0, a.1),
+                surface.point_at_knot(b.0, b.1),
+            );
             let middle = surface.point_at_knot(0.5 * (a.0 + b.0), 0.5 * (a.1 + b.1));
             if distance(from, middle) <= tolerance && distance(to, middle) <= tolerance {
                 traced.push(None);
                 continue;
             }
-            let seam = (k >= 2).then(|| traced[k - 2]).flatten().filter(|(f, t, m, _)| {
-                distance(*f, to) <= tolerance && distance(*t, from) <= tolerance && distance(*m, middle) <= tolerance
-            });
+            let seam = (k >= 2)
+                .then(|| traced[k - 2])
+                .flatten()
+                .filter(|(f, t, m, _)| {
+                    distance(*f, to) <= tolerance
+                        && distance(*t, from) <= tolerance
+                        && distance(*m, middle) <= tolerance
+                });
             if let Some((.., edge)) = seam {
                 ring.push((edge, false));
                 traced[k - 2] = None;
@@ -918,7 +1034,9 @@ impl Assembly<'_> {
                 continue;
             }
             let (p, q) = (self.corner(from), self.corner(to));
-            let edge = self.build.edge(Curve3::Nurbs(surface.isocurve(axis, at)?), p, q)?;
+            let edge = self
+                .build
+                .edge(Curve3::Nurbs(surface.isocurve(axis, at)?), p, q)?;
             ring.push((edge, true));
             traced.push(Some((from, to, middle, edge)));
         }
@@ -933,8 +1051,12 @@ impl Assembly<'_> {
     fn orient(&self, surface: &Surface, ring: &mut [(EdgeKey, bool)], outer: bool) {
         let mut uv = Vec::new();
         for (edge, forward) in ring.iter() {
-            let Some(edge) = self.build.body.edges.get(*edge) else { return };
-            let Some(curve) = self.build.body.curves.get(edge.curve) else { return };
+            let Some(edge) = self.build.body.edges.get(*edge) else {
+                return;
+            };
+            let Some(curve) = self.build.body.curves.get(edge.curve) else {
+                return;
+            };
             let (t0, t1) = (edge.start_parameter, edge.end_parameter);
             for k in 0..8 {
                 let s = k as f64 / 8.0;
@@ -964,8 +1086,16 @@ impl Assembly<'_> {
         // A count can be no more than the parameters there are.
         let count = (v(3) as usize).min(entity.params.len());
         let (surface_at, outer, holes): (f64, Option<f64>, Vec<f64>) = match entity.kind {
-            144 => (v(1), (v(2) != 0.0).then(|| v(4)), (0..count).map(|k| v(5 + k)).collect()),
-            143 => (v(2), (count > 0).then(|| v(4)), (1..count).map(|k| v(4 + k)).collect()),
+            144 => (
+                v(1),
+                (v(2) != 0.0).then(|| v(4)),
+                (0..count).map(|k| v(5 + k)).collect(),
+            ),
+            143 => (
+                v(2),
+                (count > 0).then(|| v(4)),
+                (1..count).map(|k| v(4 + k)).collect(),
+            ),
             _ => return None,
         };
         let (surface, net) = self.doc.surface_spec(surface_at)?;
@@ -997,11 +1127,14 @@ impl Assembly<'_> {
         let mut ring = Vec::new();
         let mut at = 2;
         for _ in 0..p(1)? as usize {
-            let (kind, list, index, agrees, pcurves) = (p(at)?, p(at + 1)?, p(at + 2)?, p(at + 3)?, p(at + 4)?);
+            let (kind, list, index, agrees, pcurves) =
+                (p(at)?, p(at + 1)?, p(at + 2)?, p(at + 3)?, p(at + 4)?);
             if kind == 0.0 {
                 ring.push((self.edge(list, index)?, agrees != 0.0));
             }
-            at = at.saturating_add(5).saturating_add((pcurves as usize).saturating_mul(2));
+            at = at
+                .saturating_add(5)
+                .saturating_add((pcurves as usize).saturating_mul(2));
         }
         Some(ring)
     }
@@ -1089,7 +1222,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
         if line.len() < 73 {
             continue;
         }
-        let Some(section) = line.get(72..73).and_then(|s| s.chars().next()) else { continue };
+        let Some(section) = line.get(72..73).and_then(|s| s.chars().next()) else {
+            continue;
+        };
         sections.entry(section).or_default().push(line);
     }
     let directory = sections.get(&'D')?;
@@ -1119,14 +1254,22 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
         10 => 10.0,
         11 => 0.000_025_4,
         3 => match globals.get(14) {
-            Some(P::Str(name)) if name.eq_ignore_ascii_case("IN") || name.eq_ignore_ascii_case("INCH") => 25.4,
+            Some(P::Str(name))
+                if name.eq_ignore_ascii_case("IN") || name.eq_ignore_ascii_case("INCH") =>
+            {
+                25.4
+            }
             Some(P::Str(name)) if name.eq_ignore_ascii_case("FT") => 304.8,
             Some(P::Str(name)) if name.eq_ignore_ascii_case("M") => 1000.0,
             Some(P::Str(name)) if name.eq_ignore_ascii_case("CM") => 10.0,
             _ => 1.0,
         },
         _ => 1.0,
-    } * globals.get(12).map(P::num).filter(|s| *s > 0.0).map_or(1.0, |s| 1.0 / s);
+    } * globals
+        .get(12)
+        .map(P::num)
+        .filter(|s| *s > 0.0)
+        .map_or(1.0, |s| 1.0 / s);
 
     let parameter_lines: HashMap<usize, &str> = sections
         .get(&'P')
@@ -1181,11 +1324,21 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
     // An entity's layer: its level's name, else the level number; level 0
     // (and a pointer to several levels) is layer 0.
     let layer = |entity: &Entity| match entity.level {
-        n if n > 0 => level_names.get(&n).cloned().unwrap_or_else(|| n.to_string()),
+        n if n > 0 => level_names
+            .get(&n)
+            .cloned()
+            .unwrap_or_else(|| n.to_string()),
         _ => "0".to_string(),
     };
-    let scale = drawing_mm.filter(|mm| *mm > 0.0).map_or(1.0, |mm| unit_mm / mm);
-    let resolution = globals.get(18).map(P::num).filter(|r| *r > 0.0).unwrap_or(1e-6) * scale;
+    let scale = drawing_mm
+        .filter(|mm| *mm > 0.0)
+        .map_or(1.0, |mm| unit_mm / mm);
+    let resolution = globals
+        .get(18)
+        .map(P::num)
+        .filter(|r| *r > 0.0)
+        .unwrap_or(1e-6)
+        * scale;
     let doc = Doc {
         entities,
         scale,
@@ -1203,7 +1356,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
     for number in solids {
         let entity = &doc.entities[&number];
         let v = |k: usize| entity.params.get(k).map(P::num);
-        let Some((shell, agrees)) = v(1).zip(v(2)) else { continue };
+        let Some((shell, agrees)) = v(1).zip(v(2)) else {
+            continue;
+        };
         let mut assembly = Assembly {
             doc: &doc,
             build: Builder {
@@ -1279,10 +1434,18 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
         .into_iter()
         .filter_map(|number| {
             let entity = &doc.entities[&number];
-            Some((doc.nurbs_curve(number as f64)?, doc.color(entity.color), layer(entity)))
+            Some((
+                doc.nurbs_curve(number as f64)?,
+                doc.color(entity.color),
+                layer(entity),
+            ))
         })
         .collect();
-    Some(IgesModel { bodies, sheets, curves })
+    Some(IgesModel {
+        bodies,
+        sheets,
+        curves,
+    })
 }
 
 /// A point along a parameter-space curve piece at `t` in 0..=1; an arc
@@ -1314,10 +1477,19 @@ fn unscale(curve: Curve3, scale: f64) -> Curve3 {
             direction: l.direction.map(|c| c / scale),
         }),
         Curve3::Nurbs(n) => {
-            let points = n.control_points().iter().map(|p| p.map(|c| c / scale)).collect();
-            NurbsCurve3::new(n.degree(), points, n.knots().to_vec(), Some(n.weights().to_vec()))
-                .map(Curve3::Nurbs)
-                .unwrap_or(Curve3::Nurbs(n))
+            let points = n
+                .control_points()
+                .iter()
+                .map(|p| p.map(|c| c / scale))
+                .collect();
+            NurbsCurve3::new(
+                n.degree(),
+                points,
+                n.knots().to_vec(),
+                Some(n.weights().to_vec()),
+            )
+            .map(Curve3::Nurbs)
+            .unwrap_or(Curve3::Nurbs(n))
         }
         Curve3::Circle(mut c) => {
             c.plane.origin = c.plane.origin.map(|x| x / scale);
@@ -1359,7 +1531,10 @@ fn analytic_revolution(
     let x_axis = turned(x, k, start).to_array();
     let base = Plane::orthonormal(foot(far).to_array(), x_axis, k.to_array())?;
     Some(if (r_far - r_near).abs() <= tolerance {
-        Surface::Cylinder(kernel::brep::Cylinder { base, radius: r_far })
+        Surface::Cylinder(kernel::brep::Cylinder {
+            base,
+            radius: r_far,
+        })
     } else {
         Surface::Cone(kernel::brep::Cone {
             base,
@@ -1389,7 +1564,9 @@ fn arc_angles(entity: &Entity) -> (f64, f64) {
 /// Whether a closed body's faces point inward: the volume its mesh encloses
 /// comes out negative.
 fn inside_out(body: &Body) -> bool {
-    let Some(bounds) = kernel::brep::body_bounds(body) else { return false };
+    let Some(bounds) = kernel::brep::body_bounds(body) else {
+        return false;
+    };
     let size = Vec3::from(bounds.min).distance(Vec3::from(bounds.max));
     let mesh = kernel::brep::mesh_body(body, 0.5, size * 1e-2);
     let volume: f64 = mesh

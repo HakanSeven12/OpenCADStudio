@@ -10,8 +10,8 @@ use document::{
     types::{Transform, Vector3},
     Document, Handle,
 };
-mod reference;
 mod expressions;
+mod reference;
 pub(crate) use expressions::validate_with_properties;
 #[cfg(test)]
 mod tests;
@@ -408,7 +408,14 @@ fn evaluate_row_context(
         .map(|p| (p.handle, frames[&p.handle].end))
         .collect();
     let actual = expressions::actual_inputs(document, baseline, definition, insert, &table)?;
-    let resolved = expressions::row(baseline.unwrap_or(document), definition, &table, row, &actual, true)?;
+    let resolved = expressions::row(
+        baseline.unwrap_or(document),
+        definition,
+        &table,
+        row,
+        &actual,
+        true,
+    )?;
     let mut endpoints = std::collections::BTreeMap::new();
     for (column, property) in table.columns.iter().enumerate() {
         if property.lookup_property {
@@ -430,7 +437,9 @@ fn evaluate_row_context(
         if !(is_distance && (parameter.linear || parameter.polar) || is_angle && parameter.polar) {
             return Err("This Lookup input property is unsupported.");
         }
-        let value = resolved[column].as_ref().map(|(_, value)| *value)
+        let value = resolved[column]
+            .as_ref()
+            .map(|(_, value)| *value)
             .filter(|value| value.is_finite() && (!is_distance || *value > 1e-9))
             .ok_or("The selected Lookup row has an invalid parameter value.")?;
         let endpoint = if let Some(endpoint) = endpoints.get_mut(&parameter.id) {
@@ -500,7 +509,9 @@ fn evaluate_row_context(
             previous,
         )?
     } else {
-        let action_bases = super::block_actions::instance::load_action_bases(document, insert, definition).unwrap_or_default();
+        let action_bases =
+            super::block_actions::instance::load_action_bases(document, insert, definition)
+                .unwrap_or_default();
         let resolved_frames = super::block_actions::rebuild_framed(
             &mut evaluated,
             baseline.unwrap_or(document),
@@ -511,7 +522,12 @@ fn evaluate_row_context(
         )?;
         let mut result =
             super::block_actions::instance::materialize(document, insert, definition, &evaluated)?;
-        super::block_actions::instance::save_action_bases(&mut result, insert, definition, &action_bases)?;
+        super::block_actions::instance::save_action_bases(
+            &mut result,
+            insert,
+            definition,
+            &action_bases,
+        )?;
         for parameter in &parameters {
             if let Some(frame) = resolved_frames.get(&parameter.handle) {
                 super::block_actions::instance::save_frame(&mut result, insert, parameter, *frame)?;
@@ -735,7 +751,12 @@ fn apply_table_inner(
     let mut edited = without_blank_rows(&edited);
     let previous = table(document, definition, parameter).map_err(str::to_string)?;
     validate(&edited, previous.as_ref().map(|(_, t)| t))?;
-    expressions::validate_context(document, definition, &edited, previous.as_ref().map(|(_, t)| t))?;
+    expressions::validate_context(
+        document,
+        definition,
+        &edited,
+        previous.as_ref().map(|(_, t)| t),
+    )?;
     let lookups = parameters(document, definition);
     let primary = lookups
         .iter()
@@ -825,11 +846,7 @@ fn apply_table_inner(
     }
     Ok(handle)
 }
-pub(crate) fn reframe(
-    document: &mut Document,
-    definition: Handle,
-    transform: &Transform,
-) -> usize {
+pub(crate) fn reframe(document: &mut Document, definition: Handle, transform: &Transform) -> usize {
     let Some(graph) = graph_handle(document, definition) else {
         return 0;
     };

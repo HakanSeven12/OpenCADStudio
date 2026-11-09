@@ -9,10 +9,16 @@ use glam::DVec3;
 
 mod table;
 
-pub(crate) fn current_table_row(doc: &Document, baseline: Option<&Document>, insert: Handle) -> Option<usize> {
+pub(crate) fn current_table_row(
+    doc: &Document,
+    baseline: Option<&Document>,
+    insert: Handle,
+) -> Option<usize> {
     let definition = instance::definition(doc, insert)?;
     let view = super::block_properties_table::table(baseline.unwrap_or(doc), definition).ok()??;
-    table::current_row(doc, baseline, insert, definition, &view).ok().flatten()
+    table::current_row(doc, baseline, insert, definition, &view)
+        .ok()
+        .flatten()
 }
 
 pub(crate) struct Descriptor<'a> {
@@ -116,11 +122,7 @@ fn flip_labels(doc: &Document, parameter: Handle) -> Vec<String> {
 }
 
 /// Empty native labels use UI defaults; authored labels are never translated.
-pub(crate) fn flip_state_label(
-    doc: &Document,
-    parameter: Handle,
-    state: bool,
-) -> Option<String> {
+pub(crate) fn flip_state_label(doc: &Document, parameter: Handle, state: bool) -> Option<String> {
     let Some(ObjectType::DynamicBlock(object)) = doc.objects.get(&parameter) else {
         return None;
     };
@@ -244,9 +246,9 @@ pub(crate) fn properties(
 ) -> Vec<Property> {
     // The rows print with the drawing's LUNITS/LUPREC/AUPREC, so a headless
     // caller or a non-active tab never formats with another drawing's settings.
-    crate::entities::common::set_unit_context(
-        crate::entities::common::UnitContext::from_header(&doc.header),
-    );
+    crate::entities::common::set_unit_context(crate::entities::common::UnitContext::from_header(
+        &doc.header,
+    ));
     let Some(definition) = instance::definition(doc, insert) else {
         return vec![];
     };
@@ -301,7 +303,9 @@ pub(crate) fn properties(
         }
     }
     rows.extend(table::property(doc, baseline, document, insert, definition));
-    rows.extend(super::block_lookup::reference_properties(doc, baseline, document, insert));
+    rows.extend(super::block_lookup::reference_properties(
+        doc, baseline, document, insert,
+    ));
     rows
 }
 #[derive(Clone, Copy)]
@@ -370,7 +374,10 @@ pub(crate) fn evaluate(
                     frame.end =
                         frame.base + DVec3::new(angle.cos(), angle.sin(), 0.) * delta.length();
                 }
-                Component::Flip | Component::Visibility(_) | Component::TableRow(_) | Component::LookupOutput { .. } => unreachable!(),
+                Component::Flip
+                | Component::Visibility(_)
+                | Component::TableRow(_)
+                | Component::LookupOutput { .. } => unreachable!(),
             }
             if !frame.end.is_finite() {
                 return Err("Specify a finite parameter value.");

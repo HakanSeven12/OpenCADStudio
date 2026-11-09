@@ -1293,7 +1293,9 @@ fn t2m_switch<'a>(
     row![
         switch,
         name,
-        text(hint).size(11).style(if enabled { muted_style } else { dim }),
+        text(hint)
+            .size(11)
+            .style(if enabled { muted_style } else { dim }),
     ]
     .spacing(8)
     .align_y(iced::Center)
@@ -1376,14 +1378,16 @@ pub fn view_txt2mtxt_settings<'a>(
                 Some(PdfDialogMsg::T2mCombine),
             ),
             column![
-                text(crate::tr!("txt2mtxt", "order")).size(11).style(muted_style),
+                text(crate::tr!("txt2mtxt", "order"))
+                    .size(11)
+                    .style(muted_style),
                 t2m_order(s.select_order, s.combine),
             ]
             .spacing(6)
             .padding(iced::Padding::ZERO.left(44)),
             text(crate::tr!("txt2mtxt", "combine-note"))
-            .size(11)
-            .style(muted_style),
+                .size(11)
+                .style(muted_style),
         ]
         .spacing(8),
     );
@@ -1394,7 +1398,8 @@ pub fn view_txt2mtxt_settings<'a>(
                 crate::tr!("txt2mtxt", "wrap"),
                 crate::tr!("txt2mtxt", "wrap-hint"),
                 s.word_wrap,
-                s.combine.then_some(PdfDialogMsg::T2mWrap as fn(bool) -> PdfDialogMsg),
+                s.combine
+                    .then_some(PdfDialogMsg::T2mWrap as fn(bool) -> PdfDialogMsg),
             ),
             t2m_switch(
                 crate::tr!("txt2mtxt", "uniform"),
@@ -1423,7 +1428,9 @@ pub fn view_txt2mtxt_settings<'a>(
     let preview = container(
         row![
             column![
-                text(crate::tr!("txt2mtxt", "selected")).size(11).style(muted_style),
+                text(crate::tr!("txt2mtxt", "selected"))
+                    .size(11)
+                    .style(muted_style),
                 t2m_sample(sample, false, 190.0)
             ]
             .spacing(4),
@@ -1499,8 +1506,14 @@ pub fn view_matchprop_settings<'a>(
         (M::LAYER, crate::tr!("matchprop-settings", "layer")),
         (M::LTYPE, crate::tr!("matchprop-settings", "linetype")),
         (M::LTSCALE, crate::tr!("matchprop-settings", "ltscale")),
-        (M::LINEWEIGHT, crate::tr!("matchprop-settings", "lineweight")),
-        (M::TRANSPARENCY, crate::tr!("matchprop-settings", "transparency")),
+        (
+            M::LINEWEIGHT,
+            crate::tr!("matchprop-settings", "lineweight"),
+        ),
+        (
+            M::TRANSPARENCY,
+            crate::tr!("matchprop-settings", "transparency"),
+        ),
         (M::THICKNESS, crate::tr!("matchprop-settings", "thickness")),
         (M::PLOTSTYLE, crate::tr!("matchprop-settings", "plotstyle")),
     ];
@@ -1518,9 +1531,15 @@ pub fn view_matchprop_settings<'a>(
             let name = if enabled { name } else { name.style(dim) };
             let mut shown = row![].spacing(6).align_y(iced::Center);
             if let (M::COLOR, Some([r, g, b])) = (bit, s.swatch) {
-                shown = shown.push(crate::ui::color_select::swatch(iced::Color::from_rgb8(r, g, b)));
+                shown = shown.push(crate::ui::color_select::swatch(iced::Color::from_rgb8(
+                    r, g, b,
+                )));
             }
-            shown = shown.push(text(value.as_str()).size(11).style(if enabled { muted_style } else { dim }));
+            shown = shown.push(text(value.as_str()).size(11).style(if enabled {
+                muted_style
+            } else {
+                dim
+            }));
             if !enabled {
                 shown = shown.push(
                     text(crate::tr!("matchprop-settings", "plotstyle-off"))
@@ -1574,9 +1593,13 @@ pub fn view_matchprop_settings<'a>(
     let mut chips = special.into_iter().peekable();
     while chips.peek().is_some() {
         let line = chips.by_ref().take(3).map(|(bit, label)| {
-            container(chip(label, s.mode & bit != 0, msg(PdfDialogMsg::MpToggle(bit))))
-                .width(Fill)
-                .into()
+            container(chip(
+                label,
+                s.mode & bit != 0,
+                msg(PdfDialogMsg::MpToggle(bit)),
+            ))
+            .width(Fill)
+            .into()
         });
         grid = grid.push(iced::widget::Row::with_children(line.collect::<Vec<_>>()).spacing(6));
     }
@@ -3079,7 +3102,12 @@ pub struct ImageAdjustState {
 pub const IMAGE_ADJUST_DEFAULTS: [u8; 3] = [50, 50, 0];
 
 impl ImageAdjustState {
-    pub fn new(handles: Vec<document::Handle>, path: &str, values: [u8; 3], canvas: [u8; 3]) -> Self {
+    pub fn new(
+        handles: Vec<document::Handle>,
+        path: &str,
+        values: [u8; 3],
+        canvas: [u8; 3],
+    ) -> Self {
         let name = std::path::Path::new(path.trim()).file_name().map_or_else(
             || path.trim().to_string(),
             |n| n.to_string_lossy().into_owned(),

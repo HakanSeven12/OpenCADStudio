@@ -612,7 +612,10 @@ pub fn set_pdf_import_pick(path: std::path::PathBuf) {
 }
 
 pub fn take_pdf_import_pick() -> Option<std::path::PathBuf> {
-    PDF_IMPORT_PICK.lock().unwrap_or_else(|e| e.into_inner()).take()
+    PDF_IMPORT_PICK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
 }
 
 /// The file type ATTACH's picker was last left on (1-based; 7 = Drawing).
@@ -1444,7 +1447,12 @@ pub fn terminate_requests() -> impl iced::futures::Stream<Item = ()> + Send + 's
     iced::stream::channel(1, async |mut output| {
         let (sender, receiver) = iced::futures::channel::oneshot::channel();
         // SAFETY: the handler only stores an atomic flag.
-        unsafe { signal(SIGTERM, on_sigterm as extern "C" fn(std::os::raw::c_int) as usize) };
+        unsafe {
+            signal(
+                SIGTERM,
+                on_sigterm as extern "C" fn(std::os::raw::c_int) as usize,
+            )
+        };
         std::thread::spawn(move || {
             while !TERMINATE.load(std::sync::atomic::Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(250));

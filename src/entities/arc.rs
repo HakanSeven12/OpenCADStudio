@@ -210,11 +210,27 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
                 "total_angle",
                 format_angle(total_angle.to_radians()),
             ),
-            ro(t!("Arc length").as_ref(), "arc_length", format_length(arc_length)),
+            ro(
+                t!("Arc length").as_ref(),
+                "arc_length",
+                format_length(arc_length),
+            ),
             ro(t!("Area").as_ref(), "area", format_area(area)),
-            ro(t!("Normal X").as_ref(), "normal_x", format_decimal(arc.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format_decimal(arc.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format_decimal(arc.normal.z)),
+            ro(
+                t!("Normal X").as_ref(),
+                "normal_x",
+                format_decimal(arc.normal.x),
+            ),
+            ro(
+                t!("Normal Y").as_ref(),
+                "normal_y",
+                format_decimal(arc.normal.y),
+            ),
+            ro(
+                t!("Normal Z").as_ref(),
+                "normal_z",
+                format_decimal(arc.normal.z),
+            ),
         ],
     }]
 }

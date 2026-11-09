@@ -53,10 +53,7 @@ impl PluginClassStore {
                 set.len()
             ));
         }
-        if let Some(existing) = set
-            .iter()
-            .find(|entry| entry.class_id == class.class_id)
-        {
+        if let Some(existing) = set.iter().find(|entry| entry.class_id == class.class_id) {
             if existing.schema_version == class.schema_version
                 && existing.grip_schema == class.grip_schema
                 && existing.parameters == class.parameters
@@ -76,11 +73,7 @@ impl PluginClassStore {
 
     /// The owning plugin's declaration, or `None` (the caller then refuses —
     /// staging requires the caller to BE the owner).
-    pub(crate) fn find(
-        &self,
-        plugin: &str,
-        class_id: &str,
-    ) -> Option<&PluginClassDeclaration> {
+    pub(crate) fn find(&self, plugin: &str, class_id: &str) -> Option<&PluginClassDeclaration> {
         self.entries
             .get(plugin)?
             .iter()
@@ -133,7 +126,10 @@ mod tests {
         // A different schema version refuses without touching the live entry.
         let err = store.declare("p", class("road", 5)).unwrap_err();
         assert!(err.contains("different schema"), "got: {err}");
-        assert_eq!(store.find("p", "road").expect("live entry").schema_version, 4);
+        assert_eq!(
+            store.find("p", "road").expect("live entry").schema_version,
+            4
+        );
         // Another plugin cannot see (and so cannot stage) the class, but a
         // refusal can name the honest owner.
         assert!(store.find("other", "road").is_none());
@@ -149,7 +145,9 @@ mod tests {
                 .expect("within the per-plugin cap");
         }
         assert!(store.declare("full", class("one-too-many", 1)).is_err());
-        store.declare("lean", class("lean", 1)).expect("other plugin");
+        store
+            .declare("lean", class("lean", 1))
+            .expect("other plugin");
         assert_eq!(store.total(), MAX_PLUGIN_CLASSES_PER_PLUGIN + 1);
         // Retention drops the dead plugin's whole set and reports the change.
         assert!(store.retain_alive(|p| p != "full"));

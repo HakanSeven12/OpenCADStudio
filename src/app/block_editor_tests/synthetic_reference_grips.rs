@@ -130,7 +130,12 @@ fn window() -> (OpenCADStudio, Handle, Handle, i32) {
         line((0., 0.), (100., 0.)),
         line((0., 10.), (100., 10.)),
         line((0., 5.), (100., 5.)),
-        EntityType::Arc(Arc::from_center_radius_angles(Vector3::new(40., 30., 0.), 20., 0., std::f64::consts::FRAC_PI_2)),
+        EntityType::Arc(Arc::from_center_radius_angles(
+            Vector3::new(40., 30., 0.),
+            20.,
+            0.,
+            std::f64::consts::FRAC_PI_2,
+        )),
     ];
     let (mut app, plain, mirrored) = drawing("WINDOW", entities, |insert| {
         insert.insert_point = Vector3::new(300., 50., 0.);
@@ -156,8 +161,16 @@ fn window() -> (OpenCADStudio, Handle, Handle, i32) {
     .unwrap();
     config::set(doc, def, width, Some(2)).unwrap();
     for (key, targets, frame) in [
-        (XyKeyPoint::End, end_targets, [DVec3::new(90., -5., 0.), DVec3::new(110., 15., 0.)]),
-        (XyKeyPoint::Base, base_targets, [DVec3::new(-10., -5., 0.), DVec3::new(10., 15., 0.)]),
+        (
+            XyKeyPoint::End,
+            end_targets,
+            [DVec3::new(90., -5., 0.), DVec3::new(110., 15., 0.)],
+        ),
+        (
+            XyKeyPoint::Base,
+            base_targets,
+            [DVec3::new(-10., -5., 0.), DVec3::new(10., 15., 0.)],
+        ),
     ] {
         actions::create_with_options(
             doc,
@@ -267,8 +280,16 @@ const DOOR_AT_REST: [((f64, f64), (f64, f64)); 5] = [
 fn synthetic_swing_door_thickness_grip_tracks_requested_position() {
     for rotated in [false, true] {
         let (mut app, plain, turned, id) = swing_door();
-        let (insert, other) = if rotated { (turned, plain) } else { (plain, turned) };
-        let other_before = app.tabs[app.active_tab].scene.document.get_entity(other).cloned();
+        let (insert, other) = if rotated {
+            (turned, plain)
+        } else {
+            (plain, turned)
+        };
+        let other_before = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(other)
+            .cloned();
         let target = drag(&mut app, insert, id, 1, 2.);
         let after = grip(&mut app, insert, id, 1);
         assert!(
@@ -293,7 +314,11 @@ fn synthetic_swing_door_thickness_grip_tracks_requested_position() {
         assert!(center.length() < EPS && (radius - 70.).abs() < EPS);
         assert!(start.abs() < EPS && (end - std::f64::consts::FRAC_PI_2).abs() < EPS);
         assert_eq!(
-            app.tabs[app.active_tab].scene.document.get_entity(other).cloned(),
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .get_entity(other)
+                .cloned(),
             other_before,
             "the other reference is untouched"
         );
@@ -329,7 +354,11 @@ fn synthetic_window_endpoint_grips_track_requested_positions() {
         for role in [0, 1] {
             let context = format!("mirrored={mirrored} role={role}");
             let (mut app, plain, flipped, id) = window();
-            let (insert, other) = if mirrored { (flipped, plain) } else { (plain, flipped) };
+            let (insert, other) = if mirrored {
+                (flipped, plain)
+            } else {
+                (plain, flipped)
+            };
             let start = grip(&mut app, insert, id, role).world;
             let target = drag(&mut app, insert, id, role, 20.);
             assert!((target - start).length() > 19.9, "{context}");
@@ -354,7 +383,6 @@ fn synthetic_window_grip_edits_undo_and_redo_the_whole_drawing() {
             let context = format!("mirrored={mirrored} role={role}");
             let (mut app, plain, flipped, id) = window();
             let insert = if mirrored { flipped } else { plain };
-            let before = app.tabs[app.active_tab].scene.document.clone();
             let depth = app.tabs[app.active_tab].history.undo_stack.len();
             drag(&mut app, insert, id, role, 20.);
             assert_eq!(
@@ -372,7 +400,11 @@ fn synthetic_window_grip_edits_undo_and_redo_the_whole_drawing() {
                 &context,
             );
             let _ = app.update(Message::Redo);
-            assert_eq!(block_name(&app, insert), changed_name, "redo {context}: name");
+            assert_eq!(
+                block_name(&app, insert),
+                changed_name,
+                "redo {context}: name"
+            );
             assert_lines(
                 &geometry(&app.tabs[app.active_tab].scene.document, insert).0,
                 &window_after(role),
@@ -393,8 +425,7 @@ fn synthetic_window_grip_edits_persist_through_dwg_and_dxf() {
             for extension in ["dwg", "dxf"] {
                 let context = format!("{extension} mirrored={mirrored} role={role}");
                 let bytes = crate::io::save_to_bytes(&changed, extension, changed.version).unwrap();
-                let saved =
-                    crate::io::load_bytes(&format!("window.{extension}"), bytes).unwrap();
+                let saved = crate::io::load_bytes(&format!("window.{extension}"), bytes).unwrap();
                 let mut reopened = OpenCADStudio::new_for_test();
                 let j = reopened.active_tab;
                 reopened.tabs[j].scene.document = saved;
@@ -427,7 +458,6 @@ fn synthetic_window_grip_edits_persist_through_dwg_and_dxf() {
         }
     }
 }
-
 
 /// A synthetic coupled-flip block with two orthogonal Flip parameters and a Linear parameter
 /// driving a Stretch action.
@@ -499,10 +529,23 @@ fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
     let first = actions::create(doc, def, Kind::Flip, flip_v, &targets, DVec3::ZERO).unwrap();
     let second = actions::create(doc, def, Kind::Flip, flip_h, &targets, DVec3::ZERO).unwrap();
     let basepoint = crate::scene::block_basepoint::create(doc, def, Vector3::ZERO).unwrap();
-    let base_id = crate::scene::block_basepoint::parameter(doc, def).unwrap().1.parameter.parameter.element.eval.node_id;
+    let base_id = crate::scene::block_basepoint::parameter(doc, def)
+        .unwrap()
+        .1
+        .parameter
+        .parameter
+        .element
+        .eval
+        .node_id;
     for handle in [first, second] {
-        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&handle).unwrap() else { panic!() };
-        let document::objects::DynamicBlockData::FlipAction(action) = &mut object.data else { panic!() };
+        let document::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get_mut(&handle).unwrap()
+        else {
+            panic!()
+        };
+        let document::objects::DynamicBlockData::FlipAction(action) = &mut object.data else {
+            panic!()
+        };
         action.action.dependencies.push(basepoint);
         action.action.action_ids.push(base_id);
     }
@@ -516,15 +559,30 @@ fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
     (app, plain, lin_id, flip_v_id, flip_h_id)
 }
 
-fn assert_coupled_geometry(app: &OpenCADStudio, insert: Handle, width: f64, vertical: bool, horizontal: bool) {
-    let transform = |x: f64, y: f64| (if vertical { 100. - x } else { x }, if horizontal { 20. - y } else { y });
+fn assert_coupled_geometry(
+    app: &OpenCADStudio,
+    insert: Handle,
+    width: f64,
+    vertical: bool,
+    horizontal: bool,
+) {
+    let transform = |x: f64, y: f64| {
+        (
+            if vertical { 100. - x } else { x },
+            if horizontal { 20. - y } else { y },
+        )
+    };
     let expected = [
         (transform(0., 0.), transform(width, 0.)),
         (transform(width, 0.), transform(width, 20.)),
         (transform(width, 20.), transform(0., 20.)),
         (transform(0., 20.), transform(0., 0.)),
     ];
-    assert_lines(&geometry(&app.tabs[app.active_tab].scene.document, insert).0, &expected, "coupled geometry");
+    assert_lines(
+        &geometry(&app.tabs[app.active_tab].scene.document, insert).0,
+        &expected,
+        "coupled geometry",
+    );
 }
 
 fn toggle(app: &mut OpenCADStudio, insert: Handle, id: i32) {
@@ -541,7 +599,11 @@ fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
     for reverse in [false, true] {
         let (mut app, insert, lin_id, flip_v_id, flip_h_id) = coupled_flip_synthetic();
         let i = app.active_tab;
-        let order = if reverse { [flip_h_id, flip_v_id] } else { [flip_v_id, flip_h_id] };
+        let order = if reverse {
+            [flip_h_id, flip_v_id]
+        } else {
+            [flip_v_id, flip_h_id]
+        };
         let baseline = app.tabs[i].scene.document.clone();
         toggle(&mut app, insert, order[0]);
         assert_coupled_geometry(&app, insert, 100., !reverse, reverse);
@@ -553,20 +615,33 @@ fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
         assert_coupled_geometry(&app, insert, 130., true, true);
         let changed = app.tabs[i].scene.document.clone();
         let _ = app.update(Message::Undo);
-        assert_eq!(geometry(&app.tabs[i].scene.document, insert), before_stretch);
+        assert_eq!(
+            geometry(&app.tabs[i].scene.document, insert),
+            before_stretch
+        );
         let _ = app.update(Message::Redo);
         assert_coupled_geometry(&app, insert, 130., true, true);
         let def = changed.dynamic_definition_for_insert(insert).unwrap();
-        app.tabs[i].scene.document = actions::instance::refresh_after_edit(&changed, &baseline, def).unwrap();
+        app.tabs[i].scene.document =
+            actions::instance::refresh_after_edit(&changed, &baseline, def).unwrap();
         assert_coupled_geometry(&app, insert, 130., true, true);
         for ext in ["dwg", "dxf"] {
             let doc = &app.tabs[i].scene.document;
             let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
-            let loaded = crate::io::load_bytes_finalized(std::path::Path::new(&format!("coupled.{ext}")), bytes).unwrap();
+            let loaded = crate::io::load_bytes_finalized(
+                std::path::Path::new(&format!("coupled.{ext}")),
+                bytes,
+            )
+            .unwrap();
             let mut reopened = OpenCADStudio::new_for_test();
             let j = reopened.active_tab;
             reopened.tabs[j].scene.document = loaded;
-            assert!(grip(&mut reopened, insert, lin_id, 1).world.distance(target) < EPS);
+            assert!(
+                grip(&mut reopened, insert, lin_id, 1)
+                    .world
+                    .distance(target)
+                    < EPS
+            );
             assert_coupled_geometry(&reopened, insert, 130., true, true);
             drag(&mut reopened, insert, lin_id, 1, 10.);
             assert_coupled_geometry(&reopened, insert, 140., true, true);
@@ -587,7 +662,11 @@ fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
 fn assert_window_arc(app: &OpenCADStudio, insert: Handle, center: DVec3, radius: f64) {
     let (_, arcs) = geometry(&app.tabs[app.active_tab].scene.document, insert);
     assert_eq!(arcs.len(), 1);
-    assert!(arcs[0].0.distance(center) < EPS, "actual={:?} expected={center:?}", arcs[0]);
+    assert!(
+        arcs[0].0.distance(center) < EPS,
+        "actual={:?} expected={center:?}",
+        arcs[0]
+    );
     assert!((arcs[0].1 - radius).abs() < EPS);
     assert!(arcs[0].2.abs() < EPS);
     assert!((arcs[0].3 - std::f64::consts::FRAC_PI_2).abs() < EPS);
@@ -597,21 +676,38 @@ fn assert_window_arc(app: &OpenCADStudio, insert: Handle, center: DVec3, radius:
 fn synthetic_window_scale_grips_refresh_reload_reset_and_continue() {
     for mirrored in [false, true] {
         let (mut app, plain, mirror, id) = window();
-        let (insert, other) = if mirrored { (mirror, plain) } else { (plain, mirror) };
+        let (insert, other) = if mirrored {
+            (mirror, plain)
+        } else {
+            (plain, mirror)
+        };
         let i = app.active_tab;
         let original = app.tabs[i].scene.document.clone();
         drag(&mut app, insert, id, 0, 20.);
         assert_window_arc(&app, insert, DVec3::new(52., 36., 0.), 24.);
         let edited = app.tabs[i].scene.document.clone();
         let _ = app.update(Message::Undo);
-        assert_eq!(geometry(&app.tabs[i].scene.document, insert), geometry(&original, insert));
+        assert_eq!(
+            geometry(&app.tabs[i].scene.document, insert),
+            geometry(&original, insert)
+        );
         let def = original.dynamic_definition_for_insert(insert).unwrap();
-        assert_eq!(actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(), actions::instance::load_action_bases(&original, insert, def).unwrap());
+        assert_eq!(
+            actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(),
+            actions::instance::load_action_bases(&original, insert, def).unwrap()
+        );
         let _ = app.update(Message::Redo);
-        assert_eq!(geometry(&app.tabs[i].scene.document, insert), geometry(&edited, insert));
-        assert_eq!(actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(), actions::instance::load_action_bases(&edited, insert, def).unwrap());
+        assert_eq!(
+            geometry(&app.tabs[i].scene.document, insert),
+            geometry(&edited, insert)
+        );
+        assert_eq!(
+            actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(),
+            actions::instance::load_action_bases(&edited, insert, def).unwrap()
+        );
         let def = edited.dynamic_definition_for_insert(insert).unwrap();
-        app.tabs[i].scene.document = actions::instance::refresh_after_edit(&edited, &original, def).unwrap();
+        app.tabs[i].scene.document =
+            actions::instance::refresh_after_edit(&edited, &original, def).unwrap();
         assert_window_arc(&app, insert, DVec3::new(52., 36., 0.), 24.);
         assert_window_arc(&app, other, DVec3::new(40., 30., 0.), 20.);
         for ext in ["dwg", "dxf"] {
@@ -625,7 +721,9 @@ fn synthetic_window_scale_grips_refresh_reload_reset_and_continue() {
             // Incremental scale about base -20: -20 + (52 + 20) * 140/120.
             assert_window_arc(&reopened, insert, DVec3::new(64., 42., 0.), 28.);
             assert_window_arc(&reopened, other, DVec3::new(40., 30., 0.), 20.);
-            let reset = actions::instance::reset(&reopened.tabs[j].scene.document, insert).unwrap().unwrap();
+            let reset = actions::instance::reset(&reopened.tabs[j].scene.document, insert)
+                .unwrap()
+                .unwrap();
             reopened.tabs[j].scene.document = reset;
             assert_window_arc(&reopened, insert, DVec3::new(40., 30., 0.), 20.);
             drag(&mut reopened, insert, id, 1, 20.);
@@ -642,31 +740,68 @@ fn synthetic_basepoint_stretch_grips_survive_finalized_open_and_continue() {
         let i = app.active_tab;
         let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
         let doc = &mut app.tabs[i].scene.document;
-        let action = actions::actions(doc, def).into_iter().find_map(|(h, _, kind, _)| {
-            if kind != Kind::Stretch { return None }
-            let document::objects::ObjectType::DynamicBlock(object) = &doc.objects[&h] else { return None };
-            let document::objects::DynamicBlockData::StretchAction(action) = &object.data else { return None };
-            action.connections.iter().any(|c| c.name == "BaseXDelta").then_some(h)
-        }).unwrap();
+        let action = actions::actions(doc, def)
+            .into_iter()
+            .find_map(|(h, _, kind, _)| {
+                if kind != Kind::Stretch {
+                    return None;
+                }
+                let document::objects::ObjectType::DynamicBlock(object) = &doc.objects[&h] else {
+                    return None;
+                };
+                let document::objects::DynamicBlockData::StretchAction(action) = &object.data
+                else {
+                    return None;
+                };
+                action
+                    .connections
+                    .iter()
+                    .any(|c| c.name == "BaseXDelta")
+                    .then_some(h)
+            })
+            .unwrap();
         let basepoint = crate::scene::block_basepoint::create(doc, def, Vector3::ZERO).unwrap();
-        let node = crate::scene::block_basepoint::parameter(doc, def).unwrap().1.parameter.parameter.element.eval.node_id;
-        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else { panic!() };
-        let document::objects::DynamicBlockData::StretchAction(action) = &mut object.data else { panic!() };
+        let node = crate::scene::block_basepoint::parameter(doc, def)
+            .unwrap()
+            .1
+            .parameter
+            .parameter
+            .element
+            .eval
+            .node_id;
+        let document::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get_mut(&action).unwrap()
+        else {
+            panic!()
+        };
+        let document::objects::DynamicBlockData::StretchAction(action) = &mut object.data else {
+            panic!()
+        };
         action.action.dependencies.push(basepoint);
         action.action.action_ids.push(node);
-        action.codes.push(document::objects::BlockStretchCode { code: node, indexes: vec![0] });
+        action.codes.push(document::objects::BlockStretchCode {
+            code: node,
+            indexes: vec![0],
+        });
         save_and_close(&mut app);
         let insert = if mirrored { mirror } else { plain };
         let target = drag(&mut app, insert, id, 0, 20.);
         let changed = app.tabs[i].scene.document.clone();
         for ext in ["dwg", "dxf"] {
             let bytes = crate::io::save_to_bytes(&changed, ext, changed.version).unwrap();
-            let loaded = crate::io::load_bytes_finalized(std::path::Path::new(&format!("basepoint.{ext}")), bytes).unwrap();
+            let loaded = crate::io::load_bytes_finalized(
+                std::path::Path::new(&format!("basepoint.{ext}")),
+                bytes,
+            )
+            .unwrap();
             let mut reopened = OpenCADStudio::new_for_test();
             let j = reopened.active_tab;
             reopened.tabs[j].scene.document = loaded;
             let actual = grip(&mut reopened, insert, id, 0).world;
-            assert!(actual.distance(target) < EPS, "{ext} mirrored={mirrored} actual={actual:?} expected={target:?}");
+            assert!(
+                actual.distance(target) < EPS,
+                "{ext} mirrored={mirrored} actual={actual:?} expected={target:?}"
+            );
             assert_window_arc(&reopened, insert, DVec3::new(52., 36., 0.), 24.);
             drag(&mut reopened, insert, id, 1, 10.);
             assert_window_arc(&reopened, insert, DVec3::new(58., 39., 0.), 26.);

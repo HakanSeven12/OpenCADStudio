@@ -75,8 +75,16 @@ accessors!(get_array_col_sp, set_array_col_sp, ARRAY_COL_SP);
 accessors!(get_array_p_count, set_array_p_count, ARRAY_P_COUNT);
 accessors!(get_array_p_angle, set_array_p_angle, ARRAY_P_ANGLE);
 accessors!(get_array_path_count, set_array_path_count, ARRAY_PATH_COUNT);
-accessors!(get_array_path_spacing, set_array_path_spacing, ARRAY_PATH_SPACING);
-accessors!(get_array_path_measure, set_array_path_measure, ARRAY_PATH_MEASURE);
+accessors!(
+    get_array_path_spacing,
+    set_array_path_spacing,
+    ARRAY_PATH_SPACING
+);
+accessors!(
+    get_array_path_measure,
+    set_array_path_measure,
+    ARRAY_PATH_MEASURE
+);
 accessors!(get_polygon_sides, set_polygon_sides, POLYGON_SIDES);
 accessors!(get_rect_elevation, set_rect_elevation, RECT_ELEVATION);
 accessors!(get_rect_thickness, set_rect_thickness, RECT_THICKNESS);

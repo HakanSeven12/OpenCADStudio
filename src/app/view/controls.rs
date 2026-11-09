@@ -300,12 +300,17 @@ pub(super) fn viewport_controls<'a>(
                 outline_tooltip(outline_on, outline_opacity),
                 "VPHIGHLIGHT",
             );
-            bar = bar.push(sep()).push(outline).push(drag).push(sep()).push(danger_btn(
-                crate::ui::icons::CLOSE,
-                Message::CloseModelViewport,
-                crate::tr!("viewport", "close"),
-                "VPORTS SINGLE",
-            ));
+            bar = bar
+                .push(sep())
+                .push(outline)
+                .push(drag)
+                .push(sep())
+                .push(danger_btn(
+                    crate::ui::icons::CLOSE,
+                    Message::CloseModelViewport,
+                    crate::tr!("viewport", "close"),
+                    "VPORTS SINGLE",
+                ));
         }
     }
 
@@ -439,14 +444,28 @@ mod tests {
         assert_eq!(outline_opacity_step(50, up), 55);
         assert_eq!(outline_opacity_step(50, down), 45);
         assert_eq!(outline_opacity_step(100, up), 100);
-        assert_eq!(outline_opacity_step(5, down), 5, "never wheeled out of sight");
+        assert_eq!(
+            outline_opacity_step(5, down),
+            5,
+            "never wheeled out of sight"
+        );
         assert!(outline_tooltip(true, 50).contains("50%"));
     }
 
     #[test]
     fn test_viewport_controls_construction() {
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
-            let _el = viewport_controls(style.mode, true, true, true, 1, false, None, None, (true, 50));
+            let _el = viewport_controls(
+                style.mode,
+                true,
+                true,
+                true,
+                1,
+                false,
+                None,
+                None,
+                (true, 50),
+            );
             let _el_open = viewport_controls(
                 style.mode,
                 false,

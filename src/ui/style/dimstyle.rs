@@ -630,9 +630,11 @@ pub fn view_window<'a>(
         ];
         let feet_current = feet_modes[(raw & 3) as usize].clone();
         let feet: Element<'a, Message> = if show_feet_inches {
-            let list = crate::ui::dropdown_list::pick_list(Some(feet_current.clone()), feet_modes, |choice| {
-                choice.to_string()
-            })
+            let list = crate::ui::dropdown_list::pick_list(
+                Some(feet_current.clone()),
+                feet_modes,
+                |choice| choice.to_string(),
+            )
             .text_size(11)
             .width(210);
             let list: Element<'a, Message> = if enabled && !vals.read_only {
@@ -753,21 +755,20 @@ pub fn view_window<'a>(
                              field: &'static str,
                              enabled: bool|
           -> Element<'a, Message> {
-        let list =
-            crate::ui::dropdown_list::pick_list(Some(selected.clone()), options, |value| value.to_string())
-                .text_size(11)
-                .width(150);
-        let list: Element<'a, Message> = if enabled
-            && !vals.read_only
-            && user_arrow_field == Some(field)
-        {
-            user_arrow_list(user_arrow_blocks.clone(), field)
-        } else if enabled && !vals.read_only {
-            list.on_select(move |value| Message::DsSetHandle { field, value })
-                .into()
-        } else {
-            crate::ui::read_only::field(&selected, 11.0, Length::Fixed(150.0))
-        };
+        let list = crate::ui::dropdown_list::pick_list(Some(selected.clone()), options, |value| {
+            value.to_string()
+        })
+        .text_size(11)
+        .width(150);
+        let list: Element<'a, Message> =
+            if enabled && !vals.read_only && user_arrow_field == Some(field) {
+                user_arrow_list(user_arrow_blocks.clone(), field)
+            } else if enabled && !vals.read_only {
+                list.on_select(move |value| Message::DsSetHandle { field, value })
+                    .into()
+            } else {
+                crate::ui::read_only::field(&selected, 11.0, Length::Fixed(150.0))
+            };
         row![lbl(label), list]
             .spacing(8)
             .align_y(iced::Center)
@@ -1519,8 +1520,10 @@ mod preview_extension_tests {
         let default = preview_extension_geometry(112.0, 0.18, 0.0625);
         let changed = preview_extension_geometry(112.0, 1.18, 0.0625);
         assert_eq!(changed.0, default.0);
-        assert!((default.1 - changed.1 - 5.0).abs() < 0.001,
-            "DIMEXE must move the extension end by 5 px: {default:?} -> {changed:?}");
+        assert!(
+            (default.1 - changed.1 - 5.0).abs() < 0.001,
+            "DIMEXE must move the extension end by 5 px: {default:?} -> {changed:?}"
+        );
     }
 
     #[test]
@@ -1528,8 +1531,10 @@ mod preview_extension_tests {
         let default = preview_extension_geometry(112.0, 0.18, 0.0625);
         let changed = preview_extension_geometry(112.0, 0.18, 1.0625);
         assert_eq!(changed.1, default.1);
-        assert!((default.0 - changed.0 - 5.0).abs() < 0.001,
-            "DIMEXO must move the extension start by 5 px: {default:?} -> {changed:?}");
+        assert!(
+            (default.0 - changed.0 - 5.0).abs() < 0.001,
+            "DIMEXO must move the extension start by 5 px: {default:?} -> {changed:?}"
+        );
     }
 
     #[test]
@@ -1539,8 +1544,10 @@ mod preview_extension_tests {
         let (start, end) = preview_extension_geometry(112.0, 0.18, 0.0625);
         assert!((start - 94.0).abs() <= 1.0);
         assert!((end - 22.0).abs() <= 1.0);
-        assert!((94.0 - start - 0.3125).abs() < 0.001,
-            "default DIMEXO must contribute its scaled gap, got start {start}");
+        assert!(
+            (94.0 - start - 0.3125).abs() < 0.001,
+            "default DIMEXO must contribute its scaled gap, got start {start}"
+        );
     }
 
     #[test]

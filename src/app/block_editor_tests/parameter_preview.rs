@@ -745,7 +745,8 @@ fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
             panic!()
         };
         action.action.dependencies = vec![child];
-        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
+        let document::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get_mut(&moved).unwrap()
         else {
             panic!()
         };
@@ -2076,9 +2077,11 @@ fn check_move_parameter_targets(flip: bool) {
         .selection_marker_selected(handle));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     assert_eq!(
-        actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
-            .unwrap(),
-        actions::instance::ParameterFrame { base: target.base, end: target.end }
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &target).unwrap(),
+        actions::instance::ParameterFrame {
+            base: target.base,
+            end: target.end
+        }
     );
     let count = actions::actions(&app.tabs[i].scene.document, def).len();
     let _ = app.dispatch_command("BACTION MOVE");

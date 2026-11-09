@@ -1383,6 +1383,12 @@ impl GuiClient {
             batch.results.push(compact);
             batch.next += 1;
 
+            // Nothing ran: forget the batch so the same request_id can retry
+            // against the state this reply just refreshed (#2488).
+            if stale_before_first_step(&batch, &response) {
+                return Ok(batch_result(&batch, "failed", false));
+            }
+
             if response["ok"].as_bool() == Some(false)
                 || matches!(response["status"].as_str(), Some("failed" | "cancelled"))
             {
@@ -1411,6 +1417,33 @@ impl GuiClient {
             }
         }
     }
+}
+
+/// `stale_state` on a batch's first step: the GUI refused before running
+/// anything. On a later step, earlier steps have already run.
+fn stale_before_first_step(batch: &BatchExecution, response: &Value) -> bool {
+    batch.next == 1 && response["code"] == "stale_state"
+}
+
+/// A fresh `state` for each held connection, so an idle one is not left stale.
+/// A connection whose active document changed keeps its state: the bridge
+/// must not silently retarget its next edit.
+fn refresh_client_states(clients: &mut HashMap<String, GuiClient>) {
+    for client in clients.values_mut() {
+        if let Ok(state) = exchange(
+            &client.descriptor,
+            json!({"op":"state"}),
+            Duration::from_secs(5),
+        ) {
+            if adopt_refreshed_state(&client.state, &state) {
+                client.state = state;
+            }
+        }
+    }
+}
+
+fn adopt_refreshed_state(current: &Value, fresh: &Value) -> bool {
+    fresh["ok"] == true && fresh["document_id"] == current["document_id"]
 }
 
 fn batch_step_id(id: &str, step: usize) -> String {
@@ -2054,7 +2087,9 @@ fn call_tool(
     match name {
         "ocs_sessions" => {
             let launch = arguments["launch_if_none"].as_bool().unwrap_or(true);
-            Ok(Value::Array(sessions(launch).map_err(CallError::Infra)?))
+            let listed = sessions(launch).map_err(CallError::Infra)?;
+            refresh_client_states(clients);
+            Ok(Value::Array(listed))
         }
         "ocs_read" => {
             let op = arguments["op"].as_str().unwrap_or("state");
@@ -4297,8 +4332,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|block| block["type"] == "image"
-                    && block["data"] == "capture-png"));
+                .any(|block| block["type"] == "image" && block["data"] == "capture-png"));
         }
     }
 
@@ -4503,6 +4537,43 @@ mod tests {
         store.insert_at(mk("second"), past_ttl);
         assert_eq!(store.tasks.len(), 1);
         assert!(store.get_mut_at("second", past_ttl).is_some());
+    }
+
+    #[test]
+    fn only_a_first_step_stale_state_is_retryable() {
+        let stale = json!({"ok":false,"code":"stale_state"});
+        let batch = |next| BatchExecution {
+            id: "b".into(),
+            request: json!({}),
+            steps: Vec::new(),
+            next,
+            active: None,
+            pending: None,
+            results: Vec::new(),
+            changes: Vec::new(),
+            state: None,
+            terminal: None,
+        };
+        assert!(stale_before_first_step(&batch(1), &stale));
+        assert!(!stale_before_first_step(&batch(2), &stale), "step 0 ran");
+        assert!(!stale_before_first_step(
+            &batch(1),
+            &json!({"ok":false,"code":"command_busy"})
+        ));
+    }
+
+    #[test]
+    fn a_refresh_never_retargets_another_document() {
+        let current = json!({"document_id":2,"revision":1});
+        assert!(adopt_refreshed_state(
+            &current,
+            &json!({"ok":true,"document_id":2,"revision":9})
+        ));
+        assert!(!adopt_refreshed_state(
+            &current,
+            &json!({"ok":true,"document_id":3,"revision":9})
+        ));
+        assert!(!adopt_refreshed_state(&current, &json!({"ok":false})));
     }
 
     #[test]

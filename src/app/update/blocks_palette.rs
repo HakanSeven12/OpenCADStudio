@@ -322,10 +322,12 @@ impl OpenCADStudio {
             options.repeat = false;
         }
         let mut cmd = InsertBlockCommand::palette(name.to_string(), wires, &options);
-        if let Some(record)=self.tabs[i].scene.document.block_records.get(name) {
-            let doc=&self.tabs[i].scene.document;
-            cmd.set_insertion_points(crate::scene::render_graph::block_base_point(doc,name),
-                crate::scene::block_grips::insertion_points(doc,record.handle));
+        if let Some(record) = self.tabs[i].scene.document.block_records.get(name) {
+            let doc = &self.tabs[i].scene.document;
+            cmd.set_insertion_points(
+                crate::scene::render_graph::block_base_point(doc, name),
+                crate::scene::block_grips::insertion_points(doc, record.handle),
+            );
         }
         if let Some(point) = drop_at {
             cmd.set_point(point);
@@ -452,10 +454,8 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.push_undo_snapshot(i, "INSERT");
         self.merge_dependencies(i, &deps);
-        let apps = crate::app::command_driver::clipboard::eed_app_map(
-            &self.tabs[i].scene.document,
-            &deps,
-        );
+        let apps =
+            crate::app::command_driver::clipboard::eed_app_map(&self.tabs[i].scene.document, &deps);
         let mut created = Vec::new();
         for def in &deps.blocks {
             let scene = &mut self.tabs[i].scene;
@@ -587,7 +587,14 @@ impl OpenCADStudio {
                         .iter()
                         .map(|session| session.br_handle)
                         .collect();
-                    self.push_undo_snapshot(i, crate::app::tab_document::HistoryLabel::formatted(format!("Delete block {name}"), "delete-block", name.to_owned().into()));
+                    self.push_undo_snapshot(
+                        i,
+                        crate::app::tab_document::HistoryLabel::formatted(
+                            format!("Delete block {name}"),
+                            "delete-block",
+                            name.to_owned().into(),
+                        ),
+                    );
                     let outcome = crate::scene::block_service::delete(
                         &mut self.tabs[i].scene,
                         &name,
@@ -913,10 +920,13 @@ impl OpenCADStudio {
                 ),
             );
             user.push(br.name.clone());
-            insertion_points.insert(br.name.to_ascii_uppercase(),(
-                crate::scene::render_graph::block_base_point(doc,&br.name),
-                crate::scene::block_grips::insertion_points(doc,br.handle),
-            ));
+            insertion_points.insert(
+                br.name.to_ascii_uppercase(),
+                (
+                    crate::scene::render_graph::block_base_point(doc, &br.name),
+                    crate::scene::block_grips::insertion_points(doc, br.handle),
+                ),
+            );
         }
         user.sort_by_key(|n| n.to_ascii_uppercase());
         let search_path = std::env::current_dir()
@@ -937,7 +947,9 @@ impl OpenCADStudio {
 /// layout's, whose contents are the drawing itself and can be large. Unlike
 /// `Scene::custom_block_names`, this keeps anonymous records, because a
 /// generated record can hold a named one and so carries its changes.
-fn palette_records(doc: &document::Document) -> impl Iterator<Item = &document::tables::BlockRecord> {
+fn palette_records(
+    doc: &document::Document,
+) -> impl Iterator<Item = &document::tables::BlockRecord> {
     use document::TableEntry;
     doc.block_records
         .iter()

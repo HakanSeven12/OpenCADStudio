@@ -424,7 +424,16 @@ impl FieldKey {
     pub fn widget_id(&self) -> iced::widget::Id {
         match self {
             FieldKey::Geom(field) => prop_geom_field_id(field),
-            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}-{:?}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component, key.batch_generation, key.editor_session)),
+            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!(
+                "props-block-{}-{}-{}-{}-{:?}-{:?}-{:?}",
+                key.document,
+                key.definition,
+                key.insert,
+                key.parameter,
+                key.component,
+                key.batch_generation,
+                key.editor_session
+            )),
             FieldKey::Attr(tag) => prop_attr_field_id(tag),
             FieldKey::PluginParam(name) => prop_plugin_param_field_id(name),
             FieldKey::Param(index, field) => prop_param_field_id(*index, *field),
@@ -1110,9 +1119,7 @@ impl PropertiesPanel {
                 let list = DropdownList::new(rows)
                     .selected((*selected < options.len()).then_some(*selected))
                     .on_escape(Message::PropBlockPickerDismiss { key, quick });
-                let popup = container(list)
-                    .style(container::bordered_box)
-                    .padding(2);
+                let popup = container(list).style(container::bordered_box).padding(2);
                 // The overlay reports its own Escape before the global shortcut
                 // repeats it; a distinct dismiss message lets the later repeat
                 // be swallowed with the list already closed.
@@ -1147,7 +1154,11 @@ impl PropertiesPanel {
             PropValue::Choice { selected, options } => {
                 self.render_choice_row(label, prop.field, selected, options)
             }
-            PropValue::ChoiceWithTooltip { selected, options, tooltip: description } => {
+            PropValue::ChoiceWithTooltip {
+                selected,
+                options,
+                tooltip: description,
+            } => {
                 let row = self.render_choice_row(label, prop.field, selected, options);
                 if description.is_empty() {
                     row
@@ -1722,7 +1733,10 @@ impl PropertiesPanel {
                 .style(button::subtle)
                 .padding([2, 6])
                 .width(Length::Fill);
-            if typed.as_deref().map_or(false, |t| t.eq_ignore_ascii_case(opt.as_str())) {
+            if typed
+                .as_deref()
+                .map_or(false, |t| t.eq_ignore_ascii_case(opt.as_str()))
+            {
                 initial_selected = Some(rows.len());
             }
             rows.push(DropdownRow::item(btn, value, msg));
@@ -1733,9 +1747,7 @@ impl PropertiesPanel {
             .select_first_by_default(select_first)
             .query(filter.unwrap_or_default())
             .on_escape(Message::PropEditChoiceToggle(field));
-        let popup = container(list)
-            .style(container::bordered_box)
-            .padding(2);
+        let popup = container(list).style(container::bordered_box).padding(2);
 
         prop_row_with_active(
             label,
@@ -1761,21 +1773,15 @@ impl PropertiesPanel {
         value: &'a str,
     ) -> Element<'a, Message> {
         let key = plugin_param_edit_key(name);
-        let display = self
-            .edit_buf
-            .get(&key)
-            .map(|s| s.as_str())
-            .unwrap_or(value);
+        let display = self.edit_buf.get(&key).map(|s| s.as_str()).unwrap_or(value);
 
         let active = self.active_field.as_ref() == Some(&key);
         let name_for_input = name.to_string();
         let ti = text_input("", display)
             .id(prop_plugin_param_field_id(name))
-            .on_input(move |v| {
-                Message::PropPluginParamInput {
-                    name: name_for_input.clone(),
-                    value: v,
-                }
+            .on_input(move |v| Message::PropPluginParamInput {
+                name: name_for_input.clone(),
+                value: v,
             })
             .on_submit(Message::PropPluginParamCommit(name.to_string()))
             .size(FONT_SZ)
@@ -2106,14 +2112,20 @@ fn coord_suffix(label: &str) -> Option<(&str, usize)> {
 
 /// Length of the coordinate group starting at `idx`: consecutive text rows
 /// labelled "<Base> X", "<Base> Y" and optionally "<Base> Z". 0/1 = no group.
-pub(crate) fn coord_group_len(props: &[crate::scene::model::object::Property], idx: usize) -> usize {
+pub(crate) fn coord_group_len(
+    props: &[crate::scene::model::object::Property],
+    idx: usize,
+) -> usize {
     if matches!(props[idx].field, "pl3_vertex_x" | "pm_vx") {
         return 0;
     }
     let groupable = |p: &crate::scene::model::object::Property| {
         matches!(
             p.value,
-            PropValue::EditText(_) | PropValue::ReadOnly(_) | PropValue::ReadOnlyWithTooltip { .. } | PropValue::BlockNumber { .. }
+            PropValue::EditText(_)
+                | PropValue::ReadOnly(_)
+                | PropValue::ReadOnlyWithTooltip { .. }
+                | PropValue::BlockNumber { .. }
         )
     };
     let Some((base, 0)) = coord_suffix(&props[idx].label) else {
@@ -2706,7 +2718,8 @@ mod tests {
 
         let mut panel = super::PropertiesPanel::default();
         let options = vec!["ByLayer".into(), "ByBlock".into(), "50".into()];
-        let mut row = panel.render_edit_choice_row("Transparency", "transparency", "ByLayer", &options);
+        let mut row =
+            panel.render_edit_choice_row("Transparency", "transparency", "ByLayer", &options);
         let mut tree = Tree::new(row.as_widget());
         tree.diff(row.as_widget_mut());
         input_state(&mut tree).focus();

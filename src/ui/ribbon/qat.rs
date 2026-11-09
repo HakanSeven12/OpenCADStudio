@@ -492,13 +492,15 @@ impl Ribbon {
             place.as_str(),
         ]));
         use crate::ui::dropdown_list::{DropdownList, DropdownRow};
-        let mut items: Vec<DropdownRow<'_, Message>> = vec![DropdownRow::header(menu_header(title))];
+        let mut items: Vec<DropdownRow<'_, Message>> =
+            vec![DropdownRow::header(menu_header(title))];
         items.extend(standard.into_iter().map(|(label, item)| {
             let checked = self.layout.qat_has(&item);
             let on_press = self
                 .can_toggle(&item)
                 .then(|| Message::RibbonQat(QatMsg::Toggle(item)));
-            let el: Element<'_, Message> = check_row(label.clone(), checked, on_press.clone()).into();
+            let el: Element<'_, Message> =
+                check_row(label.clone(), checked, on_press.clone()).into();
             if let Some(msg) = on_press {
                 DropdownRow::item(el, label, msg)
             } else {
@@ -604,15 +606,9 @@ impl Ribbon {
                     })
                     .collect()
             };
-        let list = DropdownList::with_options(
-            rows,
-            Length::Fixed(list_h),
-            Length::Fill,
-            0.0,
-            0.0,
-        )
-        .query(self.qat_query.clone())
-        .on_escape(Message::CloseRibbonDropdown);
+        let list = DropdownList::with_options(rows, Length::Fixed(list_h), Length::Fill, 0.0, 0.0)
+            .query(self.qat_query.clone())
+            .on_escape(Message::CloseRibbonDropdown);
         let panel = container(
             iced::widget::column![
                 menu_header(crate::tr!("ribbon-menu", "more-commands-title")),

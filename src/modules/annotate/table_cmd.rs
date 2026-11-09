@@ -95,7 +95,14 @@ pub fn row_heights(
     data_rows: usize,
     lines: usize,
 ) -> Vec<f64> {
-    row_heights_for(style, ["Title", "Header", "Data"], title, header, data_rows, lines)
+    row_heights_for(
+        style,
+        ["Title", "Header", "Data"],
+        title,
+        header,
+        data_rows,
+        lines,
+    )
 }
 
 /// Row heights of a table whose first, second and other rows take the
@@ -116,7 +123,9 @@ pub fn row_heights_for(
             Some(s) => match s.cell_style(&cell_style_name(names[slot])) {
                 Some(cell) => (
                     cell.cell_style.content_format.text_height,
-                    cell.cell_style.margins().map_or(s.vertical_margin, |(_, v)| v),
+                    cell.cell_style
+                        .margins()
+                        .map_or(s.vertical_margin, |(_, v)| v),
                 ),
                 None => (
                     [
@@ -231,7 +240,9 @@ fn template_option(options: &mut TemplateOptions, index: usize) -> &mut bool {
 }
 
 /// An empty, unmerged cell with the cell style of `cell`.
-fn blank_cell_like(cell: &document::entities::table::TableCell) -> document::entities::table::TableCell {
+fn blank_cell_like(
+    cell: &document::entities::table::TableCell,
+) -> document::entities::table::TableCell {
     let mut blank = document::entities::table::TableCell::new();
     blank.style_id = cell.style_id;
     blank.style = cell.style.clone();
@@ -332,7 +343,6 @@ pub fn table_from_template(
     table
 }
 
-
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
     Columns,
@@ -340,9 +350,15 @@ enum Step {
     Insertion,
     FirstCorner,
     SecondCorner(DVec3),
-    StyleName { window: bool },
-    Width { window: bool },
-    Height { window: bool },
+    StyleName {
+        window: bool,
+    },
+    Width {
+        window: bool,
+    },
+    Height {
+        window: bool,
+    },
     LinkName,
     /// "from Style": place the style's starting table.
     FromStyle,
@@ -400,7 +416,10 @@ fn cell_style_from_row(style: &document::objects::RowCellStyle) -> CellStyle {
     result
 }
 
-pub(crate) fn selected_row_style(table_style: &document::objects::TableStyle, name: &str) -> CellStyle {
+pub(crate) fn selected_row_style(
+    table_style: &document::objects::TableStyle,
+    name: &str,
+) -> CellStyle {
     let style = if name.eq_ignore_ascii_case("Title") {
         &table_style.title_row_style
     } else if name.eq_ignore_ascii_case("Header") {
@@ -486,7 +505,9 @@ impl TableCommand {
 
     /// The styles whose starting table "from Style" can place.
     fn template_styles(&self) -> impl Iterator<Item = &StyleChoice> {
-        self.styles.iter().filter(|choice| choice.template.is_some())
+        self.styles
+            .iter()
+            .filter(|choice| choice.template.is_some())
     }
 
     /// -TABLE: every setting on the command line, starting from the ones
@@ -571,8 +592,14 @@ impl TableCommand {
         let style = self.style.as_ref().map(|choice| &choice.style);
         let Some(second) = second else {
             let widths = vec![self.cell_width; self.columns.unwrap_or(1)];
-            let heights =
-                row_heights_for(style, self.row_names(), title, header, self.data_rows.unwrap_or(1), self.row_lines);
+            let heights = row_heights_for(
+                style,
+                self.row_names(),
+                title,
+                header,
+                self.data_rows.unwrap_or(1),
+                self.row_lines,
+            );
             return (first, widths, heights);
         };
         let second = self.plane.to_local(second);
@@ -598,11 +625,19 @@ impl TableCommand {
             }
             // Else as many data rows as fit, at least one.
             None => {
-                let one = row_heights_for(style, self.row_names(), title, header, 1, self.row_lines);
+                let one =
+                    row_heights_for(style, self.row_names(), title, header, 1, self.row_lines);
                 let data = *one.last().unwrap_or(&1.0);
                 let labels: f64 = one[..one.len() - 1].iter().sum();
                 let count = ((height - labels) / data + 1.0e-9).floor().max(1.0) as usize;
-                row_heights_for(style, self.row_names(), title, header, count, self.row_lines)
+                row_heights_for(
+                    style,
+                    self.row_names(),
+                    title,
+                    header,
+                    count,
+                    self.row_lines,
+                )
             }
         };
         (first, widths, heights)
@@ -702,9 +737,16 @@ impl TableCommand {
                 .to_array()
         };
         let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
-        let title_height = if title { heights.first().copied().unwrap_or(0.0) } else { 0.0 };
+        let title_height = if title {
+            heights.first().copied().unwrap_or(0.0)
+        } else {
+            0.0
+        };
         let mut x = 0.0;
-        for (index, column) in std::iter::once(0.0).chain(widths.iter().copied()).enumerate() {
+        for (index, column) in std::iter::once(0.0)
+            .chain(widths.iter().copied())
+            .enumerate()
+        {
             x += column;
             let inner = index > 0 && index < widths.len();
             points.push(world(x, if inner { -title_height } else { 0.0 }));
@@ -1005,8 +1047,10 @@ impl CadCommand for TableCommand {
             }
             Step::FromStyleName => {
                 if input == "?" {
-                    let names: Vec<&str> =
-                        self.template_styles().map(|choice| choice.name.as_str()).collect();
+                    let names: Vec<&str> = self
+                        .template_styles()
+                        .map(|choice| choice.name.as_str())
+                        .collect();
                     return Some(CmdResult::ReportMeasurement(format!(
                         "{}\n-----------------\n{}",
                         t!("Table Style Name"),
@@ -1133,7 +1177,10 @@ impl CadCommand for TableCommand {
                 let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
                 let title = widths.len() > 1
                     && table.merged_ranges.iter().any(|r| {
-                        r.top_row == 0 && r.bottom_row == 0 && r.left_col == 0 && r.right_col + 1 >= widths.len()
+                        r.top_row == 0
+                            && r.bottom_row == 0
+                            && r.left_col == 0
+                            && r.right_col + 1 >= widths.len()
                     });
                 Some(self.grid_wire(point, &widths, &heights, title))
             }
@@ -1185,7 +1232,9 @@ impl CadCommand for TableTemplatePickCommand {
     }
 }
 
-inventory::submit!(crate::command::CommandRegistration { names: &["TABLE", "-TABLE"] });
+inventory::submit!(crate::command::CommandRegistration {
+    names: &["TABLE", "-TABLE"]
+});
 
 /// A table cell resolved from a pick: grid coordinates plus whether its
 /// content is locked against editing.
@@ -1397,13 +1446,14 @@ impl TableCellEditCommand {
     }
 
     fn set_value_type(&mut self, data_type: i32, unit_type: i32, picture: &str) {
-        use document::entities::table::CellStylePropertyFlags as P;
         use crate::entities::table::{cell_data_category, cell_data_kind, CELL_DATA_CATEGORIES};
+        use document::entities::table::CellStylePropertyFlags as P;
         // A cell whose type turns into a number aligns Top Right, whatever
         // its table style's alignment (measured with Top Center, Middle
         // Left, Bottom Center, Top Left, Middle Right, Bottom Left); an
         // alignment set on the cell itself stays.
-        let before = cell_data_kind(&self.table, self.row, self.column).map(|(kind, _)| CELL_DATA_CATEGORIES[kind].0);
+        let before = cell_data_kind(&self.table, self.row, self.column)
+            .map(|(kind, _)| CELL_DATA_CATEGORIES[kind].0);
         let after = cell_data_category(data_type, unit_type);
         let own_alignment = self
             .table
@@ -1414,8 +1464,11 @@ impl TableCellEditCommand {
             .is_some_and(|style| style.sets(P::ALIGNMENT));
         let right = (before != Some(after)
             && !own_alignment
-            && matches!(after, "Whole Number" | "Decimal Number" | "Currency" | "Percentage"))
-            .then_some(3);
+            && matches!(
+                after,
+                "Whole Number" | "Decimal Number" | "Currency" | "Percentage"
+            ))
+        .then_some(3);
         if let Some(cell) = self.table.cell_mut(self.row, self.column) {
             if let Some(alignment) = right {
                 let style = cell.style.get_or_insert_with(Default::default);
@@ -1603,7 +1656,10 @@ mod tabledit_tests {
         for line in wire.points.chunks(3) {
             assert!(line[0][0].is_finite() && line[1][0].is_finite());
             assert!(line[2][0].is_nan(), "lines must not join: {line:?}");
-            assert!(line[0][0] == line[1][0] || line[0][1] == line[1][1], "diagonal {line:?}");
+            assert!(
+                line[0][0] == line[1][0] || line[0][1] == line[1][1],
+                "diagonal {line:?}"
+            );
         }
     }
 
@@ -1613,7 +1669,11 @@ mod tabledit_tests {
         let cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
         assert!(cmd.title_header().0, "a new table starts with a title row");
         let wire = cmd.preview_grid(DVec3::ZERO, None);
-        let verticals: Vec<_> = wire.points.chunks(3).filter(|l| l[0][0] == l[1][0]).collect();
+        let verticals: Vec<_> = wire
+            .points
+            .chunks(3)
+            .filter(|l| l[0][0] == l[1][0])
+            .collect();
         let (left, right) = (verticals[0][0][0], verticals[verticals.len() - 1][0][0]);
         assert_eq!(verticals.len(), 4, "3 columns: 4 vertical lines");
         for line in &verticals {
@@ -1621,7 +1681,10 @@ mod tabledit_tests {
             if line[0][0] == left || line[0][0] == right {
                 assert_eq!(top, 0.0, "the outline reaches the top: {line:?}");
             } else {
-                assert!(top < 0.0, "an inner column line must stop under the title: {line:?}");
+                assert!(
+                    top < 0.0,
+                    "an inner column line must stop under the title: {line:?}"
+                );
             }
         }
     }
@@ -1631,14 +1694,19 @@ mod tabledit_tests {
         let names = ["Title", "Header", "Data"];
         let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
         match cmd.on_point(DVec3::new(10.0, 20.0, 0.0)) {
-            CmdResult::CommitAndExit(document::EntityType::Table(t)) => assert_eq!(t.column_count(), 3),
+            CmdResult::CommitAndExit(document::EntityType::Table(t)) => {
+                assert_eq!(t.column_count(), 3)
+            }
             CmdResult::CommitAndEditText(_) => panic!("the new table must not open a cell editor"),
             _ => panic!("expected the table to be committed"),
         }
         // the window (two corners) form too
         let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, true, true, names);
         let _ = cmd.on_point(DVec3::ZERO);
-        assert!(matches!(cmd.on_point(DVec3::new(9.0, -6.0, 0.0)), CmdResult::CommitAndExit(_)));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(9.0, -6.0, 0.0)),
+            CmdResult::CommitAndExit(_)
+        ));
     }
 
     #[test]

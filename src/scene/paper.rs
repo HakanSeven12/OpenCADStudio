@@ -423,14 +423,11 @@ impl Scene {
         // never changes within a build.
         let layer_walk = self.render_space_layer_walk(layout_block, None);
         let layer_hidden = |layer: &str| {
-            self.document
-                .layers
-                .get(layer)
-                .is_some_and(|l| {
-                    l.flags.off
-                        || l.flags.frozen
-                        || layer_walk.is_some_and(|walk| !walk.contains(&l.handle))
-                })
+            self.document.layers.get(layer).is_some_and(|l| {
+                l.flags.off
+                    || l.flags.frozen
+                    || layer_walk.is_some_and(|walk| !walk.contains(&l.handle))
+            })
         };
         let mut models: Vec<HatchModel> = Vec::new();
         let annotation_scale_handle = self.paper_annotation_scale_handle();
@@ -554,14 +551,11 @@ impl Scene {
         // foreign blocks / plot passes resolve to `None` and stay complete.
         let layer_walk = self.render_space_layer_walk(block, None);
         let layer_hidden = |layer: &str| {
-            self.document
-                .layers
-                .get(layer)
-                .is_some_and(|l| {
-                    l.flags.off
-                        || l.flags.frozen
-                        || layer_walk.is_some_and(|walk| !walk.contains(&l.handle))
-                })
+            self.document.layers.get(layer).is_some_and(|l| {
+                l.flags.off
+                    || l.flags.frozen
+                    || layer_walk.is_some_and(|walk| !walk.contains(&l.handle))
+            })
         };
         let layer_plottable = |layer: &str| {
             self.document

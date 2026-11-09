@@ -13,6 +13,7 @@ ribbon: Model tab › Create panel
 | Option | What it does |
 |---|---|
 | **Multiple** (`M`) | Lets you pick more areas or faces, then press Enter to give one height to all of them. |
+| **New body** (`N`) | With a solid's face, or an area on it, picked: creates a separate solid from that area and leaves the original solid unchanged. **Modify solid** (`MODIFY`) switches back. |
 | **Undo** (`U`) | Removes the last picked area or face. |
 
 ## Notes

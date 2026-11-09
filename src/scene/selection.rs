@@ -2,7 +2,9 @@ use super::*;
 
 /// The address of the object's hyperlink.
 pub(crate) fn pe_url_of(entity: &EntityType) -> Option<&str> {
-    pe_url_strings(entity).next().filter(|text| !text.is_empty())
+    pe_url_strings(entity)
+        .next()
+        .filter(|text| !text.is_empty())
 }
 
 fn pe_url_strings(entity: &EntityType) -> impl Iterator<Item = &str> {
@@ -453,7 +455,11 @@ impl Scene {
         };
         let mut keys: rustc_hash::FxHashMap<&str, rustc_hash::FxHashSet<Vec<Option<String>>>> =
             Default::default();
-        for e in self.selected.iter().filter_map(|h| self.document.get_entity(*h)) {
+        for e in self
+            .selected
+            .iter()
+            .filter_map(|h| self.document.get_entity(*h))
+        {
             keys.entry(entity_type_name(e)).or_default().insert(key(e));
         }
         let matches: Vec<Handle> = self
@@ -894,7 +900,8 @@ impl Scene {
                                 PropValue::LayerChoice(_) => {
                                     QSelectValueEditor::Choice(layer_options.clone())
                                 }
-                                PropValue::Choice { ref options, .. } | PropValue::ChoiceWithTooltip { ref options, .. } => {
+                                PropValue::Choice { ref options, .. }
+                                | PropValue::ChoiceWithTooltip { ref options, .. } => {
                                     QSelectValueEditor::Choice(options.clone())
                                 }
                                 PropValue::EditChoice {
@@ -1055,7 +1062,11 @@ impl Scene {
     /// `"ByLayer"` / `"7"` / `"0.30mm"` are stable; everything else
     /// goes through `geometry_properties()` and pulls the matching
     /// row's value out.
-    pub fn entity_property_value(&self, entity: &document::EntityType, field: &str) -> Option<String> {
+    pub fn entity_property_value(
+        &self,
+        entity: &document::EntityType,
+        field: &str,
+    ) -> Option<String> {
         use crate::entities::traits::EntityTypeOps;
         use crate::scene::model::object::PropValue;
         match field {
@@ -1130,7 +1141,8 @@ impl Scene {
                     | PropValue::PlainText(s)
                     | PropValue::Hyperlink(s) => s,
                     PropValue::LayerChoice(s) => s,
-                    PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => selected,
+                    PropValue::Choice { selected, .. }
+                    | PropValue::ChoiceWithTooltip { selected, .. } => selected,
                     PropValue::EditChoice { value, .. } => value,
                     PropValue::ColorChoice(c) => Self::format_color(c),
                     PropValue::NamedColorChoice { name, .. } => name,
@@ -1312,7 +1324,6 @@ impl Scene {
             // reference-only). Undo restores it through the recorded channel.
             self.reference_only.remove(h);
             selection_changed |= self.selected.remove(&h);
-            self.selected_order.retain(|selected| *selected != h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
                 hover_changed = true;
@@ -1337,7 +1348,10 @@ impl Scene {
             handle_set.insert(h);
             erased.push((h, ChangeKind::Removed));
         }
+        // Once for the whole batch: per handle this is quadratic in the selection.
         if selection_changed {
+            self.selected_order
+                .retain(|selected| !handle_set.contains(selected));
             self.bump_selection_set();
         } else if hover_changed {
             self.bump_selection();
@@ -1466,6 +1480,24 @@ const SIMILAR_FIELDS: &[(u16, &[&str])] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn erasing_part_of_a_selection_keeps_the_rest_in_pick_order() {
+        let mut scene = crate::scene::Scene::new();
+        let mut line = |y| {
+            scene.add_entity(document::EntityType::Line(
+                document::entities::Line::from_coords(0.0, y, 0.0, 1.0, y, 0.0),
+            ))
+        };
+        let (a, b, c) = (line(0.0), line(1.0), line(2.0));
+        for handle in [c, b, a] {
+            scene.select_entity(handle, false);
+        }
+
+        scene.erase_entities(&[b]);
+
+        assert_eq!(scene.selected_handles_in_order(), vec![c, a]);
+    }
+
     #[test]
     fn qselect_sample_matches_identical_entities_without_unique_handles() {
         use crate::app::{QSelectMode, QSelectScope};
@@ -1905,8 +1937,6 @@ mod tests {
     }
 }
 
-
-
 /// Cells picked in one table: the cell the pick started from and the one it
 /// reaches (a Shift+click or a drag moves the second).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1944,7 +1974,11 @@ impl Scene {
         margin: f64,
     ) -> Option<(Handle, (usize, usize))> {
         let block = self.interaction_block_handle();
-        let record = self.document.block_records.iter().find(|r| r.handle == block)?;
+        let record = self
+            .document
+            .block_records
+            .iter()
+            .find(|r| r.handle == block)?;
         record.entity_handles.iter().rev().find_map(|&handle| {
             let Some(EntityType::Table(table)) = self.document.get_entity(handle) else {
                 return None;
@@ -1958,10 +1992,13 @@ impl Scene {
             {
                 return None;
             }
-            let style = table.table_style_handle.and_then(|h| match self.document.objects.get(&h)? {
-                document::objects::ObjectType::TableStyle(style) => Some(style),
-                _ => None,
-            });
+            let style =
+                table
+                    .table_style_handle
+                    .and_then(|h| match self.document.objects.get(&h)? {
+                        document::objects::ObjectType::TableStyle(style) => Some(style),
+                        _ => None,
+                    });
             crate::modules::annotate::table_cmd::table_cell_inside(table, style, point, margin)
                 .map(|cell| (handle, cell))
         })

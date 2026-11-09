@@ -239,12 +239,9 @@ pub fn view<'a>(
     width: f32,
     chrome: Chrome,
 ) -> Element<'a, Message> {
-    let has_selected_insert = selected.iter().any(|h| {
-        matches!(
-            doc.get_entity(*h),
-            Some(document::EntityType::Insert(_))
-        )
-    });
+    let has_selected_insert = selected
+        .iter()
+        .any(|h| matches!(doc.get_entity(*h), Some(document::EntityType::Insert(_))));
 
     let available_blocks = user_block_names(doc);
     let chosen_block = state
@@ -285,11 +282,9 @@ pub fn view<'a>(
     let add_drawing_row: Element<'a, Message> = if available_blocks.is_empty() {
         Space::new().height(0).into()
     } else {
-        let picker = pick_list(
-            chosen_block.clone(),
-            available_blocks,
-            |name: &String| name.clone(),
-        )
+        let picker = pick_list(chosen_block.clone(), available_blocks, |name: &String| {
+            name.clone()
+        })
         .on_select(|name| tm(ToolPalettesMsg::SelectDrawingBlock(name)))
         .text_size(11)
         .padding([3, 6])
@@ -299,10 +294,13 @@ pub fn view<'a>(
             .padding([3, 8])
             .on_press_maybe(chosen_block.map(|n| tm(ToolPalettesMsg::AddDrawingBlock(n))));
 
-        row![picker, container(add_btn).id("tool-palettes-add-drawing-block")]
-            .spacing(4)
-            .align_y(iced::Center)
-            .into()
+        row![
+            picker,
+            container(add_btn).id("tool-palettes-add-drawing-block")
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+        .into()
     };
 
     // Palette tab management bar (new palette input + button)
@@ -366,12 +364,9 @@ pub fn view<'a>(
         let main_btn = button(
             row![
                 thumb,
-                column![
-                    text(tool.label.clone()).size(12),
-                    text(subtitle).size(10),
-                ]
-                .spacing(2)
-                .width(Fill),
+                column![text(tool.label.clone()).size(12), text(subtitle).size(10),]
+                    .spacing(2)
+                    .width(Fill),
             ]
             .spacing(8)
             .align_y(iced::Center),
@@ -418,7 +413,7 @@ pub fn view<'a>(
         container(
             text(crate::tr!("tool-palettes", "no-tools"))
                 .size(11)
-                .color( iced::Color::from_rgb(0.6, 0.6, 0.6) ),
+                .color(iced::Color::from_rgb(0.6, 0.6, 0.6)),
         )
         .padding(10)
         .width(Fill)

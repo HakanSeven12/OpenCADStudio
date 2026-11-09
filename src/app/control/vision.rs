@@ -598,10 +598,7 @@ mod tests {
                 .iter()
                 .find(|entity| entity["space"] == space)
                 .unwrap_or_else(|| {
-                    panic!(
-                        "{space} is not grounded: {:?}",
-                        grounding.visible_entities
-                    )
+                    panic!("{space} is not grounded: {:?}", grounding.visible_entities)
                 })
                 .clone()
         };

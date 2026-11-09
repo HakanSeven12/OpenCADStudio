@@ -15,9 +15,7 @@
 //! imported into, with its top-left corner at the block's origin; SVG's y
 //! runs down the page, so it runs down the drawing here too.
 
-use document::entities::{
-    BoundaryEdge, BoundaryPath, Hatch, Polyline2D, PolylineEdge, Vertex2D,
-};
+use document::entities::{BoundaryEdge, BoundaryPath, Hatch, Polyline2D, PolylineEdge, Vertex2D};
 use document::types::{Color, Vector2, Vector3};
 use document::EntityType;
 use resvg::tiny_skia::PathSegment;
@@ -207,7 +205,11 @@ impl Flattener {
         hatch.is_solid = true;
         hatch.common.color = color;
         for (k, vertices) in loops.into_iter().enumerate() {
-            let mut boundary = if k == 0 { BoundaryPath::external() } else { BoundaryPath::new() };
+            let mut boundary = if k == 0 {
+                BoundaryPath::external()
+            } else {
+                BoundaryPath::new()
+            };
             boundary.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(vertices, true)));
             hatch.paths.push(boundary);
         }
@@ -254,7 +256,11 @@ fn paint_color(paint: &Paint) -> Option<Color> {
     if (c.red, c.green, c.blue) == (0, 0, 0) || (c.red, c.green, c.blue) == (255, 255, 255) {
         return Some(Color::Index(7));
     }
-    Some(Color::Rgb { r: c.red, g: c.green, b: c.blue })
+    Some(Color::Rgb {
+        r: c.red,
+        g: c.green,
+        b: c.blue,
+    })
 }
 
 /// Reads an SVG (or gzip-compressed SVGZ), scaled so the picture fits
@@ -274,13 +280,26 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Result<Picture, Error> {
         return Err(Error::Empty);
     }
     let scale = (fit[0] / w).min(fit[1] / h);
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    let mut flattener = Flattener { scale, extent: w.max(h), entities: Vec::new(), outline: true, loops: Vec::new(), outline_start: 0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let mut flattener = Flattener {
+        scale,
+        extent: w.max(h),
+        entities: Vec::new(),
+        outline: true,
+        loops: Vec::new(),
+        outline_start: 0,
+    };
     flattener.group(tree.root());
     if flattener.entities.is_empty() {
         return Err(Error::Empty);
     }
-    Ok(Picture { entities: flattener.entities })
+    Ok(Picture {
+        entities: flattener.entities,
+    })
 }
 
 #[cfg(test)]

@@ -355,7 +355,8 @@ fn moving_flip_axis_updates_linked_grips_with_undo_and_redo() {
                 Vector3::UNIT_Y,
             )
             .unwrap();
-            let document::objects::ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap()
+            let document::objects::ObjectType::DynamicBlock(o) =
+                doc.objects.get_mut(&flip).unwrap()
             else {
                 panic!()
             };
@@ -553,8 +554,24 @@ fn coupled_flip_document() -> (document::Document, Handle, Handle) {
     .unwrap();
     let mut flip_targets = targets;
     flip_targets.push(linear);
-    actions::create(doc, def, actions::Kind::Flip, flip_v, &flip_targets, DVec3::ZERO).unwrap();
-    actions::create(doc, def, actions::Kind::Flip, flip_h, &flip_targets, DVec3::ZERO).unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Flip,
+        flip_v,
+        &flip_targets,
+        DVec3::ZERO,
+    )
+    .unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Flip,
+        flip_h,
+        &flip_targets,
+        DVec3::ZERO,
+    )
+    .unwrap();
     let _ = app.dispatch_command("BSAVE");
     let _ = app.dispatch_command("BCLOSE");
     (app.tabs[i].scene.document.clone(), insert, def)
@@ -757,4 +774,3 @@ fn coupled_flip_viewport_click_all_masks_and_orders_recover_refresh_and_reset() 
         }
     }
 }
-

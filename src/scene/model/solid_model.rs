@@ -383,7 +383,11 @@ pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
 /// - X-axis aligns along the boundary edge emanating from that vertex closest to the pick point.
 /// - Z-axis is the face's outward normal.
 /// - Y-axis is Z × X (in-plane, right-handed).
-pub fn planar_face_ucs(body: &Body, face: FaceKey, pick: [f64; 3]) -> Option<document::tables::Ucs> {
+pub fn planar_face_ucs(
+    body: &Body,
+    face: FaceKey,
+    pick: [f64; 3],
+) -> Option<document::tables::Ucs> {
     let normal = planar_face_normal(body, face)?;
     let z = DVec3::from_array(normal).normalize_or_zero();
     if z.length_squared() < 1e-12 {

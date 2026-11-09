@@ -1269,7 +1269,8 @@ fn append_feature_edge(
     }
 }
 
-static EDGE_SMOOTH_DEGREES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
+static EDGE_SMOOTH_DEGREES: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x3f80_0000);
 
 /// VSEDGESMOOTH: the crease angle in degrees (default 1). A mesh edge whose
 /// two faces meet flatter than this is not drawn in the shaded-with-edges
@@ -1301,7 +1302,8 @@ fn crease_edges(
     let normal = |face: &Vec<usize>| {
         let mut n = glam::DVec3::ZERO;
         for (k, &a) in face.iter().enumerate() {
-            let (Some(p), Some(q)) = (vertices.get(a), vertices.get(face[(k + 1) % face.len()])) else {
+            let (Some(p), Some(q)) = (vertices.get(a), vertices.get(face[(k + 1) % face.len()]))
+            else {
                 continue;
             };
             n.x += (p[1] - q[1]) * (p[2] + q[2]);
@@ -1668,13 +1670,27 @@ mod crease_edge_tests {
             edges
         };
         // Two quads side by side in one plane share edge 1–4.
-        let flat = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [2.0, 1.0, 0.0]];
+        let flat = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, 1.0, 0.0],
+        ];
         let faces = vec![vec![0, 1, 4, 3], vec![1, 2, 5, 4]];
         let kept = crease_edges(&flat, &faces, edges_of(&faces));
         assert!(!kept.contains(&edge_key(1, 4)));
         assert_eq!(kept.len(), 6, "the outline stays");
         // The second quad folded up by 90° keeps the shared edge.
-        let folded = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+        let folded = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ];
         let kept = crease_edges(&folded, &faces, edges_of(&faces));
         assert!(kept.contains(&edge_key(1, 4)));
     }

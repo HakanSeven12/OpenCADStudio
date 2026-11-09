@@ -46,7 +46,12 @@ impl OpenCADStudio {
             "CENTERCROSSSIZE" => quoted(&settings.cross_size),
             "CENTERCROSSGAP" => quoted(&settings.cross_gap),
             "CENTERLTYPEFILE" => quoted(&settings.linetype_file),
-            "CENTERMARKEXE" => if settings.mark_extensions { "ON" } else { "OFF" }.to_string(),
+            "CENTERMARKEXE" => if settings.mark_extensions {
+                "ON"
+            } else {
+                "OFF"
+            }
+            .to_string(),
             "CENTERLAYER" if settings.layer.trim() == "." || settings.layer.is_empty() => {
                 quoted(&crate::tr!("center-cmd", "var-use-current"))
             }
@@ -61,7 +66,12 @@ impl OpenCADStudio {
     fn center_variable_prompt(&mut self, name: &str, i: usize) {
         let current = self.center_variable_display(name, i);
         let prompt = if matches!(name, "CENTERLAYER" | "CENTERLTYPE") {
-            crate::tr!("center-cmd", "var-prompt-current", name = name, current = current)
+            crate::tr!(
+                "center-cmd",
+                "var-prompt-current",
+                name = name,
+                current = current
+            )
         } else {
             crate::tr!("center-cmd", "var-prompt", name = name, current = current)
         };
@@ -72,7 +82,12 @@ impl OpenCADStudio {
     /// `CENTEREXE [value]` (etc.) and `SETVAR CENTEREXE value`: prompt for a
     /// value, or check and store the one given; a rejected value is reported
     /// and asked for again.
-    pub(super) fn center_setvar(&mut self, name: &str, value: Option<&str>, i: usize) -> Task<Message> {
+    pub(super) fn center_setvar(
+        &mut self,
+        name: &str,
+        value: Option<&str>,
+        i: usize,
+    ) -> Task<Message> {
         let name = name.to_ascii_uppercase();
         let Some(value) = value.map(|value| value.trim().trim_matches('"').to_string()) else {
             self.center_variable_prompt(&name, i);
@@ -126,7 +141,10 @@ impl OpenCADStudio {
             }
             "CENTERLTYPEFILE" => {
                 #[cfg(target_arch = "wasm32")]
-                if !value.is_empty() && !value.eq_ignore_ascii_case("acadiso.lin") && !value.eq_ignore_ascii_case("acad.lin") {
+                if !value.is_empty()
+                    && !value.eq_ignore_ascii_case("acadiso.lin")
+                    && !value.eq_ignore_ascii_case("acad.lin")
+                {
                     return Task::perform(
                         crate::io::pick_linetype_file_web(),
                         Message::CenterlineLinetypeFilePicked,

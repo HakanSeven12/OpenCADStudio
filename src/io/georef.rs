@@ -30,7 +30,11 @@ impl Georef {
 /// The georeference stored in the image itself, else in its world file.
 pub fn find(image: &str) -> Option<Georef> {
     let path = Path::new(image);
-    geotiff(path).ok().flatten().and_then(Georef::valid).or_else(|| world_file(path))
+    geotiff(path)
+        .ok()
+        .flatten()
+        .and_then(Georef::valid)
+        .or_else(|| world_file(path))
 }
 
 fn world_file(image: &Path) -> Option<Georef> {
@@ -106,7 +110,11 @@ fn geotiff(path: &Path) -> std::io::Result<Option<Georef>> {
         b"MM" => false,
         _ => return Ok(None),
     };
-    let mut t = TiffReader { r, little_endian, big_tiff: false };
+    let mut t = TiffReader {
+        r,
+        little_endian,
+        big_tiff: false,
+    };
     match t.u16()? {
         42 => {}
         43 => {
@@ -117,7 +125,11 @@ fn geotiff(path: &Path) -> std::io::Result<Option<Georef>> {
     }
     let ifd = t.word()?;
     t.r.seek(SeekFrom::Start(ifd))?;
-    let count = if t.big_tiff { t.u64()? } else { t.u16()? as u64 };
+    let count = if t.big_tiff {
+        t.u64()?
+    } else {
+        t.u16()? as u64
+    };
     let inline = if t.big_tiff { 8 } else { 4 };
     // (tag, value count, position of the value field)
     let mut wanted = Vec::new();
@@ -127,7 +139,10 @@ fn geotiff(path: &Path) -> std::io::Result<Option<Georef>> {
         let n = t.word()?;
         let at = t.r.stream_position()?;
         if kind == TYPE_DOUBLE
-            && matches!(tag, MODEL_PIXEL_SCALE | MODEL_TIEPOINT | MODEL_TRANSFORMATION)
+            && matches!(
+                tag,
+                MODEL_PIXEL_SCALE | MODEL_TIEPOINT | MODEL_TRANSFORMATION
+            )
         {
             wanted.push((tag, n, at));
         }
@@ -142,7 +157,9 @@ fn geotiff(path: &Path) -> std::io::Result<Option<Georef>> {
             let offset = t.word()?;
             t.r.seek(SeekFrom::Start(offset))?;
         }
-        (0..n.min(16)).map(|_| t.u64().map(f64::from_bits)).collect()
+        (0..n.min(16))
+            .map(|_| t.u64().map(f64::from_bits))
+            .collect()
     };
     let m = values(MODEL_TRANSFORMATION)?;
     if m.len() >= 8 {
@@ -183,7 +200,10 @@ mod tests {
         tif.extend(2u16.to_be_bytes());
         let scale_at = 8 + 2 + 2 * 12 + 4;
         let tie_at = scale_at + 3 * 8;
-        for (tag, n, at) in [(MODEL_PIXEL_SCALE, 3u32, scale_at), (MODEL_TIEPOINT, 6, tie_at)] {
+        for (tag, n, at) in [
+            (MODEL_PIXEL_SCALE, 3u32, scale_at),
+            (MODEL_TIEPOINT, 6, tie_at),
+        ] {
             tif.extend(tag.to_be_bytes());
             tif.extend(TYPE_DOUBLE.to_be_bytes());
             tif.extend(n.to_be_bytes());
@@ -202,6 +222,9 @@ mod tests {
         // 50 px tall: lower-left corner 100 m below the upper edge.
         let (corner, u, v) = from_wld.placement(50);
         assert_eq!(corner, DVec3::new(500000.0, 4000000.0, 0.0));
-        assert_eq!((u, v), (DVec3::new(2.0, 0.0, 0.0), DVec3::new(0.0, 2.0, 0.0)));
+        assert_eq!(
+            (u, v),
+            (DVec3::new(2.0, 0.0, 0.0), DVec3::new(0.0, 2.0, 0.0))
+        );
     }
 }

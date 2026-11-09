@@ -112,7 +112,9 @@ impl OpenCADStudio {
             Some(K::InsertTable) => crate::t!("Insert Table").into_owned(),
             Some(K::DataLinkManager) => crate::t!("Data Link Manager").into_owned(),
             Some(K::DataExtraction) => crate::t!("Data Extraction Wizard").into_owned(),
-            Some(K::DataExtractionUnsaved) => crate::t!("Data Extraction - Unsaved Drawing").into_owned(),
+            Some(K::DataExtractionUnsaved) => {
+                crate::t!("Data Extraction - Unsaved Drawing").into_owned()
+            }
             Some(K::Plotstyle) => crate::tr!("modal", "plot-style-editor"),
             Some(K::TextStyle) => crate::tr!("modal", "text-style-manager"),
             Some(K::MlStyle) => crate::tr!("modal", "multiline-style-manager"),
@@ -129,9 +131,7 @@ impl OpenCADStudio {
             Some(K::ExternalChange) => crate::tr!("modal", "drawing-changed"),
             Some(K::LayerDeleteWarning) => crate::tr!("modal", "delete-layer"),
             Some(K::Unsaved) => crate::tr!("modal", "unsaved-changes"),
-            Some(K::BlockEditChanges) => {
-                crate::t!("Block - Save Parameter Changes?").into_owned()
-            }
+            Some(K::BlockEditChanges) => crate::t!("Block - Save Parameter Changes?").into_owned(),
             Some(K::BlockEditPicker) => crate::t!("Edit Block Definition").into_owned(),
             Some(K::Rename) => crate::tr!("rename-dialog", "title"),
             Some(K::Purge) => crate::tr!("purge-dialog", "title"),
@@ -187,7 +187,9 @@ impl OpenCADStudio {
         Some(match kind {
             super::super::ModalKind::StyleImport => sized_flow(ex, 540, 480, |flow| {
                 crate::ui::style::style_manager::import_view(
-                    self.style_import.as_ref().expect("style import dialog without draft"),
+                    self.style_import
+                        .as_ref()
+                        .expect("style import dialog without draft"),
                     &self.tabs[self.active_tab].scene.document,
                     flow,
                 )
@@ -211,7 +213,9 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::BlockEditorSettings => {
-                crate::ui::window::block_editor_settings::view_window(self.block_editor_settings.as_ref()?)
+                crate::ui::window::block_editor_settings::view_window(
+                    self.block_editor_settings.as_ref()?,
+                )
             }
             super::super::ModalKind::BlockCycleOrder => {
                 crate::ui::window::block_cycle_order::view_window(self.block_cycle_order.as_ref()?)
@@ -387,7 +391,9 @@ impl OpenCADStudio {
             }),
             super::super::ModalKind::Overkill => {
                 let state = self.overkill_dialog.as_ref()?;
-                automatic_flow(ex, |flow| crate::ui::window::overkill::view_window(state, flow))
+                automatic_flow(ex, |flow| {
+                    crate::ui::window::overkill::view_window(state, flow)
+                })
             }
             super::super::ModalKind::FindReplace => automatic_flow(ex, |flow| {
                 crate::ui::window::find_replace::view_window(
@@ -492,11 +498,15 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Purge => {
                 let state = self.purge_dialog.as_ref()?;
-                sized_flow(ex, 460, 520, |flow| crate::ui::window::purge::view(state, flow))
+                sized_flow(ex, 460, 520, |flow| {
+                    crate::ui::window::purge::view(state, flow)
+                })
             }
             super::super::ModalKind::Rename => {
                 let state = self.rename_dialog.as_ref()?;
-                sized_flow(ex, 520, 420, |flow| crate::ui::window::rename::view(state, flow))
+                sized_flow(ex, 520, 420, |flow| {
+                    crate::ui::window::rename::view(state, flow)
+                })
             }
             super::super::ModalKind::BlockLookup => {
                 let state = self.block_lookup.as_ref()?;
@@ -603,7 +613,11 @@ impl OpenCADStudio {
             super::super::ModalKind::TableCellEntry => {
                 let entry = self.table_cell_entry.as_ref()?;
                 sized_flow(ex, 460, 300, |flow| {
-                    crate::ui::window::table_cell_dialog::view_entry(entry.cell_name(), &entry.text, flow)
+                    crate::ui::window::table_cell_dialog::view_entry(
+                        entry.cell_name(),
+                        &entry.text,
+                        flow,
+                    )
                 })
             }
             super::super::ModalKind::TableCellFormat => {
@@ -632,7 +646,9 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::Spell => {
                 let state = self.spell.as_ref()?;
-                sized_flow(ex, 600, 620, |flow| crate::ui::window::spell_dialog::view(state, flow))
+                sized_flow(ex, 600, 620, |flow| {
+                    crate::ui::window::spell_dialog::view(state, flow)
+                })
             }
             super::super::ModalKind::Txt2MtxtSettings => {
                 let settings = self.txt2mtxt_dialog.as_ref()?;
@@ -976,7 +992,8 @@ impl OpenCADStudio {
                 let ttf_flags = draft.style.true_type_font_flags;
                 let (listed, rows) = self.textstyle_list();
                 let preview = self.textstyle_preview(&edited);
-                let usage = crate::app::text_style_users::Usage::of(self.selected_textstyle_users());
+                let usage =
+                    crate::app::text_style_users::Usage::of(self.selected_textstyle_users());
                 let compare_opts: Vec<String> = styles
                     .iter()
                     .filter(|name| !name.eq_ignore_ascii_case(&self.textstyle_selected))
@@ -1048,8 +1065,7 @@ impl OpenCADStudio {
                             preview: preview.clone(),
                             sample: &self.textstyle_sample,
                             bold: ttf_flags & crate::entities::text_support::TTF_FLAG_BOLD != 0,
-                            italic: ttf_flags & crate::entities::text_support::TTF_FLAG_ITALIC
-                                != 0,
+                            italic: ttf_flags & crate::entities::text_support::TTF_FLAG_ITALIC != 0,
                             backward: draft.style.flags.backward,
                             upside_down: draft.style.flags.upside_down,
                             vertical: draft.style.is_vertical,
@@ -1217,7 +1233,8 @@ impl OpenCADStudio {
                         || a.header_row_style != b.header_row_style
                         || a.title_row_style != b.title_row_style
                     {
-                        comparison_sections.push(crate::i18n::translate("Cell styles").into_owned());
+                        comparison_sections
+                            .push(crate::i18n::translate("Cell styles").into_owned());
                     }
                     if a.template().is_some() != b.template().is_some() {
                         comparison_sections
@@ -1931,9 +1948,9 @@ impl OpenCADStudio {
                     conversion_loss_dialog_window(&self.conversion_losses, &target, flow)
                 })
             }
-            super::super::ModalKind::IfccadAlphaWarning => {
-                sized_flow(ex, 600, 480, |flow| ifccad_alpha_dialog(&self.conversion_losses, flow))
-            }
+            super::super::ModalKind::IfccadAlphaWarning => sized_flow(ex, 600, 480, |flow| {
+                ifccad_alpha_dialog(&self.conversion_losses, flow)
+            }),
             #[cfg(not(target_arch = "wasm32"))]
             super::super::ModalKind::FileInUse => {
                 let (path, error) = self
@@ -2097,7 +2114,6 @@ impl OpenCADStudio {
                 let state = self.plugin_dialog_state.as_ref()?;
                 automatic_flow(ex, |_flow| state.view())
             }
-
         })
     }
 
@@ -2110,23 +2126,22 @@ impl OpenCADStudio {
         );
         // Commands the dispatcher can't run: not a registered command,
         // plugin command, alias, or input action.
-        let valid: rustc_hash::FxHashSet<String> =
-            crate::command::all_registered_command_names()
-                .into_iter()
-                .map(str::to_uppercase)
-                .chain(
-                    self.command_line
-                        .dynamic_commands
-                        .iter()
-                        .map(|cmd| cmd.to_uppercase()),
-                )
-                .chain(self.command_aliases.keys().cloned())
-                .chain(
-                    crate::app::shortcuts::INPUT_ACTIONS
-                        .iter()
-                        .map(|action| action.to_string()),
-                )
-                .collect();
+        let valid: rustc_hash::FxHashSet<String> = crate::command::all_registered_command_names()
+            .into_iter()
+            .map(str::to_uppercase)
+            .chain(
+                self.command_line
+                    .dynamic_commands
+                    .iter()
+                    .map(|cmd| cmd.to_uppercase()),
+            )
+            .chain(self.command_aliases.keys().cloned())
+            .chain(
+                crate::app::shortcuts::INPUT_ACTIONS
+                    .iter()
+                    .map(|action| action.to_string()),
+            )
+            .collect();
         let unknown_set: rustc_hash::FxHashSet<String> = self
             .shortcut_editor_rows
             .iter()
@@ -2153,28 +2168,25 @@ impl OpenCADStudio {
     fn aliases_modal_content<'s>(&'s self, ex: iced::Vector) -> Element<'s, Message> {
         // Aliases claimed by two rows — the cells turn red and a persistent
         // warning names the command already using each alias.
-        let (duplicate_set, duplicate_conflicts) = duplicate_rows(
-            &self.alias_editor_rows,
-            |alias| alias.trim().to_uppercase(),
-        );
+        let (duplicate_set, duplicate_conflicts) =
+            duplicate_rows(&self.alias_editor_rows, |alias| alias.trim().to_uppercase());
         // Commands the dispatcher can't run: not a registered command,
         // plugin command, or input action.
-        let valid: rustc_hash::FxHashSet<String> =
-            crate::command::all_registered_command_names()
-                .into_iter()
-                .map(str::to_uppercase)
-                .chain(
-                    self.command_line
-                        .dynamic_commands
-                        .iter()
-                        .map(|cmd| cmd.to_uppercase()),
-                )
-                .chain(
-                    crate::app::shortcuts::INPUT_ACTIONS
-                        .iter()
-                        .map(|action| action.to_string()),
-                )
-                .collect();
+        let valid: rustc_hash::FxHashSet<String> = crate::command::all_registered_command_names()
+            .into_iter()
+            .map(str::to_uppercase)
+            .chain(
+                self.command_line
+                    .dynamic_commands
+                    .iter()
+                    .map(|cmd| cmd.to_uppercase()),
+            )
+            .chain(
+                crate::app::shortcuts::INPUT_ACTIONS
+                    .iter()
+                    .map(|action| action.to_string()),
+            )
+            .collect();
         let unknown_set: rustc_hash::FxHashSet<String> = self
             .alias_editor_rows
             .iter()
@@ -2328,8 +2340,12 @@ fn save_as_dialog_window<'a>(
     ));
     items.push(Space::new().height(16).into());
     if crate::io::parse_save_format(format).0 == "ifccad" {
-        items.push(text(crate::tr!("ifccad-ui", "alpha-note"))
-            .size(11).style(dialog_muted_text_style).into());
+        items.push(
+            text(crate::tr!("ifccad-ui", "alpha-note"))
+                .size(11)
+                .style(dialog_muted_text_style)
+                .into(),
+        );
         items.push(Space::new().height(12).into());
     }
     items.push(
@@ -2635,32 +2651,51 @@ fn external_change_dialog_window(
 /// (AEC / application) objects that survive only as verbatim source-version
 /// bytes, so saving to a different version or to DXF would drop them. Offers to
 /// save in the source version (keep them) or proceed (drop them).
-fn ifccad_alpha_dialog<'a>(losses: &'a [String], sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+fn ifccad_alpha_dialog<'a>(
+    losses: &'a [String],
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let mut body = column![text(crate::tr!("ifccad-ui", "alpha-body"))
-        .size(13).wrapping(iced::widget::text::Wrapping::WordOrGlyph)].spacing(8)
-        .padding(iced::Padding {
-            right: 14.0,
-            bottom: 1.0,
-            ..iced::Padding::ZERO
-        });
+        .size(13)
+        .wrapping(iced::widget::text::Wrapping::WordOrGlyph)]
+    .spacing(8)
+    .padding(iced::Padding {
+        right: 14.0,
+        bottom: 1.0,
+        ..iced::Padding::ZERO
+    });
     if !losses.is_empty() {
         body = body.push(text(crate::tr!("ifccad-ui", "conversion-title")).size(13));
         for loss in losses {
-            body = body.push(text(format!("• {loss}")).size(12)
-                .wrapping(iced::widget::text::Wrapping::WordOrGlyph));
+            body = body.push(
+                text(format!("• {loss}"))
+                    .size(12)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            );
         }
     }
-    container(column![
-        iced::widget::scrollable(body)
-            .width(sizing.width).height(sizing.height),
-        Space::new().height(16),
-        row![
-            dialog_button(t!("Save anyway"), Message::IfccadAlphaProceed, button::warning),
-            Space::new().width(8),
-            dialog_button(t!("Cancel"), Message::CloseModal, button::secondary),
-        ],
-    ].width(sizing.width).height(sizing.height))
-        .style(dialog_body_style).padding([20, 24]).into()
+    container(
+        column![
+            iced::widget::scrollable(body)
+                .width(sizing.width)
+                .height(sizing.height),
+            Space::new().height(16),
+            row![
+                dialog_button(
+                    t!("Save anyway"),
+                    Message::IfccadAlphaProceed,
+                    button::warning
+                ),
+                Space::new().width(8),
+                dialog_button(t!("Cancel"), Message::CloseModal, button::secondary),
+            ],
+        ]
+        .width(sizing.width)
+        .height(sizing.height),
+    )
+    .style(dialog_body_style)
+    .padding([20, 24])
+    .into()
 }
 
 fn conversion_loss_dialog_window<'a>(

@@ -341,7 +341,8 @@ pub(crate) fn equal_size_follower(
                 if !set_polyline_vertex(&mut entity, index as usize + 1, x, y) {
                     return None;
                 }
-            } else if let (document::EntityType::Line(line), None) = (&mut entity, follower.marker) {
+            } else if let (document::EntityType::Line(line), None) = (&mut entity, follower.marker)
+            {
                 line.end.x = x;
                 line.end.y = y;
             } else {
@@ -701,7 +702,10 @@ fn dynamic_dimension_follow_points(
 
 /// The end points of a line reference: a line's two ends, or the picked
 /// polyline segment's vertices.
-fn line_ends(entity: &document::EntityType, reference: ParametricRef) -> Option<(Vector3, Vector3)> {
+fn line_ends(
+    entity: &document::EntityType,
+    reference: ParametricRef,
+) -> Option<(Vector3, Vector3)> {
     let (start, end) = match reference.segment_index() {
         Some(index) => {
             let index = index as i32;
@@ -1635,7 +1639,9 @@ pub(crate) fn resolve_point(entity: &document::EntityType, marker: i32) -> Optio
 pub(crate) fn polyline_vertex_index(entity: &document::EntityType, marker: usize) -> Option<usize> {
     let (count, closed) = match entity {
         document::EntityType::LwPolyline(polyline) => (polyline.vertices.len(), polyline.is_closed),
-        document::EntityType::Polyline2D(polyline) => (polyline.vertices.len(), polyline.is_closed()),
+        document::EntityType::Polyline2D(polyline) => {
+            (polyline.vertices.len(), polyline.is_closed())
+        }
         _ => return None,
     };
     Some(if closed && marker == count && count > 0 {
@@ -2717,10 +2723,11 @@ impl super::Scene {
         annotational_layer: &str,
     ) -> bool {
         use crate::entities::dim_override as ov;
-        let is_dimensional = self
-            .parametric_constraints
-            .iter()
-            .any(|set| set.dimensions.values().any(|dimension| *dimension == handle));
+        let is_dimensional = self.parametric_constraints.iter().any(|set| {
+            set.dimensions
+                .values()
+                .any(|dimension| *dimension == handle)
+        });
         if !is_dimensional || self.dimension_is_annotational(handle) == annotational {
             return false;
         }
@@ -2731,7 +2738,9 @@ impl super::Scene {
             return false;
         }
         if annotational {
-            entity.as_entity_mut().set_layer(annotational_layer.to_string());
+            entity
+                .as_entity_mut()
+                .set_layer(annotational_layer.to_string());
             entity.common_mut().color = document::types::Color::ByLayer;
             // The screen-size overrides belong to the dynamic form; an
             // annotational dimension draws at its style's size.
@@ -2805,7 +2814,11 @@ impl super::Scene {
                 continue;
             };
             let mut table = (**table).clone();
-            crate::entities::table::store_cell_geometry(&mut table, &document, self.table_modified_since_save(handle));
+            crate::entities::table::store_cell_geometry(
+                &mut table,
+                &document,
+                self.table_modified_since_save(handle),
+            );
             if let Some(document::EntityType::Table(stored)) = document.get_entity_mut(handle) {
                 **stored = table;
             }
@@ -2884,7 +2897,8 @@ impl super::Scene {
             // it rather than lifted above it.
             let radial = matches!(
                 &**dimension,
-                document::entities::Dimension::Radius(_) | document::entities::Dimension::Diameter(_)
+                document::entities::Dimension::Radius(_)
+                    | document::entities::Dimension::Diameter(_)
             );
             let centred = !radial || ov::int(xdata, ov::DIMTAD) == Some(0);
             let sizes_set = sizes.iter().all(|(code, size)| {
@@ -3508,7 +3522,8 @@ impl super::Scene {
             if !constraint.enabled || self.entity_temporarily_hidden(*dimension) {
                 continue;
             }
-            let Some(document::EntityType::Dimension(entity)) = self.document.get_entity(*dimension)
+            let Some(document::EntityType::Dimension(entity)) =
+                self.document.get_entity(*dimension)
             else {
                 continue;
             };
@@ -3998,7 +4013,9 @@ mod tests {
             Vector3::new(10.0, 0.0, 0.0),
         );
         line.common.handle = h(1);
-        document.add_entity(document::EntityType::Line(line)).unwrap();
+        document
+            .add_entity(document::EntityType::Line(line))
+            .unwrap();
         let mut circle = document::entities::Circle::from_center_radius(Vector3::ZERO, 5.0);
         circle.common.handle = h(2);
         document
@@ -4253,10 +4270,7 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            vec![
-                ConstraintKind::Coincident,
-                ConstraintKind::DistanceDirected
-            ]
+            vec![ConstraintKind::Coincident, ConstraintKind::DistanceDirected]
         );
         assert_eq!(set.constraints_touching(h(1)).count(), 1);
     }
@@ -4367,10 +4381,12 @@ mod tests {
     fn glyph_hit_test_entries_matches_precomputed_boxes() {
         let mut scene = super::super::Scene::new();
         let scope = ParametricScope::ModelSpace;
-        let line = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(-1.0, 0.0, 0.0),
-            Vector3::new(1.0, 0.0, 0.0),
-        )));
+        let line = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
         scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let id = scene.parametric_constraint_set_mut(scope).add(
             ConstraintKind::Horizontal,
@@ -4405,10 +4421,12 @@ mod tests {
     fn cached_glyph_placements_hit_returns_same_arc() {
         let mut scene = super::super::Scene::new();
         let scope = ParametricScope::ModelSpace;
-        let line = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(-1.0, 0.0, 0.0),
-            Vector3::new(1.0, 0.0, 0.0),
-        )));
+        let line = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
         scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let id = scene.parametric_constraint_set_mut(scope).add(
             ConstraintKind::Horizontal,
@@ -4433,10 +4451,12 @@ mod tests {
     fn cached_glyph_placements_invalidated_by_metadata_edit() {
         let mut scene = super::super::Scene::new();
         let scope = ParametricScope::ModelSpace;
-        let line = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(-1.0, 0.0, 0.0),
-            Vector3::new(1.0, 0.0, 0.0),
-        )));
+        let line = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+        ));
         scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         let id = scene.parametric_constraint_set_mut(scope).add(
             ConstraintKind::Horizontal,
@@ -4622,14 +4642,18 @@ mod tests {
     #[test]
     fn automatic_inference_maps_relations_and_skips_existing_constraints() {
         let mut scene = super::super::Scene::new();
-        let first = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(5.0, 0.0, 0.0),
-        )));
-        let second = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(5.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 0.0),
-        )));
+        let first = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(5.0, 0.0, 0.0),
+            ),
+        ));
+        let second = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(5.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 0.0),
+            ),
+        ));
         scene
             .parametric_constraint_set_mut(ParametricScope::ModelSpace)
             .add(
@@ -4661,10 +4685,12 @@ mod tests {
     #[test]
     fn visibility_toggles_geometric_and_dimensional_independently() {
         let mut scene = super::super::Scene::new();
-        let line = scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(5.0, 0.0, 0.0),
-        )));
+        let line = scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(5.0, 0.0, 0.0),
+            ),
+        ));
         let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
         let geometric = set.add(
             ConstraintKind::Horizontal,

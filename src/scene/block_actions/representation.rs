@@ -177,15 +177,25 @@ pub(super) fn reconcile(
         }
         entity.common_mut().handle = to;
         entity.common_mut().owner_handle = rep;
-        if crate::scene::block_construction::is_construction(entity.common()) { entity.common_mut().invisible = true; }
+        if crate::scene::block_construction::is_construction(entity.common()) {
+            entity.common_mut().invisible = true;
+        }
         entity.common_mut().raw_record = None;
         if existing {
             *scene.document.get_entity_mut(to).unwrap() = entity;
             if let Some((old, name)) = changed_insert {
-                let old = scene.document.block_records.get(&old).map_or(Handle::NULL, |b| b.handle);
+                let old = scene
+                    .document
+                    .block_records
+                    .get(&old)
+                    .map_or(Handle::NULL, |b| b.handle);
                 if let Some(new) = scene.document.block_records.get(&name).map(|b| b.handle) {
                     scene.repoint_representation(to, old, new, &name);
-                    if scene.document.dynamic_definition_for_insert(from).is_some_and(|def| def != new) {
+                    if scene
+                        .document
+                        .dynamic_definition_for_insert(from)
+                        .is_some_and(|def| def != new)
+                    {
                         sync_nested_cache(&mut scene.document, from, to, &mapping)?;
                     }
                 }
@@ -358,7 +368,8 @@ pub(super) fn apply_visibility(
         let id = doc.get_entity(h).and_then(authoring::element_id);
         if let Some(hidden) = id.and_then(|id| flags.get(&id)) {
             let entity = doc.get_entity_mut(h).unwrap();
-            entity.common_mut().invisible = *hidden || crate::scene::block_construction::is_construction(entity.common());
+            entity.common_mut().invisible =
+                *hidden || crate::scene::block_construction::is_construction(entity.common());
         }
     }
     Ok(())

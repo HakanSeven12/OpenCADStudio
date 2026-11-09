@@ -47,7 +47,10 @@ impl OpenCADStudio {
         } else {
             let value = u8::from(self.tabs[i].scene.block_constraint_status_mode);
             self.command_line
-                .push_output(&crate::ui::command_line::value_prompt("BCONSTATUSMODE", &value));
+                .push_output(&crate::ui::command_line::value_prompt(
+                    "BCONSTATUSMODE",
+                    &value,
+                ));
             self.pending_setvar = Some("BCONSTATUSMODE".into());
         }
         Task::none()

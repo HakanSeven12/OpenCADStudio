@@ -362,9 +362,7 @@ impl CadCommand for OrientationParameterCommand {
                 (Kind::Rotation, false) => "Specify radius of parameter:",
                 (Kind::Rotation, true) if self.choosing_base_angle => "Specify base angle <0>:",
                 (Kind::Rotation, true) if self.asking_label() => "Specify label location:",
-                (Kind::Rotation, true) if self.asking_grips() => {
-                    "Enter number of grips [0/1] <1>:"
-                }
+                (Kind::Rotation, true) if self.asking_grips() => "Enter number of grips [0/1] <1>:",
                 (Kind::Rotation, true) => "Specify default rotation angle or [Base angle] <0>:",
                 (Kind::Alignment, _) => {
                     if self.perpendicular {

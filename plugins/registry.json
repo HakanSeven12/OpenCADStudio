@@ -43,5 +43,10 @@
     "repo": "pabloxbezx/teren-ocs-plugin",
     "name": "Terén",
     "description": "Survey points and TIN surfaces: point import with format detection (PNEZD, PYXZD, S-JTSK), breaklines, boundaries and holes, manual triangle edits, contours, point and surface styles, 3D viewer, LandXML/DXF export. Czech and English."
+  },
+  {
+    "repo": "Macchecaspita/opencad-raster-plugin",
+    "name": "Raster Tools",
+    "description": "Raster images: insert by size, width, DPI or pixel; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent; relink and find moved image files. English and Italian."
   }
 ]

@@ -238,7 +238,6 @@ impl PlotStyleTableExt for PlotStyleTable {
         }
     }
 
-
     /// Load one CTB by file name from the per-user plot styles folder.
     fn load_named(name: &str) -> Result<Self, String> {
         let path = Path::new(name);
@@ -373,4 +372,3 @@ mod lenient_loading_tests {
         assert!(PlotStyleTable::load_named("../escape.ctb").is_err());
     }
 }
-

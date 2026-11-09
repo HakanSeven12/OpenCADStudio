@@ -59,9 +59,14 @@ pub(crate) fn associate(
         DynamicBlockData::PolarStretchAction(native) => {
             let key_point = key_point.or_else(|| stretch::polar_key_point(native).ok());
             native.connections = polar_connections(&p, key_point);
-            let stretching = native.action.dependencies.iter().copied().filter(|handle| !native.handles.contains(handle)).collect::<Vec<_>>();
-            native.bindings =
-                stretch::bind_existing(doc, &stretching, &native.points, p.end.z)?;
+            let stretching = native
+                .action
+                .dependencies
+                .iter()
+                .copied()
+                .filter(|handle| !native.handles.contains(handle))
+                .collect::<Vec<_>>();
+            native.bindings = stretch::bind_existing(doc, &stretching, &native.points, p.end.z)?;
         }
         DynamicBlockData::ArrayAction(native) => {
             native.connections = ["Base", "End", "UpdatedBase", "UpdatedEnd"].map(connection)

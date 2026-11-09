@@ -143,7 +143,10 @@ pub struct SpellState {
     pub custom: Vec<String>,
     /// Changes the Undo button takes back: the object as it was and where
     /// the check was.
-    pub undo: Vec<(Vec<(document::Handle, document::EntityType)>, (usize, usize))>,
+    pub undo: Vec<(
+        Vec<(document::Handle, document::EntityType)>,
+        (usize, usize),
+    )>,
     pub status: String,
 }
 
@@ -168,7 +171,10 @@ fn scope_switch<'a>(scope: SpellScope, enabled: bool) -> Element<'a, Message> {
         row![
             part(crate::tr!("spell", "scope-drawing"), SpellScope::Drawing),
             part(crate::tr!("spell", "scope-space"), SpellScope::Space),
-            part(crate::tr!("spell", "scope-selection"), SpellScope::Selection),
+            part(
+                crate::tr!("spell", "scope-selection"),
+                SpellScope::Selection
+            ),
         ]
         .spacing(2),
     )
@@ -280,20 +286,37 @@ fn suggestions_card<'a>(state: &'a SpellState) -> Element<'a, Message> {
 
 fn settings_card<'a>(state: &'a SpellState) -> Element<'a, Message> {
     let o = state.options;
-    let toggle = |label: String, s: SpellSetting| chip(label, o.get(s), msg(SpellMsg::Setting(s, !o.get(s))));
+    let toggle = |label: String, s: SpellSetting| {
+        chip(label, o.get(s), msg(SpellMsg::Setting(s, !o.get(s))))
+    };
     let include = row![
-        toggle(crate::tr!("spell", "opt-dimensions"), SpellSetting::Dimensions),
-        toggle(crate::tr!("spell", "opt-attributes"), SpellSetting::Attributes),
+        toggle(
+            crate::tr!("spell", "opt-dimensions"),
+            SpellSetting::Dimensions
+        ),
+        toggle(
+            crate::tr!("spell", "opt-attributes"),
+            SpellSetting::Attributes
+        ),
         toggle(crate::tr!("spell", "opt-xrefs"), SpellSetting::Xrefs),
     ]
     .spacing(6)
     .wrap();
     let ignore = row![
-        toggle(crate::tr!("spell", "opt-capitalized"), SpellSetting::IgnoreCapitalized),
+        toggle(
+            crate::tr!("spell", "opt-capitalized"),
+            SpellSetting::IgnoreCapitalized
+        ),
         toggle(crate::tr!("spell", "opt-mixed"), SpellSetting::IgnoreMixed),
         toggle(crate::tr!("spell", "opt-upper"), SpellSetting::IgnoreUpper),
-        toggle(crate::tr!("spell", "opt-numbers"), SpellSetting::IgnoreNumbers),
-        toggle(crate::tr!("spell", "opt-punctuation"), SpellSetting::IgnorePunctuation),
+        toggle(
+            crate::tr!("spell", "opt-numbers"),
+            SpellSetting::IgnoreNumbers
+        ),
+        toggle(
+            crate::tr!("spell", "opt-punctuation"),
+            SpellSetting::IgnorePunctuation
+        ),
     ]
     .spacing(6)
     .wrap();
@@ -309,29 +332,41 @@ fn settings_card<'a>(state: &'a SpellState) -> Element<'a, Message> {
         })
         .collect();
     let words: Element<'a, Message> = if words.is_empty() {
-        text(crate::tr!("spell", "no-words")).size(11).style(muted_style).into()
+        text(crate::tr!("spell", "no-words"))
+            .size(11)
+            .style(muted_style)
+            .into()
     } else {
         row(words).spacing(4).wrap().into()
     };
     card(
         crate::tr!("spell", "settings"),
         column![
-            text(crate::tr!("spell", "include")).size(11).style(muted_style),
+            text(crate::tr!("spell", "include"))
+                .size(11)
+                .style(muted_style),
             include,
-            text(crate::tr!("spell", "ignore-words")).size(11).style(muted_style),
+            text(crate::tr!("spell", "ignore-words"))
+                .size(11)
+                .style(muted_style),
             ignore,
-            text(crate::tr!("spell", "user-dictionary")).size(11).style(muted_style),
+            text(crate::tr!("spell", "user-dictionary"))
+                .size(11)
+                .style(muted_style),
             words,
         ]
         .spacing(6),
     )
 }
 
-pub fn view<'a>(state: &'a SpellState, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view<'a>(
+    state: &'a SpellState,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let select = button(text(crate::tr!("spell", "select")).size(11))
-    .on_press(msg(SpellMsg::SelectObjects))
-    .style(button_style(false))
-    .padding([4, 9]);
+        .on_press(msg(SpellMsg::SelectObjects))
+        .style(button_style(false))
+        .padding([4, 9]);
     let start = button(text(crate::tr!("spell", "start")).size(12))
         .style(button::primary)
         .padding([5, 14]);
@@ -340,31 +375,44 @@ pub fn view<'a>(state: &'a SpellState, sizing: crate::ui::modal::ModalSizing) ->
     } else {
         start.on_press(msg(SpellMsg::Start))
     };
-    let mut where_row = row![scope_switch(state.scope, !state.running)].spacing(6).align_y(iced::Center);
+    let mut where_row = row![scope_switch(state.scope, !state.running)]
+        .spacing(6)
+        .align_y(iced::Center);
     if state.scope == SpellScope::Selection {
         where_row = where_row.push(select);
     }
     let where_row = where_row.push(start);
     let selection_note: Element<'a, Message> = if state.scope == SpellScope::Selection {
-        text(crate::tr!("spell", "selected-count", count = state.selection.len().to_string()))
-            .size(11)
-            .style(muted_style)
-            .into()
+        text(crate::tr!(
+            "spell",
+            "selected-count",
+            count = state.selection.len().to_string()
+        ))
+        .size(11)
+        .style(muted_style)
+        .into()
     } else {
         Space::new().height(0).into()
     };
-    let names: Vec<String> = state.languages.iter().map(|(_, name)| name.clone()).collect();
+    let names: Vec<String> = state
+        .languages
+        .iter()
+        .map(|(_, name)| name.clone())
+        .collect();
     let current = state
         .languages
         .iter()
         .find(|(tag, _)| *tag == state.language)
         .map(|(_, name)| name.clone());
-    let languages = crate::ui::dropdown_list::pick_list(current, names, |name: &String| name.clone())
-        .on_select(|name| msg(SpellMsg::Language(name)))
-        .text_size(11)
-        .padding([4, 8]);
+    let languages =
+        crate::ui::dropdown_list::pick_list(current, names, |name: &String| name.clone())
+            .on_select(|name| msg(SpellMsg::Language(name)))
+            .text_size(11)
+            .padding([4, 8]);
     let dictionary = row![
-        text(crate::tr!("spell", "main-dictionary")).size(11).style(muted_style),
+        text(crate::tr!("spell", "main-dictionary"))
+            .size(11)
+            .style(muted_style),
         languages,
         Space::new().width(Fill),
         chip(
@@ -397,19 +445,20 @@ pub fn view<'a>(state: &'a SpellState, sizing: crate::ui::modal::ModalSizing) ->
             (!state.undo.is_empty()).then_some(msg(SpellMsg::Undo)),
             button::secondary,
         ),
-        dialog_button_styled_opt(crate::t!("Close"), Some(Message::CloseModal), button::secondary),
+        dialog_button_styled_opt(
+            crate::t!("Close"),
+            Some(Message::CloseModal),
+            button::secondary
+        ),
     ]
     .spacing(6)
     .align_y(iced::Center);
-    column![
-        scrollable(body).height(Fill),
-        footer
-    ]
-    .spacing(10)
-    .padding([10, 12])
-    .width(sizing.width)
-    .height(sizing.height)
-    .into()
+    column![scrollable(body).height(Fill), footer]
+        .spacing(10)
+        .padding([10, 12])
+        .width(sizing.width)
+        .height(sizing.height)
+        .into()
 }
 
 /// Window titlebar text.

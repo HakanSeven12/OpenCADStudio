@@ -51,7 +51,8 @@ impl OpenCADStudio {
         i: usize,
         handles: &[document::Handle],
     ) -> Task<Message> {
-        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles) else {
+        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles)
+        else {
             return Task::none();
         };
         #[cfg(target_arch = "wasm32")]
@@ -98,9 +99,8 @@ impl OpenCADStudio {
             remembered.allow_exploding = state.allow_exploding;
             remembered.open_in_editor = state.open_in_editor;
         }
-        self.block_definition_open_editor = state
-            .open_in_editor
-            .then(|| state.name.trim().to_string());
+        self.block_definition_open_editor =
+            state.open_in_editor.then(|| state.name.trim().to_string());
         self.persist_settings_if_changed();
         let i = self.active_tab;
         let base_point = state.parse_base_point();
@@ -452,7 +452,8 @@ impl OpenCADStudio {
                         (v.len() == 3).then(|| glam::DVec3::new(v[0], v[1], v[2]))
                     })
                     .collect();
-                let Some(array) = assoc_array::array_of_insert(&self.tabs[i].scene.document, handle)
+                let Some(array) =
+                    assoc_array::array_of_insert(&self.tabs[i].scene.document, handle)
                 else {
                     self.command_line.push_error(
                         crate::t!("ARRAYEDIT: the selected object is not an associative array.")
@@ -460,9 +461,9 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 };
-                let location = points
-                    .first()
-                    .and_then(|p| assoc_array::nearest_item(&self.tabs[i].scene.document, &array, *p));
+                let location = points.first().and_then(|p| {
+                    assoc_array::nearest_item(&self.tabs[i].scene.document, &array, *p)
+                });
                 self.push_undo_snapshot(i, "ARRAYEDIT");
                 let scene = &mut self.tabs[i].scene;
                 let result = match (op, location, points.get(1)) {
@@ -740,11 +741,14 @@ impl OpenCADStudio {
                             .remove(&name.to_ascii_uppercase())
                             .unwrap_or_default();
                         let preview = self.tabs[i].scene.block_preview_wires(&name);
-                        let mut cmd = InsertBlockCommand::classic_for_block(name.clone(), preview, units);
-                        if let Some(record)=self.tabs[i].scene.document.block_records.get(&name) {
-                            let doc=&self.tabs[i].scene.document;
-                            cmd.set_insertion_points(crate::scene::render_graph::block_base_point(doc,&name),
-                                crate::scene::block_grips::insertion_points(doc,record.handle));
+                        let mut cmd =
+                            InsertBlockCommand::classic_for_block(name.clone(), preview, units);
+                        if let Some(record) = self.tabs[i].scene.document.block_records.get(&name) {
+                            let doc = &self.tabs[i].scene.document;
+                            cmd.set_insertion_points(
+                                crate::scene::render_graph::block_base_point(doc, &name),
+                                crate::scene::block_grips::insertion_points(doc, record.handle),
+                            );
                         }
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -1138,7 +1142,8 @@ impl OpenCADStudio {
                     return Some(self.finish_dispatch(cmd));
                 }
                 if matched.len() > 1 {
-                    let names: Vec<&str> = matched.iter().map(|entry| entry.name.as_str()).collect();
+                    let names: Vec<&str> =
+                        matched.iter().map(|entry| entry.name.as_str()).collect();
                     self.command_line.push_error(
                         crate::tf!(
                             "XBIND: '{}' matches more than one reference ({}).",
@@ -1159,10 +1164,7 @@ impl OpenCADStudio {
                         continue;
                     }
                     match kind {
-                        Some(kind) => requests.push((
-                            kind,
-                            word.trim_matches('"').to_string(),
-                        )),
+                        Some(kind) => requests.push((kind, word.trim_matches('"').to_string())),
                         None => {
                             parse_error = Some(word.to_string());
                             break;
@@ -1399,7 +1401,8 @@ impl OpenCADStudio {
                                 self.tabs[i].xref_unloaded.remove(key);
                                 self.tabs[i].xref_stat_cache.remove(key);
                             }
-                            let handles: rustc_hash::FxHashSet<document::types::Handle> = self.tabs[i]
+                            let handles: rustc_hash::FxHashSet<document::types::Handle> = self.tabs
+                                [i]
                                 .scene
                                 .document
                                 .block_records
@@ -2091,10 +2094,12 @@ mod tests {
         app.tabs[i].scene.define_block_raw(
             "PRE_BASE",
             document::Vector3::new(10.0, 5.0, 0.0),
-            vec![document::EntityType::Line(document::entities::Line::from_points(
-                document::Vector3::new(10.0, 5.0, 0.0),
-                document::Vector3::new(30.0, 5.0, 0.0),
-            ))],
+            vec![document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::Vector3::new(10.0, 5.0, 0.0),
+                    document::Vector3::new(30.0, 5.0, 0.0),
+                ),
+            )],
         );
         let _ = app.run_command_line("BLOCK");
         let state = app
@@ -2355,8 +2360,16 @@ mod tests {
         };
         let scene = &mut app.tabs[i].scene;
         scene.define_block_raw("Part", document::types::Vector3::ZERO, vec![line(1.0)]);
-        scene.define_block_raw("Holder", document::types::Vector3::ZERO, vec![insert("Part")]);
-        scene.define_block_raw("Outer", document::types::Vector3::ZERO, vec![insert("Holder")]);
+        scene.define_block_raw(
+            "Holder",
+            document::types::Vector3::ZERO,
+            vec![insert("Part")],
+        );
+        scene.define_block_raw(
+            "Outer",
+            document::types::Vector3::ZERO,
+            vec![insert("Holder")],
+        );
         scene.define_block_raw("Other", document::types::Vector3::ZERO, vec![line(2.0)]);
         app.refresh_block_palette();
         let preview = |app: &crate::app::OpenCADStudio, name: &str| {
@@ -2675,8 +2688,12 @@ mod tests {
             .objects
             .insert(h, ObjectType::ImageDefinition(def));
         // Reference it so collect_entries lists it.
-        let mut img =
-            document::entities::RasterImage::new("img.png", document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut img = document::entities::RasterImage::new(
+            "img.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         img.definition_handle = Some(h);
         app.tabs[i]
             .scene
@@ -2706,8 +2723,12 @@ mod tests {
             .document
             .objects
             .insert(h, ObjectType::ImageDefinition(def));
-        let mut img =
-            document::entities::RasterImage::new("img.png", document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut img = document::entities::RasterImage::new(
+            "img.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         img.definition_handle = Some(h);
         app.tabs[i]
             .scene
@@ -2808,7 +2829,9 @@ mod tests {
             .unwrap();
         let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
-        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
+        xref_doc
+            .add_entity(document::EntityType::Line(line))
+            .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();
@@ -2841,7 +2864,9 @@ mod tests {
         let mut line = document::entities::Line::new();
         line.common.plotstyle_flags = 0b11;
         line.common.plotstyle_handle = Some(xref_doc.allocate_handle());
-        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
+        xref_doc
+            .add_entity(document::EntityType::Line(line))
+            .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();
@@ -3082,7 +3107,9 @@ mod tests {
             .unwrap();
         let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
-        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
+        xref_doc
+            .add_entity(document::EntityType::Line(line))
+            .unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();

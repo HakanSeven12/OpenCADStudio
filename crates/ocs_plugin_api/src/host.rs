@@ -567,14 +567,11 @@ impl Serialize for HostNotification {
                 value,
             } => {
                 bytes.push(12);
-                bincode::serialize_into(&mut bytes, panel_id)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, control_id)
                     .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, action)
-                    .map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, value)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, action).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, value).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::QuadAction {
                 panel_id,
@@ -584,8 +581,7 @@ impl Serialize for HostNotification {
                 pick_point,
             } => {
                 bytes.push(13);
-                bincode::serialize_into(&mut bytes, panel_id)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, control_id)
                     .map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, handles).map_err(serde::ser::Error::custom)?;
@@ -656,14 +652,14 @@ impl<'de> Deserialize<'de> for HostNotification {
             }
             12 => {
                 let mut cursor = std::io::Cursor::new(rest);
-                let panel_id: String = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let control_id: String = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let action: String = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let value: Option<crate::dialog::DialogValue> = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
+                let panel_id: String =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let control_id: String =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let action: String =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let value: Option<crate::dialog::DialogValue> =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
                 Ok(HostNotification::PanelAction {
                     panel_id,
                     control_id,
@@ -673,16 +669,16 @@ impl<'de> Deserialize<'de> for HostNotification {
             }
             13 => {
                 let mut cursor = std::io::Cursor::new(rest);
-                let panel_id: String = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let control_id: String = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let handles: Vec<Handle> = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let type_keys: Vec<String> = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
-                let pick_point: [f64; 3] = bincode::deserialize_from(&mut cursor)
-                    .map_err(serde::de::Error::custom)?;
+                let panel_id: String =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let control_id: String =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let handles: Vec<Handle> =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let type_keys: Vec<String> =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
+                let pick_point: [f64; 3] =
+                    bincode::deserialize_from(&mut cursor).map_err(serde::de::Error::custom)?;
                 Ok(HostNotification::QuadAction {
                     panel_id,
                     control_id,
@@ -998,7 +994,12 @@ pub trait InteractiveCommand: Send {
     }
 
     /// Pending panel updates buffered during interactive command execution (API v7, additive).
-    fn take_pending_panel_updates(&mut self) -> Vec<(String, std::collections::HashMap<String, crate::dialog::DialogValue>)> {
+    fn take_pending_panel_updates(
+        &mut self,
+    ) -> Vec<(
+        String,
+        std::collections::HashMap<String, crate::dialog::DialogValue>,
+    )> {
         Vec::new()
     }
 }
@@ -2412,7 +2413,6 @@ impl PluginDisplayDescriptor {
         }
     }
 }
-
 
 /// One XRecord addressed by dictionary path + name (API v13, additive).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

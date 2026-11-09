@@ -215,7 +215,7 @@ and stable; branch on it, not on message text.
 
 | Code | Meaning | Retryable |
 |---|---|---|
-| `stale_state`, `session_changed` | The caller's snapshot is behind | yes — refresh `state`, retry once with a new `request_id` |
+| `stale_state`, `session_changed` | The caller's snapshot is behind | yes — nothing ran, so refresh `state` and retry once; the same `request_id` is safe. Do not echo `camera_revision` on edits |
 | `document_required`, `document_not_active`, `document_closed` | Envelope addressing problem | yes (refresh state) |
 | `document_dirty` | Closing would lose unsaved changes | no — resend with `"discard":true` to confirm |
 | `entity_absent` | A listed handle does not exist (the message names them) | refresh and re-read |
@@ -476,7 +476,7 @@ dedicated op needed:
 |---|---|
 | `run` | Execute one command line headlessly (`"cmd":"LINE 0,0 10,10"` — command name + space-separated prompt answers; points `x,y[,z]`, options by displayed token). Response `status` is `completed` or `waiting_input`. Requires `document_id`. |
 | `start` / `input` | Interactive dialog: `start` opens a command, `state.command.accepts` lists the valid input kinds (`text`, `token`, `point`, `entity`, `structure`, `selection`, `enter`), `input` feeds one. |
-| `cancel` | Aborts the running command — or retracts this client's own pending pick (§6.12). |
+| `cancel` | Aborts the running command — or retracts this client's own pending pick (§6.12). A command another client holds is refused with `command_busy` unless the request carries `"force":true`; `state.command_owner_client_id` names the holder (null when the user holds it). |
 | `batch` | `steps[]` — sequential ops (≤ 64) where each step sees the previous step's state; stops at the first failure and reports `completed_steps` / `next_step`. |
 | `select` | Change the current selection (`handles`, `clear`, filters). |
 | `events` | Cursor-paged event stream (command lifecycle, document and selection changes, 128-event ring, `resync` flag). Polling by design. |

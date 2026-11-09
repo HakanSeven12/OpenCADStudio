@@ -173,7 +173,8 @@ fn batch_reference_properties_edit_common_numeric_and_state_rows() {
     let last = *app.tabs[i].properties.source_handles.last().unwrap();
     let doc = &mut app.tabs[i].scene.document;
     let dictionary = doc.ensure_extension_dictionary(last);
-    let Some(document::objects::ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&dictionary)
+    let Some(document::objects::ObjectType::Dictionary(dictionary)) =
+        doc.objects.get_mut(&dictionary)
     else {
         panic!()
     };
@@ -229,7 +230,10 @@ fn batch_reference_properties_edit_common_numeric_and_state_rows() {
         );
     }
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 2);
-    let _ = app.update(Message::PropBlockChoice { key: current, index: 1 });
+    let _ = app.update(Message::PropBlockChoice {
+        key: current,
+        index: 1,
+    });
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 2);
 }
 
@@ -291,7 +295,11 @@ fn block_flip_grip_toggles_directly_and_reverses_the_arrow() {
         let EntityType::Insert(ins) = doc.get_entity(reference).unwrap() else {
             panic!()
         };
-        let member = doc.block_records.get(&ins.block_name).unwrap().entity_handles[0];
+        let member = doc
+            .block_records
+            .get(&ins.block_name)
+            .unwrap()
+            .entity_handles[0];
         let EntityType::Line(line) = doc.get_entity(member).unwrap() else {
             panic!()
         };

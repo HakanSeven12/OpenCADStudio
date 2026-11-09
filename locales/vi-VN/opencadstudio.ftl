@@ -3434,7 +3434,9 @@ draw =
     .arc-specify-start-point-of-arc = ARC Xác định điểm bắt đầu của cung:
     .arc-specify-second-point-of-arc = ARC Xác định điểm thứ hai của cung:
     .arc-specify-end-point-of-arc = ARC Xác định điểm cuối của cung:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC Xác định tâm của cung:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
     .arc-specify-included-angle = ARC  Chỉ định góc ở tâm:
     .arc-specify-length-of-chord = ARC Xác định độ dài của dây cung:
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC Xác định hướng tiếp tuyến cho điểm bắt đầu của cung:
@@ -4571,6 +4573,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Select object or bounded area:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Chọn thêm đối tượng hoặc vùng kín [Undo] (Enter để nhập chiều cao):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  Chỉ định chiều cao đùn có dấu hoặc [Nhiều/Hoàn tác]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: the selected face could not be copied to a new body.
+    .presspull-option-new-body = New body
+    .presspull-option-modify-solid = Modify solid
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  Chế độ tạo [Solid/Surface]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP Chọn đường quét hoặc [Căn chỉnh/Điểm cơ sở/Tỷ lệ/Xoắn]:
@@ -5347,6 +5353,9 @@ view =
     .opening-patreon-page = Đang mở trang Patreon...
     .opening-feedback-page = Đang mở trang phản hồi...
     .opening-release-notes = Đang mở ghi chú phát hành...
+    .checking-for-updates = Đang kiểm tra cập nhật...
+    .no-newer-release = Không tìm thấy bản phát hành mới hơn. Đây là phiên bản { $version }.
+    .web-always-latest = Ứng dụng web luôn chạy bản phát hành mới nhất.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: kéo bằng chuột trái. Nhấn Esc để thoát.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW  Chỉ định góc thứ nhất của vùng in:
     .plotwindow-specify-opposite-corner = PLOTWINDOW Xác định góc đối diện:
@@ -7275,9 +7284,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Khoảng cách = { $value }
-    .angle-start = { $command } Chỉ định điểm đỉnh hoặc [Đường]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Chọn đường thẳng thứ nhất hoặc [Điểm] (góc nhỏ hơn):
-    .second-line = { $command }  Chọn đường thẳng thứ hai (góc nhỏ hơn):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Đường thẳng
     .points = Điểm
     .invalid-radius = Chọn một đường tròn hoặc cung có bán kính dương, hữu hạn.
@@ -8377,6 +8399,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

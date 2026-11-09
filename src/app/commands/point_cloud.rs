@@ -218,7 +218,8 @@ impl OpenCADStudio {
                 definition.reactors.push(reactor);
             }
             if let Some(document::EntityType::Extended(extended)) = document.get_entity_mut(cloud) {
-                if let document::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+                if let document::entities::ExtendedEntityData::PointCloudEx(data) =
+                    &mut extended.data
                 {
                     data.reactor_handle = reactor;
                 }

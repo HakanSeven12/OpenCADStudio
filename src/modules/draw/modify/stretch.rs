@@ -87,8 +87,11 @@ pub(crate) fn stretch_entity_except(
             let Some(mut world) = crate::entities::curve::lwpolyline_world_xy(p) else {
                 return false;
             };
-            let before: Vec<[f64; 2]> =
-                world.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+            let before: Vec<[f64; 2]> = world
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect();
             for v in &mut world.vertices {
                 if in_win(v.location.x, v.location.y) {
                     v.location.x += dx;
@@ -97,8 +100,11 @@ pub(crate) fn stretch_entity_except(
                 }
             }
             if stretched {
-                let after: Vec<[f64; 2]> =
-                    world.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+                let after: Vec<[f64; 2]> = world
+                    .vertices
+                    .iter()
+                    .map(|v| [v.location.x, v.location.y])
+                    .collect();
                 let closed = world.is_closed;
                 for (k, v) in world.vertices.iter_mut().enumerate() {
                     v.bulge = held_bulge(v.bulge, &before, &after, k, closed);
@@ -107,8 +113,11 @@ pub(crate) fn stretch_entity_except(
             }
         }
         document::EntityType::Polyline2D(p) => {
-            let before: Vec<[f64; 2]> =
-                p.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+            let before: Vec<[f64; 2]> = p
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect();
             for v in &mut p.vertices {
                 if in_win(v.location.x, v.location.y) {
                     v.location.x += dx;
@@ -117,8 +126,11 @@ pub(crate) fn stretch_entity_except(
                 }
             }
             if stretched {
-                let after: Vec<[f64; 2]> =
-                    p.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+                let after: Vec<[f64; 2]> = p
+                    .vertices
+                    .iter()
+                    .map(|v| [v.location.x, v.location.y])
+                    .collect();
                 let closed = p.is_closed();
                 for (k, v) in p.vertices.iter_mut().enumerate() {
                     v.bulge = held_bulge(v.bulge, &before, &after, k, closed);
@@ -166,8 +178,10 @@ pub(crate) fn stretch_entity_except(
                 p.y += dy;
                 p.z += dz;
             };
-            let justified =
-                !matches!((t.horizontal_alignment, t.vertical_alignment), (HA::Left, VA::Baseline));
+            let justified = !matches!(
+                (t.horizontal_alignment, t.vertical_alignment),
+                (HA::Left, VA::Baseline)
+            );
             match t.alignment_point.as_mut() {
                 // Aligned and Fit text runs between its two points: each
                 // stretches on its own.
@@ -356,14 +370,26 @@ pub(crate) fn held_bulge(
 
 /// Stretch an arc by its ends: both in the window move it whole; one moves
 /// that end while the arc keeps its height over the new chord.
-fn stretch_arc(arc: &mut document::entities::Arc, in_win: &dyn Fn(f64, f64) -> bool, delta: DVec3) -> bool {
+fn stretch_arc(
+    arc: &mut document::entities::Arc,
+    in_win: &dyn Fn(f64, f64) -> bool,
+    delta: DVec3,
+) -> bool {
     let (start, finish) = (arc.start_point_wcs(), arc.end_point_wcs());
-    stretch_arc_endpoints(arc, in_win(start.x, start.y), in_win(finish.x, finish.y), delta)
+    stretch_arc_endpoints(
+        arc,
+        in_win(start.x, start.y),
+        in_win(finish.x, finish.y),
+        delta,
+    )
 }
 
 /// Apply fixed endpoint membership, shared by ordinary and dynamic Stretch.
 pub(crate) fn stretch_arc_endpoints(
-    arc: &mut document::entities::Arc, start_in: bool, finish_in: bool, delta: DVec3,
+    arc: &mut document::entities::Arc,
+    start_in: bool,
+    finish_in: bool,
+    delta: DVec3,
 ) -> bool {
     use document::types::{Matrix3, Vector3};
     let ocs = Matrix3::arbitrary_axis(arc.normal);
@@ -753,7 +779,11 @@ impl CadCommand for StretchCommand {
         }
     }
 
-    fn preview_entities(&mut self, document: &document::Document, pt: DVec3) -> Vec<document::EntityType> {
+    fn preview_entities(
+        &mut self,
+        document: &document::Document,
+        pt: DVec3,
+    ) -> Vec<document::EntityType> {
         // The base-point step already has the final windows: resolve what
         // moves there, so the drag starts with only those objects hidden.
         if matches!(self.step, Step::Base | Step::Target { .. }) && self.moving.is_none() {
@@ -853,13 +883,15 @@ mod shift_stretch_tests {
     #[test]
     fn shift_window_subtracts_selected_vertices_without_adding_a_crossing_window() {
         let original = vec![(DVec3::ZERO, DVec3::new(20.0, 20.0, 0.0))];
-        let mut cmd = StretchCommand::with_windows(
-            vec![Handle::NULL], vec![], original.clone(), vec![],
-        );
+        let mut cmd =
+            StretchCommand::with_windows(vec![Handle::NULL], vec![], original.clone(), vec![]);
         // The first corner latches subtraction: releasing Shift before the
         // second click must not turn it back into an additive selection.
         cmd.set_shift(true);
-        assert!(matches!(cmd.on_point(DVec3::new(5.0, 7.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(5.0, 7.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         cmd.set_shift(false);
         match cmd.on_point(DVec3::new(12.0, 15.0, 0.0)) {
             CmdResult::StretchWindow {
@@ -879,7 +911,10 @@ mod shift_stretch_tests {
     fn normal_window_still_adds_to_the_stretch_selection() {
         let original = vec![(DVec3::ZERO, DVec3::new(20.0, 20.0, 0.0))];
         let mut cmd = StretchCommand::with_windows(vec![], vec![], original.clone(), vec![]);
-        assert!(matches!(cmd.on_point(DVec3::new(24.0, 4.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(24.0, 4.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         match cmd.on_point(DVec3::new(30.0, 10.0, 0.0)) {
             CmdResult::StretchWindow {
                 windows,
@@ -909,7 +944,9 @@ mod shift_stretch_tests {
             &excluded,
             DVec3::new(5.0, 0.0, 0.0),
         ));
-        let document::EntityType::Line(line) = entity else { panic!("line expected") };
+        let document::EntityType::Line(line) = entity else {
+            panic!("line expected")
+        };
         assert_eq!(line.start, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(line.end, Vector3::new(15.0, 0.0, 0.0));
     }
@@ -991,17 +1028,18 @@ mod shift_stretch_tests {
     fn shift_removed_point_survives_command_to_commit() {
         let handle = Handle::new(42);
         let window = (DVec3::new(-1.0, -1.0, -1.0), DVec3::new(11.0, 1.0, 1.0));
-        let mut cmd = StretchCommand::with_windows(
-            vec![handle], vec![], vec![window], Vec::new(),
-        );
+        let mut cmd = StretchCommand::with_windows(vec![handle], vec![], vec![window], Vec::new());
         assert!(cmd.remove_stretch_point(handle, DVec3::ZERO));
         assert!(cmd.consume_stretch_remove_release());
         assert!(!cmd.consume_stretch_remove_release());
         assert!(matches!(cmd.on_enter(), CmdResult::NeedPoint));
         assert!(matches!(cmd.on_point(DVec3::ZERO), CmdResult::NeedPoint));
-        let CmdResult::StretchEntities { excluded_points, .. } =
-            cmd.on_point(DVec3::new(5.0, 0.0, 0.0))
-        else { panic!("expected STRETCH result") };
+        let CmdResult::StretchEntities {
+            excluded_points, ..
+        } = cmd.on_point(DVec3::new(5.0, 0.0, 0.0))
+        else {
+            panic!("expected STRETCH result")
+        };
         assert_eq!(excluded_points, vec![(handle, DVec3::ZERO)]);
     }
 
@@ -1031,10 +1069,19 @@ mod shift_stretch_tests {
         let window = (DVec3::new(5.0, -1.0, -1.0), DVec3::new(15.0, 1.0, 1.0));
         let mut cmd = StretchCommand::preselected(vec![handle], vec![], window);
         assert_eq!(cmd.prompt(), "STRETCH  Specify base point:");
-        assert!(matches!(cmd.on_point(DVec3::new(10.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(10.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         assert!(cmd.prompt().starts_with("STRETCH  Specify new point"));
         let result = cmd.on_point(DVec3::new(15.0, 0.0, 0.0));
-        let CmdResult::StretchEntities { handles, windows, delta, .. } = result else {
+        let CmdResult::StretchEntities {
+            handles,
+            windows,
+            delta,
+            ..
+        } = result
+        else {
             panic!("expected StretchEntities");
         };
         assert_eq!(handles, vec![handle]);
@@ -1053,9 +1100,18 @@ mod shift_stretch_tests {
         );
         let mut cmd = StretchCommand::new(vec![handle], vec![wire]);
         assert_eq!(cmd.prompt(), "STRETCH  Specify base point:");
-        assert!(matches!(cmd.on_point(DVec3::new(0.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(matches!(
+            cmd.on_point(DVec3::new(0.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
         let result = cmd.on_point(DVec3::new(5.0, 5.0, 0.0));
-        let CmdResult::StretchEntities { handles, windows, delta, .. } = result else {
+        let CmdResult::StretchEntities {
+            handles,
+            windows,
+            delta,
+            ..
+        } = result
+        else {
             panic!("expected StretchEntities");
         };
         assert_eq!(handles, vec![handle]);
@@ -1069,6 +1125,9 @@ mod shift_stretch_tests {
     #[test]
     fn empty_selection_starts_in_crossing_window_step() {
         let cmd = StretchCommand::new(vec![], vec![]);
-        assert_eq!(cmd.prompt(), "STRETCH  Specify first corner of crossing window:");
+        assert_eq!(
+            cmd.prompt(),
+            "STRETCH  Specify first corner of crossing window:"
+        );
     }
 }

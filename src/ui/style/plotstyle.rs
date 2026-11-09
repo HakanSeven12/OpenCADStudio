@@ -376,11 +376,12 @@ pub fn view_window<'a>(
             },
             // ── Lineweight ───────────────────────────────────────────────────
             lbl(t!("Lineweight:")),
-            crate::ui::dropdown_list::pick_list(Some(current_lw), lw_items, |item| item.to_string(),)
-                .on_select(|item: PlotLineweightItem| { Message::PlotStylePanelLwSet(item.index) })
-                .text_size(11)
-                .padding([3, 5])
-                .width(iced::Length::Fill),
+            crate::ui::dropdown_list::pick_list(Some(current_lw), lw_items, |item| item
+                .to_string(),)
+            .on_select(|item: PlotLineweightItem| { Message::PlotStylePanelLwSet(item.index) })
+            .text_size(11)
+            .padding([3, 5])
+            .width(iced::Length::Fill),
             // ── Screening ────────────────────────────────────────────────────
             lbl(t!("Screening (0-100):")),
             text_input("100", screen_buf)

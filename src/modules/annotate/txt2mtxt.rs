@@ -187,7 +187,13 @@ fn piece<'a>(handle: Handle, entity: &'a EntityType, doc: &Document) -> Option<P
 }
 
 /// A new MTEXT with `source`'s layer, colour and style.
-fn mtext_from(source: &EntityType, value: String, at: [f64; 2], height: f64, rotation: f64) -> MText {
+fn mtext_from(
+    source: &EntityType,
+    value: String,
+    at: [f64; 2],
+    height: f64,
+    rotation: f64,
+) -> MText {
     let mut m = MText::new();
     let (common, style, z, normal) = match source {
         EntityType::Text(t) => (&t.common, &t.style, t.insertion_point.z, t.normal),
@@ -265,7 +271,9 @@ fn separate(p: &Piece, doc: &Document) -> Vec<EntityType> {
                         .join(" ");
                     let at = p.point(line[0].0 - origin_along, p.rect[3] - k as f64 * step);
                     let height = line[0].1.height;
-                    EntityType::MText(Box::new(mtext_from(p.entity, value, at, height, m.rotation)))
+                    EntityType::MText(Box::new(mtext_from(
+                        p.entity, value, at, height, m.rotation,
+                    )))
                 })
                 .collect()
         }
@@ -293,7 +301,12 @@ pub fn plan(
     }
     if !settings.select_order {
         // Top-down; a tie keeps the selection order.
-        let top = |p: &Piece| p.corners().map(|c| up(c, frame)).into_iter().fold(f64::MIN, f64::max);
+        let top = |p: &Piece| {
+            p.corners()
+                .map(|c| up(c, frame))
+                .into_iter()
+                .fold(f64::MIN, f64::max)
+        };
         pieces.sort_by(|a, b| top(b).total_cmp(&top(a)));
     }
     let first = &pieces[0];

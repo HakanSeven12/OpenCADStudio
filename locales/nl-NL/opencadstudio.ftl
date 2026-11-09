@@ -3427,7 +3427,9 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Geef beginpunt van boog op:
     .arc-specify-second-point-of-arc = ARC  Geef tweede punt van boog op:
     .arc-specify-end-point-of-arc = ARC  Geef eindpunt van boog op:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  Geef middelpunt van boog op:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
     .arc-specify-included-angle = ARC  Geef ingesloten hoek op:
     .arc-specify-length-of-chord = ARC  Geef lengte van koorde op:
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Geef raaklijnrichting in beginpunt van boog op:
@@ -4553,6 +4555,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Select object or bounded area:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Selecteer extra objecten of begrensde gebieden [Undo] (Enter voor hoogte):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  { common.specify }: { common.extrusion } · { common.height } (+/−) [{ common.multiple }/{ common.undo }]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: the selected face could not be copied to a new body.
+    .presspull-option-new-body = New body
+    .presspull-option-modify-solid = Modify solid
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  { draw.select }: { model.sweep } · { common.path } [{ common.alignment-title-case }/{ styles.basepoint }/{ common.scale }/{ properties.twist }]:
@@ -5344,6 +5350,9 @@ view =
     .opening-patreon-page = Patreon pagina openen...
     .opening-feedback-page = Herinneringspagina openen...
     .opening-release-notes = Openen van de release notes...
+    .checking-for-updates = Zoeken naar updates...
+    .no-newer-release = Geen nieuwere versie gevonden. Dit is versie { $version }.
+    .web-always-latest = De webapp draait altijd de nieuwste versie.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: sleep met de linker muisknop. Druk op Esc om af te sluiten.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW Geef de eerste hoek van het plotvenster op:
     .plotwindow-specify-opposite-corner = PLOTWINDOW Geef de andere hoek aan:
@@ -7266,9 +7275,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Distance = { $value }
-    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
-    .second-line = { $command }  Select second line (smaller angle):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Lines
     .points = Points
     .invalid-radius = Select a circle or arc with a finite, positive radius.
@@ -8378,6 +8400,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

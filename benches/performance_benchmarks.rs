@@ -59,9 +59,8 @@ use OpenCADStudio::scene::{ChangeKind, Scene};
 use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
-    grid_segments, selection_overlay, CrosshairOptions, GridCanvasState, GridKey,
-    GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
-    UcsIconParams,
+    grid_segments, selection_overlay, CrosshairOptions, GridCanvasState, GridKey, GridParams,
+    GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions, UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
 use OpenCADStudio::ui::ribbon::{LayerInfo, Ribbon};
@@ -156,7 +155,7 @@ fn bench_scene_entity_ingestion(runner: &mut BenchmarkRunner) {
         black_box(&scene);
     }
 
-    let median_sec = samples[samples.len() / 2] / 1000.0;
+    let median_sec = harness::median(&samples) / 1000.0;
     let throughput = (n_entities as f64) / median_sec;
 
     runner.record(
@@ -257,7 +256,7 @@ fn bench_analytical_tessellation_zoom(runner: &mut BenchmarkRunner) {
     }
 
     let wires = wires_opt.unwrap();
-    let median_tess_sec = tess_samples[tess_samples.len() / 2] / 1000.0;
+    let median_tess_sec = harness::median(&tess_samples) / 1000.0;
     let tess_throughput = (total_entities as f64) / median_tess_sec;
 
     runner.record(
@@ -301,7 +300,7 @@ fn bench_analytical_tessellation_zoom(runner: &mut BenchmarkRunner) {
         zoom_samples.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
 
-    let median_zoom_ms = zoom_samples[zoom_samples.len() / 2];
+    let median_zoom_ms = harness::median(&zoom_samples);
     let fps = 100.0 / (median_zoom_ms / 1000.0);
 
     runner.record(
@@ -347,7 +346,7 @@ fn bench_spatial_index_construction(runner: &mut BenchmarkRunner) {
         black_box(index);
     }
 
-    let median_sec = samples[samples.len() / 2] / 1000.0;
+    let median_sec = harness::median(&samples) / 1000.0;
     let throughput = (wires.len() as f64) / median_sec;
 
     runner.record(
@@ -417,7 +416,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
         click_samples.push(per_query_us);
     }
 
-    let median_click_us = click_samples[click_samples.len() / 2];
+    let median_click_us = harness::median(&click_samples);
     runner.record(
         "hit_test_click_pick_latency",
         "Single-point click_hit query across 5,000 entities in screen space",
@@ -441,7 +440,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
         let per_query_us = (t0.elapsed().as_secs_f64() * 1_000_000.0) / (n_queries as f64);
         box_win_samples.push(per_query_us);
     }
-    let median_win_us = box_win_samples[box_win_samples.len() / 2];
+    let median_win_us = harness::median(&box_win_samples);
     runner.record(
         "hit_test_box_window_enclosed",
         "Window selection box_hit (enclosed) across 5,000 entities",
@@ -465,7 +464,7 @@ fn bench_hit_test_picking(runner: &mut BenchmarkRunner) {
         let per_query_us = (t0.elapsed().as_secs_f64() * 1_000_000.0) / (n_queries as f64);
         box_cross_samples.push(per_query_us);
     }
-    let median_cross_us = box_cross_samples[box_cross_samples.len() / 2];
+    let median_cross_us = harness::median(&box_cross_samples);
     runner.record(
         "hit_test_box_crossing_boundary",
         "Crossing selection box_hit (boundary intersection) across 5,000 entities",
@@ -543,7 +542,7 @@ fn bench_osnap_evaluation(runner: &mut BenchmarkRunner) {
         samples.push(per_snap_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         name,
         "Real-time OSNAP evaluation (Endpoint, Mid, Center, Intersect, Nearest) across 5k entities",
@@ -619,7 +618,7 @@ fn bench_geometric_constraint_solving(runner: &mut BenchmarkRunner) {
         samples.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
 
-    let median_ms = samples[samples.len() / 2];
+    let median_ms = harness::median(&samples);
     runner.record(
         name,
         "Solving coupled nonlinear 2D constraints (Perp, Parallel, Length) via Dogleg solver",
@@ -670,7 +669,7 @@ fn bench_dxf_io_throughput(runner: &mut BenchmarkRunner) {
     }
 
     let mb_size = (dxf_bytes.len() as f64) / (1024.0 * 1024.0);
-    let median_write_sec = write_samples[write_samples.len() / 2] / 1000.0;
+    let median_write_sec = harness::median(&write_samples) / 1000.0;
     let write_throughput_mb = mb_size / median_write_sec;
 
     runner.record(
@@ -693,7 +692,7 @@ fn bench_dxf_io_throughput(runner: &mut BenchmarkRunner) {
         black_box(parsed_doc);
     }
 
-    let median_read_sec = read_samples[read_samples.len() / 2] / 1000.0;
+    let median_read_sec = harness::median(&read_samples) / 1000.0;
     let read_throughput_mb = mb_size / median_read_sec;
 
     runner.record(
@@ -739,7 +738,7 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
         let per_ns = (t0.elapsed().as_nanos() as f64) / (n as f64);
         deep_samples.push(per_ns);
     }
-    let median_deep_ns = deep_samples[deep_samples.len() / 2];
+    let median_deep_ns = harness::median(&deep_samples);
     runner.record(
         "selection_state_deep_clone",
         "SelectionState::clone (deep clone with 64 polygon vertices)",
@@ -759,7 +758,7 @@ fn bench_selection_cloning(runner: &mut BenchmarkRunner) {
         let per_ns = (t0.elapsed().as_nanos() as f64) / (n as f64);
         arc_samples.push(per_ns);
     }
-    let median_arc_ns = arc_samples[arc_samples.len() / 2];
+    let median_arc_ns = harness::median(&arc_samples);
     runner.record(
         "selection_state_arc_clone",
         "Arc<SelectionState>::clone (atomic reference count increment)",
@@ -871,7 +870,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_ribbon_view_construction",
         "Ribbon::view widget tree construction per frame (populated tabs, styles, layers)",
@@ -977,7 +976,7 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             samples.push(per_us);
         }
 
-        let median_us = samples[samples.len() / 2];
+        let median_us = harness::median(&samples);
         runner.record(
             "ui_grid_geometry_uncached",
             "Viewport 2-pane tiled grid projection & segment generation (uncached)",
@@ -1030,7 +1029,11 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             },
         ];
         let key_for = |pane: usize| {
-            GridKey::from_grids(std::slice::from_ref(&grids[pane]), clips[pane], GridStyle::default())
+            GridKey::from_grids(
+                std::slice::from_ref(&grids[pane]),
+                clips[pane],
+                GridStyle::default(),
+            )
         };
 
         let state = GridCanvasState::default();
@@ -1083,7 +1086,7 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             samples.push(per_ns);
         }
 
-        let median_ns = samples[samples.len() / 2];
+        let median_ns = harness::median(&samples);
         runner.record(
             "ui_grid_cache_hit_evaluation",
             "Per-pane grid overlay key construction + reuse decision (2 panes, 1 changed)",
@@ -1118,7 +1121,7 @@ fn bench_ui_icon_caching(runner: &mut BenchmarkRunner) {
             samples.push(per_ns);
         }
 
-        let median_ns = samples[samples.len() / 2];
+        let median_ns = harness::median(&samples);
         runner.record(
             "ui_icon_handle_cached",
             "Themed SVG icon cache hit (FxHashMap lookup + Handle clone)",
@@ -1144,7 +1147,7 @@ fn bench_ui_icon_caching(runner: &mut BenchmarkRunner) {
             samples.push(per_ns);
         }
 
-        let median_ns = samples[samples.len() / 2];
+        let median_ns = harness::median(&samples);
         runner.record(
             "ui_icon_handle_uncached",
             "Uncached SVG icon memory parse + Handle allocation",
@@ -1192,7 +1195,7 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_plotstyle_layer_usage",
         "Plot Style 256-bucket ACI layer-usage table rebuild (200 layers, 8 buckets x25)",
@@ -1258,7 +1261,7 @@ fn bench_ui_statusbar_derived_data(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_statusbar_derived_data",
         "Status-bar cached derived data hit (layout names + scale picker Arc clones)",
@@ -1363,7 +1366,7 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_grip_budget",
         &format!(
@@ -1402,7 +1405,7 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
         let per_us = (t0.elapsed().as_micros() as f64) / (n_build as f64);
         build_samples.push(per_us);
     }
-    let build_median_us = build_samples[build_samples.len() / 2];
+    let build_median_us = harness::median(&build_samples);
     runner.record(
         "ui_grip_budget_build",
         &format!(
@@ -1493,7 +1496,7 @@ fn bench_ui_constraint_glyphs(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_constraint_glyphs",
         &format!(
@@ -1537,7 +1540,7 @@ fn bench_ui_selection_overlay(runner: &mut BenchmarkRunner) {
         samples.push(per_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     runner.record(
         "ui_selection_overlay",
         &format!(
@@ -1570,6 +1573,7 @@ fn build_selection_overlay_element(
             is_plugin: false,
             is_authoring: false,
             is_dynamic: false,
+            is_filled: false,
         })
         .collect();
     let ucs_icons = vec![UcsIconParams {
@@ -1594,7 +1598,9 @@ fn build_selection_overlay_element(
         None,
         None,
         grips,
+        vec![],
         None,
+        vec![],
         None,
         ucs_icons,
         vec![OstTrackPoint {
@@ -1604,6 +1610,7 @@ fn build_selection_overlay_element(
         None,
         true,
         vec![],
+        None,
         None,
         None,
         NavCursor::None,
@@ -1757,7 +1764,7 @@ fn bench_wide_and_tapered_arc_tessellation(runner: &mut BenchmarkRunner) {
         samples.push(elapsed_ms);
     }
 
-    let median_ms = samples[samples.len() / 2];
+    let median_ms = harness::median(&samples);
     let throughput = (total_entities as f64) / (median_ms / 1000.0);
     runner.record(
         name,
@@ -1830,7 +1837,7 @@ fn bench_zoom_extents_calculation(runner: &mut BenchmarkRunner) {
         samples.push(elapsed_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     let throughput = (n as f64) / (median_us / 1_000_000.0);
     runner.record(
         name,
@@ -1894,7 +1901,7 @@ fn bench_batch_entity_mutation(runner: &mut BenchmarkRunner) {
         samples.push(elapsed_ms);
     }
 
-    let median_ms = samples[samples.len() / 2];
+    let median_ms = harness::median(&samples);
     let throughput = (mutate_count as f64) / (median_ms / 1000.0);
     runner.record(
         name,
@@ -1934,7 +1941,7 @@ fn bench_draworder_evaluation(runner: &mut BenchmarkRunner) {
             let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
             samples.push(elapsed_ms);
         }
-        let median_ms = samples[samples.len() / 2];
+        let median_ms = harness::median(&samples);
         let throughput = (total_entities as f64) / (median_ms / 1000.0);
         runner.record(
             "draworder_depth_map_full_build",
@@ -1965,7 +1972,7 @@ fn bench_draworder_evaluation(runner: &mut BenchmarkRunner) {
             let per_us = (t0.elapsed().as_micros() as f64) / (n_patch as f64);
             samples.push(per_us);
         }
-        let median_us = samples[samples.len() / 2];
+        let median_us = harness::median(&samples);
         runner.record(
             "draworder_depth_map_incremental_patch",
             "Draworder depth map fast-path retrieval under entity modifications",
@@ -2016,7 +2023,7 @@ fn bench_undo_delta_recording(runner: &mut BenchmarkRunner) {
         samples.push(elapsed_us);
     }
 
-    let median_us = samples[samples.len() / 2];
+    let median_us = harness::median(&samples);
     let throughput = (mutate_count as f64) / (median_us / 1_000_000.0);
     runner.record(
         name,
@@ -2078,7 +2085,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let elapsed_us = t0.elapsed().as_micros() as f64;
         uncached_samples.push(elapsed_us);
     }
-    let median_uncached_us = uncached_samples[uncached_samples.len() / 2];
+    let median_uncached_us = harness::median(&uncached_samples);
     let fps_uncached = 1_000_000.0 / median_uncached_us.max(1.0);
     runner.record(
         "view_render_viewport_uncached (Before)",
@@ -2114,7 +2121,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let elapsed_us = t0.elapsed().as_micros() as f64;
         cached_samples.push(elapsed_us);
     }
-    let median_cached_us = cached_samples[cached_samples.len() / 2];
+    let median_cached_us = harness::median(&cached_samples);
     let fps_cached = 1_000_000.0 / median_cached_us.max(1.0);
     runner.record(
         "view_render_viewport_cached (After)",
@@ -2190,7 +2197,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
         let per_us = (t0.elapsed().as_micros() as f64) / (n_pans as f64);
         pan_samples.push(per_us);
     }
-    let median_pan_us = pan_samples[pan_samples.len() / 2];
+    let median_pan_us = harness::median(&pan_samples);
     runner.record(
         "nav_camera_pan_viewport_update",
         "Camera pan_screen + build_viewports (pure GPU uniform update)",
@@ -2222,7 +2229,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
         let per_us = (t0.elapsed().as_micros() as f64) / (n_hover as f64);
         hover_samples.push(per_us);
     }
-    let median_hover_us = hover_samples[hover_samples.len() / 2];
+    let median_hover_us = harness::median(&hover_samples);
     runner.record(
         "nav_spatial_hover_candidate_search",
         "Spatial hover candidate search (R-tree candidate culling for cursor movement)",
@@ -2252,7 +2259,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
         let per_us = (t0.elapsed().as_micros() as f64) / (n_frames as f64);
         assemble_samples.push(per_us);
     }
-    let median_assemble_us = assemble_samples[assemble_samples.len() / 2];
+    let median_assemble_us = harness::median(&assemble_samples);
     runner.record(
         "nav_viewport_assembly_scaling",
         "ViewportData assembly per camera_generation change (live navigation frame prep)",
@@ -2286,7 +2293,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
         black_box(tree);
         inc_samples.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
-    let median_inc_ms = inc_samples[inc_samples.len() / 2];
+    let median_inc_ms = harness::median(&inc_samples);
     runner.record(
         "nav_spatial_quadtree_build",
         "QuadTree spatial index construction across 100k clustered entities",

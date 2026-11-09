@@ -79,7 +79,9 @@ pub enum QatBuiltin {
     CenterLayer,
 }
 
-fn lenient_qat<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<QatItem>, D::Error> {
+fn lenient_qat<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<QatItem>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Saved {

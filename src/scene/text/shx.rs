@@ -221,7 +221,10 @@ fn bigfont_code_page(path: &str, file: &ShxFile) -> &'static str {
     } else if name.contains("gb")
         || name.contains("hz")
         || name.contains("china")
-        || !file.shapes.keys().any(|&code| code > 0xFF && code & 0xFF < 0xA1)
+        || !file
+            .shapes
+            .keys()
+            .any(|&code| code > 0xFF && code & 0xFF < 0xA1)
     {
         "ansi_936"
     } else {
@@ -237,7 +240,8 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     if file.kind != ShxKind::Bigfont {
         return None;
     }
-    let enc = document::io::dxf::code_page::encoding_from_code_page(bigfont_code_page(path, &file))?;
+    let enc =
+        document::io::dxf::code_page::encoding_from_code_page(bigfont_code_page(path, &file))?;
     let mut buf = [0u8; 4];
     let (bytes, _, unmappable) = enc.encode(ch.encode_utf8(&mut buf));
     if unmappable || bytes.len() != 2 {

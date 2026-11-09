@@ -24,7 +24,9 @@ pub struct Imported {
 
 /// File units over drawing units; one where the drawing is unitless.
 fn ratio(file_mm: f64, drawing_mm: Option<f64>) -> f64 {
-    drawing_mm.filter(|mm| *mm > 0.0).map_or(1.0, |mm| file_mm / mm)
+    drawing_mm
+        .filter(|mm| *mm > 0.0)
+        .map_or(1.0, |mm| file_mm / mm)
 }
 
 /// A block name from a product's, with the characters names cannot hold
@@ -152,7 +154,8 @@ fn step_blocks(model: crate::io::step_import::StepModel, scale: f64, stem: &str)
                 .bodies
                 .iter()
                 .filter_map(|body| {
-                    let faces: Vec<Option<Color>> = body.faces.iter().map(|c| c.map(step_colour)).collect();
+                    let faces: Vec<Option<Color>> =
+                        body.faces.iter().map(|c| c.map(step_colour)).collect();
                     let colour = body.colour.map(step_colour);
                     let mut entity = painted_body_entity(&body.body, colour, &faces, false)?;
                     if product.scale != 1.0 {
@@ -176,7 +179,11 @@ fn step_blocks(model: crate::io::step_import::StepModel, scale: f64, stem: &str)
             (names[k].clone(), entities)
         })
         .collect();
-    let identity = [[scale, 0.0, 0.0, 0.0], [0.0, scale, 0.0, 0.0], [0.0, 0.0, scale, 0.0]];
+    let identity = [
+        [scale, 0.0, 0.0, 0.0],
+        [0.0, scale, 0.0, 0.0],
+        [0.0, 0.0, scale, 0.0],
+    ];
     // Solids placed straight into the drawing keep the colour by block
     // they have in a block.
     let mut direct: Vec<EntityType> = model
@@ -192,8 +199,16 @@ fn step_blocks(model: crate::io::step_import::StepModel, scale: f64, stem: &str)
             Some(entity)
         })
         .collect();
-    direct.extend(model.roots.iter().map(|&k| placed_insert(&names[k], &identity)));
-    Imported { blocks, entities: direct }
+    direct.extend(
+        model
+            .roots
+            .iter()
+            .map(|&k| placed_insert(&names[k], &identity)),
+    );
+    Imported {
+        blocks,
+        entities: direct,
+    }
 }
 
 /// `None` when the file is not of `format` or holds nothing it can read.

@@ -67,8 +67,10 @@ fn fixture() -> Scene {
         scene.add_entity(EntityType::Line(line));
     }
     for index in 0..TEXTS {
-        let mut text =
-            Text::with_value(format!("note {index}"), Vector3::new(0.0, index as f64, 0.0));
+        let mut text = Text::with_value(
+            format!("note {index}"),
+            Vector3::new(0.0, index as f64, 0.0),
+        );
         text.common.layer = "NOTES".to_string();
         scene.add_entity(EntityType::Text(text));
     }

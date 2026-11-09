@@ -267,7 +267,10 @@ mod tests {
         draft.oblique.text = "1,5".to_string();
         draft.height.text = "-1".to_string();
         assert_eq!(draft.invalid_fields(), 3);
-        assert!(draft.width.error().is_some_and(|error| error.contains("0.01 to 100")));
+        assert!(draft
+            .width
+            .error()
+            .is_some_and(|error| error.contains("0.01 to 100")));
         assert_eq!(
             draft.oblique.error().as_deref(),
             Some("Must be between \u{2212}85° and 85°.")

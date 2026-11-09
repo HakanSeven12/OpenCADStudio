@@ -3428,11 +3428,13 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Specify start point of arc:
     .arc-specify-second-point-of-arc = ARC  Specify second point of arc:
     .arc-specify-end-point-of-arc = ARC  Specify end point of arc:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  Specify center point of arc:
-    .arc-specify-included-angle = ARC  Specify included angle:
-    .arc-specify-length-of-chord = ARC  Specify length of chord:
-    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Specify tangent direction for the start point of arc:
-    .arc-specify-radius-of-arc = ARC  Specify radius of arc:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
+    .arc-specify-included-angle = ARC  Specify included angle (hold Ctrl to switch direction):
+    .arc-specify-length-of-chord = ARC  Specify length of chord (hold Ctrl to switch direction):
+    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Specify tangent direction for the start point of arc (hold Ctrl to switch direction):
+    .arc-specify-radius-of-arc = ARC  Specify radius of arc (hold Ctrl to switch direction):
     .chord-length = chord Length
 
 modify =
@@ -4565,6 +4567,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Select object or bounded area:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  Specify signed extrusion height or [Multiple/Undo]:
+    .presspull-specify-new-body-height = PRESSPULL  Specify signed height of the new body or [Multiple/Modify solid/Undo]:
+    .presspull-face-new-body-failed = PRESSPULL: the selected face could not be copied to a new body.
+    .presspull-option-new-body = New body
+    .presspull-option-modify-solid = Modify solid
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  Creation mode [Solid/Surface]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  Select sweep path or [Alignment/Base point/Scale/Twist]:
@@ -5341,6 +5347,9 @@ view =
     .opening-patreon-page = Opening Patreon page...
     .opening-feedback-page = Opening feedback page...
     .opening-release-notes = Opening release notes...
+    .checking-for-updates = Checking for updates...
+    .no-newer-release = No newer release was found. This is version { $version }.
+    .web-always-latest = The web app always runs the latest release.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: drag with the left mouse button. Press Esc to exit.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW  Specify first corner of plot window:
     .plotwindow-specify-opposite-corner = PLOTWINDOW  Specify opposite corner:
@@ -7269,9 +7278,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Distance = { $value }
-    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
-    .second-line = { $command }  Select second line (smaller angle):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Lines
     .points = Points
     .invalid-radius = Select a circle, arc, or circular region edge with a finite, positive radius.
@@ -8427,6 +8449,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

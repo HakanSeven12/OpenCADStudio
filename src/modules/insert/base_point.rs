@@ -44,8 +44,7 @@ impl CadCommand for BaseCommand {
 
     fn prompt(&self) -> String {
         if self.variable {
-            crate::ui::command_line::value_prompt("INSBASE", &point_text(self.current)
-            )
+            crate::ui::command_line::value_prompt("INSBASE", &point_text(self.current))
         } else {
             format!("Enter base point <{}>:", point_text(self.current))
         }

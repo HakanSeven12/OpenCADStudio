@@ -829,7 +829,11 @@ fn arc_joint_bevels(
                 start_angle,
                 ..
             } => {
-                let (c, x, y) = (DVec3::from(center), DVec3::from(axis_x), DVec3::from(axis_y));
+                let (c, x, y) = (
+                    DVec3::from(center),
+                    DVec3::from(axis_x),
+                    DVec3::from(axis_y),
+                );
                 let normal = x.cross(y).try_normalize()?;
                 let (sin, cos) = start_angle.sin_cos();
                 let first = c + radius * (cos * x + sin * y);
@@ -3642,7 +3646,8 @@ mod tests {
     fn none_arrow_draws_what_its_block_holds() {
         // A drawing's "_NONE" holding a 0.25 circle, which AutoCAD 2025 draws.
         let mut doc = Document::new();
-        let circle = document::entities::Circle::from_center_radius(document::types::Vector3::ZERO, 0.25);
+        let circle =
+            document::entities::Circle::from_center_radius(document::types::Vector3::ZERO, 0.25);
         crate::app::define_block_raw_doc(
             &mut doc,
             "_NONE",
@@ -4031,8 +4036,10 @@ mod tests {
         // the text down the stroke route; its mask and frame are drawn there
         // too, exactly as for plain text.
         let wires = |value: &str, flags: i32| {
-            let mut text =
-                document::entities::MText::with_value(value, document::types::Vector3::new(0., 0., 0.));
+            let mut text = document::entities::MText::with_value(
+                value,
+                document::types::Vector3::new(0., 0., 0.),
+            );
             text.height = 2.5;
             text.background_fill_flags = flags;
             text.background_color = document::types::Color::Index(1);

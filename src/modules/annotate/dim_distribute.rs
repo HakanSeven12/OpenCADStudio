@@ -92,10 +92,7 @@ impl CadCommand for DimDistributeCommand {
             return Vec::new();
         }
         match self.step {
-            Step::Method => vec![
-                CmdOption::new("Equal", "E"),
-                CmdOption::new("Offset", "O"),
-            ],
+            Step::Method => vec![CmdOption::new("Equal", "E"), CmdOption::new("Offset", "O")],
             Step::Base => vec![CmdOption::new("Offset", "O")],
             Step::Gather if self.offset_method => vec![CmdOption::new("Offset", "O")],
             Step::Gather => Vec::new(),

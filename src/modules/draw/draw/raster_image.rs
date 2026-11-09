@@ -132,7 +132,8 @@ impl ImageCommand {
                 let (upper_left, lower_right) =
                     corners_from_placement(ins, world_width, self.aspect());
                 let ole = build_embedded_ole(image, upper_left, lower_right);
-                self.plane.place_entity(EntityType::Ole2Frame(Box::new(ole)))
+                self.plane
+                    .place_entity(EntityType::Ole2Frame(Box::new(ole)))
             }
         }
     }

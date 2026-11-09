@@ -1001,11 +1001,24 @@ fn the_filter_and_search_narrow_the_rows_and_the_footer_counts_them() {
         3,
         "Angle1, Distance1 and TAG1 end in 1"
     );
-    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Distance*", "").len(), 2);
-    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "*", "angle").len(), 1);
-    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Angle*", "distance").len(), 0);
     assert_eq!(
-        manager::footer(manager::FilterMode::All, rows.len(), manager::displayed(&rows, manager::FilterMode::All, "Angle*", "").len()),
+        manager::displayed(&rows, manager::FilterMode::All, "Distance*", "").len(),
+        2
+    );
+    assert_eq!(
+        manager::displayed(&rows, manager::FilterMode::All, "*", "angle").len(),
+        1
+    );
+    assert_eq!(
+        manager::displayed(&rows, manager::FilterMode::All, "Angle*", "distance").len(),
+        0
+    );
+    assert_eq!(
+        manager::footer(
+            manager::FilterMode::All,
+            rows.len(),
+            manager::displayed(&rows, manager::FilterMode::All, "Angle*", "").len()
+        ),
         "All: 1 of 4 parameters displayed"
     );
 }
@@ -1578,7 +1591,12 @@ fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let count = |app: &OpenCADStudio| {
         let panel = &app.tabs[tab].parameters_panel;
         let rows = manager::rows(&app.tabs[tab].scene.document, definition);
-        let shown = manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search);
+        let shown = manager::displayed(
+            &rows,
+            manager::FilterMode::All,
+            &panel.filter,
+            &panel.search,
+        );
         manager::footer(manager::FilterMode::All, rows.len(), shown.len())
     };
     assert_eq!(
@@ -1758,7 +1776,8 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
         let scaled =
             actions::create(doc, definition, Kind::Scale, parent, &[member], DVec3::ZERO).unwrap();
         actions::create(doc, definition, Kind::Move, child, &[member], DVec3::ZERO).unwrap();
-        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
+        let document::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get_mut(&moved).unwrap()
         else {
             panic!()
         };
@@ -1883,7 +1902,8 @@ fn evaluation_graph(document: &document::Document) -> document::Handle {
 /// Leave the graph naming one node twice: every parameter it held is still
 /// named, and no authoring read will edit it.
 fn duplicate_a_node(document: &mut document::Document, graph: document::Handle) -> bool {
-    let Some(document::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&graph)
+    let Some(document::objects::ObjectType::DynamicBlock(object)) =
+        document.objects.get_mut(&graph)
     else {
         return false;
     };

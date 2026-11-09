@@ -116,7 +116,11 @@ fn main() -> iced::Result {
 
         // Unattended script runs need no window, so no GPU either.
         if let Some(script) = args.batch.as_ref().or(args.each.as_ref()) {
-            let files = if args.each.is_some() { &args.files[..] } else { &[] };
+            let files = if args.each.is_some() {
+                &args.files[..]
+            } else {
+                &[]
+            };
             std::process::exit(app::run_batch(script, files, args.read_only));
         }
 

@@ -157,7 +157,11 @@ fn f64_at(b: &[u8], o: usize) -> Option<f64> {
 }
 
 fn pt3_at(b: &[u8], o: usize) -> Option<DVec3> {
-    Some(DVec3::new(f64_at(b, o)?, f64_at(b, o + 8)?, f64_at(b, o + 16)?))
+    Some(DVec3::new(
+        f64_at(b, o)?,
+        f64_at(b, o + 8)?,
+        f64_at(b, o + 16)?,
+    ))
 }
 
 fn align4(o: usize) -> usize {
@@ -178,7 +182,10 @@ fn padded_string(data: &[u8], o: usize, unicode: bool) -> Option<(String, usize)
         Some((String::from_utf16_lossy(&units), align4(end)))
     } else {
         let n = raw.iter().position(|&b| b == 0)?;
-        Some((String::from_utf8_lossy(&raw[..n]).into_owned(), align4(o + n + 1)))
+        Some((
+            String::from_utf8_lossy(&raw[..n]).into_owned(),
+            align4(o + n + 1),
+        ))
     }
 }
 
@@ -244,7 +251,10 @@ impl State {
             DVec3::X
         };
         let world_dir = self.xform.transform_vector3(dir);
-        t.position = self.xform.transform_point3(DVec3::from(t.position)).to_array();
+        t.position = self
+            .xform
+            .transform_point3(DVec3::from(t.position))
+            .to_array();
         t.height *= world_dir.length();
         t.rotation = world_dir.y.atan2(world_dir.x);
         t.style = self.style;
@@ -406,7 +416,10 @@ fn decode_shell(d: &[u8]) -> Vec<Vec<DVec3>> {
     if n < 2 || 4 + n * 24 + 4 > d.len() {
         return faces;
     }
-    let Some(verts) = (0..n).map(|i| pt3_at(d, 4 + i * 24)).collect::<Option<Vec<_>>>() else {
+    let Some(verts) = (0..n)
+        .map(|i| pt3_at(d, 4 + i * 24))
+        .collect::<Option<Vec<_>>>()
+    else {
         return faces;
     };
     let mut fp = 4 + n * 24;
@@ -444,8 +457,9 @@ fn three_point_circle(d: &[u8]) -> Option<(DVec3, f64, DVec3, DVec3, f64)> {
     if axb.length_squared() < 1e-24 {
         return None;
     }
-    let c = p3 + (b * a.length_squared() - a * b.length_squared()).cross(axb)
-        / (2.0 * axb.length_squared());
+    let c = p3
+        + (b * a.length_squared() - a * b.length_squared()).cross(axb)
+            / (2.0 * axb.length_squared());
     let n = (p2 - p1).cross(p3 - p2).normalize();
     let u = (p1 - c).normalize();
     let w = p3 - c;
@@ -502,7 +516,11 @@ fn decode_lwpolyline(d: &[u8]) -> Option<(Vec<DVec3>, bool)> {
     if flags & 4 != 0 {
         r.read_bit_double(); // constant width
     }
-    let elevation = if flags & 8 != 0 { r.read_bit_double() } else { 0.0 };
+    let elevation = if flags & 8 != 0 {
+        r.read_bit_double()
+    } else {
+        0.0
+    };
     if flags & 2 != 0 {
         r.read_bit_double(); // thickness
     }
@@ -514,8 +532,16 @@ fn decode_lwpolyline(d: &[u8]) -> Option<(Vec<DVec3>, bool)> {
     };
     let count = |v: i32| (0..=max_items as i32).contains(&v).then_some(v as usize);
     let n_points = count(r.read_bit_long())?;
-    let n_bulges = if flags & 16 != 0 { count(r.read_bit_long())? } else { 0 };
-    let n_ids = if flags & 1024 != 0 { count(r.read_bit_long())? } else { 0 };
+    let n_bulges = if flags & 16 != 0 {
+        count(r.read_bit_long())?
+    } else {
+        0
+    };
+    let n_ids = if flags & 1024 != 0 {
+        count(r.read_bit_long())?
+    } else {
+        0
+    };
     if flags & 32 != 0 {
         count(r.read_bit_long())?; // widths follow the ids; unused
     }
@@ -525,7 +551,10 @@ fn decode_lwpolyline(d: &[u8]) -> Option<(Vec<DVec3>, bool)> {
     let mut pts = vec![[r.read_raw_double(), r.read_raw_double()]];
     for i in 1..n_points {
         let [px, py] = pts[i - 1];
-        pts.push([r.read_bit_double_with_default(px), r.read_bit_double_with_default(py)]);
+        pts.push([
+            r.read_bit_double_with_default(px),
+            r.read_bit_double_with_default(py),
+        ]);
     }
     let bulges: Vec<f64> = (0..n_bulges).map(|_| r.read_bit_double()).collect();
     for _ in 0..n_ids {
@@ -592,7 +621,9 @@ fn decode_text2(d: &[u8], unicode: bool) -> Option<(ProxyText, DVec3)> {
         o += 16; // bold, italic, charset, pitch
         o = padded_string(d, o, true).map_or(o, |(_, next)| next); // typeface
     }
-    let font = padded_string(d, o, unicode).map(|(f, _)| f).unwrap_or_default();
+    let font = padded_string(d, o, unicode)
+        .map(|(f, _)| f)
+        .unwrap_or_default();
     Some((
         ProxyText {
             position: position.to_array(),
@@ -689,7 +720,9 @@ mod tests {
     }
 
     fn translate(x: f64) -> Vec<u8> {
-        f64s(&[1., 0., 0., x, 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.])
+        f64s(&[
+            1., 0., 0., x, 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ])
     }
 
     /// Pushes compose onto the current transform; a pop restores the outer one.
@@ -735,7 +768,9 @@ mod tests {
     #[test]
     fn decodes_circles_arcs_and_fills() {
         let on_circle = |p: &ProxyPolyline, r: f64| {
-            p.points.iter().all(|q| ((q[0] * q[0] + q[1] * q[1]).sqrt() - r).abs() < 1e-9)
+            p.points
+                .iter()
+                .all(|q| ((q[0] * q[0] + q[1] * q[1]).sqrt() - r).abs() < 1e-9)
         };
         let mut arc = f64s(&[0., 0., 0., 2., 0., 0., 1., 1., 0., 0., std::f64::consts::PI]);
         arc.extend(0u32.to_le_bytes());
@@ -770,7 +805,11 @@ mod tests {
     #[test]
     fn decodes_styled_unicode_text() {
         let utf16 = |s: &str| {
-            let mut b: Vec<u8> = s.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+            let mut b: Vec<u8> = s
+                .encode_utf16()
+                .chain([0])
+                .flat_map(u16::to_le_bytes)
+                .collect();
             b.resize((b.len() + 3) & !3, 0);
             b
         };

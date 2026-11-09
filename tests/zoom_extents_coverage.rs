@@ -75,7 +75,9 @@ fn fit_all_reaches_an_entity_parked_far_from_the_rest() {
 #[test]
 fn fit_all_frames_a_hatch_only_drawing() {
     let mut scene = Scene::new();
-    scene.add_entity(EntityType::Hatch(Box::new(square_hatch(100.0, 200.0, 40.0))));
+    scene.add_entity(EntityType::Hatch(Box::new(square_hatch(
+        100.0, 200.0, 40.0,
+    ))));
 
     scene.fit_all();
 
@@ -103,7 +105,9 @@ fn fit_all_keeps_a_hatch_outside_the_wires_in_view() {
     }
     // The fill is the outermost thing in the drawing; the wires alone would
     // frame a 12 x 10 strip and leave it off screen.
-    scene.add_entity(EntityType::Hatch(Box::new(square_hatch(500.0, 500.0, 50.0))));
+    scene.add_entity(EntityType::Hatch(Box::new(square_hatch(
+        500.0, 500.0, 50.0,
+    ))));
 
     scene.fit_all();
 

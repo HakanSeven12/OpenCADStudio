@@ -1261,7 +1261,8 @@ fn project_mesh_verts(
         .map(|(i, &w)| {
             let point = mesh_vert(w, &mesh.verts_low, i);
             let point = transform.map_or(point, |transform| {
-                let point = transform.apply(document::types::Vector3::new(point.x, point.y, point.z));
+                let point =
+                    transform.apply(document::types::Vector3::new(point.x, point.y, point.z));
                 glam::DVec3::new(point.x, point.y, point.z)
             });
             projection::project_screen(view_rot, eye, bounds, point)
@@ -1316,8 +1317,7 @@ pub fn mesh_box_hit<'a>(
             continue;
         }
         let hit = if crossing {
-            proj.iter().flatten().any(in_box)
-                || mesh_covers_any(&proj, &mesh.indices, &corners)
+            proj.iter().flatten().any(in_box) || mesh_covers_any(&proj, &mesh.indices, &corners)
         } else {
             proj.iter().all(|p| p.is_some_and(|p| in_box(&p)))
         };
@@ -1349,9 +1349,7 @@ pub fn mesh_poly_hit<'a>(
             continue;
         }
         let hit = if crossing {
-            proj.iter()
-                .flatten()
-                .any(|p| point_in_polygon(*p, poly))
+            proj.iter().flatten().any(|p| point_in_polygon(*p, poly))
                 || mesh_covers_any(&proj, &mesh.indices, poly)
         } else {
             proj.iter()

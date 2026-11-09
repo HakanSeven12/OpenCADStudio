@@ -272,7 +272,9 @@ pub fn hidden_layers(u: &document::entities::Underlay) -> Vec<String> {
         .filter(|r| r.application_name.eq_ignore_ascii_case(LAYER_OVERRIDE_APP))
         .flat_map(|r| r.values.iter())
         .filter_map(|v| match v {
-            document::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => Some(s.clone()),
+            document::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => {
+                Some(s.clone())
+            }
             _ => None,
         })
         .collect()

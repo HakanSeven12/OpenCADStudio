@@ -8,15 +8,15 @@
 //! panel, so it shrinks as the panels do.
 
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
-use iced::advanced::{Renderer as _, Shell, mouse, overlay, renderer};
+use iced::advanced::{mouse, overlay, renderer, Renderer as _, Shell};
 use iced::{
-    Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
-    Theme, Vector, keyboard,
+    keyboard, Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer,
+    Shadow, Size, Theme, Vector,
 };
 
 use crate::app::Message;
@@ -671,8 +671,7 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
                                 cancelled: false,
                                 order: (0..self.panels.len()).collect(),
                                 cursor: at,
-                                floatable: self.on_float.is_some()
-                                    && self.panels[i].floatable,
+                                floatable: self.on_float.is_some() && self.panels[i].floatable,
                                 outside: false,
                             })
                     })

@@ -92,7 +92,9 @@ fn ocs_synthesized_mtext_context_survives_dwg_roundtrip() {
     m.insertion_point = Vector3::new(100.0, 200.0, 0.0);
     m.rectangle_width = 50.0;
     m.is_annotative = true;
-    let ent = doc.add_entity(EntityType::MText(Box::new(m))).expect("add mtext");
+    let ent = doc
+        .add_entity(EntityType::MText(Box::new(m)))
+        .expect("add mtext");
 
     let sh = doc.allocate_handle();
     let mut scale = Scale::new("1:50", 1.0, 50.0);

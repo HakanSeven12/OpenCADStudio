@@ -300,7 +300,11 @@ pub fn page_units_per_inch(path: &str, page: &str) -> Option<f64> {
     let page = pdf.pages().get(page_no.checked_sub(1)?)?;
     let positive = |v: f64| (v.is_finite() && v > 0.0).then_some(v);
     let measured = (|| {
-        let viewport = page.raw().get::<Array<'_>>(b"VP")?.iter::<Dict<'_>>().next()?;
+        let viewport = page
+            .raw()
+            .get::<Array<'_>>(b"VP")?
+            .iter::<Dict<'_>>()
+            .next()?;
         let ratio = viewport
             .get::<Dict<'_>>(b"Measure")?
             .get::<Array<'_>>(b"X")?

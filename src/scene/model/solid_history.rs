@@ -470,7 +470,10 @@ pub fn primitive_property_operation(
 /// the common entity rows plus [`primitive_properties`].  A generic B-rep has
 /// no stable primitive dimensions to expose, but it still uses the compact
 /// Solid History palette rather than the internal ACIS/cache diagnostics.
-pub fn has_compact_solid_properties(document: &document::Document, handle: document::Handle) -> bool {
+pub fn has_compact_solid_properties(
+    document: &document::Document,
+    handle: document::Handle,
+) -> bool {
     match document.get_entity(handle) {
         Some(document::EntityType::Solid3D(_)) => true,
         Some(document::EntityType::Surface(_)) => matches!(
@@ -837,7 +840,9 @@ fn extrusion_properties(
 
 /// Native surface construction data mirrors the same local profile, placement,
 /// direction and taper used by the extrusion history rebuild.
-pub fn extrusion_surface_data(value: &SolidHistorySweep) -> Option<document::entities::SurfaceData> {
+pub fn extrusion_surface_data(
+    value: &SolidHistorySweep,
+) -> Option<document::entities::SurfaceData> {
     use document::entities::{SurfaceData, SurfaceSweepOptions};
 
     if value.path_entity.is_some() {
@@ -4168,7 +4173,8 @@ fn apply_primitive_grip_at_corner(
                 if (direction - current).length_squared() <= 1e-24 {
                     return false;
                 }
-                value.direction = document::types::Vector3::new(direction.x, direction.y, direction.z);
+                value.direction =
+                    document::types::Vector3::new(direction.x, direction.y, direction.z);
                 value.end_draft_distance = height;
             }
             _ => return false,

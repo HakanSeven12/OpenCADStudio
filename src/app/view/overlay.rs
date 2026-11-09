@@ -207,8 +207,10 @@ impl MTextPreview {
         let (rx, ry) = if let Some(cell) = self.cell {
             cell.unproject(p)
         } else {
-            (self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale,
-                self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale)
+            (
+                self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale,
+                self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale,
+            )
         };
         let (wx, wy) = turn((self.rotation.0, -self.rotation.1), rx, ry);
         let mut best = 0usize;
@@ -349,11 +351,21 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         if let Some(cell) = self.cell {
             let outline = Path::new(|p| {
                 p.move_to(cell.corners[0]);
-                for corner in &cell.corners[1..] { p.line_to(*corner); }
+                for corner in &cell.corners[1..] {
+                    p.line_to(*corner);
+                }
                 p.close();
             });
-            frame.fill(&outline, theme.palette().primary.base.color.scale_alpha(0.08));
-            frame.stroke(&outline, Stroke::default().with_color(theme.palette().primary.base.color).with_width(2.0));
+            frame.fill(
+                &outline,
+                theme.palette().primary.base.color.scale_alpha(0.08),
+            );
+            frame.stroke(
+                &outline,
+                Stroke::default()
+                    .with_color(theme.palette().primary.base.color)
+                    .with_width(2.0),
+            );
         }
         // Selection highlight behind the glyphs, over the whole line height
         // (descenders and accents included), turned with the text.
@@ -529,14 +541,24 @@ pub(super) fn table_cell_editor_overlay(
 ) -> Element<'static, Message> {
     let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
     let prog = MTextPreview {
-        segments: mtext_preview_segments(ed), boxes: ed.glyph_boxes.clone(),
-        sel: ed.sel, caret: ed.caret, caret_on: ed.caret_blink_on,
-        minx: 0.0, miny: 0.0, scale: 1.0, content_h: size.1,
-        ruler: None, rotation: (angle.cos(), angle.sin()), cell: Some(cell),
+        segments: mtext_preview_segments(ed),
+        boxes: ed.glyph_boxes.clone(),
+        sel: ed.sel,
+        caret: ed.caret,
+        caret_on: ed.caret_blink_on,
+        minx: 0.0,
+        miny: 0.0,
+        scale: 1.0,
+        content_h: size.1,
+        ruler: None,
+        rotation: (angle.cos(), angle.sin()),
+        cell: Some(cell),
     };
     crate::ui::ime_zone::ime_zone(
-        iced::widget::canvas(prog).width(size.0).height(size.1), Message::CommandAppendChar,
-    ).into()
+        iced::widget::canvas(prog).width(size.0).height(size.1),
+        Message::CommandAppendChar,
+    )
+    .into()
 }
 
 pub(super) fn mtext_editor_overlay<'a>(
@@ -639,11 +661,9 @@ fn mtext_editor_content<'a>(
                     ValueOrigin::Style => (crate::tr!("mtext-object-origin", "style"), |theme| {
                         theme.palette().success.base.color
                     }),
-                    ValueOrigin::Custom => {
-                        (crate::tr!("mtext-object-origin", "custom"), |theme| {
-                            theme.palette().danger.base.color
-                        })
-                    }
+                    ValueOrigin::Custom => (crate::tr!("mtext-object-origin", "custom"), |theme| {
+                        theme.palette().danger.base.color
+                    }),
                     ValueOrigin::Mixed => (crate::tr!("mtext-object-origin", "mixed"), |theme| {
                         theme.palette().warning.base.color
                     }),
@@ -687,12 +707,13 @@ fn mtext_editor_content<'a>(
     if !style_opts.contains(&ed.style) {
         style_opts.push(ed.style.clone());
     }
-    let style_pl = crate::ui::dropdown_list::pick_list(Some(ed.style.clone()), style_opts, |value| {
-        value.to_string()
-    })
-    .on_select(Message::MTextStyle)
-    .text_size(11)
-    .width(iced::Length::Fixed(96.0));
+    let style_pl =
+        crate::ui::dropdown_list::pick_list(Some(ed.style.clone()), style_opts, |value| {
+            value.to_string()
+        })
+        .on_select(Message::MTextStyle)
+        .text_size(11)
+        .width(iced::Length::Fixed(96.0));
     let annotative = checkbox(ed.annotative)
         .on_toggle(Message::MTextAnnotative)
         .size(14);
@@ -1482,10 +1503,11 @@ pub(super) fn context_menu_editor_overlay(
         ]
         .into()
     };
-    let mut items: Vec<Element<'static, Message>> = vec![text(crate::tr!("context-menu", "editor-title"))
-        .size(12)
-        .style(crate::ui::style::common::muted_style)
-        .into()];
+    let mut items: Vec<Element<'static, Message>> =
+        vec![text(crate::tr!("context-menu", "editor-title"))
+            .size(12)
+            .style(crate::ui::style::common::muted_style)
+            .into()];
     for row in rows {
         match row {
             // Repeat stays: it is the menu's default row.
@@ -1495,7 +1517,12 @@ pub(super) fn context_menu_editor_overlay(
                     items.push(tick(key, item.label.clone(), 0.0));
                 }
             }
-            MenuRow::Submenu { id, label, items: children, .. } => {
+            MenuRow::Submenu {
+                id,
+                label,
+                items: children,
+                ..
+            } => {
                 if let Some(key) = row_key(row) {
                     items.push(tick(key, label.clone(), 0.0));
                 }
@@ -1561,13 +1588,23 @@ pub(super) fn context_menu_editor_overlay(
         ]
         .into(),
     );
-    let body = scrollable(column(items).spacing(3).padding([4, 10]).width(Length::Fixed(300.0)))
-        .height(Length::Shrink);
+    let body = scrollable(
+        column(items)
+            .spacing(3)
+            .padding([4, 10])
+            .width(Length::Fixed(300.0)),
+    )
+    .height(Length::Shrink);
     let panel = container(body)
         .style(container::bordered_box)
         .padding([MENU_PAD_TOP as u16, 0])
         .width(Length::Fixed(300.0));
-    position_canvas_overlay_clamped(pos, bottom_inset, Vector::new(-MENU_CURSOR_INSET_X, 0.0), panel.into())
+    position_canvas_overlay_clamped(
+        pos,
+        bottom_inset,
+        Vector::new(-MENU_CURSOR_INSET_X, 0.0),
+        panel.into(),
+    )
 }
 
 /// One menu row: label (bold for the default row), the keyword hint
@@ -2709,7 +2746,12 @@ mod cell_editor_wheel_tests {
             origin: p(100.0, 100.0),
             x: iced::Vector::new(1.0, 0.0),
             y: iced::Vector::new(0.0, 1.0),
-            corners: [p(100.0, 100.0), p(300.0, 100.0), p(300.0, 160.0), p(100.0, 160.0)],
+            corners: [
+                p(100.0, 100.0),
+                p(300.0, 100.0),
+                p(300.0, 160.0),
+                p(100.0, 160.0),
+            ],
             height: 60.0,
         };
         let editor = MTextPreview {
@@ -2726,17 +2768,23 @@ mod cell_editor_wheel_tests {
             rotation: (1.0, 0.0),
             cell: Some(cell),
         };
-        let drawing = mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);
+        let drawing =
+            mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);
         let mut ui = iced_test::simulator::Simulator::with_size(
             Default::default(),
             iced::Size::new(800.0, 600.0),
-            stack![drawing, iced::widget::canvas(editor).width(Fill).height(Fill)],
+            stack![
+                drawing,
+                iced::widget::canvas(editor).width(Fill).height(Fill)
+            ],
         );
         ui.point_at(p(200.0, 130.0));
         ui.simulate([Event::Mouse(iced::mouse::Event::WheelScrolled {
             delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
         })]);
-        assert!(ui.into_messages().any(|m| matches!(m, Message::ViewportScroll(_))));
+        assert!(ui
+            .into_messages()
+            .any(|m| matches!(m, Message::ViewportScroll(_))));
     }
 }
 
@@ -2821,7 +2869,10 @@ mod quad_view_tests {
         );
         let bounds = find_tile(&mut ui, "MO");
         assert_eq!(
-            (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0),
+            (
+                bounds.x + bounds.width / 2.0,
+                bounds.y + bounds.height / 2.0
+            ),
             (300.0, 225.0),
             "the collapsed tile's glyph is centred on the anchor"
         );
@@ -2832,7 +2883,7 @@ mod quad_view_tests {
         ui.simulate([Event::Mouse(iced::mouse::Event::CursorMoved {
             position: iced::Point::new(300.0, 225.0),
         })]);
-        ui.click("MO");
+        ui.click("MO").expect("MO button should be clickable");
         let messages: Vec<_> = ui.into_messages().collect();
         assert!(messages
             .iter()
@@ -2859,11 +2910,12 @@ mod quad_view_tests {
         let second = find_tile(&mut ui, "CO");
         assert_eq!(
             second.x + second.width / 2.0,
-            300.0 + crate::ui::popup::quad_overlay::QUAD_TILE
+            300.0
+                + crate::ui::popup::quad_overlay::QUAD_TILE
                 + crate::ui::popup::quad_overlay::QUAD_TILE_GAP,
             "the second tile's glyph centres a tile plus a gap right of the anchor"
         );
-        ui.click("CO");
+        ui.click("CO").expect("CO button should be clickable");
         let messages: Vec<_> = ui.into_messages().collect();
         assert!(messages.iter().any(|m| matches!(
             m,
@@ -2881,10 +2933,18 @@ mod quad_view_tests {
             viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
         };
         let at_cursor = press_at(hover(), iced::Point::new(300.0, 225.0));
-        assert!(!at_cursor.iter().any(|m| matches!(m, Message::Quad(_))), "{at_cursor:?}");
+        assert!(
+            !at_cursor.iter().any(|m| matches!(m, Message::Quad(_))),
+            "{at_cursor:?}"
+        );
         let middle = QUAD_HOVER_GAP + QUAD_TILE * 0.5;
         let on_tile = press_at(hover(), iced::Point::new(300.0 + middle, 225.0 - middle));
-        assert!(on_tile.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))), "{on_tile:?}");
+        assert!(
+            on_tile
+                .iter()
+                .any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))),
+            "{on_tile:?}"
+        );
     }
 
     #[test]

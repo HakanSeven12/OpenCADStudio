@@ -3423,7 +3423,9 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Adja meg az ív kezdőpontját:
     .arc-specify-second-point-of-arc = ARC  Adja meg az ív második pontját:
     .arc-specify-end-point-of-arc = ARC  Adja meg az ív végpontját:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  Adja meg az ív középpontját:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
     .arc-specify-included-angle = ARC  Adja meg a középponti szöget:
     .arc-specify-length-of-chord = ARC  Adja meg a húr hosszát:
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Adja meg az érintő irányát az ív kezdőpontjában:
@@ -4545,6 +4547,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Select object or bounded area:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Válasszon további objektumokat vagy zárt területeket [Undo] (Enter a magassághoz):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  { common.specify }: { common.extrusion } · { common.height } (+/−) [Multiple ({ common.multiple }) / Undo ({ common.undo })]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: the selected face could not be copied to a new body.
+    .presspull-option-new-body = New body
+    .presspull-option-modify-solid = Modify solid
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  { common.creation-mode } [Solid ({ properties.solid }) / Surface ({ properties.surface })]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  { draw.select }: { model.sweep } · { common.path } [Alignment ({ common.alignment-title-case }) / Base point ({ styles.basepoint }) / Scale ({ common.scale }) / Twist ({ properties.twist })]:
@@ -5333,6 +5339,9 @@ view =
     .opening-patreon-page = Patreon oldal megnyitása...
     .opening-feedback-page = Visszajelzési oldal megnyitása...
     .opening-release-notes = Kiadási megjegyzések megnyitása...
+    .checking-for-updates = Frissítések keresése...
+    .no-newer-release = Nem található újabb kiadás. Ez a(z) { $version } verzió.
+    .web-always-latest = A webalkalmazás mindig a legújabb kiadást futtatja.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: húzás bal egérgombbal. Kilépés: Esc.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW Adja meg a nyomtatási ablak első sarkát:
     .plotwindow-specify-opposite-corner = PLOTWINDOW Adja meg a szemközti sarkot:
@@ -7246,9 +7255,22 @@ block-def =
 # Ideiglenes geometriai mérési eredmények.
 measurement =
     .distance = Távolság = { $value }
-    .angle-start = { $command }  Adja meg a szög csúcspontját vagy [Vonalak]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Jelölje ki az első vonalat vagy [Pontok] (kisebb szög):
-    .second-line = { $command }  Jelölje ki a második vonalat (kisebb szög):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Vonalak
     .points = Pontok
     .invalid-radius = Jelöljön ki véges, pozitív sugarú kört vagy körívet.
@@ -8358,6 +8380,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

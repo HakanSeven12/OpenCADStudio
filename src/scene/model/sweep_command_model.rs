@@ -39,7 +39,9 @@ fn embedded_sweep_path(path: &EntityType) -> Option<document::entities::Embedded
     }
 }
 
-fn polyline_wire(value: &document::entities::Polyline3D) -> Option<document::entities::EmbeddedEntity> {
+fn polyline_wire(
+    value: &document::entities::Polyline3D,
+) -> Option<document::entities::EmbeddedEntity> {
     let points = value
         .vertices
         .iter()
@@ -250,7 +252,10 @@ fn reversed_toward_pick(path: &EntityType, pick: glam::DVec3) -> Option<EntityTy
             };
             let mut first = document::entities::LwVertex::new(at(arc.end_angle));
             first.bulge = -(sweep / 4.0).tan();
-            polyline.vertices = vec![first, document::entities::LwVertex::new(at(arc.start_angle))];
+            polyline.vertices = vec![
+                first,
+                document::entities::LwVertex::new(at(arc.start_angle)),
+            ];
             polyline.normal = arc.normal;
             polyline.elevation = arc.center.z;
             Some(EntityType::LwPolyline(polyline))

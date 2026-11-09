@@ -423,7 +423,8 @@ impl OpenCADStudio {
             }
         }
         if let Some(handle) = cloud {
-            if let Some(document::EntityType::Extended(extended)) = document.get_entity_mut(handle) {
+            if let Some(document::EntityType::Extended(extended)) = document.get_entity_mut(handle)
+            {
                 if let ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
                     data.intensity_color_scheme = intensity_slot.scheme;
                     data.intensity_as_gradient = intensity_slot.gradient;

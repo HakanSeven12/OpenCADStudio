@@ -46,7 +46,8 @@ fn parse(xrecord: &XRecord) -> Option<(String, Filter)> {
 
 /// The `ACLYDICTIONARY` of a record's extension dictionary: its nested filters.
 fn nested_dictionary(document: &Document, xrecord: &XRecord) -> Option<Handle> {
-    let Some(ObjectType::Dictionary(extension)) = document.objects.get(&xrecord.xdictionary_handle?)
+    let Some(ObjectType::Dictionary(extension)) =
+        document.objects.get(&xrecord.xdictionary_handle?)
     else {
         return None;
     };
@@ -55,7 +56,12 @@ fn nested_dictionary(document: &Document, xrecord: &XRecord) -> Option<Handle> {
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(DICTIONARY))
         .map(|(_, handle)| *handle)
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::Dictionary(_))))
+        .filter(|handle| {
+            matches!(
+                document.objects.get(handle),
+                Some(ObjectType::Dictionary(_))
+            )
+        })
 }
 
 /// The filter records under `dictionary`, each before the ones nested in it.
@@ -135,7 +141,9 @@ fn new_dictionary(document: &mut Document, owner: Handle, hard_owner: bool) -> H
         dictionary.reactors = vec![owner];
         dictionary.duplicate_cloning = 1;
     }
-    document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+    document
+        .objects
+        .insert(handle, ObjectType::Dictionary(dictionary));
     handle
 }
 
@@ -192,7 +200,9 @@ pub(crate) fn write_layer_filters(document: &mut Document, filters: &[StoredLaye
             XRecordEntry::string(300, &stored.name),
             XRecordEntry::string(301, &to_expression(&stored.filter)),
         ];
-        document.objects.insert(handle, ObjectType::XRecord(xrecord));
+        document
+            .objects
+            .insert(handle, ObjectType::XRecord(xrecord));
         if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary) {
             let next = (1..)
                 .map(|n| format!("*A{n}"))
@@ -470,7 +480,9 @@ mod tests {
         let read = from_expression("( NAME== \"*1-*\" )").unwrap();
         assert!(matches!(&read.items[..], [Item::Condition(c)] if c.value == "*1-*"));
         let grouped = from_expression("NAME==\"A*\" AND (COLOR==\"1\" OR COLOR==\"2\")").unwrap();
-        assert!(matches!(&grouped.items[1], Item::Group(g) if g.mode == Match::Any && g.conditions.len() == 2));
+        assert!(
+            matches!(&grouped.items[1], Item::Group(g) if g.mode == Match::Any && g.conditions.len() == 2)
+        );
         assert_eq!(from_expression(&to_expression(&grouped)), Some(grouped));
         assert_eq!(from_expression(&to_expression(&filter)), Some(filter));
         let any = from_expression("COLOR==\"1\" OR NOT LOCKED==\"True\"").unwrap();

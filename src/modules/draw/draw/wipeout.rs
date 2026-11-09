@@ -255,7 +255,10 @@ impl CadCommand for WipeoutCommand {
         };
         // Only a polyline is taken; anything else is asked for again. A
         // polyline that is open or has arcs ends the command.
-        if !matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
+        if !matches!(
+            entity,
+            EntityType::LwPolyline(_) | EntityType::Polyline2D(_)
+        ) {
             return CmdResult::NeedPoint;
         }
         if !straight_and_closed(&entity) || wipeout_from_polyline(&entity).is_none() {
@@ -324,7 +327,10 @@ impl CadCommand for WipeoutCommand {
                     .trim_start_matches('_')
                     .starts_with(|c: char| c.is_ascii_alphabetic()) =>
                 {
-                    Some(CmdResult::ReportError(crate::tr!("wipeout-cmd", "point-or-keyword")))
+                    Some(CmdResult::ReportError(crate::tr!(
+                        "wipeout-cmd",
+                        "point-or-keyword"
+                    )))
                 }
                 _ => None,
             },
@@ -429,9 +435,15 @@ fn straight_and_closed(entity: &EntityType) -> bool {
                 .iter()
                 .map(|vertex| [vertex.location.x, vertex.location.y])
                 .collect();
-            let count = if polyline.is_closed { points.len() } else { points.len().saturating_sub(1) };
+            let count = if polyline.is_closed {
+                points.len()
+            } else {
+                points.len().saturating_sub(1)
+            };
             (polyline.is_closed || explicitly_closed(&points))
-                && polyline.vertices[..count].iter().all(|vertex| vertex.bulge.abs() < 1.0e-12)
+                && polyline.vertices[..count]
+                    .iter()
+                    .all(|vertex| vertex.bulge.abs() < 1.0e-12)
         }
         EntityType::Polyline2D(polyline) => {
             let points: Vec<[f64; 2]> = polyline
@@ -439,9 +451,15 @@ fn straight_and_closed(entity: &EntityType) -> bool {
                 .iter()
                 .map(|vertex| [vertex.location.x, vertex.location.y])
                 .collect();
-            let count = if polyline.is_closed() { points.len() } else { points.len().saturating_sub(1) };
+            let count = if polyline.is_closed() {
+                points.len()
+            } else {
+                points.len().saturating_sub(1)
+            };
             (polyline.is_closed() || explicitly_closed(&points))
-                && polyline.vertices[..count].iter().all(|vertex| vertex.bulge.abs() < 1.0e-12)
+                && polyline.vertices[..count]
+                    .iter()
+                    .all(|vertex| vertex.bulge.abs() < 1.0e-12)
         }
         _ => false,
     }

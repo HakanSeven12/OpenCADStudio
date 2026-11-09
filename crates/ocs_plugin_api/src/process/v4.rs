@@ -977,13 +977,11 @@ mod tests {
                                 "missing requested tab: {message}"
                             );
                             assert!(
-                                message.contains("current tab 2"),
+                                message.contains("while the host dispatches to tab 2"),
                                 "missing current tab: {message}"
                             );
                             assert!(
-                                message.contains(
-                                    "cannot be served inline during another tab's dispatch"
-                                ),
+                                message.contains("cannot be served inline"),
                                 "missing inline-dispatch refusal: {message}"
                             );
                         }

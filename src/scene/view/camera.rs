@@ -326,8 +326,7 @@ impl Camera {
         let view_rot = self.view_proj_rte(bounds);
         let eye = self.eye();
         move |p| {
-            let screen =
-                crate::scene::view::projection::project_screen(view_rot, eye, bounds, p)?;
+            let screen = crate::scene::view::projection::project_screen(view_rot, eye, bounds, p)?;
             Some(glam::vec2(screen.x, screen.y))
         }
     }
@@ -889,8 +888,7 @@ impl Camera {
             return;
         }
         let axis = Vec3::new(-delta_y, -delta_x, 0.0) / length;
-        self.rotation =
-            (self.rotation * Quat::from_axis_angle(axis, length * 0.005)).normalize();
+        self.rotation = (self.rotation * Quat::from_axis_angle(axis, length * 0.005)).normalize();
         self.sync_yaw_pitch();
     }
 

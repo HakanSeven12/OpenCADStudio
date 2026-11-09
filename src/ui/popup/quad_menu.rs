@@ -93,10 +93,7 @@ pub enum QuadTarget {
     None,
     /// A single hovered entity; `type_key` is the canonical
     /// `entity_type_name()` string ("Line", "Insert", …).
-    Hovered {
-        handle: Handle,
-        type_key: String,
-    },
+    Hovered { handle: Handle, type_key: String },
     /// The current selection set, possibly of mixed types.
     Selection {
         handles: Vec<Handle>,
@@ -122,9 +119,9 @@ impl QuadTarget {
         }
         match self {
             QuadTarget::None => false,
-            QuadTarget::Hovered { type_key, .. } => applies_to
-                .iter()
-                .any(|k| k.eq_ignore_ascii_case(type_key)),
+            QuadTarget::Hovered { type_key, .. } => {
+                applies_to.iter().any(|k| k.eq_ignore_ascii_case(type_key))
+            }
             QuadTarget::Selection { type_keys, .. } => type_keys
                 .iter()
                 .any(|type_key| applies_to.iter().any(|k| k.eq_ignore_ascii_case(type_key))),
@@ -170,10 +167,7 @@ pub enum QuadMsg {
     /// Activate the tab at `index`.
     Tab(usize),
     /// Pick an item: the panel's id and the index into its items.
-    Pick {
-        panel_id: String,
-        item_index: usize,
-    },
+    Pick { panel_id: String, item_index: usize },
     /// Close the quad without picking (outside press, Esc).
     Close,
 }
@@ -204,7 +198,10 @@ impl QuadMru {
     /// capping at [`QUAD_MRU_CAP`]. Recorded when a command is launched from
     /// a quad (the `Message::QuadRun` wrapper).
     pub fn record_for(&mut self, type_key: &str, command: &str) {
-        record(&mut self.per_type.entry(type_key.to_string()).or_default(), command);
+        record(
+            &mut self.per_type.entry(type_key.to_string()).or_default(),
+            command,
+        );
     }
 
     /// Move `command` to the front of the global list (No Selection quad).
@@ -264,7 +261,11 @@ fn glyph_abbrev(label: &str) -> String {
             .map(|ch| ch.to_ascii_uppercase())
             .collect()
     } else {
-        label.chars().take(2).collect::<String>().to_ascii_uppercase()
+        label
+            .chars()
+            .take(2)
+            .collect::<String>()
+            .to_ascii_uppercase()
     }
 }
 
@@ -291,14 +292,34 @@ fn command_group(command: &str) -> &'static str {
         return "Dimension";
     }
     match verb.as_str() {
-        "LINE" | "CIRCLE" | "CIRCLE_CD" | "CIRCLE_2P" | "CIRCLE_3P" | "CIRCLE_TTR"
-        | "CIRCLE_TTT" | "ARC" | "ARC_3P" | "ELLIPSE" | "RECT" | "RECTANG" | "POLY"
-        | "PLINE" | "PLINEFIT" | "SPLINE" | "POINT" | "HATCH" | "DONUT" | "HELIX"
-        | "REVCLOUD" | "REVCLOUD_RECTANGULAR" | "REVCLOUD_POLYGONAL" => "Draw",
-        "TEXT" | "MTEXT" | "TEXTEDIT" | "DDEDIT" | "MTEDIT" | "TEDIT" | "TXT2MTXT"
-        | "ATTDEF" | "ATTEDIT" | "LEADER" | "MLEADER" | "TABLE" | "TABLEDIT" => "Annotate",
-        "INSERT" | "BLOCK" | "BEDIT" | "REFEDIT" | "CLIP" | "XCLIP" | "XATTACH"
-        | "ATTACH" => "Block",
+        "LINE"
+        | "CIRCLE"
+        | "CIRCLE_CD"
+        | "CIRCLE_2P"
+        | "CIRCLE_3P"
+        | "CIRCLE_TTR"
+        | "CIRCLE_TTT"
+        | "ARC"
+        | "ARC_3P"
+        | "ELLIPSE"
+        | "RECT"
+        | "RECTANG"
+        | "POLY"
+        | "PLINE"
+        | "PLINEFIT"
+        | "SPLINE"
+        | "POINT"
+        | "HATCH"
+        | "DONUT"
+        | "HELIX"
+        | "REVCLOUD"
+        | "REVCLOUD_RECTANGULAR"
+        | "REVCLOUD_POLYGONAL" => "Draw",
+        "TEXT" | "MTEXT" | "TEXTEDIT" | "DDEDIT" | "MTEDIT" | "TEDIT" | "TXT2MTXT" | "ATTDEF"
+        | "ATTEDIT" | "LEADER" | "MLEADER" | "TABLE" | "TABLEDIT" => "Annotate",
+        "INSERT" | "BLOCK" | "BEDIT" | "REFEDIT" | "CLIP" | "XCLIP" | "XATTACH" | "ATTACH" => {
+            "Block"
+        }
         _ => "Modify",
     }
 }
@@ -351,8 +372,9 @@ pub fn quad_panels_for_target(
                 items: commands.iter().map(|c| QuadItem::from_command(c)).collect(),
                 applies_to: Vec::new(),
             });
-            for (idx, (label, cmds)) in
-                crate::modules::registry::quad_no_selection_groups().iter().enumerate()
+            for (idx, (label, cmds)) in crate::modules::registry::quad_no_selection_groups()
+                .iter()
+                .enumerate()
             {
                 panels.push(QuadPanel {
                     id: format!("quad.grp.{idx}"),
@@ -407,6 +429,28 @@ pub fn quad_panels_for_target(
         }
     }
     panels
+}
+
+/// How many recent commands the hover and selection quads' Recent tab lists.
+const QUAD_RECENT_TAB: usize = 5;
+
+/// The commands run last, from any source (oldest first in `recent`), as a
+/// tab the hover and selection quads offer beside the target's own
+/// commands. `None` while nothing has run.
+pub fn recent_tab(recent: &[String]) -> Option<QuadPanel> {
+    let mut commands: Vec<String> = Vec::new();
+    for command in recent.iter().rev() {
+        push_unique(&mut commands, command.clone());
+        if commands.len() == QUAD_RECENT_TAB {
+            break;
+        }
+    }
+    (!commands.is_empty()).then(|| QuadPanel {
+        id: "quad.recent".to_string(),
+        label: "Recent".to_string(),
+        items: commands.iter().map(|c| QuadItem::from_command(c)).collect(),
+        applies_to: Vec::new(),
+    })
 }
 
 /// The primary panel of a hover/selection quad: `width` of the deduplicated
@@ -484,7 +528,10 @@ mod quad_tests {
         assert_eq!(all[0], format!("CMD{}", QUAD_MRU_CAP + 3));
         // Oldest entries fell off the tail of the capped list.
         assert_eq!(mru.recent_for("Line", 100).len(), QUAD_MRU_CAP);
-        assert_eq!(mru.recent_for("Line", 2), vec![all[0].clone(), all[1].clone()]);
+        assert_eq!(
+            mru.recent_for("Line", 2),
+            vec![all[0].clone(), all[1].clone()]
+        );
 
         let mut mru = QuadMru::new();
         mru.record_global("OFFSET");
@@ -564,8 +611,7 @@ mod quad_tests {
             plugin_panel("plugin:b:all", &["*"]),
             plugin_panel("plugin:c:open", &[]),
         ];
-        let panels =
-            quad_panels_for_target(&QuadTarget::None, &QuadMru::new(), 4, &plugins);
+        let panels = quad_panels_for_target(&QuadTarget::None, &QuadMru::new(), 4, &plugins);
         // Only universal plugins survive the No Selection quad.
         let ids: Vec<&str> = panels.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&"plugin:b:all"));

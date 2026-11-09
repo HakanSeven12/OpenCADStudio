@@ -1,6 +1,8 @@
 use super::{Message, OpenCADStudio};
 use crate::scene::block_parameter_properties::{self as native, Input};
-use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey, PropSection, PropValue};
+use crate::scene::model::object::{
+    BlockParameterComponent, BlockParameterKey, PropSection, PropValue,
+};
 use crate::ui::properties::FieldKey;
 use document::Handle;
 use iced::Task;
@@ -23,7 +25,9 @@ impl OpenCADStudio {
         let tab = &self.tabs[i];
         let session = tab.active_block_edit_session()?;
         let entity = tab.scene.document.get_entity(insert)?;
-        let document::EntityType::Insert(reference) = entity else { return None };
+        let document::EntityType::Insert(reference) = entity else {
+            return None;
+        };
         let definition = tab.scene.document.dynamic_definition_for_insert(insert)?;
         if reference.common.owner_handle != session.br_handle || definition == session.br_handle {
             return None;
@@ -154,7 +158,12 @@ impl OpenCADStudio {
             if key.editor_session.is_none()
                 || key.editor_session != self.nested_block_property_session(i, key.insert)
                 || self.property_target_override.is_some()
-                || tab.scene.selected_entities().iter().map(|(handle, _)| *handle).ne([key.insert])
+                || tab
+                    .scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(handle, _)| *handle)
+                    .ne([key.insert])
             {
                 return false;
             }
@@ -162,7 +171,10 @@ impl OpenCADStudio {
             return false;
         }
         let definition = if matches!(key.component, BlockParameterComponent::Visibility(_)) {
-            tab.scene.document.dynamic_visibility_for_insert(key.insert).map(|(definition, _)| definition)
+            tab.scene
+                .document
+                .dynamic_visibility_for_insert(key.insert)
+                .map(|(definition, _)| definition)
         } else {
             crate::scene::block_actions::instance::definition(&tab.scene.document, key.insert)
         };

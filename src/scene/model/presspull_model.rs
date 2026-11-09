@@ -379,9 +379,12 @@ pub fn edge_on_face_point(
         let inside = (0..=64)
             .map(|k| base + view * (low + (high - low) * k as f64 / 64.0))
             .filter(|candidate| {
-                profile.plane.project(candidate.to_array()).is_some_and(|local| {
-                    contains(&boundary, local, Tolerance::new(BOUNDARY_TOLERANCE))
-                })
+                profile
+                    .plane
+                    .project(candidate.to_array())
+                    .is_some_and(|local| {
+                        contains(&boundary, local, Tolerance::new(BOUNDARY_TOLERANCE))
+                    })
             })
             .collect::<Vec<_>>();
         if let Some(middle) = inside.get(inside.len() / 2) {
@@ -510,6 +513,28 @@ pub fn resolve_target(
     })
 }
 
+/// The same target as a free profile: applying it creates a new solid and
+/// leaves the solid it was picked from untouched.
+pub fn detached_target(target: &PresspullTarget) -> Option<PresspullTarget> {
+    let (entity, source) = match &target.kind {
+        PresspullTargetKind::Profile { entity, source, .. } => (entity.clone(), *source),
+        PresspullTargetKind::Face { body, face, .. } => {
+            let profile = brep::planar_face_profile(body, *face)?;
+            let plane = working_plane(profile.plane);
+            (region_from_loops(&profile.loops, plane)?, None)
+        }
+    };
+    Some(PresspullTarget {
+        kind: PresspullTargetKind::Profile {
+            entity,
+            source,
+            owner: None,
+        },
+        anchor: target.anchor,
+        direction: target.direction,
+    })
+}
+
 /// Curves only: mouse movement never triangulates a preview body.
 pub fn preview_wires(
     target: &PresspullTarget,
@@ -583,4 +608,47 @@ fn preview_body_wires(body: &Body, color: [f32; 4], isolines: usize) -> Vec<Wire
         .filter(|points| points.len() >= 2)
         .map(|points| WireModel::solid_f64("PRESSPULL-PREVIEW".to_owned(), points, color, false))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn box_body() -> Body {
+        let plane = Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let corners = [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+        let ring = (0..4)
+            .map(|i| {
+                Curve::Line(Line {
+                    start: corners[i],
+                    end: corners[(i + 1) % 4],
+                })
+            })
+            .collect::<Vec<_>>();
+        brep::extrude_region(plane, &[ring], [0.0, 0.0, 2.0]).unwrap()
+    }
+
+    #[test]
+    fn detached_face_extrudes_a_separate_solid() {
+        let body = box_body();
+        let face = brep::planar_face_at_point(&body, [2.0, 2.0, 2.0], 1e-6).unwrap();
+        let target = PresspullTarget {
+            kind: PresspullTargetKind::Face {
+                handle: Handle::new(1),
+                face,
+                body: body.clone(),
+                offset: false,
+            },
+            anchor: DVec3::new(2.0, 2.0, 2.0),
+            direction: DVec3::Z,
+        };
+        let detached = detached_target(&target).unwrap();
+        let PresspullTargetKind::Profile { entity, owner, .. } = &detached.kind else {
+            panic!("a detached target is a profile");
+        };
+        assert_eq!(*owner, None);
+        let new_body = extrusion_body(entity, [0.0, 0.0, 3.0]).unwrap();
+        let wires = preview_body_wires(&new_body, [1.0; 4], 0);
+        assert!(!wires.is_empty());
+    }
 }

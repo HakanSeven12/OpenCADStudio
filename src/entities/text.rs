@@ -336,9 +336,7 @@ pub(crate) fn justification_offset(
     let ay = match v {
         _ if matches!(h, HA::Middle) => (b.ink_min[1] + b.ink_max[1]) * 0.5,
         VA::Baseline => 0.0,
-        VA::Bottom => {
-            -height * crate::entities::text_support::descent_ratio(font_name)
-        }
+        VA::Bottom => -height * crate::entities::text_support::descent_ratio(font_name),
         VA::Middle => height * 0.5,
         VA::Top => height,
     };

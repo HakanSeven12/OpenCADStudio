@@ -3,9 +3,7 @@
 #![allow(unused_imports)]
 use super::util::*;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
-use crate::app::helpers::{
-    parse_coord, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
-};
+use crate::app::helpers::{parse_coord, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind};
 use crate::app::TextEntryMode;
 use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
@@ -1068,11 +1066,20 @@ impl OpenCADStudio {
                     return task;
                 }
             }
-            if self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .map(|c| c.input_kind().wants_text())
-                .unwrap_or(false)
+            // A point prompt that also takes keywords reads a typed
+            // coordinate as the point: handing `300,50` to the step's text
+            // reader would turn the comma into a decimal mark (300.5).
+            let coordinate_at_point_step = parse_coord(&text).is_some()
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.point_step_accepts_keywords());
+            if !coordinate_at_point_step
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.input_kind().wants_text())
+                    .unwrap_or(false)
             {
                 // An empty submit must not be handed to on_text_input —
                 // a text step would commit the empty string (wiping a
@@ -1185,12 +1192,14 @@ impl OpenCADStudio {
                 .active_cmd
                 .as_ref()
                 .is_some_and(|command| !command.options().is_empty());
-            self.command_line.push_rejection(if has_options {
-                crate::t!("Point or option keyword required.")
-            } else {
-                crate::t!("Invalid point.")
-            }
-            .as_ref());
+            self.command_line.push_rejection(
+                if has_options {
+                    crate::t!("Point or option keyword required.")
+                } else {
+                    crate::t!("Invalid point.")
+                }
+                .as_ref(),
+            );
             return self.focus_cmd_input();
         }
         if let Some(cmd) = self.command_line.submit() {
@@ -1311,11 +1320,8 @@ impl OpenCADStudio {
         let Some(active) = self.tabs[i].active_plugin_grip.clone() else {
             return Task::none();
         };
-        let dyn_locked = self.dyn_input
-            && self.tabs[i]
-                .dyn_fields
-                .iter()
-                .any(|field| field.locked());
+        let dyn_locked =
+            self.dyn_input && self.tabs[i].dyn_fields.iter().any(|field| field.locked());
         let target = if dyn_locked {
             self.dyn_resolve_point()
         } else {
@@ -1957,9 +1963,8 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 if layer.frozen {
-                    self.command_line.push_error(
-                        crate::t!("A frozen layer can't be made current.").as_ref(),
-                    );
+                    self.command_line
+                        .push_error(crate::t!("A frozen layer can't be made current.").as_ref());
                     return Task::none();
                 }
                 // Mirror the change into the document header (CLAYER) too,
@@ -2407,11 +2412,10 @@ impl OpenCADStudio {
         let new = typed.trim().to_string();
         match node {
             TreeNode::Group(old) if !new.is_empty() && new != old => {
-                let taken = self.tabs[i]
-                    .layers
-                    .groups
-                    .iter()
-                    .any(|(g, _)| g.eq_ignore_ascii_case(&new) && !g.eq_ignore_ascii_case(&old));
+                let taken =
+                    self.tabs[i].layers.groups.iter().any(|(g, _)| {
+                        g.eq_ignore_ascii_case(&new) && !g.eq_ignore_ascii_case(&old)
+                    });
                 if taken {
                     self.command_line
                         .push_error(&crate::tr!("layer-groups", "exists", name = new));
@@ -2482,10 +2486,12 @@ impl OpenCADStudio {
             (TreeNode::Group(name) | TreeNode::Filter(name), A::Rename) => {
                 let panel = &mut self.tabs[i].layers;
                 panel.tree_rename = Some((node.clone(), name.clone()));
-                return iced::widget::operation::focus(crate::ui::window::layers::tree_rename_input_id())
-                    .chain(iced::widget::operation::select_all(
-                        crate::ui::window::layers::tree_rename_input_id(),
-                    ));
+                return iced::widget::operation::focus(
+                    crate::ui::window::layers::tree_rename_input_id(),
+                )
+                .chain(iced::widget::operation::select_all(
+                    crate::ui::window::layers::tree_rename_input_id(),
+                ));
             }
             (TreeNode::Unused, A::Purge) => {
                 let unused = self.tabs[i].layers.node_layers(&TreeNode::Unused);
@@ -2561,7 +2567,9 @@ impl OpenCADStudio {
         scene
             .selected
             .iter()
-            .fold(0u64, |acc, h| acc ^ h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .fold(0u64, |acc, h| {
+                acc ^ h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            })
             .hash(&mut hasher);
         for layer in scene.document.layers.iter() {
             format!("{layer:?}").hash(&mut hasher);
@@ -3823,7 +3831,8 @@ impl OpenCADStudio {
         value: String,
     ) -> Task<Message> {
         let value = if field == "transparency" {
-            let Some(transparency) = crate::scene::creation_style::parse_current_transparency(&value)
+            let Some(transparency) =
+                crate::scene::creation_style::parse_current_transparency(&value)
             else {
                 self.command_line.push_error(
                     "Transparency: expected ByLayer, ByBlock, or an integer from 0 to 90.",
@@ -3839,7 +3848,9 @@ impl OpenCADStudio {
         } else {
             value
         };
-        if field == "authoring_alignment_type" { return self.set_authoring_alignment_type(&value); }
+        if field == "authoring_alignment_type" {
+            return self.set_authoring_alignment_type(&value);
+        }
         if field.starts_with("bedit_") {
             return self.set_block_property(field, &value);
         }
@@ -4109,7 +4120,8 @@ impl OpenCADStudio {
                                 .document
                                 .get_entity_mut(handle)
                                 .and_then(crate::entities::dimension::as_dimension_mut);
-                            if let Some(document::entities::Dimension::LargeRadial(dimension)) = radial
+                            if let Some(document::entities::Dimension::LargeRadial(dimension)) =
+                                radial
                             {
                                 dimension.base.text_user_positioned = false;
                             }
@@ -4633,9 +4645,24 @@ impl OpenCADStudio {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;
                     }
-                    let result = if let Some(test) = self.tabs[i].block_test.as_ref().filter(|test| test.insert == handle) {
-                        crate::scene::block_lookup::evaluate_test_choice(&self.tabs[i].scene.document, &test.baseline, handle, &value)
-                    } else { crate::scene::block_lookup::evaluate_reference_choice(&self.tabs[i].scene.document, handle, &value) };
+                    let result = if let Some(test) = self.tabs[i]
+                        .block_test
+                        .as_ref()
+                        .filter(|test| test.insert == handle)
+                    {
+                        crate::scene::block_lookup::evaluate_test_choice(
+                            &self.tabs[i].scene.document,
+                            &test.baseline,
+                            handle,
+                            &value,
+                        )
+                    } else {
+                        crate::scene::block_lookup::evaluate_reference_choice(
+                            &self.tabs[i].scene.document,
+                            handle,
+                            &value,
+                        )
+                    };
                     match result {
                         Ok(Some(staged)) => {
                             self.apply_action_document(i, staged);
@@ -4840,7 +4867,9 @@ impl OpenCADStudio {
                                 text.width_factor = style.width_factor;
                                 text.oblique_angle = style.oblique_angle;
                             }
-                            (document::EntityType::MText(text), Some(style)) if style.height > 0.0 => {
+                            (document::EntityType::MText(text), Some(style))
+                                if style.height > 0.0 =>
+                            {
                                 text.height = style.height;
                             }
                             _ => {}
@@ -4859,7 +4888,10 @@ impl OpenCADStudio {
                         let document = &mut self.tabs[i].scene.document;
                         let current = match document.get_entity(handle) {
                             Some(document::EntityType::Dimension(dimension))
-                                if !matches!(**dimension, document::entities::Dimension::Arc(_)) =>
+                                if !matches!(
+                                    **dimension,
+                                    document::entities::Dimension::Arc(_)
+                                ) =>
                             {
                                 crate::scene::annotative::object_is_annotative(
                                     document,
@@ -4934,7 +4966,9 @@ impl OpenCADStudio {
                         .objects
                         .iter()
                         .find_map(|(h, o)| match o {
-                            document::objects::ObjectType::Material(m) if m.name == value => Some(*h),
+                            document::objects::ObjectType::Material(m) if m.name == value => {
+                                Some(*h)
+                            }
                             _ => None,
                         });
                     match value.as_str() {
@@ -5256,8 +5290,12 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
-        if field == "authoring_grip_count" { return self.commit_block_grip_count(); }
-        if field.starts_with("authoring_display_grip_") { return self.commit_native_grip_location(field); }
+        if field == "authoring_grip_count" {
+            return self.commit_block_grip_count();
+        }
+        if field.starts_with("authoring_display_grip_") {
+            return self.commit_native_grip_location(field);
+        }
         if field.starts_with("authoring_action_") {
             return self.commit_authoring_action_option(field);
         }
@@ -5358,7 +5396,8 @@ impl OpenCADStudio {
                     }
                 }
                 if field.starts_with("ole_") {
-                    if let Err(message) = crate::entities::ole2frame::validate_property(field, &val) {
+                    if let Err(message) = crate::entities::ole2frame::validate_property(field, &val)
+                    {
                         self.command_line.push_error(message);
                         return Task::none();
                     }
@@ -5728,8 +5767,10 @@ impl OpenCADStudio {
                                                     plane,
                                                 );
                                         if field == "ml_scale" {
-                                            if let (document::EntityType::MLine(mline), Some(style)) =
-                                                (entity, mline_style.as_ref())
+                                            if let (
+                                                document::EntityType::MLine(mline),
+                                                Some(style),
+                                            ) = (entity, mline_style.as_ref())
                                             {
                                                 crate::modules::draw::draw::mline::sync_mline_element_parameters(
                                                             mline, style,
@@ -6592,7 +6633,9 @@ mod layer_name_target_tests {
         let mut line = document::entities::Line::new();
         line.common.color = Color::Index(2);
         line.common.layer = "ZULU".into();
-        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
         app.tabs[i].scene.select_entity(handle, true);
         let epoch = app.tabs[i].scene.geometry_epoch;
         let _ = app.update(Message::RibbonLayerColorChanged {
@@ -6786,16 +6829,31 @@ mod layer_name_target_tests {
         let current = app.tabs[i].scene.document.header.current_layer_name.clone();
         let _ = app.update(Message::LayerToggleFreeze(current.clone()));
         assert!(
-            !app.tabs[i].scene.document.layers.get(&current).unwrap().is_frozen(),
+            !app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get(&current)
+                .unwrap()
+                .is_frozen(),
             "the current layer stays thawed"
         );
 
         let _ = app.update(Message::LayerToggleFreeze("ZULU".to_string()));
-        assert!(app.tabs[i].scene.document.layers.get("ZULU").unwrap().is_frozen());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
         let zulu = app.layer_panel_index(i, "ZULU").unwrap();
         app.tabs[i].layers.selected = Some(zulu);
         let _ = app.on_layer_set_current();
-        assert_eq!(app.tabs[i].scene.document.header.current_layer_name, current);
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_layer_name,
+            current
+        );
 
         for name in ["Defpoints", "XREF|WALLS"] {
             let mut layer = document::tables::layer::Layer::new(name);
@@ -6806,7 +6864,10 @@ mod layer_name_target_tests {
             app.tabs[i].layers.selected = Some(idx);
             app.tabs[i].layers.selected_multi = vec![idx];
             let _ = app.on_layer_delete();
-            assert!(app.tabs[i].scene.document.layers.contains(name), "{name} kept");
+            assert!(
+                app.tabs[i].scene.document.layers.contains(name),
+                "{name} kept"
+            );
         }
     }
 
@@ -7867,11 +7928,10 @@ mod tablestyle_ribbon_tests {
         let mut extra = document::objects::TableStyle::standard();
         extra.name = "EXTRA".to_string();
         extra.handle = app.tabs[i].scene.document.allocate_handle();
-        app.tabs[i]
-            .scene
-            .document
-            .objects
-            .insert(extra.handle, document::objects::ObjectType::TableStyle(extra));
+        app.tabs[i].scene.document.objects.insert(
+            extra.handle,
+            document::objects::ObjectType::TableStyle(extra),
+        );
         app.tabs[i].dirty = false;
         let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
         assert_eq!(
@@ -7893,11 +7953,10 @@ mod tablestyle_ribbon_tests {
         let mut extra = document::objects::TableStyle::standard();
         extra.name = "EXTRA".to_string();
         extra.handle = app.tabs[i].scene.document.allocate_handle();
-        app.tabs[i]
-            .scene
-            .document
-            .objects
-            .insert(extra.handle, document::objects::ObjectType::TableStyle(extra));
+        app.tabs[i].scene.document.objects.insert(
+            extra.handle,
+            document::objects::ObjectType::TableStyle(extra),
+        );
         let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
         app.open_table_insert();
         assert_eq!(
@@ -8026,7 +8085,9 @@ mod tab_close_tests {
         let id = app.tabs[i].id;
         crate::modules::draw::draw::attdef::session().set_place(id, &Default::default());
         assert!(
-            crate::modules::draw::draw::attdef::session().last_in(id).is_some(),
+            crate::modules::draw::draw::attdef::session()
+                .last_in(id)
+                .is_some(),
             "the drawing remembered a place"
         );
 
@@ -8411,7 +8472,11 @@ pub(super) fn layer_rename_problem(
         );
     }
     // A case-only change finds the layer itself, which is fine.
-    if document.layers.get(new).is_some_and(|taken| taken.name != old) {
+    if document
+        .layers
+        .get(new)
+        .is_some_and(|taken| taken.name != old)
+    {
         return Some(crate::tf!("A layer named \"{new}\" already exists.").into_owned());
     }
     None

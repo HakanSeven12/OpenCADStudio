@@ -1038,7 +1038,10 @@ pub fn upload_chunk_material_bind_groups(
                 Some(handle) => (Some(handle.value()), Vec::new()),
                 None if !material_has_images(material) => {
                     let params = material_map_params(Some(material));
-                    (None, bytemuck::cast_slice(std::slice::from_ref(&params)).to_vec())
+                    (
+                        None,
+                        bytemuck::cast_slice(std::slice::from_ref(&params)).to_vec(),
+                    )
                 }
                 // Images but no handle to identify them by: keep it private.
                 None => {
@@ -1990,7 +1993,8 @@ pub fn build_mesh_batch_filtered(
     let mut wire_indices: Vec<u32> = Vec::new();
     let mut edge_verts: Vec<MeshEdgeVertex> = Vec::new();
     let mut highlight_ranges: Vec<MeshBatchRange> = Vec::new();
-    let mut chunk_handles: rustc_hash::FxHashSet<document::Handle> = rustc_hash::FxHashSet::default();
+    let mut chunk_handles: rustc_hash::FxHashSet<document::Handle> =
+        rustc_hash::FxHashSet::default();
     let mut total_tris = 0u64;
     let mut ordered: Vec<MeshBatchPart<'_>> = Vec::new();
     let mut source_indices: rustc_hash::FxHashMap<(bool, u64), (std::sync::Arc<[u32]>, u64)> =

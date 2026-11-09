@@ -96,12 +96,17 @@ impl Scene {
 
     /// The paper-space objects of layout `name`, without its sheet viewport.
     pub fn layout_paper_entities(&self, name: &str) -> Vec<Handle> {
-        let Some((record, sheet)) = self.document.objects.values().find_map(|object| match object {
-            ObjectType::Layout(layout) if layout.name == name => {
-                Some((layout.block_record, layout.viewport))
-            }
-            _ => None,
-        }) else {
+        let Some((record, sheet)) =
+            self.document
+                .objects
+                .values()
+                .find_map(|object| match object {
+                    ObjectType::Layout(layout) if layout.name == name => {
+                        Some((layout.block_record, layout.viewport))
+                    }
+                    _ => None,
+                })
+        else {
             return Vec::new();
         };
         self.document

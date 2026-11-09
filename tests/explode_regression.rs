@@ -577,8 +577,16 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
             })
             .collect();
 
-        assert_eq!(lines.len(), 4, "{label}: outer rectangle must yield 4 lines");
-        assert_eq!(circles.len(), 1, "{label}: circular hole must yield 1 circle");
+        assert_eq!(
+            lines.len(),
+            4,
+            "{label}: outer rectangle must yield 4 lines"
+        );
+        assert_eq!(
+            circles.len(),
+            1,
+            "{label}: circular hole must yield 1 circle"
+        );
         assert!((circles[0].radius - 2.0).abs() < 1e-6);
         assert!((circles[0].center.x - 10.0).abs() < 1e-6);
         assert!((circles[0].center.y - 5.0).abs() < 1e-6);
@@ -586,11 +594,18 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
         for piece in &pieces {
             let c = piece.common();
             assert_eq!(c.layer, "REGIONS", "{label}: layer preserved");
-            assert_eq!(c.color, document::types::Color::from_index(3), "{label}: color preserved");
+            assert_eq!(
+                c.color,
+                document::types::Color::from_index(3),
+                "{label}: color preserved"
+            );
             assert_eq!(c.linetype, "DASHED", "{label}: linetype preserved");
             assert!(c.handle.is_null(), "{label}: handle cleared");
             assert!(c.owner_handle.is_null(), "{label}: owner_handle cleared");
-            assert!(c.xdictionary_handle.is_none(), "{label}: xdict must not leak");
+            assert!(
+                c.xdictionary_handle.is_none(),
+                "{label}: xdict must not leak"
+            );
         }
     }
 }
@@ -817,12 +832,7 @@ fn explode_region_elliptical_and_spline_boundaries() {
     // 2. Region with a cubic NURBS/Spline edge closed by a straight line.
     let nurbs = KNurbs::new(
         3,
-        vec![
-            [0.0, 0.0],
-            [3.0, 5.0],
-            [7.0, -2.0],
-            [10.0, 0.0],
-        ],
+        vec![[0.0, 0.0], [3.0, 5.0], [7.0, -2.0], [10.0, 0.0]],
         vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
         None,
     )
@@ -847,8 +857,12 @@ fn explode_region_elliptical_and_spline_boundaries() {
         2,
         "spline region must explode to 1 Spline and 1 Line"
     );
-    let has_line = pieces_spline.iter().any(|p| matches!(p, EntityType::Line(_)));
-    let has_spline = pieces_spline.iter().any(|p| matches!(p, EntityType::Spline(_)));
+    let has_line = pieces_spline
+        .iter()
+        .any(|p| matches!(p, EntityType::Line(_)));
+    let has_spline = pieces_spline
+        .iter()
+        .any(|p| matches!(p, EntityType::Spline(_)));
     assert!(has_line, "must contain a Line");
     assert!(has_spline, "must contain a Spline");
     for p in &pieces_spline {
@@ -895,4 +909,3 @@ fn explode_region_elliptical_and_spline_boundaries() {
         .expect("equal-radii ellipse arc must emit EntityType::Arc");
     assert!((arc_piece.radius - 5.0).abs() < 1e-6);
 }
-

@@ -68,7 +68,9 @@ pub fn xdata(app: &str, spec: &str) -> ExtendedDataRecord {
 fn xdata_with(app: &str, spec: &str, strings: &[(&str, &str)]) -> ExtendedDataRecord {
     let mut record = ExtendedDataRecord::new(app);
     for item in spec.split('|') {
-        let Some((code, value)) = item.split_once('=') else { continue };
+        let Some((code, value)) = item.split_once('=') else {
+            continue;
+        };
         let real = || value.parse::<f64>().unwrap_or(0.0);
         let point = || {
             let mut v = value.split(',').map(|c| c.parse::<f64>().unwrap_or(0.0));
@@ -134,8 +136,16 @@ pub fn material_xdata(
         .replace("{R}", &f64::from(finish.roughness).to_string())
         .replace("{SH}", &finish.shading.to_string())
         .replace("{X}", &tail);
-    let file = finish.map.as_ref().map(|(file, _)| file.as_str()).unwrap_or("");
-    xdata_with("AVE_MATERIAL", &spec, &[("{N}", name), ("{H}", handle), ("{T}", file)])
+    let file = finish
+        .map
+        .as_ref()
+        .map(|(file, _)| file.as_str())
+        .unwrap_or("");
+    xdata_with(
+        "AVE_MATERIAL",
+        &spec,
+        &[("{N}", name), ("{H}", handle), ("{T}", file)],
+    )
 }
 
 /// A diffuse texture map's record, `{T}` its file name (scale 1 and offset
@@ -159,7 +169,10 @@ impl MaterialFinish {
         Self {
             roughness: 1.0 - material.and_then(|m| m.shininess).unwrap_or(0.0),
             opacity: 1.0 - material.and_then(|m| m.transparency).unwrap_or(0.0),
-            shading: material.and_then(|m| m.shading).unwrap_or(2).saturating_sub(1),
+            shading: material
+                .and_then(|m| m.shading)
+                .unwrap_or(2)
+                .saturating_sub(1),
             map: material.and_then(|m| m.map.clone()),
         }
     }
@@ -230,12 +243,20 @@ pub fn material_values(
         .map(|tag| {
             let value = match *tag {
                 "NAME" => name.to_string(),
-                "ACADCOLOR" => if asked { " ".into() } else { String::new() },
+                "ACADCOLOR" => {
+                    if asked {
+                        " ".into()
+                    } else {
+                        String::new()
+                    }
+                }
                 "COLOR" => format!("{:.4},{:.4},{:.4}", diffuse[0], diffuse[1], diffuse[2]),
                 "OPACITY" => "1.0,1.0,1.0".into(),
                 "SURFACE" => r#"("nullsurf" "")"#.into(),
                 // The roughness in its shortest decimal form ("0.9", "1").
-                "SURF1" => format!(r#"(11 "Ka" "1")(11 "Kd" "1")(11 "Ks" "1")(11 "roughness" "{roughness}")"#),
+                "SURF1" => format!(
+                    r#"(11 "Ka" "1")(11 "Kd" "1")(11 "Ks" "1")(11 "roughness" "{roughness}")"#
+                ),
                 "SHADINGRATE" => "-1.0".into(),
                 "DISPLACEMENT" => r#"("nulldisp" "")"#.into(),
                 "DBOUND" => "0.0".into(),
@@ -292,7 +313,8 @@ pub fn light_block() -> Vec<EntityType> {
     );
     let (k, m, n) = (0.2703701166919155, 0.3154318028072347, 0.1516666666666666);
     let setting = |tag: &str, prompt: &str, value: &str, y: f64| {
-        let mut def = AttributeDefinition::new(tag.to_string(), prompt.to_string(), value.to_string());
+        let mut def =
+            AttributeDefinition::new(tag.to_string(), prompt.to_string(), value.to_string());
         def.insertion_point = Vector3::new(0.0, y, 0.0);
         def.height = 0.01;
         def.flags.invisible = true;
@@ -336,13 +358,23 @@ pub fn light_block() -> Vec<EntityType> {
 
 /// A spotlight's record: its target, and the cone from its hotspot and
 /// falloff angles (degrees).
-pub fn spot_xdata(name: &str, target: [f64; 3], color: [f64; 3], hotspot: f64, falloff: f64) -> ExtendedDataRecord {
+pub fn spot_xdata(
+    name: &str,
+    target: [f64; 3],
+    color: [f64; 3],
+    hotspot: f64,
+    falloff: f64,
+) -> ExtendedDataRecord {
     let spec = LIGHT
         .replace("{C}", &triple(color))
         .replace("1011=0.0,0.0,0.0", &format!("1011={}", triple(target)))
         .replace(
             "1040=0.0|1040=0.0|1040=0.0",
-            &format!("1040={}|1040={}|1040=0.0", falloff / 2.0, (falloff - hotspot) / 2.0),
+            &format!(
+                "1040={}|1040={}|1040=0.0",
+                falloff / 2.0,
+                (falloff - hotspot) / 2.0
+            ),
         );
     xdata_with("AVE_RENDER", &spec, &[("{N}", name)])
 }
@@ -352,7 +384,8 @@ pub fn spot_xdata(name: &str, target: [f64; 3], color: [f64; 3], hotspot: f64, f
 pub fn spot_block() -> Vec<EntityType> {
     let (p, q, r) = (0.1045454545454545, 0.301304347826087, 0.3399999999999999);
     let setting = |tag: &str, prompt: &str, value: &str, y: f64| {
-        let mut def = AttributeDefinition::new(tag.to_string(), prompt.to_string(), value.to_string());
+        let mut def =
+            AttributeDefinition::new(tag.to_string(), prompt.to_string(), value.to_string());
         def.insertion_point = Vector3::new(0.0, y, 0.0);
         def.height = 0.01;
         def.flags.invisible = true;

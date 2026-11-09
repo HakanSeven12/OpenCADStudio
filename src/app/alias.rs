@@ -156,7 +156,10 @@ fn migrate_aliases(stored: &mut FxHashMap<String, String>, from_version: u32) ->
     let mut changed = false;
     for version in from_version + 1..=DEFAULT_ALIASES_VERSION {
         for (alias, old, new) in retargeted_at(version) {
-            if stored.get(*alias).is_some_and(|cmd| cmd.eq_ignore_ascii_case(old)) {
+            if stored
+                .get(*alias)
+                .is_some_and(|cmd| cmd.eq_ignore_ascii_case(old))
+            {
                 if new.is_empty() {
                     stored.remove(*alias);
                 } else {

@@ -1370,7 +1370,11 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
         }
         // The plot PDF is already the sheet at size; a driver default of
         // fitting it into the printable area shrinks a 1:1 plot (#1651).
-        if !opts.driver_options.iter().any(|(key, _)| key == "print-scaling") {
+        if !opts
+            .driver_options
+            .iter()
+            .any(|(key, _)| key == "print-scaling")
+        {
             cmd.arg("-o").arg("print-scaling=none");
         }
         let lp_result = cmd.arg("--").arg(path_str.as_ref()).output();

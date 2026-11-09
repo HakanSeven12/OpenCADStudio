@@ -520,19 +520,19 @@ fn cell_style_picker_from<'a>(
     extra: Vec<String>,
     msg: fn(String) -> Message,
 ) -> Element<'a, Message> {
-    let mut options = vec!["Title".to_string(), "Header".to_string(), "Data".to_string()];
+    let mut options = vec![
+        "Title".to_string(),
+        "Header".to_string(),
+        "Data".to_string(),
+    ];
     options.extend(extra);
     row![
         text(label.into()).size(11).style(muted).width(118),
-        pick_list(
-            Some(selected.to_string()),
-            options,
-            |value| value.clone(),
-        )
-        .on_select(msg)
-        .padding([3, 6])
-        .text_size(12)
-        .width(Fill),
+        pick_list(Some(selected.to_string()), options, |value| value.clone(),)
+            .on_select(msg)
+            .padding([3, 6])
+            .text_size(12)
+            .width(Fill),
     ]
     .spacing(8)
     .align_y(iced::Center)
@@ -598,13 +598,19 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
             .with_width(1.0);
         for k in 0..=rows {
             let y = top + k as f32 * row_h;
-            frame.stroke(&Path::line(Point::new(left, y), Point::new(left + width, y)), stroke);
+            frame.stroke(
+                &Path::line(Point::new(left, y), Point::new(left + width, y)),
+                stroke,
+            );
         }
         for k in 0..=3 {
             let x = left + k as f32 * col_w;
             // The title row spans the table.
             let y0 = if k == 0 || k == 3 { top } else { top + row_h };
-            frame.stroke(&Path::line(Point::new(x, y0), Point::new(x, top + height)), stroke);
+            frame.stroke(
+                &Path::line(Point::new(x, y0), Point::new(x, top + height)),
+                stroke,
+            );
         }
         let label = |frame: &mut Frame, content: String, x: f32, y: f32, size: f32| {
             frame.fill_text(Text {
@@ -617,7 +623,13 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
                 ..Default::default()
             });
         };
-        label(&mut frame, t!("Title").into_owned(), left + width / 2.0, top + row_h / 2.0, 13.0);
+        label(
+            &mut frame,
+            t!("Title").into_owned(),
+            left + width / 2.0,
+            top + row_h / 2.0,
+            13.0,
+        );
         for row in 1..rows {
             let content = if row == 1 { t!("Header") } else { t!("Data") }.into_owned();
             for column in 0..3 {
@@ -737,9 +749,13 @@ pub fn table_insert_view<'a>(
         };
         let mut line = row![].spacing(6).align_y(iced::Center);
         if window {
-            line = line.push(form_radio("", true, kept.then_some(true), move |_| keep.clone()));
+            line = line.push(form_radio("", true, kept.then_some(true), move |_| {
+                keep.clone()
+            }));
         }
-        line = line.push(text(label).size(11).style(muted).width(92)).push(input);
+        line = line
+            .push(text(label).size(11).style(muted).width(92))
+            .push(input);
         if let Some(suffix) = suffix {
             line = line.push(text(suffix).size(11).style(muted));
         }
@@ -781,15 +797,24 @@ pub fn table_insert_view<'a>(
     ]
     .spacing(5);
     let cell_styles = column![
-        cell_style_picker_from(t!("First row"), &state.first_row_style, state.cell_styles.clone(), |v| {
-            Message::TableInsertField(TableInsertField::FirstRowStyle(v))
-        }),
-        cell_style_picker_from(t!("Second row"), &state.second_row_style, state.cell_styles.clone(), |v| {
-            Message::TableInsertField(TableInsertField::SecondRowStyle(v))
-        }),
-        cell_style_picker_from(t!("All other rows"), &state.other_row_style, state.cell_styles.clone(), |v| {
-            Message::TableInsertField(TableInsertField::OtherRowStyle(v))
-        }),
+        cell_style_picker_from(
+            t!("First row"),
+            &state.first_row_style,
+            state.cell_styles.clone(),
+            |v| { Message::TableInsertField(TableInsertField::FirstRowStyle(v)) }
+        ),
+        cell_style_picker_from(
+            t!("Second row"),
+            &state.second_row_style,
+            state.cell_styles.clone(),
+            |v| { Message::TableInsertField(TableInsertField::SecondRowStyle(v)) }
+        ),
+        cell_style_picker_from(
+            t!("All other rows"),
+            &state.other_row_style,
+            state.cell_styles.clone(),
+            |v| { Message::TableInsertField(TableInsertField::OtherRowStyle(v)) }
+        ),
     ]
     .spacing(5);
     // Left: what the table starts from and its sample; right: how it is
@@ -829,18 +854,19 @@ pub fn table_insert_view<'a>(
     .width(Fill);
     let right = match (&state.template, state.source) {
         (Some((width, lines)), TableSource::Empty) => {
-            let fixed = |label: Cow<'static, str>, value: &str, suffix: Option<Cow<'static, str>>| {
-                let mut line = row![
-                    text(label).size(11).style(muted).width(118),
-                    text(value.to_string()).size(12).style(muted).width(Fill),
-                ]
-                .spacing(6)
-                .align_y(iced::Center);
-                if let Some(suffix) = suffix {
-                    line = line.push(text(suffix).size(11).style(muted));
-                }
-                Element::from(line)
-            };
+            let fixed =
+                |label: Cow<'static, str>, value: &str, suffix: Option<Cow<'static, str>>| {
+                    let mut line = row![
+                        text(label).size(11).style(muted).width(118),
+                        text(value.to_string()).size(12).style(muted).width(Fill),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Center);
+                    if let Some(suffix) = suffix {
+                        line = line.push(text(suffix).size(11).style(muted));
+                    }
+                    Element::from(line)
+                };
             let sizes = column![
                 labeled_input(t!("Additional columns"), &state.extra_columns, |v| {
                     Message::TableInsertField(TableInsertField::ExtraColumns(v))
@@ -865,7 +891,9 @@ pub fn table_insert_view<'a>(
                 )
             };
             let options = column![
-                text(t!("Keep from the starting table:")).size(11).style(muted),
+                text(t!("Keep from the starting table:"))
+                    .size(11)
+                    .style(muted),
                 row![
                     column![
                         option(t!("Label cell text"), 0, o.label_text),
@@ -1625,7 +1653,9 @@ pub fn data_extraction_view(
 }
 
 /// The notice DATAEXTRACTION shows on a drawing that was never saved.
-pub fn data_extraction_unsaved_view(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
+pub fn data_extraction_unsaved_view(
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'static, Message> {
     let amber = iced::Color::from_rgb8(0xE0, 0x9A, 0x2B);
     let badge = container(crate::ui::icons::tinted(
         crate::ui::icons::WARNING,
@@ -1648,10 +1678,12 @@ pub fn data_extraction_unsaved_view(sizing: crate::ui::modal::ModalSizing) -> El
         row![
             badge,
             column![
-                text(t!("Save the drawing first")).size(13).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
+                text(t!("Save the drawing first"))
+                    .size(13)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
                 text(t!(
                     "You must save the drawing before continuing with data extraction."
                 ))

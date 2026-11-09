@@ -38,7 +38,10 @@ pub(super) async fn pick(title: String, filters: Vec<(String, Vec<String>)>) -> 
 
 fn dgn_filters() -> Vec<(String, Vec<String>)> {
     vec![
-        ("MicroStation DGN (*.dgn)".to_string(), vec!["dgn".to_string()]),
+        (
+            "MicroStation DGN (*.dgn)".to_string(),
+            vec!["dgn".to_string()],
+        ),
         ("All DGN Files (*.*)".to_string(), vec!["*".to_string()]),
     ]
 }
@@ -58,7 +61,9 @@ fn exists(path: &str) -> bool {
 fn is_dgn(path: &str) -> bool {
     crate::scene::model::underlay_vector::dgn_import_models(path)
         .and_then(|models| models.into_iter().next())
-        .is_some_and(|model| crate::scene::model::underlay_vector::dgn_import(path, &model).is_some())
+        .is_some_and(|model| {
+            crate::scene::model::underlay_vector::dgn_import(path, &model).is_some()
+        })
 }
 
 /// The importer a file goes to.
@@ -99,7 +104,11 @@ fn route(path: &str, format: Option<usize>) -> Result<Route, String> {
         Some("3D Studio") => return Ok(Route::Tds),
         _ => {}
     }
-    let pdf = if by_extension { ext == "pdf" } else { f.is_some_and(|f| f.name == "PDF Files") };
+    let pdf = if by_extension {
+        ext == "pdf"
+    } else {
+        f.is_some_and(|f| f.name == "PDF Files")
+    };
     if pdf {
         return Ok(Route::Pdf);
     }
@@ -114,10 +123,12 @@ fn route(path: &str, format: Option<usize>) -> Result<Route, String> {
     let named = FORMATS
         .iter()
         .find(|f| f.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)));
-    Err(match named.and_then(|f| unsupported_reason(f.support).map(|r| (f, r))) {
-        Some((f, reason)) => format!("{}: {reason}", f.name),
-        None => crate::t!("OpenCAD Studio has no importer for this format.").into_owned(),
-    })
+    Err(
+        match named.and_then(|f| unsupported_reason(f.support).map(|r| (f, r))) {
+            Some((f, reason)) => format!("{}: {reason}", f.name),
+            None => crate::t!("OpenCAD Studio has no importer for this format.").into_owned(),
+        },
+    )
 }
 
 impl OpenCADStudio {
@@ -136,7 +147,8 @@ impl OpenCADStudio {
             }
             ("IMPORT", true) => {
                 use crate::command::{CadCommand, FreeTextValuePromptCommand};
-                let command = FreeTextValuePromptCommand::new("_IMPORTFILE", "Enter import file name:");
+                let command =
+                    FreeTextValuePromptCommand::new("_IMPORTFILE", "Enter import file name:");
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 Some(Task::none())
@@ -169,7 +181,12 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn open_import_file_dialog(&mut self) {
-        let path = self.import_dialogs.recent.first().cloned().unwrap_or_default();
+        let path = self
+            .import_dialogs
+            .recent
+            .first()
+            .cloned()
+            .unwrap_or_default();
         self.import_dialogs.file = Some(ImportFileState {
             path,
             format: 0,
@@ -191,9 +208,8 @@ impl OpenCADStudio {
         // settings when the window opens) stay when the file is changed.
         let previous = self.import_dialogs.dgn.take();
         let saved = dgn_import::settings();
-        let keep = |f: fn(&DgnImportState) -> bool, default: bool| {
-            previous.as_ref().map_or(default, f)
-        };
+        let keep =
+            |f: fn(&DgnImportState) -> bool, default: bool| previous.as_ref().map_or(default, f);
         self.import_dialogs.dgn = Some(DgnImportState {
             path: path.to_string(),
             version: if import.v7 { "V7" } else { "V8" },
@@ -281,7 +297,10 @@ impl OpenCADStudio {
         }
     }
 
-    pub(in crate::app) fn update_import_dialog(&mut self, message: ImportDialogMsg) -> Task<Message> {
+    pub(in crate::app) fn update_import_dialog(
+        &mut self,
+        message: ImportDialogMsg,
+    ) -> Task<Message> {
         let i = self.active_tab;
         match message {
             ImportDialogMsg::Help(which) => {
@@ -290,10 +309,12 @@ impl OpenCADStudio {
                         "Imports a DGN model as drawing objects: levels as layers, cells as blocks."
                     ),
                     "3ds" => std::borrow::Cow::Owned(crate::tr!("import-3ds", "help")),
-                    "3ds-material" => std::borrow::Cow::Owned(crate::tr!("import-3ds-alert", "help")),
-                    _ => crate::t!(
-                        "Imports a file of the chosen format with the format's importer."
-                    ),
+                    "3ds-material" => {
+                        std::borrow::Cow::Owned(crate::tr!("import-3ds-alert", "help"))
+                    }
+                    _ => {
+                        crate::t!("Imports a file of the chosen format with the format's importer.")
+                    }
                 };
                 self.command_line.push_info(help.as_ref());
             }
@@ -422,7 +443,12 @@ impl OpenCADStudio {
             }
             ImportDialogMsg::TdsPicked(None) => {}
             ImportDialogMsg::TdsCheck(k, on) => {
-                if let Some(c) = self.import_dialogs.tds.as_mut().and_then(|s| s.checked.get_mut(k)) {
+                if let Some(c) = self
+                    .import_dialogs
+                    .tds
+                    .as_mut()
+                    .and_then(|s| s.checked.get_mut(k))
+                {
                     *c = on;
                 }
             }
@@ -502,7 +528,8 @@ impl OpenCADStudio {
                 if let Some(s) = self.import_dialogs.dgn.as_mut() {
                     if let Some(model) = s.models.get(k) {
                         if let Some(import) = dgn_import(&s.path, &model.label) {
-                            s.mapping = [0, 1, 2, 3].map(|tab| dgn_import::mapping_rows(&import, tab));
+                            s.mapping =
+                                [0, 1, 2, 3].map(|tab| dgn_import::mapping_rows(&import, tab));
                             s.units = import.unit_names.clone();
                         }
                         s.model = k;
@@ -584,7 +611,11 @@ impl OpenCADStudio {
 
     /// The import: into a new drawing (or the current one), one undo step;
     /// then the model's reference attachments as the request says.
-    pub(in crate::app) fn run_dgn_import(&mut self, i: usize, request: DgnImportRequest) -> Task<Message> {
+    pub(in crate::app) fn run_dgn_import(
+        &mut self,
+        i: usize,
+        request: DgnImportRequest,
+    ) -> Task<Message> {
         let Some(import) =
             crate::scene::model::underlay_vector::dgn_import(&request.path, &request.model)
         else {
@@ -592,14 +623,12 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Invalid or unsupported DGN file.").as_ref());
             return Task::none();
         };
-        let converted =
-            dgn_import::convert(&import, request.sub_units, request.explode_text_nodes);
+        let converted = dgn_import::convert(&import, request.sub_units, request.explode_text_nodes);
         let no_references =
             request.references == ReferenceMode::Ignore || import.references.is_empty();
         if converted.entities.is_empty() && no_references {
-            self.command_line.push_error(
-                crate::t!("The DGN model has nothing that can be imported.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("The DGN model has nothing that can be imported.").as_ref());
             return Task::none();
         }
         let mut task = Task::none();
@@ -784,8 +813,7 @@ impl Naming {
         match self {
             Naming::Keep => name.to_string(),
             Naming::Prefix(p) => {
-                let shared = kind == 'l'
-                    && (name == "0" || name.eq_ignore_ascii_case("Defpoints"));
+                let shared = kind == 'l' && (name == "0" || name.eq_ignore_ascii_case("Defpoints"));
                 if shared {
                     name.to_string()
                 } else {
@@ -820,7 +848,12 @@ fn place_converted(
         let doc = &scene.document;
         let taken = |n: &str| doc.layers.iter().any(|l| l.name.eq_ignore_ascii_case(n));
         let target = naming.name('l', name, &taken);
-        if !scene.document.layers.iter().any(|l| l.name.eq_ignore_ascii_case(&target)) {
+        if !scene
+            .document
+            .layers
+            .iter()
+            .any(|l| l.name.eq_ignore_ascii_case(&target))
+        {
             let mut layer = document::tables::Layer::new(target.as_str());
             layer.handle = scene.document.allocate_handle();
             layer.color = *color;
@@ -834,9 +867,18 @@ fn place_converted(
     let mut styles: HashMap<String, String> = HashMap::new();
     for (name, font) in &converted.styles {
         let doc = &scene.document;
-        let taken = |n: &str| doc.text_styles.iter().any(|s| s.name.eq_ignore_ascii_case(n));
+        let taken = |n: &str| {
+            doc.text_styles
+                .iter()
+                .any(|s| s.name.eq_ignore_ascii_case(n))
+        };
         let target = naming.name('s', name, &taken);
-        if !scene.document.text_styles.iter().any(|s| s.name.eq_ignore_ascii_case(&target)) {
+        if !scene
+            .document
+            .text_styles
+            .iter()
+            .any(|s| s.name.eq_ignore_ascii_case(&target))
+        {
             let mut style = document::tables::TextStyle::new(target.as_str());
             style.handle = scene.document.allocate_handle();
             style.font_file = font.clone();
@@ -850,33 +892,53 @@ fn place_converted(
     let mut dim_styles: HashMap<String, String> = HashMap::new();
     for (name, values) in &converted.dim_styles {
         let doc = &scene.document;
-        let taken = |n: &str| doc.dim_styles.iter().any(|s| s.name.eq_ignore_ascii_case(n));
+        let taken = |n: &str| {
+            doc.dim_styles
+                .iter()
+                .any(|s| s.name.eq_ignore_ascii_case(n))
+        };
         let target = naming.name('s', name, &taken);
-        if !scene.document.dim_styles.iter().any(|s| s.name.eq_ignore_ascii_case(&target)) {
+        if !scene
+            .document
+            .dim_styles
+            .iter()
+            .any(|s| s.name.eq_ignore_ascii_case(&target))
+        {
             let doc = &scene.document;
             let base = values.clone().or_else(|| {
                 doc.dim_styles
                     .iter()
                     .find(|s| s.name.eq_ignore_ascii_case(name))
                     .or_else(|| {
-                        doc.dim_styles
-                            .iter()
-                            .find(|s| s.name.eq_ignore_ascii_case(&doc.header.current_dimstyle_name))
+                        doc.dim_styles.iter().find(|s| {
+                            s.name
+                                .eq_ignore_ascii_case(&doc.header.current_dimstyle_name)
+                        })
                     })
                     .cloned()
             });
-            let mut style = base.unwrap_or_else(|| document::tables::DimStyle::new(target.as_str()));
+            let mut style =
+                base.unwrap_or_else(|| document::tables::DimStyle::new(target.as_str()));
             if values.is_some() {
-                let text = styles.get(&style.dimtxsty).cloned().unwrap_or_else(|| style.dimtxsty.clone());
-                if let Some(t) = scene.document.text_styles.iter().find(|t| t.name.eq_ignore_ascii_case(&text)) {
+                let text = styles
+                    .get(&style.dimtxsty)
+                    .cloned()
+                    .unwrap_or_else(|| style.dimtxsty.clone());
+                if let Some(t) = scene
+                    .document
+                    .text_styles
+                    .iter()
+                    .find(|t| t.name.eq_ignore_ascii_case(&text))
+                {
                     style.dimtxsty = t.name.clone();
                     style.dimtxsty_handle = t.handle;
                 }
                 let arrow = crate::entities::arrowheads::resolve(&mut scene.document, "_Closed");
                 style.dimblk1 = arrow.unwrap_or(document::Handle::NULL);
                 style.dimblk2 = style.dimblk1;
-                style.dimldrblk = crate::entities::arrowheads::resolve(&mut scene.document, "_None")
-                    .unwrap_or(document::Handle::NULL);
+                style.dimldrblk =
+                    crate::entities::arrowheads::resolve(&mut scene.document, "_None")
+                        .unwrap_or(document::Handle::NULL);
             }
             style.name = target.clone();
             style.handle = scene.document.allocate_handle();
@@ -887,8 +949,12 @@ fn place_converted(
     let mut blocks: HashMap<String, String> = HashMap::new();
     // Names the drawing has or this import gave, upper-cased: one lookup
     // each, however many blocks the file brings.
-    let mut claimed: std::collections::HashSet<String> =
-        scene.document.block_records.iter().map(|b| b.name.to_ascii_uppercase()).collect();
+    let mut claimed: std::collections::HashSet<String> = scene
+        .document
+        .block_records
+        .iter()
+        .map(|b| b.name.to_ascii_uppercase())
+        .collect();
     for (name, _) in &converted.blocks {
         let taken = |n: &str| claimed.contains(&n.to_ascii_uppercase());
         let target = naming.name('b', name, &taken);
@@ -939,7 +1005,9 @@ fn place_converted(
             .into_iter()
             .map(|e| placed_dimension_text(&scene.document, fix(e)))
             .collect();
-        if let Ok(handles) = scene.define_block_from_owned_entities(entities, target, glam::DVec3::ZERO) {
+        if let Ok(handles) =
+            scene.define_block_from_owned_entities(entities, target, glam::DVec3::ZERO)
+        {
             scene.bind_outline_hatches(&handles);
         }
     }

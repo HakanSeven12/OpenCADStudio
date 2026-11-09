@@ -625,7 +625,10 @@ impl RenderConvertible for Polyline2D {
 
 /// A heavy 2D polyline's vertices as (position, bulge) pairs.
 fn plain_points(pl: &Polyline2D) -> Vec<([f64; 2], f64)> {
-    pl.vertices.iter().map(|v| ([v.location.x, v.location.y], v.bulge)).collect()
+    pl.vertices
+        .iter()
+        .map(|v| ([v.location.x, v.location.y], v.bulge))
+        .collect()
 }
 
 impl Grippable for Polyline2D {
@@ -657,7 +660,12 @@ impl Grippable for Polyline2D {
         let n = self.vertices.len();
         if grip_id >= n && self.flags.bits() & (2 | 4) == 0 {
             let mut points = plain_points(self);
-            crate::entities::lwpolyline::apply_mid_grip(&mut points, self.flags.is_closed(), grip_id - n, apply);
+            crate::entities::lwpolyline::apply_mid_grip(
+                &mut points,
+                self.flags.is_closed(),
+                grip_id - n,
+                apply,
+            );
             for (vertex, ([x, y], bulge)) in self.vertices.iter_mut().zip(points) {
                 (vertex.location.x, vertex.location.y, vertex.bulge) = (x, y, bulge);
             }
@@ -903,7 +911,9 @@ impl PropertyEditable for Polyline2D {
                     Property {
                         label: t!("Linetype generation").into_owned(),
                         field: "pl2_ltype_gen",
-                        value: crate::entities::common::enabled_choice(self.flags.bits() & 128 != 0),
+                        value: crate::entities::common::enabled_choice(
+                            self.flags.bits() & 128 != 0,
+                        ),
                     },
                 ],
             },
@@ -1206,7 +1216,8 @@ fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
         .map(|vertex| vertex.layer.clone())
         .unwrap_or_else(|| "0".to_string());
     let curve_vertices = samples.into_iter().map(|point| {
-        let mut vertex = document::entities::Vertex3DPolyline::from_xyz(point[0], point[1], point[2]);
+        let mut vertex =
+            document::entities::Vertex3DPolyline::from_xyz(point[0], point[1], point[2]);
         vertex.layer = vertex_layer.clone();
         vertex.flags = POLY3D_VERTEX | POLY3D_SPLINE_POINT;
         vertex

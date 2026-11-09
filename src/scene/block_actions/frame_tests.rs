@@ -133,7 +133,6 @@ fn block_parameter_frames_preserve_both_endpoints_and_native_metadata() {
             assert_eq!(reference.block_name, "ACTIONS");
             assert_eq!(reference.insert_point, Vector3::ZERO);
             assert_eq!(instance::current(&saved, insert, &p).unwrap(), expected.end);
-
         }
         let reset = instance::reset(&doc, insert).unwrap().unwrap();
         assert_eq!(instance::frame(&reset, insert, &p).unwrap(), initial);

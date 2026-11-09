@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn a_y_up_metafile_draws_upright() {
         let data = wmf(&[
-            (0x020B, vec![100, 0]),  // SetWindowOrg(0, 100)
+            (0x020B, vec![100, 0]),    // SetWindowOrg(0, 100)
             (0x020C, vec![-100, 100]), // SetWindowExt(100, -100)
             // CreateBrushIndirect: solid red; SelectObject(0).
             (0x02FC, vec![0, 0x00FF, 0x0000, 0]),

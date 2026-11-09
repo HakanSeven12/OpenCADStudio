@@ -3426,7 +3426,9 @@ draw =
     .arc-specify-start-point-of-arc = ARC  호의 시작점 지정:
     .arc-specify-second-point-of-arc = ARC  호의 두 번째 점 지정:
     .arc-specify-end-point-of-arc = ARC  호의 끝점 지정:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  호의 중심점 지정:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
     .arc-specify-included-angle = ARC  사이각 지정:
     .arc-specify-length-of-chord = ARC  현의 길이 지정:
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  호 시작점의 접선 방향 지정:
@@ -4554,6 +4556,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Select object or bounded area:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  추가 객체 또는 경계 영역 선택 [Undo](Enter로 높이 지정):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  { common.specify }: { common.extrusion } · { common.height } (+/−) [{ common.multiple }/{ common.undo }]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: the selected face could not be copied to a new body.
+    .presspull-option-new-body = New body
+    .presspull-option-modify-solid = Modify solid
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  { draw.select }: { model.sweep } · { common.path } [{ common.alignment-title-case }/{ styles.basepoint }/{ common.scale }/{ properties.twist }]:
@@ -5345,6 +5351,9 @@ view =
     .opening-patreon-page = Patreon 페이지를 여는 중...
     .opening-feedback-page = 피드백 페이지를 여는 중...
     .opening-release-notes = 출시 노트를 여는 중...
+    .checking-for-updates = 업데이트 확인 중...
+    .no-newer-release = 새 릴리스를 찾지 못했습니다. 현재 버전은 { $version }입니다.
+    .web-always-latest = 웹 앱은 항상 최신 릴리스로 실행됩니다.
     .pan-drag-with-the-left-mouse-button-press-esc =PAN: 마우스 왼쪽 버튼으로 드래그합니다. 종료하려면 Esc를 누르세요.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW 플롯 창의 첫 번째 모서리를 지정합니다.
     .plotwindow-specify-opposite-corner = PLOTWINDOW 반대편 모서리 지정:
@@ -7267,9 +7276,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Distance = { $value }
-    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
-    .second-line = { $command }  Select second line (smaller angle):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Lines
     .points = Points
     .invalid-radius = Select a circle or arc with a finite, positive radius.
@@ -8369,6 +8391,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

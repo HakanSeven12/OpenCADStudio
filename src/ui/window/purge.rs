@@ -5,8 +5,8 @@ use crate::ui::style::form::hdivider;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
 use iced::{Element, Fill};
 
-pub(crate) use crate::app::commands::purge::KINDS;
 use crate::app::commands::purge as pk;
+pub(crate) use crate::app::commands::purge::KINDS;
 
 #[derive(Debug, Clone)]
 pub enum PurgeMsg {

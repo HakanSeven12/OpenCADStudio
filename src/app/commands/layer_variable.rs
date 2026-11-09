@@ -36,9 +36,11 @@ impl OpenCADStudio {
     pub(super) fn dispatch_layer_variable(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let (typed, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        let name = *NAMES
-            .iter()
-            .find(|name| typed.trim_start_matches(['_', '.']).eq_ignore_ascii_case(name))?;
+        let name = *NAMES.iter().find(|name| {
+            typed
+                .trim_start_matches(['_', '.'])
+                .eq_ignore_ascii_case(name)
+        })?;
         let value = value.trim().trim_matches('"').trim();
         if value.is_empty() {
             let current = self
@@ -54,7 +56,8 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
         let stored = if value == "." { "." } else { value };
-        if crate::io::drawing_variable(&self.tabs[i].scene.document, name).as_deref() != Some(stored)
+        if crate::io::drawing_variable(&self.tabs[i].scene.document, name).as_deref()
+            != Some(stored)
         {
             crate::io::set_drawing_variable(&mut self.tabs[i].scene.document, name, stored);
             self.tabs[i].dirty = true;

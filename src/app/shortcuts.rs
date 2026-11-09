@@ -91,7 +91,11 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         ("RIGHT".to_string(), "CARETRIGHT"),
     ]
     .into_iter()
-    .chain(PLATFORM_BINDINGS.iter().map(|(key, action)| (key.to_string(), *action)))
+    .chain(
+        PLATFORM_BINDINGS
+            .iter()
+            .map(|(key, action)| (key.to_string(), *action)),
+    )
     .map(|(key, action)| (key, action.to_string()))
     .collect()
 }
@@ -322,9 +326,15 @@ impl OpenCADStudio {
         if scene.current_layout == "Model" {
             return Task::none();
         }
-        let viewports: Vec<document::Handle> =
-            scene.viewport_list().into_iter().map(|vp| vp.handle).collect();
-        let next = match scene.active_viewport.and_then(|h| viewports.iter().position(|v| *v == h)) {
+        let viewports: Vec<document::Handle> = scene
+            .viewport_list()
+            .into_iter()
+            .map(|vp| vp.handle)
+            .collect();
+        let next = match scene
+            .active_viewport
+            .and_then(|h| viewports.iter().position(|v| *v == h))
+        {
             Some(index) => viewports.get((index + 1) % viewports.len()),
             None => viewports.first(),
         };
@@ -345,19 +355,29 @@ impl OpenCADStudio {
         };
         let builtin = builtin.filter(|_| !self.shortcut_bindings.contains_key(key));
         // Alt+letter opens that menu of the menu bar, unless it is bound.
-        if let Some(letter) = key.strip_prefix("ALT+").filter(|rest| rest.chars().count() == 1) {
+        if let Some(letter) = key
+            .strip_prefix("ALT+")
+            .filter(|rest| rest.chars().count() == 1)
+        {
             if !self.shortcut_bindings.contains_key(key) {
-                if let Some(task) = letter.chars().next().and_then(|ch| self.open_menu_bar_menu(ch)) {
+                if let Some(task) = letter
+                    .chars()
+                    .next()
+                    .and_then(|ch| self.open_menu_bar_menu(ch))
+                {
                     return task;
                 }
             }
         }
-        let action = builtin.as_ref().or_else(|| self.shortcut_bindings.get(key)).or_else(|| {
-            let base = key.rsplit('+').next()?;
-            is_named_key(base)
-                .then(|| self.shortcut_bindings.get(base))
-                .flatten()
-        });
+        let action = builtin
+            .as_ref()
+            .or_else(|| self.shortcut_bindings.get(key))
+            .or_else(|| {
+                let base = key.rsplit('+').next()?;
+                is_named_key(base)
+                    .then(|| self.shortcut_bindings.get(base))
+                    .flatten()
+            });
         let Some(action) = action.cloned() else {
             return Task::none();
         };
@@ -420,7 +440,11 @@ impl OpenCADStudio {
                 if count < 2 {
                     return Task::none();
                 }
-                let step = if action == "NEXTDRAWING" { 1 } else { count - 1 };
+                let step = if action == "NEXTDRAWING" {
+                    1
+                } else {
+                    count - 1
+                };
                 Message::TabSwitch((self.active_tab + step) % count)
             }
             "SELECTALL" => Message::SelectAllShortcut,
@@ -482,11 +506,7 @@ mod tests {
 
         let dyn_before = app.dyn_input;
         let _ = app.run_shortcut("F12");
-        assert_eq!(
-            app.dyn_input,
-            !dyn_before,
-            "bare F12 toggles dynamic input"
-        );
+        assert_eq!(app.dyn_input, !dyn_before, "bare F12 toggles dynamic input");
         assert!(!app.quad, "bare F12 must not touch the quad");
 
         let _ = app.run_shortcut("SHIFT+F12");

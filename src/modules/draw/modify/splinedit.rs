@@ -127,9 +127,9 @@ impl SplineditCommand {
                     .iter()
                     .map(|point| {
                         let uv = plane.project(*point)?;
-                        Some(document::entities::LwVertex::new(document::types::Vector2::new(
-                            uv[0], uv[1],
-                        )))
+                        Some(document::entities::LwVertex::new(
+                            document::types::Vector2::new(uv[0], uv[1]),
+                        ))
                     })
                     .collect::<Option<Vec<_>>>()?;
                 EntityType::LwPolyline(polyline)

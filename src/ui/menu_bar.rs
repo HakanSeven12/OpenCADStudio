@@ -661,6 +661,7 @@ const MENUS: &[(&str, &[Entry])] = &[
             Cmd("Keyboard Shortcuts", "SHORTCUTS", ""),
             Cmd("Send Feedback", "FEEDBACK", ""),
             Sep,
+            Cmd("Check for Updates...", "CHECKFORUPDATES", ""),
             Cmd("About Open CAD Studio", "ABOUT", ""),
         ],
     ),
@@ -784,7 +785,13 @@ pub fn keyboard_menu(
     let menus = menu_rows(aliases);
     let rows = menus.get(index)?;
     fn item(row: &Row) -> Option<crate::ui::popup::context_menu::MenuItem> {
-        let Row::Cmd { icon, label, tail, on_press } = row else {
+        let Row::Cmd {
+            icon,
+            label,
+            tail,
+            on_press,
+        } = row
+        else {
             return None;
         };
         let line = match on_press.as_deref() {

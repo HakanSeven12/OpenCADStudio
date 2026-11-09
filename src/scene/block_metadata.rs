@@ -16,7 +16,8 @@ fn flag(data: Option<&ExtendedData>, app: &str) -> Option<bool> {
 }
 
 fn link(data: Option<&ExtendedData>) -> Option<(String, String)> {
-    let link = super::hyperlink::Link::from_values(&data?.get_record(super::hyperlink::APP)?.values)?;
+    let link =
+        super::hyperlink::Link::from_values(&data?.get_record(super::hyperlink::APP)?.values)?;
     Some((link.url.trim().to_string(), link.text.trim().to_string()))
 }
 
@@ -67,7 +68,11 @@ pub(crate) fn set_hyperlink(
         let link = super::hyperlink::Link {
             url,
             text: description.trim().into(),
-            location: if location.is_empty() { current.location.clone() } else { location },
+            location: if location.is_empty() {
+                current.location.clone()
+            } else {
+                location
+            },
             ..current
         };
         let mut record = ExtendedDataRecord::new("PE_URL");

@@ -497,9 +497,10 @@ impl ModelSpaceThemeConfig {
     pub fn resolve_selection_color(&self) -> [f32; 4] {
         let mut color = document::types::aci_table::aci_to_rgb(self.selection_highlight_color)
             .filter(|_| self.selection_highlight_color != 0)
-            .map_or(crate::scene::model::wire_model::WireModel::SELECTED, |(r, g, b)| {
-                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
-            });
+            .map_or(
+                crate::scene::model::wire_model::WireModel::SELECTED,
+                |(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
+            );
         color[3] = f32::from(self.selection_highlight_opacity.clamp(10, 100)) / 100.0;
         color
     }

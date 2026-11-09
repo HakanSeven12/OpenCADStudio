@@ -892,17 +892,18 @@ impl super::OpenCADStudio {
     }
 
     pub(super) fn mtext_apply_span_number(&mut self, field: &'static str, value: String) {
-        let number = value
-            .trim()
-            .replace(',', ".")
-            .parse::<f64>()
-            .ok()
-            .filter(|&number| match field {
-                "height" | "width" => number > 0.0,
-                "oblique" => (-85.0..=85.0).contains(&number),
-                "tracking" => number.is_finite(),
-                _ => false,
-            });
+        let number =
+            value
+                .trim()
+                .replace(',', ".")
+                .parse::<f64>()
+                .ok()
+                .filter(|&number| match field {
+                    "height" | "width" => number > 0.0,
+                    "oblique" => (-85.0..=85.0).contains(&number),
+                    "tracking" => number.is_finite(),
+                    _ => false,
+                });
         let has_selection = self
             .mtext_editor
             .as_ref()
@@ -1064,7 +1065,9 @@ impl super::OpenCADStudio {
                     // The family, not the style's bold / italic face of it.
                     let font =
                         crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
-                    crate::scene::text::sysfont::split_style(&font).0.to_string()
+                    crate::scene::text::sysfont::split_style(&font)
+                        .0
+                        .to_string()
                 }
             })
             .unwrap_or_default()
@@ -1173,9 +1176,10 @@ impl super::OpenCADStudio {
                 .as_ref()
                 .map(|ed| {
                     let font =
-                        crate::entities::text_support::resolve_text_style(&ed.style, doc)
-                            .font_name;
-                    crate::scene::text::sysfont::split_style(&font).0.to_string()
+                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
+                    crate::scene::text::sysfont::split_style(&font)
+                        .0
+                        .to_string()
                 })
                 .unwrap_or_default()
         } else {

@@ -200,8 +200,10 @@ pub(super) struct DocumentTab {
     pub(super) last_matchprop_src: document::Handle,
     /// Follow-up command for a Parameter Set macro after parameter placement.
     pub(super) pending_parameter_set_follow_up: Option<&'static str>,
-    pub(super) pending_xy_box_set: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
-    pub(super) pending_action_pair: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
+    pub(super) pending_xy_box_set:
+        Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
+    pub(super) pending_action_pair:
+        Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
     /// The definition as it stood when a box or pair Parameter Set began, plus
     /// the dirty flag it carried, so a cancelled set takes back the parameter
     /// it placed and leaves the drawing as unsaved as it found it.
@@ -495,7 +497,10 @@ impl DocumentTab {
         if degraded {
             (Vec::new(), Vec::new())
         } else {
-            (entities.into_iter().collect(), records.into_iter().collect())
+            (
+                entities.into_iter().collect(),
+                records.into_iter().collect(),
+            )
         }
     }
 
@@ -697,7 +702,8 @@ impl DocumentTab {
                     false,
                 ),
             };
-            if let Some(document::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h) {
+            if let Some(document::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h)
+            {
                 vp.ucs_origin = o;
                 vp.ucs_x_axis = x;
                 vp.ucs_y_axis = y;
@@ -968,7 +974,11 @@ impl HistoryLabel {
     }
 
     pub(super) fn formatted(source: String, attribute: &'static str, value: Self) -> Self {
-        Self::Formatted { source, attribute, value: Box::new(value) }
+        Self::Formatted {
+            source,
+            attribute,
+            value: Box::new(value),
+        }
     }
 
     fn display_with<'a>(
@@ -979,17 +989,20 @@ impl HistoryLabel {
         match self {
             Self::Literal(value) => std::borrow::Cow::Borrowed(value),
             Self::Message(source) => translate(source),
-            Self::Formatted { source, attribute, value } => {
-                format(attribute, &value.display_with(translate, format))
-                    .map(std::borrow::Cow::Owned)
-                    .unwrap_or_else(|| std::borrow::Cow::Borrowed(source.as_str()))
-            }
+            Self::Formatted {
+                source,
+                attribute,
+                value,
+            } => format(attribute, &value.display_with(translate, format))
+                .map(std::borrow::Cow::Owned)
+                .unwrap_or_else(|| std::borrow::Cow::Borrowed(source.as_str())),
         }
     }
 
     fn estimated_bytes(&self) -> usize {
         match self {
-            Self::Formatted { source, value, .. } => source.len()
+            Self::Formatted { source, value, .. } => source
+                .len()
                 .saturating_add(std::mem::size_of::<Self>())
                 .saturating_add(value.estimated_bytes()),
             _ => self.as_str().len(),
@@ -997,11 +1010,17 @@ impl HistoryLabel {
     }
 
     pub(super) fn display(&self) -> std::borrow::Cow<'_, str> {
-        self.display_with(&|source| crate::i18n::translate(source), &|attribute, value| {
-            crate::i18n::format_attribute("block-formatted-history", attribute, &[("label", value)])
-        })
+        self.display_with(
+            &|source| crate::i18n::translate(source),
+            &|attribute, value| {
+                crate::i18n::format_attribute(
+                    "block-formatted-history",
+                    attribute,
+                    &[("label", value)],
+                )
+            },
+        )
     }
-
 }
 
 impl From<String> for HistoryLabel {
@@ -1170,6 +1189,14 @@ pub(super) struct DeltaSnapshot {
     /// the entity it belongs to (e.g. a plugin scope that both erases and
     /// re-designates). Almost always empty.
     pub(super) reference_designations: Vec<ReferenceDesignationDelta>,
+    /// The node graph before and after a graph evaluation, which edits the
+    /// drawing from the graph's inputs (#2731).
+    pub(super) graph: Option<
+        Box<(
+            crate::ui::node_graph::GraphUndo,
+            crate::ui::node_graph::GraphUndo,
+        )>,
+    >,
     /// Drawing-wide parameter table changed by this transaction.
     pub(super) named_parameters: Option<(
         crate::scene::named_parameters::ParameterTable,
@@ -1294,8 +1321,9 @@ pub(super) struct PendingHistorySnapshot {
     /// A plugin's undo group: message boundaries leave it open until the
     /// plugin ends it or the user runs a command.
     pub(super) held: bool,
+    /// The node graph when a graph evaluation opened this step.
+    pub(super) graph_before: Option<crate::ui::node_graph::GraphUndo>,
 }
-
 
 #[cfg(test)]
 mod history_label_tests {
@@ -1304,29 +1332,48 @@ mod history_label_tests {
 
     #[test]
     fn history_literal_labels_bypass_translation_even_when_they_match_catalog_sources() {
-        for value in ["LINE", "PLUGIN: custom", "Revert", "Edit construction geometry"] {
+        for value in [
+            "LINE",
+            "PLUGIN: custom",
+            "Revert",
+            "Edit construction geometry",
+        ] {
             let label = HistoryLabel::from(value);
-            assert_eq!(label.display_with(&|_| panic!("literal label was translated"), &|_, _| panic!("literal label was formatted")), value);
+            assert_eq!(
+                label.display_with(&|_| panic!("literal label was translated"), &|_, _| panic!(
+                    "literal label was formatted"
+                )),
+                value
+            );
             assert_eq!(label.as_str(), value);
         }
     }
 
     #[test]
     fn formatted_history_retains_source_and_only_translates_marked_arguments() {
-        for value in [HistoryLabel::from("Revert"), HistoryLabel::Message("Revert")] {
+        for value in [
+            HistoryLabel::from("Revert"),
+            HistoryLabel::Message("Revert"),
+        ] {
             let message = matches!(value, HistoryLabel::Message(_));
             let label = HistoryLabel::formatted("Edit block Revert".into(), "edit-block", value);
-            let rendered = label.display_with(&|source| {
-                assert_eq!(source, "Revert");
-                Cow::Borrowed("translated kind")
-            }, &|attribute, value| {
-                assert_eq!(attribute, "edit-block");
-                assert_eq!(value, if message { "translated kind" } else { "Revert" });
-                Some(format!("localized template: {value}"))
-            });
+            let rendered = label.display_with(
+                &|source| {
+                    assert_eq!(source, "Revert");
+                    Cow::Borrowed("translated kind")
+                },
+                &|attribute, value| {
+                    assert_eq!(attribute, "edit-block");
+                    assert_eq!(value, if message { "translated kind" } else { "Revert" });
+                    Some(format!("localized template: {value}"))
+                },
+            );
             assert!(rendered.starts_with("localized template:"));
             assert_eq!(label.as_str(), "Edit block Revert");
-            assert_eq!(label.display_with(&|source| Cow::Borrowed(source), &|_, _| None), label.as_str());
+            assert_eq!(
+                label.display_with(&|source| Cow::Borrowed(source), &|_, _| None),
+                label.as_str()
+            );
         }
     }
 
@@ -1334,11 +1381,20 @@ mod history_label_tests {
     fn history_message_labels_render_again_without_mutating_the_stored_source() {
         let label = HistoryLabel::Message("Edit construction geometry");
         let retained = label.clone();
-        for translated in ["Modifier la géométrie de construction", "تحرير الهندسة الإنشائية"] {
-            assert_eq!(retained.display_with(&|source| {
-                assert_eq!(source, "Edit construction geometry");
-                Cow::Owned(translated.to_owned())
-            }, &|_, _| panic!("plain message was formatted")), translated);
+        for translated in [
+            "Modifier la géométrie de construction",
+            "تحرير الهندسة الإنشائية",
+        ] {
+            assert_eq!(
+                retained.display_with(
+                    &|source| {
+                        assert_eq!(source, "Edit construction geometry");
+                        Cow::Owned(translated.to_owned())
+                    },
+                    &|_, _| panic!("plain message was formatted")
+                ),
+                translated
+            );
             assert_eq!(retained.as_str(), "Edit construction geometry");
         }
     }

@@ -2990,7 +2990,8 @@ pub fn style_sections(
                 });
             }
             if !dimension.base().text_user_positioned {
-                let text_position = styled_dimension_text_position(dimension, s, 1.0, Some(document));
+                let text_position =
+                    styled_dimension_text_position(dimension, s, 1.0, Some(document));
                 for section in &mut sections {
                     for property in &mut section.props {
                         match property.field {
@@ -3268,7 +3269,13 @@ fn styled_dimension_text_position(
     document: Option<&Document>,
 ) -> Vector3 {
     let scale = dimension_style_scale(style, fallback_scale);
-    dimension_text_pos_f64(dimension, Some(style), style.dimtxt * scale, scale, document)
+    dimension_text_pos_f64(
+        dimension,
+        Some(style),
+        style.dimtxt * scale,
+        scale,
+        document,
+    )
 }
 
 pub(crate) fn materialize_large_radial_text_position(
@@ -3934,7 +3941,10 @@ fn tessellate_dimension_inner(
     let moved_text = dimtmove_one_text(dim, style, dim_txt as f64, dim_scale, Some(document));
     // Text out on its own leader leaves the dimension line as DIMTMOVE 2
     // does: no line chasing it, no turn toward it.
-    let text_movement = if moved_text.as_ref().is_some_and(|moved| !moved.lines.is_empty()) {
+    let text_movement = if moved_text
+        .as_ref()
+        .is_some_and(|moved| !moved.lines.is_empty())
+    {
         2
     } else {
         style.map(|s| s.dimtmove).unwrap_or(0)
@@ -4313,7 +4323,14 @@ fn tessellate_dimension_inner(
     }
 
     if let Some(symbol) = style.and_then(|style| {
-        arc_length_symbol_points(dim, Some(style), dim_txt, dim_scale, style.dimarcsym, Some(document))
+        arc_length_symbol_points(
+            dim,
+            Some(style),
+            dim_txt,
+            dim_scale,
+            style.dimarcsym,
+            Some(document),
+        )
     }) {
         let mut points = Vec::new();
         add_polyline(&mut points, &symbol);
@@ -4940,7 +4957,10 @@ fn dimtmove_one_text(
             let (reach_past, center) = if turned {
                 (-side * (text_width * 0.5 + gap), v3(at(elbow, u, offset)))
             } else {
-                (side * (text_width * 0.5 + gap), lifted(at(elbow, u, offset)))
+                (
+                    side * (text_width * 0.5 + gap),
+                    lifted(at(elbow, u, offset)),
+                )
             };
             let hook_end = at(elbow, u, offset + reach_past);
             return Some(MovedText {
@@ -5324,8 +5344,7 @@ fn dimension_geometry(
                 // point to the centre. Text outside: only a leader from the
                 // arc point to the text, unless DIMTOFL asks for the inside
                 // line as well.
-                let inside_line =
-                    !jogged && !suppress.dim2 && (!text_is_outside || params.dimtofl);
+                let inside_line = !jogged && !suppress.dim2 && (!text_is_outside || params.dimtofl);
                 if inside_line {
                     add_segment(&mut g.dim_lines, center, point);
                 }
@@ -5768,7 +5787,10 @@ fn append_linear_dimension(
         .filter(|along| *along > 0.0 && *along < line_len)
         .unwrap_or(line_len * 0.5);
     let split_point = d1_out + line_dir * split;
-    let (out1, out2) = (arrows_outside != params.flip1, arrows_outside != params.flip2);
+    let (out1, out2) = (
+        arrows_outside != params.flip1,
+        arrows_outside != params.flip2,
+    );
     let draw_inside_line = !(out1 && out2) || params.dimtofl;
     if draw_inside_line && !suppress.dim1 && split > 1e-6 {
         add_segment_with_text_break(&mut g.dim_lines, d1_out, split_point, params.text_break);
@@ -5987,7 +6009,10 @@ fn append_diameter_dimension(
         .unwrap_or(line_length * 0.5);
     let split_point = first + axis * split;
 
-    let (out1, out2) = (arrows_outside != params.flip1, arrows_outside != params.flip2);
+    let (out1, out2) = (
+        arrows_outside != params.flip1,
+        arrows_outside != params.flip2,
+    );
     let draw_inside_line = text_outside || !(out1 && out2) || params.dimtofl;
     if draw_inside_line && !suppress.dim1 && split > 1e-6 {
         add_segment_with_text_break(&mut g.dim_lines, first, split_point, params.text_break);
@@ -8494,7 +8519,11 @@ pub(crate) fn automatic_text_position(document: &Document, dim: &Dimension) -> O
             || (name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
     })?;
     let style = resolved_dimension_style(source, dim, document);
-    let scale = if style.dimscale > 1e-6 { style.dimscale } else { 1.0 };
+    let scale = if style.dimscale > 1e-6 {
+        style.dimscale
+    } else {
+        1.0
+    };
     let height = style.dimtxt * scale;
     let mut position = dimension_text_pos_f64(dim, Some(&style), height, scale, Some(document));
     // Text beside an extension line, or a radius's text, which sits out past
@@ -8519,7 +8548,11 @@ pub(crate) fn automatic_text_position(document: &Document, dim: &Dimension) -> O
         let t1 = (first.x - defpt.x) * ax + (first.y - defpt.y) * ay;
         let t2 = (second.x - defpt.x) * ax + (second.y - defpt.y) * ay;
         let towards_second = if t2 >= t1 { 1.0 } else { -1.0 };
-        let inward = if style.dimjust == 1 { towards_second } else { -towards_second };
+        let inward = if style.dimjust == 1 {
+            towards_second
+        } else {
+            -towards_second
+        };
         (ax * half * inward, ay * half * inward)
     };
     match dim {
@@ -8535,17 +8568,29 @@ pub(crate) fn automatic_text_position(document: &Document, dim: &Dimension) -> O
             position.y += dy;
         }
         Dimension::Aligned(d) => {
-            let (ex, ey) = (d.second_point.x - d.first_point.x, d.second_point.y - d.first_point.y);
+            let (ex, ey) = (
+                d.second_point.x - d.first_point.x,
+                d.second_point.y - d.first_point.y,
+            );
             let len = ex.hypot(ey).max(1e-12);
-            let (dx, dy) =
-                axis(d.first_point, d.second_point, d.definition_point, ex / len, ey / len);
+            let (dx, dy) = axis(
+                d.first_point,
+                d.second_point,
+                d.definition_point,
+                ex / len,
+                ey / len,
+            );
             position.x += dx;
             position.y += dy;
         }
         Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => {
             if let Some((vertex, start, end, radius)) = angular_dimension_frame(dim) {
                 let toward_end = if end >= start { 1.0 } else { -1.0 };
-                let sign = if style.dimjust == 1 { -toward_end } else { toward_end };
+                let sign = if style.dimjust == 1 {
+                    -toward_end
+                } else {
+                    toward_end
+                };
                 let (sin, cos) = (half * sign / f64::from(radius).max(1e-12)).sin_cos();
                 let (cx, cy) = (f64::from(vertex.x), f64::from(vertex.y));
                 let (px, py) = (position.x - cx, position.y - cy);
@@ -8589,7 +8634,9 @@ fn dimension_text_ink_width(
                     let body: String = chars.by_ref().take_while(|c| *c != ';').collect();
                     font.get_or_insert_with(|| body.split('|').next().unwrap_or("").to_string());
                 }
-                Some('C' | 'c' | 'H' | 'h' | 'W' | 'w' | 'Q' | 'q' | 'T' | 't' | 'A' | 'a' | 'p') => {
+                Some(
+                    'C' | 'c' | 'H' | 'h' | 'W' | 'w' | 'Q' | 'q' | 'T' | 't' | 'A' | 'a' | 'p',
+                ) => {
                     chars.by_ref().find(|c| *c == ';');
                 }
                 Some('P') => plain.push(' '),
@@ -8756,9 +8803,7 @@ fn dimension_text_pos_f64(
     // DIMTOH: text that lands outside reads horizontally.
     let horizontal_outside = style.is_some_and(|style| style.dimtoh);
 
-    if let Some(moved) =
-        dimtmove_one_text(dim, style, text_height, dim_scale, document)
-    {
+    if let Some(moved) = dimtmove_one_text(dim, style, text_height, dim_scale, document) {
         return moved.center;
     }
     if let Some(point) = stored_text_point(dim) {
@@ -8862,8 +8907,7 @@ fn dimension_text_pos_f64(
             // the arc): DIMJUST 1 by the second line, 2 by the first
             // (`text_w` carries a gap each side).
             let gaps = if dimtad == 0 { 2.0 } else { 0.0 };
-            let beside =
-                (arrow + gaps * dimgap + text_w * 0.5) / (radius as f64).max(1.0e-12);
+            let beside = (arrow + gaps * dimgap + text_w * 0.5) / (radius as f64).max(1.0e-12);
             let toward_end = if end >= start { 1.0 } else { -1.0 };
             let angle = if move_outside {
                 end as f64 + (text_w * 0.5 + dimgap + arrow) / (radius as f64).max(1.0e-12)
@@ -9165,11 +9209,10 @@ pub(crate) fn baked_dimension_text_entities(
     let Some((ent, gap)) = baked_dimension_text(dim, document, anno_scale) else {
         return Vec::new();
     };
-    let mut entities =
-        match crate::entities::dim_inspect::read(&dim.base().common.extended_data) {
-            Some(inspection) => crate::entities::dim_inspect::layout(&inspection, ent, document, gap),
-            None => vec![ent],
-        };
+    let mut entities = match crate::entities::dim_inspect::read(&dim.base().common.extended_data) {
+        Some(inspection) => crate::entities::dim_inspect::layout(&inspection, ent, document, gap),
+        None => vec![ent],
+    };
     for ent in &mut entities {
         if let EntityType::Text(t) = ent {
             t.alignment_point = Some(t.insertion_point);
@@ -9201,7 +9244,10 @@ fn baked_dimension_text(
         .map(|s| s.dimtxt * dim_scale)
         .unwrap_or(2.5 * dim_scale);
     let gap = style.map(|s| s.dimgap.abs()).unwrap_or(0.0) * dim_scale;
-    Some((dimension_text_entity(dim, dim_txt, style, document, dim_scale)?, gap))
+    Some((
+        dimension_text_entity(dim, dim_txt, style, document, dim_scale)?,
+        gap,
+    ))
 }
 
 pub(crate) fn baked_arc_length_symbol_points(
@@ -9236,11 +9282,18 @@ pub(crate) fn baked_arc_length_symbol_points(
     .or_else(|| style.map(|style| style.dimarcsym))
     .unwrap_or(0);
 
-    arc_length_symbol_points(dim, style, text_height, dim_scale, symbol_position, Some(document))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|point| Vector3::new(point.x as f64, point.y as f64, point.z as f64))
-        .collect()
+    arc_length_symbol_points(
+        dim,
+        style,
+        text_height,
+        dim_scale,
+        symbol_position,
+        Some(document),
+    )
+    .unwrap_or_default()
+    .into_iter()
+    .map(|point| Vector3::new(point.x as f64, point.y as f64, point.z as f64))
+    .collect()
 }
 
 pub(crate) fn dimension_text_grip_position(
@@ -9269,9 +9322,8 @@ mod arrow_tip_grips_tests {
     use crate::scene::model::object::{GripMenuAction, GripShape};
 
     fn rotated() -> Dimension {
-        let mut d = DimensionLinear::horizontal(
-            Vector3::new(2.0, 3.0, 0.0), Vector3::new(12.0, 7.0, 0.0),
-        );
+        let mut d =
+            DimensionLinear::horizontal(Vector3::new(2.0, 3.0, 0.0), Vector3::new(12.0, 7.0, 0.0));
         d.rotation = std::f64::consts::PI / 6.0;
         d.definition_point = Vector3::new(4.0, 11.0, 0.0);
         d.base.text_middle_point = Vector3::new(20.0, 25.0, 0.0);
@@ -9280,9 +9332,8 @@ mod arrow_tip_grips_tests {
     }
 
     fn aligned() -> Dimension {
-        let mut d = DimensionAligned::new(
-            Vector3::new(2.0, 3.0, 0.0), Vector3::new(8.0, 11.0, 0.0),
-        );
+        let mut d =
+            DimensionAligned::new(Vector3::new(2.0, 3.0, 0.0), Vector3::new(8.0, 11.0, 0.0));
         d.definition_point = Vector3::new(1.0, 10.0, 0.0);
         d.base.text_middle_point = Vector3::new(20.0, 25.0, 0.0);
         d.base.text_user_positioned = true;
@@ -9292,16 +9343,29 @@ mod arrow_tip_grips_tests {
     fn assert_grips(mut dim: Dimension, second: DVec3, tips: [DVec3; 2]) {
         let grips = dim.grips();
         assert_eq!(grips.len(), 6, "two arrow-tip grips must be appended");
-        let expected = [DVec3::new(2.0, 3.0, 0.0), second,
-            (tips[0] + tips[1]) * 0.5, DVec3::new(20.0, 25.0, 0.0), tips[0], tips[1]];
+        let expected = [
+            DVec3::new(2.0, 3.0, 0.0),
+            second,
+            (tips[0] + tips[1]) * 0.5,
+            DVec3::new(20.0, 25.0, 0.0),
+            tips[0],
+            tips[1],
+        ];
         for (id, point) in expected.into_iter().enumerate() {
             assert_eq!(grips[id].id, id);
-            assert!(grips[id].world.distance(point) < 1e-9, "grip {id}: {:?}", grips[id]);
+            assert!(
+                grips[id].world.distance(point) < 1e-9,
+                "grip {id}: {:?}",
+                grips[id]
+            );
             assert_eq!(grips[id].is_midpoint, id != 0);
             assert_eq!(grips[id].shape, GripShape::Square);
         }
         for id in [4, 5] {
-            assert!(dim.grip_menu(id).iter().any(|item| item.action == GripMenuAction::FlipArrow));
+            assert!(dim
+                .grip_menu(id)
+                .iter()
+                .any(|item| item.action == GripMenuAction::FlipArrow));
             dim.apply_grip_menu(id, GripMenuAction::FlipArrow);
         }
         assert!(dim.base().flip_arrow1 && dim.base().flip_arrow2);
@@ -9310,17 +9374,23 @@ mod arrow_tip_grips_tests {
     #[test]
     fn rotated_linear_has_projected_tips_and_keeps_ids_0_to_3() {
         let s = 3.0_f64.sqrt();
-        assert_grips(rotated(), DVec3::new(12.0, 7.0, 0.0), [
-            DVec3::new(2.5 - 2.0 * s, 9.0 - s * 0.5, 0.0),
-            DVec3::new(10.0 - s, 10.0 + 2.0 * s, 0.0),
-        ]);
+        assert_grips(
+            rotated(),
+            DVec3::new(12.0, 7.0, 0.0),
+            [
+                DVec3::new(2.5 - 2.0 * s, 9.0 - s * 0.5, 0.0),
+                DVec3::new(10.0 - s, 10.0 + 2.0 * s, 0.0),
+            ],
+        );
     }
 
     #[test]
     fn aligned_has_projected_tips_and_keeps_ids_0_to_3() {
-        assert_grips(aligned(), DVec3::new(8.0, 11.0, 0.0), [
-            DVec3::new(-2.0, 6.0, 0.0), DVec3::new(4.0, 14.0, 0.0),
-        ]);
+        assert_grips(
+            aligned(),
+            DVec3::new(8.0, 11.0, 0.0),
+            [DVec3::new(-2.0, 6.0, 0.0), DVec3::new(4.0, 14.0, 0.0)],
+        );
     }
 
     #[test]
@@ -9331,14 +9401,20 @@ mod arrow_tip_grips_tests {
                 let mut moved = dim.clone();
                 moved.apply_grip(id, GripApply::Absolute(target));
                 let definition = dv3(&dimension_definition_point(&moved));
-                assert!(definition.distance(target) < 1e-9, "grip {id} did not move definition_point");
+                assert!(
+                    definition.distance(target) < 1e-9,
+                    "grip {id} did not move definition_point"
+                );
                 assert!(dv3(&moved.base().definition_point).distance(target) < 1e-9);
                 let tips = moved.grips();
                 let axis = (tips[5].world - tips[4].world).normalize();
                 assert!((target - tips[4].world).cross(axis).length() < 1e-9);
                 let mut middle = dim.clone();
                 middle.apply_grip(2, GripApply::Absolute(target));
-                assert_eq!(moved.base().text_middle_point, middle.base().text_middle_point);
+                assert_eq!(
+                    moved.base().text_middle_point,
+                    middle.base().text_middle_point
+                );
                 let original_tip = dim.grips()[id].world;
                 let mut translated = dim.clone();
                 translated.apply_grip(id, GripApply::Translate(target - original_tip));
@@ -10504,7 +10580,9 @@ mod layout_parity_tests {
 
 /// The dimension an entity is, if it is one. The variant holds it boxed, so
 /// a pattern cannot reach into it; match on this instead.
-pub(crate) fn as_dimension(entity: &document::EntityType) -> Option<&document::entities::Dimension> {
+pub(crate) fn as_dimension(
+    entity: &document::EntityType,
+) -> Option<&document::entities::Dimension> {
     match entity {
         document::EntityType::Dimension(dimension) => Some(dimension),
         _ => None,

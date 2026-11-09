@@ -172,17 +172,20 @@ pub fn folder_shx_fonts() -> Vec<String> {
 pub fn local_font_file(name: &str) -> Option<PathBuf> {
     let file = name.rsplit(['/', '\\']).next()?;
     let lower = file.to_ascii_lowercase();
-    fonts_dir().into_iter().chain(support_folder()).find_map(|dir| {
-        let direct = dir.join(file);
-        if direct.is_file() {
-            return Some(direct);
-        }
-        std::fs::read_dir(&dir)
-            .ok()?
-            .filter_map(|entry| entry.ok())
-            .find(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase() == lower)
-            .map(|entry| entry.path())
-    })
+    fonts_dir()
+        .into_iter()
+        .chain(support_folder())
+        .find_map(|dir| {
+            let direct = dir.join(file);
+            if direct.is_file() {
+                return Some(direct);
+            }
+            std::fs::read_dir(&dir)
+                .ok()?
+                .filter_map(|entry| entry.ok())
+                .find(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase() == lower)
+                .map(|entry| entry.path())
+        })
 }
 
 /// List the community folder through the GitHub contents API.

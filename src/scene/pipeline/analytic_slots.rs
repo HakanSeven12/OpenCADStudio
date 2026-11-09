@@ -144,8 +144,12 @@ pub(crate) enum Edit {
         value: EllipseInstance,
     },
     /// Only the depth field: enough to hide an instance.
-    HideCircle { index: u32 },
-    HideEllipse { index: u32 },
+    HideCircle {
+        index: u32,
+    },
+    HideEllipse {
+        index: u32,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -160,7 +164,11 @@ pub(crate) enum Outcome {
 
 /// The instance record for a placement relative to its definition's base,
 /// split into the high and low parts the shaders recombine.
-pub(crate) fn block_instance_at(position: [f64; 3], base: [f64; 3], depth: f32) -> BlockWireInstance {
+pub(crate) fn block_instance_at(
+    position: [f64; 3],
+    base: [f64; 3],
+    depth: f32,
+) -> BlockWireInstance {
     let delta = [
         position[0] - base[0],
         position[1] - base[1],
@@ -219,14 +227,23 @@ pub(crate) fn plan_reference(
     if new.is_empty() {
         // Hidden or erased: keep the slots so that showing it again lands on
         // the same instances.
-        let mut edits = Vec::with_capacity(old.blocks.len() + old.circles.len() + old.ellipses.len());
+        let mut edits =
+            Vec::with_capacity(old.blocks.len() + old.circles.len() + old.ellipses.len());
         edits.extend(old.blocks.iter().map(|slot| Edit::Block {
             chunk: slot.chunk,
             index: slot.index,
             value: hidden_block(),
         }));
-        edits.extend(old.circles.iter().map(|slot| Edit::HideCircle { index: slot.index }));
-        edits.extend(old.ellipses.iter().map(|slot| Edit::HideEllipse { index: slot.index }));
+        edits.extend(
+            old.circles
+                .iter()
+                .map(|slot| Edit::HideCircle { index: slot.index }),
+        );
+        edits.extend(
+            old.ellipses
+                .iter()
+                .map(|slot| Edit::HideEllipse { index: slot.index }),
+        );
         return Outcome::Edits(edits);
     }
     if old.blocks.len() != new.blocks.len() {
@@ -336,7 +353,11 @@ impl AnalyticSlots {
         use std::mem::{offset_of, size_of};
         for edit in edits {
             match edit {
-                Edit::Block { chunk, index, value } => {
+                Edit::Block {
+                    chunk,
+                    index,
+                    value,
+                } => {
                     if let Some(buffer) = self.block_buffers.get(*chunk as usize) {
                         queue.write_buffer(
                             buffer,
@@ -469,7 +490,10 @@ mod tests {
             depth: 0.25,
             style: look(),
             // Definition 7 is the recorded unit segment; any other is longer.
-            points: vec![[0.0, 0.0, 0.0], [if source_id == 7 { 1.0 } else { 2.0 }, 0.0, 0.0]],
+            points: vec![
+                [0.0, 0.0, 0.0],
+                [if source_id == 7 { 1.0 } else { 2.0 }, 0.0, 0.0],
+            ],
             magnitude: 100.0,
         }
     }
@@ -499,7 +523,11 @@ mod tests {
         assert_eq!(edits.len(), 3);
         // The instance is stored relative to the definition's base.
         match &edits[0] {
-            Edit::Block { chunk, index, value } => {
+            Edit::Block {
+                chunk,
+                index,
+                value,
+            } => {
                 assert_eq!((*chunk, *index), (0, 10));
                 assert_eq!(value.translation, [10.0, 0.0, 0.0]);
                 assert_eq!(value.depth, [0.25, 0.0]);
@@ -621,7 +649,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn placements_that_return_in_another_order_take_the_slot_of_their_shape() {
         let two_shapes = vec![
@@ -659,8 +686,16 @@ mod tests {
         // The long shape (group 1) goes to its own slot, the short one to its.
         match (&edits[0], &edits[1]) {
             (
-                Edit::Block { index: first, value: a, .. },
-                Edit::Block { index: second, value: b, .. },
+                Edit::Block {
+                    index: first,
+                    value: a,
+                    ..
+                },
+                Edit::Block {
+                    index: second,
+                    value: b,
+                    ..
+                },
             ) => {
                 assert_eq!((*first, *second), (11, 10));
                 assert_eq!(a.translation[0], 5.0);

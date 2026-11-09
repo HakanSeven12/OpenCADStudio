@@ -74,7 +74,11 @@ impl FieldHost {
     }
 
     fn locate_table_cell(
-        doc: &document::Document, table: Handle, row: usize, column: usize, value: &str,
+        doc: &document::Document,
+        table: Handle,
+        row: usize,
+        column: usize,
+        value: &str,
     ) -> Option<Self> {
         let EntityType::Table(table) = doc.get_entity(table)? else {
             return None;
@@ -87,19 +91,31 @@ impl FieldHost {
             return None;
         }
         let placeholders = placeholders(&field.code)?;
-        let mut children: Vec<_> = doc.fields.iter().filter(|(_, f)| f.owner == container).collect();
+        let mut children: Vec<_> = doc
+            .fields
+            .iter()
+            .filter(|(_, f)| f.owner == container)
+            .collect();
         children.sort_by_key(|(h, _)| h.value());
         let (mut spans, mut out, mut at) = (Vec::new(), String::new(), 0);
         for placeholder in &placeholders {
             let offset = field.code[at..].find(placeholder)? + at;
             out.push_str(&field.code[at..offset]);
-            let index = placeholder.strip_prefix("%<\\_FldIdx ")?.strip_suffix(">%")?
-                .trim().parse::<usize>().ok()?;
+            let index = placeholder
+                .strip_prefix("%<\\_FldIdx ")?
+                .strip_suffix(">%")?
+                .trim()
+                .parse::<usize>()
+                .ok()?;
             let (handle, _) = children.get(index)?;
             let ObjectType::Field(child) = doc.objects.get(handle)? else {
                 return None;
             };
-            let shown = if child.value.display().is_empty() { &child.value_string } else { child.value.display() };
+            let shown = if child.value.display().is_empty() {
+                &child.value_string
+            } else {
+                child.value.display()
+            };
             let start = out.len();
             out.push_str(shown);
             spans.push(start..out.len());
@@ -107,8 +123,11 @@ impl FieldHost {
         }
         out.push_str(&field.code[at..]);
         (out == value).then_some(Self {
-            container: Some(container), inserted: vec![None; spans.len()], spans,
-            placeholders, removed: false,
+            container: Some(container),
+            inserted: vec![None; spans.len()],
+            spans,
+            placeholders,
+            removed: false,
         })
     }
 
@@ -250,7 +269,12 @@ impl FieldHost {
 
     /// Store the field tree for a table cell, as `rebuild` does for a text.
     pub(in crate::app) fn save_table_cell(
-        &self, doc: &mut document::Document, table: Handle, row: usize, column: usize, value: &str,
+        &self,
+        doc: &mut document::Document,
+        table: Handle,
+        row: usize,
+        column: usize,
+        value: &str,
     ) {
         if let Some((template, children)) = self.field_parts(doc, value) {
             doc.set_table_cell_field(table, row, column, &template, children);
@@ -265,17 +289,36 @@ impl FieldHost {
         }
     }
 
-    fn field_parts(&self, doc: &document::Document, value: &str) -> Option<(String, Vec<NewField>)> {
+    fn field_parts(
+        &self,
+        doc: &document::Document,
+        value: &str,
+    ) -> Option<(String, Vec<NewField>)> {
         let mut old: Vec<Handle> = self
             .container
-            .map(|c| doc.fields.iter().filter(|(_, f)| f.owner == c).map(|(h, _)| *h).collect())
+            .map(|c| {
+                doc.fields
+                    .iter()
+                    .filter(|(_, f)| f.owner == c)
+                    .map(|(h, _)| *h)
+                    .collect()
+            })
             .unwrap_or_default();
         old.sort_by_key(|h| h.value());
         let (mut template, mut at, mut children) = (String::new(), 0, Vec::new());
-        for ((span, placeholder), inserted) in self.spans.iter().zip(&self.placeholders).zip(&self.inserted) {
+        for ((span, placeholder), inserted) in self
+            .spans
+            .iter()
+            .zip(&self.placeholders)
+            .zip(&self.inserted)
+        {
             let field = inserted.clone().or_else(|| {
-                let n = placeholder.strip_prefix("%<\\_FldIdx ")?.strip_suffix(">%")?.trim();
-                let (code, objects) = document::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)?;
+                let n = placeholder
+                    .strip_prefix("%<\\_FldIdx ")?
+                    .strip_suffix(">%")?
+                    .trim();
+                let (code, objects) =
+                    document::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)?;
                 let mut field = NewField::new(code, &value[span.clone()]);
                 field.objects = objects;
                 Some(field)
@@ -317,8 +360,14 @@ impl MTextEditorState {
         let kept = host.track(old, new, caret).ok_or(EditError::FieldText)?;
         Ok(Some(FieldHost {
             spans: kept.iter().map(|(_, r)| r.clone()).collect(),
-            placeholders: kept.iter().map(|(k, _)| host.placeholders[*k].clone()).collect(),
-            inserted: kept.iter().map(|(k, _)| host.inserted[*k].clone()).collect(),
+            placeholders: kept
+                .iter()
+                .map(|(k, _)| host.placeholders[*k].clone())
+                .collect(),
+            inserted: kept
+                .iter()
+                .map(|(k, _)| host.inserted[*k].clone())
+                .collect(),
             removed: host.removed || kept.len() < host.spans.len(),
             ..host.clone()
         }))
@@ -326,19 +375,32 @@ impl MTextEditorState {
 }
 
 impl crate::app::OpenCADStudio {
-    pub(in crate::app) fn mtext_table_cell_fields(&mut self, table: Handle, row: usize, column: usize) {
+    pub(in crate::app) fn mtext_table_cell_fields(
+        &mut self,
+        table: Handle,
+        row: usize,
+        column: usize,
+    ) {
         let Some(ed) = self.mtext_editor.as_mut() else {
             return;
         };
         ed.field_host = FieldHost::locate_table_cell(
-            &self.tabs[self.active_tab].scene.document, table, row, column, &ed.content.text(),
+            &self.tabs[self.active_tab].scene.document,
+            table,
+            row,
+            column,
+            &ed.content.text(),
         );
     }
 
     /// Ctrl+F in the text editor: choose a field to put at the caret. Only an
     /// existing MTEXT can host one, as the field belongs to its entity.
     pub(in crate::app) fn mtext_insert_field_open(&mut self) {
-        if self.mtext_editor.as_ref().is_some_and(|e| e.editing.is_some()) {
+        if self
+            .mtext_editor
+            .as_ref()
+            .is_some_and(|e| e.editing.is_some())
+        {
             self.open_field_dialog(crate::ui::window::field_dialog::FieldTarget::EditorInsert);
         } else if self.mtext_editor.is_some() {
             self.command_line.push_error(

@@ -958,8 +958,13 @@ mod tests {
         );
         assert_eq!(panel.search, "", "and the search field is empty");
         assert_eq!(
-            manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search)
-                .len(),
+            manager::displayed(
+                &rows,
+                manager::FilterMode::All,
+                &panel.filter,
+                &panel.search
+            )
+            .len(),
             rows.len(),
             "which lists every row"
         );

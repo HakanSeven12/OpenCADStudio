@@ -1263,7 +1263,9 @@ pub(crate) fn dash_ranges(
     pattern_length: f32,
     pattern: &[f32; 8],
 ) -> Vec<[f32; 2]> {
-    use crate::scene::pipeline::wire_gpu::{aligned_end_dash, closed_dash_solid, closed_dash_stretch};
+    use crate::scene::pipeline::wire_gpu::{
+        aligned_end_dash, closed_dash_solid, closed_dash_stretch,
+    };
     if run_total < 0.0 {
         let length = -run_total;
         if closed_dash_solid(length, pattern_length) {
@@ -1391,7 +1393,10 @@ fn visible_station_ranges(
 
 /// One vector DPI step in points, for `PlotOptions::vector_dpi`.
 fn vector_step(options: PdfPlotOptions) -> Option<f32> {
-    options.vector_dpi.filter(|&dpi| dpi > 0).map(|dpi| 72.0 / dpi as f32)
+    options
+        .vector_dpi
+        .filter(|&dpi| dpi > 0)
+        .map(|dpi| 72.0 / dpi as f32)
 }
 
 fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step: Option<f32>) {
@@ -1407,7 +1412,10 @@ fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step
                 point.p.y.0 = snap(point.p.y.0);
                 // Bezier control points keep their slot so curves stay whole.
                 if out.last().is_none_or(|last| {
-                    point.bezier || last.bezier || last.p.x.0 != point.p.x.0 || last.p.y.0 != point.p.y.0
+                    point.bezier
+                        || last.bezier
+                        || last.p.x.0 != point.p.x.0
+                        || last.p.y.0 != point.p.y.0
                 }) {
                     out.push(point);
                 }
@@ -2900,8 +2908,8 @@ mod tests {
         );
     }
 
-    use crate::io::plot_style::PlotStyleTableExt as _;
     use super::*;
+    use crate::io::plot_style::PlotStyleTableExt as _;
 
     #[test]
     fn only_colour_7_adapts_to_the_white_sheet() {
@@ -3068,10 +3076,19 @@ mod tests {
             page
         };
         let on = pdf_stream_text(&render_pdf_bytes(&[make_page(true)], None).unwrap());
-        assert!(on.contains("/ca 0.5") || on.contains("/CA 0.5"), "alpha state missing");
-        assert!(on.contains("1 0 0 RG"), "colour must not be blended towards white");
+        assert!(
+            on.contains("/ca 0.5") || on.contains("/CA 0.5"),
+            "alpha state missing"
+        );
+        assert!(
+            on.contains("1 0 0 RG"),
+            "colour must not be blended towards white"
+        );
         let off = pdf_stream_text(&render_pdf_bytes(&[make_page(false)], None).unwrap());
-        assert!(!off.contains("/ca ") && !off.contains("/CA "), "no alpha without transparency");
+        assert!(
+            !off.contains("/ca ") && !off.contains("/CA "),
+            "no alpha without transparency"
+        );
         assert!(off.contains("1 0 0 RG"), "opaque red without transparency");
     }
 

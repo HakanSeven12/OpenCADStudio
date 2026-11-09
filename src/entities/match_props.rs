@@ -605,7 +605,11 @@ pub fn active_settings_line(mode: u32) -> String {
         .filter(|(bit, _)| mode & bit != 0)
         .map(|(_, name)| *name)
         .collect();
-    format!("{}  {} ", crate::t!("Current active settings:"), names.join(" "))
+    format!(
+        "{}  {} ",
+        crate::t!("Current active settings:"),
+        names.join(" ")
+    )
 }
 
 /// MATCHPROP kernel: transfer the source entity's properties onto one

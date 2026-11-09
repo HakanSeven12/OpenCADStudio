@@ -113,9 +113,9 @@ impl OpenCADStudio {
                     Some(count) => self.command_line.push_output(
                         crate::tf!("SELECTPREVIOUS: {} object(s) selected.", count).as_ref(),
                     ),
-                    None => self.command_line.push_error(
-                        crate::t!("SELECTPREVIOUS: no previous selection.").as_ref(),
-                    ),
+                    None => self
+                        .command_line
+                        .push_error(crate::t!("SELECTPREVIOUS: no previous selection.").as_ref()),
                 }
                 self.refresh_properties();
             }
@@ -204,8 +204,7 @@ impl OpenCADStudio {
                     );
                 } else {
                     self.cal_context.base_unit = crate::app::quick_calc::base_unit(&self.tabs[i]);
-                    self.cal_context.sysvars =
-                        Some(crate::app::quick_calc::sysvars(&self.tabs[i]));
+                    self.cal_context.sysvars = Some(crate::app::quick_calc::sysvars(&self.tabs[i]));
                     match crate::app::calc::evaluate(expr, &mut self.cal_context) {
                         Ok(v) => {
                             let v = v.display();
@@ -442,17 +441,16 @@ impl OpenCADStudio {
                     .filter_map(|e| {
                         let h = e.common().handle.value();
                         match e {
-                            document::EntityType::LwPolyline(_) | document::EntityType::Polyline2D(_) => {
-                                Some((
-                                    h,
-                                    PeditTarget {
-                                        is_poly: true,
-                                        convertible: false,
-                                        mesh_size: None,
-                                        mesh_closed: None,
-                                    },
-                                ))
-                            }
+                            document::EntityType::LwPolyline(_)
+                            | document::EntityType::Polyline2D(_) => Some((
+                                h,
+                                PeditTarget {
+                                    is_poly: true,
+                                    convertible: false,
+                                    mesh_size: None,
+                                    mesh_closed: None,
+                                },
+                            )),
                             document::EntityType::Line(_) | document::EntityType::Arc(_) => Some((
                                 h,
                                 PeditTarget {
@@ -559,7 +557,8 @@ impl OpenCADStudio {
                     let selected: Vec<_> =
                         self.tabs[i].scene.selected_entities().into_iter().collect();
                     if selected.len() == 1 {
-                        if let Some(document::EntityType::Insert(_)) = selected.first().map(|(_, e)| e)
+                        if let Some(document::EntityType::Insert(_)) =
+                            selected.first().map(|(_, e)| e)
                         {
                             let handle = selected[0].0;
                             let _ =
@@ -1003,7 +1002,10 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
             cmd if cmd.starts_with("-DATAEXTRACTION _RUN ") => {
-                let path = cmd.trim_start_matches("-DATAEXTRACTION _RUN ").trim().to_string();
+                let path = cmd
+                    .trim_start_matches("-DATAEXTRACTION _RUN ")
+                    .trim()
+                    .to_string();
                 self.run_extraction_template(&path);
             }
 
@@ -1132,13 +1134,12 @@ impl OpenCADStudio {
         unpersisted_pre_document: Option<document::Document>,
     ) {
         if self.block_editor_preferences.locked {
-            self.command_line.push_error(
-                crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref());
             return;
         }
         use crate::modules::draw::modify::block_edit::BlockEditSession;
-        self.tabs[i].action_bars=Default::default();
+        self.tabs[i].action_bars = Default::default();
         // Capture the camera before the editor reframes it, so leaving
         // the block editor returns the view exactly where it was (#425).
         let current_camera = self.tabs[i].scene.camera.borrow().clone();

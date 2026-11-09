@@ -78,7 +78,9 @@ impl OpenCADStudio {
                         }
                     }
                     None => {
-                        self.command_line.push_output(&crate::ui::command_line::value_prompt_or_none(&name, &current));
+                        self.command_line.push_output(
+                            &crate::ui::command_line::value_prompt_or_none(&name, &current),
+                        );
                         self.pending_setvar = Some(name);
                     }
                 }
@@ -100,7 +102,8 @@ impl OpenCADStudio {
                     None => ask(self, name),
                     Some(v) => match v.parse::<i32>() {
                         Err(_) => {
-                            self.command_line.push_rejection("Requires an integer value.");
+                            self.command_line
+                                .push_rejection("Requires an integer value.");
                             ask(self, name);
                         }
                         Ok(n) if !(0..=max).contains(&n) => {

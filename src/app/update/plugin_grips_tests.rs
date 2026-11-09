@@ -1,4 +1,4 @@
-﻿//! Plugin grip surface characterisation (API v11). Tests only; no
+//! Plugin grip surface characterisation (API v11). Tests only; no
 //! production code changed here.
 //!
 //! Paths covered (the commission's acceptance set):
@@ -266,7 +266,7 @@ fn install_sink(plugin: &str) -> SinkState {
                     descriptor: None,
                     descriptor_tolerance: None,
                 }
-            },
+            }
             CustomGripPhase::Settle => {
                 if *panic_on_settle.borrow() {
                     panic!("plugin settle handler is buggy");
@@ -628,18 +628,31 @@ fn custom_grip_bare_click_stays_hot_and_second_click_settles_once() {
     assert!(!app.tabs[i].active_plugin_grip.as_ref().unwrap().moved);
     assert_eq!(state.events.borrow().len(), 1, "bare click must not settle");
     assert_eq!(state.events.borrow()[0].phase, CustomGripPhase::Begin);
-    assert_eq!(app.tabs[i].dyn_anchor, Some(glam::DVec3::new(3.0, 3.0, 0.0)));
-    assert_eq!(app.tabs[i].dyn_fields.len(), 2, "native polar fields stay visible");
+    assert_eq!(
+        app.tabs[i].dyn_anchor,
+        Some(glam::DVec3::new(3.0, 3.0, 0.0))
+    );
+    assert_eq!(
+        app.tabs[i].dyn_fields.len(),
+        2,
+        "native polar fields stay visible"
+    );
 
     let _ = app.on_viewport_move(end);
     left_click_at(&mut app, end);
     let events = state.events.borrow();
     assert_eq!(
-        events.iter().filter(|event| event.phase == CustomGripPhase::Begin).count(),
+        events
+            .iter()
+            .filter(|event| event.phase == CustomGripPhase::Begin)
+            .count(),
         1,
         "the placement press must not restart the drag"
     );
-    assert_eq!(events.last().map(|event| event.phase), Some(CustomGripPhase::Settle));
+    assert_eq!(
+        events.last().map(|event| event.phase),
+        Some(CustomGripPhase::Settle)
+    );
     drop(events);
     assert!(app.active_plugin_grip().is_none());
     assert!(app.tabs[i].dyn_fields.is_empty());
@@ -655,7 +668,7 @@ fn a_redundant_origin_move_does_not_cancel_click_move_click() {
     let i = tab(&app);
     let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
     left_press_at(&mut app, start);
-    app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
     left_release_at(&mut app, start, false);
     let active = app.tabs[i]
         .active_plugin_grip
@@ -663,7 +676,12 @@ fn a_redundant_origin_move_does_not_cancel_click_move_click() {
         .expect("an unchanged move leaves click-move-click hot");
     assert!(!active.moved, "an unchanged point is not a drag");
     let events = state.events.borrow();
-    assert_eq!(events.len(), 2, "Begin plus one redundant Move, no Settle: {:?}", *events);
+    assert_eq!(
+        events.len(),
+        2,
+        "Begin plus one redundant Move, no Settle: {:?}",
+        *events
+    );
     assert!(matches!(
         events[0].phase,
         ocs_plugin_api::host::CustomGripPhase::Begin
@@ -734,9 +752,18 @@ fn custom_grip_press_drag_release_still_settles() {
 
     left_press_at(&mut app, start);
     let _ = app.on_viewport_move(end);
-    assert!(app.tabs[tab(&app)].active_plugin_grip.as_ref().unwrap().moved);
+    assert!(
+        app.tabs[tab(&app)]
+            .active_plugin_grip
+            .as_ref()
+            .unwrap()
+            .moved
+    );
     left_release_at(&mut app, end, true);
-    assert_eq!(state.events.borrow().last().map(|event| event.phase), Some(CustomGripPhase::Settle));
+    assert_eq!(
+        state.events.borrow().last().map(|event| event.phase),
+        Some(CustomGripPhase::Settle)
+    );
     assert!(app.active_plugin_grip().is_none());
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
@@ -761,7 +788,10 @@ fn enter_settles_custom_grip_instead_of_repeating_last_command() {
             .rev()
             .find(|event| event.phase == CustomGripPhase::Settle)
             .expect("empty Enter settles the hot grip");
-        assert_eq!(settle.point, expected, "empty Enter keeps the current point");
+        assert_eq!(
+            settle.point, expected,
+            "empty Enter keeps the current point"
+        );
         assert!(
             !events
                 .iter()
@@ -769,7 +799,10 @@ fn enter_settles_custom_grip_instead_of_repeating_last_command() {
             "empty Enter needs no synthetic Move"
         );
         drop(events);
-        assert!(app.tabs[i].active_cmd.is_none(), "Enter must not start LINE");
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "Enter must not start LINE"
+        );
         assert!(app.active_plugin_grip().is_none());
         grip_points::remove_in_process_sink(TEST_PLUGIN);
     }
@@ -874,15 +907,26 @@ fn custom_grip_drag_uses_native_endpoint_snap_and_marker() {
     let near = iced::Point::new(endpoint.x + 2.0, endpoint.y + 2.0);
 
     let i = tab(&app);
-    let candidate = app.hit_plugin_grip(i, start).expect("custom grip is hittable");
+    let candidate = app
+        .hit_plugin_grip(i, start)
+        .expect("custom grip is hittable");
     let _ = app.begin_plugin_grip_drag(i, &candidate);
     let _ = app.on_viewport_move(near);
     let events = state.events.borrow();
-    let moved = events.iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap();
-    assert!((moved.point[0] - 20.0).abs() < 1e-6, "native endpoint snap supplies X");
+    let moved = events
+        .iter()
+        .rev()
+        .find(|event| event.phase == CustomGripPhase::Move)
+        .unwrap();
+    assert!(
+        (moved.point[0] - 20.0).abs() < 1e-6,
+        "native endpoint snap supplies X"
+    );
     assert!(moved.point[1].abs() < 1e-6 && moved.point[2].abs() < 1e-6);
     drop(events);
-    let hit = app.tabs[i].snap_result.expect("the native snap marker stays live");
+    let hit = app.tabs[i]
+        .snap_result
+        .expect("the native snap marker stays live");
     assert_eq!(hit.snap_type, crate::snap::SnapType::Endpoint);
     assert!((hit.screen.x - endpoint.x).abs() < 1e-3);
     assert!((hit.screen.y - endpoint.y).abs() < 1e-3);
@@ -901,11 +945,24 @@ fn custom_grip_drag_uses_native_polar_and_grid_constraints() {
     app.polar_increment_deg = 45.0;
     let start = screen_of(&app, [0.0, 0.0, 0.0]);
     let end = canvas_screen_of(&app, [20.0, 0.1, 0.0]);
-    let candidate = app.hit_plugin_grip(tab(&app), start).expect("custom grip is hittable");
+    let candidate = app
+        .hit_plugin_grip(tab(&app), start)
+        .expect("custom grip is hittable");
     let _ = app.begin_plugin_grip_drag(tab(&app), &candidate);
     let _ = app.on_viewport_move(end);
-    let moved = state.events.borrow().iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap().clone();
-    assert!(moved.point[1].abs() < 1e-6, "polar constrains to the native 0-degree ray: {:?}", moved.point);
+    let moved = state
+        .events
+        .borrow()
+        .iter()
+        .rev()
+        .find(|event| event.phase == CustomGripPhase::Move)
+        .unwrap()
+        .clone();
+    assert!(
+        moved.point[1].abs() < 1e-6,
+        "polar constrains to the native 0-degree ray: {:?}",
+        moved.point
+    );
 
     app.polar_mode = false;
     app.snapper.grid_snap_on = true;
@@ -914,10 +971,28 @@ fn custom_grip_drag_uses_native_polar_and_grid_constraints() {
     let grid_end = canvas_screen_of(&app, [10.2, 10.2, 0.0]);
     let _ = app.on_viewport_move(grid_end);
     let i = tab(&app);
-    assert_eq!(app.tabs[i].snap_result.map(|hit| hit.snap_type), Some(crate::snap::SnapType::Grid));
-    let moved = state.events.borrow().iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap().clone();
-    assert!((moved.point[0] - 10.0).abs() < 1e-6, "grid snap supplies X: {:?}", moved.point);
-    assert!((moved.point[1] - 10.0).abs() < 1e-6, "grid snap supplies Y: {:?}", moved.point);
+    assert_eq!(
+        app.tabs[i].snap_result.map(|hit| hit.snap_type),
+        Some(crate::snap::SnapType::Grid)
+    );
+    let moved = state
+        .events
+        .borrow()
+        .iter()
+        .rev()
+        .find(|event| event.phase == CustomGripPhase::Move)
+        .unwrap()
+        .clone();
+    assert!(
+        (moved.point[0] - 10.0).abs() < 1e-6,
+        "grid snap supplies X: {:?}",
+        moved.point
+    );
+    assert!(
+        (moved.point[1] - 10.0).abs() < 1e-6,
+        "grid snap supplies Y: {:?}",
+        moved.point
+    );
     let _ = app.settle_plugin_grip_drag();
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
@@ -1658,11 +1733,12 @@ mod notification_attach {
             // A plugin write bumps the epoch and broadcasts DocumentChanged
             // (deferred until the runner acks ChannelReady, then flushed â€”
             // the deferral is what makes this deterministic).
-            let handle =
-                host.add_entity(document::EntityType::Line(document::entities::Line::from_points(
+            let handle = host.add_entity(document::EntityType::Line(
+                document::entities::Line::from_points(
                     document::types::Vector3::new(0.0, 0.0, 0.0),
                     document::types::Vector3::new(3.0, 0.0, 0.0),
-                )));
+                ),
+            ));
             assert!(!handle.is_null());
             drop(host);
             let target_epoch = app.tabs[0].scene.geometry_epoch;
@@ -2143,8 +2219,8 @@ fn descriptor_reanchor_solves_ramp_ends_by_bisection() {
         layer: String::new(),
     };
     // Record-model sanity: the declared end height (the unsigned re-read).
-    let (base, _) = crate::parametric::build_display_entities(&chain, 1e-3)
-        .expect("the base chain derives");
+    let (base, _) =
+        crate::parametric::build_display_entities(&chain, 1e-3).expect("the base chain derives");
     let _ = base;
 
     // The re-anchor: the same run (100.0), the end lifted to 11.0, the
@@ -2156,9 +2232,7 @@ fn descriptor_reanchor_solves_ramp_ends_by_bisection() {
         glam::DVec3::new(100.0, 11.0, 0.0),
     )
     .expect("the height target solves");
-    let ocs_plugin_api::host::Ramp::Sampled {
-        values: solved, ..
-    } = &edited.segments[0].def.ramp
+    let ocs_plugin_api::host::Ramp::Sampled { values: solved, .. } = &edited.segments[0].def.ramp
     else {
         panic!("the scale keeps the sampled arm");
     };
@@ -2367,9 +2441,8 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
                         final_point,
                     )
                     .expect("the plugin's own law re-derives the settled design");
-                    let (fresh, _) =
-                        crate::parametric::build_display_entities(&design, 1e-3)
-                            .expect("the settled design derives");
+                    let (fresh, _) = crate::parametric::build_display_entities(&design, 1e-3)
+                        .expect("the settled design derives");
                     let staged = handles2.borrow().clone();
                     assert_eq!(fresh.len(), staged.len(), "the restage is count-stable");
                     for (slot, fresh_entity) in staged.iter().zip(fresh.iter()) {
@@ -2420,7 +2493,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         undo_before,
         "the per-move re-derivation records zero history"
     );
-    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let host = crate::app::plugin_host::HostSession::new(&mut app, i);
     let EntityType::Spline(spline) = host
         .document()
         .get_entity(handles[1])
@@ -2447,8 +2520,10 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
     // The identity stamps and the designation ride untouched mid-drag
     // (the stamp read goes through its own host session).
     for handle in &handles {
-        let mut session = crate::app::plugin_host::HostSession::new(&mut app, i);
-        assert!(session.read_record(*handle, "PLUGIN_ALIGN_DISPLAY").is_some());
+        let session = crate::app::plugin_host::HostSession::new(&mut app, i);
+        assert!(session
+            .read_record(*handle, "PLUGIN_ALIGN_DISPLAY")
+            .is_some());
     }
     for handle in &handles {
         assert!(app.tabs[i].scene.is_reference_only(*handle));
@@ -2470,7 +2545,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         "the last step is the re-stage's own label"
     );
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2482,7 +2557,9 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
             (spline.control_points[2].y - 11.0).abs() < 1e-9,
             "the re-stage re-applied the settled design"
         );
-        assert!(host.read_record(handles[0], "PLUGIN_ALIGN_DISPLAY").is_some());
+        assert!(host
+            .read_record(handles[0], "PLUGIN_ALIGN_DISPLAY")
+            .is_some());
     }
     // Two undos round-trip the original display set (the re-stage's step,
     // then the record row's step).
@@ -2490,7 +2567,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
     let _ = app.update(Message::Undo);
     assert_eq!(undo_entry_count(&app), undo_before);
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2559,9 +2636,7 @@ fn descriptor_refusals_keep_the_streaming_path() {
     {
         let events2 = Rc::clone(&events);
         let begin2 = Rc::new(RefCell::new(Some((
-                        ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
-                            crest_profile_chain(),
-                        ),
+            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(crest_profile_chain()),
             1e-3,
         ))));
         grip_points::install_in_process_sink(plugin, move |_host, event| {
@@ -2681,9 +2756,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     {
         let events2 = Rc::clone(&events);
         let begin2 = Rc::new(RefCell::new(Some((
-            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(
-                crest_profile_chain(),
-            ),
+            ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(crest_profile_chain()),
             1e-3,
         ))));
         grip_points::install_in_process_sink(plugin, move |_host, event| {
@@ -2734,7 +2807,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(90.0, 30.0, 0.0));
     assert_eq!(events.borrow().len(), 1, "the move stayed local");
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2757,7 +2830,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     );
     // The legal move after the refusal re-derives fully (the drag lives on).
     let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
-    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let host = crate::app::plugin_host::HostSession::new(&mut app, i);
     let EntityType::Spline(spline) = host
         .document()
         .get_entity(handles[1])

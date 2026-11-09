@@ -2335,7 +2335,10 @@ fn normalized_direction(value: [f64; 3], fallback: [f32; 3]) -> [f32; 3] {
     }
 }
 
-fn solar_direction(sun: &document::objects::Sun, geo: &document::objects::GeoData) -> Option<[f32; 3]> {
+fn solar_direction(
+    sun: &document::objects::Sun,
+    geo: &document::objects::GeoData,
+) -> Option<[f32; 3]> {
     if sun.julian_day < 1_000_000 {
         return None;
     }
@@ -3221,10 +3224,14 @@ impl Scene {
 
                 (env, pre)
             } else {
-                let mut best_env: Option<(document::Handle, &document::objects::RenderEnvironment)> =
-                    None;
-                let mut best_preset: Option<(document::Handle, &document::objects::RenderSettings)> =
-                    None;
+                let mut best_env: Option<(
+                    document::Handle,
+                    &document::objects::RenderEnvironment,
+                )> = None;
+                let mut best_preset: Option<(
+                    document::Handle,
+                    &document::objects::RenderSettings,
+                )> = None;
 
                 for (handle, object) in &self.document.objects {
                     if let ObjectType::ClassObject(value) = object {
@@ -3498,7 +3505,11 @@ impl Scene {
             sources.into_iter().take(count).enumerate()
         {
             let toward_source = (camera.rotation * view_direction).normalize_or_zero();
-            let intensity = if count == 1 { 0.85 } else { two_light_intensity };
+            let intensity = if count == 1 {
+                0.85
+            } else {
+                two_light_intensity
+            };
             uniforms.light_position_type[index][3] = 1.0;
             uniforms.light_direction_intensity[index] = [
                 -toward_source.x,
@@ -4381,7 +4392,9 @@ impl Scene {
             use crate::par::prelude::*;
             wires
                 .par_iter()
-                .filter(|w| w.display_visible && w.render_instance.is_none() && !w.text_verts.is_empty())
+                .filter(|w| {
+                    w.display_visible && w.render_instance.is_none() && !w.text_verts.is_empty()
+                })
                 .flat_map_iter(|w| {
                     // Bake the host wire's draw-order depth into its glyphs so
                     // text layers like the rest of the entity: its own
@@ -4632,7 +4645,9 @@ impl Scene {
                     continue;
                 }
                 let context_scale = match self.document.objects.get(&scale) {
-                    Some(document::objects::ObjectType::Scale(value)) => value.inverse_factor() as f32,
+                    Some(document::objects::ObjectType::Scale(value)) => {
+                        value.inverse_factor() as f32
+                    }
                     _ => annotation_scale,
                 };
                 let block_cache = self.block_cache_arc_for(Some(scale), true, self.active_viewport);
@@ -5107,12 +5122,14 @@ impl Scene {
         // Per-viewport frozen-layer set for a paper content viewport. Content
         // viewports hide special fills, media, meshes and lights on VP-frozen
         // layers too, matching the already-filtered resident wire set.
-        let vp_frozen: rustc_hash::FxHashSet<Handle> =
-            if !inst.paper_sheet && inst.tile_idx.is_none() && inst.handle != document::Handle::NULL {
-                self.viewport_hidden_handles(inst.handle)
-            } else {
-                rustc_hash::FxHashSet::default()
-            };
+        let vp_frozen: rustc_hash::FxHashSet<Handle> = if !inst.paper_sheet
+            && inst.tile_idx.is_none()
+            && inst.handle != document::Handle::NULL
+        {
+            self.viewport_hidden_handles(inst.handle)
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
         let lighting_block = if inst.paper_sheet {
             self.current_layout_block_handle()
         } else {
@@ -5289,8 +5306,11 @@ impl Scene {
         } else {
             self.meshes_for_viewport(inst.handle, &vp_frozen)
         };
-        let point_clouds =
-            self.point_clouds_for_viewport(inst.handle, &vp_frozen, inst.paper_sheet || wireframe_2d);
+        let point_clouds = self.point_clouds_for_viewport(
+            inst.handle,
+            &vp_frozen,
+            inst.paper_sheet || wireframe_2d,
+        );
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for
@@ -5317,7 +5337,8 @@ impl Scene {
         } else {
             0x3000_0000_0000_0000 | inst.handle.value()
         };
-        let draw_depths = if inst.render_mode == document::entities::ViewportRenderMode::Wireframe3D {
+        let draw_depths = if inst.render_mode == document::entities::ViewportRenderMode::Wireframe3D
+        {
             Arc::clone(&self.no_draw_depths)
         } else {
             self.draw_depth_map()
@@ -5345,16 +5366,9 @@ impl Scene {
             }
             Arc::new(pv)
         };
-        // Stable per-viewport identity (tagged so tile / sheet / content /
-        // implicit-model instances never collide), so a reused pipeline slot
-        // can tell it changed occupant and reset its caches.
-        let instance_id: u64 = if let Some(t) = inst.tile_idx {
-            0x1000_0000_0000_0000 | (t as u64)
-        } else if inst.paper_sheet {
-            0x2000_0000_0000_0000
-        } else {
-            0x3000_0000_0000_0000 | inst.handle.value()
-        };
+        // Stable per-viewport identity, so a reused pipeline slot can tell it
+        // changed occupant and reset its caches.
+        let instance_id = self.render_instance_id(inst);
         // A paper content viewport with a non-rectangular clip entity gets its
         // boundary projected into this render target's NDC (paper shape mapped
         // through the same visible-sub-rect crop as the content). Rectangular
@@ -5831,7 +5845,12 @@ mod layer0_inherit_tests {
             source_id: 1,
             translation: [0.0; 3],
         });
-        let mut stub = stub_wire(Arc::new(vec![copy]), [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0], 0.0);
+        let mut stub = stub_wire(
+            Arc::new(vec![copy]),
+            [0.0, 0.0, 1.0, 0.0],
+            [5.0, 0.0, 0.0],
+            0.0,
+        );
         stub.name = "1".into();
         let (styled, _) = scene.display_styled_wires(Arc::new(vec![stub]), 1);
         let styled = expand_stubs(&styled);

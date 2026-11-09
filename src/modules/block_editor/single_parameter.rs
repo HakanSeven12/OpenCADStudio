@@ -457,17 +457,29 @@ mod tests {
     #[test]
     fn reopening_a_question_keeps_the_default_it_shows() {
         let mut command = lookup();
-        assert!(matches!(command.on_text_input("N"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(matches!(
             command.on_text_input("Grip9"),
             Some(CmdResult::NeedPoint)
         ));
-        assert!(matches!(command.on_text_input("N"), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
         assert_eq!(command.prompt(), "Enter parameter name <Lookup1>:");
-        assert!(matches!(command.on_text_input(""), Some(CmdResult::NeedPoint)));
+        assert!(matches!(
+            command.on_text_input(""),
+            Some(CmdResult::NeedPoint)
+        ));
         assert!(matches!(
             place(&mut command),
-            CmdResult::PlaceBlockSingleParameter { options: Options { name: None, .. }, .. }
+            CmdResult::PlaceBlockSingleParameter {
+                options: Options { name: None, .. },
+                ..
+            }
         ));
     }
 

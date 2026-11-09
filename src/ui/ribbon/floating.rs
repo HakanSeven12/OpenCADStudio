@@ -731,7 +731,10 @@ impl Ribbon {
                 continue;
             }
             for group in self.ordered_groups(index) {
-                let shown = self.layout.floating_panel(module.id(), group.title).is_some();
+                let shown = self
+                    .layout
+                    .floating_panel(module.id(), group.title)
+                    .is_some();
                 out.push((module.id(), group.title, shown));
             }
         }

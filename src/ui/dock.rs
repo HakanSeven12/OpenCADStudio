@@ -53,6 +53,10 @@ pub enum DockMsg {
     /// Open (`Some`) the pallet menu of an edge's icon strip (its + button),
     /// or close it (`None`).
     EdgeMenu(Option<DockSide>),
+    /// Right-click on the icon strip: open its pallet menu at the pointer.
+    EdgeMenuAtPointer(DockSide),
+    /// The pointer moved over the icon strip, at this point in it.
+    StripPointer(iced::Point),
     /// Pallet menu pick: hide `panel` when it shows, else open it docked on
     /// the edge (as a new group unless it already has a group there).
     EdgeMenuToggle(DockSide, PanelId),
@@ -1201,13 +1205,32 @@ pub fn strip_layout(groups: &[(usize, Vec<f32>)]) -> (Vec<StripGroup>, f32) {
     (placed, y + STRIP_PLUS_GAP)
 }
 
+/// Where the + button goes for a natural top of `plus_top` on a strip
+/// `strip_h` tall: below the tabs, or pinned to the strip's end when the tabs
+/// overflow it. A strip not measured yet (`strip_h` 0) is left alone.
+pub fn strip_plus_top(plus_top: f32, strip_h: f32) -> f32 {
+    if strip_h <= 0.0 {
+        return plus_top;
+    }
+    plus_top.min((strip_h - STRIP_PLUS_H - STRIP_PLUS_GAP).max(STRIP_PLUS_GAP))
+}
+
+/// Top of a menu `menu_h` tall wanted at `y`, kept on a strip `strip_h` tall.
+pub fn strip_menu_top(y: f32, menu_h: f32, strip_h: f32) -> f32 {
+    if strip_h <= 0.0 {
+        return y;
+    }
+    y.min(strip_h - menu_h).max(0.0)
+}
+
 /// Length of a pallet's tab in the strip: the icon alone, or labelled, the
 /// icon followed by its name read upward, as long as the name is.
 pub fn strip_tab_h(title: &str, labelled: bool) -> f32 {
     if !labelled {
         return STRIP_CELL_H;
     }
-    STRIP_CELL_H - 4.0 + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
+    STRIP_CELL_H - 4.0
+        + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
         + STRIP_LABEL_PAD
 }
 
@@ -1232,7 +1255,9 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
             // The tab boundary nearest the pointer.
             let index = (0..=g.cells.len())
                 .min_by(|&a, &b| {
-                    (g.cell_top(a) - y).abs().total_cmp(&(g.cell_top(b) - y).abs())
+                    (g.cell_top(a) - y)
+                        .abs()
+                        .total_cmp(&(g.cell_top(b) - y).abs())
                 })
                 .unwrap_or(0);
             return StripHit::Join {
@@ -1364,11 +1389,14 @@ pub fn detach_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Mes
     .on_press(Message::Dock(DockMsg::Detach(id)))
     .style(button::subtle)
     .padding([3, 5]);
-    let detach =
-        container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
-    tooltip(detach, text(crate::t!("Open in its own window")).size(10), tip)
-        .gap(4)
-        .into()
+    let detach = container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
+    tooltip(
+        detach,
+        text(crate::t!("Open in its own window")).size(10),
+        tip,
+    )
+    .gap(4)
+    .into()
 }
 
 pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
@@ -1767,12 +1795,23 @@ mod tests {
     }
 
     #[test]
+    fn plus_button_and_menu_stay_on_a_short_strip() {
+        // Tabs that fit: the + stays right below them.
+        assert_eq!(strip_plus_top(300.0, 800.0), 300.0);
+        // Tabs that overflow: the + is pinned inside the strip (#2718).
+        let pinned = strip_plus_top(1800.0, 800.0);
+        assert!(pinned + STRIP_PLUS_H <= 800.0, "{pinned}");
+        assert_eq!(strip_plus_top(1800.0, 0.0), 1800.0, "not measured yet");
+        assert_eq!(strip_menu_top(100.0, 300.0, 800.0), 100.0);
+        assert_eq!(strip_menu_top(700.0, 300.0, 800.0), 500.0);
+        assert_eq!(strip_menu_top(700.0, 900.0, 800.0), 0.0);
+    }
+
+    #[test]
     fn strip_hit_maps_dividers_icons_and_the_end() {
         // Two groups: three icons, then one.
-        let (layout, plus_top) = strip_layout(&[
-            (0, vec![STRIP_CELL_H; 3]),
-            (2, vec![STRIP_CELL_H]),
-        ]);
+        let (layout, plus_top) =
+            strip_layout(&[(0, vec![STRIP_CELL_H; 3]), (2, vec![STRIP_CELL_H])]);
         let g0 = layout[0].clone();
         let g1 = layout[1].clone();
         assert_eq!(g0.icons_top, STRIP_PAD);

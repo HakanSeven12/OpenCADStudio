@@ -1,6 +1,6 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
-use crate::scene::model::wire_model::DashClosure;
 use super::super::*;
+use crate::scene::model::wire_model::DashClosure;
 
 /// Dim an already-bg-adapted colour toward the background when the entity's
 /// layer is locked, so locked objects read as non-editable (they stay visible
@@ -781,7 +781,12 @@ fn proxy_preview_wires(
             .map_or(e.common().layer.as_str(), |layer| layer.name.as_str())
     };
     let show = |c: [f32; 4]| {
-        fade_if_locked(document, e, view::render::adapt_to_bg(c, bg_color), bg_color)
+        fade_if_locked(
+            document,
+            e,
+            view::render::adapt_to_bg(c, bg_color),
+            bg_color,
+        )
     };
     // (colour, aci, pattern length, pattern, lineweight px) of a style.
     let resolve = |style: &ProxyStyle| -> ([f32; 4], u8, f32, [f32; 8], f32) {
@@ -798,7 +803,9 @@ fn proxy_preview_wires(
                 (show(layer.color), aci)
             }
             ProxyColor::Aci(a) => (
-                show(convert::tess_util::aci_to_rgba(&document::types::Color::Index(a))),
+                show(convert::tess_util::aci_to_rgba(
+                    &document::types::Color::Index(a),
+                )),
                 a,
             ),
             ProxyColor::Rgb(r, g, b) => {
@@ -830,9 +837,7 @@ fn proxy_preview_wires(
                 }),
         };
         let lw_px = match style.lineweight {
-            w if w >= 0 => {
-                view::render::lineweight_to_px(&document::types::LineWeight::Value(w))
-            }
+            w if w >= 0 => view::render::lineweight_to_px(&document::types::LineWeight::Value(w)),
             -1 if style.layer.is_some() => layer.lw_px,
             _ => own.line_weight_px,
         };
@@ -869,7 +874,11 @@ fn proxy_preview_wires(
         let font = t.font.trim();
         let font = font.rsplit_once('.').map_or(font, |(stem, _)| stem);
         let font = if font.is_empty() { "standard" } else { font };
-        let width = if t.width_factor > 0.0 { t.width_factor } else { 1.0 };
+        let width = if t.width_factor > 0.0 {
+            t.width_factor
+        } else {
+            1.0
+        };
         let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
             [0.0, 0.0],
             t.height as f32,
@@ -883,7 +892,11 @@ fn proxy_preview_wires(
             let run: Vec<[f64; 3]> = stroke
                 .iter()
                 .map(|&[x, y]| {
-                    [t.position[0] + x as f64, t.position[1] + y as f64, t.position[2]]
+                    [
+                        t.position[0] + x as f64,
+                        t.position[1] + y as f64,
+                        t.position[2],
+                    ]
                 })
                 .collect();
             push_run(t.style, &run);
@@ -891,14 +904,21 @@ fn proxy_preview_wires(
     }
     let mut fills: BTreeMap<ProxyStyle, Vec<[f64; 3]>> = BTreeMap::new();
     for fill in &dec.fills {
-        fills.entry(fill.style).or_default().extend_from_slice(&fill.tris);
+        fills
+            .entry(fill.style)
+            .or_default()
+            .extend_from_slice(&fill.tris);
     }
     let mut wires: Vec<WireModel> = lines
         .into_iter()
         .filter(|(_, pts)| pts.len() >= 2)
         .map(|(style, pts)| wire(&style, pts, Vec::new()))
         .collect();
-    wires.extend(fills.into_iter().map(|(style, tris)| wire(&style, Vec::new(), tris)));
+    wires.extend(
+        fills
+            .into_iter()
+            .map(|(style, tris)| wire(&style, Vec::new(), tris)),
+    );
     wires
 }
 
@@ -1252,15 +1272,8 @@ fn tessellate_entity_inner(
             pattern,
             line_weight_px,
         };
-        let wires = proxy_preview_wires(
-            document,
-            e,
-            &dec,
-            inherited,
-            active_viewport,
-            bg_color,
-            sel,
-        );
+        let wires =
+            proxy_preview_wires(document, e, &dec, inherited, active_viewport, bg_color, sel);
         if !wires.is_empty() {
             return wires;
         }

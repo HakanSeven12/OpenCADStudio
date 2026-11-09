@@ -25,7 +25,8 @@ pub fn apply_mask(
         common.linetype = "ByLayer".to_string();
         common.linetype_handle = None;
     }
-    if mask & 4 != 0 && (change_byblock || common.line_weight != document::types::LineWeight::ByBlock)
+    if mask & 4 != 0
+        && (change_byblock || common.line_weight != document::types::LineWeight::ByBlock)
     {
         common.line_weight = document::types::LineWeight::ByLayer;
     }

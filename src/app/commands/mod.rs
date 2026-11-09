@@ -9,8 +9,8 @@ mod block_cmdline;
 mod blocks;
 mod blockvars;
 mod center_vars;
-mod revcloud_vars;
 pub(crate) mod purge;
+mod revcloud_vars;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
 mod bvisibility;
@@ -21,17 +21,17 @@ mod dim;
 mod dim_cmd;
 mod dim_inspect;
 mod dim_layer;
-mod layer_variable;
-pub(crate) mod extraction_eval;
-mod mleader_layer;
 pub(crate) mod display;
 mod draw;
+pub(crate) mod extraction_eval;
 mod field;
+mod fileops;
 mod group_display;
 mod hatch_dialogs;
 mod hatch_vars;
-mod fileops;
+mod layer_variable;
 mod log_file;
+mod mleader_layer;
 pub(crate) use log_file::write_line as write_log_line;
 pub(crate) use log_file::{
     log_file_folder_setting, log_file_mode, set_log_file_folder, set_log_file_mode,
@@ -57,10 +57,10 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
-pub(in crate::app) mod table_cells;
 mod styleprops;
-mod text_edit;
+pub(in crate::app) mod table_cells;
 mod table_style_var;
+mod text_edit;
 mod text_layer;
 mod ucsfollow;
 mod view;
@@ -251,9 +251,7 @@ impl OpenCADStudio {
             return unknown(self);
         };
         let resolved = crate::plugin::quad::with_store(|store| {
-            store
-                .resolve(&plugin_id, &panel_id, &control_id)
-                .cloned()
+            store.resolve(&plugin_id, &panel_id, &control_id).cloned()
         });
         match resolved {
             Some(QuadActionDef::Command(verb)) => self.update(Message::Command(verb)),
@@ -342,7 +340,9 @@ impl OpenCADStudio {
         }
         let construction = cmd.trim_start_matches(['_', '.']);
         if construction == "BCONSTRUCTION" || construction.starts_with("BCONSTRUCTION ") {
-            return Some(self.start_block_construction(construction.strip_prefix("BCONSTRUCTION").unwrap().trim()));
+            return Some(self.start_block_construction(
+                construction.strip_prefix("BCONSTRUCTION").unwrap().trim(),
+            ));
         }
         if cmd.trim_start_matches(['_', '.']) == "BCYCLEORDER" {
             return Some(self.open_block_cycle_order());
@@ -355,9 +355,8 @@ impl OpenCADStudio {
         if self.block_editor_preferences.locked
             && matches!(verb, "BEDIT" | "BEDIT_BEGIN" | "BEDIT_OPEN" | "BEDIT_NEW")
         {
-            self.command_line.push_error(
-                crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("The Block Editor is locked by BLOCKEDITLOCK.").as_ref());
             return Some(Task::none());
         }
         if cmd == "BACTIONSET" {
@@ -367,20 +366,25 @@ impl OpenCADStudio {
             }
         }
         if cmd == "BASSOCIATE" {
-            if let Some(error)=self.action_association_error() {
+            if let Some(error) = self.action_association_error() {
                 self.command_line.push_error(crate::t!(error).as_ref());
                 return Some(Task::none());
             }
         }
         if cmd == "BACTIONBAR" || cmd.starts_with("BACTIONBAR ") {
-            if let Some(error)=self.action_bar_error() {
+            if let Some(error) = self.action_bar_error() {
                 self.command_line.push_error(crate::t!(error).as_ref());
                 return Some(Task::none());
             }
         }
-        if self.block_editor_preferences.action_bars && self.tabs[i].active_block_edit_session().is_some()
-            && matches!(verb,"BACTIONSET"|"BASSOCIATE"|"BLOOKUPTABLE") {
-            self.command_line.push_error(crate::t!("Use the action bar to edit this action, or set BACTIONBARMODE to 0.").as_ref());
+        if self.block_editor_preferences.action_bars
+            && self.tabs[i].active_block_edit_session().is_some()
+            && matches!(verb, "BACTIONSET" | "BASSOCIATE" | "BLOOKUPTABLE")
+        {
+            self.command_line.push_error(
+                crate::t!("Use the action bar to edit this action, or set BACTIONBARMODE to 0.")
+                    .as_ref(),
+            );
             return Some(Task::none());
         }
         if matches!(
@@ -407,7 +411,9 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                if let Some(error) = self.action_error(crate::scene::block_actions::Kind::parse(args)) {
+                if let Some(error) =
+                    self.action_error(crate::scene::block_actions::Kind::parse(args))
+                {
                     self.command_line.push_error(crate::t!(error).as_ref());
                     return Some(Task::none());
                 }
@@ -626,10 +632,15 @@ impl OpenCADStudio {
         let cmd_upper = cmd.trim().to_uppercase();
         let stripped_cmd = cmd_upper.replace([' ', '_', '-'], "");
         let panel_match = self.plugin_panels.iter().find_map(|(id, state)| {
-            let matches_cmd = state.def.command.as_deref().map(|c| {
-                let cu = c.to_uppercase();
-                cu == cmd_upper || cu.replace([' ', '_', '-'], "") == stripped_cmd
-            }).unwrap_or(false);
+            let matches_cmd = state
+                .def
+                .command
+                .as_deref()
+                .map(|c| {
+                    let cu = c.to_uppercase();
+                    cu == cmd_upper || cu.replace([' ', '_', '-'], "") == stripped_cmd
+                })
+                .unwrap_or(false);
             let matches_id = {
                 let id_u = id.to_uppercase();
                 id_u == cmd_upper || id_u.replace([' ', '_', '-'], "") == stripped_cmd
@@ -651,7 +662,8 @@ impl OpenCADStudio {
                 let mut host = crate::app::plugin_host::HostSession::new(self, i);
                 let toggled = host.toggle_panel(&panel_id, None);
                 if toggled {
-                    self.command_line.push_info(&format!("{title} palette toggled."));
+                    self.command_line
+                        .push_info(&format!("{title} palette toggled."));
                     self.tabs[i].last_cmd = Some(cmd.to_string());
                     self.command_line.record_recent(cmd);
                     return Some(self.finish_dispatch(cmd));
@@ -1269,6 +1281,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUDGRIPS",
         "GROUPDISPLAYMODE",
         "OFFSETGAPTYPE",
+        "MEASUREMODE",
         "MATCHMODE",
         "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
@@ -1379,6 +1392,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DORBIT",
         "3O",
         "ABOUT",
+        "CHECKFORUPDATES",
         "ATTACH",
         "ATTDISP",
         "ATTEXT",
@@ -1751,7 +1765,10 @@ mod marquee_cancel_tests {
 
         // Initially panel is registered and not visible
         assert!(!app.plugin_panels.get("sample_palette").unwrap().visible);
-        assert!(app.command_line.dynamic_commands.contains(&"SAMPLEPALETTE".to_string()));
+        assert!(app
+            .command_line
+            .dynamic_commands
+            .contains(&"SAMPLEPALETTE".to_string()));
 
         // Dispatch SAMPLEPALETTE command to toggle on
         let _ = app.dispatch_command("SAMPLEPALETTE");
@@ -1777,11 +1794,12 @@ mod marquee_cancel_tests {
         let mut app = fresh();
         let i = app.active_tab;
 
-        let dialog = DialogDef::new("Test Modal").with_row(DialogRow::single(DialogControl::Text {
-            id: "name".to_string(),
-            label: "Name".to_string(),
-            default: "DefaultVal".to_string(),
-        }));
+        let dialog =
+            DialogDef::new("Test Modal").with_row(DialogRow::single(DialogControl::Text {
+                id: "name".to_string(),
+                label: "Name".to_string(),
+                default: "DefaultVal".to_string(),
+            }));
 
         {
             let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
@@ -1790,10 +1808,7 @@ mod marquee_cancel_tests {
         }
 
         assert!(app.plugin_dialog_state.is_some());
-        assert_eq!(
-            app.active_modal,
-            Some(crate::app::ModalKind::PluginDialog)
-        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PluginDialog));
         assert_eq!(
             app.plugin_dialog_state.as_ref().unwrap().title(),
             "Test Modal"
@@ -1803,7 +1818,7 @@ mod marquee_cancel_tests {
     #[test]
     fn plugin_quad_pick_delivers_to_owner_and_unknown_panel_errors() {
         use ocs_plugin_api::dialog::{QuadActionDef, QuadItemDef, QuadPanelDef};
-        use ocs_plugin_api::host::{CustomGripResponse, HostApi};
+        use ocs_plugin_api::host::CustomGripResponse;
         use ocs_plugin_api::ribbon::owned::OwnedIconKind;
 
         let mut app = fresh();
@@ -1909,7 +1924,9 @@ mod marquee_cancel_tests {
         );
 
         // The raw dispatch probe: None, no notification, no error.
-        assert!(app.try_dispatch_command("quadplugin:a:b:c", false).is_none());
+        assert!(app
+            .try_dispatch_command("quadplugin:a:b:c", false)
+            .is_none());
         assert!(crate::plugin::v4_support::take_test_dispatch_log().is_empty());
 
         // A pick whose owner turned invisible (died/disabled since the quad
@@ -2024,16 +2041,26 @@ mod stretch_preselection_tests {
         assert_eq!(cmd_prompt, "STRETCH  Specify base point:");
 
         // Pick base point
-        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(10.0, 0.0, 0.0));
+        let res = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .unwrap()
+            .on_point(DVec3::new(10.0, 0.0, 0.0));
         let _ = app.apply_cmd_result(res);
 
         // Pick destination point
-        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(15.0, 0.0, 0.0));
+        let res = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .unwrap()
+            .on_point(DVec3::new(15.0, 0.0, 0.0));
         let _ = app.apply_cmd_result(res);
 
         // Check line: start (0,0,0) didn't move; end (10,0,0) moved to (15,0,0)
         let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        let document::EntityType::Line(l) = ent else { panic!("expected line"); };
+        let document::EntityType::Line(l) = ent else {
+            panic!("expected line");
+        };
         assert_eq!(l.start, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(l.end, Vector3::new(15.0, 0.0, 0.0));
     }
@@ -2057,16 +2084,26 @@ mod stretch_preselection_tests {
         assert_eq!(cmd_prompt, "STRETCH  Specify base point:");
 
         // Pick base point
-        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(0.0, 0.0, 0.0));
+        let res = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .unwrap()
+            .on_point(DVec3::new(0.0, 0.0, 0.0));
         let _ = app.apply_cmd_result(res);
 
         // Pick destination point
-        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(5.0, 3.0, 0.0));
+        let res = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .unwrap()
+            .on_point(DVec3::new(5.0, 3.0, 0.0));
         let _ = app.apply_cmd_result(res);
 
         // Check line: start moved to (5,3,0); end moved to (15,3,0)
         let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        let document::EntityType::Line(l) = ent else { panic!("expected line"); };
+        let document::EntityType::Line(l) = ent else {
+            panic!("expected line");
+        };
         assert_eq!(l.start, Vector3::new(5.0, 3.0, 0.0));
         assert_eq!(l.end, Vector3::new(15.0, 3.0, 0.0));
     }
@@ -2079,6 +2116,9 @@ mod stretch_preselection_tests {
         let _ = app.dispatch_command("STRETCH");
         assert!(app.tabs[i].active_cmd.is_some());
         let cmd_prompt = app.tabs[i].active_cmd.as_ref().unwrap().prompt();
-        assert_eq!(cmd_prompt, "STRETCH  Specify first corner of crossing window:");
+        assert_eq!(
+            cmd_prompt,
+            "STRETCH  Specify first corner of crossing window:"
+        );
     }
 }

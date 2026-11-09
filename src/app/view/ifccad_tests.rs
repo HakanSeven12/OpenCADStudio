@@ -182,10 +182,7 @@ fn ifccad_alpha_buttons_are_visible_and_emit_separate_actions() {
                         .visible_bounds()
                         .is_some());
                 }
-                for label in [
-                    t!("Save anyway").into_owned(),
-                    t!("Cancel").into_owned(),
-                ] {
+                for label in [t!("Save anyway").into_owned(), t!("Cancel").into_owned()] {
                     assert!(ui.find(label.as_str()).unwrap().visible_bounds().is_some());
                     ui.click(label.as_str()).unwrap();
                 }

@@ -92,7 +92,8 @@ impl OpenCADStudio {
         let dynamic = tab.scene.document.is_dynamic_block(record_handle)
             || crate::scene::block_authoring::export_graph(&tab.scene.document, record_handle)
                 .is_some();
-        let annotative = crate::scene::annotative::block_is_annotative(&tab.scene.document, &canonical_name);
+        let annotative =
+            crate::scene::annotative::block_is_annotative(&tab.scene.document, &canonical_name);
         let probe = EntityType::Insert(Insert::new(canonical_name.clone(), Vector3::ZERO));
         let captured = ClipboardDeps::capture(&tab.scene.document, &[probe]);
         let wires = tab.scene.block_preview_wires(&canonical_name);
@@ -202,7 +203,8 @@ impl OpenCADStudio {
             }
             let scale = [ins.x_scale(), ins.y_scale(), ins.z_scale()];
             let rotation_deg = ins.rotation.to_degrees();
-            if scale.iter().any(|v| !v.is_finite() || v.abs() <= 1e-9) || !rotation_deg.is_finite() {
+            if scale.iter().any(|v| !v.is_finite() || v.abs() <= 1e-9) || !rotation_deg.is_finite()
+            {
                 continue;
             }
             if !specs
@@ -259,10 +261,8 @@ impl OpenCADStudio {
             return already_exists;
         }
         self.merge_dependencies(i, &deps);
-        let apps = crate::app::command_driver::clipboard::eed_app_map(
-            &self.tabs[i].scene.document,
-            &deps,
-        );
+        let apps =
+            crate::app::command_driver::clipboard::eed_app_map(&self.tabs[i].scene.document, &deps);
         let mut created = Vec::new();
         for def in &deps.blocks {
             let scene = &mut self.tabs[i].scene;
@@ -271,7 +271,10 @@ impl OpenCADStudio {
                 crate::app::command_driver::clipboard::remap_eed_apps(entity, &apps);
             }
             if redefine && def.name.eq_ignore_ascii_case(&tool.name) {
-                if scene.redefine_block_raw(&def.name, def.base_point, entities).is_err() {
+                if scene
+                    .redefine_block_raw(&def.name, def.base_point, entities)
+                    .is_err()
+                {
                     return false;
                 }
             } else if scene.document.block_records.get(&def.name).is_none() {
@@ -322,31 +325,50 @@ impl OpenCADStudio {
                 .push_info(crate::t!("No drawing open — use New or Open first.").as_ref());
             return Task::none();
         }
-        let Some(tool) = self
-            .tool_palettes
-            .active_tab()
-            .tools
-            .get(tool_idx)
-            .cloned()
-        else {
+        let Some(tool) = self.tool_palettes.active_tab().tools.get(tool_idx).cloned() else {
             return Task::none();
         };
 
         // Refuse unsupported redefinition before changing definitions or tables.
         if self.block_redefine_mode == 2 {
             if let Some(record) = self.tabs[i].scene.document.block_records.get(&tool.name) {
-                if tool.dynamic || crate::scene::block_authoring::export_graph(&self.tabs[i].scene.document, record.handle).is_some() {
-                    self.command_line.push_error(&crate::tr!("tool-palettes", "redefine-dynamic"));
+                if tool.dynamic
+                    || crate::scene::block_authoring::export_graph(
+                        &self.tabs[i].scene.document,
+                        record.handle,
+                    )
+                    .is_some()
+                {
+                    self.command_line
+                        .push_error(&crate::tr!("tool-palettes", "redefine-dynamic"));
                     return Task::none();
                 }
             }
         }
-        if let Some(container) = self.tabs[i].scene.block_edit_block.and_then(|handle|
-            self.tabs[i].scene.document.block_records.iter().find(|r| r.handle == handle).map(|r| r.name.clone())) {
-            let captured_cycle = tool.captured.as_ref().is_some_and(|deps|
-                deps.blocks.iter().any(|def| def.name.eq_ignore_ascii_case(&container)));
-            if captured_cycle || crate::scene::block_service::would_create_cycle(&self.tabs[i].scene.document, &container, &tool.name) {
-                self.command_line.push_error(&crate::scene::block_service::circular_dependency_error(&container, &tool.name));
+        if let Some(container) = self.tabs[i].scene.block_edit_block.and_then(|handle| {
+            self.tabs[i]
+                .scene
+                .document
+                .block_records
+                .iter()
+                .find(|r| r.handle == handle)
+                .map(|r| r.name.clone())
+        }) {
+            let captured_cycle = tool.captured.as_ref().is_some_and(|deps| {
+                deps.blocks
+                    .iter()
+                    .any(|def| def.name.eq_ignore_ascii_case(&container))
+            });
+            if captured_cycle
+                || crate::scene::block_service::would_create_cycle(
+                    &self.tabs[i].scene.document,
+                    &container,
+                    &tool.name,
+                )
+            {
+                self.command_line.push_error(
+                    &crate::scene::block_service::circular_dependency_error(&container, &tool.name),
+                );
                 return Task::none();
             }
         }
@@ -532,8 +554,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             ToolPalettesMsg::DeletePalette(idx) => {
-                if self.tool_palettes.palettes.len() > 1
-                    && idx < self.tool_palettes.palettes.len()
+                if self.tool_palettes.palettes.len() > 1 && idx < self.tool_palettes.palettes.len()
                 {
                     self.tool_palettes.palettes.remove(idx);
                     if idx < self.tool_palettes.active_palette {

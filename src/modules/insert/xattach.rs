@@ -651,7 +651,12 @@ pub fn prepare_xref_definition(
     request: &XrefAttachRequest,
     host_file: Option<&std::path::Path>,
 ) -> String {
-    prepare_named_xref_definition(scene, request, host_file, &path_to_block_name(&request.path))
+    prepare_named_xref_definition(
+        scene,
+        request,
+        host_file,
+        &path_to_block_name(&request.path),
+    )
 }
 
 /// [`prepare_xref_definition`] under a chosen name instead of the file's.

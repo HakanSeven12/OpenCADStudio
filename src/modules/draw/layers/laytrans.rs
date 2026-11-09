@@ -35,9 +35,7 @@ impl Mapping {
     /// same two spellings, so what a command line accepts can also be written
     /// to a file and read back unchanged.
     pub fn parse(token: &str) -> Option<Mapping> {
-        let (from, to) = token
-            .split_once('=')
-            .or_else(|| token.split_once("->"))?;
+        let (from, to) = token.split_once('=').or_else(|| token.split_once("->"))?;
         let (from, to) = (from.trim(), to.trim());
         (!from.is_empty() && !to.is_empty()).then(|| Mapping {
             from: from.to_string(),

@@ -85,7 +85,11 @@ impl LayerFilter {
                     items,
                 };
             }
-            if conditions.items.iter().all(|item| matches!(item, Item::Condition(_))) {
+            if conditions
+                .items
+                .iter()
+                .all(|item| matches!(item, Item::Condition(_)))
+            {
                 let group = Group {
                     mode: Match::Any,
                     conditions: conditions
@@ -257,8 +261,7 @@ impl OpenCADStudio {
     ) -> Option<Task<Message>> {
         let mut parts = cmd.splitn(2, char::is_whitespace);
         let verb = parts.next().unwrap_or("");
-        if !verb.eq_ignore_ascii_case("LAYERFILTER") && !verb.eq_ignore_ascii_case("-LAYERFILTER")
-        {
+        if !verb.eq_ignore_ascii_case("LAYERFILTER") && !verb.eq_ignore_ascii_case("-LAYERFILTER") {
             return None;
         }
         let rest = parts.next().unwrap_or("").trim();
@@ -350,7 +353,12 @@ impl OpenCADStudio {
             None => self.layer_filters.push(filter),
         }
         self.command_line.push_output(
-            crate::tf!("LAYERFILTER: '{}' saved ({} layer(s) match).", name, matches).as_ref(),
+            crate::tf!(
+                "LAYERFILTER: '{}' saved ({} layer(s) match).",
+                name,
+                matches
+            )
+            .as_ref(),
         );
     }
 
@@ -437,7 +445,9 @@ impl OpenCADStudio {
             return;
         };
         self.layer_filters[parent_index].children.push(child_filter);
-        let matches = self.matching_layers(i, &self.layer_filters[parent_index]).len();
+        let matches = self
+            .matching_layers(i, &self.layer_filters[parent_index])
+            .len();
         self.command_line.push_output(
             crate::tf!(
                 "LAYERFILTER: '{}' nests '{}', {} layer(s) match.",
@@ -464,9 +474,8 @@ impl OpenCADStudio {
         };
         let names = self.matching_layers(i, &filter);
         if names.is_empty() {
-            self.command_line.push_output(
-                crate::tf!("LAYERFILTER: '{}' matches no layers.", name).as_ref(),
-            );
+            self.command_line
+                .push_output(crate::tf!("LAYERFILTER: '{}' matches no layers.", name).as_ref());
             return;
         }
         self.command_line
@@ -485,13 +494,12 @@ impl OpenCADStudio {
         match self.find_layer_filter(name) {
             Some(index) => {
                 self.layer_filters.remove(index);
-                self.command_line.push_output(
-                    crate::tf!("LAYERFILTER: '{}' removed.", name).as_ref(),
-                );
+                self.command_line
+                    .push_output(crate::tf!("LAYERFILTER: '{}' removed.", name).as_ref());
             }
-            None => self.command_line.push_error(
-                crate::tf!("LAYERFILTER: '{}' not found.", name).as_ref(),
-            ),
+            None => self
+                .command_line
+                .push_error(crate::tf!("LAYERFILTER: '{}' not found.", name).as_ref()),
         }
     }
 
@@ -515,9 +523,8 @@ impl OpenCADStudio {
         };
         let names = self.matching_layers(i, &filter);
         if names.is_empty() {
-            self.command_line.push_output(
-                crate::tf!("LAYERFILTER: '{}' matches no layers.", name).as_ref(),
-            );
+            self.command_line
+                .push_output(crate::tf!("LAYERFILTER: '{}' matches no layers.", name).as_ref());
             return;
         }
         let operation = operation.to_ascii_uppercase();

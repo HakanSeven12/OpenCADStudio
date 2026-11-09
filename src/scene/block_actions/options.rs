@@ -101,14 +101,17 @@ pub(crate) fn set_rotate_only(
         unreachable!()
     };
     super::stretch::validate_polar(doc, definition, native)?;
-    let geometric = super::targets::geometry(doc, definition, Kind::PolarStretch, native.connections[0].code, &native.action.dependencies)?;
+    let geometric = super::targets::geometry(
+        doc,
+        definition,
+        Kind::PolarStretch,
+        native.connections[0].code,
+        &native.action.dependencies,
+    )?;
     let mut targets = targets.to_vec();
     targets.sort();
     targets.dedup();
-    if targets
-        .iter()
-        .any(|handle| !geometric.contains(handle))
-    {
+    if targets.iter().any(|handle| !geometric.contains(handle)) {
         return Err("Select rotate-only objects from this action's selection set.");
     }
     let mut before = native.handles.clone();

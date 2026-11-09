@@ -675,7 +675,12 @@ impl OpenCADStudio {
             return Task::none();
         }
         let angle = state.angle_radians();
-        let pending = self.begin_undo(i, HistoryLabel::Message("Edit gradient"), targets.len(), true);
+        let pending = self.begin_undo(
+            i,
+            HistoryLabel::Message("Edit gradient"),
+            targets.len(),
+            true,
+        );
         for handle in &targets {
             let Some(mut entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
                 continue;
@@ -789,7 +794,12 @@ impl OpenCADStudio {
             );
         }
         let selected = selected.as_slice();
-        let pending = self.begin_undo(i, HistoryLabel::Message("Fill change"), selected.len(), true);
+        let pending = self.begin_undo(
+            i,
+            HistoryLabel::Message("Fill change"),
+            selected.len(),
+            true,
+        );
         let mut changed = false;
         for handle in to_close {
             let Some(mut entity) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
@@ -1339,7 +1349,10 @@ mod tests {
         let _ = app.on_line_transparency(document::types::Transparency::from_percent(0.3));
 
         let header = &app.tabs[i].scene.document.header;
-        assert_eq!(header.current_entity_color, document::types::Color::Index(2));
+        assert_eq!(
+            header.current_entity_color,
+            document::types::Color::Index(2)
+        );
         assert_eq!(header.current_linetype_name, "Continuous");
         assert_eq!(header.current_line_weight, 35);
         assert!((header.current_entity_linetype_scale - 2.5).abs() < f64::EPSILON);

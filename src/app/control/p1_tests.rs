@@ -2878,7 +2878,9 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         .iter()
         .find(|entity| entity["handle"].as_str() != Some(handle.as_str()))
         .map(|entity| {
-            document::Handle::new(u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap())
+            document::Handle::new(
+                u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+            )
         })
         .expect("the second line");
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {

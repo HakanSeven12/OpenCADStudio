@@ -154,9 +154,8 @@ fn expand_stub_near_recursive(
     out: &mut Vec<WireModel>,
 ) {
     let Some(stub) = wire.stub.as_ref() else {
-        let mut copy = crate::scene::cache::block_cache::translated_prototype_wire(
-            wire, owner_name, offset,
-        );
+        let mut copy =
+            crate::scene::cache::block_cache::translated_prototype_wire(wire, owner_name, offset);
         shift_depth(&mut copy, depth_offset);
         copy.selected = owner_selected;
         copy.display_visible &= parent_visible;
@@ -262,7 +261,10 @@ mod nested_stub_perf_tests {
 
         result.clear();
         expand_stub_near_into(&root, Some([0.0, 0.0, 1.0, 1.0]), &mut result);
-        assert!(result.is_empty(), "a distant nested block must not materialize");
+        assert!(
+            result.is_empty(),
+            "a distant nested block must not materialize"
+        );
     }
 
     #[test]

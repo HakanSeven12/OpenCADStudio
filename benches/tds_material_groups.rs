@@ -26,9 +26,7 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use OpenCADStudio::io::tds_import::{
-    self, LayerMode, TdsImport, TdsOptions, TdsStep,
-};
+use OpenCADStudio::io::tds_import::{self, LayerMode, TdsImport, TdsOptions, TdsStep};
 
 const MATERIALS: usize = 100;
 const OBJECTS: usize = 5;
@@ -116,12 +114,16 @@ fn options() -> TdsOptions {
 
 fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
     for &byte in bytes {
-        *hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(u64::from(byte));
+        *hash = hash
+            .wrapping_mul(0x100_0000_01b3)
+            .wrapping_add(u64::from(byte));
     }
 }
 
 fn hash_str(hash: &mut u64, value: &str) {
-    *hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(value.len() as u64);
+    *hash = hash
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(value.len() as u64);
     hash_bytes(hash, value.as_bytes());
 }
 
@@ -130,10 +132,18 @@ fn hash_str(hash: &mut u64, value: &str) {
 /// list. Every importer side must agree bit for bit.
 fn sink(import: &TdsImport) -> u64 {
     let mut hash: u64 = 0x9e37_79b9_7f4a_7c15;
-    hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(import.parts.len() as u64);
-    hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(import.steps.len() as u64);
-    hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(import.materials.len() as u64);
-    hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(import.messages.len() as u64);
+    hash = hash
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(import.parts.len() as u64);
+    hash = hash
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(import.steps.len() as u64);
+    hash = hash
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(import.materials.len() as u64);
+    hash = hash
+        .wrapping_mul(0x100_0000_01b3)
+        .wrapping_add(import.messages.len() as u64);
     for part in &import.parts {
         hash_str(&mut hash, &part.layer);
         match &part.material {
@@ -143,14 +153,22 @@ fn sink(import: &TdsImport) -> u64 {
             }
             None => hash = hash.wrapping_mul(0x100_0000_01b3),
         }
-        hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(part.mesh.vertices.len() as u64);
-        hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(part.mesh.faces.len() as u64);
-        hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(part.color.map_or(u64::MAX, u64::from));
+        hash = hash
+            .wrapping_mul(0x100_0000_01b3)
+            .wrapping_add(part.mesh.vertices.len() as u64);
+        hash = hash
+            .wrapping_mul(0x100_0000_01b3)
+            .wrapping_add(part.mesh.faces.len() as u64);
+        hash = hash
+            .wrapping_mul(0x100_0000_01b3)
+            .wrapping_add(part.color.map_or(u64::MAX, u64::from));
     }
     for step in &import.steps {
         match step {
             TdsStep::Part(index) => {
-                hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(*index as u64 + 1);
+                hash = hash
+                    .wrapping_mul(0x100_0000_01b3)
+                    .wrapping_add(*index as u64 + 1);
             }
             TdsStep::Material(name) => {
                 hash = hash.wrapping_mul(0x100_0000_01b3).wrapping_add(1);
@@ -188,7 +206,8 @@ fn main() {
     let expected = sink(&first);
 
     for _ in 0..WARMUP {
-        let scene = tds_import::read(black_box(&bytes)).expect("the synthesized 3D Studio file must import");
+        let scene = tds_import::read(black_box(&bytes))
+            .expect("the synthesized 3D Studio file must import");
         let import = tds_import::convert(black_box(&scene), black_box(&opts));
         black_box(sink(black_box(&import)));
     }
@@ -197,8 +216,8 @@ fn main() {
         let started = Instant::now();
         let mut value = 0u64;
         for _ in 0..ITERATIONS {
-            let scene =
-                tds_import::read(black_box(&bytes)).expect("the synthesized 3D Studio file must import");
+            let scene = tds_import::read(black_box(&bytes))
+                .expect("the synthesized 3D Studio file must import");
             let import = tds_import::convert(black_box(&scene), black_box(&opts));
             value = sink(black_box(&import));
         }

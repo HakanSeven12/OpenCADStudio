@@ -91,21 +91,24 @@ impl MLeaderEditCommand {
             .iter()
             .enumerate()
             .flat_map(|(root_index, root)| {
-                root.lines.iter().enumerate().map(move |(line_index, line)| {
-                    let mut distance = line
-                        .points
-                        .windows(2)
-                        .map(|segment| point_segment_distance_xy(pick, segment[0], segment[1]))
-                        .fold(f64::INFINITY, f64::min);
-                    if let Some(last) = line.points.last().copied() {
-                        distance = distance.min(point_segment_distance_xy(
-                            pick,
-                            last,
-                            root.connection_point,
-                        ));
-                    }
-                    (root_index, line_index, distance)
-                })
+                root.lines
+                    .iter()
+                    .enumerate()
+                    .map(move |(line_index, line)| {
+                        let mut distance = line
+                            .points
+                            .windows(2)
+                            .map(|segment| point_segment_distance_xy(pick, segment[0], segment[1]))
+                            .fold(f64::INFINITY, f64::min);
+                        if let Some(last) = line.points.last().copied() {
+                            distance = distance.min(point_segment_distance_xy(
+                                pick,
+                                last,
+                                root.connection_point,
+                            ));
+                        }
+                        (root_index, line_index, distance)
+                    })
             })
             .filter(|(_, _, distance)| *distance <= tolerance)
             .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
@@ -125,7 +128,9 @@ impl MLeaderEditCommand {
                 }
             }
         }
-        ml.context.leader_roots.retain(|root| !root.lines.is_empty());
+        ml.context
+            .leader_roots
+            .retain(|root| !root.lines.is_empty());
         Some((*handle, ml))
     }
 }
@@ -254,20 +259,13 @@ impl CadCommand for MLeaderEditCommand {
             return None;
         }
         let mut probe = ml;
-        crate::entities::multileader::add_leader_line(
-            &mut probe,
-            Vector3::new(pt.x, pt.y, pt.z),
-        );
-        let root = probe
-            .context
-            .leader_roots
-            .iter()
-            .find(|root| {
-                root.lines
-                    .last()
-                    .and_then(|line| line.points.first())
-                    .is_some_and(|p| (p.x - pt.x).abs() < 1e-9 && (p.y - pt.y).abs() < 1e-9)
-            })?;
+        crate::entities::multileader::add_leader_line(&mut probe, Vector3::new(pt.x, pt.y, pt.z));
+        let root = probe.context.leader_roots.iter().find(|root| {
+            root.lines
+                .last()
+                .and_then(|line| line.points.first())
+                .is_some_and(|p| (p.x - pt.x).abs() < 1e-9 && (p.y - pt.y).abs() < 1e-9)
+        })?;
         let cp = root.connection_point;
         Some(preview_wire(&[
             pt.as_vec3(),
@@ -382,7 +380,11 @@ impl MLeaderAlignCommand {
             MLeaderAlignMode::Distribute => crate::tr!("mleader-align", "mode-distribute"),
             MLeaderAlignMode::Parallel => crate::tr!("mleader-align", "mode-parallel"),
             MLeaderAlignMode::Spacing => {
-                crate::tr!("mleader-align", "mode-spacing", value = format!("{:.6}", self.spacing))
+                crate::tr!(
+                    "mleader-align",
+                    "mode-spacing",
+                    value = format!("{:.6}", self.spacing)
+                )
             }
         };
         crate::tr!("mleader-align", "current-mode", mode = mode)
@@ -722,7 +724,9 @@ impl CadCommand for MLeaderCollectCommand {
             CollectStep::WrapNumber => crate::tr!(
                 "mleader-collect",
                 "number-per-row",
-                value = COLLECT_NUMBER.load(std::sync::atomic::Ordering::Relaxed).to_string()
+                value = COLLECT_NUMBER
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .to_string()
             ),
         }
     }
@@ -935,8 +939,11 @@ pub(crate) fn mleader_pick_distance(ml: &MultiLeader, point: Vector3) -> f64 {
                 distance = distance.min(point_segment_distance_xy(point, segment[0], segment[1]));
             }
             if let Some(last) = line.points.last().copied() {
-                distance =
-                    distance.min(point_segment_distance_xy(point, last, root.connection_point));
+                distance = distance.min(point_segment_distance_xy(
+                    point,
+                    last,
+                    root.connection_point,
+                ));
             }
         }
     }

@@ -566,7 +566,10 @@ pub fn mline_lines_with_style(m: &MLine, style: &document::objects::MLineStyle) 
     mline_lines_resolved(m, Some(style))
 }
 
-fn mline_lines_resolved(m: &MLine, style: Option<&document::objects::MLineStyle>) -> Vec<MLineLine> {
+fn mline_lines_resolved(
+    m: &MLine,
+    style: Option<&document::objects::MLineStyle>,
+) -> Vec<MLineLine> {
     use document::entities::{MLineFlags, MLineJustification};
     use document::types::Color;
 

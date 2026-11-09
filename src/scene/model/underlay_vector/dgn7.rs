@@ -62,9 +62,21 @@ fn quaternion_axes(e: &[u8], at: usize) -> Option<[[f64; 3]; 3]> {
     let (w, x, y, z) = (q(0)?, q(1)?, q(2)?, q(3)?);
     // The rotation matrix's columns are the axes.
     let m = [
-        [x * x - y * y - z * z + w * w, 2.0 * (z * w + x * y), 2.0 * (x * z - y * w)],
-        [2.0 * (x * y - z * w), -x * x + y * y - z * z + w * w, 2.0 * (x * w + y * z)],
-        [2.0 * (x * z + y * w), 2.0 * (y * z - x * w), -x * x - y * y + z * z + w * w],
+        [
+            x * x - y * y - z * z + w * w,
+            2.0 * (z * w + x * y),
+            2.0 * (x * z - y * w),
+        ],
+        [
+            2.0 * (x * y - z * w),
+            -x * x + y * y - z * z + w * w,
+            2.0 * (x * w + y * z),
+        ],
+        [
+            2.0 * (x * z + y * w),
+            2.0 * (y * z - x * w),
+            -x * x - y * y + z * z + w * w,
+        ],
     ];
     Some([0, 1, 2].map(|c| [m[0][c], m[1][c], m[2][c]]))
 }
@@ -74,7 +86,9 @@ fn radix50(e: &[u8], at: usize) -> String {
     const SET: &[u8] = b" ABCDEFGHIJKLMNOPQRSTUVWXYZ$.?0123456789";
     let mut name = String::new();
     for k in 0..2 {
-        let Some(mut word) = uint16(e, at + 2 * k).map(usize::from) else { break };
+        let Some(mut word) = uint16(e, at + 2 * k).map(usize::from) else {
+            break;
+        };
         let mut chars = [0u8; 3];
         for c in chars.iter_mut().rev() {
             *c = SET.get(word % 40).copied().unwrap_or(b' ');
@@ -451,7 +465,9 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]], d3: bool, depth: usize) -> Raw {
                 let (start, sweep) = if kind == 15 {
                     (0.0, 360.0)
                 } else {
-                    let (Some(st), Some(sw)) = (int32(e, 36), int32(e, 40)) else { continue };
+                    let (Some(st), Some(sw)) = (int32(e, 36), int32(e, 40)) else {
+                        continue;
+                    };
                     let sw = sw as u32;
                     let mut sweep = if sw & 0x8000_0000 != 0 {
                         -((sw & 0x7fff_ffff) as f64)
@@ -573,7 +589,8 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]], d3: bool, depth: usize) -> Raw {
                 // (60); 3D: quaternion (46), origin (62), count (74),
                 // characters (76).
                 let rotation = if d3 {
-                    quaternion_axes(e, 46).map(|[x, _, _]| (x[1].atan2(x[0]).to_degrees() * 360000.0).round() as i32)
+                    quaternion_axes(e, 46)
+                        .map(|[x, _, _]| (x[1].atan2(x[0]).to_degrees() * 360000.0).round() as i32)
                 } else {
                     int32(e, 46)
                 };
@@ -849,7 +866,9 @@ fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
                 let len = field.iter().position(|c| *c == 0).unwrap_or(field.len());
                 let name: String = field[..len].iter().map(|&c| char::from(c)).collect();
                 if (1..=63).contains(&n) && !name.trim().is_empty() {
-                    names.entry(n as u8).or_insert_with(|| name.trim().to_string());
+                    names
+                        .entry(n as u8)
+                        .or_insert_with(|| name.trim().to_string());
                 }
             }
             continue;
@@ -970,7 +989,12 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
 /// A unit name of the design file header (two characters, zero padded).
 fn unit_name(b: &[u8], at: usize) -> String {
     b.get(at..at + 2)
-        .map(|n| String::from_utf8_lossy(n).trim_matches(char::from(0)).trim().to_string())
+        .map(|n| {
+            String::from_utf8_lossy(n)
+                .trim_matches(char::from(0))
+                .trim()
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -1017,7 +1041,10 @@ pub fn import(bytes: &[u8]) -> Option<DgnImport> {
     let raw = read_run(&top, &colors, is_3d(bytes), 0);
     let levels = (0..64u32)
         .map(|l| {
-            let name = names.get(&(l as u8)).cloned().unwrap_or_else(|| l.to_string());
+            let name = names
+                .get(&(l as u8))
+                .cloned()
+                .unwrap_or_else(|| l.to_string());
             (l, (name, None))
         })
         .collect();

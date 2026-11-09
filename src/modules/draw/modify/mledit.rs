@@ -92,7 +92,8 @@ impl MlineEditCommand {
                 }
                 let insert = segment + 1;
                 let mut vertex = mline.vertices[segment].clone();
-                vertex.position = document::types::Vector3::new(projected.x, projected.y, projected.z);
+                vertex.position =
+                    document::types::Vector3::new(projected.x, projected.y, projected.z);
                 mline.vertices.insert(insert, vertex);
                 crate::entities::mline::rebuild_mline_geometry(&mut mline);
                 crate::modules::draw::draw::mline::sync_mline_element_parameters(
@@ -604,8 +605,18 @@ pub(crate) fn trim_mline_at(
             continue;
         }
         let at = at.clamp(0.0, 1.0);
-        let low = edges.iter().copied().filter(|t| *t < at).fold(0.0, f64::max) * length;
-        let high = edges.iter().copied().filter(|t| *t > at).fold(1.0, f64::min) * length;
+        let low = edges
+            .iter()
+            .copied()
+            .filter(|t| *t < at)
+            .fold(0.0, f64::max)
+            * length;
+        let high = edges
+            .iter()
+            .copied()
+            .filter(|t| *t > at)
+            .fold(1.0, f64::min)
+            * length;
         let data = &mut mline.vertices[segment].segments[element];
         remove_drawn_range(&mut data.parameters, length, low, high);
         add_cut_range(&mut data.area_fill_parameters, length, low, high);
@@ -1124,7 +1135,10 @@ mod trim_tests {
         let trimmed = trim_mline_at(&mline, DVec3::new(5.0, 0.2, 0.0), cuts).unwrap();
         for element in 0..2 {
             let data = &trimmed.vertices[0].segments[element];
-            assert_eq!(drawn_ranges(&data.parameters, 10.0), vec![(0.0, 3.0), (7.0, 10.0)]);
+            assert_eq!(
+                drawn_ranges(&data.parameters, 10.0),
+                vec![(0.0, 3.0), (7.0, 10.0)]
+            );
         }
         // The fill between the outer lines leaves the same gap.
         let mut style = document::objects::MLineStyle::new("FILLED");
@@ -1135,6 +1149,10 @@ mod trim_tests {
         style.flags.fill_on = true;
         let fill = crate::entities::mline::mline_fill_triangles_with_style(&trimmed, &style);
         assert!(!fill.is_empty());
-        assert!(fill.iter().all(|p| p[0] <= 3.0 + 1e-6 || p[0] >= 7.0 - 1e-6), "{fill:?}");
+        assert!(
+            fill.iter()
+                .all(|p| p[0] <= 3.0 + 1e-6 || p[0] >= 7.0 - 1e-6),
+            "{fill:?}"
+        );
     }
 }

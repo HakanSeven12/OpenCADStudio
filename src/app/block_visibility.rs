@@ -121,7 +121,10 @@ impl OpenCADStudio {
                         } else {
                             Task::none()
                         };
-                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Visibility state"));
+                    self.push_undo_snapshot(
+                        i,
+                        super::tab_document::HistoryLabel::Message("Visibility state"),
+                    );
                     self.show_visibility_state(i, target.definition, target.parameter, index);
                     self.finish_pending_history(i);
                     return cancellation;
@@ -152,7 +155,10 @@ impl OpenCADStudio {
                 if state.edited != state.original
                     || state.current != self.visibility_current(i, state.target.definition)
                 {
-                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Visibility states"));
+                    self.push_undo_snapshot(
+                        i,
+                        super::tab_document::HistoryLabel::Message("Visibility states"),
+                    );
                     visibility::replace_states(
                         &mut self.tabs[i].scene.document,
                         state.target.definition,

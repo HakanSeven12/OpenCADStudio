@@ -31,9 +31,14 @@ fn mtext_preview_cleared_after_commit() {
     app.mtext_type("Synthetic text");
     let _ = app.update(Message::MTextOk);
     assert!(app.mtext_editor.is_none());
-    assert_eq!(app.tabs[app.active_tab].scene.document.entities().count(), 1);
-    assert!(app.tabs[app.active_tab].scene.preview_wires.is_empty(),
-        "MTEXT corner rectangle remains after commit");
+    assert_eq!(
+        app.tabs[app.active_tab].scene.document.entities().count(),
+        1
+    );
+    assert!(
+        app.tabs[app.active_tab].scene.preview_wires.is_empty(),
+        "MTEXT corner rectangle remains after commit"
+    );
 }
 
 #[test]
@@ -52,6 +57,8 @@ fn mtext_preview_cleared_after_editor_escape() {
     let _ = app.update(Message::CommandEscape);
     assert!(app.mtext_editor.is_none());
     assert_eq!(app.tabs[i].scene.document.entities().count(), 0);
-    assert!(app.tabs[i].scene.preview_wires.is_empty(),
-        "MTEXT corner rectangle remains after editor Esc");
+    assert!(
+        app.tabs[i].scene.preview_wires.is_empty(),
+        "MTEXT corner rectangle remains after editor Esc"
+    );
 }

@@ -348,7 +348,8 @@ impl CadCommand for DataLinkUpdateCommand {
     }
 
     fn selection_entity_filter(&self) -> Option<fn(&EntityType) -> bool> {
-        matches!(self.step, UpdateStep::Select { .. }).then_some(is_linked_table as fn(&EntityType) -> bool)
+        matches!(self.step, UpdateStep::Select { .. })
+            .then_some(is_linked_table as fn(&EntityType) -> bool)
     }
 
     fn selection_entity_filter_reports(&self) -> bool {

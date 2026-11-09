@@ -3409,11 +3409,13 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Yayın başlangıç noktasını belirtin:
     .arc-specify-second-point-of-arc = ARC  Yayın ikinci noktasını belirtin:
     .arc-specify-end-point-of-arc = ARC  Yayın bitiş noktasını belirtin:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
     .arc-specify-center-point-of-arc = ARC  Yayın merkez noktasını belirtin:
-    .arc-specify-included-angle = ARC  İç açıyı belirtin:
-    .arc-specify-length-of-chord = ARC  Kiriş uzunluğunu belirtin:
-    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Yayın başlangıç noktasındaki teğet yönünü belirtin:
-    .arc-specify-radius-of-arc = ARC  Yayın yarıçapını belirtin:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Yayın merkez noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-included-angle = ARC  İç açıyı belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-length-of-chord = ARC  Kiriş uzunluğunu belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Yayın başlangıç noktasındaki teğet yönünü belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-radius-of-arc = ARC  Yayın yarıçapını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
     .chord-length = Kiriş uzunluğu
 
 modify =
@@ -4522,6 +4524,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  Nesne veya sınırlı alan seçin:
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Ek nesneleri veya kapalı alanları seçin [Undo] (yükseklik için Enter):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  { common.specify }: { common.extrusion } · { common.height } (+/−) [{ common.multiple }/{ common.undo }]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: seçilen yüz yeni bir gövdeye kopyalanamadı.
+    .presspull-option-new-body = Yeni gövde
+    .presspull-option-modify-solid = Katıyı değiştir
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Süpürülecek nesneleri seçin veya [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  { draw.select }: { model.sweep } · { common.path } [{ common.alignment-title-case }/{ styles.basepoint }/{ common.scale }/{ properties.twist }]:
@@ -5296,6 +5302,9 @@ view =
     .opening-patreon-page = Patreon sayfası açılıyor...
     .opening-feedback-page = Geri bildirim sayfası açılıyor...
     .opening-release-notes = Sürüm notları açılıyor...
+    .checking-for-updates = Güncellemeler denetleniyor...
+    .no-newer-release = Daha yeni bir sürüm bulunamadı. Bu sürüm: { $version }.
+    .web-always-latest = Web uygulaması her zaman en son sürümü çalıştırır.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: Sol fare düğmesiyle sürükleyin. Çıkmak için Esc tuşuna basın.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW  Yazdırma penceresinin ilk köşesini belirtin:
     .plotwindow-specify-opposite-corner = PLOTWINDOW  Karşı köşeyi belirtin:
@@ -7191,9 +7200,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Mesafe = { $value }
-    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .angle-start = Yay, çember, çizgi seçin veya <Köşeyi belirtin>:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
-    .second-line = { $command }  Select second line (smaller angle):
+    .second-line = İkinci çizgiyi seçin:
+    .angle-vertex = Açının köşesini belirtin:
+    .angle-first-end = Açının ilk uç noktasını belirtin:
+    .angle-second-end = Açının ikinci uç noktasını belirtin:
+    .lines-parallel = Çizgiler paralel.
+    .not-a-line = Seçilen nesne bir çizgi değil.
+    .not-line-arc-circle = Seçilen nesne bir çizgi, yay veya çember değil.
+    .angle-invalid-object =
+        {"*"}Geçersiz seçim*
+        Bir nokta veya Specify bekleniyor
+    .angle-invalid-second =
+        {"*"}Geçersiz seçim*
+        Tek bir nesne bekleniyor.
+    .arc-endpoints-equal = Yayın uç noktaları aynı.
     .lines = Lines
     .points = Points
     .invalid-radius = Select a circle or arc with a finite, positive radius.
@@ -8347,6 +8369,7 @@ menu-labels =
     .n-3d-views = 3D Views
     .n-4-viewports = 4 Viewports
     .about-open-cad-studio = About Open CAD Studio
+    .check-for-updates = Güncellemeleri Denetle...
     .align-text = Align Text
     .arrange-icons = Arrange Icons
     .attribute-display = Attribute Display

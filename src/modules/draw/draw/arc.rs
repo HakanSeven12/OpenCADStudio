@@ -130,6 +130,12 @@ fn arc_result(
         .unwrap_or(CmdResult::NeedPoint)
 }
 
+/// A value the arc cannot be built from ends the command, as the reference
+/// does.
+fn invalid() -> CmdResult {
+    CmdResult::CancelWithMessage("*Invalid*".into())
+}
+
 fn line_wire(a: DVec3, b: DVec3) -> WireModel {
     WireModel::solid_f64(
         "rubber_band".into(),
@@ -1765,9 +1771,9 @@ impl ArcCommand {
         if r < 1e-9 || len <= 0.0 || len >= TAU * r {
             return None;
         }
-        let toward = self
-            .cursor
-            .map(|cursor| (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)).rem_euclid(TAU));
+        let toward = self.cursor.map(|cursor| {
+            (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)).rem_euclid(TAU)
+        });
         let ccw = match toward {
             Some(span) if span > 1e-9 => span <= std::f64::consts::PI,
             _ => !self.cw,
@@ -1829,19 +1835,25 @@ impl CadCommand for ArcCommand {
         match self.step {
             ArcStep::Start => t!("ARC  Specify start point of arc:"),
             ArcStep::Second { .. } => t!("ARC  Specify second point of arc:"),
-            ArcStep::End3 { .. } | ArcStep::EndSC { .. } | ArcStep::EndAfterStart { .. } => {
+            ArcStep::End3 { .. } | ArcStep::EndAfterStart { .. } => {
                 t!("ARC  Specify end point of arc:")
             }
-            ArcStep::CenterFirst | ArcStep::CenterAfterStart { .. } | ArcStep::CenterSE { .. } => {
+            ArcStep::EndSC { .. } => {
+                t!("ARC  Specify end point of arc (hold Ctrl to switch direction):")
+            }
+            ArcStep::CenterFirst | ArcStep::CenterAfterStart { .. } => {
                 t!("ARC  Specify center point of arc:")
             }
-            ArcStep::StartAfterCenter { .. } => t!("ARC  Specify start point of arc:"),
-            ArcStep::AngleSC { .. } | ArcStep::AngleSE { .. } => t!("ARC  Specify included angle:"),
-            ArcStep::LengthSC { .. } => t!("ARC  Specify length of chord:"),
-            ArcStep::DirectionSE { .. } => {
-                t!("ARC  Specify tangent direction for the start point of arc:")
+            ArcStep::CenterSE { .. } => {
+                t!("ARC  Specify center point of arc (hold Ctrl to switch direction):")
             }
-            ArcStep::RadiusSE { .. } => t!("ARC  Specify radius of arc:"),
+            ArcStep::StartAfterCenter { .. } => t!("ARC  Specify start point of arc:"),
+            ArcStep::AngleSC { .. } | ArcStep::AngleSE { .. } => t!("ARC  Specify included angle (hold Ctrl to switch direction):"),
+            ArcStep::LengthSC { .. } => t!("ARC  Specify length of chord (hold Ctrl to switch direction):"),
+            ArcStep::DirectionSE { .. } => {
+                t!("ARC  Specify tangent direction for the start point of arc (hold Ctrl to switch direction):")
+            }
+            ArcStep::RadiusSE { .. } => t!("ARC  Specify radius of arc (hold Ctrl to switch direction):"),
         }
         .into_owned()
     }
@@ -1926,6 +1938,7 @@ impl CadCommand for ArcCommand {
                 self.step = ArcStep::EndSC { s, c: pt };
                 Some(CmdResult::NeedPoint)
             }
+            ArcStep::EndSC { c, .. } if c.distance(pt) < 1e-9 => Some(invalid()),
             ArcStep::EndSC { s, c } => Some(self.commit(self.sc_end(s, c, pt))),
             // At a typed prompt a pick reads as commercial solutions do: the cursor's
             // direction from the centre (angle) or its distance (length,
@@ -1953,6 +1966,11 @@ impl CadCommand for ArcCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        // A coordinate typed at an angle, length, direction or radius prompt
+        // is a point, read like a pick: the comma is never a decimal mark.
+        if crate::app::helpers::parse_coord(text).is_some() {
+            return None;
+        }
         let upper = text.trim().to_uppercase();
         match self.step {
             ArcStep::Start => match upper.as_str() {
@@ -2008,10 +2026,24 @@ impl CadCommand for ArcCommand {
                 if self.cw {
                     span = -span;
                 }
-                Some(self.commit(self.sc_angle(s, c, span)))
+                // A typed included angle counts whole turns off (400 = 40);
+                // a whole number of turns sweeps nothing.
+                let turns = span.abs() % TAU;
+                if turns < 1e-9 || TAU - turns < 1e-9 {
+                    return Some(invalid());
+                }
+                Some(self.commit(self.sc_angle(s, c, turns.copysign(span))))
             }
             ArcStep::LengthSC { s, c } => {
                 let len = Self::typed_number(text)?;
+                if len == 0.0 {
+                    return Some(CmdResult::ReportError(
+                        t!("Value must be nonzero.").into_owned(),
+                    ));
+                }
+                if len.abs() > 2.0 * c.distance(s) {
+                    return Some(invalid());
+                }
                 Some(self.commit(self.sc_length(s, c, len)))
             }
             ArcStep::AngleSE { s, e } => {
@@ -2019,6 +2051,13 @@ impl CadCommand for ArcCommand {
                 if self.cw {
                     included = -included;
                 }
+                // As at the Start-Center angle: whole turns count off, and
+                // a whole number of them spans nothing.
+                let turns = included.abs() % TAU;
+                if turns < 1e-9 || TAU - turns < 1e-9 {
+                    return Some(invalid());
+                }
+                let included = turns.copysign(included);
                 Some(self.commit(arc_from_endpoints_angle(s, e, included, self.plane)))
             }
             ArcStep::DirectionSE { s, e } => {

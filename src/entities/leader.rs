@@ -660,9 +660,9 @@ impl LeaderTess for Leader {
             });
             match dim_clr {
                 Some(idx) if idx != 0 && idx != 256 => {
-                    crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::from_index(
-                        idx,
-                    ))
+                    crate::scene::convert::tess_util::aci_to_rgba(
+                        &document::types::Color::from_index(idx),
+                    )
                 }
                 _ => entity_color,
             }
@@ -676,8 +676,9 @@ impl LeaderTess for Leader {
             _ => line_weight_px,
         };
         let name = handle.value().to_string();
-        let p3 =
-            |v: &document::types::Vector3| -> [f32; 3] { [(v.x) as f32, (v.y) as f32, (v.z) as f32] };
+        let p3 = |v: &document::types::Vector3| -> [f32; 3] {
+            [(v.x) as f32, (v.y) as f32, (v.z) as f32]
+        };
 
         let verts = &self.vertices;
 

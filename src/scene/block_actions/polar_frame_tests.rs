@@ -333,7 +333,11 @@ fn block_polar_stretch_end_connection_parameter_dependency_and_reversed_line_rou
             )),
         ],
     );
-    let record = scene.document.block_records.get("POLAR_END_TARGET").unwrap();
+    let record = scene
+        .document
+        .block_records
+        .get("POLAR_END_TARGET")
+        .unwrap();
     let (definition, targets) = (record.handle, record.entity_handles.clone());
     let mut doc = scene.document;
     let parameter = distance::create(
@@ -363,7 +367,10 @@ fn block_polar_stretch_end_connection_parameter_dependency_and_reversed_line_rou
         }
     }
     let expected = polar(&doc, action_handle).clone();
-    assert_eq!(stretch::polar_key_point(&expected).unwrap(), XyKeyPoint::End);
+    assert_eq!(
+        stretch::polar_key_point(&expected).unwrap(),
+        XyKeyPoint::End
+    );
     assert_eq!(expected.action.dependencies.len(), 3);
     let geometric = super::targets::geometry(
         &doc,
@@ -411,34 +418,55 @@ fn block_polar_stretch_end_connection_parameter_dependency_and_reversed_line_rou
     }
 }
 
-
-
-
 #[test]
 fn block_polar_stretch_parameter_dependencies_remain_metadata_after_reload() {
     let (mut doc, definition, parameter, action, targets, a, b) = fixture(XyKeyPoint::End);
-    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else { panic!() };
-    let DynamicBlockData::PolarStretchAction(native) = &mut object.data else { panic!() };
+    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
+        panic!()
+    };
+    let DynamicBlockData::PolarStretchAction(native) = &mut object.data else {
+        panic!()
+    };
     native.action.dependencies.push(parameter);
     let baseline = geometry(&doc, b);
-    for loaded in [doc.clone(),
-        DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap())).read().unwrap(),
-        DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap())).unwrap().read().unwrap(),
+    for loaded in [
+        doc.clone(),
+        DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap(),
+        DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
+            .unwrap()
+            .read()
+            .unwrap(),
     ] {
         let native = polar(&loaded, action);
         assert_eq!(stretch::polar_key_point(native).unwrap(), XyKeyPoint::End);
         let code = native.connections[0].code;
-        assert_eq!(super::targets::geometry(&loaded, definition, Kind::PolarStretch, code, &native.action.dependencies).unwrap(), targets[..3]);
+        assert_eq!(
+            super::targets::geometry(
+                &loaded,
+                definition,
+                Kind::PolarStretch,
+                code,
+                &native.action.dependencies
+            )
+            .unwrap(),
+            targets[..3]
+        );
         let parameter_before = loaded.objects[&parameter].clone();
-        let changed = instance::evaluate(&loaded, a, parameter, DVec3::new(17., 3., 0.)).unwrap().unwrap();
+        let changed = instance::evaluate(&loaded, a, parameter, DVec3::new(17., 3., 0.))
+            .unwrap()
+            .unwrap();
         let actual = geometry(&changed, a);
         let expected = [
-            (DVec3::new(2.,3.,0.), DVec3::new(17.,3.,0.)),
-            (DVec3::new(16.,3.,0.), DVec3::new(17.,4.,0.)),
-            (DVec3::new(8.,5.,0.), DVec3::new(9.,5.,0.)),
-            (DVec3::new(30.,30.,0.), DVec3::new(31.,30.,0.)),
+            (DVec3::new(2., 3., 0.), DVec3::new(17., 3., 0.)),
+            (DVec3::new(16., 3., 0.), DVec3::new(17., 4., 0.)),
+            (DVec3::new(8., 5., 0.), DVec3::new(9., 5., 0.)),
+            (DVec3::new(30., 30., 0.), DVec3::new(31., 30., 0.)),
         ];
-        for ((a,b),(x,y)) in actual.iter().zip(expected) { assert!(a.distance(x)<1e-8 && b.distance(y)<1e-8); }
+        for ((a, b), (x, y)) in actual.iter().zip(expected) {
+            assert!(a.distance(x) < 1e-8 && b.distance(y) < 1e-8);
+        }
         assert_eq!(changed.objects[&parameter], parameter_before);
         assert_eq!(geometry(&changed, b), baseline);
     }

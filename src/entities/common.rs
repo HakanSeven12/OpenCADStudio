@@ -229,7 +229,11 @@ fn format_signed_length(value: f64) -> String {
 fn fixed(value: f64, precision: usize) -> String {
     let scale = 10f64.powi(precision as i32);
     let rounded = (value * scale).round() / scale;
-    format!("{:.*}", precision, if rounded.is_finite() { rounded } else { value })
+    format!(
+        "{:.*}",
+        precision,
+        if rounded.is_finite() { rounded } else { value }
+    )
 }
 
 /// Drop the trailing zeros of a decimal (and a bare point) when DIMZIN asks
@@ -1581,12 +1585,22 @@ mod negative_zero_format_tests {
 /// reference shows it.
 pub(crate) fn enabled_choice(on: bool) -> crate::scene::model::object::PropValue {
     crate::scene::model::object::PropValue::Choice {
-        selected: if on { crate::t!("Enabled") } else { crate::t!("Disabled") }.into_owned(),
-        options: vec![crate::t!("Enabled").into_owned(), crate::t!("Disabled").into_owned()],
+        selected: if on {
+            crate::t!("Enabled")
+        } else {
+            crate::t!("Disabled")
+        }
+        .into_owned(),
+        options: vec![
+            crate::t!("Enabled").into_owned(),
+            crate::t!("Disabled").into_owned(),
+        ],
     }
 }
 
 /// Reads an Enabled / Disabled (or true / false) choice back.
 pub(crate) fn enabled_value(value: &str) -> bool {
-    value == "true" || value.eq_ignore_ascii_case("enabled") || value == crate::t!("Enabled").as_ref()
+    value == "true"
+        || value.eq_ignore_ascii_case("enabled")
+        || value == crate::t!("Enabled").as_ref()
 }

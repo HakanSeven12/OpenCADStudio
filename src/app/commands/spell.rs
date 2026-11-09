@@ -48,7 +48,9 @@ fn with_speller<T>(language: &str, f: impl FnOnce(&SystemSpeller) -> T) -> T {
     SPELLER.with(|cell| {
         let mut cell = cell.borrow_mut();
         if cell.as_ref().is_none_or(|s| s.language() != language) {
-            *cell = Some(SystemSpeller::new((!language.is_empty()).then_some(language)));
+            *cell = Some(SystemSpeller::new(
+                (!language.is_empty()).then_some(language),
+            ));
         }
         f(cell.as_ref().expect("speller just made"))
     })
@@ -80,7 +82,10 @@ fn parse_handles(text: &str) -> Vec<Handle> {
 }
 
 /// The text the check reads in an object, `None` when it holds none.
-fn checked_text(entity: &EntityType, options: &crate::ui::window::spell_dialog::SpellOptions) -> Option<String> {
+fn checked_text(
+    entity: &EntityType,
+    options: &crate::ui::window::spell_dialog::SpellOptions,
+) -> Option<String> {
     match entity {
         EntityType::Text(t) => Some(decode_dxf_escapes(&t.value)),
         EntityType::MText(m) => Some(decode_dxf_escapes(
@@ -188,7 +193,11 @@ impl CadCommand for SpellSelectCommand {
 impl OpenCADStudio {
     pub(super) fn dispatch_spell(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let (verb, rest) = cmd.split_once(char::is_whitespace).unwrap_or((cmd, ""));
-        match verb.trim_start_matches(['_', '.']).to_ascii_uppercase().as_str() {
+        match verb
+            .trim_start_matches(['_', '.'])
+            .to_ascii_uppercase()
+            .as_str()
+        {
             // A pickfirst selection is not used: the window opens on the
             // place chosen last (Entire drawing at first), as measured.
             "SPELL" if rest.trim().is_empty() => {
@@ -292,7 +301,8 @@ impl OpenCADStudio {
                 Some((s, e)) => {
                     let word = text[s..e].to_string();
                     let suggestions = with_speller(&language, |sp| sp.check_word(&word, true).1);
-                    state.replacement = suggestions.first().cloned().unwrap_or_else(|| word.clone());
+                    state.replacement =
+                        suggestions.first().cloned().unwrap_or_else(|| word.clone());
                     state.suggestions = suggestions;
                     state.cursor.1 = e;
                     state.current = Some(SpellFind {
@@ -336,7 +346,12 @@ impl OpenCADStudio {
             }
             let mut out = value.to_string();
             let picked: Vec<(usize, usize)> = match nth {
-                Some(n) => hits.get(n).or_else(|| hits.first()).copied().into_iter().collect(),
+                Some(n) => hits
+                    .get(n)
+                    .or_else(|| hits.first())
+                    .copied()
+                    .into_iter()
+                    .collect(),
                 None => hits,
             };
             for (s, e) in picked.into_iter().rev() {
@@ -361,12 +376,14 @@ impl OpenCADStudio {
                 }
                 None => false,
             },
-            EntityType::AttributeDefinition(a) => {
-                replace_plain(&a.default_value).map(|v| a.default_value = v).is_some()
-            }
+            EntityType::AttributeDefinition(a) => replace_plain(&a.default_value)
+                .map(|v| a.default_value = v)
+                .is_some(),
             EntityType::Dimension(d) => {
                 let text = d.base().text.clone();
-                replace_plain(&text).map(|v| d.base_mut().text = v).is_some()
+                replace_plain(&text)
+                    .map(|v| d.base_mut().text = v)
+                    .is_some()
             }
             _ => false,
         };
@@ -422,7 +439,11 @@ impl OpenCADStudio {
                 let replacement = state.replacement.clone();
                 let cursor = (state.cursor.0, found.start);
                 let all = matches!(message, SpellMsg::ChangeAll);
-                let targets = if all { state.targets.clone() } else { vec![found.handle] };
+                let targets = if all {
+                    state.targets.clone()
+                } else {
+                    vec![found.handle]
+                };
                 // Which occurrence of the word in its text this one is.
                 let nth = TextMatcher::new(found.word.clone(), true, true, false)
                     .find_all_in(&found.text)
@@ -431,7 +452,8 @@ impl OpenCADStudio {
                 let mut undo = Vec::new();
                 for h in targets {
                     let nth = if all { None } else { nth };
-                    if let Some(entry) = self.spell_replace_in(i, h, &found.word, &replacement, nth) {
+                    if let Some(entry) = self.spell_replace_in(i, h, &found.word, &replacement, nth)
+                    {
                         undo.push(entry);
                     }
                 }
@@ -455,7 +477,11 @@ impl OpenCADStudio {
             }
             SpellMsg::AddWord => {
                 if let Some(found) = &state.current {
-                    if !state.custom.iter().any(|w| w.eq_ignore_ascii_case(&found.word)) {
+                    if !state
+                        .custom
+                        .iter()
+                        .any(|w| w.eq_ignore_ascii_case(&found.word))
+                    {
                         state.custom.push(found.word.clone());
                     }
                     self.spell_prefs.custom = state.custom.clone();

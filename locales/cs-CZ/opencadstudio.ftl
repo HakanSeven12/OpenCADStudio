@@ -3431,7 +3431,9 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Určete počáteční bod oblouku:
     .arc-specify-second-point-of-arc = ARC  Určete druhý bod oblouku:
     .arc-specify-end-point-of-arc = ARC  Určete koncový bod oblouku:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  Určete střed oblouku:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
     .arc-specify-included-angle = ARC  Určete středový úhel:
     .arc-specify-length-of-chord = ARC  Určete délku tětivy:
     .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Určete směr tečny v počátečním bodě oblouku:
@@ -4557,6 +4559,10 @@ insert =
     .presspull-select-object-or-bounded-area-enter-to-finish = PRESSPULL  { draw.select }: { common.object-title-case } / { common.area } ({ properties.closed }) (Enter: { common.finish }):
     .presspull-select-additional-objects-or-bounded-areas-undo-enter-for-height = PRESSPULL  Vyberte další objekty nebo ohraničené oblasti [Undo] (Enter = výška):
     .presspull-specify-signed-extrusion-height-or-multiple-undo = PRESSPULL  { common.specify }: { common.extrusion } · { common.height } (+/−) [{ common.multiple }/{ common.undo }]:
+    .presspull-specify-new-body-height = PRESSPULL  { common.specify }: { insert.presspull-option-new-body } · { common.height } (+/−) [{ common.multiple }/{ insert.presspull-option-modify-solid }/{ common.undo }]:
+    .presspull-face-new-body-failed = PRESSPULL: vybranou plochu nelze zkopírovat do nového tělesa.
+    .presspull-option-new-body = Nové těleso
+    .presspull-option-modify-solid = Upravit těleso
     .sweep-select-objects-to-sweep-or-mode-enter-to-finish = SWEEP  Select objects to sweep or [MOde]:
     .sweep-creation-mode-solid-surface = SWEEP  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .sweep-select-sweep-path-or-alignment-base-point-scale-twist = SWEEP  { draw.select }: { model.sweep } · { common.path } [{ common.alignment-title-case }/{ styles.basepoint }/{ common.scale }/{ properties.twist }]:
@@ -5348,6 +5354,9 @@ view =
     .opening-patreon-page = Otevírání stránky Patreon…
     .opening-feedback-page = Otevírání stránky zpětné vazby…
     .opening-release-notes = Otevírání poznámek k vydání…
+    .checking-for-updates = Hledání aktualizací…
+    .no-newer-release = Novější verze nebyla nalezena. Toto je verze { $version }.
+    .web-always-latest = Webová aplikace vždy běží v nejnovější verzi.
     .pan-drag-with-the-left-mouse-button-press-esc = PAN: táhněte levým tlačítkem myši. Ukončíte klávesou Esc.
     .plotwindow-specify-first-corner-of-plot-window = PLOTWINDOW  Určete první roh okna vykreslení:
     .plotwindow-specify-opposite-corner = PLOTWINDOW  Určete protilehlý roh:
@@ -7270,9 +7279,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Vzdálenost = { $value }
-    .angle-start = { $command }  Určete vrchol nebo [Lines]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Vyberte první úsečku nebo [Points] (menší úhel):
-    .second-line = { $command }  Vyberte druhou úsečku (menší úhel):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Úsečky
     .points = Body
     .invalid-radius = Vyberte kružnici nebo oblouk s konečným kladným poloměrem.
@@ -8386,6 +8408,7 @@ menu-labels =
     .n-3d-views = 3D pohledy
     .n-4-viewports = 4 výřezy
     .about-open-cad-studio = O aplikaci Open CAD Studio
+    .check-for-updates = Check for Updates...
     .align-text = Zarovnat text
     .arrange-icons = Uspořádat ikony
     .attribute-display = Zobrazení atributů

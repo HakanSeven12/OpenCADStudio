@@ -224,8 +224,7 @@ pub(crate) fn data_link_entries(doc: &Document) -> Vec<(String, Handle)> {
 }
 
 fn data_link_dictionary(doc: &Document) -> Option<Handle> {
-    let Some(ObjectType::Dictionary(root)) =
-        doc.objects.get(&doc.header.named_objects_dict_handle)
+    let Some(ObjectType::Dictionary(root)) = doc.objects.get(&doc.header.named_objects_dict_handle)
     else {
         return None;
     };
@@ -476,9 +475,7 @@ fn link_details(doc: &Document, link: &DataLink) -> String {
     let sheet = sheet.unwrap_or_default();
     match (kind, range) {
         (LinkRange::NamedRange, Some(name)) => crate::tf!("Named range: {name}").into_owned(),
-        (LinkRange::CellRange, Some(cells)) => {
-            crate::tf!("Range: {sheet}!{cells}").into_owned()
-        }
+        (LinkRange::CellRange, Some(cells)) => crate::tf!("Range: {sheet}!{cells}").into_owned(),
         _ => crate::tf!("Entire sheet: {sheet}").into_owned(),
     }
 }
@@ -809,10 +806,7 @@ fn build_table(
 
 /// The sheet, range kind and range a link reads: from its connection string,
 /// or from the custom data older OpenCAD drawings kept them in.
-fn link_selection(
-    doc: &Document,
-    link: &DataLink,
-) -> (Option<String>, LinkRange, Option<String>) {
+fn link_selection(doc: &Document, link: &DataLink) -> (Option<String>, LinkRange, Option<String>) {
     let mut sheet = None;
     let mut kind = LinkRange::EntireSheet;
     let mut range = None;
@@ -939,7 +933,10 @@ pub(crate) fn add_extraction_link(doc: &mut Document, settings: &str) -> Handle 
     let names = data_link_entries(doc);
     let mut name = base.clone();
     let mut n = 1;
-    while names.iter().any(|(known, _)| known.eq_ignore_ascii_case(&name)) {
+    while names
+        .iter()
+        .any(|(known, _)| known.eq_ignore_ascii_case(&name))
+    {
         n += 1;
         name = format!("{base} ({n})");
     }
@@ -965,8 +962,7 @@ pub(crate) fn extraction_link_settings(doc: &Document, handle: Handle) -> Option
 
 /// Whether the link lets tables write their data back to the source.
 pub(crate) fn data_link_allows_write(doc: &Document, handle: Handle) -> bool {
-    data_link(doc, handle)
-        .is_some_and(|link| link.update_option & UPDATE_ALLOW_SOURCE_UPDATE != 0)
+    data_link(doc, handle).is_some_and(|link| link.update_option & UPDATE_ALLOW_SOURCE_UPDATE != 0)
 }
 
 fn read_link_rows(doc: &Document, link: &DataLink) -> Result<Vec<Vec<String>>, String> {
@@ -979,10 +975,7 @@ fn read_link_rows(doc: &Document, link: &DataLink) -> Result<Vec<Vec<String>>, S
     )
 }
 
-pub(crate) fn read_data_link(
-    doc: &Document,
-    handle: Handle,
-) -> Result<Vec<Vec<String>>, String> {
+pub(crate) fn read_data_link(doc: &Document, handle: Handle) -> Result<Vec<Vec<String>>, String> {
     let link = data_link(doc, handle)
         .ok_or_else(|| crate::t!("The data link no longer exists.").into_owned())?;
     read_link_rows(doc, link)
@@ -1277,10 +1270,9 @@ pub(crate) fn write_extraction_file(path: &Path, rows: &[Vec<String>]) -> Result
             + "\n")
             .into_bytes(),
         _ => {
-            return Err(crate::t!(
-                "The external file must be an .xlsx, .csv or .txt file."
+            return Err(
+                crate::t!("The external file must be an .xlsx, .csv or .txt file.").into_owned(),
             )
-            .into_owned())
         }
     };
     #[cfg(target_arch = "wasm32")]
@@ -1599,7 +1591,9 @@ fn load_extraction_settings(state: &mut DataExtractionState) -> Result<(), Strin
         }
     }
     if let Some(hidden) = set_of("hiddenCategories") {
-        state.categories.retain(|category| !hidden.contains(category));
+        state
+            .categories
+            .retain(|category| !hidden.contains(category));
         state.hidden_categories = hidden;
     }
     state.combine_identical = flag("combineIdentical", state.combine_identical);
@@ -1676,7 +1670,9 @@ fn load_extractor_settings(state: &mut DataExtractionState, value: &serde_json::
     let text_of = |key: &str, current: &str| output[key].as_str().unwrap_or(current).to_string();
     state.output_path = text_of("fileName", &state.output_path);
     state.output_file = !state.output_path.trim().is_empty();
-    state.output_table = output["ouputFlags"].as_i64().map_or(state.output_table, |f| f & 2 != 0);
+    state.output_table = output["ouputFlags"]
+        .as_i64()
+        .map_or(state.output_table, |f| f & 2 != 0);
     state.table_style = text_of("tableStyleName", &state.table_style);
     state.table_title = text_of("tableTitle", &state.table_title);
     state.title_cell_style = text_of("titleCellStyle", &state.title_cell_style);
@@ -1730,7 +1726,11 @@ impl OpenCADStudio {
         let styles = table_style_choices(doc);
         let current = styles
             .iter()
-            .find(|choice| choice.name.eq_ignore_ascii_case(&doc.header.current_table_style_name))
+            .find(|choice| {
+                choice
+                    .name
+                    .eq_ignore_ascii_case(&doc.header.current_table_style_name)
+            })
             .or(styles.first())
             .cloned();
         let links = data_link_choices(doc)
@@ -1759,7 +1759,8 @@ impl OpenCADStudio {
             .map(Handle::new)
             .and_then(|handle| data_link(doc, handle).map(|link| (handle, link)))
         else {
-            self.command_line.push_error(crate::t!("Data link not found.").as_ref());
+            self.command_line
+                .push_error(crate::t!("Data link not found.").as_ref());
             return;
         };
         let rows = match read_link_rows(doc, link) {
@@ -1947,12 +1948,16 @@ impl OpenCADStudio {
         self.table_insert.template = style.as_ref().and_then(|choice| {
             let template = choice.template.as_ref()?;
             let width = template.columns.first().map_or(0.0, |c| c.width);
-            Some((crate::entities::common::format_length(width), "1".to_string()))
+            Some((
+                crate::entities::common::format_length(width),
+                "1".to_string(),
+            ))
         });
         if self.table_insert.template.is_some() {
             self.table_insert.insertion = TableInsertion::Point;
         }
-        self.table_insert.template_options = *crate::modules::annotate::table_cmd::template_options();
+        self.table_insert.template_options =
+            *crate::modules::annotate::table_cmd::template_options();
         self.table_insert.cell_styles = style.map_or_else(Vec::new, |choice| {
             choice
                 .style
@@ -2560,7 +2565,9 @@ impl OpenCADStudio {
                     self.data_extraction.hidden_categories.remove(&category);
                     self.data_extraction.categories.insert(category);
                 } else {
-                    self.data_extraction.hidden_categories.insert(category.clone());
+                    self.data_extraction
+                        .hidden_categories
+                        .insert(category.clone());
                     self.data_extraction.categories.remove(&category);
                 }
             }
@@ -2663,8 +2670,7 @@ impl OpenCADStudio {
                 }
             }
         }
-        let (properties, categories) =
-            extraction_properties(&self.data_extraction, &previous);
+        let (properties, categories) = extraction_properties(&self.data_extraction, &previous);
         self.data_extraction.categories = categories;
         self.data_extraction.properties = properties;
     }
@@ -3070,12 +3076,17 @@ impl OpenCADStudio {
     fn extraction_table(&self, rows: &[Vec<String>]) -> document::entities::Table {
         let state = &self.data_extraction;
         let doc = &self.tabs[self.active_tab].scene.document;
-        let style = doc.objects.iter().find_map(|(handle, object)| match object {
-            ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(&state.table_style) => {
-                Some((*handle, style))
-            }
-            _ => None,
-        });
+        let style = doc
+            .objects
+            .iter()
+            .find_map(|(handle, object)| match object {
+                ObjectType::TableStyle(style)
+                    if style.name.eq_ignore_ascii_case(&state.table_style) =>
+                {
+                    Some((*handle, style))
+                }
+                _ => None,
+            });
         let body: Vec<Vec<String>> = if state.property_headers {
             rows.to_vec()
         } else {
@@ -3093,11 +3104,8 @@ impl OpenCADStudio {
                 (
                     rows.map(|row| row.text_height.max(1.0e-6)),
                     rows.map(|row| {
-                        crate::entities::text_support::resolve_text_style(
-                            &row.text_style_name,
-                            doc,
-                        )
-                        .font_name
+                        crate::entities::text_support::resolve_text_style(&row.text_style_name, doc)
+                            .font_name
                     }),
                     (table_style.horizontal_margin, table_style.vertical_margin),
                 )
@@ -3105,7 +3113,11 @@ impl OpenCADStudio {
             None => {
                 let font =
                     crate::entities::text_support::resolve_text_style("Standard", doc).font_name;
-                ([0.25, 0.25, 0.18], [font.clone(), font.clone(), font], (0.06, 0.06))
+                (
+                    [0.25, 0.25, 0.18],
+                    [font.clone(), font.clone(), font],
+                    (0.06, 0.06),
+                )
             }
         };
         // A text's extent: from the left of its ink or pen origin to the right

@@ -2697,8 +2697,10 @@ fn solve_scope(
             _ => None,
         })
         .collect();
-    let equal_entities: Vec<(Handle, Handle)> =
-        equal_refs.iter().map(|(a, b)| (a.entity, b.entity)).collect();
+    let equal_entities: Vec<(Handle, Handle)> = equal_refs
+        .iter()
+        .map(|(a, b)| (a.entity, b.entity))
+        .collect();
     let mut moving: HashSet<Handle> = cache
         .keys()
         .copied()
@@ -2709,7 +2711,11 @@ fn solve_scope(
             .into_iter()
             .map(|(index, second)| {
                 let (a, b) = equal_refs[index];
-                if second { b } else { a }
+                if second {
+                    b
+                } else {
+                    a
+                }
             })
             .collect();
     for follower in &equal_followers {
@@ -2993,8 +2999,10 @@ fn solve_scope(
     // Grip edits retain radii while connected lines resize to meet their
     // endpoints. Other edits can retain line lengths as well.
     if retain_size {
-        let follower_entities: HashSet<Handle> =
-            equal_followers.iter().map(|follower| follower.entity).collect();
+        let follower_entities: HashSet<Handle> = equal_followers
+            .iter()
+            .map(|follower| follower.entity)
+            .collect();
         for (handle, geom) in &cache {
             // A Fixed entity's size is whatever its pins say: whole → all
             // pinned anyway, partial → the reference lets it resize (MOVE
@@ -3004,7 +3012,10 @@ fn solve_scope(
                     .iter()
                     .any(|reference| reference.entity == *handle && reference.marker.is_none())
                 || symmetric_constraints.iter().any(|constraint| {
-                    constraint.refs.get(2).is_some_and(|axis| axis.entity == *handle)
+                    constraint
+                        .refs
+                        .get(2)
+                        .is_some_and(|axis| axis.entity == *handle)
                 })
                 || follower_entities.contains(handle)
                 || driving_self_size.contains(handle)
@@ -3992,9 +4003,7 @@ impl Scene {
                 for &index in scopes {
                     let scope = self.parametric_constraints[index].scope;
                     let missing_before = self.undo_recording.as_ref().is_some_and(|recording| {
-                        !recording
-                            .parametric_constraints_before
-                            .contains_key(&scope)
+                        !recording.parametric_constraints_before.contains_key(&scope)
                     });
                     if missing_before {
                         let before = self.parametric_constraints[index].clone();
@@ -4386,7 +4395,10 @@ mod tests {
         let mut expected_known = vec![0, 3];
         let expected = literal(&cycle, &mut expected_known);
         let mut known: HashSet<u32> = [0, 3].into_iter().collect();
-        assert_eq!(super::propagate_in_sweep_order(&cycle, &mut known), expected);
+        assert_eq!(
+            super::propagate_in_sweep_order(&cycle, &mut known),
+            expected
+        );
         assert_eq!(known, expected_known.into_iter().collect::<HashSet<_>>());
     }
 

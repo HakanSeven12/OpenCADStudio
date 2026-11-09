@@ -333,7 +333,11 @@ pub(crate) fn point_field(req: &Value, key: &str) -> Parsed<document::types::Vec
     point_value(req.get(key), key, "invalid_point")
 }
 
-fn point_list_field(spec: &Value, key: &str, minimum: usize) -> Parsed<Vec<document::types::Vector3>> {
+fn point_list_field(
+    spec: &Value,
+    key: &str,
+    minimum: usize,
+) -> Parsed<Vec<document::types::Vector3>> {
     let points = spec[key]
         .as_array()
         .filter(|points| points.len() >= minimum)

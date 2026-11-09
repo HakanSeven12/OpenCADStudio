@@ -113,12 +113,12 @@ impl QuadStore {
         panel_ids
             .iter()
             .map(|panel_id| {
-            if self.owners.get(panel_id).map(String::as_str) != Some(plugin_id) {
-                return false;
-            }
-            self.remove_owned(plugin_id, panel_id)
-        })
-        .collect()
+                if self.owners.get(panel_id).map(String::as_str) != Some(plugin_id) {
+                    return false;
+                }
+                self.remove_owned(plugin_id, panel_id)
+            })
+            .collect()
     }
 
     /// The stored action definition behind one `quadplugin:` item, if the
@@ -130,7 +130,10 @@ impl QuadStore {
         panel_id: &str,
         control_id: &str,
     ) -> Option<&QuadActionDef> {
-        let entry = self.entries.iter().find(|entry| entry.plugin_id == plugin_id)?;
+        let entry = self
+            .entries
+            .iter()
+            .find(|entry| entry.plugin_id == plugin_id)?;
         let panel = entry
             .panels
             .iter()
@@ -296,7 +299,9 @@ static QUAD_STORE: OnceLock<std::sync::Mutex<QuadStore>> = OnceLock::new();
 /// Run `f` against the process-global quad store.
 pub(crate) fn with_store<R>(f: impl FnOnce(&mut QuadStore) -> R) -> R {
     let store = QUAD_STORE.get_or_init(|| std::sync::Mutex::new(QuadStore::default()));
-    let mut guard = store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = store
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     f(&mut guard)
 }
 
@@ -366,7 +371,10 @@ mod tests {
         let batch: Vec<QuadPanelDef> = (0..MAX_QUAD_PANELS_PER_PLUGIN)
             .map(|index| panel(&format!("p{index}"), &["a"]))
             .collect();
-        assert_eq!(store.register("A", &batch), vec![true; MAX_QUAD_PANELS_PER_PLUGIN]);
+        assert_eq!(
+            store.register("A", &batch),
+            vec![true; MAX_QUAD_PANELS_PER_PLUGIN]
+        );
         // The cap refuses new panels but never removes the accepted prefix.
         let ok = store.register("A", &[panel("over", &["a"])]);
         assert_eq!(ok, vec![false]);
@@ -410,7 +418,10 @@ mod tests {
         // The namespacing guard: the exposed lookup key is namespaced with
         // the plugin id, so plugin panels can never collide with the
         // builtin `quad.*` ids regardless of what a plugin names its panels.
-        assert_eq!(quad_panel_ui_id("opencad.python", "align"), "plugin:opencad.python:align");
+        assert_eq!(
+            quad_panel_ui_id("opencad.python", "align"),
+            "plugin:opencad.python:align"
+        );
     }
 
     #[test]

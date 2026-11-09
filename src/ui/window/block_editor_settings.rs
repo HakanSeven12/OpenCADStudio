@@ -57,10 +57,24 @@ pub(crate) fn view_window(state: &State) -> Element<'_, Message> {
             );
         }
     }
-    for (index, label) in ["Unconstrained color", "Partially constrained color", "Fully constrained color", "Over-constrained color"].into_iter().enumerate() {
-        fields = fields.push(row![text(crate::t!(label)).width(240),
-            text_input("1–255 or RGB:r,g,b", &state.constraint_colors[index])
-                .on_input(move |value| Message::BlockConstraintColorInput(index, value))].spacing(12).align_y(iced::Center));
+    for (index, label) in [
+        "Unconstrained color",
+        "Partially constrained color",
+        "Fully constrained color",
+        "Over-constrained color",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fields = fields.push(
+            row![
+                text(crate::t!(label)).width(240),
+                text_input("1–255 or RGB:r,g,b", &state.constraint_colors[index])
+                    .on_input(move |value| Message::BlockConstraintColorInput(index, value))
+            ]
+            .spacing(12)
+            .align_y(iced::Center),
+        );
     }
     let mut body = column![scrollable(fields).height(430), text(crate::t!("Colors: BYLAYER, BYBLOCK, 1–255, or RGB:r,g,b. Constraint colors require an index or RGB value. Fonts: family, file, or primary,bigfont.")).size(12)].spacing(12);
     if let Some(error) = &state.error {

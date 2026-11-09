@@ -2726,7 +2726,10 @@ impl Pipeline {
         queue: &wgpu::Queue,
         instances: &[CircleInstance],
         owners: &[document::Handle],
-    ) -> (Vec<CircleGpu>, Vec<(document::Handle, analytic_slots::CurveSlot)>) {
+    ) -> (
+        Vec<CircleGpu>,
+        Vec<(document::Handle, analytic_slots::CurveSlot)>,
+    ) {
         if instances.is_empty() {
             return (Vec::new(), Vec::new());
         }
@@ -2756,7 +2759,10 @@ impl Pipeline {
         queue: &wgpu::Queue,
         instances: &[EllipseInstance],
         owners: &[document::Handle],
-    ) -> (Vec<EllipseGpu>, Vec<(document::Handle, analytic_slots::CurveSlot)>) {
+    ) -> (
+        Vec<EllipseGpu>,
+        Vec<(document::Handle, analytic_slots::CurveSlot)>,
+    ) {
         if instances.is_empty() {
             return (Vec::new(), Vec::new());
         }
@@ -2812,8 +2818,14 @@ impl Pipeline {
             by_handle,
             block_buffers: blocks.buffers,
             shapes: blocks.shapes,
-            circle_buffer: self.gpu_circles.first().map(|gpu| gpu.instance_buffer.clone()),
-            ellipse_buffer: self.gpu_ellipses.first().map(|gpu| gpu.instance_buffer.clone()),
+            circle_buffer: self
+                .gpu_circles
+                .first()
+                .map(|gpu| gpu.instance_buffer.clone()),
+            ellipse_buffer: self
+                .gpu_ellipses
+                .first()
+                .map(|gpu| gpu.instance_buffer.clone()),
             blocks_id: std::sync::Arc::as_ptr(&self.gpu_block_wires) as usize,
             circles_id: std::sync::Arc::as_ptr(&self.gpu_circles) as usize,
             ellipses_id: std::sync::Arc::as_ptr(&self.gpu_ellipses) as usize,
@@ -3769,9 +3781,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.wipeout_skip_flags = self
             .gpu_wipeouts
             .iter()
-            .map(|h| {
-                aabb_offscreen(h.world_aabb.map(f64::from), view_rot, eye, clip_w, clip_h)
-            })
+            .map(|h| aabb_offscreen(h.world_aabb.map(f64::from), view_rot, eye, clip_w, clip_h))
             .collect();
     }
 
@@ -3884,7 +3894,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 if gpu_errors_seen() == errors_before {
                     cache.insert(
                         key,
-                        (std::sync::Arc::downgrade(meshes), std::sync::Arc::clone(&chunks)),
+                        (
+                            std::sync::Arc::downgrade(meshes),
+                            std::sync::Arc::clone(&chunks),
+                        ),
                     );
                 }
                 (chunks, triangles)
@@ -4273,8 +4286,12 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             shadow_sampler: &self.shadow_sampler,
         };
         let frame = frame_bind_group(device, &self.frame_bgl, &self.uniform_buffer, &views);
-        let selection =
-            frame_bind_group(device, &self.frame_bgl, &self.selection_uniform_buffer, &views);
+        let selection = frame_bind_group(
+            device,
+            &self.frame_bgl,
+            &self.selection_uniform_buffer,
+            &views,
+        );
         self.uniform_bind_group = frame;
         self.selection_uniform_bind_group = selection;
     }
@@ -4316,7 +4333,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         selection.transparency_enable = 1.0;
         uniforms.highlight_widen = 0.0;
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-        queue.write_buffer(&self.selection_uniform_buffer, 0, bytemuck::bytes_of(&selection));
+        queue.write_buffer(
+            &self.selection_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&selection),
+        );
     }
 
     pub fn upload_background_images(
@@ -5854,18 +5875,8 @@ fn aabb_offscreen(
     let h = clip_h as f32;
     // A corner behind the perspective eye mirrors across the screen, so the
     // projected union bounds nothing: never cull in that case (#64).
-    let corners = [
-        (x0, y0),
-        (x1, y0),
-        (x0, y1),
-        (x1, y1),
-    ]
-    .map(|(x, y)| {
-        crate::scene::view::projection::project_ndc(
-            view_rot,
-            eye,
-            glam::DVec3::new(x, y, 0.0),
-        )
+    let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| {
+        crate::scene::view::projection::project_ndc(view_rot, eye, glam::DVec3::new(x, y, 0.0))
     });
     let mut min_px = f32::INFINITY;
     let mut max_px = f32::NEG_INFINITY;
@@ -5916,18 +5927,8 @@ fn aabb_below_pixel(
     let h = clip_h as f32;
     // Mirrored corners from behind the eye would fake a tiny or shifted box:
     // keep the draw call when any corner has no real projection (#64).
-    let corners = [
-        (x0, y0),
-        (x1, y0),
-        (x0, y1),
-        (x1, y1),
-    ]
-    .map(|(x, y)| {
-        crate::scene::view::projection::project_ndc(
-            view_rot,
-            eye,
-            glam::DVec3::new(x, y, 0.0),
-        )
+    let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| {
+        crate::scene::view::projection::project_ndc(view_rot, eye, glam::DVec3::new(x, y, 0.0))
     });
     let mut min_px = f32::INFINITY;
     let mut max_px = f32::NEG_INFINITY;

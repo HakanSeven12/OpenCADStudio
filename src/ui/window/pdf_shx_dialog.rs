@@ -4,7 +4,9 @@
 //! row, added from a file, removed); the layer the text goes on; the
 //! recognition threshold and "use best matching font".
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_input, toggler, Space};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, text, text_input, toggler, Space,
+};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -76,10 +78,9 @@ impl ShxSettingsState {
             return;
         };
         // A font that is not available has nothing to show.
-        let Some(spec) = crate::modules::insert::pdf_shx_text::resolve_font(
-            &font.name,
-            self.drawing.as_deref(),
-        ) else {
+        let Some(spec) =
+            crate::modules::insert::pdf_shx_text::resolve_font(&font.name, self.drawing.as_deref())
+        else {
             return;
         };
         let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
@@ -122,9 +123,13 @@ impl ShxSettingsState {
     }
 }
 
-fn section<'a>(title: String, aside: Option<String>, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    let mut head = row![text(title.to_uppercase()).size(10).style(accent_text)]
-        .align_y(iced::Center);
+fn section<'a>(
+    title: String,
+    aside: Option<String>,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut head =
+        row![text(title.to_uppercase()).size(10).style(accent_text)].align_y(iced::Center);
     if let Some(aside) = aside {
         head = head
             .push(Space::new().width(Fill))
@@ -137,7 +142,11 @@ fn section<'a>(title: String, aside: Option<String>, content: impl Into<Element<
         .into()
 }
 
-fn small_button<'a>(label: &'static str, message: ShxDialogMsg, danger: bool) -> Element<'a, Message> {
+fn small_button<'a>(
+    label: &'static str,
+    message: ShxDialogMsg,
+    danger: bool,
+) -> Element<'a, Message> {
     button(
         text(label)
             .size(11)
@@ -159,11 +168,9 @@ fn small_button<'a>(label: &'static str, message: ShxDialogMsg, danger: bool) ->
 fn font_row<'a>(state: &'a ShxSettingsState, index: usize) -> Element<'a, Message> {
     let font = &state.settings.fonts[index];
     let chosen = index == state.selected;
-    let grip = mouse_area(
-        container(text("⠿").size(12).style(muted_style)).padding([0, 2]),
-    )
-    .on_press(msg(ShxDialogMsg::DragStart(index)))
-    .interaction(iced::mouse::Interaction::Grab);
+    let grip = mouse_area(container(text("⠿").size(12).style(muted_style)).padding([0, 2]))
+        .on_press(msg(ShxDialogMsg::DragStart(index)))
+        .interaction(iced::mouse::Interaction::Grab);
     let switch = toggler(font.enabled)
         .size(16.0)
         .on_toggle(move |on| msg(ShxDialogMsg::Toggle(index, on)));
@@ -248,9 +255,12 @@ pub fn view<'a>(
     let preview_card = container(
         column![
             row![
-                text(format!("{} · {}", crate::tr!("pdf-shx", "preview"), chosen_label).to_uppercase())
-                    .size(10)
-                    .style(accent_text),
+                text(
+                    format!("{} · {}", crate::tr!("pdf-shx", "preview"), chosen_label)
+                        .to_uppercase()
+                )
+                .size(10)
+                .style(accent_text),
                 Space::new().width(Fill),
                 sample
             ]
@@ -289,7 +299,9 @@ pub fn view<'a>(
             all = s.fonts.len().to_string()
         )),
         column![
-            text(crate::tr!("pdf-shx", "fonts-hint")).size(10).style(muted_style),
+            text(crate::tr!("pdf-shx", "fonts-hint"))
+                .size(10)
+                .style(muted_style),
             scrollable(list).height(Length::Fixed(250.0)),
             add,
         ]
@@ -345,17 +357,23 @@ pub fn view<'a>(
         crate::tr!("pdf-shx", "recognition"),
         None,
         column![
-            text(crate::tr!("pdf-shx", "threshold")).size(11).style(muted_style),
+            text(crate::tr!("pdf-shx", "threshold"))
+                .size(11)
+                .style(muted_style),
             row![slide, stepper].spacing(10).align_y(iced::Center),
             row![
                 toggler(s.best_font)
                     .size(16.0)
                     .on_toggle(|on| msg(ShxDialogMsg::BestFont(on))),
-                text(crate::tr!("pdf-shx", "best-font")).size(12).width(Fill),
+                text(crate::tr!("pdf-shx", "best-font"))
+                    .size(12)
+                    .width(Fill),
             ]
             .spacing(10)
             .align_y(iced::Center),
-            text(crate::tr!("pdf-shx", "hint")).size(10).style(muted_style),
+            text(crate::tr!("pdf-shx", "hint"))
+                .size(10)
+                .style(muted_style),
         ]
         .spacing(10),
     );

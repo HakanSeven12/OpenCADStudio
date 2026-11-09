@@ -1731,7 +1731,9 @@ fn find_target(doc: &Document, key: u64) -> Option<RefTarget> {
                 });
             }
             ObjectType::ClassObject(object) if handle.value() == key => {
-                if let document::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
+                if let document::objects::ClassObjectData::PointCloudDefinitionEx(def) =
+                    &object.data
+                {
                     return Some(RefTarget::PointCloud {
                         handle: *handle,
                         name: def.source_filename.clone(),
@@ -2159,10 +2161,7 @@ pub fn xbind_symbols(
         let Some(source_layer) = source.layers.get(source_name) else {
             continue;
         };
-        let Some(new_linetype) = maps
-            .linetypes
-            .get(&source_layer.line_type.to_uppercase())
-        else {
+        let Some(new_linetype) = maps.linetypes.get(&source_layer.line_type.to_uppercase()) else {
             continue;
         };
         if let Some(host_layer) = doc.layers.get_mut(host_name) {
@@ -2287,9 +2286,7 @@ fn collect_xbind_dependencies(source: &Document, selection: &mut XbindSelection)
                 EntityType::Dimension(dimension) => {
                     let base = dimension.base();
                     if !base.style_name.is_empty() {
-                        selection
-                            .dim_styles
-                            .insert(base.style_name.to_uppercase());
+                        selection.dim_styles.insert(base.style_name.to_uppercase());
                     }
                     queue_bindable_block(source, &base.block_name, selection, &mut queue);
                 }
@@ -3400,10 +3397,15 @@ mod tests {
         img_def.handle = img_h;
         doc.objects
             .insert(img_h, ObjectType::ImageDefinition(img_def));
-        let mut img =
-            document::entities::RasterImage::new("img.png", document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut img = document::entities::RasterImage::new(
+            "img.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         img.definition_handle = Some(img_h);
-        doc.add_entity(document::EntityType::RasterImage(img)).unwrap();
+        doc.add_entity(document::EntityType::RasterImage(img))
+            .unwrap();
         // Unreferenced PDF definition → listed, never merged.
         let pdf_h = doc.allocate_handle();
         let mut pdf_def = UnderlayDefinition::pdf("doc.pdf", "1");
@@ -3818,7 +3820,8 @@ mod tests {
                 let mut other_line = document::entities::Line::new();
                 other_line.common.layer = "HIDDEN".to_string();
                 other_line.common.owner_handle = other_handle;
-                doc.add_entity(document::EntityType::Line(other_line)).unwrap();
+                doc.add_entity(document::EntityType::Line(other_line))
+                    .unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
 
@@ -3862,8 +3865,11 @@ mod tests {
             detach_reference(&mut host, key).expect("detach");
             assert!(host.block_records.get("PLAN").is_none());
             assert!(host.block_records.get("PLAN$0$TITLE").is_some());
-            let insert = document::entities::Insert::new("PLAN$0$TITLE", document::types::Vector3::ZERO);
-            let handle = host.add_entity(document::EntityType::Insert(insert)).expect("insert");
+            let insert =
+                document::entities::Insert::new("PLAN$0$TITLE", document::types::Vector3::ZERO);
+            let handle = host
+                .add_entity(document::EntityType::Insert(insert))
+                .expect("insert");
             assert!(host.get_entity(handle).is_some());
             std::fs::remove_dir_all(&dir).ok();
         }
@@ -3992,14 +3998,16 @@ mod tests {
                 // Hatch (pattern names have no table — preserved verbatim).
                 let mut hatch = document::entities::Hatch::new();
                 hatch.pattern.name = "ANSI31".to_string();
-                doc.add_entity(document::EntityType::Hatch(Box::new(hatch))).unwrap();
+                doc.add_entity(document::EntityType::Hatch(Box::new(hatch)))
+                    .unwrap();
                 // Dim-style reference via a tolerance entity.
                 doc.dim_styles
                     .add(document::tables::DimStyle::new("ARCH"))
                     .expect("add dimstyle");
                 let mut tol = document::entities::Tolerance::new();
                 tol.dimension_style_name = "ARCH".to_string();
-                doc.add_entity(document::EntityType::Tolerance(tol)).unwrap();
+                doc.add_entity(document::EntityType::Tolerance(tol))
+                    .unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             bind_reference(&mut host, key, &dir, &dir).expect("bind");
@@ -4023,7 +4031,8 @@ mod tests {
             let hatches: Vec<_> = host
                 .entities()
                 .filter(|e| {
-                    e.common().owner_handle == br.handle && matches!(e, document::EntityType::Hatch(_))
+                    e.common().owner_handle == br.handle
+                        && matches!(e, document::EntityType::Hatch(_))
                 })
                 .collect();
             assert_eq!(hatches.len(), 1);
@@ -4077,7 +4086,8 @@ mod tests {
             let lines: Vec<_> = host
                 .entities()
                 .filter(|e| {
-                    e.common().owner_handle == br.handle && matches!(e, document::EntityType::Line(_))
+                    e.common().owner_handle == br.handle
+                        && matches!(e, document::EntityType::Line(_))
                 })
                 .collect();
             assert_eq!(lines.len(), 1);
@@ -4111,7 +4121,8 @@ mod tests {
                     8.0,
                 );
                 img.definition_handle = Some(h);
-                doc.add_entity(document::EntityType::RasterImage(img)).unwrap();
+                doc.add_entity(document::EntityType::RasterImage(img))
+                    .unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             bind_reference(&mut host, key, &src_dir, &host_dir).expect("bind");
@@ -4147,7 +4158,8 @@ mod tests {
                     8.0,
                 );
                 img.definition_handle = Some(h);
-                doc.add_entity(document::EntityType::RasterImage(img)).unwrap();
+                doc.add_entity(document::EntityType::RasterImage(img))
+                    .unwrap();
             });
             let (mut host, key) = xref_doc_with("PLAN", &xref_path);
             let err = bind_reference(&mut host, key, &dir, &dir).unwrap_err();
@@ -4201,7 +4213,8 @@ mod tests {
 /// stays full.
 fn relative_point_cloud_path(doc: &mut Document, handle: Handle, host: &Path) {
     use crate::io::xref_model::{to_pathtype_result, Pathtype};
-    let Some(document::objects::ObjectType::ClassObject(object)) = doc.objects.get_mut(&handle) else {
+    let Some(document::objects::ObjectType::ClassObject(object)) = doc.objects.get_mut(&handle)
+    else {
         return;
     };
     let document::objects::ClassObjectData::PointCloudDefinitionEx(def) = &mut object.data else {

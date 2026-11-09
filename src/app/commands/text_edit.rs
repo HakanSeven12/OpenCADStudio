@@ -3,8 +3,8 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::modules::annotate::text_edit::{
-    align_anchor, align_positions, frame_size, text_align_setting, is_text, justified, moved,
-    parse_handles, scaled, text_height, Justify, JustifyTextCommand, ScaleTextCommand,
+    align_anchor, align_positions, frame_size, is_text, justified, moved, parse_handles, scaled,
+    text_align_setting, text_height, Justify, JustifyTextCommand, ScaleTextCommand,
     TextAlignCommand, TextFrame,
 };
 use crate::modules::draw::select::SelectObjectsCommand;
@@ -26,7 +26,8 @@ impl OpenCADStudio {
                 } else {
                     "_SCALETEXTSEL"
                 };
-                let command = SelectObjectsCommand::filtered(name, pending, "Select objects:", is_text);
+                let command =
+                    SelectObjectsCommand::filtered(name, pending, "Select objects:", is_text);
                 Some(self.start_count_command(i, Box::new(command)))
             }
             name @ ("_JUSTIFYTEXTSEL" | "_SCALETEXTSEL") => {
@@ -35,7 +36,11 @@ impl OpenCADStudio {
                 if handles.is_empty() {
                     return Some(Task::none());
                 }
-                let name = if name == "_JUSTIFYTEXTSEL" { "JUSTIFYTEXT" } else { "SCALETEXT" };
+                let name = if name == "_JUSTIFYTEXTSEL" {
+                    "JUSTIFYTEXT"
+                } else {
+                    "SCALETEXT"
+                };
                 Some(self.start_text_prompt(i, name, handles))
             }
             "_JUSTIFYTEXTAPPLY" => {
@@ -53,7 +58,8 @@ impl OpenCADStudio {
             }
             "TEXTALIGN" => {
                 self.tabs[i].scene.deselect_all();
-                self.command_line.push_output(&TextAlignCommand::current_settings());
+                self.command_line
+                    .push_output(&TextAlignCommand::current_settings());
                 Some(self.start_count_command(i, Box::new(TextAlignCommand::new())))
             }
             "_TEXTALIGNAPPLY" => {
@@ -182,8 +188,11 @@ impl OpenCADStudio {
             scaled(e, doc, base, new_height / old)
         });
         if n > 0 || mode != "P" {
-            self.command_line
-                .push_output(&crate::tr!("text-edit", "changed", count = n.to_string()));
+            self.command_line.push_output(&crate::tr!(
+                "text-edit",
+                "changed",
+                count = n.to_string()
+            ));
         }
     }
 
@@ -193,7 +202,10 @@ impl OpenCADStudio {
             return;
         };
         let handles = parse_handles(request["handles"].as_str().unwrap_or(""));
-        let target = request["target"].as_str().map(parse_handles).and_then(|h| h.first().copied());
+        let target = request["target"]
+            .as_str()
+            .map(parse_handles)
+            .and_then(|h| h.first().copied());
         let point = |v: &serde_json::Value| Some([v.get(0)?.as_f64()?, v.get(1)?.as_f64()?]);
         let Some(second) = point(&request["second"]) else {
             return;
@@ -215,7 +227,8 @@ impl OpenCADStudio {
             return;
         };
         let movers: Vec<Handle> = handles.into_iter().filter(|h| Some(*h) != target).collect();
-        let anchors: Vec<([f64; 2], f64, f64)> = movers.iter().filter_map(|h| anchor_of(*h)).collect();
+        let anchors: Vec<([f64; 2], f64, f64)> =
+            movers.iter().filter_map(|h| anchor_of(*h)).collect();
         if anchors.len() != movers.len() {
             return;
         }

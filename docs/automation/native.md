@@ -41,6 +41,19 @@ or `start` while a command is still active is refused with `command_busy`:
 continue it with `input` or drop it with `cancel`. A legacy `run` line ends the
 waiting command and starts the new one.
 
+### Protocol-1 `save` destinations
+
+Saving to the current drawing path keeps the fingerprint recorded when the
+drawing was opened and respects a known edit-lock conflict. Supplying that
+same path explicitly does not waive either check. Directory aliases are
+compared using the native path-matching rules.
+
+A different existing destination is refused with `destination_exists` unless
+the native control request includes `"overwrite":true`. A new destination
+needs no overwrite acknowledgement. After a native Save As from A to B,
+a later control request naming A therefore needs explicit acknowledgement.
+The MCP save schema and REST `/save` route do not yet expose `overwrite`.
+
 ### The legacy `run` line
 
 `{"op":"run","cmd":"LINE 0,0 10,10"}` feeds the tokens after the command name

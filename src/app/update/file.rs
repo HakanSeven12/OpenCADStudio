@@ -3591,7 +3591,7 @@ impl OpenCADStudio {
             return self.open_save_dialog_window(i);
         }
         if purpose != crate::app::SavePurpose::Autosave
-            && !set_current_path
+            && destination_is_current
             && self.tabs[i].edit_lock_conflict
         {
             let error = "Drawing edit lock is held by another editor.".to_string();
@@ -3732,10 +3732,10 @@ impl OpenCADStudio {
         let backup = purpose != crate::app::SavePurpose::Autosave && self.backup_on_save;
         let verification = if check_external_change && purpose != crate::app::SavePurpose::Autosave
         {
-            let expected = if set_current_path {
-                None
-            } else {
+            let expected = if destination_is_current {
                 self.tabs[i].disk_fingerprint.clone()
+            } else {
+                None
             };
             if self.pending_save_leases.contains_key(&tab_id) {
                 Self::native_save_verification(

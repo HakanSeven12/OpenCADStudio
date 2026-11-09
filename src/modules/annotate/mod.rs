@@ -332,7 +332,7 @@ impl CadModule for AnnotateModule {
                             ],
                             default: "AIOBJECTSCALEADD",
                         },
-                        RibbonItem::Tool(crate::modules::ToolDef {
+                        RibbonItem::LabeledTool(crate::modules::ToolDef {
                             id: "SCALELISTEDIT",
                             label: "Scale List",
                             icon: crate::modules::IconKind::Svg(include_bytes!(
@@ -342,7 +342,7 @@ impl CadModule for AnnotateModule {
                                 "SCALELISTEDIT".to_string(),
                             ),
                         }),
-                        RibbonItem::Tool(crate::modules::ToolDef {
+                        RibbonItem::LabeledTool(crate::modules::ToolDef {
                             id: "OBJECTSCALE",
                             label: "Add/Delete Scales",
                             icon: crate::modules::IconKind::Svg(include_bytes!(
@@ -350,7 +350,7 @@ impl CadModule for AnnotateModule {
                             )),
                             event: crate::modules::ModuleEvent::Command("OBJECTSCALE".to_string()),
                         }),
-                        RibbonItem::Tool(crate::modules::ToolDef {
+                        RibbonItem::LabeledTool(crate::modules::ToolDef {
                             id: "ANNORESET",
                             label: "Sync Scale Positions",
                             icon: crate::modules::IconKind::Svg(include_bytes!(

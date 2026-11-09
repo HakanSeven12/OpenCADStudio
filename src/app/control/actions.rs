@@ -192,6 +192,10 @@ pub(super) const NAMES: &[&str] = &[
     "dialog_discard",
     "dialog_cancel",
     "block_def_dialog",
+    // The Write Block dialog's fields: `source=block|entire|objects`,
+    // `block=<name>`, `object_mode=retain|convert|delete`,
+    // `base_point=x,y[,z]`, `file=<path>` and `unit=<code|meters|mm|feet>`.
+    "wblock_dialog",
     "table_insert_dialog",
     "table_style_dialog",
     "attdef_dialog",
@@ -1996,6 +2000,72 @@ impl OpenCADStudio {
                     _ => return Err(failure("invalid_value", "Unknown block definition field")),
                 }
             }
+            "wblock_dialog" => {
+                if self.wblock.is_none() {
+                    return Err(failure("no_dialog", "The Write Block dialog is not open"));
+                }
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                use crate::ui::window::wblock::{WblockObjectMode, WblockSourceMode};
+                match key {
+                    "source" => {
+                        let mode = match v.to_ascii_lowercase().as_str() {
+                            "block" => WblockSourceMode::Block,
+                            "entire" | "drawing" => WblockSourceMode::EntireDrawing,
+                            "objects" | "object" => WblockSourceMode::Objects,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "source is block, entire or objects",
+                                ))
+                            }
+                        };
+                        Message::WblockSourceMode(mode)
+                    }
+                    "block" => Message::WblockBlockSelect(v.to_string()),
+                    "base_x" => Message::WblockBaseX(v.to_string()),
+                    "base_y" => Message::WblockBaseY(v.to_string()),
+                    "base_z" => Message::WblockBaseZ(v.to_string()),
+                    "object_mode" => {
+                        let mode = match v.to_ascii_lowercase().as_str() {
+                            "retain" => WblockObjectMode::Retain,
+                            "convert" => WblockObjectMode::Convert,
+                            "delete" => WblockObjectMode::Delete,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "object_mode is retain, convert or delete",
+                                ))
+                            }
+                        };
+                        Message::WblockObjectMode(mode)
+                    }
+                    "file" => Message::WblockFilePath(v.to_string()),
+                    "unit" => {
+                        let unit = v
+                            .trim()
+                            .parse::<i16>()
+                            .or_else(|_| match v.to_ascii_lowercase().as_str() {
+                                "inch" | "inches" => Ok(1),
+                                "foot" | "feet" => Ok(2),
+                                "mm" => Ok(4),
+                                "cm" => Ok(5),
+                                "m" | "meter" | "meters" => Ok(6),
+                                _ => Err(()),
+                            })
+                            .map_err(|_| {
+                                failure("invalid_value", "unit is an insertion unit code or name")
+                            })?;
+                        Message::WblockUnit(unit)
+                    }
+                    _ => {
+                        return Err(failure(
+                            "invalid_value",
+                            "Unknown write block dialog field",
+                        ))
+                    }
+                }
+            }
             // One field of the open attribute definition dialog: `tag=…`,
             // `prompt=…`, `default=…`, `justify=MC`, `style=…`, `height=…`,
             // `rotation=…`, `width=…`, `on_screen=0|1`, `x=…` / `y=…` / `z=…`,
@@ -3574,6 +3644,7 @@ impl OpenCADStudio {
             "dialog_ok" => match self.active_modal {
                 Some(crate::app::ModalKind::Unsaved) => Message::UnsavedDialogSave,
                 Some(crate::app::ModalKind::BlockEditChanges) => Message::BlockEditChangesSave,
+                Some(crate::app::ModalKind::WriteBlock) => Message::WblockApply,
                 Some(crate::app::ModalKind::XrefAttach) => {
                     Message::XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg::Apply)
                 }

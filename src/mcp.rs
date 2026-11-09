@@ -46,6 +46,12 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `set_properties` lists its `name` selector and takes a colour as a
 /// number or `{"rgb":[r,g,b]}`, which its example shows on a layer.
 /// `command_escape` presses Esc once, where `cancel` ends the command.
+/// The Block Definition dialog is driveable from a script: its `block_def_dialog`
+/// fields cover mode, annotative, orientation, uniform scale, exploding, unit,
+/// description and hyperlink. `dialog_ok`, `dialog_discard` and `dialog_cancel`
+/// now answer the dirty-close (`BlockEditChanges`) prompt; the Write Block
+/// dialog is driveable from a script: `wblock_dialog` fields cover source,
+/// block, base point, unit, object mode and path, and `dialog_ok` applies it.
 #[cfg(test)]
 const TOOL_SCHEMA_DIGEST: &str = "3d3c991e8dc24ebd3de3ee56d71a3526bc3af16dd78f2cc42351fc48965014f6";
 const MAX_REQUEST: usize = 1_048_576;

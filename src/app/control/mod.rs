@@ -4788,6 +4788,51 @@ mod tests {
     }
 
     #[test]
+    fn write_block_dialog_is_answerable_through_the_automation_bridge() {
+        use crate::app::ModalKind;
+        use document::entities::Line;
+        use document::types::Vector3;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::UNIT_X,
+            )))
+            .unwrap();
+
+        let temp = std::env::temp_dir().join(format!("ocs-wblock-{}.dwg", session_id()));
+        let _ = std::fs::remove_file(&temp);
+        let drawn = request(&mut app, json!({"op":"run","cmd":"SELECTALL"}));
+        assert_eq!(drawn["ok"], true, "{drawn}");
+        let opened = request(&mut app, json!({"op":"run","cmd":"WBLOCK"}));
+        assert_ne!(opened["code"], "bad_request", "{opened}");
+        assert_eq!(app.active_modal, Some(ModalKind::WriteBlock));
+        for value in [
+            "source=objects",
+            "object_mode=delete",
+            &format!("file={}", temp.to_string_lossy()),
+            "unit=6",
+        ] {
+            let reply = request(
+                &mut app,
+                json!({"op":"action","name":"wblock_dialog","value":value}),
+            );
+            assert_eq!(reply["ok"], true, "{value}: {reply}");
+        }
+        let applied = request(&mut app, json!({"op":"action","name":"dialog_ok"}));
+        assert_ne!(applied["code"], "no_dialog", "{applied}");
+        assert!(temp.is_file(), "WBLOCK wrote {}", temp.display());
+        let _ = std::fs::remove_file(&temp);
+        assert_ne!(app.active_modal, Some(ModalKind::WriteBlock));
+    }
+
+    #[test]
     fn block_definition_dialog_fields_are_automatable() {
         use crate::app::ModalKind;
         let mut app = OpenCADStudio::new_for_test();

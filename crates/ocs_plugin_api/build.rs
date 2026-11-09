@@ -1268,7 +1268,7 @@ fn generate_version_info(out_dir: &Path) {
     let info = serde_json::json!({
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
-        "api_version": 15,
+        "api_version": 16,
         "acadrust_version": document.version.to_string(),
         "acadrust_source": document.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,

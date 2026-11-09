@@ -2122,6 +2122,7 @@ impl OpenCADStudio {
             verify_reader,
             false,
             require_new_destination,
+            (!path_changed).then_some(path.as_path()),
         )?;
 
         if set_current_path {
@@ -3787,6 +3788,7 @@ impl OpenCADStudio {
                             revision,
                             camera_generation,
                             path,
+                            physical_path: None,
                             version,
                             previous_autosave,
                             set_current_path,
@@ -3833,6 +3835,8 @@ impl OpenCADStudio {
                 .expect("save capture produced more than one result");
             Task::perform(
                 async move {
+                    let physical_path = destination_is_current.then(|| worker_path.clone());
+                    let logical_path = destination_is_current.then(|| path.clone());
                     let (result, refreshed_preview) = std::thread::spawn(move || {
                         let mut refreshed_preview = None;
                         if let Some(png) = thumbnail {
@@ -3861,6 +3865,7 @@ impl OpenCADStudio {
                             verify_reader,
                             allow_conversion_loss,
                             purpose == crate::app::SavePurpose::SaveAsNew,
+                            logical_path.as_deref(),
                         );
                         (result, refreshed_preview)
                     })
@@ -3878,6 +3883,7 @@ impl OpenCADStudio {
                         revision,
                         camera_generation,
                         path,
+                        physical_path,
                         version,
                         previous_autosave,
                         set_current_path,
@@ -3932,7 +3938,7 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn on_save_finished(&mut self, outcome: crate::app::SaveOutcome) -> Task<Message> {
+    pub(super) fn on_save_finished(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);
@@ -3952,6 +3958,11 @@ impl OpenCADStudio {
             return Task::none();
         }
 
+        if outcome.result.is_ok() {
+            if let Some(physical) = outcome.physical_path.as_deref() {
+                outcome.result = crate::io::verify_save_destination(&outcome.path, physical);
+            }
+        }
         if let Err(error) = &outcome.result {
             if error.externally_modified && outcome.purpose != crate::app::SavePurpose::Autosave {
                 let file_name = outcome

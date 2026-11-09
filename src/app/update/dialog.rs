@@ -1591,6 +1591,7 @@ mod tests {
             revision: app.tabs[i].edit_revision,
             camera_generation: app.tabs[i].scene.camera_generation,
             path: new_dir.join("host.dwg"),
+            physical_path: None,
             version: app.tabs[i].scene.document.version,
             previous_autosave: None,
             set_current_path: true,

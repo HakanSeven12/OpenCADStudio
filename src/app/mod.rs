@@ -2550,6 +2550,7 @@ pub struct SaveOutcome {
     revision: u64,
     camera_generation: u64,
     path: PathBuf,
+    physical_path: Option<PathBuf>,
     version: document::DxfVersion,
     previous_autosave: Option<PathBuf>,
     set_current_path: bool,

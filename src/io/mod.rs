@@ -2180,6 +2180,7 @@ mod save_failure_tests {
             None,
             false,
             false,
+            None,
         )
         .unwrap_err();
 
@@ -2216,6 +2217,7 @@ mod save_failure_tests {
             Some(reader),
             false,
             false,
+            None,
         )
         .unwrap_err();
 
@@ -2248,6 +2250,7 @@ mod save_failure_tests {
             None,
             false,
             true,
+            None,
         )
         .unwrap_err();
         assert!(error.externally_modified);
@@ -2472,7 +2475,11 @@ pub fn save_owned_as_version_atomic(
     verify_reader: Option<std::fs::File>,
     allow_loss: bool,
     require_new_destination: bool,
+    logical_path: Option<&Path>,
 ) -> Result<(), SaveFailure> {
+    if let Some(logical) = logical_path {
+        verify_save_destination(logical, path)?;
+    }
     save_owned_as_version_inner(
         doc,
         path,
@@ -2482,6 +2489,9 @@ pub fn save_owned_as_version_atomic(
         0.0,
         require_new_destination,
         move |path| {
+            if let Some(logical) = logical_path {
+                verify_save_destination(logical, path)?;
+            }
             let Some(expected) = expected_fingerprint else {
                 return Ok(());
             };
@@ -2497,7 +2507,29 @@ pub fn save_owned_as_version_atomic(
                 _ => Err(SaveFailure::externally_modified(path)),
             }
         },
-    )
+    )?;
+    if let Some(logical) = logical_path {
+        verify_save_destination(logical, path)?;
+    }
+    Ok(())
+}
+
+/// Keep a current drawing's logical name bound to the writer's destination.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn verify_save_destination(logical: &Path, physical: &Path) -> Result<(), SaveFailure> {
+    let extension = |path: &Path| {
+        path.extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase())
+    };
+    if extension(logical) != extension(physical) {
+        return Err(SaveFailure::other(
+            "Current-file alias has a different destination extension; save to a new matching path",
+        ));
+    }
+    match (std::fs::canonicalize(logical), std::fs::canonicalize(physical)) {
+        (Ok(logical), Ok(physical)) if logical == physical => Ok(()),
+        _ => Err(SaveFailure::externally_modified(logical)),
+    }
 }
 
 fn save_owned_as_version_inner<F>(

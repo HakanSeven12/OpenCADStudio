@@ -51,6 +51,9 @@ For a current-file symlink, the save replaces its resolved drawing target
 and preserves the symlink and logical document path. Relative references
 keep that logical path as their base. Directory aliases retain the
 current-file check even if the drawing was deleted externally.
+An alias with a different physical file extension is refused, so the
+writer cannot silently switch formats. The logical alias must still name
+the captured destination before placement and when a GUI save completes.
 
 A different existing destination is refused with `destination_exists` unless
 the native control request includes `"overwrite":true`. A new destination

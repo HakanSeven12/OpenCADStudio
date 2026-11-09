@@ -485,3 +485,95 @@ fn control_save_file_alias_keeps_cross_directory_xref_base() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn control_save_file_alias_refuses_a_different_physical_extension() {
+    for windowed in [false, true] {
+        for extension in ["dwg", "bin"] {
+            let scratch = Scratch::new();
+            let seed = scratch.0.join("seed.dxf");
+            drop(open_drawing(&seed, false));
+            let original = std::fs::read(&seed).unwrap();
+            let physical = scratch.0.join(format!("drawing.{extension}"));
+            std::fs::write(&physical, &original).unwrap();
+            let alias = scratch.0.join("drawing.dxf");
+            std::os::unix::fs::symlink(&physical, &alias).unwrap();
+            let mut app = reopen_drawing(&alias, windowed);
+            edit(&mut app);
+            let saved = request(&mut app, json!({"op":"save","path":alias}));
+            assert_eq!(saved["ok"], false, "{saved}");
+            assert!(alias.is_symlink());
+            assert_eq!(std::fs::read(&physical).unwrap(), original);
+            assert_eq!(app.tabs[app.active_tab].current_path.as_ref(), Some(&alias));
+            assert!(app.tabs[app.active_tab].dirty);
+            drop(app);
+            drop(reopen_drawing(&alias, false));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn control_save_file_alias_refuses_retargeting_before_worker_or_completion() {
+    use iced::futures::StreamExt;
+
+    for after_worker in [false, true] {
+        for release_lease in [false, true] {
+            let scratch = Scratch::new();
+            let first = scratch.0.join("first.dxf");
+            let second = scratch.0.join("second.dxf");
+            drop(open_drawing(&first, false));
+            drop(open_drawing(&second, false));
+            let first_bytes = std::fs::read(&first).unwrap();
+            let second_bytes = std::fs::read(&second).unwrap();
+            let alias = scratch.0.join("alias.dxf");
+            std::os::unix::fs::symlink(&first, &alias).unwrap();
+            let mut app = reopen_drawing(&alias, true);
+            edit(&mut app);
+            let i = app.active_tab;
+            let original = app.tabs[i].disk_fingerprint.clone();
+            if release_lease {
+                let _ = app.tabs[i].edit_lease.take();
+            }
+            let (accepted, task) = app.control_request(json!({
+                "protocol":1,"op":"save","path":alias,
+                "request_id":"alias-retarget","client_id":"test",
+                "document_id":app.tabs[i].id,"revision":app.tabs[i].edit_revision,
+            }));
+            assert_eq!(accepted["status"], "accepted", "{accepted}");
+            let task = if after_worker {
+                // Execute real disk work, but hold its completion message
+                // until the logical alias has changed to the other file.
+                let mut stream = iced_runtime::task::into_stream(task).unwrap();
+                let action = iced::futures::executor::block_on(stream.next()).unwrap();
+                let iced_runtime::Action::Output(crate::app::Message::SaveFinished(outcome)) =
+                    action
+                else {
+                    panic!("expected the native save completion");
+                };
+                assert!(outcome.result.is_ok(), "{:?}", outcome.result);
+                iced::Task::done(crate::app::Message::SaveFinished(outcome))
+            } else {
+                task
+            };
+            std::fs::remove_file(&alias).unwrap();
+            std::os::unix::fs::symlink(&second, &alias).unwrap();
+            app.drive_headless_task(task).unwrap();
+            let saved = app
+                .control_request(json!({"op":"operation","request_id":"alias-retarget"}))
+                .0;
+            assert_eq!(saved["ok"], false, "{saved}");
+            assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
+            assert_eq!(std::fs::read(&second).unwrap(), second_bytes);
+            if after_worker {
+                assert_ne!(std::fs::read(&first).unwrap(), first_bytes);
+            } else {
+                assert_eq!(std::fs::read(&first).unwrap(), first_bytes);
+            }
+            assert_eq!(app.tabs[i].disk_fingerprint, original);
+            assert_eq!(app.tabs[i].current_path.as_ref(), Some(&alias));
+            assert!(app.tabs[i].dirty);
+        }
+    }
+}

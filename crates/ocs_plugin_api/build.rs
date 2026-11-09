@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+#[allow(dead_code)]
+#[path = "src/manifest.rs"]
+mod manifest;
+
 use cargo_lock::Lockfile;
 use serde::de::DeserializeOwned;
 use serde_reflection::{
@@ -51,6 +55,7 @@ fn main() {
     );
     println!("cargo:rerun-if-changed=entity_coverage_policy.json");
     println!("cargo:rerun-if-changed=src/entity_coverage_types.rs");
+    println!("cargo:rerun-if-changed=src/manifest.rs");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1268,11 +1273,11 @@ fn generate_version_info(out_dir: &Path) {
     let info = serde_json::json!({
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
-        "api_version": 16,
+        "api_version": manifest::API_VERSION,
         "acadrust_version": document.version.to_string(),
         "acadrust_source": document.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,
-        "api_version_min_supported": 3,
+        "api_version_min_supported": manifest::API_VERSION_MIN_SUPPORTED,
         "build_timestamp": build_timestamp,
     });
     fs::write(out_dir.join("version_info.json"), info.to_string()).unwrap();

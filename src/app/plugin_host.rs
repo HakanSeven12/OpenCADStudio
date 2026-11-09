@@ -10271,8 +10271,10 @@ mod tests {
             expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
             expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
+            // Reading a DXF derives a justified attribute's insertion point
+            // from its alignment point (#2728).
+            expect_edited_dxf: "PART_NO|Serial|PN-002 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
             expect_edited_dwg: "",
             expect_reedited_dwg: "",
         });

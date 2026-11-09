@@ -1312,7 +1312,6 @@ impl Scene {
             // reference-only). Undo restores it through the recorded channel.
             self.reference_only.remove(h);
             selection_changed |= self.selected.remove(&h);
-            self.selected_order.retain(|selected| *selected != h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
                 hover_changed = true;
@@ -1337,7 +1336,10 @@ impl Scene {
             handle_set.insert(h);
             erased.push((h, ChangeKind::Removed));
         }
+        // Once for the whole batch: per handle this is quadratic in the selection.
         if selection_changed {
+            self.selected_order
+                .retain(|selected| !handle_set.contains(selected));
             self.bump_selection_set();
         } else if hover_changed {
             self.bump_selection();
@@ -1466,6 +1468,24 @@ const SIMILAR_FIELDS: &[(u16, &[&str])] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn erasing_part_of_a_selection_keeps_the_rest_in_pick_order() {
+        let mut scene = crate::scene::Scene::new();
+        let mut line = |y| {
+            scene.add_entity(document::EntityType::Line(
+                document::entities::Line::from_coords(0.0, y, 0.0, 1.0, y, 0.0),
+            ))
+        };
+        let (a, b, c) = (line(0.0), line(1.0), line(2.0));
+        for handle in [c, b, a] {
+            scene.select_entity(handle, false);
+        }
+
+        scene.erase_entities(&[b]);
+
+        assert_eq!(scene.selected_handles_in_order(), vec![c, a]);
+    }
+
     #[test]
     fn qselect_sample_matches_identical_entities_without_unique_handles() {
         use crate::app::{QSelectMode, QSelectScope};

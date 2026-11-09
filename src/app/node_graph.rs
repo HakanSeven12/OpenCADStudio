@@ -79,7 +79,17 @@ fn typed_value(row: &NodeRow, raw: &str) -> Option<Value> {
             Some(x) if x.is_finite() => Some(graph::value::number(x)),
             _ => is_measure(text).then(parsed),
         },
-        RowWidget::Group => Some(parsed()).filter(|value| typed_point(value).is_some()),
+        RowWidget::Coordinate if text.is_empty() => Some(Value::Null),
+        RowWidget::Coordinate | RowWidget::Group => match parsed() {
+            // A typed list of points runs the node once per point.
+            Value::Array(points)
+                if matches!(row.widget, RowWidget::Coordinate)
+                    && points.iter().all(|point| typed_point(point).is_some()) =>
+            {
+                Some(Value::Array(points))
+            }
+            value => typed_point(&value).map(graph::value::point_value),
+        },
         _ => Some(parsed()),
     }
 }
@@ -116,7 +126,7 @@ fn unchanged(row: &NodeRow, raw: &str, value: &Value) -> bool {
     raw.trim() == crate::ui::node_graph::display(&row.value)
         || row.value == *value
         || match row.widget {
-            RowWidget::Group => typed_point(&row.value)
+            RowWidget::Group | RowWidget::Coordinate => typed_point(&row.value)
                 .zip(typed_point(value))
                 .is_some_and(|(a, b)| a.iter().zip(b).all(|(a, b)| close(*a, b))),
             RowWidget::Number | RowWidget::Measure => row_number(&row.value)
@@ -411,6 +421,7 @@ impl OpenCADStudio {
         self.graph_undo_open = true;
         self.graph_unwind(i);
         let mut tasks = edit(self);
+        self.graph_drop_driven_params(i);
         let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
         let mut host = AppHost {
             app: self,
@@ -456,6 +467,38 @@ impl OpenCADStudio {
             tab.scene.erase_entities(&live);
         }
         tab.dirty = true;
+    }
+
+    /// A link beats a value typed by hand, but an object node applies its
+    /// typed values after its links. So the typed values of everything a link
+    /// supplies go; values of a coordinate's siblings stay.
+    fn graph_drop_driven_params(&mut self, i: usize) {
+        let graph = &self.tabs[i].graph;
+        let is_object = |id: NodeId| {
+            graph
+                .engine
+                .node(id)
+                .is_some_and(|node| matches!(node.kind, Kind::Object(_)))
+        };
+        if !graph.engine.links.iter().any(|link| is_object(link.to.node)) {
+            return;
+        }
+        let sections = self.graph_all_sections(i);
+        let graph = &mut self.tabs[i].graph;
+        let ids: Vec<NodeId> = graph.engine.nodes.iter().map(|node| node.id).collect();
+        for (index, id) in ids.into_iter().enumerate() {
+            let driven = graph.driven_fields(id, &sections[index]);
+            let Some(node) = graph.engine.node_mut(id) else {
+                continue;
+            };
+            if !matches!(node.kind, Kind::Object(_)) {
+                continue;
+            }
+            for field in driven.iter().filter(|field| components(field).is_none()) {
+                settle_coordinates(&mut node.params, field);
+            }
+            node.params.retain(|field, _| !driven.contains(field));
+        }
     }
 
     pub(super) fn graph_run(&mut self, i: usize) -> Task<Message> {

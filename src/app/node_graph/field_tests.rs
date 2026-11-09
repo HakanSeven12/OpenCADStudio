@@ -754,3 +754,259 @@ fn sliders_show_the_arrow() {
     rig.send(Event::Mouse(mouse::Event::ButtonPressed(Button::Left)));
     assert_eq!(rig.cursor_at(slider), mouse::Interaction::Idle, "dragging");
 }
+
+/// What `corner` on a Rectangle holds after typing `text` and leaving.
+fn rectangle_corner(text: &str) -> (Value, Value) {
+    let mut rig = Rig::new();
+    let id = rig.op("Rectangle", Point::new(40.0, 40.0));
+    let corner = rig.field(id, "corner");
+    rig.click(corner);
+    rig.typed(text);
+    rig.click(CANVAS);
+    assert_eq!(rig.drafts(), 0);
+    let node = rig.app.tabs[rig.i].graph.engine.node(id).expect("node");
+    (rig.param(id, "corner"), node.outputs["object"].clone())
+}
+
+#[test]
+fn coordinates_are_taken_with_or_without_parentheses() {
+    for text in ["0,0,0", "(0,0,0)", "( 0, 0, 0 )"] {
+        let (corner, object) = rectangle_corner(text);
+        assert_eq!(corner, graph::value::point_value([0.0, 0.0, 0.0]), "{text}");
+        assert!(ops::handle(&object).is_some(), "{text} makes the rectangle");
+    }
+}
+
+#[test]
+fn coordinates_show_formatted_after_commit() {
+    for (text, shown) in [
+        ("1.5,-2,3", "(1.5, -2, 3)"),
+        ("(-12.75,0.25,-3)", "(-12.75, 0.25, -3)"),
+        ("4,5", "(4, 5, 0)"),
+        ("2*3,1,0", "(6, 1, 0)"),
+    ] {
+        let (corner, _) = rectangle_corner(text);
+        assert_eq!(crate::ui::node_graph::display(&corner), shown, "{text}");
+    }
+}
+
+#[test]
+fn coordinates_refuse_anything_else() {
+    for text in ["abc", "1,2,3,4", "1,,3", "(1,x,3)"] {
+        let (corner, object) = rectangle_corner(text);
+        assert_eq!(corner, Value::Null, "{text}");
+        assert!(ops::handle(&object).is_none(), "{text}");
+    }
+}
+
+#[test]
+fn a_coordinate_can_be_cleared() {
+    let mut rig = Rig::new();
+    let id = rig.op("Rectangle", Point::new(40.0, 40.0));
+    let corner = rig.field(id, "corner");
+    rig.click(corner);
+    rig.typed("1,2,3");
+    rig.key(Named::Enter);
+    rig.click(CANVAS);
+    rig.click(corner);
+    rig.key(Named::Backspace);
+    rig.click(CANVAS);
+    assert_eq!(rig.param(id, "corner"), Value::Null);
+}
+
+#[test]
+fn retyping_a_coordinate_does_not_run_the_graph() {
+    let mut rig = Rig::new();
+    let id = rig.op("Rectangle", Point::new(40.0, 40.0));
+    let corner = rig.field(id, "corner");
+    rig.click(corner);
+    rig.typed("1,2,3");
+    rig.key(Named::Enter);
+    rig.click(CANVAS);
+    rig.mark_unrun(id);
+    rig.click(corner);
+    rig.typed("(1, 2, 3)");
+    rig.click(CANVAS);
+    assert!(!rig.has_run(id));
+}
+
+#[test]
+fn coordinate_group_rows_show_formatted_after_commit() {
+    let mut rig = Rig::new();
+    let id = rig.object(ObjectKind::Point, Point::new(40.0, 40.0));
+    let group = rig.field(id, LOCATION);
+    rig.click(group);
+    rig.typed("1,2,3");
+    rig.click(CANVAS);
+    assert_eq!(
+        rig.param(id, LOCATION),
+        graph::value::point_value([1.0, 2.0, 3.0])
+    );
+    assert_point(rig.location(id), [1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn coordinate_inputs_are_told_from_objects() {
+    let widget = |node: &str, field: &str| {
+        let mut rig = Rig::new();
+        rig.op(node, Point::new(40.0, 40.0));
+        let sections = rig.app.graph_all_sections(rig.i);
+        let found = sections[0][0].rows.iter().find(|row| row.field == field);
+        matches!(found.expect("row").widget, RowWidget::Coordinate)
+    };
+    for (node, field) in [
+        ("Rectangle", "corner"),
+        ("Distance", "a"),
+        ("Aligned Dimension", "first"),
+        ("Fillet", "first point"),
+        ("Move", "vector"),
+    ] {
+        assert!(widget(node, field), "{node}.{field}");
+    }
+    for (node, field) in [
+        ("Fillet", "first"),
+        ("Intersect", "a"),
+        ("Equal", "a"),
+        ("Move", "object"),
+    ] {
+        assert!(!widget(node, field), "{node}.{field}");
+    }
+}
+
+/// A Point op at (5, 6, 7) to link from.
+fn sender(rig: &mut Rig) -> NodeId {
+    let id = rig.op("Point", Point::new(40.0, 400.0));
+    for (field, value) in [("x", 5.0), ("y", 6.0), ("z", 7.0)] {
+        let node = rig.app.tabs[rig.i].graph.engine.node_mut(id).expect("node");
+        node.params
+            .insert(field.to_owned(), graph::value::number(value));
+    }
+    let _ = rig.app.graph_run(rig.i);
+    id
+}
+
+#[test]
+fn a_linked_coordinate_field_cannot_be_typed_in() {
+    let mut rig = Rig::new();
+    let from = sender(&mut rig);
+    let id = rig.op("Rectangle", Point::new(40.0, 40.0));
+    let corner = rig.field(id, "corner");
+    rig.click(corner);
+    rig.typed("1,2,3");
+    rig.key(Named::Enter);
+    rig.link(from, "point", id, "corner");
+    rig.click(corner);
+    rig.typed("9,9,9");
+    rig.click(CANVAS);
+    assert_eq!(rig.drafts(), 0, "no text field to type in");
+    let row_value = |rig: &Rig| {
+        let sections = rig.app.graph_all_sections(rig.i);
+        let index = rig.app.tabs[rig.i]
+            .graph
+            .engine
+            .nodes
+            .iter()
+            .position(|node| node.id == id)
+            .expect("node");
+        let row = sections[index][0]
+            .rows
+            .iter()
+            .find(|row| row.field == "corner");
+        row.expect("row").value.clone()
+    };
+    assert_eq!(row_value(&rig), graph::value::point_value([5.0, 6.0, 7.0]));
+}
+
+#[test]
+fn a_linked_group_locks_its_components_and_wins() {
+    let mut rig = Rig::new();
+    let from = sender(&mut rig);
+    let id = rig.object(ObjectKind::Point, Point::new(40.0, 40.0));
+    rig.open_coordinates(id);
+    let x = rig.field(id, "loc_x");
+    rig.click(x);
+    rig.typed("1");
+    rig.key(Named::Enter);
+    rig.click(CANVAS);
+    rig.link(from, "point", id, LOCATION);
+    assert_point(rig.location(id), [5.0, 6.0, 7.0]);
+
+    rig.click(x);
+    rig.typed("9");
+    rig.click(CANVAS);
+    assert_eq!(rig.drafts(), 0, "the component is read-only");
+    assert_point(rig.location(id), [5.0, 6.0, 7.0]);
+}
+
+#[test]
+fn a_linked_component_locks_its_group_and_keeps_its_siblings() {
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 400.0));
+    let node = rig.app.tabs[rig.i]
+        .graph
+        .engine
+        .node_mut(number)
+        .expect("node");
+    node.params
+        .insert("value".to_owned(), graph::value::number(8.0));
+    let id = rig.object(ObjectKind::Point, Point::new(40.0, 40.0));
+    let group = rig.field(id, LOCATION);
+    rig.click(group);
+    rig.typed("1,2,3");
+    rig.click(CANVAS);
+    rig.link(number, "value", id, "loc_x");
+    assert_point(rig.location(id), [8.0, 2.0, 3.0]);
+
+    rig.click(group);
+    rig.typed("9,9,9");
+    rig.click(CANVAS);
+    assert_eq!(rig.drafts(), 0, "the group is read-only");
+    assert_point(rig.location(id), [8.0, 2.0, 3.0]);
+
+    rig.open_coordinates(id);
+    let y = rig.field(id, "loc_y");
+    rig.click(y);
+    rig.typed("4");
+    rig.click(CANVAS);
+    assert_point(rig.location(id), [8.0, 4.0, 3.0]);
+}
+
+#[test]
+fn tab_skips_every_field_a_link_supplies() {
+    let mut rig = Rig::new();
+    let from = sender(&mut rig);
+    let id = rig.object(ObjectKind::Point, Point::new(40.0, 40.0));
+    rig.open_coordinates(id);
+    rig.link(from, "point", id, LOCATION);
+    let order = rig.app.tabs[rig.i]
+        .graph
+        .tab_order(&rig.app.graph_all_sections(rig.i));
+    assert!(
+        !order
+            .iter()
+            .any(|port| port.node == id && port.field.starts_with("loc_")),
+        "{order:?}"
+    );
+}
+
+#[test]
+fn removing_a_link_makes_the_field_editable_again() {
+    let mut rig = Rig::new();
+    let from = sender(&mut rig);
+    let id = rig.op("Rectangle", Point::new(40.0, 40.0));
+    rig.link(from, "point", id, "corner");
+    assert!(rig.app.tabs[rig.i]
+        .graph
+        .engine
+        .disconnect(&port(id, "corner"))
+        .is_some());
+    let _ = rig.app.graph_run(rig.i);
+    let corner = rig.field(id, "corner");
+    rig.click(corner);
+    rig.typed("1,2,3");
+    rig.click(CANVAS);
+    assert_eq!(
+        rig.param(id, "corner"),
+        graph::value::point_value([1.0, 2.0, 3.0])
+    );
+}

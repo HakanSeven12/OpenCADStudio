@@ -474,6 +474,8 @@ pub enum RowWidget {
     /// A number written the way the Properties panel takes it, as an
     /// expression or with units; checked when it is committed.
     Measure,
+    /// A point, typed as `x,y,z` with or without parentheses.
+    Coordinate,
     /// A coordinate group's summary row; its label folds the components.
     Group,
     Slider { min: f64, max: f64, step: f64 },
@@ -605,6 +607,27 @@ fn row_tip(row: &NodeRow) -> String {
         row.label.clone()
     } else {
         format!("{}: {value}", row.label)
+    }
+}
+
+/// Whether an operation input takes a point or vector. The specs do not say:
+/// points, curves and objects are all inputs without a default, so this goes
+/// by name, and by the operation where a name means different things.
+fn is_coordinate(spec: &Spec, input: &graph::ops::Input) -> bool {
+    if input.list || !matches!(input.default, graph::ops::Initial::None) {
+        return false;
+    }
+    match input.name {
+        "first" | "second" => !matches!(spec.name, "Fillet" | "Chamfer" | "Centerline"),
+        "a" | "b" => spec.category == "Geometry",
+        "third" | "point" | "center" | "location" | "vector" | "corner" | "vertex" | "base"
+        | "side" | "keep" | "jog" | "feature" | "leader" => true,
+        name => {
+            name.starts_with("axis ")
+                || [" point", " corner", " source", " target"]
+                    .iter()
+                    .any(|end| name.ends_with(end))
+        }
     }
 }
 
@@ -830,6 +853,7 @@ impl Graph {
                     },
                     ("Boolean", "value") => RowWidget::Toggle,
                     _ if matches!(input.default, graph::ops::Initial::Num(_)) => RowWidget::Number,
+                    _ if is_coordinate(spec, input) => RowWidget::Coordinate,
                     _ => RowWidget::Field,
                 };
                 let output = spec.outputs.contains(&input.name);
@@ -998,25 +1022,53 @@ impl Graph {
             })
     }
 
+    /// The rows of node `id` that a link supplies, and so cannot be typed in.
+    /// One value can have several ports: a coordinate is also its group's
+    /// row, and a section's header carries all of its rows. A row is driven
+    /// by a link to any port that includes it, and a group by a link to any
+    /// of its components.
+    pub(crate) fn driven_fields(&self, id: NodeId, sections: &[NodeSection]) -> HashSet<String> {
+        let linked = |field: &str| {
+            self.engine.is_linked(&Port {
+                node: id,
+                field: field.to_owned(),
+            })
+        };
+        let mut driven = HashSet::default();
+        for section in sections {
+            let whole = section.header.as_ref().is_some_and(|h| linked(&h.field));
+            for row in &section.rows {
+                if whole
+                    || row.group.as_ref().is_some_and(|group| linked(group))
+                    || linked(&row.field)
+                    || row.field.split('|').any(linked)
+                {
+                    driven.insert(row.field.clone());
+                }
+            }
+        }
+        driven
+    }
+
     /// Every text field a user can type in, each card's in Tab order: its
     /// rows from the top.
-    fn tab_order(&self, sections: &[Vec<NodeSection>]) -> Vec<Port> {
+    pub(crate) fn tab_order(&self, sections: &[Vec<NodeSection>]) -> Vec<Port> {
         let mut fields = Vec::new();
         for (node, node_sections) in self.engine.nodes.iter().zip(sections) {
             let id = node.id;
+            let driven = self.driven_fields(id, node_sections);
             for section in node_sections.iter().filter(|s| self.is_open(id, s)) {
                 for row in &section.rows {
                     let typed = !matches!(row.widget, RowWidget::Slider { .. } | RowWidget::Toggle);
-                    let port = Port {
-                        node: id,
-                        field: row.field.clone(),
-                    };
                     if typed
                         && row.input
                         && self.is_shown(id, row)
-                        && !self.engine.is_linked(&port)
+                        && !driven.contains(&row.field)
                     {
-                        fields.push(port);
+                        fields.push(Port {
+                            node: id,
+                            field: row.field.clone(),
+                        });
                     }
                 }
             }
@@ -1286,6 +1338,7 @@ impl Graph {
             text_color: Some(theme.palette().primary.weak.text),
             ..Default::default()
         });
+        let driven = self.driven_fields(id, &sections);
         let mut col = column![header];
         if sections.is_empty() {
             col = col.push(
@@ -1329,7 +1382,8 @@ impl Graph {
             if open {
                 for node_row in section.rows {
                     if self.is_shown(id, &node_row) {
-                        col = col.push(self.row_view(id, node_row));
+                        let locked = driven.contains(&node_row.field);
+                        col = col.push(self.row_view(id, node_row, locked));
                     }
                 }
             }
@@ -1373,7 +1427,7 @@ impl Graph {
         (in_port, out_port)
     }
 
-    fn row_view(&self, id: NodeId, node_row: NodeRow) -> Element<'_, Message> {
+    fn row_view(&self, id: NodeId, node_row: NodeRow, locked: bool) -> Element<'_, Message> {
         let tip = row_tip(&node_row);
         let (in_port, out_port) = self.port_views(id, &node_row);
         let label: Element<'_, Message> = match node_row.widget {
@@ -1402,9 +1456,8 @@ impl Graph {
             node: id,
             field: node_row.field,
         };
-        let linked_in = self.engine.is_linked(&port);
         let shown = display(&node_row.value);
-        let value: Element<'_, Message> = if node_row.input && !linked_in {
+        let value: Element<'_, Message> = if node_row.input && !locked {
             match node_row.widget {
                 RowWidget::Slider { min, max, step } => {
                     let current = graph::value::num(&node_row.value).unwrap_or(min);
@@ -1429,7 +1482,11 @@ impl Graph {
                         .width(Length::Fill)
                         .into()
                 }
-                RowWidget::Field | RowWidget::Number | RowWidget::Measure | RowWidget::Group => {
+                RowWidget::Field
+                | RowWidget::Number
+                | RowWidget::Measure
+                | RowWidget::Coordinate
+                | RowWidget::Group => {
                     let numeric = matches!(node_row.widget, RowWidget::Number);
                     let draft = self.drafts.get(&port).cloned().unwrap_or(shown);
                     let edit = port.clone();

@@ -883,7 +883,9 @@ impl OpenCADStudio {
                     w: size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.x,
                     h: size.height.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.y,
                 });
-            let (id, open) = open_window(placement, self.modal_title_for(kind));
+            // A dialog opened from another dialog's window comes up in front
+            // of it, not behind the window that was clicked (#2750).
+            let (id, open) = open_window(placement, self.modal_title_for(kind), true);
             if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                 tool.window = Some(id);
             }
@@ -905,7 +907,7 @@ impl OpenCADStudio {
             .map(|(panel, placement)| (*panel, *placement))
             .collect();
         for (panel, placement) in panels {
-            let (id, open) = open_window(placement, panel.title().to_string());
+            let (id, open) = open_window(placement, panel.title().to_string(), false);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement));
             tasks.push(open);
@@ -1031,7 +1033,11 @@ fn window_content(windows: &[OsWindow], id: iced::window::Id) -> Option<Detached
 
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
-fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id, Task<Message>) {
+fn open_window(
+    placement: WindowPlacement,
+    _title: String,
+    focus: bool,
+) -> (iced::window::Id, Task<Message>) {
     // The main window's scale is the best guess before the window exists;
     // `os_window_scale` puts it right once it knows its own.
     let position = if placement.x.is_finite() && placement.y.is_finite() {
@@ -1056,7 +1062,12 @@ fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id,
         },
         ..iced::window::Settings::default()
     });
-    (id, open.map(|_| Message::Noop))
+    let open = if focus {
+        open.then(iced::window::gain_focus)
+    } else {
+        open.map(|_| Message::Noop)
+    };
+    (id, open)
 }
 
 #[cfg(test)]

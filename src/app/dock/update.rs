@@ -144,7 +144,15 @@ impl OpenCADStudio {
                     self.save_config();
                 }
             }
-            DockMsg::EdgeMenu(side) => self.dock_edge_menu = side,
+            DockMsg::EdgeMenu(side) => {
+                self.dock_edge_menu = side;
+                self.dock_edge_menu_y = None;
+            }
+            DockMsg::EdgeMenuAtPointer(side) => {
+                self.dock_edge_menu = Some(side);
+                self.dock_edge_menu_y = Some(self.dock_strip_pointer_y);
+            }
+            DockMsg::StripPointer(p) => self.dock_strip_pointer_y = p.y,
             DockMsg::StripLabels(on) => {
                 self.dock_edge_menu = None;
                 self.dock.strip_labels = on;
@@ -943,7 +951,11 @@ impl OpenCADStudio {
                 (gi, cells)
             })
             .collect();
-        crate::ui::dock::strip_layout(&groups)
+        let (layout, plus_top) = crate::ui::dock::strip_layout(&groups);
+        (
+            layout,
+            crate::ui::dock::strip_plus_top(plus_top, self.dock_workspace_size().1),
+        )
     }
 
     /// The open pallets of `side`'s shown group, each as (position in the

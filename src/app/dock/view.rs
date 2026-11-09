@@ -94,10 +94,17 @@ impl OpenCADStudio {
                         .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
                         .into(),
                 );
+                // shortcut: estimated row height, measure the menu if rows change size.
+                let menu_h = (checked.len() + 2) as f32 * 29.0 + 12.0;
+                let y = crate::ui::dock::strip_menu_top(
+                    self.dock_edge_menu_y.unwrap_or(plus_top),
+                    menu_h,
+                    self.dock_workspace_size().1,
+                );
                 layers.push(place_at(
                     dock_edge_menu(side, &checked, self.dock.strip_labels),
                     x.max(0.0),
-                    plus_top,
+                    y,
                 ));
             }
         }
@@ -248,7 +255,7 @@ impl OpenCADStudio {
             DockMsg, DropTarget, DOCK_STRIP_W, STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_GRIP_W,
             STRIP_PAD, STRIP_PLUS_GAP, STRIP_PLUS_H,
         };
-        let (layout, _) = self.dock_strip_layout(side);
+        let (layout, plus_top) = self.dock_strip_layout(side);
         let labels = self.dock.strip_labels;
         // Only a group actually on screen is marked as shown: on an
         // auto-hiding edge nothing is, until a group is revealed.
@@ -323,7 +330,7 @@ impl OpenCADStudio {
                         .center_y(Length::Fixed(cell_h)),
                 )
                 .on_press(Message::Dock(DockMsg::IconPress(id)))
-                .on_right_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
+                .on_right_press(Message::Dock(DockMsg::EdgeMenuAtPointer(side)))
                 .on_enter(Message::Dock(DockMsg::Hover(id)))
                 .on_exit(Message::Dock(DockMsg::HoverEnd(id)))
                 .interaction(iced::mouse::Interaction::Pointer);
@@ -416,7 +423,6 @@ impl OpenCADStudio {
                     .into(),
             );
         }
-        items.push(Space::new().height(STRIP_PLUS_GAP).into());
         let plus = button(crate::ui::icons::themed_secondary(
             crate::ui::icons::PLUS,
             14.0,
@@ -438,8 +444,17 @@ impl OpenCADStudio {
         .width(Length::Fixed(STRIP_PLUS_H))
         .height(Length::Fixed(STRIP_PLUS_H))
         .padding(7);
-        items.push(container(plus).center_x(Length::Fixed(DOCK_STRIP_W)).into());
-        container(column(items))
+        // The tabs clip above the +, so overflowing ones never push it away.
+        let tabs = container(column(items))
+            .height(Length::Fixed(plus_top - STRIP_PLUS_GAP))
+            .clip(true);
+        let strip = column![
+            tabs,
+            Space::new().height(STRIP_PLUS_GAP),
+            container(plus).center_x(Length::Fixed(DOCK_STRIP_W)),
+        ];
+        let strip = mouse_area(strip).on_move(|p| Message::Dock(DockMsg::StripPointer(p)));
+        container(strip)
             .width(Length::Fixed(DOCK_STRIP_W))
             .height(Fill)
             .style(|theme: &Theme| container::Style {

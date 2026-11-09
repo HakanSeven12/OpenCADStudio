@@ -409,6 +409,28 @@ pub fn quad_panels_for_target(
     panels
 }
 
+/// How many recent commands the hover and selection quads' Recent tab lists.
+const QUAD_RECENT_TAB: usize = 5;
+
+/// The commands run last, from any source (oldest first in `recent`), as a
+/// tab the hover and selection quads offer beside the target's own
+/// commands. `None` while nothing has run.
+pub fn recent_tab(recent: &[String]) -> Option<QuadPanel> {
+    let mut commands: Vec<String> = Vec::new();
+    for command in recent.iter().rev() {
+        push_unique(&mut commands, command.clone());
+        if commands.len() == QUAD_RECENT_TAB {
+            break;
+        }
+    }
+    (!commands.is_empty()).then(|| QuadPanel {
+        id: "quad.recent".to_string(),
+        label: "Recent".to_string(),
+        items: commands.iter().map(|c| QuadItem::from_command(c)).collect(),
+        applies_to: Vec::new(),
+    })
+}
+
 /// The primary panel of a hover/selection quad: `width` of the deduplicated
 /// union, tab-less under the cursor.
 fn entity_primary(union: &[String], width: usize) -> QuadPanel {

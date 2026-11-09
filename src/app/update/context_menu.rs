@@ -756,12 +756,20 @@ impl OpenCADStudio {
         let plugin_panels: Vec<crate::ui::popup::quad_menu::QuadPanel> = Vec::new();
         #[cfg(not(target_arch = "wasm32"))]
         let plugin_panels = crate::app::plugin_host::plugin_quad_panels(&self.disabled_plugins);
-        let panels = quad_panels_for_target(
+        let mut panels = quad_panels_for_target(
             &target,
             &self.quad_mru,
             self.quad_width as usize,
             &plugin_panels,
         );
+        // Beside an object's own commands, the ones run last on anything.
+        if matches!(mode, QuadMode::Hover | QuadMode::Selection) && !panels.is_empty() {
+            if let Some(recent) =
+                crate::ui::popup::quad_menu::recent_tab(&self.command_line.recent_commands)
+            {
+                panels.insert(1, recent);
+            }
+        }
         // Nothing to offer (an object type with no commands, an empty
         // creation catalogue): no quad, so the shortcut menu still answers
         // and Enter keeps its meaning. The hover and selection quads show

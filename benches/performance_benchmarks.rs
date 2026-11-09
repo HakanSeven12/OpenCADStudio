@@ -1570,6 +1570,7 @@ fn build_selection_overlay_element(
             is_plugin: false,
             is_authoring: false,
             is_dynamic: false,
+            is_filled: false,
         })
         .collect();
     let ucs_icons = vec![UcsIconParams {
@@ -1594,7 +1595,9 @@ fn build_selection_overlay_element(
         None,
         None,
         grips,
+        vec![],
         None,
+        vec![],
         None,
         ucs_icons,
         vec![OstTrackPoint {
@@ -1604,6 +1607,7 @@ fn build_selection_overlay_element(
         None,
         true,
         vec![],
+        None,
         None,
         None,
         NavCursor::None,

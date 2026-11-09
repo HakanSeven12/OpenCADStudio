@@ -1938,7 +1938,7 @@ impl CadCommand for ArcCommand {
                 self.step = ArcStep::EndSC { s, c: pt };
                 Some(CmdResult::NeedPoint)
             }
-            ArcStep::EndSC { s, c } if c.distance(pt) < 1e-9 => Some(invalid()),
+            ArcStep::EndSC { c, .. } if c.distance(pt) < 1e-9 => Some(invalid()),
             ArcStep::EndSC { s, c } => Some(self.commit(self.sc_end(s, c, pt))),
             // At a typed prompt a pick reads as commercial solutions do: the cursor's
             // direction from the centre (angle) or its distance (length,
@@ -2051,6 +2051,13 @@ impl CadCommand for ArcCommand {
                 if self.cw {
                     included = -included;
                 }
+                // As at the Start-Center angle: whole turns count off, and
+                // a whole number of them spans nothing.
+                let turns = included.abs() % TAU;
+                if turns < 1e-9 || TAU - turns < 1e-9 {
+                    return Some(invalid());
+                }
+                let included = turns.copysign(included);
                 Some(self.commit(arc_from_endpoints_angle(s, e, included, self.plane)))
             }
             ArcStep::DirectionSE { s, e } => {

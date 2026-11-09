@@ -254,6 +254,22 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::AboutOpen));
             }
 
+            // The check the program makes at start, on request: the notice
+            // when a newer release is out, a line saying so when not.
+            "CHECKFORUPDATES" => {
+                if cfg!(target_arch = "wasm32") {
+                    self.command_line
+                        .push_output(&crate::tr!("view", "web-always-latest"));
+                    return Some(Task::none());
+                }
+                self.command_line
+                    .push_info(&crate::tr!("view", "checking-for-updates"));
+                return Some(Task::perform(
+                    crate::io::update_check::check_for_update(),
+                    Message::UpdateCheckManual,
+                ));
+            }
+
             "PLUGINS" | "PLUGINMANAGER" => {
                 return Some(Task::done(Message::PluginManagerOpen));
             }

@@ -458,6 +458,7 @@ fn palette_highlight(theme: &Theme) -> container::Style {
 }
 
 /// Canvas state of one node.
+#[derive(Clone)]
 pub struct NodeUi {
     pub pos: Point,
     /// Expanded section titles and coordinate groups; a new object node opens
@@ -508,6 +509,18 @@ pub enum Drag {
     Pan(Point, Vector),
 }
 
+/// What undo and redo put back of a graph: its nodes, links and inputs,
+/// where they sit, and what its last evaluation changed in the drawing, so
+/// the next evaluation unwinds the right edits (#2731).
+#[derive(Clone)]
+pub struct GraphUndo {
+    engine: graph::Graph,
+    ui: HashMap<NodeId, NodeUi>,
+    applied: Vec<(Handle, EntityType)>,
+    applied_records: Vec<(Handle, document::objects::ObjectType)>,
+    created: Vec<Handle>,
+}
+
 #[derive(Default)]
 pub struct Graph {
     pub engine: graph::Graph,
@@ -534,6 +547,30 @@ pub struct Graph {
     pub created: Vec<Handle>,
 }
 
+impl Graph {
+    pub fn undo_state(&self) -> GraphUndo {
+        GraphUndo {
+            engine: self.engine.clone(),
+            ui: self.ui.clone(),
+            applied: self.applied.clone(),
+            applied_records: self.applied_records.clone(),
+            created: self.created.clone(),
+        }
+    }
+
+    /// Puts `state` back; open edits in fields are dropped with it.
+    pub fn restore(&mut self, state: &GraphUndo) {
+        let state = state.clone();
+        self.engine = state.engine;
+        self.ui = state.ui;
+        self.applied = state.applied;
+        self.applied_records = state.applied_records;
+        self.created = state.created;
+        self.drafts.clear();
+        self.drag = None;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum GraphMsg {
     Toggle,
@@ -549,6 +586,8 @@ pub enum GraphMsg {
     InPress(Port),
     Input(Port, String),
     Commit(Port),
+    /// Esc in a field: drop its draft, so the field shows its value again.
+    Discard(Port),
     /// The pointer went elsewhere: commit every draft but the focused field's.
     Leave(Option<Port>),
     /// A slider or toggle set an operation input.
@@ -593,7 +632,7 @@ fn node_tip(name: String, spec: Option<&Spec>) -> String {
     match spec {
         Some(spec) => {
             let inputs: Vec<&str> = spec.inputs.iter().map(|input| input.name).collect();
-            format!("{name}\n{} → {}", inputs.join(", "), spec.outputs.join(", "))
+            format!("{name}\n{} -> {}", inputs.join(", "), spec.outputs.join(", "))
         }
         None => name,
     }
@@ -618,7 +657,12 @@ fn is_coordinate(spec: &Spec, input: &graph::ops::Input) -> bool {
         return false;
     }
     match input.name {
-        "first" | "second" => !matches!(spec.name, "Fillet" | "Chamfer" | "Centerline"),
+        // An object to pick, where the spec also asks for the point that
+        // picks it (`first` beside `first point`).
+        "first" | "second" => !spec
+            .inputs
+            .iter()
+            .any(|other| other.name.strip_suffix(" point") == Some(input.name)),
         "a" | "b" => spec.category == "Geometry",
         "third" | "point" | "center" | "location" | "vector" | "corner" | "vertex" | "base"
         | "side" | "keep" | "jog" | "feature" | "leader" => true,
@@ -637,7 +681,12 @@ fn field_id(port: &Port) -> widget::Id {
 }
 
 /// Whether `text` is a number, or could still become one with more typing.
+/// A list (`[1, 2.5, 3]`) runs the node once per element.
 fn number_prefix(text: &str) -> bool {
+    if let Some(list) = text.strip_prefix('[') {
+        let list = list.strip_suffix(']').unwrap_or(list);
+        return list.split(',').all(|item| number_prefix(item.trim()));
+    }
     let digits = |part: &str| part.chars().all(|c| c.is_ascii_digit());
     let unsigned = text.strip_prefix('-').unwrap_or(text);
     let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
@@ -1902,6 +1951,17 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
                 return;
             }
         }
+        // Esc leaves the field (the text input's own handling) and abandons
+        // the edit, which the next click would otherwise commit.
+        if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        }) = event
+        {
+            if let Some(port) = self.focused(tree, content, renderer) {
+                shell.publish(msg(GraphMsg::Discard(port)));
+            }
+        }
         let pressed = matches!(
             event,
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -2066,7 +2126,7 @@ mod palette_tests {
     #[test]
     fn tooltips_name_a_node_and_its_ports() {
         let spec = graph::spec("Add");
-        assert_eq!(node_tip("Add".to_owned(), spec), "Add\na, b → result");
+        assert_eq!(node_tip("Add".to_owned(), spec), "Add\na, b -> result");
         assert_eq!(node_tip("Line".to_owned(), None), "Line");
     }
 

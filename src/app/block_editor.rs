@@ -321,6 +321,7 @@ impl OpenCADStudio {
             structure,
             parametric_constraints,
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters,
             label: super::tab_document::HistoryLabel::formatted(format!("Edit block {}", session.block_name), "edit-block", session.block_name.to_owned().into()),
         })

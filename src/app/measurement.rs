@@ -279,7 +279,6 @@ mod measurement_tests {
         assert!(app.tabs[i].active_cmd.is_none());
         assert!(app.measurement_readout(i).unwrap().text.contains("Radius"));
         let _ = app.dispatch_command("MEASUREANGLE");
-        let _ = app.feed_command(StepInput::Text("LINES".into()));
         let _ = app.feed_command(StepInput::EntityPick(first, DVec3::X));
         let _ = app.feed_command(StepInput::EntityPick(second, DVec3::Y));
         assert!(app.tabs[i].active_cmd.is_none());

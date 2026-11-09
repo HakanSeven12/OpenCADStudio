@@ -2944,8 +2944,6 @@ mod area_query_tests {
         );
     }
 
-    /// An index-restricted result depends on the query, not just the wires, so
-    /// it must never be served from the whole-set cache.
     #[test]
     fn a_local_expansion_keeps_every_leaf_the_aperture_could_hit() {
         // Leaves 100 units apart, so a few-unit aperture excludes most of
@@ -3010,6 +3008,8 @@ mod area_query_tests {
         );
     }
 
+    /// An index-restricted result depends on the query, not just the wires, so
+    /// it must never be served from the whole-set cache.
     #[test]
     fn a_restricted_query_is_not_offered_to_the_expansion_cache() {
         let wires = sample();

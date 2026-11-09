@@ -1175,16 +1175,6 @@ impl MeasureGeomCommand {
         Some(a.cross(b).length().atan2(a.dot(b)).to_degrees())
     }
 
-    fn line_direction(entity: &EntityType) -> Option<DVec3> {
-        let EntityType::Line(line) = entity else {
-            return None;
-        };
-        Self::direction(
-            DVec3::new(line.end.x, line.end.y, line.end.z)
-                - DVec3::new(line.start.x, line.start.y, line.start.z),
-        )
-    }
-
     // Unoriented lines: the smaller angle, independent of endpoint order.
     fn line_angle(a: DVec3, b: DVec3) -> Option<f64> {
         Self::angle_degrees(a, b).map(|angle| angle.min(180.0 - angle))
@@ -1613,13 +1603,16 @@ impl CadCommand for MeasureGeomCommand {
                 .as_ref()
                 .and_then(|(_, e)| Self::radius_at(e, cursor))
                 .map(Self::radius_msg),
+            // As the pick reads it: a polyline's straight segment counts,
+            // another segment of the same polyline too.
             Mode::AngleLines => {
-                let (first_handle, first) = self.first_line?;
-                let (handle, entity) = self.hovered.as_ref()?;
-                if first_handle == *handle {
+                use crate::modules::annotate::angular_dim::{picked_shape, PickedShape};
+                let (_, first) = self.first_line?;
+                let (_, entity) = self.hovered.as_ref()?;
+                let Some(PickedShape::Line { direction }) = picked_shape(entity, cursor) else {
                     return None;
-                }
-                Self::line_angle(first, Self::line_direction(entity)?).map(Self::angle_value_msg)
+                };
+                Self::line_angle(first, direction).map(Self::angle_value_msg)
             }
             _ => None,
         }
@@ -2257,6 +2250,8 @@ mod measurement_tests {
         assert!(text.contains("6.0000") && text.contains("12.0000"));
         let mut command = MeasureGeomCommand::new();
         command.on_text_input("A");
+        // Angle opens on the object prompt; Enter goes to the vertex.
+        command.on_enter();
         command.on_point(DVec3::ZERO);
         command.on_point(DVec3::X);
         assert!(result(command.on_point(DVec3::Y)).contains("90.00°"));

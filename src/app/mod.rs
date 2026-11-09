@@ -5609,6 +5609,9 @@ pub enum Message {
     /// GitHub releases API returned a result. `Some(version)` means a
     /// newer release exists; we open the update-notice window.
     UpdateCheckResult(Option<crate::io::update_check::UpdateInfo>),
+    /// CHECKFORUPDATES' answer: shown at once, and reported when there is
+    /// nothing newer.
+    UpdateCheckManual(Option<crate::io::update_check::UpdateInfo>),
     /// The process was asked to stop (SIGTERM).
     #[cfg(not(target_arch = "wasm32"))]
     Terminate,

@@ -1,11 +1,12 @@
 name: Publish to WinGet
 
+# After the Release workflow has built and uploaded the installers. A
+# `release: published` trigger would run before the MSI files exist, and
+# twice per release together with this one.
 on:
   workflow_run:
     workflows: ["Release"]
     types: [completed]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -33,9 +34,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          TAG="${INPUT_TAG:-${{ github.event.release.tag_name }}}"
+          # A release-triggered run's head branch is the release tag.
+          TAG="${INPUT_TAG:-${{ github.event.workflow_run.head_branch }}}"
           if [ -z "$TAG" ]; then
             TAG=$(gh release view --repo ${{ github.repository }} --json tagName -q .tagName)
+          fi
+          if [ "$(gh release view "$TAG" --repo ${{ github.repository }} --json isPrerelease -q .isPrerelease)" = "true" ]; then
+            echo "$TAG is a pre-release; WinGet gets stable releases only." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Target release tag: $TAG"
@@ -66,7 +72,7 @@ jobs:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
 
       - name: Publish to WinGet with run-komac
-        if: steps.check-token.outputs.configured == 'true'
+        if: steps.check-token.outputs.configured == 'true' && steps.resolve-tag.outputs.skip != 'true'
         uses: michidk/run-komac@v2
         with:
           args: >-

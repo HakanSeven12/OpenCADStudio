@@ -235,6 +235,7 @@ impl OpenCADStudio {
             structure: (!objects.is_empty()).then_some(StructureSnapshot::Objects(objects)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: label.into(),
         };
@@ -386,7 +387,12 @@ impl OpenCADStudio {
                 });
             }
         }
+        let graph = pending
+            .graph_before
+            .take()
+            .map(|before| Box::new((before, self.tabs[i].graph.undo_state())));
         if !pending.keep_empty
+            && graph.is_none()
             && visibility_states.is_none()
             && entities.is_empty()
             && reference_designations.is_empty()
@@ -415,6 +421,7 @@ impl OpenCADStudio {
                 .then_some(StructureSnapshot::Full(pending.structure_before)),
             parametric_constraints,
             reference_designations,
+            graph,
             named_parameters: None,
             label: pending.label,
         };
@@ -431,6 +438,11 @@ impl OpenCADStudio {
     }
 
     pub(super) fn finish_all_pending_history(&mut self) {
+        // A graph evaluation drives nested updates (an object node writes
+        // through the Properties path); its step closes after it, as one.
+        if self.graph_undo_open {
+            return;
+        }
         for i in 0..self.tabs.len() {
             // A plugin's scope spans the commands its running request drives;
             // the message boundary after the request closes it.
@@ -485,6 +497,7 @@ impl OpenCADStudio {
             plugin_owned: false,
             keep_empty: false,
             held: false,
+            graph_before: None,
         });
     }
 
@@ -691,6 +704,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::Layers(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: pending.label,
         };
@@ -752,6 +766,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::TextStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: pending.label,
         };
@@ -813,6 +828,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::DimStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: pending.label,
         };
@@ -894,6 +910,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::Objects(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: pending.label,
         };
@@ -934,6 +951,7 @@ impl OpenCADStudio {
             }),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            graph: None,
             named_parameters: None,
             label: "STYLE".into(),
         };
@@ -1144,6 +1162,7 @@ impl OpenCADStudio {
             structure,
             parametric_constraints,
             reference_designations,
+            graph: None,
             named_parameters,
             label: pending.label,
         };
@@ -1301,6 +1320,11 @@ impl OpenCADStudio {
         d: &mut DeltaSnapshot,
         undo: bool,
     ) -> Vec<(Handle, crate::scene::ChangeKind)> {
+        if let Some(graph) = &d.graph {
+            self.tabs[i]
+                .graph
+                .restore(if undo { &graph.0 } else { &graph.1 });
+        }
         // Install the chosen side of every entity image. Derived-cache, geometry
         // and UI invalidation are deferred until every requested undo/redo step
         // has been applied.

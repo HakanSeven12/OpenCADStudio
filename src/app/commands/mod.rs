@@ -1380,6 +1380,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DORBIT",
         "3O",
         "ABOUT",
+        "CHECKFORUPDATES",
         "ATTACH",
         "ATTDISP",
         "ATTEXT",

@@ -250,6 +250,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "3D Views" => Some(("menu-labels", "n-3d-views")),
         "4 Viewports" => Some(("menu-labels", "n-4-viewports")),
         "About Open CAD Studio" => Some(("menu-labels", "about-open-cad-studio")),
+        "Check for Updates..." => Some(("menu-labels", "check-for-updates")),
         "Align Text" => Some(("menu-labels", "align-text")),
         "Arrange Icons" => Some(("menu-labels", "arrange-icons")),
         "Attribute Display" => Some(("menu-labels", "attribute-display")),

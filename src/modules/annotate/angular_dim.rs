@@ -1075,6 +1075,14 @@ fn polyline_segment(
         });
     }
     let center = BulgeArc::from_bulge(first, second, bulge)?.center;
+    // An arc runs counter-clockwise from its first point to its second; a
+    // clockwise segment (negative bulge) runs the other way along the
+    // polyline, so its ends swap.
+    let (first_world, second_world, refs) = if bulge < 0.0 {
+        (second_world, first_world, [refs[1], refs[0]])
+    } else {
+        (first_world, second_world, refs)
+    };
     Some(PickedCurve::Arc {
         center: to_world(center),
         first: first_world,

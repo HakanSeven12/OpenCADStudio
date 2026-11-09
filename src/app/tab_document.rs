@@ -1170,6 +1170,9 @@ pub(super) struct DeltaSnapshot {
     /// the entity it belongs to (e.g. a plugin scope that both erases and
     /// re-designates). Almost always empty.
     pub(super) reference_designations: Vec<ReferenceDesignationDelta>,
+    /// The node graph before and after a graph evaluation, which edits the
+    /// drawing from the graph's inputs (#2731).
+    pub(super) graph: Option<Box<(crate::ui::node_graph::GraphUndo, crate::ui::node_graph::GraphUndo)>>,
     /// Drawing-wide parameter table changed by this transaction.
     pub(super) named_parameters: Option<(
         crate::scene::named_parameters::ParameterTable,
@@ -1294,6 +1297,8 @@ pub(super) struct PendingHistorySnapshot {
     /// A plugin's undo group: message boundaries leave it open until the
     /// plugin ends it or the user runs a command.
     pub(super) held: bool,
+    /// The node graph when a graph evaluation opened this step.
+    pub(super) graph_before: Option<crate::ui::node_graph::GraphUndo>,
 }
 
 

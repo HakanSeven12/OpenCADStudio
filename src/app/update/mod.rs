@@ -13628,6 +13628,21 @@ impl OpenCADStudio {
                     .push_back(super::ModalKind::UpdateNotice);
                 Task::none()
             }
+            Message::UpdateCheckManual(latest) => {
+                let Some(info) = latest else {
+                    self.command_line.push_output(&crate::tr!(
+                        "view",
+                        "no-newer-release",
+                        version = env!("OCS_APP_VERSION")
+                    ));
+                    return Task::none();
+                };
+                self.update_notice_version = Some(info.version);
+                self.update_notice_body = Some(info.body);
+                self.active_modal = Some(super::ModalKind::UpdateNotice);
+                self.reset_modal_geometry();
+                Task::none()
+            }
             Message::DonationPromptDonate => {
                 self.close_active_modal();
                 self.dispatch_view("DONATE", self.active_tab)

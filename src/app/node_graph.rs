@@ -68,6 +68,20 @@ fn typed_value(row: &NodeRow, raw: &str) -> Option<Value> {
     // Typed text is protocol JSON when it parses (numbers, true,
     // {"rgb":[..]}), otherwise a plain string.
     let parsed = || serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_owned()));
+    // A list runs the node once per element, each read as the row reads one.
+    if matches!(row.widget, RowWidget::Number | RowWidget::Measure) {
+        if let Ok(Value::Array(items)) = serde_json::from_str::<Value>(text) {
+            return items
+                .iter()
+                .map(|item| match item {
+                    Value::Number(_) => Some(item.clone()),
+                    Value::String(item) => typed_value(row, item),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(Value::Array);
+        }
+    }
     match row.widget {
         RowWidget::Number => text
             .parse()
@@ -118,6 +132,13 @@ fn settle_coordinates(params: &mut std::collections::BTreeMap<String, Value>, fi
             params.insert(member.to_owned(), graph::value::number(x));
         }
     }
+}
+
+/// Sets a node parameter: typed, by a slider or through automation alike, so
+/// a coordinate group and its components never both hold the value.
+fn set_param(params: &mut std::collections::BTreeMap<String, Value>, field: String, value: Value) {
+    settle_coordinates(params, &field);
+    params.insert(field, value);
 }
 
 /// Whether `value`, typed as `raw`, is what `row` already holds.
@@ -418,6 +439,10 @@ impl OpenCADStudio {
         edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
     ) -> Task<Message> {
         self.push_undo_snapshot(i, "GRAPH");
+        let before = self.tabs[i].graph.undo_state();
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.graph_before = Some(before);
+        }
         self.graph_undo_open = true;
         self.graph_unwind(i);
         let mut tasks = edit(self);
@@ -573,6 +598,9 @@ impl OpenCADStudio {
                 });
             }
             GraphMsg::Commit(port) => return self.graph_commit(i, vec![port]),
+            GraphMsg::Discard(port) => {
+                self.tabs[i].graph.drafts.remove(&port);
+            }
             GraphMsg::Leave(focused) => {
                 let ports = self.tabs[i]
                     .graph
@@ -715,9 +743,6 @@ impl OpenCADStudio {
         tab.graph.to_file(&tab.scene.document.header.fingerprint_guid)
     }
 
-    /// An edited input, kept as the node's parameter: an operation reads it
-    /// while nothing is linked, an object node writes it to every entity it
-    /// stands for on each evaluation.
     /// Turns the drafts of `ports` into the values of their inputs, then runs
     /// the graph once. A draft that is invalid or changes nothing is dropped,
     /// so the field shows its value again and no undo step is made.
@@ -745,8 +770,7 @@ impl OpenCADStudio {
                 continue;
             };
             if let Some(node) = graph.engine.node_mut(port.node) {
-                settle_coordinates(&mut node.params, &port.field);
-                node.params.insert(port.field, value);
+                set_param(&mut node.params, port.field, value);
                 changed = true;
             }
         }
@@ -757,11 +781,14 @@ impl OpenCADStudio {
         }
     }
 
+    /// An edited input, kept as the node's parameter: an operation reads it
+    /// while nothing is linked, an object node writes it to every entity it
+    /// stands for on each evaluation.
     fn graph_set(&mut self, i: usize, port: Port, value: Value) -> Task<Message> {
         let Some(node) = self.tabs[i].graph.engine.node_mut(port.node) else {
             return Task::none();
         };
-        node.params.insert(port.field, value);
+        set_param(&mut node.params, port.field, value);
         self.graph_run(i)
     }
 }

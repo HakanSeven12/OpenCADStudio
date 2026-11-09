@@ -25,11 +25,10 @@ Open CAD Studio uses calendar-based weekly tags (e.g. `v2026.45`). Because Windo
 
 The [`.github/workflows/winget.yml`](../../.github/workflows/winget.yml) workflow automates submitting manifest pull requests to `microsoft/winget-pkgs`:
 
-1. It triggers on new published releases or via manual `workflow_dispatch`.
+1. It runs when the Release workflow has finished uploading the installers, or by hand via `workflow_dispatch` (optionally with a tag).
 2. It calls `scripts/release.py versions --tag <tag>` to resolve the MSI version (`26.45.0`).
-3. It uses `vedantmgoyal9/winget-releaser@v2` (powered by [Komac](https://github.com/russellbanks/Komac)) to:
-   - Filter the release assets for the x64 and arm64 MSI installers (`-installer.msi$`).
-   - Sync the repository fork with upstream `microsoft/winget-pkgs`.
+3. It uses `michidk/run-komac@v2` ([Komac](https://github.com/russellbanks/Komac)) to:
+   - Point the manifest at the release's x64 and arm64 MSI installers.
    - Update and submit the package manifest to `microsoft/winget-pkgs`.
 
 #### Required Repository Secret

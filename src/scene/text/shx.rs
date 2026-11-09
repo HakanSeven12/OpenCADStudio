@@ -270,6 +270,15 @@ pub fn shape_number(path: &str, name: &str) -> Option<u16> {
         .map(|(&num, _)| num)
 }
 
+/// The name of shape `number` in the SHX at `path`, when it has one.
+pub fn shape_name(path: &str, number: u16) -> Option<String> {
+    load_file(path)?
+        .shapes
+        .get(&number)
+        .map(|(name, _)| name.clone())
+        .filter(|name| !name.is_empty())
+}
+
 /// Tessellate `shape_number` from the SHX at `path` into unit-space
 /// polylines. `None` when the file/shape is missing or not a shapes file.
 pub fn shape_polylines(path: &str, shape_number: u16) -> Option<ShapePolylines> {

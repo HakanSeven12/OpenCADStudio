@@ -1955,6 +1955,44 @@ impl OpenCADStudio {
                     "objects_on_screen" => Message::BlockDefObjectsOnScreen(on),
                     "create_empty" => Message::BlockDefCreateEmpty,
                     "select_objects" => Message::BlockDefSelectObjects,
+                    "mode" => {
+                        use crate::ui::window::block_definition::BlockObjectMode;
+                        let mode = match v.to_ascii_lowercase().as_str() {
+                            "retain" => BlockObjectMode::Retain,
+                            "convert" => BlockObjectMode::Convert,
+                            "delete" => BlockObjectMode::Delete,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "mode is retain, convert or delete",
+                                ))
+                            }
+                        };
+                        Message::BlockDefObjectMode(mode)
+                    }
+                    "annotative" => Message::BlockDefAnnotative(on),
+                    "match_orientation" => Message::BlockDefMatchOrientation(on),
+                    "scale_uniformly" => Message::BlockDefScaleUniformly(on),
+                    "allow_exploding" => Message::BlockDefAllowExploding(on),
+                    "unit" => {
+                        let unit = v
+                            .trim()
+                            .parse::<i16>()
+                            .or_else(|_| match v.to_ascii_lowercase().as_str() {
+                                "inch" | "inches" => Ok(1),
+                                "foot" | "feet" => Ok(2),
+                                "mm" => Ok(4),
+                                "cm" => Ok(5),
+                                "m" | "meter" | "meters" => Ok(6),
+                                _ => Err(()),
+                            })
+                            .map_err(|_| {
+                                failure("invalid_value", "unit is an insertion unit code or name")
+                            })?;
+                        Message::BlockDefUnit(unit)
+                    }
+                    "description" => Message::BlockDefDescription(v.to_string()),
+                    "hyperlink" => Message::BlockDefHyperlink,
                     _ => return Err(failure("invalid_value", "Unknown block definition field")),
                 }
             }

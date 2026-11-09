@@ -7125,4 +7125,37 @@ mod batch5_tests {
             "the default anchors at the source's bounding corner: {inserts:?}"
         );
     }
+
+    #[test]
+    fn setbylayer_reset_is_scriptable() {
+        use document::Entity as _;
+
+        let mut app = new_app();
+        let reply = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .next()
+            .unwrap()
+            .common()
+            .handle;
+        // An empty selection is reported, not silently ignored.
+        let empty = app.automation_op(r#"{"op":"run","cmd":"-SETBYLAYER"}"#);
+        let text = out(&app);
+        assert!(text.contains("SETBYLAYER"), "{empty}: {text}");
+
+        let _ = app.automation_op(r#"{"op":"run","cmd":"SELECTALL"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"CHPROP COLOR 1"}"#);
+        let pre = app.tabs[i].scene.document.get_entity(line).unwrap();
+        assert_eq!(pre.common().color, document::types::Color::Index(1));
+
+        let _ = app.automation_op(r#"{"op":"run","cmd":"-SETBYLAYER"}"#);
+        let post = app.tabs[i].scene.document.get_entity(line).unwrap();
+        assert_eq!(post.common().color, document::types::Color::ByLayer);
+        let text = out(&app);
+        assert!(text.contains("reset 1 entity"), "{text}");
+    }
 }

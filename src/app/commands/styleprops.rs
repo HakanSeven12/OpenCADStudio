@@ -724,12 +724,54 @@ impl OpenCADStudio {
                         .push_rejection("SETBYLAYERMODE requires an integer from 0 to 255.");
                 }
             }
-            "SETBYLAYER" | "-SETBYLAYER" => {
+            "SETBYLAYER" => {
                 let command = crate::modules::draw::modify::setbylayer::SetByLayerCommand::new(
                     self.tabs[i].scene.selected.iter().copied().collect(),
                 );
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
+            }
+            "-SETBYLAYER" => {
+                // Dash form: the current mask, the ByBlock and nested-block
+                // defaults the interactive path asks for, no prompts.
+                self.apply_bylayer(i, crate::modules::draw::modify::setbylayer::mode(), false, false);
+            }
+            cmd if cmd.starts_with("-SETBYLAYER ") => {
+                // One-line script form: `-SETBYLAYER [COLOR] [LTYPE]`...
+                // `-SETBYLAYER BYBLOCK BLOCKS` sets every property with ByBlock
+                // and nested blocks honoured. No selection → an error, not a
+                // silent no-op.
+                let tokens = cmd["-SETBYLAYER ".len()..]
+                    .split_whitespace()
+                    .collect::<Vec<_>>();
+                let mut mask = 0;
+                let mut byblock = false;
+                let mut blocks = false;
+                for key in &tokens {
+                    match key.to_ascii_uppercase().as_str() {
+                        "COLOR" | "C" | "COLOUR" => mask |= 1,
+                        "LTYPE" | "LT" | "LINETYPE" => mask |= 2,
+                        "LINEWEIGHT" | "LW" => mask |= 4,
+                        "TRANSPARENCY" | "T" => mask |= 128,
+                        "MATERIAL" | "M" => mask |= 8,
+                        "PLOTSTYLE" | "PS" => mask |= 16,
+                        "BYBLOCK" | "CB" | "ALL" => byblock = true,
+                        "BLOCKS" | "INCL" => blocks = true,
+                        "" => {}
+                        _ => {
+                            self.command_line.push_error(
+                                crate::tf!("SETBYLAYER: unknown property \"{key}\".").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                    }
+                }
+                if mask == 0 {
+                    // No property named: fall back to the current mask, the
+                    // same default the interactive `Settings` round offers.
+                    mask = crate::modules::draw::modify::setbylayer::mode();
+                }
+                self.apply_bylayer(i, mask, byblock, blocks);
             }
             cmd if cmd.starts_with("SETBYLAYER_APPLY ") => {
                 let flags: Vec<_> = cmd.split_whitespace().skip(1).collect();
@@ -737,92 +779,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 let mask = crate::modules::draw::modify::setbylayer::mode();
-                let change_byblock = flags[0] == "1";
-                let include_blocks = flags[1] == "1";
-                let mut handles: Vec<_> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .map(|(h, _)| h)
-                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
-                    .collect();
-                if include_blocks {
-                    let mut visited: std::collections::HashSet<_> =
-                        handles.iter().copied().collect();
-                    let mut index = 0;
-                    while index < handles.len() {
-                        let children = match self.tabs[i].scene.document.get_entity(handles[index])
-                        {
-                            Some(document::EntityType::Insert(insert)) => self.tabs[i]
-                                .scene
-                                .document
-                                .block_records
-                                .get(&insert.block_name)
-                                .map(|block| block.entity_handles.clone())
-                                .unwrap_or_default(),
-                            _ => Vec::new(),
-                        };
-                        for child in children {
-                            if visited.insert(child) && !self.tabs[i].scene.is_layer_locked(child) {
-                                handles.push(child);
-                            }
-                        }
-                        index += 1;
-                    }
-                }
-                if handles.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("SETBYLAYER: select entities first.").as_ref());
-                } else {
-                    let has_changes = handles.iter().any(|handle| {
-                        self.tabs[i]
-                            .scene
-                            .document
-                            .get_entity(*handle)
-                            .is_some_and(|entity| {
-                                let mut common = entity.common().clone();
-                                crate::modules::draw::modify::setbylayer::apply_mask(
-                                    &mut common,
-                                    mask,
-                                    change_byblock,
-                                )
-                            })
-                    });
-                    if !has_changes {
-                        self.command_line.push_output(
-                            crate::t!("SETBYLAYER: no properties required changes.").as_ref(),
-                        );
-                        return Some(Task::none());
-                    }
-                    self.push_undo_snapshot(i, "SETBYLAYER");
-                    let mut changed = Vec::new();
-                    for handle in &handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
-                            if crate::modules::draw::modify::setbylayer::apply_mask(
-                                entity.common_mut(),
-                                mask,
-                                change_byblock,
-                            ) {
-                                changed.push(*handle);
-                            }
-                        }
-                    }
-                    self.tabs[i].dirty = true;
-                    let changes: Vec<_> = changed
-                        .iter()
-                        .copied()
-                        .map(|handle| (handle, crate::scene::ChangeKind::Modified))
-                        .collect();
-                    self.tabs[i].scene.bump_entities(&changes);
-                    self.refresh_properties();
-                    self.command_line.push_output(
-                        crate::tf!(
-                            "SETBYLAYER: reset {} entity/entities to ByLayer.",
-                            changed.len()
-                        )
-                        .as_ref(),
-                    );
-                }
+                self.apply_bylayer(i, mask, flags[0] == "1", flags[1] == "1");
             }
 
             // OVERKILL gathers objects, exposes cleanup settings (dialog, or the
@@ -5376,6 +5333,102 @@ mod scale_validation_tests {
 }
 
 impl OpenCADStudio {
+    /// SETBYLAYER's shared workhorse: reset every selected entity's
+    /// hard-set colour, linetype, lineweight, transparency, material and
+    /// plot style back to ByLayer/ByBlock, honouring the flags and nesting
+    /// block content when `include_blocks`. One undo snapshot, one report.
+    pub(in crate::app) fn apply_bylayer(
+        &mut self,
+        i: usize,
+        mask: u8,
+        change_byblock: bool,
+        include_blocks: bool,
+    ) {
+        let mut handles: Vec<_> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        if include_blocks {
+            let mut visited: std::collections::HashSet<_> = handles.iter().copied().collect();
+            let mut index = 0;
+            while index < handles.len() {
+                let children =
+                    match self.tabs[i].scene.document.get_entity(handles[index]) {
+                        Some(document::EntityType::Insert(insert)) => self.tabs[i]
+                            .scene
+                            .document
+                            .block_records
+                            .get(&insert.block_name)
+                            .map(|block| block.entity_handles.clone())
+                            .unwrap_or_default(),
+                        _ => Vec::new(),
+                    };
+                for child in children {
+                    if visited.insert(child) && !self.tabs[i].scene.is_layer_locked(child) {
+                        handles.push(child);
+                    }
+                }
+                index += 1;
+            }
+        }
+        if handles.is_empty() {
+            self.command_line
+                .push_error(crate::t!("SETBYLAYER: select entities first.").as_ref());
+            return;
+        }
+        let has_changes = handles.iter().any(|handle| {
+            self.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .is_some_and(|entity| {
+                    let mut common = entity.common().clone();
+                    crate::modules::draw::modify::setbylayer::apply_mask(
+                        &mut common,
+                        mask,
+                        change_byblock,
+                    )
+                })
+        });
+        if !has_changes {
+            self.command_line.push_output(
+                crate::t!("SETBYLAYER: no properties required changes.").as_ref(),
+            );
+            return;
+        }
+        self.push_undo_snapshot(i, "SETBYLAYER");
+        let mut changed = Vec::new();
+        for handle in &handles {
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                if crate::modules::draw::modify::setbylayer::apply_mask(
+                    entity.common_mut(),
+                    mask,
+                    change_byblock,
+                ) {
+                    changed.push(*handle);
+                }
+            }
+        }
+        self.tabs[i].dirty = true;
+        let changes: Vec<_> = changed
+            .iter()
+            .copied()
+            .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.tabs[i].scene.bump_entities(&changes);
+        self.refresh_properties();
+        self.command_line.push_output(
+            crate::tf!(
+                "SETBYLAYER: reset {} entity/entities to ByLayer.",
+                changed.len()
+            )
+            .as_ref(),
+        );
+    }
+
     /// XDWGFADECTL: store it in the profile, show it on the ribbon and redraw
     /// every tab's referenced drawings.
     pub(in crate::app) fn set_xref_fade(&mut self, fade: i32) {

@@ -1385,6 +1385,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "FILEASSOC",
         // Reset selected entities' overrides to follow their layer.
         "SETBYLAYER",
+        // One-line script form: `-SETBYLAYER [COLOR] [LTYPE] ...`.
+        "-SETBYLAYER",
         // Remove duplicate objects; set drawing base point; audit integrity;
         // read/write system variables.
         "OVERKILL",

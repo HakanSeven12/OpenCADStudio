@@ -739,11 +739,29 @@ impl OpenCADStudio {
                 start(self, ScriptPromptCommand::new("-PURGE", purge_flow()))
             }
             "-PURGE" => {
-                if matches!(arg(0), "ALL" | "BLOCKS" | "LAYERS" | "LINETYPES" | "STYLES") {
+                if matches!(
+                    arg(0),
+                    "ALL"
+                        | "BLOCKS"
+                        | "LAYERS"
+                        | "LINETYPES"
+                        | "STYLES"
+                        | "DIMSTYLES"
+                        | "MLEADERSTYLES"
+                        | "TABLESTYLES"
+                        | "MLINESTYLES"
+                        | "GROUPS"
+                        | "MATERIALS"
+                        | "ZEROLENGTH"
+                        | "EMPTYTEXT"
+                ) {
                     return Some(self.dispatch_command(&format!("PURGE {} {}", arg(0), arg(1))));
                 }
-                // ponytail: only the tables the inline PURGE knows are purged;
-                // the rest answer so a script keeps going.
+                // ponytail: regapps, detail view, plot and visual styles,
+                // shapes and orphaned data are not purged: their users are
+                // not all known to the drawing model (raw passthrough data
+                // can name them), so removing one could break the file. They
+                // answer so a script keeps going.
                 self.command_line
                     .push_output(crate::tf!("PURGE: {} are not purged yet.", arg(0)).as_ref());
             }

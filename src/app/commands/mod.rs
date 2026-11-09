@@ -10,7 +10,7 @@ mod blocks;
 mod blockvars;
 mod center_vars;
 mod revcloud_vars;
-mod purge;
+pub(crate) mod purge;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
 mod bvisibility;

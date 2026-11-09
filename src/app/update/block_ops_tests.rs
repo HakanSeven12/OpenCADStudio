@@ -1480,7 +1480,9 @@ fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
         doc.dim_styles.add(style).unwrap();
         doc.layers.add(Layer::new("Unused")).unwrap();
     }
-    let _ = app.dispatch_command("PURGE ALL");
+    // ALL would purge the unused dimstyle first and its linetype with it.
+    let _ = app.dispatch_command("PURGE LAYERS");
+    let _ = app.dispatch_command("PURGE LINETYPES");
     let doc = &app.tabs[i].scene.document;
     assert!(doc.layers.get("WORK").is_some(), "purged the current layer");
     assert!(doc.line_types.get("DIM_DASH").is_some(), "purged a dimstyle's linetype");
@@ -1512,7 +1514,8 @@ fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
         doc.objects
             .insert(table_style.handle, ObjectType::TableStyle(table_style));
     }
-    let _ = app.dispatch_command("PURGE ALL");
+    // ALL would purge the unused styles first and their text styles with them.
+    let _ = app.dispatch_command("PURGE STYLES");
     let doc = &app.tabs[i].scene.document;
     assert!(doc.text_styles.get("LEADER_TEXT").is_some(), "purged a multileader style's text style");
     assert!(doc.text_styles.get("TABLE_TEXT").is_some(), "purged a table style's text style");

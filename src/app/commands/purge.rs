@@ -1,18 +1,55 @@
 //! PURGE's choice of what can go: one pass over a drawing, shared by the
 //! command and the Purge dialog.
 
-use document::{Document, Handle};
+use crate::app::style_ops::{style_in_use, StyleKind};
+use document::objects::ObjectType;
+use document::{Document, EntityType, Handle};
 
-/// The layers, text styles, linetypes and blocks one PURGE pass removes from
-/// `doc`, for the kinds `wanted` turns on (layers, styles, linetypes,
-/// blocks). Removing blocks can free what only they used, so a full purge
-/// repeats passes until one finds nothing.
+/// The kinds PURGE removes, in the order `purge_pass` reports them.
+pub(crate) const KINDS: usize = 12;
+pub(crate) const LAYERS: usize = 0;
+pub(crate) const TEXT_STYLES: usize = 1;
+pub(crate) const LINETYPES: usize = 2;
+pub(crate) const BLOCKS: usize = 3;
+pub(crate) const DIM_STYLES: usize = 4;
+pub(crate) const MLEADER_STYLES: usize = 5;
+pub(crate) const TABLE_STYLES: usize = 6;
+pub(crate) const MLINE_STYLES: usize = 7;
+pub(crate) const GROUPS: usize = 8;
+pub(crate) const MATERIALS: usize = 9;
+/// Entities, not definitions: named `TYPE HANDLE` (`LINE 2A`).
+pub(crate) const ZERO_LENGTH: usize = 10;
+pub(crate) const EMPTY_TEXT: usize = 11;
+
+/// The style kind a style purge kind removes through the style managers'
+/// shared storage.
+pub(crate) fn style_kind(kind: usize) -> Option<StyleKind> {
+    Some(match kind {
+        DIM_STYLES => StyleKind::Dim,
+        MLEADER_STYLES => StyleKind::MLeader,
+        TABLE_STYLES => StyleKind::Table,
+        MLINE_STYLES => StyleKind::MLine,
+        _ => return None,
+    })
+}
+
+/// The handle in an entity item's `TYPE HANDLE` name.
+pub(crate) fn item_handle(name: &str) -> Option<Handle> {
+    let hex = name.rsplit(' ').next()?;
+    u64::from_str_radix(hex, 16).ok().map(Handle::new)
+}
+
+/// What one PURGE pass removes from `doc`, per kind, for the kinds `wanted`
+/// turns on. Removing blocks can free what only they used, so a full purge
+/// repeats passes until one finds nothing. `active_mleader` is the session's
+/// current multileader style, which is kept.
 pub(crate) fn purge_pass(
     doc: &Document,
     open_edits: &[Handle],
-    wanted: [bool; 4],
-) -> [Vec<String>; 4] {
-    let [do_layers, do_styles, do_lts, do_blocks] = wanted;
+    wanted: [bool; KINDS],
+    active_mleader: &str,
+) -> [Vec<String>; KINDS] {
+    let [do_layers, do_styles, do_lts, do_blocks, ..] = wanted;
     // Xref-dependent records (`Xref|Name`) belong to the xref and come back
     // with its next reload, so they are never purged, also when the xref did
     // not resolve and nothing in the host draws on them (#1929). Blocks get
@@ -230,5 +267,116 @@ pub(crate) fn purge_pass(
     } else {
         vec![]
     };
-    [layer_remove, style_remove, lt_remove, block_remove]
+    let mut lists: [Vec<String>; KINDS] = Default::default();
+    lists[LAYERS] = layer_remove;
+    lists[TEXT_STYLES] = style_remove;
+    lists[LINETYPES] = lt_remove;
+    lists[BLOCKS] = block_remove;
+
+    // Styles: what the style managers would let you delete.
+    let keep = |name: &str| name.eq_ignore_ascii_case("Standard") || name.contains('|');
+    if wanted[DIM_STYLES] {
+        let names: Vec<String> = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
+        lists[DIM_STYLES] = names
+            .iter()
+            .filter(|name| {
+                // A style's overrides (`NAME$0`) go first; it follows on the
+                // next pass.
+                let children = format!("{}$", name.to_uppercase());
+                !keep(name)
+                    && !names.iter().any(|n| n.to_uppercase().starts_with(&children))
+                    && !style_in_use(doc, StyleKind::Dim, name, active_mleader)
+            })
+            .cloned()
+            .collect();
+    }
+    for kind in [MLEADER_STYLES, TABLE_STYLES, MLINE_STYLES] {
+        if !wanted[kind] {
+            continue;
+        }
+        let style = style_kind(kind).expect("style kind");
+        lists[kind] = doc
+            .objects
+            .values()
+            .filter_map(|o| match (kind, o) {
+                (MLEADER_STYLES, ObjectType::MultiLeaderStyle(s)) => Some(s.name.clone()),
+                (TABLE_STYLES, ObjectType::TableStyle(s)) => Some(s.name.clone()),
+                (MLINE_STYLES, ObjectType::MLineStyle(s)) => Some(s.name.clone()),
+                _ => None,
+            })
+            .filter(|name| !keep(name) && !style_in_use(doc, style, name, active_mleader))
+            .collect();
+    }
+
+    // Groups with no member left in the drawing.
+    if wanted[GROUPS] {
+        lists[GROUPS] = doc
+            .objects
+            .values()
+            .filter_map(|o| match o {
+                ObjectType::Group(g)
+                    if g.entities.iter().all(|h| doc.get_entity(*h).is_none()) =>
+                {
+                    Some(g.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+    }
+
+    // Materials no object or layer uses; the three built-in ones stay.
+    if wanted[MATERIALS] {
+        let used: rustc_hash::FxHashSet<Handle> = doc
+            .entities()
+            .filter_map(|e| e.common().material_handle)
+            .chain(doc.layers.iter().map(|l| l.material))
+            .collect();
+        lists[MATERIALS] = doc
+            .objects
+            .values()
+            .filter_map(|o| match o {
+                ObjectType::Material(m)
+                    if !used.contains(&m.handle)
+                        && !["Global", "ByLayer", "ByBlock"]
+                            .iter()
+                            .any(|b| b.eq_ignore_ascii_case(&m.name)) =>
+                {
+                    Some(m.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+    }
+
+    // Zero-length geometry and empty text, on a model or sheet layout.
+    if wanted[ZERO_LENGTH] || wanted[EMPTY_TEXT] {
+        let spaces: rustc_hash::FxHashSet<Handle> = doc
+            .block_records
+            .iter()
+            .filter(|br| matches!(doc.objects.get(&br.layout), Some(ObjectType::Layout(_))))
+            .map(|br| br.handle)
+            .collect();
+        const TOL: f64 = 1e-10;
+        for e in doc.entities().filter(|e| spaces.contains(&e.common().owner_handle)) {
+            let (kind, label) = match e {
+                EntityType::Line(l) if (l.end - l.start).length() <= TOL => (ZERO_LENGTH, "LINE"),
+                EntityType::Arc(a) if a.radius.abs() <= TOL => (ZERO_LENGTH, "ARC"),
+                EntityType::Circle(c) if c.radius.abs() <= TOL => (ZERO_LENGTH, "CIRCLE"),
+                EntityType::LwPolyline(p)
+                    if p.vertices.windows(2).all(|w| {
+                        (w[1].location - w[0].location).length() <= TOL
+                    }) =>
+                {
+                    (ZERO_LENGTH, "LWPOLYLINE")
+                }
+                EntityType::Text(t) if t.value.trim().is_empty() => (EMPTY_TEXT, "TEXT"),
+                EntityType::MText(t) if t.value.trim().is_empty() => (EMPTY_TEXT, "MTEXT"),
+                _ => continue,
+            };
+            if wanted[kind] {
+                lists[kind].push(format!("{label} {:X}", e.common().handle));
+            }
+        }
+    }
+    lists
 }

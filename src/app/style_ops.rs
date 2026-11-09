@@ -423,148 +423,12 @@ impl OpenCADStudio {
     }
 
     pub(super) fn remove_style_storage(&mut self, kind: StyleKind, name: &str) -> bool {
-        let doc = &mut self.tabs[self.active_tab].scene.document;
-        match kind {
-            StyleKind::Text => doc.text_styles.remove(name).is_some(),
-            StyleKind::Dim => doc.dim_styles.remove(name).is_some(),
-            StyleKind::Table | StyleKind::MLeader | StyleKind::MLine => {
-                let kind2 = kind;
-                if let Some(h) = object_handle(doc, name, kind2) {
-                    // A table style takes its starting table with it.
-                    if let Some(ObjectType::TableStyle(style)) = doc.objects.get(&h) {
-                        if let Some(template) = style.template() {
-                            doc.objects.remove(&template);
-                        }
-                    }
-                    doc.objects.remove(&h).is_some()
-                } else {
-                    false
-                }
-            }
-        }
+        remove_style(&mut self.tabs[self.active_tab].scene.document, kind, name)
     }
 
     pub(super) fn style_in_use(&self, kind: StyleKind, name: &str) -> bool {
-        use document::entities::EntityType;
-
-        let i = self.active_tab;
-        let doc = &self.tabs[i].scene.document;
-        match kind {
-            StyleKind::Text => {
-                if doc
-                    .header
-                    .current_text_style_name
-                    .eq_ignore_ascii_case(name)
-                {
-                    return true;
-                }
-                let style_handle = doc.text_styles.get(name).map(|style| style.handle);
-                let referenced_by_entity = doc.entities().any(|entity| match entity {
-                    EntityType::Text(text) => text.style.eq_ignore_ascii_case(name),
-                    EntityType::MText(text) => text.style.eq_ignore_ascii_case(name),
-                    EntityType::AttributeEntity(attribute) => {
-                        attribute.text_style.eq_ignore_ascii_case(name)
-                    }
-                    EntityType::AttributeDefinition(attribute) => {
-                        attribute.text_style.eq_ignore_ascii_case(name)
-                    }
-                    EntityType::Insert(insert) => insert
-                        .attributes
-                        .iter()
-                        .any(|attribute| attribute.text_style.eq_ignore_ascii_case(name)),
-                    EntityType::MultiLeader(leader) => {
-                        [leader.text_style_handle, leader.context.text_style_handle]
-                            .into_iter()
-                            .flatten()
-                            .any(|handle| Some(handle) == style_handle)
-                    }
-                    EntityType::Table(table) => table.rows.iter().any(|row| {
-                        row.style
-                            .as_ref()
-                            .and_then(|style| style.text_style_handle)
-                            .is_some_and(|handle| Some(handle) == style_handle)
-                            || row.cells.iter().any(|cell| {
-                                cell.style
-                                    .as_ref()
-                                    .and_then(|style| style.text_style_handle)
-                                    .is_some_and(|handle| Some(handle) == style_handle)
-                                    || cell.contents.iter().any(|content| {
-                                        content
-                                            .text_style_handle
-                                            .is_some_and(|handle| Some(handle) == style_handle)
-                                    })
-                            })
-                    }),
-                    _ => false,
-                });
-                referenced_by_entity
-                    || doc
-                        .dim_styles
-                        .iter()
-                        .any(|style| style.dimtxsty.eq_ignore_ascii_case(name))
-                    || doc.objects.values().any(|object| match object {
-                        ObjectType::TableStyle(style) => [
-                            &style.data_row_style,
-                            &style.header_row_style,
-                            &style.title_row_style,
-                        ]
-                        .into_iter()
-                        .any(|row| row.text_style_name.eq_ignore_ascii_case(name)),
-                        ObjectType::MultiLeaderStyle(style) => {
-                            style.text_style_handle == style_handle
-                        }
-                        _ => false,
-                    })
-            }
-            StyleKind::Dim => {
-                doc.header.current_dimstyle_name.eq_ignore_ascii_case(name)
-                    || doc.entities().any(|entity| match entity {
-                        EntityType::Dimension(dimension) => {
-                            dimension.base().style_name.eq_ignore_ascii_case(name)
-                        }
-                        EntityType::Leader(leader) => {
-                            leader.dimension_style.eq_ignore_ascii_case(name)
-                        }
-                        EntityType::Tolerance(tolerance) => {
-                            tolerance.dimension_style_name.eq_ignore_ascii_case(name)
-                        }
-                        _ => false,
-                    })
-            }
-            StyleKind::Table | StyleKind::MLeader | StyleKind::MLine => {
-                let Some(handle) = object_handle(doc, name, kind) else {
-                    return false;
-                };
-                let is_current = match kind {
-                    StyleKind::Table => doc
-                        .header
-                        .current_table_style_name
-                        .eq_ignore_ascii_case(name),
-                    StyleKind::MLeader => {
-                        doc.header
-                            .current_mleader_style_name
-                            .eq_ignore_ascii_case(name)
-                            || self.tabs[i].active_mleader_style.eq_ignore_ascii_case(name)
-                    }
-                    StyleKind::MLine => doc.header.multiline_style.eq_ignore_ascii_case(name),
-                    StyleKind::Text | StyleKind::Dim => false,
-                };
-                is_current
-                    || doc.entities().any(|entity| match (kind, entity) {
-                        (StyleKind::Table, EntityType::Table(table)) => {
-                            table.table_style_handle == Some(handle)
-                        }
-                        (StyleKind::MLeader, EntityType::MultiLeader(leader)) => {
-                            leader.style_handle == Some(handle)
-                        }
-                        (StyleKind::MLine, EntityType::MLine(line)) => {
-                            line.style_handle == Some(handle)
-                                || line.style_name.eq_ignore_ascii_case(name)
-                        }
-                        _ => false,
-                    })
-            }
-        }
+        let tab = &self.tabs[self.active_tab];
+        style_in_use(&tab.scene.document, kind, name, &tab.active_mleader_style)
     }
 
     /// Rename `old`→`new` in the backing store, re-keying table entries and
@@ -1282,6 +1146,168 @@ fn find_object_style<T>(
         let (n, val) = pick(o)?;
         n.eq_ignore_ascii_case(name).then_some(val)
     })
+}
+
+/// Whether anything in `doc` uses the style: the current one, an object
+/// that names it, or a style that refers to it. `active_mleader` is the
+/// session's current multileader style. Shared by the style managers'
+/// delete and by PURGE.
+pub(crate) fn style_in_use(
+    doc: &document::Document,
+    kind: StyleKind,
+    name: &str,
+    active_mleader: &str,
+) -> bool {
+    use document::entities::EntityType;
+
+    match kind {
+        StyleKind::Text => {
+            if doc
+                .header
+                .current_text_style_name
+                .eq_ignore_ascii_case(name)
+            {
+                return true;
+            }
+            let style_handle = doc.text_styles.get(name).map(|style| style.handle);
+            let referenced_by_entity = doc.entities().any(|entity| match entity {
+                EntityType::Text(text) => text.style.eq_ignore_ascii_case(name),
+                EntityType::MText(text) => text.style.eq_ignore_ascii_case(name),
+                EntityType::AttributeEntity(attribute) => {
+                    attribute.text_style.eq_ignore_ascii_case(name)
+                }
+                EntityType::AttributeDefinition(attribute) => {
+                    attribute.text_style.eq_ignore_ascii_case(name)
+                }
+                EntityType::Insert(insert) => insert
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.text_style.eq_ignore_ascii_case(name)),
+                EntityType::MultiLeader(leader) => {
+                    [leader.text_style_handle, leader.context.text_style_handle]
+                        .into_iter()
+                        .flatten()
+                        .any(|handle| Some(handle) == style_handle)
+                }
+                EntityType::Table(table) => table.rows.iter().any(|row| {
+                    row.style
+                        .as_ref()
+                        .and_then(|style| style.text_style_handle)
+                        .is_some_and(|handle| Some(handle) == style_handle)
+                        || row.cells.iter().any(|cell| {
+                            cell.style
+                                .as_ref()
+                                .and_then(|style| style.text_style_handle)
+                                .is_some_and(|handle| Some(handle) == style_handle)
+                                || cell.contents.iter().any(|content| {
+                                    content
+                                        .text_style_handle
+                                        .is_some_and(|handle| Some(handle) == style_handle)
+                                })
+                        })
+                }),
+                _ => false,
+            });
+            referenced_by_entity
+                || doc
+                    .dim_styles
+                    .iter()
+                    .any(|style| style.dimtxsty.eq_ignore_ascii_case(name))
+                || doc.objects.values().any(|object| match object {
+                    ObjectType::TableStyle(style) => [
+                        &style.data_row_style,
+                        &style.header_row_style,
+                        &style.title_row_style,
+                    ]
+                    .into_iter()
+                    .any(|row| row.text_style_name.eq_ignore_ascii_case(name)),
+                    ObjectType::MultiLeaderStyle(style) => {
+                        style.text_style_handle == style_handle
+                    }
+                    _ => false,
+                })
+        }
+        StyleKind::Dim => {
+            doc.header.current_dimstyle_name.eq_ignore_ascii_case(name)
+                || doc.entities().any(|entity| match entity {
+                    EntityType::Dimension(dimension) => {
+                        dimension.base().style_name.eq_ignore_ascii_case(name)
+                    }
+                    EntityType::Leader(leader) => {
+                        leader.dimension_style.eq_ignore_ascii_case(name)
+                    }
+                    EntityType::Tolerance(tolerance) => {
+                        tolerance.dimension_style_name.eq_ignore_ascii_case(name)
+                    }
+                    _ => false,
+                })
+        }
+        StyleKind::Table | StyleKind::MLeader | StyleKind::MLine => {
+            let Some(handle) = object_handle(doc, name, kind) else {
+                return false;
+            };
+            let is_current = match kind {
+                StyleKind::Table => doc
+                    .header
+                    .current_table_style_name
+                    .eq_ignore_ascii_case(name),
+                StyleKind::MLeader => {
+                    doc.header
+                        .current_mleader_style_name
+                        .eq_ignore_ascii_case(name)
+                        || active_mleader.eq_ignore_ascii_case(name)
+                }
+                StyleKind::MLine => doc.header.multiline_style.eq_ignore_ascii_case(name),
+                StyleKind::Text | StyleKind::Dim => false,
+            };
+            is_current
+                || doc.entities().any(|entity| match (kind, entity) {
+                    (StyleKind::Table, EntityType::Table(table)) => {
+                        table.table_style_handle == Some(handle)
+                    }
+                    (StyleKind::MLeader, EntityType::MultiLeader(leader)) => {
+                        leader.style_handle == Some(handle)
+                    }
+                    (StyleKind::MLine, EntityType::MLine(line)) => {
+                        line.style_handle == Some(handle)
+                            || line.style_name.eq_ignore_ascii_case(name)
+                    }
+                    _ => false,
+                })
+        }
+    }
+}
+
+/// Removes the style named `name` from `doc`. Shared by the style
+/// managers' delete and by PURGE.
+pub(crate) fn remove_style(doc: &mut document::Document, kind: StyleKind, name: &str) -> bool {
+    match kind {
+        StyleKind::Text => doc.text_styles.remove(name).is_some(),
+        StyleKind::Dim => doc.dim_styles.remove(name).is_some(),
+        StyleKind::Table | StyleKind::MLeader | StyleKind::MLine => {
+            let Some(h) = object_handle(doc, name, kind) else {
+                return false;
+            };
+            // A table style takes its starting table with it.
+            if let Some(ObjectType::TableStyle(style)) = doc.objects.get(&h) {
+                if let Some(template) = style.template() {
+                    remove_object(doc, template);
+                }
+            }
+            remove_object(doc, h)
+        }
+    }
+}
+
+/// Removes a non-graphical object and every dictionary entry naming it, so
+/// no dictionary is written with a pointer to an object that is gone.
+pub(crate) fn remove_object(doc: &mut document::Document, handle: Handle) -> bool {
+    for object in doc.objects.values_mut() {
+        if let ObjectType::Dictionary(dict) = object {
+            dict.entries.retain(|(_, h)| *h != handle);
+        }
+    }
+    doc.objects.remove(&handle).is_some()
 }
 
 fn object_handle(doc: &document::Document, name: &str, kind: StyleKind) -> Option<Handle> {

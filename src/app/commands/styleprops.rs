@@ -344,6 +344,7 @@ impl OpenCADStudio {
             // line); PURGE <sub> (typed or scripted) runs directly.
             "PURGE" => self.open_purge_dialog(),
             cmd if cmd.starts_with("PURGE ") => {
+                use super::purge::{self as pk, KINDS};
                 let sub = cmd
                     .split_whitespace()
                     .nth(1)
@@ -361,54 +362,57 @@ impl OpenCADStudio {
                 let only = self.purge_only.take();
                 let chosen =
                     |kind: usize, name: &str| only.as_ref().is_none_or(|o| o.allows(kind, name));
-                let all = sub == "ALL" || sub.is_empty();
-                let do_layers = all || matches!(sub.as_str(), "LAYERS" | "LAYER" | "LA");
-                let do_styles = all || matches!(sub.as_str(), "TEXTSTYLES" | "STYLES" | "ST");
-                let do_lts = all || matches!(sub.as_str(), "LINETYPES" | "LTYPES" | "LT");
-                let do_blocks = all || matches!(sub.as_str(), "BLOCKS" | "BLOCK" | "B");
-                if !(do_layers || do_styles || do_lts || do_blocks) {
-                    self.command_line.push_error(crate::tf!(
-                        "PURGE: unknown option \"{sub}\" — use ALL, Blocks, LAyers, LineTypes or STyles."
-                    ).as_ref());
-                    return Some(Task::none());
+                let mut kinds = [false; KINDS];
+                match sub.as_str() {
+                    // ALL takes every named kind; geometry only when asked
+                    // for, or by the dialog that lists it.
+                    "ALL" | "A" => kinds[..pk::ZERO_LENGTH].fill(true),
+                    "DIALOG" => kinds = [true; KINDS],
+                    "LAYERS" | "LAYER" | "LA" => kinds[pk::LAYERS] = true,
+                    "TEXTSTYLES" | "STYLES" | "ST" => kinds[pk::TEXT_STYLES] = true,
+                    "LINETYPES" | "LTYPES" | "LT" => kinds[pk::LINETYPES] = true,
+                    "BLOCKS" | "BLOCK" | "B" => kinds[pk::BLOCKS] = true,
+                    "DIMSTYLES" | "D" => kinds[pk::DIM_STYLES] = true,
+                    "MLEADERSTYLES" | "ML" => kinds[pk::MLEADER_STYLES] = true,
+                    "TABLESTYLES" | "T" => kinds[pk::TABLE_STYLES] = true,
+                    "MLINESTYLES" | "M" => kinds[pk::MLINE_STYLES] = true,
+                    "GROUPS" | "G" => kinds[pk::GROUPS] = true,
+                    "MATERIALS" | "MA" => kinds[pk::MATERIALS] = true,
+                    "ZEROLENGTH" | "Z" => kinds[pk::ZERO_LENGTH] = true,
+                    "EMPTYTEXT" | "E" => kinds[pk::EMPTY_TEXT] = true,
+                    _ => {
+                        self.command_line.push_error(&crate::tr!(
+                            "purge-dialog",
+                            "unknown-type",
+                            kind = sub.as_str()
+                        ));
+                        return Some(Task::none());
+                    }
                 }
 
                 // Purging a block frees whatever only its members referenced
                 // (nested blocks, layers, linetypes, styles), so those become
                 // purgeable on the next pass — repeat until a pass removes
                 // nothing, so one PURGE does what re-running it used to.
-                let (mut n_layers, mut n_styles, mut n_lts, mut n_blocks) =
-                    (0usize, 0usize, 0usize, 0usize);
+                let mut removed = [0usize; KINDS];
                 let mut snapshot_pushed = false;
                 loop {
-                    // Collect names in use (immutable borrows — own scope per pass).
-                    // An INSERT's attributes live inside it, not in the entity
-                    // list, so their layer, style and linetype count separately.
                     let open_edits: Vec<document::Handle> = self.tabs[i]
                         .block_edits
                         .iter()
                         .map(|session| session.br_handle)
                         .collect();
-                    let [layer_remove, style_remove, lt_remove, block_remove] =
-                        super::purge::purge_pass(
-                            &self.tabs[i].scene.document,
-                            &open_edits,
-                            [do_layers, do_styles, do_lts, do_blocks],
-                        );
-
-                    let pick = |list: Vec<String>, kind: usize| -> Vec<String> {
-                        list.into_iter().filter(|n| wanted(n) && chosen(kind, n)).collect()
-                    };
-                    let layer_remove = pick(layer_remove, 0);
-                    let style_remove = pick(style_remove, 1);
-                    let lt_remove = pick(lt_remove, 2);
-                    let block_remove = pick(block_remove, 3);
-                    if layer_remove.len()
-                        + style_remove.len()
-                        + lt_remove.len()
-                        + block_remove.len()
-                        == 0
-                    {
+                    let lists = pk::purge_pass(
+                        &self.tabs[i].scene.document,
+                        &open_edits,
+                        kinds,
+                        &self.tabs[i].active_mleader_style,
+                    );
+                    let mut lists = lists;
+                    for (kind, list) in lists.iter_mut().enumerate() {
+                        list.retain(|n| wanted(n) && chosen(kind, n));
+                    }
+                    if lists.iter().all(Vec::is_empty) {
                         break;
                     }
                     // Snapshot the pre-purge document once, before the first
@@ -418,46 +422,73 @@ impl OpenCADStudio {
                         snapshot_pushed = true;
                     }
 
-                    // Apply removals (mutable). Count what actually went: an
-                    // entry the table cannot remove by name would otherwise be
-                    // listed again on every pass and never let the loop end.
-                    let doc = &mut self.tabs[i].scene.document;
-                    let layers_gone = layer_remove
-                        .iter()
-                        .filter(|n| doc.layers.remove(n).is_some())
-                        .count();
-                    let styles_gone = style_remove
-                        .iter()
-                        .filter(|n| doc.text_styles.remove(n).is_some())
-                        .count();
-                    let lts_gone = lt_remove
-                        .iter()
-                        .filter(|n| doc.line_types.remove(n).is_some())
-                        .count();
-                    let mut blocks_gone = 0usize;
-                    for name in &block_remove {
-                        // The service erases the definition, its member
-                        // entities, both BLOCK/ENDBLK delimiters and any stale
-                        // draw-order table, so a purge and a delete leave the
-                        // same document behind.
-                        if crate::scene::block_service::erase(&mut self.tabs[i].scene, name)
-                            .is_some()
-                        {
-                            blocks_gone += 1;
-                        }
+                    // Count what actually went: an entry that cannot be
+                    // removed would otherwise be listed again on every pass
+                    // and never let the loop end.
+                    let mut gone = [0usize; KINDS];
+                    for (kind, list) in lists.iter().enumerate() {
+                        let scene = &mut self.tabs[i].scene;
+                        gone[kind] = match kind {
+                            pk::BLOCKS => list
+                                .iter()
+                                // The service erases the definition, its
+                                // members, both delimiters and any stale
+                                // draw-order table, as a delete does.
+                                .filter(|n| crate::scene::block_service::erase(scene, n).is_some())
+                                .count(),
+                            pk::ZERO_LENGTH | pk::EMPTY_TEXT => {
+                                let handles: Vec<document::Handle> =
+                                    list.iter().filter_map(|n| pk::item_handle(n)).collect();
+                                scene.erase_entities(&handles);
+                                handles
+                                    .iter()
+                                    .filter(|h| scene.document.get_entity(**h).is_none())
+                                    .count()
+                            }
+                            _ => {
+                                let doc = &mut scene.document;
+                                list.iter()
+                                    .filter(|n| match kind {
+                                        pk::LAYERS => doc.layers.remove(n).is_some(),
+                                        pk::TEXT_STYLES => doc.text_styles.remove(n).is_some(),
+                                        pk::LINETYPES => doc.line_types.remove(n).is_some(),
+                                        pk::GROUPS | pk::MATERIALS => {
+                                            let handle = doc.objects.values().find_map(|o| match o {
+                                                document::objects::ObjectType::Group(g)
+                                                    if kind == pk::GROUPS && g.name == **n =>
+                                                {
+                                                    Some(g.handle)
+                                                }
+                                                document::objects::ObjectType::Material(m)
+                                                    if kind == pk::MATERIALS && m.name == **n =>
+                                                {
+                                                    Some(m.handle)
+                                                }
+                                                _ => None,
+                                            });
+                                            handle.is_some_and(|h| {
+                                                crate::app::style_ops::remove_object(doc, h)
+                                            })
+                                        }
+                                        _ => pk::style_kind(kind).is_some_and(|style| {
+                                            crate::app::style_ops::remove_style(doc, style, n)
+                                        }),
+                                    })
+                                    .count()
+                            }
+                        };
                     }
-                    n_layers += layers_gone;
-                    n_styles += styles_gone;
-                    n_lts += lts_gone;
-                    n_blocks += blocks_gone;
-                    if layers_gone + styles_gone + lts_gone + blocks_gone == 0 {
+                    for (total, n) in removed.iter_mut().zip(gone) {
+                        *total += n;
+                    }
+                    if gone.iter().sum::<usize>() == 0 {
                         break;
                     }
                 }
 
                 // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;
-                if do_blocks {
+                if kinds[pk::BLOCKS] {
                     let live_blocks: rustc_hash::FxHashSet<document::Handle> = self.tabs[i]
                         .scene
                         .document
@@ -480,9 +511,6 @@ impl OpenCADStudio {
                         })
                         .collect();
                     if !orphans.is_empty() {
-                        // `snapshot_pushed` is this purge's last use — no
-                        // re-assignment needed (a block purge already snapshotted;
-                        // a snapshot here only matters when nothing else changed).
                         if !snapshot_pushed {
                             self.push_undo_snapshot(i, "Purge");
                         }
@@ -493,26 +521,25 @@ impl OpenCADStudio {
                     }
                 }
 
-                let purged = n_layers + n_styles + n_lts + n_blocks;
+                let purged: usize = removed.iter().sum();
                 if purged > 0 || n_sortents > 0 {
                     self.tabs[i].dirty = true;
-                    // Rebuild the layer/style/linetype panel + ribbon caches so
-                    // the removed definitions disappear from the UI immediately.
+                    // Rebuild the layer/style/linetype panel and the ribbon's
+                    // style lists so the removed definitions disappear.
                     self.refresh_layer_panel();
-                    // Per-type breakdown so the user sees exactly what went.
-                    let mut parts: Vec<String> = Vec::new();
-                    if n_layers > 0 {
-                        parts.push(crate::tf!("{n_layers} layer(s)").into_owned());
-                    }
-                    if n_styles > 0 {
-                        parts.push(crate::tf!("{n_styles} text style(s)").into_owned());
-                    }
-                    if n_lts > 0 {
-                        parts.push(crate::tf!("{n_lts} linetype(s)").into_owned());
-                    }
-                    if n_blocks > 0 {
-                        parts.push(crate::tf!("{n_blocks} block(s)").into_owned());
-                    }
+                    self.sync_ribbon_styles();
+                    // Per-kind breakdown so the user sees exactly what went.
+                    let mut parts: Vec<String> = crate::ui::window::purge::ORDER
+                        .iter()
+                        .filter(|kind| removed[**kind] > 0)
+                        .map(|kind| {
+                            format!(
+                                "{}: {}",
+                                crate::ui::window::purge::kind_label(*kind),
+                                removed[*kind]
+                            )
+                        })
+                        .collect();
                     if n_sortents > 0 {
                         parts.push(
                             crate::tf!("{n_sortents} stale draw-order table(s)").into_owned(),
@@ -3791,60 +3818,78 @@ impl OpenCADStudio {
             }
 
             // ── FINDNONPURGEABLE — list named objects still in use ───────
-            // Reports the layers, linetypes, text styles and blocks that are
-            // referenced by objects, and therefore cannot be purged — so it is
-            // clear why PURGE leaves them behind. Read-only.
+            // Every named item PURGE would not offer, by kind, so it is clear
+            // why PURGE leaves them behind. Read-only; PURGE's own pass
+            // decides, so the two always agree.
             "FINDNONPURGEABLE" => {
-                use rustc_hash::FxHashSet;
-                let mut layers: FxHashSet<String> = FxHashSet::default();
-                let mut linetypes: FxHashSet<String> = FxHashSet::default();
-                let mut styles: FxHashSet<String> = FxHashSet::default();
-                let mut blocks: FxHashSet<String> = FxHashSet::default();
-                {
-                    let doc = &self.tabs[i].scene.document;
-                    for e in doc.entities() {
-                        let l = &e.common().layer;
-                        if !l.is_empty() {
-                            layers.insert(l.clone());
-                        }
-                        let lt = &e.common().linetype;
-                        if !lt.is_empty() && lt != "ByLayer" && lt != "ByBlock" {
-                            linetypes.insert(lt.clone());
-                        }
-                        match e {
-                            document::EntityType::Text(t) if !t.style.is_empty() => {
-                                styles.insert(t.style.clone());
-                            }
-                            document::EntityType::MText(t) if !t.style.is_empty() => {
-                                styles.insert(t.style.clone());
-                            }
-                            document::EntityType::Insert(ins) => {
-                                blocks.insert(ins.block_name.clone());
-                            }
-                            _ => {}
-                        }
+                use super::purge::{self as pk, KINDS};
+                let doc = &self.tabs[i].scene.document;
+                let open_edits: Vec<document::Handle> =
+                    self.tabs[i].block_edits.iter().map(|s| s.br_handle).collect();
+                let mut kinds = [false; KINDS];
+                kinds[..pk::ZERO_LENGTH].fill(true);
+                let purgeable =
+                    pk::purge_pass(doc, &open_edits, kinds, &self.tabs[i].active_mleader_style);
+                let objects = |pick: fn(&document::objects::ObjectType) -> Option<&str>| {
+                    doc.objects.values().filter_map(pick).map(str::to_owned).collect::<Vec<_>>()
+                };
+                use document::objects::ObjectType as O;
+                let mut lines = Vec::new();
+                for kind in crate::ui::window::purge::ORDER {
+                    let names: Vec<String> = match kind {
+                        pk::LAYERS => doc.layers.iter().map(|l| l.name.clone()).collect(),
+                        pk::TEXT_STYLES => doc
+                            .text_styles
+                            .iter()
+                            .filter(|s| !s.name.is_empty() && !s.is_shape_file)
+                            .map(|s| s.name.clone())
+                            .collect(),
+                        pk::LINETYPES => doc.line_types.iter().map(|l| l.name.clone()).collect(),
+                        pk::BLOCKS => doc
+                            .block_records
+                            .iter()
+                            .filter(|b| !b.name.starts_with('*'))
+                            .map(|b| b.name.clone())
+                            .collect(),
+                        pk::DIM_STYLES => doc.dim_styles.iter().map(|d| d.name.clone()).collect(),
+                        pk::MLEADER_STYLES => objects(|o| match o {
+                            O::MultiLeaderStyle(s) => Some(&s.name),
+                            _ => None,
+                        }),
+                        pk::TABLE_STYLES => objects(|o| match o {
+                            O::TableStyle(s) => Some(&s.name),
+                            _ => None,
+                        }),
+                        pk::MLINE_STYLES => objects(|o| match o {
+                            O::MLineStyle(s) => Some(&s.name),
+                            _ => None,
+                        }),
+                        pk::MATERIALS => objects(|o| match o {
+                            O::Material(m) => Some(&m.name),
+                            _ => None,
+                        }),
+                        // Groups with members are not purge candidates at all.
+                        _ => continue,
+                    };
+                    let mut kept: Vec<String> = names
+                        .into_iter()
+                        .filter(|n| !purgeable[kind].contains(n))
+                        .collect();
+                    kept.sort_by_key(|n| n.to_lowercase());
+                    if !kept.is_empty() {
+                        lines.push(format!(
+                            "  {}: {}",
+                            crate::ui::window::purge::kind_label(kind),
+                            kept.join(", ")
+                        ));
                     }
                 }
-                let fmt = |set: FxHashSet<String>| -> String {
-                    if set.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        let mut v: Vec<_> = set.into_iter().collect();
-                        v.sort();
-                        v.join(", ")
-                    }
-                };
                 self.command_line.push_output(
                     crate::t!("FINDNONPURGEABLE: named objects in use (not purgeable):").as_ref(),
                 );
-                self.command_line
-                    .push_output(crate::tf!("  Layers: {}", fmt(layers)).as_ref());
-                self.command_line
-                    .push_output(crate::tf!("  Linetypes: {}", fmt(linetypes)).as_ref());
-                self.command_line
-                    .push_output(crate::tf!("  Text styles: {}", fmt(styles)).as_ref());
-                self.command_line
-                    .push_output(crate::tf!("  Blocks: {}", fmt(blocks)).as_ref());
+                for line in lines {
+                    self.command_line.push_output(&line);
+                }
             }
 
             // ── AUDIT — report drawing-database integrity issues ─────────

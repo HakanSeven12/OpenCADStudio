@@ -5,8 +5,8 @@ use crate::ui::style::form::hdivider;
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
 use iced::{Element, Fill};
 
-/// Kinds in the order `purge_pass` reports them.
-pub(crate) const KINDS: usize = 4;
+pub(crate) use crate::app::commands::purge::KINDS;
+use crate::app::commands::purge as pk;
 
 #[derive(Debug, Clone)]
 pub enum PurgeMsg {
@@ -20,25 +20,49 @@ pub enum PurgeMsg {
 }
 
 pub(crate) struct State {
-    /// Per kind (layers, text styles, linetypes, blocks): name, ticked.
+    /// Per kind, in `purge_pass` order: name, ticked.
     pub items: [Vec<(String, bool)>; KINDS],
     pub nested: bool,
 }
 
-fn kind_label(kind: usize) -> String {
-    match kind {
-        0 => crate::tr!("purge-dialog", "layers"),
-        1 => crate::tr!("purge-dialog", "text-styles"),
-        2 => crate::tr!("purge-dialog", "linetypes"),
+/// A kind's name, in the dialog and in PURGE's report.
+pub(crate) fn kind_label(index: usize) -> String {
+    match index {
+        pk::LAYERS => crate::tr!("purge-dialog", "layers"),
+        pk::TEXT_STYLES => crate::tr!("purge-dialog", "text-styles"),
+        pk::LINETYPES => crate::tr!("purge-dialog", "linetypes"),
+        pk::DIM_STYLES => crate::tr!("purge-dialog", "dim-styles"),
+        pk::MLEADER_STYLES => crate::tr!("purge-dialog", "mleader-styles"),
+        pk::TABLE_STYLES => crate::tr!("purge-dialog", "table-styles"),
+        pk::MLINE_STYLES => crate::tr!("purge-dialog", "mline-styles"),
+        pk::GROUPS => crate::tr!("purge-dialog", "groups"),
+        pk::MATERIALS => crate::tr!("purge-dialog", "materials"),
+        pk::ZERO_LENGTH => crate::tr!("purge-dialog", "zero-length"),
+        pk::EMPTY_TEXT => crate::tr!("purge-dialog", "empty-text"),
         _ => crate::tr!("purge-dialog", "blocks"),
     }
 }
 
+/// Blocks first, as removing them frees what only they used.
+pub(crate) const ORDER: [usize; KINDS] = [
+    pk::BLOCKS,
+    pk::LAYERS,
+    pk::LINETYPES,
+    pk::TEXT_STYLES,
+    pk::DIM_STYLES,
+    pk::MLEADER_STYLES,
+    pk::TABLE_STYLES,
+    pk::MLINE_STYLES,
+    pk::GROUPS,
+    pk::MATERIALS,
+    pk::ZERO_LENGTH,
+    pk::EMPTY_TEXT,
+];
+
 pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Element<'_, Message> {
     let mut list = column![].spacing(4);
     let mut any = false;
-    // Blocks first, as removing them frees what only they used.
-    for kind in [3, 0, 2, 1] {
+    for kind in ORDER {
         let items = &state.items[kind];
         if items.is_empty() {
             continue;

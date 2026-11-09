@@ -3252,8 +3252,14 @@ pub struct Scene {
     /// The source is held weakly, not by address: a dropped `Arc` can be
     /// replaced at the same address within one epoch, and a bare pointer
     /// compare would then hand back another set's expansion.
-    stub_expansion_cache:
-        RefCell<Option<(std::sync::Weak<Vec<WireModel>>, u64, Arc<Vec<WireModel>>)>>,
+    stub_expansion_cache: RefCell<
+        Option<(
+            std::sync::Weak<Vec<WireModel>>,
+            u64,
+            u64,
+            Arc<Vec<WireModel>>,
+        )>,
+    >,
     /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// The resident set `resident_tess_memo`'s `InSet` runs read from.
@@ -12457,12 +12463,19 @@ impl Scene {
         if !candidates.has_stubs() {
             return candidates;
         }
-        if let Some((weak, epoch, wires)) = self.stub_expansion_cache.borrow().as_ref() {
-            if *epoch == self.geometry_epoch
-                && weak
-                    .upgrade()
-                    .is_some_and(|alive| Arc::ptr_eq(&alive, &source))
-            {
+        // Which guard rejected the entry, so the cost of a miss can be
+        // attributed: `geometry` moves on any entity edit, `block` only when a
+        // definition changes, and the expansion depends on the latter.
+        let mut miss = "no-entry";
+        if let Some((weak, epoch, block_epoch, wires)) =
+            self.stub_expansion_cache.borrow().as_ref()
+        {
+            let same_source = weak
+                .upgrade()
+                .is_some_and(|alive| Arc::ptr_eq(&alive, &source));
+            let same_geometry = *epoch == self.geometry_epoch;
+            let same_block = *block_epoch == self.block_epoch;
+            if same_geometry && same_source {
                 if crate::perf::enabled() {
                     crate::perf_record!(
                         "[perf] stub-cache hit wires={} source={}",
@@ -12472,11 +12485,24 @@ impl Scene {
                 }
                 return candidates.with_materialized(Arc::clone(wires));
             }
+            miss = match (same_source, same_geometry, same_block) {
+                (false, _, _) => "source",
+                (true, false, true) => "geometry-only",
+                (true, false, false) => "geometry-and-block",
+                (true, true, _) => "unreachable",
+            };
+        }
+        if crate::perf::enabled() {
+            crate::perf_record!("[perf] stub-cache miss reason={}", miss);
         }
         let expanded = candidates.materialize_stubs();
         if let Some(wires) = expanded.snapshot_arc() {
-            *self.stub_expansion_cache.borrow_mut() =
-                Some((Arc::downgrade(&source), self.geometry_epoch, wires));
+            *self.stub_expansion_cache.borrow_mut() = Some((
+                Arc::downgrade(&source),
+                self.geometry_epoch,
+                self.block_epoch,
+                wires,
+            ));
         }
         expanded
     }
@@ -12902,18 +12928,23 @@ impl Scene {
         if let Some(index) = self.cached_interaction_index(&wires) {
             direct(&index, wires)
         } else {
-            self.unindexed_interaction_candidates(wires, allow_pending_empty, snap)
+            self.unindexed_interaction_candidates(wires, allow_pending_empty, snap, Some(aabb))
         }
     }
 
     /// No index for `wires` yet. A pending-empty caller gets an empty result
     /// while the index builds; the snap preview gets one for any large set,
     /// so it never scans the whole drawing on a pointer move.
+    ///
+    /// `near` is the region the caller is about to hit-test, when it has one.
+    /// Passing it keeps the stub expansion local — the whole-set expansion of
+    /// a stub-heavy drawing costs ~190 ms, against 7-13 ms for one aperture.
     fn unindexed_interaction_candidates(
         &self,
         wires: Arc<Vec<WireModel>>,
         allow_pending_empty: bool,
         snap: Option<SnapQueryCategory>,
+        near: Option<[f64; 4]>,
     ) -> InteractionCandidates {
         let pending = allow_pending_empty
             && (snap.is_some() && wires.len() > 512
@@ -12922,7 +12953,10 @@ impl Scene {
         if pending {
             InteractionCandidates::pending(wires)
         } else {
-            InteractionCandidates::all(wires)
+            match near {
+                Some(aabb) => InteractionCandidates::all_near(wires, aabb),
+                None => InteractionCandidates::all(wires),
+            }
         }
     }
 
@@ -13075,7 +13109,7 @@ impl Scene {
         if let Some(index) = self.cached_interaction_index(&wires) {
             direct(&index, wires)
         } else {
-            self.unindexed_interaction_candidates(wires, allow_pending_empty, snap)
+            self.unindexed_interaction_candidates(wires, allow_pending_empty, snap, None)
         }
     }
 
@@ -13321,9 +13355,18 @@ impl Scene {
         allow_pending_empty: bool,
         snap: Option<SnapQueryCategory>,
     ) -> InteractionCandidates {
-        if !self.interaction_source_is_resident(&wires, bounds.height)
-            || !self.interaction_index_worthwhile(&wires)
-        {
+        let resident = self.interaction_source_is_resident(&wires, bounds.height);
+        // Short-circuits as before: only asked when the source is resident.
+        let worthwhile = resident && self.interaction_index_worthwhile(&wires);
+        if !resident || !worthwhile {
+            if crate::perf::enabled() {
+                crate::perf_record!(
+                    "[perf] pick-unindexed resident={} worthwhile={} wires={}",
+                    resident,
+                    worthwhile,
+                    wires.len(),
+                );
+            }
             return self.materialize_stubs_cached(InteractionCandidates::all(wires));
         }
         // Snap features are indexed at their own points; only picking grows
@@ -13348,6 +13391,7 @@ impl Scene {
                     wires,
                     allow_pending_empty,
                     snap,
+                    None,
                 ));
             }
             let ndc = clip.truncate() / clip.w;
@@ -13383,6 +13427,7 @@ impl Scene {
                 wires,
                 allow_pending_empty,
                 snap,
+                None,
             ));
         }
         let radius = radius_px.max(0.0) as f64 / s as f64;

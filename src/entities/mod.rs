@@ -2,6 +2,7 @@ pub mod arc;
 pub(crate) mod arrowheads;
 pub mod attribute;
 pub mod circle;
+pub(crate) mod civil;
 pub mod common;
 pub mod curve;
 pub mod dim_inspect;

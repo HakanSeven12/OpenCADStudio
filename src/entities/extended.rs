@@ -728,6 +728,9 @@ fn to_render(entity: &ExtendedEntity, document: &document::Document) -> Option<R
     if let ExtendedEntityData::ArcAlignedText(data) = &entity.data {
         return Some(arc_aligned_text_render(data));
     }
+    if let ExtendedEntityData::Arch(data) = &entity.data {
+        return crate::entities::civil::render(data, entity.common.handle.value(), document);
+    }
     let (points, snaps, keys): (Vec<[f64; 3]>, Vec<(glam::DVec3, SnapHint)>, Vec<[f64; 3]>) =
         match &entity.data {
             ExtendedEntityData::Camera { view_handle } => {
@@ -1654,7 +1657,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
                 ro_prop(
                     t!("Kind").as_ref(),
                     "ext_arch_kind",
-                    format!("{:?}", data.kind),
+                    data.civil_kind()
+                        .map_or_else(|| format!("{:?}", data.kind), |kind| format!("Civil 3D {kind:?}")),
                 ),
             ],
         }],

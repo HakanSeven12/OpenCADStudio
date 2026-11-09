@@ -99,7 +99,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=eababc03#eababc03c625eaf9cfc5169953d7ee88f2015338"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=dd6ed9c4#dd6ed9c4c36e342768d781c9dd8fbe60ae5dbeb1"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -4440,7 +4440,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=b9e1762#b9e1762969f3897e67e1801a2199445b6cf83b5d"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=fbadb96#fbadb9640dbfbded14b64ad2f852f6891c666fcd"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -4459,7 +4459,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=f058795#f058795a9283b7f7fcbccebff9f6880611538bd3"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=67b3049#67b3049eb41c516d8fc14600c4963423c89912a2"
 dependencies = [
  "cavalier_contours",
  "opencaddocument",
@@ -4471,7 +4471,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=f058795#f058795a9283b7f7fcbccebff9f6880611538bd3"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=67b3049#67b3049eb41c516d8fc14600c4963423c89912a2"
 dependencies = [
  "nalgebra",
 ]
@@ -4479,7 +4479,7 @@ dependencies = [
 [[package]]
 name = "opencadkernel-ssi"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=f058795#f058795a9283b7f7fcbccebff9f6880611538bd3"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=67b3049#67b3049eb41c516d8fc14600c4963423c89912a2"
 
 [[package]]
 name = "openssl-probe"

@@ -1263,6 +1263,29 @@ fn tessellate_entity_inner(
         },
         _ => None,
     };
+    // ── Civil 3D labels and profile views: lines plus generated text ─────────
+    if let EntityType::Extended(entity) = e {
+        if let document::entities::ExtendedEntityData::Arch(data) = &entity.data {
+            if let Some(dec) = crate::entities::civil::decoded(data, document) {
+                let inherited = ProxyInherit {
+                    color: entity_color,
+                    aci,
+                    pattern_length,
+                    pattern,
+                    line_weight_px,
+                };
+                return proxy_preview_wires(
+                    document,
+                    e,
+                    &dec,
+                    inherited,
+                    active_viewport,
+                    bg_color,
+                    sel,
+                );
+            }
+        }
+    }
     if let Some(blob) = proxy_blob {
         let dec = convert::proxy_graphics::decode(blob.as_ref());
         let inherited = ProxyInherit {

@@ -243,6 +243,12 @@ pub const SNAP_DWELL_MS: u128 = 60;
 pub const SNAP_MOVING_MS: u64 = 50;
 /// Maximum live discrete-snap preview rate while a drawing command is active.
 pub const SNAP_PREVIEW_INTERVAL_MS: u128 = 16;
+/// A full pointer-move pass costing at least this much cannot keep up with the
+/// rate a mouse reports at, so the moves arriving behind it are coalesced
+/// instead of queued. Under it nothing is deferred: a pass that fits inside a
+/// frame already answers faster than the display can show, and the queue it
+/// leaves behind is empty.
+pub const MOVE_COALESCE_FROM_MS: u64 = 8;
 /// Dense resident sets also retain the previous rollover while moving; this
 /// threshold gates that extra redraw-avoidance behavior.
 pub const HOVER_DWELL_DENSE_WIRES: usize = 50_000;
@@ -1429,6 +1435,23 @@ pub(super) struct OpenCADStudio {
     /// `HOVER_DWELL_MS`. Skipping the pick mid-stroke avoids the per-frame
     /// O(N) wire+hatch+mesh sweep that froze the cursor on large drawings.
     hover_dwell: Option<HoverDwell>,
+    /// The pointer position a coalesced move withheld, with its tab.
+    ///
+    /// Nothing used to drop a pointer move: every position the mouse reported
+    /// was answered in full, which on a large drawing costs ~15 ms against a
+    /// mouse that reports every few. The queue could then only grow — a
+    /// measured drag spent 13.5 s over seven frames working through 986
+    /// positions the cursor had long left. A superseded position is overwritten
+    /// here unanswered, and `MoveCoalesceTick` answers the last one.
+    move_owed: Option<(iced::Point, usize)>,
+    /// When the next full pointer-move pass may run, set only after a pass
+    /// expensive enough to be worth coalescing (`MOVE_COALESCE_FROM_MS`).
+    /// `None` means every move runs its pass, as before.
+    move_pass_due: Option<Instant>,
+    /// Moves withheld since the last answered pass, reported with it under
+    /// `PERF=1`: each one is a pass that used to be paid for in full and
+    /// thrown away, so this is the queue that is no longer forming.
+    move_withheld: u32,
     /// Pending object-snap pass while a command is active. Each cursor
     /// move stashes `(last_move_at, point, tab)` here; `SnapDwellTick`
     /// runs the full snap once the cursor has been still for `SNAP_DWELL_MS`.
@@ -4592,6 +4615,9 @@ pub enum Message {
     /// the cursor has been still long enough for the full snap on large
     /// drawings.
     SnapDwellTick,
+    /// Frame pulse while a coalesced pointer move is owed an answer; runs the
+    /// full pass at the position the gate withheld.
+    MoveCoalesceTick,
     /// Large projected interaction index finished preparing off the UI thread.
     InteractionIndexReady {
         tab_id: u64,
@@ -6441,6 +6467,9 @@ impl OpenCADStudio {
             grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
+            move_owed: None,
+            move_pass_due: None,
+            move_withheld: 0,
             snap_dwell: None,
             constraint_glyph_tooltip: None,
             grip_originals: Vec::new(),

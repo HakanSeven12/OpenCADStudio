@@ -3839,6 +3839,18 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// The command builds its result from the pointer's *path*, not from
+    /// where the pointer is now: every move it receives appends to a stroke.
+    ///
+    /// The host coalesces pointer moves — a position the cursor has already
+    /// left is dropped rather than answered, because the answer would be
+    /// overwritten before any frame showed it. That reasoning fails here: a
+    /// dropped move is a vertex the drawing never gets, so SKETCH and
+    /// freehand REVCLOUD take every one. Default `false`.
+    fn samples_motion(&self) -> bool {
+        false
+    }
+
     /// HPGAPTOL as the command currently has it, so a gap tolerance changed
     /// at its prompt is kept for later boundary picks. Default `None`.
     fn hatch_gap_tolerance(&self) -> Option<f64> {

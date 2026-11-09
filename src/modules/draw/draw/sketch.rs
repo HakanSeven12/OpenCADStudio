@@ -565,6 +565,12 @@ impl CadCommand for SketchCommand {
         }
     }
 
+    fn samples_motion(&self) -> bool {
+        // Only while the pen is actually recording: between strokes the
+        // preview is a function of the current point like any other command's.
+        self.stage == InputStage::Drawing && (self.pen_down || self.erasing)
+    }
+
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         self.last_cursor = Some(point);
         if self.stage == InputStage::Drawing {

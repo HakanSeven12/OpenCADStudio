@@ -823,6 +823,7 @@ async fn load_web_bytes(
     crate::scene::center_native::import(&mut doc);
     if name.to_ascii_lowercase().ends_with(".dxf") {
         fix_dxf_layout_plot_settings(&mut doc);
+        fix_dxf_attribute_insertion(&mut doc);
     }
     fix_viewport_status_flags(&mut doc);
     fix_double_placed_dimension_pictures(&mut doc);
@@ -865,6 +866,7 @@ async fn parse_web_document(name: &str, bytes: &[u8]) -> Result<Document, String
     crate::scene::center_native::import(&mut doc);
     if name.to_ascii_lowercase().ends_with(".dxf") {
         fix_dxf_layout_plot_settings(&mut doc);
+        fix_dxf_attribute_insertion(&mut doc);
     }
     fix_viewport_status_flags(&mut doc);
     fix_double_placed_dimension_pictures(&mut doc);
@@ -1010,6 +1012,7 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<Document, String> {
                 .read()
                 .map_err(|e| e.to_string())?;
             fix_dxf_layout_plot_settings(&mut doc);
+            fix_dxf_attribute_insertion(&mut doc);
             fix_viewport_status_flags(&mut doc);
             fix_double_placed_dimension_pictures(&mut doc);
             fix_current_style_names(&mut doc);
@@ -1298,6 +1301,7 @@ fn finalize_loaded_outcome(
     materialize_missing_block_markers(doc);
     if outcome.stats.source_format == Some(document::SourceFormat::Dxf) {
         fix_dxf_layout_plot_settings(doc);
+        fix_dxf_attribute_insertion(doc);
     }
     fix_viewport_status_flags(doc);
     fix_double_placed_dimension_pictures(doc);
@@ -3118,6 +3122,61 @@ fn fix_viewport_status_flags(doc: &mut Document) {
 /// The raw pairs are preserved on Layout, so trim and parse those authoritative
 /// values after loading. In particular, losing code 73 turns a 90°/270° sheet
 /// back to 0° and makes a landscape layout render as portrait (#505).
+/// A justified ATTDEF or ATTRIB keeps its text at its alignment point (DXF
+/// group 11); the insertion point (group 10) is derived from it and the
+/// text's size. A DXF may carry a stale group 10, which readers of DXF
+/// ignore but readers of DWG draw from, so it is recomputed on reading a
+/// DXF and a DWG written from it places the attribute where the DXF did
+/// (#2728).
+fn fix_dxf_attribute_insertion(doc: &mut Document) {
+    use crate::entities::attribute::{
+        attribute_text_start, definition_text_start, insertion_is_derived,
+    };
+    let stale = |stored: document::types::Vector3, derived: document::types::Vector3| {
+        (stored - derived).length() > 1e-9 * (1.0 + derived.length())
+    };
+    let attribute_start = |a: &document::entities::AttributeEntity| {
+        insertion_is_derived(a.horizontal_alignment, a.vertical_alignment, a.is_multiline)
+            .then(|| attribute_text_start(a))
+            .filter(|start| stale(a.insertion_point, *start))
+    };
+    // Only what changes is written back: an entity taken mutably loses the
+    // record it was read from.
+    let handles: Vec<document::Handle> = doc
+        .entities()
+        .filter(|e| match e {
+            EntityType::AttributeDefinition(a) => {
+                insertion_is_derived(a.horizontal_alignment, a.vertical_alignment, a.is_multiline)
+                    && stale(a.insertion_point, definition_text_start(a))
+            }
+            EntityType::AttributeEntity(a) => attribute_start(a).is_some(),
+            EntityType::Insert(insert) => {
+                insert.attributes.iter().any(|a| attribute_start(a).is_some())
+            }
+            _ => false,
+        })
+        .map(|e| e.common().handle)
+        .collect();
+    for handle in handles {
+        match doc.get_entity_mut(handle) {
+            Some(EntityType::AttributeDefinition(a)) => a.insertion_point = definition_text_start(a),
+            Some(EntityType::AttributeEntity(a)) => {
+                if let Some(start) = attribute_start(a) {
+                    a.insertion_point = start;
+                }
+            }
+            Some(EntityType::Insert(insert)) => {
+                for a in &mut insert.attributes {
+                    if let Some(start) = attribute_start(a) {
+                        a.insertion_point = start;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn fix_dxf_layout_plot_settings(doc: &mut Document) {
     use document::objects::{ObjectType, PlotFlags};
 

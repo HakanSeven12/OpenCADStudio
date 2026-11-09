@@ -1263,6 +1263,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUDGRIPS",
         "GROUPDISPLAYMODE",
         "OFFSETGAPTYPE",
+        "MEASUREMODE",
         "MATCHMODE",
         "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",

@@ -7270,9 +7270,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Vzdálenost = { $value }
-    .angle-start = { $command }  Určete vrchol nebo [Lines]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Vyberte první úsečku nebo [Points] (menší úhel):
-    .second-line = { $command }  Vyberte druhou úsečku (menší úhel):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Úsečky
     .points = Body
     .invalid-radius = Vyberte kružnici nebo oblouk s konečným kladným poloměrem.

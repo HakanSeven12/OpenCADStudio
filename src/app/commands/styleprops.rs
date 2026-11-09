@@ -1084,6 +1084,7 @@ impl OpenCADStudio {
                     | "REVCLOUDGRIPS"
                     | "GROUPDISPLAYMODE"
                     | "OFFSETGAPTYPE"
+                    | "MEASUREMODE"
                     | "MATCHMODE"
                     | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
@@ -1229,6 +1230,10 @@ impl OpenCADStudio {
                     }
                     if name == "SAVEFILEPATH" {
                         self.save_file_path_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "MEASUREMODE" {
+                        self.measure_mode_setvar(value.as_deref());
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name == "OFFSETGAPTYPE" {

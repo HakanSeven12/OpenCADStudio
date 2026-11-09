@@ -7246,9 +7246,22 @@ block-def =
 # Ideiglenes geometriai mérési eredmények.
 measurement =
     .distance = Távolság = { $value }
-    .angle-start = { $command }  Adja meg a szög csúcspontját vagy [Vonalak]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Jelölje ki az első vonalat vagy [Pontok] (kisebb szög):
-    .second-line = { $command }  Jelölje ki a második vonalat (kisebb szög):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Vonalak
     .points = Pontok
     .invalid-radius = Jelöljön ki véges, pozitív sugarú kört vagy körívet.

@@ -19,7 +19,7 @@ group = None
 for line in (ROOT / 'locales/en-US/opencadstudio.ftl').read_text(encoding='utf-8').splitlines():
     if match := re.match(r'^([A-Za-z][\w-]*)\s*=', line):
         group = match[1]
-    elif match := re.match(r'^    \.([A-Za-z][\w-]*)\s*=', line):
+    elif match := re.match(r'^\s+\.([A-Za-z][\w-]*)\s*=', line):
         keys.add((group, match[1]))
 assert not set(lookup.values()) - keys, f'Missing Fluent targets: {set(lookup.values()) - keys}'
 

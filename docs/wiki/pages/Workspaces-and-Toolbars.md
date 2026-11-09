@@ -11,6 +11,8 @@
 
 Type `WSCURRENT` alone to see the current workspace. To switch, give the choice on the same line: `>WSCURRENT C` for Classic, `>WSCURRENT R` for Ribbon (the leading `>` keeps the space in the line; see [Command Modifiers](Command-Modifiers#typing-a-whole-line-with-spaces)).
 
+In the Classic workspace, **Tools › Workspaces** in the menu bar switches between the two as well.
+
 ## Toolbars
 
 Every ribbon panel can also be shown as a floating toolbar.

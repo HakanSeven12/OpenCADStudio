@@ -438,11 +438,7 @@ fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a
         .width(LAUNCHER_W)
         .height(height)
         .padding(0),
-        make_tip(format!(
-            "{}\n{} {dialog}",
-            t!(panel.dialog_label),
-            t!("Command:")
-        )),
+        make_tip(super::widgets::tool_tip_text(&t!(panel.dialog_label), dialog)),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))
@@ -576,10 +572,9 @@ pub(super) fn extra_special<'a>(
             &ribbon.center_layer,
             ribbon.center_layer_color(),
             false,
-            format!(
-                "{}\n{} CENTERLAYER",
-                crate::tr!("ribbon-menu", "center-layer"),
-                t!("Command:")
+            super::widgets::tool_tip_text(
+                &crate::tr!("ribbon-menu", "center-layer"),
+                "CENTERLAYER",
             ),
         )),
     }
@@ -765,7 +760,7 @@ fn slide_out_button(
         .width(cell)
         .height(cell)
         .padding((cell - CELL_ICON) / 2.0);
-    let tip = format!("{}\n{} {}", t!(tool.tool.label), t!("Command:"), command);
+    let tip = super::widgets::tool_tip_text(&t!(tool.tool.label), &command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style)
@@ -798,11 +793,7 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
     let amount = fade.unsigned_abs().min(90) as u8;
     let switch = tooltip(
         switch,
-        make_tip(format!(
-            "{}\n{} XDWGFADECTL",
-            t!("Xref fading"),
-            t!("Command:")
-        )),
+        make_tip(super::widgets::tool_tip_text(&t!("Xref fading"), "XDWGFADECTL")),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))

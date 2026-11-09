@@ -3091,15 +3091,20 @@ impl OpenCADStudio {
                                     Ok((format!("DIMASSOC = {}", h.dimension_associativity), false))
                                 }
                             },
+                            // Typed and shown in degrees, stored in radians.
                             "ANGBASE" => match &value {
-                                Some(v) => v
-                                    .parse::<f64>()
-                                    .map(|x| {
-                                        h.angle_base = x;
-                                        (format!("ANGBASE = {x}"), true)
-                                    })
-                                    .map_err(|_| "SETVAR: numeric value required.".into()),
-                                None => Ok((format!("ANGBASE = {}", h.angle_base), false)),
+                                Some(v) => match v.parse::<f64>() {
+                                    Ok(deg) if deg.is_finite() => {
+                                        let deg = deg.rem_euclid(360.0);
+                                        h.angle_base = deg.to_radians();
+                                        Ok((format!("ANGBASE = {deg}"), true))
+                                    }
+                                    _ => Err("SETVAR: finite numeric value required.".into()),
+                                },
+                                None => Ok((
+                                    format!("ANGBASE = {}", h.angle_base.to_degrees()),
+                                    false,
+                                )),
                             },
                             "ANGDIR" => match &value {
                                 Some(v) => v
@@ -3407,13 +3412,13 @@ impl OpenCADStudio {
                                 None => Ok((format!("USRTIMER = {}", h.user_timer as i32), false)),
                             },
                             "ATTMODE" => match &value {
-                                Some(v) => v
-                                    .parse::<i16>()
-                                    .map(|x| {
+                                Some(v) => match v.parse::<i16>() {
+                                    Ok(x @ 0..=2) => {
                                         h.attribute_visibility = x;
-                                        (format!("ATTMODE = {x}"), true)
-                                    })
-                                    .map_err(|_| "SETVAR: integer value required.".into()),
+                                        Ok((format!("ATTMODE = {x}"), true))
+                                    }
+                                    _ => Err("SETVAR: 0, 1 or 2 required.".into()),
+                                },
                                 None => {
                                     Ok((format!("ATTMODE = {}", h.attribute_visibility), false))
                                 }
@@ -3709,7 +3714,7 @@ impl OpenCADStudio {
                                 } else {
                                     self.tabs[i].dirty = true;
                                 }
-                                if name == "FILLMODE" || name == "CAMERADISPLAY" {
+                                if matches!(name.as_str(), "FILLMODE" | "CAMERADISPLAY" | "ATTMODE") {
                                     self.tabs[i].scene.bump_geometry();
                                 }
                                 if matches!(name.as_str(), "PSLTSCALE" | "PLIMCHECK") {
@@ -4038,8 +4043,18 @@ impl OpenCADStudio {
                     self.command_line
                         .push_output(crate::tf!("CDIMSTY = \"{cur}\"").as_ref());
                 } else {
-                    if self.tabs[i].scene.document.dim_styles.contains(&name_arg) {
-                        self.tabs[i].scene.document.header.current_dimstyle_name = name_arg.clone();
+                    let found = self.tabs[i]
+                        .scene
+                        .document
+                        .dim_styles
+                        .get(&name_arg)
+                        .map(|ds| (ds.handle, ds.name.clone()));
+                    if let Some((handle, name)) = found {
+                        // A DWG writes the current style by handle only.
+                        let header = &mut self.tabs[i].scene.document.header;
+                        header.current_dimstyle_handle = handle;
+                        header.current_dimstyle_name = name.clone();
+                        self.ribbon.active_dim_style = name;
                         crate::scene::creation_style::sync_header_dim_vars(
                             &mut self.tabs[i].scene.document,
                         );

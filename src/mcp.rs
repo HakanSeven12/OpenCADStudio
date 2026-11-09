@@ -47,7 +47,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// number or `{"rgb":[r,g,b]}`, which its example shows on a layer.
 /// `command_escape` presses Esc once, where `cancel` ends the command.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "17d979c9f8c462c674a989524d080ec03e8ca1b420b04e53538d9d55727ba08c";
+const TOOL_SCHEMA_DIGEST: &str = "3d3c991e8dc24ebd3de3ee56d71a3526bc3af16dd78f2cc42351fc48965014f6";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

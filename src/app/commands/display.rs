@@ -1069,7 +1069,7 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::FbxExport));
             }
 
-            // STEPOUT — export 3D meshes to STEP AP203 format
+            // STEPOUT — export 3D meshes to STEP AP214 format
             "STEPOUT" | "EXPORTSTEP" | "STPOUT" => {
                 return Some(Task::done(Message::StepExport));
             }

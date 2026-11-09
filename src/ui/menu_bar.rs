@@ -282,11 +282,9 @@ const MENUS: &[(&str, &[Entry])] = &[
             Sub(
                 "Workspaces",
                 &[
-                    Cmd("2D Drafting", "WSCURRENT 2D", ""),
-                    Cmd("3D Modeling", "WSCURRENT 3D", ""),
+                    Cmd("Ribbon", "WSCURRENT RIBBON", ""),
+                    Cmd("Classic", "WSCURRENT CLASSIC", ""),
                     Sep,
-                    Cmd("Save Current As...", "WSSAVE", ""),
-                    Cmd("Workspace Settings...", "WSSETTINGS", ""),
                     Cmd("Customize...", "CUI", ""),
                 ],
             ),

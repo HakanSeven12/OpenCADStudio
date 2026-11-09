@@ -105,6 +105,7 @@ fn main() {
     );
 
     println!("cargo:rerun-if-env-changed=OCS_PATREON_TOKEN");
+    write_command_summaries();
 
     write_icon_pairs();
 
@@ -173,6 +174,49 @@ fn collect_svgs(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
             }
         }
     }
+}
+
+/// One-line summaries of commands and system variables, taken from the
+/// `summary:` front matter of the wiki source pages, as a sorted
+/// `(NAME, summary)` table for the command line's suggestion list.
+fn write_command_summaries() {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for dir in ["docs/wiki/commands", "docs/wiki/sysvars"] {
+        println!("cargo:rerun-if-changed={dir}");
+        let Ok(files) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().is_none_or(|ext| ext != "md") {
+                continue;
+            }
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let summary = text
+                .lines()
+                .skip(1)
+                .take_while(|line| *line != "---")
+                .find_map(|line| line.strip_prefix("summary:"))
+                .map(|s| s.trim().replace('`', ""));
+            if let Some(summary) = summary.filter(|s| !s.is_empty()) {
+                entries.push((name.to_ascii_uppercase(), summary));
+            }
+        }
+    }
+    entries.sort();
+    entries.dedup_by(|a, b| a.0 == b.0);
+    let mut out = String::from("&[\n");
+    for (name, summary) in &entries {
+        out.push_str(&format!("    ({name:?}, {summary:?}),\n"));
+    }
+    out.push_str("]\n");
+    let path = Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("command_summaries.rs");
+    std::fs::write(path, out).expect("write command summaries");
 }
 
 /// Watch actual Git paths: `.git` is a file in linked worktrees. Missing

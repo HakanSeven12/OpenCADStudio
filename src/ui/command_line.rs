@@ -1194,6 +1194,29 @@ impl CommandLine {
                     }
 
                     label = label.push(text(cmd.clone()).size(11));
+                    if details.is_none() {
+                        let target = self.command_aliases.get(cmd.as_str()).map(String::as_str);
+                        if let Some(summary) =
+                            crate::command::command_summary(target.unwrap_or(cmd))
+                        {
+                            label = label.push(
+                                text(summary)
+                                    .size(11)
+                                    .wrapping(iced::widget::text::Wrapping::None)
+                                    .style(move |theme: &Theme| {
+                                        let palette = theme.palette();
+                                        let base = if is_selected {
+                                            palette.primary.weak.text
+                                        } else {
+                                            palette.background.base.text
+                                        };
+                                        iced::widget::text::Style {
+                                            color: Some(Color { a: 0.7, ..base }),
+                                        }
+                                    }),
+                            );
+                        }
+                    }
 
                     let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))

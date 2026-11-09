@@ -1230,7 +1230,7 @@ fn split_dropdown_id(id: &str) -> String {
 
 /// A command's tooltip: its label and the command it runs.
 pub(super) fn command_tip(label: &str, cmd: &str) -> String {
-    format!("{label}\n{} {cmd}", crate::t!("Command:"))
+    super::widgets::tool_tip_text(label, cmd)
 }
 
 /// `btn` with its tooltip, which it leaves out while its menu is `open`:

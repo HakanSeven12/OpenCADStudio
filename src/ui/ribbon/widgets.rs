@@ -728,28 +728,32 @@ pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
     text(tip).size(11).into()
 }
 
-/// The sentence the reference shows under a tool's name, where known.
-fn tool_description(id: &str) -> Option<&'static str> {
-    Some(match id {
-        "DCLINEAR" => "Constrains the horizontal or vertical distance between points",
-        "DCHORIZONTAL" => "Constrains the X-distance between points on an object, or between two points on different objects",
-        "DCVERTICAL" => "Constrains the Y-distance between points on an object, or between two points on different objects",
-        "DCALIGNED" => "Constrains the distance between two points on an object or between two points on different objects",
-        "DCRADIUS" => "Constrains the radius of a circle or arc",
-        "DCDIAMETER" => "Constrains the diameter of a circle or arc",
-        "DCANGULAR" => "Constrains the angle between line or polyline segments, the angle swept out by an arc or a polyline arc segment, or the angle between three points on objects",
-        "DCCONVERT" => "Convert dimensions to dimensional constraints",
-        _ => return None,
-    })
-}
-
 /// A tool's tooltip: its name, its description when one is known, and the
 /// command it runs.
-fn tool_tip_text(label: &str, id: &str) -> String {
+pub(super) fn tool_tip_text(label: &str, id: &str) -> String {
     // A macro (`PDFIMPORT;FILE`) shows the command it starts.
     let id = id.split(';').next().unwrap_or(id);
-    match tool_description(id) {
-        Some(description) => format!("{label}\n{}\n{} {id}", t!(description), t!("Command:")),
+    // A ribbon token (`ARC_3P`) falls back to its command's summary.
+    let summary = crate::command::command_summary(id)
+        .or_else(|| crate::command::command_summary(id.split('_').next()?));
+    match summary {
+        Some(description) => {
+            // Broken at word ends so a long summary stays a narrow tip.
+            let mut wrapped = String::new();
+            let mut line = 0;
+            for word in description.split(' ') {
+                if line > 0 && line + word.len() > 56 {
+                    wrapped.push('\n');
+                    line = 0;
+                } else if line > 0 {
+                    wrapped.push(' ');
+                    line += 1;
+                }
+                wrapped.push_str(word);
+                line += word.len();
+            }
+            format!("{label}\n{wrapped}\n{} {id}", t!("Command:"))
+        }
         None => format!("{label}\n{} {id}", t!("Command:")),
     }
 }

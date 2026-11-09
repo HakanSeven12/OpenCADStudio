@@ -6063,7 +6063,7 @@ pub enum Message {
     StlExportPath(Option<std::path::PathBuf>),
     StlExportFinished(std::path::PathBuf, Result<(), String>),
     // ── STEP export ───────────────────────────────────────────────────────
-    /// Trigger STEP AP203 export: show save dialog.
+    /// Trigger STEP AP214 export: show save dialog.
     StepExport,
     /// Callback after the user picks (or cancels) the STEP save path.
     StepExportPath(Option<std::path::PathBuf>),

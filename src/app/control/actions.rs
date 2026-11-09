@@ -168,6 +168,7 @@ pub(super) const NAMES: &[&str] = &[
     "spell_dialog",
     "table_cell_tab",
     "command_submit",
+    "command_type",
     "pdf_shx_settings",
     "pdf_layer_toggle",
     "pc_manager_toggle",
@@ -1458,6 +1459,9 @@ impl OpenCADStudio {
                 self.command_line.input = req["value"].as_str().unwrap_or("").to_string();
                 Message::CommandSubmit
             }
+            // Types into the command line without submitting, as the
+            // keyboard does, so the suggestion list follows the text.
+            "command_type" => Message::CommandInput(req["value"].as_str().unwrap_or("").into()),
             // Tab / Shift+Tab in a table cell editor: value "next" or "prev".
             "table_cell_tab" => match req["value"].as_str() {
                 Some("prev") => Message::DynTabPrev,

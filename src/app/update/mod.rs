@@ -2687,7 +2687,7 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            // ── STEP AP203 export ─────────────────────────────────────────
+            // ── STEP AP214 export ─────────────────────────────────────────
             Message::StepExport => {
                 let i = self.active_tab;
                 if self.tabs[i].scene.meshes.is_empty() {
@@ -2701,7 +2701,7 @@ impl OpenCADStudio {
                     Task::perform(
                         async {
                             crate::sys::file_dialog()
-                                .set_title(crate::t!("Export STEP AP203").as_ref())
+                                .set_title(crate::t!("Export STEP AP214").as_ref())
                                 .set_file_name("export.step")
                                 .add_filter(crate::t!("STEP Files").as_ref(), &["step", "stp"])
                                 .add_filter(crate::t!("All Files").as_ref(), &["*"])

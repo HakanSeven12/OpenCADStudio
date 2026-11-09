@@ -4047,6 +4047,17 @@ pub struct CommandRegistration {
 
 inventory::collect!(CommandRegistration);
 
+/// One-line summary of a command or system variable from its wiki page.
+pub fn command_summary(name: &str) -> Option<&'static str> {
+    static SUMMARIES: &[(&str, &str)] =
+        include!(concat!(env!("OUT_DIR"), "/command_summaries.rs"));
+    let name = name.trim_start_matches(['\'', '_']).to_ascii_uppercase();
+    SUMMARIES
+        .binary_search_by(|(key, _)| (*key).cmp(name.as_str()))
+        .ok()
+        .map(|idx| SUMMARIES[idx].1)
+}
+
 /// All registered command names, including aliases.
 pub fn all_registered_command_names() -> Vec<&'static str> {
     inventory::iter::<CommandRegistration>

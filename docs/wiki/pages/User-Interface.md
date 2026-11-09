@@ -33,6 +33,8 @@ The ribbon groups the tools in tabs; [Ribbon Reference](Ribbon-Reference) lists 
 
 Some tabs appear only when they apply: **Block Editor** while you edit a block, **Table Cell** while table cells are selected.
 
+**Tooltips.** Hold the pointer over a ribbon or Quick Access button to see its name, a one-line description of what it does and the command it runs.
+
 **Keyboard access.** Press and release **Alt**: every tab and Quick Access button shows a key tip. Type a tab's letters to open it, then a button's letters to run it. **Esc** goes back one level.
 
 **Search.** The search box finds any command on the ribbon, the menus or the Quick Access Toolbar by name and runs it as its button would.
@@ -43,7 +45,7 @@ To hide the ribbon, use `RIBBONCLOSE`; `RIBBON` brings it back. `CLEANSCREEN` (*
 
 Everything in the program is a command, and every command can be typed. The command line:
 
-- **Suggests** matching commands and system variables as you type. Arrow keys move through the list; Enter runs the highlighted one.
+- **Suggests** matching commands and system variables as you type, each with a one-line description. Arrow keys move through the list; Enter runs the highlighted one.
 - **Accepts aliases**: `L` for `LINE`, `C` for `CIRCLE`, `TR` for `TRIM` and so on. See the [Command Reference](Command-Reference) and [Customization](Customization#command-aliases).
 - **Shows options** in square brackets, for example `[Polyline/Radius]`. Type the capital letter of an option, or click it.
 - **Repeats the last command** when you press Enter or Space at an empty prompt.

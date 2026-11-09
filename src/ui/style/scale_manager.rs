@@ -135,10 +135,14 @@ pub fn view_window<'a, 'b>(
                 let is_sel = name.as_str() == selected;
                 let is_cur = name.eq_ignore_ascii_case(current);
                 let check = crate::ui::icons::themed_check_cell(is_cur);
+                // The ratio keeps its whole width; the name takes the rest.
                 let label = row![
                     check,
-                    text(name.clone()).size(11).width(sizing.width),
-                    text(ratio.clone()).size(10).style(muted_text_style),
+                    text(name.clone()).size(11).width(iced::Length::Fill),
+                    text(ratio.clone())
+                        .size(10)
+                        .style(muted_text_style)
+                        .width(iced::Length::Shrink),
                 ]
                 .spacing(4)
                 .align_y(iced::Center);
@@ -182,7 +186,7 @@ pub fn view_window<'a, 'b>(
         .spacing(4)
         .height(sizing.height),
     )
-    .width(190)
+    .width(250)
     .height(sizing.height)
     .padding(iced::Padding {
         top: 12.0,

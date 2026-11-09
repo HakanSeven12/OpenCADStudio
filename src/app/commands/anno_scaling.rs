@@ -224,7 +224,7 @@ fn scale_table(rows: &[(String, f64, f64)]) -> Vec<String> {
     for (index, (name, paper, drawing)) in rows.iter().enumerate() {
         let effective = if *drawing > 0.0 { paper / drawing } else { 0.0 };
         lines.push(format!(
-            "{:>2}: {:<23}{:>11}{:>15}{:>14}",
+            "{:>2}: {:<23}{:>11}{:>14}{:>14}",
             index + 1,
             name,
             number(*paper),

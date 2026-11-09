@@ -3,6 +3,19 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
+/// Calculate the median independently of the order samples were collected.
+pub fn median(samples: &[f64]) -> f64 {
+    assert!(!samples.is_empty(), "median requires at least one sample");
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let middle = sorted.len() / 2;
+    if sorted.len() % 2 == 0 {
+        (sorted[middle - 1] + sorted[middle]) * 0.5
+    } else {
+        sorted[middle]
+    }
+}
+
 // ── Metric Structures ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +39,8 @@ pub struct BenchmarkMetric {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkSuiteReport {
+    #[serde(default)]
+    pub suite: String,
     pub timestamp: String,
     pub os: String,
     pub arch: String,
@@ -112,11 +127,7 @@ impl BenchmarkRunner {
         let max = samples[n - 1];
         let sum: f64 = samples.iter().sum();
         let mean = sum / (n as f64);
-        let median = if n % 2 == 0 {
-            (samples[n / 2 - 1] + samples[n / 2]) * 0.5
-        } else {
-            samples[n / 2]
-        };
+        let median = median(&samples);
 
         let p95_idx = ((n as f64) * 0.95).floor() as usize;
         let p95 = samples[p95_idx.min(n - 1)];
@@ -162,6 +173,30 @@ impl BenchmarkRunner {
             if let Some(ref path) = self.baseline_path {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     if let Ok(report) = serde_json::from_str::<BenchmarkSuiteReport>(&content) {
+                        assert_eq!(
+                            report.suite, self.title,
+                            "baseline benchmark suite differs or is missing"
+                        );
+                        assert_eq!(
+                            report.is_quick_mode, self.quick_mode,
+                            "baseline workload mode differs"
+                        );
+                        assert_eq!(
+                            report.os,
+                            env::consts::OS,
+                            "baseline operating system differs"
+                        );
+                        assert_eq!(
+                            report.arch,
+                            env::consts::ARCH,
+                            "baseline architecture differs"
+                        );
+                        let profile = if cfg!(debug_assertions) {
+                            "debug"
+                        } else {
+                            "release"
+                        };
+                        assert_eq!(report.profile, profile, "baseline build profile differs");
                         println!(
                             "\nLoaded baseline from '{}' ({} metrics)",
                             path.display(),
@@ -173,18 +208,10 @@ impl BenchmarkRunner {
                             .map(|m| (m.name.clone(), m))
                             .collect()
                     } else {
-                        eprintln!(
-                            "Warning: Failed to parse baseline JSON at '{}'",
-                            path.display()
-                        );
-                        HashMap::new()
+                        panic!("Failed to parse baseline JSON at '{}'", path.display());
                     }
                 } else {
-                    eprintln!(
-                        "Warning: Could not read baseline file at '{}'",
-                        path.display()
-                    );
-                    HashMap::new()
+                    panic!("Could not read baseline file at '{}'", path.display());
                 }
             } else {
                 HashMap::new()
@@ -214,6 +241,17 @@ impl BenchmarkRunner {
             };
 
             let baseline_col = if let Some(base) = baseline_map.get(&m.name) {
+                assert_eq!(base.unit, m.unit, "baseline unit differs for {}", m.name);
+                assert_eq!(
+                    base.description, m.description,
+                    "baseline workload description differs for {}",
+                    m.name
+                );
+                assert_eq!(
+                    base.throughput_unit, m.throughput_unit,
+                    "baseline throughput unit differs for {}",
+                    m.name
+                );
                 if base.median > 0.0 {
                     let delta_pct = ((m.median - base.median) / base.median) * 100.0;
                     if delta_pct < -1.0 {
@@ -251,6 +289,7 @@ impl BenchmarkRunner {
         println!("========================================================================================================================\n");
 
         let report = BenchmarkSuiteReport {
+            suite: self.title.clone(),
             timestamp: chrono_now(),
             os: env::consts::OS.to_string(),
             arch: env::consts::ARCH.to_string(),

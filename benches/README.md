@@ -108,3 +108,10 @@ cargo bench --bench performance_benchmarks -- --baseline target/baseline_metrics
 ```
 
 The benchmark runner will output statistical deltas (`% faster` / `% slower`) for each metric and flag regressions exceeding the defined thresholds.
+
+Baselines must use the same suite, quick/full mode, operating system,
+architecture, and build profile. Matching metrics must also retain their
+description and units. Reports created before suite identifiers were added
+must be regenerated. These checks cannot detect every workload change: keep
+the inputs and measured operation identical when comparing revisions, and use
+the same machine and comparable system conditions.

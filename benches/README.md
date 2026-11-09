@@ -72,6 +72,44 @@ Run the benchmark's process-lifecycle and report tests without opening a GUI:
 python -m unittest discover -s benches -p 'test_drawing_startup.py'
 ```
 
+## Drawing-open Rust allocation probe
+
+This native, cross-platform probe runs the drawing-open parser, linetype and
+external-reference preparation, derived-cache construction, and model-space
+geometry preparation without starting the GUI. It uses a counting wrapper over
+the system allocator to report live and peak *requested Rust allocation bytes*
+at each stage, plus the capacities of selected wire and text buffers. It also
+reports entity counts and the drawing's SHA-256 so the same work can be checked
+between runs. The input is supplied locally; no drawing is added to the repo.
+
+```sh
+cargo bench --locked --bench drawing_open_memory -- --input PATH_TO_DRAWING --expected-texts 10000
+```
+
+Use `--output PATH` to additionally write JSON to a **new** file. The optional
+`--expected-texts` check fails if the fixture no longer has the specified
+number of TEXT entities. Run a fresh process per sample; the probe waits two
+seconds after geometry preparation for background index work, then reports the
+state after dropping its document and geometry. Process-wide caches and worker
+threads may remain live. A final diagnostic stage clears the shaping and
+fallback caches in the probe process only; their hash-table capacity and other
+process-wide caches may remain allocated. The report also includes CPU text
+atlas bytes. Test the counting allocator itself with:
+
+```sh
+cargo bench --locked --bench drawing_open_memory -- --self-test
+```
+
+These numbers are not RSS: they exclude allocator bookkeeping and unused heap
+pages, allocations bypassing Rust's global allocator, GUI and GPU resources,
+and child processes. Peak is a process-wide high-water mark, not a per-phase
+peak, and allocation totals exclude reallocation sizes. The instrumentation
+also adds runtime overhead, so its timings must not be compared with an
+uninstrumented GUI benchmark. The probe disables `PERF` logging in its own
+process and records whether resident memoization is enabled. Keep the input
+hash, external references, fonts, memoization setting, build profile and
+machine constant when comparing reports.
+
 ---
 
 ## Benchmark Suite Catalog (31 Metrics)

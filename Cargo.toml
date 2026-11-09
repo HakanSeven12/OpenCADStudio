@@ -361,6 +361,10 @@ harness = false
 name = "scene_pick_micro"
 harness = false
 
+[[bench]]
+name = "drawing_open_memory"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

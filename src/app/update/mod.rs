@@ -3406,7 +3406,9 @@ impl OpenCADStudio {
                 } else if lower == "reset" {
                     if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
                         let def = panel.def.clone();
+                        let owner = panel.owner_plugin_id.clone();
                         *panel = crate::ui::window::plugin_panel::PluginPanelState::from_def(def);
+                        panel.owner_plugin_id = owner;
                     }
                     crate::plugin::v4_support::publish_panel_action(
                         panel_id,
@@ -7055,7 +7057,10 @@ impl OpenCADStudio {
                     let all = targets.iter().all(|handle| has(doc, *handle));
                     for handle in &targets {
                         if all {
-                            if crate::scene::annotative::object_scale_memberships(doc, *handle).len() > 1 {
+                            if crate::scene::annotative::object_scale_memberships(doc, *handle)
+                                .len()
+                                > 1
+                            {
                                 crate::scene::annotative::remove_annotation_context_for_scale(
                                     doc, *handle, sh,
                                 );
@@ -7203,7 +7208,11 @@ impl OpenCADStudio {
                         .reset_scale_list_to(&keep, choice != 1, choice != 0);
                     self.scale_stage_mark();
                     self.scale_stage_commit();
-                    let first = self.tabs[i].scene.scale_names_in_list_order().into_iter().next();
+                    let first = self.tabs[i]
+                        .scene
+                        .scale_names_in_list_order()
+                        .into_iter()
+                        .next();
                     if let Some(first) = first {
                         self.load_scale_editor(&first);
                     }

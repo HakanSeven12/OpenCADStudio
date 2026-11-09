@@ -382,6 +382,10 @@ pub enum PluginRequest {
         chain: crate::host::ParametricChain,
         tolerance: f64,
     },
+    /// Additive: read the current state of an owned dock panel.
+    PanelSnapshot {
+        panel_id: String,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -472,6 +476,8 @@ pub enum PluginResponse {
     },
     /// Additive: outcome of pure parametric-chain validation.
     ValidateParametricChainResult(Result<(), String>),
+    /// Additive: current state of an owned dock panel.
+    PanelSnapshot(Result<crate::dialog::PanelSnapshot, String>),
 }
 
 /// Messages sent from the host to the plugin runner.
@@ -526,6 +532,55 @@ impl OwnedPluginManifest {
     pub fn api_version(&self) -> ApiVersion {
         ApiVersion {
             major: self.api_version,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PluginRequest, PluginResponse};
+
+    fn discriminant<T: serde::Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serialize IPC variant");
+        u32::from_le_bytes(bytes[..4].try_into().expect("bincode enum discriminant"))
+    }
+
+    #[test]
+    fn panel_snapshot_variants_append_without_shifting_discriminants() {
+        let request = PluginRequest::PanelSnapshot {
+            panel_id: "alignment".to_owned(),
+        };
+        let response = PluginResponse::PanelSnapshot(Err("unsupported".to_owned()));
+
+        assert_eq!(discriminant(&PluginRequest::PushInfo(String::new())), 0);
+        assert_eq!(
+            discriminant(&PluginRequest::ValidateParametricChain {
+                chain: crate::host::ParametricChain {
+                    plane: crate::host::ParametricPlane::Plan,
+                    segments: Vec::new(),
+                    layer: String::new(),
+                },
+                tolerance: 1e-3,
+            }),
+            59
+        );
+        assert_eq!(discriminant(&request), 60);
+        assert_eq!(discriminant(&PluginResponse::Ok), 0);
+        assert_eq!(
+            discriminant(&PluginResponse::ValidateParametricChainResult(Ok(()))),
+            45
+        );
+        assert_eq!(discriminant(&response), 46);
+
+        let bytes = bincode::serialize(&request).expect("serialize panel snapshot request");
+        match bincode::deserialize::<PluginRequest>(&bytes).expect("deserialize request") {
+            PluginRequest::PanelSnapshot { panel_id } => assert_eq!(panel_id, "alignment"),
+            other => panic!("unexpected: {other:?}"),
+        }
+        let bytes = bincode::serialize(&response).expect("serialize panel snapshot response");
+        match bincode::deserialize::<PluginResponse>(&bytes).expect("deserialize response") {
+            PluginResponse::PanelSnapshot(Err(error)) => assert_eq!(error, "unsupported"),
+            other => panic!("unexpected: {other:?}"),
         }
     }
 }

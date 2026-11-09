@@ -261,12 +261,14 @@ pub fn handle_plugin_request(
             )
         }
         ShowDialog(dialog) => PluginResponse::DialogResult(host.show_dialog(dialog)),
-        RegisterPanel(panel) => PluginResponse::PanelRegistered(host.register_panel(panel)),
+        RegisterPanel(panel) => {
+            PluginResponse::PanelRegistered(host.register_panel_for_plugin(plugin_id, panel))
+        }
         UpdatePanel { panel_id, values } => {
-            PluginResponse::PanelUpdated(host.update_panel(&panel_id, values))
+            PluginResponse::PanelUpdated(host.update_panel_for_plugin(plugin_id, &panel_id, values))
         }
         TogglePanel { panel_id, show } => {
-            PluginResponse::PanelToggled(host.toggle_panel(&panel_id, show))
+            PluginResponse::PanelToggled(host.toggle_panel_for_plugin(plugin_id, &panel_id, show))
         }
         RegisterQuadPanels { panels } => {
             // API v15: the owning plugin's id is transport identity (see
@@ -307,5 +309,458 @@ pub fn handle_plugin_request(
                 .collect();
             PluginResponse::QuadPanelsRegistered { ok, errors }
         }
+        PanelSnapshot { panel_id } => {
+            PluginResponse::PanelSnapshot(host.panel_snapshot_for_plugin(plugin_id, &panel_id))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dialog::{DialogValue, PanelDef, PanelSnapshot};
+    use crate::host::{
+        CadDocumentReader, Document, DocumentReader, EntityType, ExtendedDataRecord, Handle,
+        InteractiveCommand,
+    };
+    use std::any::Any;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    const CALLER: &str = "example.actual_caller";
+    const PANEL_ID: &str = "forged.plugin.id";
+    const OWNER_ERROR: &str = "panel is not owned by caller";
+
+    #[derive(Debug, PartialEq)]
+    enum PanelCall {
+        Register {
+            plugin_id: String,
+            panel_id: String,
+        },
+        Update {
+            plugin_id: String,
+            panel_id: String,
+            values: HashMap<String, DialogValue>,
+        },
+        Toggle {
+            plugin_id: String,
+            panel_id: String,
+            show: Option<bool>,
+        },
+        Snapshot {
+            plugin_id: String,
+            panel_id: String,
+        },
+        LegacyRegister {
+            panel_id: String,
+        },
+        LegacyUpdate {
+            panel_id: String,
+            values: HashMap<String, DialogValue>,
+        },
+        LegacyToggle {
+            panel_id: String,
+            show: Option<bool>,
+        },
+    }
+
+    #[derive(Default)]
+    struct HostState {
+        calls: Vec<PanelCall>,
+        snapshot: Option<PanelSnapshot>,
+        document_reads: usize,
+        document_writes: usize,
+    }
+
+    struct RecordingHost {
+        document: Document,
+        state: Mutex<HostState>,
+    }
+
+    impl RecordingHost {
+        fn new(snapshot: PanelSnapshot) -> Self {
+            Self {
+                document: Document::new(),
+                state: Mutex::new(HostState {
+                    snapshot: Some(snapshot),
+                    ..HostState::default()
+                }),
+            }
+        }
+    }
+
+    struct LegacyHost {
+        document: Document,
+        state: Mutex<HostState>,
+    }
+
+    impl Default for LegacyHost {
+        fn default() -> Self {
+            Self {
+                document: Document::new(),
+                state: Mutex::new(HostState::default()),
+            }
+        }
+    }
+
+    macro_rules! required_host_api_methods {
+        () => {
+            fn tab_index(&self) -> usize {
+                0
+            }
+
+            fn document(&self) -> &Document {
+                self.state.lock().unwrap().document_reads += 1;
+                &self.document
+            }
+
+            fn document_mut(&mut self) -> &mut Document {
+                self.state.get_mut().unwrap().document_writes += 1;
+                &mut self.document
+            }
+
+            fn add_entity(&mut self, _entity: EntityType) -> Handle {
+                self.state.get_mut().unwrap().document_writes += 1;
+                Handle::default()
+            }
+
+            fn bump_geometry(&mut self) {}
+
+            fn read_record(&self, _handle: Handle, _app_name: &str) -> Option<&ExtendedDataRecord> {
+                self.state.lock().unwrap().document_reads += 1;
+                None
+            }
+
+            fn write_record(&mut self, _handle: Handle, _record: ExtendedDataRecord) -> bool {
+                self.state.get_mut().unwrap().document_writes += 1;
+                false
+            }
+
+            fn remove_record(&mut self, _handle: Handle, _app_name: &str) -> bool {
+                self.state.get_mut().unwrap().document_writes += 1;
+                false
+            }
+
+            fn push_undo(&mut self, _label: &str) {}
+            fn set_dirty(&mut self) {}
+            fn push_info(&mut self, _msg: &str) {}
+            fn push_output(&mut self, _msg: &str) {}
+            fn push_error(&mut self, _msg: &str) {}
+            fn start_interactive(&mut self, _command: Box<dyn InteractiveCommand>) {}
+
+            fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn Any + Send + Sync)> {
+                None
+            }
+
+            fn plugin_state_any_mut(
+                &mut self,
+                _plugin_id: &str,
+            ) -> Option<&mut (dyn Any + Send + Sync)> {
+                None
+            }
+
+            fn ensure_plugin_state_any(
+                &mut self,
+                _plugin_id: &'static str,
+                _init: &mut dyn FnMut() -> Box<dyn Any + Send + Sync>,
+            ) -> Option<&mut (dyn Any + Send + Sync)> {
+                None
+            }
+
+            fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
+                self.state.lock().unwrap().document_reads += 1;
+                Box::new(CadDocumentReader(&self.document))
+            }
+        };
+    }
+
+    impl HostApi for RecordingHost {
+        required_host_api_methods!();
+
+        fn register_panel_for_plugin(&mut self, plugin_id: &str, panel: PanelDef) -> bool {
+            self.state.lock().unwrap().calls.push(PanelCall::Register {
+                plugin_id: plugin_id.to_owned(),
+                panel_id: panel.id,
+            });
+            true
+        }
+
+        fn update_panel_for_plugin(
+            &mut self,
+            plugin_id: &str,
+            panel_id: &str,
+            values: HashMap<String, DialogValue>,
+        ) -> bool {
+            self.state.lock().unwrap().calls.push(PanelCall::Update {
+                plugin_id: plugin_id.to_owned(),
+                panel_id: panel_id.to_owned(),
+                values,
+            });
+            true
+        }
+
+        fn toggle_panel_for_plugin(
+            &mut self,
+            plugin_id: &str,
+            panel_id: &str,
+            show: Option<bool>,
+        ) -> bool {
+            self.state.lock().unwrap().calls.push(PanelCall::Toggle {
+                plugin_id: plugin_id.to_owned(),
+                panel_id: panel_id.to_owned(),
+                show,
+            });
+            true
+        }
+
+        fn panel_snapshot_for_plugin(
+            &self,
+            plugin_id: &str,
+            panel_id: &str,
+        ) -> Result<PanelSnapshot, String> {
+            let mut state = self.state.lock().unwrap();
+            state.calls.push(PanelCall::Snapshot {
+                plugin_id: plugin_id.to_owned(),
+                panel_id: panel_id.to_owned(),
+            });
+            let snapshot = state.snapshot.clone().expect("recording host snapshot");
+            if plugin_id != snapshot.plugin_id.as_str() || panel_id != snapshot.panel_id.as_str() {
+                Err(OWNER_ERROR.to_owned())
+            } else {
+                Ok(snapshot)
+            }
+        }
+    }
+
+    impl HostApi for LegacyHost {
+        required_host_api_methods!();
+
+        fn register_panel(&mut self, panel: PanelDef) -> bool {
+            self.state
+                .lock()
+                .unwrap()
+                .calls
+                .push(PanelCall::LegacyRegister { panel_id: panel.id });
+            true
+        }
+
+        fn update_panel(&mut self, panel_id: &str, values: HashMap<String, DialogValue>) -> bool {
+            self.state
+                .lock()
+                .unwrap()
+                .calls
+                .push(PanelCall::LegacyUpdate {
+                    panel_id: panel_id.to_owned(),
+                    values,
+                });
+            true
+        }
+
+        fn toggle_panel(&mut self, panel_id: &str, show: Option<bool>) -> bool {
+            self.state
+                .lock()
+                .unwrap()
+                .calls
+                .push(PanelCall::LegacyToggle {
+                    panel_id: panel_id.to_owned(),
+                    show,
+                });
+            true
+        }
+    }
+
+    fn request(host: &mut dyn HostApi, plugin_id: &str, request: PluginRequest) -> PluginResponse {
+        handle_plugin_request(
+            host,
+            plugin_id,
+            request,
+            &mut |_| panic!("unexpected interactive command"),
+            true,
+        )
+    }
+
+    #[test]
+    fn panel_requests_use_caller_identity_and_protect_snapshot_read_back() {
+        let values = HashMap::from([
+            (
+                "name".to_owned(),
+                DialogValue::Text("  Bracket & <A>  ".to_owned()),
+            ),
+            ("quantity".to_owned(), DialogValue::Number(12.5)),
+            ("enabled".to_owned(), DialogValue::Bool(true)),
+        ]);
+        let raw_text = HashMap::from([
+            ("name".to_owned(), "  Bracket & <A>  ".to_owned()),
+            ("quantity".to_owned(), " 12.500 ".to_owned()),
+        ]);
+        let mut host = RecordingHost::new(PanelSnapshot {
+            panel_id: PANEL_ID.to_owned(),
+            plugin_id: CALLER.to_owned(),
+            tab_id: 73,
+            values: values.clone(),
+            raw_text: raw_text.clone(),
+            errors: Vec::new(),
+        });
+
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::RegisterPanel(PanelDef::new(PANEL_ID, "Forged identity"))
+            ),
+            PluginResponse::PanelRegistered(true)
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::UpdatePanel {
+                    panel_id: PANEL_ID.to_owned(),
+                    values: values.clone(),
+                }
+            ),
+            PluginResponse::PanelUpdated(true)
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::TogglePanel {
+                    panel_id: PANEL_ID.to_owned(),
+                    show: Some(true),
+                }
+            ),
+            PluginResponse::PanelToggled(true)
+        ));
+
+        let snapshot = match request(
+            &mut host,
+            CALLER,
+            PluginRequest::PanelSnapshot {
+                panel_id: PANEL_ID.to_owned(),
+            },
+        ) {
+            PluginResponse::PanelSnapshot(Ok(snapshot)) => snapshot,
+            other => panic!("unexpected correct-owner snapshot response: {other:?}"),
+        };
+        assert_eq!(snapshot.plugin_id, CALLER);
+        assert_eq!(snapshot.tab_id, 73);
+        assert_eq!(snapshot.values, values);
+        assert_eq!(snapshot.raw_text, raw_text);
+        assert!(snapshot.errors.is_empty());
+
+        match request(
+            &mut host,
+            "example.wrong_owner",
+            PluginRequest::PanelSnapshot {
+                panel_id: PANEL_ID.to_owned(),
+            },
+        ) {
+            PluginResponse::PanelSnapshot(Err(error)) => assert_eq!(error, OWNER_ERROR),
+            other => panic!("wrong-owner snapshot was not rejected: {other:?}"),
+        }
+
+        let state = host.state.lock().unwrap();
+        assert_eq!(
+            state.calls,
+            vec![
+                PanelCall::Register {
+                    plugin_id: CALLER.to_owned(),
+                    panel_id: PANEL_ID.to_owned(),
+                },
+                PanelCall::Update {
+                    plugin_id: CALLER.to_owned(),
+                    panel_id: PANEL_ID.to_owned(),
+                    values: values.clone(),
+                },
+                PanelCall::Toggle {
+                    plugin_id: CALLER.to_owned(),
+                    panel_id: PANEL_ID.to_owned(),
+                    show: Some(true),
+                },
+                PanelCall::Snapshot {
+                    plugin_id: CALLER.to_owned(),
+                    panel_id: PANEL_ID.to_owned(),
+                },
+                PanelCall::Snapshot {
+                    plugin_id: "example.wrong_owner".to_owned(),
+                    panel_id: PANEL_ID.to_owned(),
+                },
+            ]
+        );
+        assert_eq!(state.document_reads, 0);
+        assert_eq!(state.document_writes, 0);
+    }
+
+    #[test]
+    fn legacy_host_defaults_reject_snapshot_and_keep_panel_registration_behavior() {
+        let mut host = LegacyHost::default();
+        let values = HashMap::from([("enabled".to_owned(), DialogValue::Bool(true))]);
+
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::RegisterPanel(PanelDef::new(PANEL_ID, "Legacy panel"))
+            ),
+            PluginResponse::PanelRegistered(true)
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::UpdatePanel {
+                    panel_id: PANEL_ID.to_owned(),
+                    values: values.clone(),
+                }
+            ),
+            PluginResponse::PanelUpdated(true)
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::TogglePanel {
+                    panel_id: PANEL_ID.to_owned(),
+                    show: None,
+                }
+            ),
+            PluginResponse::PanelToggled(true)
+        ));
+        match request(
+            &mut host,
+            CALLER,
+            PluginRequest::PanelSnapshot {
+                panel_id: PANEL_ID.to_owned(),
+            },
+        ) {
+            PluginResponse::PanelSnapshot(Err(error)) => {
+                assert_eq!(
+                    error,
+                    "Authenticated panel snapshots are not supported by this host"
+                );
+            }
+            other => panic!("legacy host returned a snapshot: {other:?}"),
+        }
+
+        let state = host.state.lock().unwrap();
+        assert_eq!(
+            state.calls,
+            vec![
+                PanelCall::LegacyRegister {
+                    panel_id: PANEL_ID.to_owned(),
+                },
+                PanelCall::LegacyUpdate {
+                    panel_id: PANEL_ID.to_owned(),
+                    values,
+                },
+                PanelCall::LegacyToggle {
+                    panel_id: PANEL_ID.to_owned(),
+                    show: None,
+                },
+            ]
+        );
+        assert_eq!(state.document_reads, 0);
+        assert_eq!(state.document_writes, 0);
     }
 }

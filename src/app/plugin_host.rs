@@ -83,6 +83,17 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].id
     }
 
+    /// Resolve the legacy panel aliases, then enforce the authenticated
+    /// transport owner. Alias lookup must not turn into an ownership bypass:
+    /// a title/command that resolves to another plugin's panel is refused.
+    fn owned_panel_id(&self, plugin_id: &str, panel_id: &str) -> Option<String> {
+        let resolved = resolve_toggle_panel_id(self.app, panel_id)?;
+        match self.app.plugin_panels.get(&resolved) {
+            Some(panel) if panel.owner_plugin_id.as_deref() == Some(plugin_id) => Some(resolved),
+            _ => None,
+        }
+    }
+
     pub fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {
         self.app
             .tabs
@@ -4534,6 +4545,36 @@ fn resolve_linetype(doc: &mut document::Document, name: &str) -> Option<String> 
 /// resolution priority, so this is plain delegation, not recursion). The
 /// per-tab plugin-state accessors expose the raw `Any` box; the typed
 /// `ocs_plugin_api::host::plugin_state*` helpers wrap them.
+fn resolve_toggle_panel_id(app: &OpenCADStudio, panel_id: &str) -> Option<String> {
+    if app.plugin_panel_ids.contains_key(panel_id) {
+        return Some(panel_id.to_string());
+    }
+    let lower = panel_id.to_lowercase();
+    let stripped = lower.replace([' ', '_', '-'], "");
+    app.plugin_panel_ids
+        .keys()
+        .find(|key| {
+            key.to_lowercase() == lower
+                || key.replace([' ', '_', '-'], "").to_lowercase() == stripped
+        })
+        .cloned()
+        .or_else(|| {
+            app.plugin_panels
+                .iter()
+                .find(|(key, state)| {
+                    key.to_lowercase() == lower
+                        || key.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        || state.def.title.to_lowercase() == lower
+                        || state.def.title.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        || state.def.command.as_ref().is_some_and(|command| {
+                            command.to_lowercase() == lower
+                                || command.replace([' ', '_', '-'], "").to_lowercase() == stripped
+                        })
+                })
+                .map(|(key, _)| key.clone())
+        })
+}
+
 impl HostApi for HostSession<'_> {
     fn tab_index(&self) -> usize {
         self.tab_index()
@@ -4883,37 +4924,7 @@ impl HostApi for HostSession<'_> {
         false
     }
     fn toggle_panel(&mut self, panel_id: &str, show: Option<bool>) -> bool {
-        let matched_id = if self.app.plugin_panel_ids.contains_key(panel_id) {
-            Some(panel_id.to_string())
-        } else {
-            let lower = panel_id.to_lowercase();
-            let stripped = lower.replace([' ', '_', '-'], "");
-            self.app
-                .plugin_panel_ids
-                .keys()
-                .find(|k| {
-                    k.to_lowercase() == lower
-                        || k.replace([' ', '_', '-'], "").to_lowercase() == stripped
-                })
-                .cloned()
-                .or_else(|| {
-                    self.app
-                        .plugin_panels
-                        .iter()
-                        .find(|(k, state)| {
-                            k.to_lowercase() == lower
-                                || k.replace([' ', '_', '-'], "").to_lowercase() == stripped
-                                || state.def.title.to_lowercase() == lower
-                                || state.def.title.replace([' ', '_', '-'], "").to_lowercase()
-                                    == stripped
-                                || state.def.command.as_ref().is_some_and(|c| {
-                                    c.to_lowercase() == lower
-                                        || c.replace([' ', '_', '-'], "").to_lowercase() == stripped
-                                })
-                        })
-                        .map(|(k, _)| k.clone())
-                })
-        };
+        let matched_id = resolve_toggle_panel_id(self.app, panel_id);
 
         if let Some(ref id) = matched_id {
             if let Some(&num) = self.app.plugin_panel_ids.get(id) {
@@ -4952,6 +4963,104 @@ impl HostApi for HostSession<'_> {
         }
         false
     }
+
+    fn register_panel_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel: ocs_plugin_api::dialog::PanelDef,
+    ) -> bool {
+        if plugin_id.is_empty() || panel.id.trim().is_empty() {
+            return false;
+        }
+        let panel_id = panel.id.clone();
+        if let Some(existing) = self.app.plugin_panels.get(&panel_id) {
+            if existing.owner_plugin_id.as_deref() != Some(plugin_id) {
+                return false;
+            }
+            if existing.def == panel {
+                // Re-registering an unchanged form is idempotent: do not
+                // discard values, collapsed sections or focus mid-edit.
+                return true;
+            }
+        }
+        if !self.register_panel(panel) {
+            return false;
+        }
+        if let Some(state) = self.app.plugin_panels.get_mut(&panel_id) {
+            state.owner_plugin_id = Some(plugin_id.to_owned());
+            true
+        } else {
+            false
+        }
+    }
+
+    fn update_panel_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
+    ) -> bool {
+        let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) else {
+            return false;
+        };
+        self.update_panel(&panel_id, values)
+    }
+
+    fn toggle_panel_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        show: Option<bool>,
+    ) -> bool {
+        let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) else {
+            return false;
+        };
+        self.toggle_panel(&panel_id, show)
+    }
+
+    fn panel_snapshot(
+        &self,
+        panel_id: &str,
+    ) -> Result<ocs_plugin_api::dialog::PanelSnapshot, String> {
+        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
+            return Err(format!("panel {panel_id:?} is not registered"));
+        };
+        let panel = self
+            .app
+            .plugin_panels
+            .get(&resolved)
+            .ok_or_else(|| format!("panel {panel_id:?} is not registered"))?;
+        // A direct HostApi command is already executing in a document-bound
+        // command context. Unlike the IPC entry point, there is no second
+        // transport identity to authenticate here; the caller's command is
+        // the capability. The snapshot still carries the registered owner
+        // and the actual session tab for the plugin's own target checks.
+        Ok(panel.snapshot(self.tab_id()))
+    }
+
+    fn panel_snapshot_for_plugin(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+    ) -> Result<ocs_plugin_api::dialog::PanelSnapshot, String> {
+        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
+            return Err(format!("panel {panel_id:?} is not registered"));
+        };
+        let panel = self
+            .app
+            .plugin_panels
+            .get(&resolved)
+            .ok_or_else(|| format!("panel {panel_id:?} is not registered"))?;
+        if panel.owner_plugin_id.as_deref() != Some(plugin_id) {
+            return Err(format!(
+                "panel {panel_id:?} is not owned by plugin {plugin_id:?}"
+            ));
+        }
+        // HostSession is created by the normal, document-bound command
+        // dispatcher. The tab is attached here, never supplied by the form.
+        Ok(panel.snapshot(self.tab_id()))
+    }
+
     fn register_quad_panels(
         &mut self,
         plugin_id: &str,
@@ -17454,5 +17563,242 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                 .all(|section| section.title != crate::t!("Plugin class parameters").into_owned()),
             "an unstamped selection rides no class rows"
         );
+    }
+
+    fn api16_text_panel() -> ocs_plugin_api::dialog::PanelDef {
+        use ocs_plugin_api::dialog::{DialogControl, PanelDef};
+
+        PanelDef::new("panel", "Panel")
+            .with_control(DialogControl::Text {
+                id: "length".into(),
+                label: "Length".into(),
+                default: "1.0".into(),
+            })
+            .with_control(DialogControl::Button {
+                id: "submit".into(),
+                label: "Submit".into(),
+                action: Some("PANEL_SUBMIT".into()),
+                align_h: None,
+                width: None,
+            })
+    }
+
+    fn api16_number_panel() -> ocs_plugin_api::dialog::PanelDef {
+        let mut panel = api16_text_panel();
+        panel.controls[0] = ocs_plugin_api::dialog::DialogControl::Number {
+            id: "length".into(),
+            label: "Length".into(),
+            default: 1.0,
+            min: None,
+            max: None,
+            step: None,
+        };
+        panel
+    }
+
+    #[test]
+    fn api16_panel_registration_is_idempotent_and_owner_authenticated() {
+        use ocs_plugin_api::dialog::DialogValue;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let tab_id = app.tabs[0].id;
+        let mut host = HostSession::new(&mut app, 0);
+
+        assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
+        assert!(host.update_panel_for_plugin(
+            "OWNER",
+            "panel",
+            std::collections::HashMap::from([(
+                "length".to_string(),
+                DialogValue::Text("2.5".to_string()),
+            )]),
+        ));
+        assert!(
+            host.register_panel_for_plugin("OWNER", api16_text_panel()),
+            "unchanged re-registration must not reset the live draft"
+        );
+        let before = host.app.plugin_panels["panel"].clone();
+
+        let mut foreign_panel = api16_text_panel();
+        foreign_panel.title = "Foreign replacement".into();
+        assert!(!host.register_panel_for_plugin("OTHER", foreign_panel));
+        assert!(!host.update_panel_for_plugin(
+            "OTHER",
+            "panel",
+            std::collections::HashMap::from([(
+                "length".to_string(),
+                DialogValue::Text("99.0".to_string()),
+            )]),
+        ));
+        assert!(!host.toggle_panel_for_plugin("OTHER", "panel", Some(true)));
+        assert!(host.panel_snapshot_for_plugin("OTHER", "panel").is_err());
+        assert_eq!(host.app.plugin_panels.get("panel"), Some(&before));
+
+        let snapshot = host.panel_snapshot_for_plugin("OWNER", "panel").unwrap();
+        assert_eq!(snapshot.plugin_id, "OWNER");
+        assert_eq!(snapshot.panel_id, "panel");
+        assert_eq!(snapshot.tab_id, tab_id);
+        assert_eq!(snapshot.values.len(), 1);
+        assert_eq!(
+            snapshot.values.get("length"),
+            Some(&DialogValue::Text("2.5".to_string()))
+        );
+        assert_eq!(snapshot.raw_text.len(), 1);
+        assert_eq!(
+            snapshot.raw_text.get("length").map(String::as_str),
+            Some("2.5")
+        );
+        assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
+        let direct = host
+            .panel_snapshot("PANEL")
+            .expect("ordinary HostApi command read-back works");
+        assert_eq!(direct.tab_id, tab_id);
+        assert_eq!(direct.values.get("length"), snapshot.values.get("length"));
+        assert!(!host.app.plugin_panels["panel"].visible);
+        assert_eq!(host.app.plugin_panels.get("panel"), Some(&before));
+    }
+
+    #[test]
+    fn api16_panel_snapshot_uses_the_real_session_tab_without_document_writes() {
+        use ocs_plugin_api::dialog::DialogValue;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let first_tab_id = app.tabs[0].id;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
+        }
+        let second_tab_id = app.push_test_document();
+        assert_eq!(second_tab_id, app.tabs[1].id);
+        assert_ne!(first_tab_id, second_tab_id);
+        assert_eq!(app.active_tab, 0);
+
+        let first_document = app.tabs[0].scene.document.clone();
+        let second_document = app.tabs[1].scene.document.clone();
+        let first = HostSession::new(&mut app, 0)
+            .panel_snapshot_for_plugin("OWNER", "panel")
+            .unwrap();
+        let second = HostSession::new(&mut app, 1)
+            .panel_snapshot_for_plugin("OWNER", "panel")
+            .unwrap();
+
+        assert_eq!(first.tab_id, first_tab_id);
+        assert_eq!(second.tab_id, second_tab_id);
+        assert_ne!(first.tab_id, second.tab_id);
+        for snapshot in [&first, &second] {
+            assert_eq!(snapshot.plugin_id, "OWNER");
+            assert_eq!(snapshot.panel_id, "panel");
+            assert_eq!(snapshot.values.len(), 1);
+            assert_eq!(
+                snapshot.values.get("length"),
+                Some(&DialogValue::Text("1.0".to_string()))
+            );
+            assert_eq!(snapshot.raw_text.len(), 1);
+            assert_eq!(
+                snapshot.raw_text.get("length").map(String::as_str),
+                Some("1.0")
+            );
+            assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
+        }
+        assert_eq!(app.tabs[0].scene.document, first_document);
+        assert_eq!(app.tabs[1].scene.document, second_document);
+        assert_eq!(app.active_tab, 0);
+        assert!(app.tabs[0].history.pending.is_none());
+        assert!(app.tabs[1].history.pending.is_none());
+    }
+
+    #[test]
+    fn api16_panel_snapshot_rejects_malformed_and_missing_panels_without_writes() {
+        use ocs_plugin_api::dialog::DialogValue;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let document_before = app.tabs[0].scene.document.clone();
+        let undo_before = app.tabs[0].history.undo_stack.len();
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host.register_panel_for_plugin("OWNER", api16_number_panel()));
+        assert!(host.update_panel_for_plugin(
+            "OWNER",
+            "panel",
+            std::collections::HashMap::from([(
+                "length".to_string(),
+                DialogValue::Text("-".to_string()),
+            )]),
+        ));
+        let snapshot = host.panel_snapshot_for_plugin("OWNER", "panel").unwrap();
+
+        assert_eq!(
+            snapshot.raw_text.get("length").map(String::as_str),
+            Some("-")
+        );
+        assert!(!snapshot.values.contains_key("length"));
+        assert!(
+            snapshot.errors.iter().any(|error| {
+                error.contains("invalid finite number")
+                    && error.contains("'length'")
+                    && error.contains("'-'")
+            }),
+            "{:?}",
+            snapshot.errors
+        );
+
+        let error = host
+            .panel_snapshot_for_plugin("OWNER", "missing")
+            .unwrap_err();
+        assert!(error.contains("not registered"), "{error}");
+        assert_eq!(host.document(), &document_before);
+        assert_eq!(host.app.tabs[0].history.undo_stack.len(), undo_before);
+        assert!(host.app.tabs[0].history.pending.is_none());
+    }
+
+    #[test]
+    fn api17_panel_reset_preserves_owner_and_aliases_remain_authenticated() {
+        use crate::app::Message;
+        use ocs_plugin_api::dialog::DialogValue;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
+            assert!(host.update_panel_for_plugin(
+                "OWNER",
+                "panel",
+                std::collections::HashMap::from([(
+                    "length".to_string(),
+                    DialogValue::Text("2.5".to_string()),
+                )]),
+            ));
+        }
+
+        // The built-in reset path must retain the authenticated owner and
+        // restore the declaration's defaults, not brick subsequent access.
+        let _ = app.update(Message::PluginPanelButtonClick(
+            "panel".to_string(),
+            "reset".to_string(),
+            Some("reset".to_string()),
+        ));
+        let mut host = HostSession::new(&mut app, 0);
+        let snapshot = host
+            .panel_snapshot_for_plugin("OWNER", "panel")
+            .expect("owner remains able to read after reset");
+        assert_eq!(
+            snapshot.values.get("length"),
+            Some(&DialogValue::Text("1.0".into()))
+        );
+        assert!(host.register_panel_for_plugin("OWNER", api16_text_panel()));
+        assert!(host.update_panel_for_plugin(
+            "OWNER",
+            "PANEL",
+            std::collections::HashMap::from([(
+                "length".to_string(),
+                DialogValue::Text("3.0".to_string()),
+            )]),
+        ));
+        assert!(host.toggle_panel_for_plugin("OWNER", "Panel", Some(true)));
+        assert!(!host.update_panel_for_plugin("OTHER", "panel", std::collections::HashMap::new(),));
+        assert!(host.panel_snapshot_for_plugin("OTHER", "Panel").is_err());
     }
 }

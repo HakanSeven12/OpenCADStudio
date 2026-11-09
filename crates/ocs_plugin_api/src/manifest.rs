@@ -145,7 +145,14 @@
 /// declares v16 and the older host refuses to load it. Custom grips now
 /// snap (object snap, tracking, ortho, polar) and settle click-move-click
 /// like native grips.
-pub const API_VERSION: u32 = 16;
+/// v17: complete dock-panel snapshots. An ordinary document-bound panel
+/// command synchronously reads typed values, exact text and validation errors
+/// through `HostApi::panel_snapshot`; the host authenticates panel ownership
+/// from the IPC transport and attaches the session's real tab. The appended
+/// request requires v17: a v16 host refuses the new plugin at load rather
+/// than accepting it and failing to decode the request. v16 plugins remain
+/// supported. Asynchronous `PanelAction` notifications remain read-only.
+pub const API_VERSION: u32 = 17;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

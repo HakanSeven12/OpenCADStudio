@@ -400,6 +400,59 @@ pub enum DialogValue {
     Table(Vec<Vec<String>>),
 }
 
+/// Current UI form contents of a registered persistent panel (API v17, additive).
+///
+/// This is UI input only: it is neither document authority nor a document revision.
+/// In particular, it does not establish that a record or entity targeted by a later
+/// write still exists or is unchanged. The host attaches [`tab_id`](Self::tab_id) so
+/// the panel read remains bound to the document tab that served it.
+///
+/// Typed values have the same shapes as [`DialogResponse::Submitted`]:
+///
+/// - [`DialogControl::Text`] produces [`DialogValue::Text`].
+/// - [`DialogControl::Number`] produces [`DialogValue::Number`] when its current text
+///   is a valid number. Partial or otherwise malformed numeric text is retained in
+///   [`raw_text`](Self::raw_text) and reported in [`errors`](Self::errors), rather than
+///   being replaced by a default or a normalized value.
+/// - [`DialogControl::Checkbox`] produces [`DialogValue::Bool`].
+/// - [`DialogControl::Choice`] produces [`DialogValue::Choice`], carrying both the
+///   selected `index` and its current `text`.
+/// - [`DialogControl::Color`] produces [`DialogValue::Color`].
+/// - [`DialogControl::FilePicker`] produces [`DialogValue::FilePath`].
+/// - [`DialogControl::Table`] produces [`DialogValue::Table`] with every current row
+///   and cell string; table cells do not have separate `raw_text` entries.
+/// - [`DialogControl::Fields`] produces [`DialogValue::Fields`], whose map is built by
+///   recursively reading its child controls. [`DialogControl::Row`] and
+///   [`DialogControl::Column`] are transparent containers and are recursively read at
+///   their location without producing values of their own.
+/// - [`DialogControl::InfoText`] and [`DialogControl::Button`] have no form value.
+///   Button activation remains a panel action, not a snapshot entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelSnapshot {
+    /// Identifier of the registered panel that was read.
+    pub panel_id: String,
+    /// Host-authenticated identity of the plugin that registered this panel.
+    /// This is assigned by the host, never accepted from the form.
+    pub plugin_id: String,
+    /// Host-attached identifier of the document tab owning the panel session.
+    pub tab_id: u64,
+    /// Complete typed values for all readable value-bearing controls, keyed by the
+    /// declared control id. Nested `Fields` use nested maps as described above.
+    ///
+    /// An unreadable value is omitted only with a corresponding entry in `errors`;
+    /// the host never silently supplies the panel declaration's default instead.
+    pub values: HashMap<String, DialogValue>,
+    /// Exact current text of every `Text`, `Number`, and `FilePicker` control, keyed
+    /// by control id, including controls reached through nested containers. Number
+    /// text is preserved verbatim even when it is partial or malformed.
+    pub raw_text: HashMap<String, String>,
+    /// Read-back problems, including duplicate or missing fields, values whose shape
+    /// does not match the declared control, and malformed input. An empty vector is a
+    /// clean read. Plugins must reject a snapshot with any errors rather than write
+    /// from a partial or ambiguous form.
+    pub errors: Vec<String>,
+}
+
 /// Response returned to the plugin after dialog interaction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogResponse {
@@ -507,6 +560,47 @@ mod tests {
         let bytes = bincode::serialize(&panel).expect("serialize quad panel");
         let restored: QuadPanelDef = bincode::deserialize(&bytes).expect("deserialize quad panel");
         assert_eq!(panel, restored);
+    }
+
+    #[test]
+    fn panel_snapshot_bincode_roundtrip_preserves_raw_text() {
+        let mut fields = HashMap::new();
+        fields.insert("name".to_string(), DialogValue::Text("Bracket".to_string()));
+
+        let mut values = HashMap::new();
+        values.insert("geometry".to_string(), DialogValue::Fields(fields));
+        values.insert(
+            "material".to_string(),
+            DialogValue::Choice {
+                index: 1,
+                text: "Steel".to_string(),
+            },
+        );
+        values.insert(
+            "rows".to_string(),
+            DialogValue::Table(vec![vec!["Bolt".to_string(), "8".to_string()]]),
+        );
+
+        let mut raw_text = HashMap::new();
+        raw_text.insert("name".to_string(), "Bracket".to_string());
+        raw_text.insert("quantity".to_string(), "-".to_string());
+
+        let snapshot = PanelSnapshot {
+            panel_id: "part_editor".to_string(),
+            plugin_id: "example.part_editor".to_string(),
+            tab_id: 42,
+            values,
+            raw_text,
+            errors: vec!["field 'quantity': malformed number".to_string()],
+        };
+        let bytes = bincode::serialize(&snapshot).expect("serialize panel snapshot");
+        let restored: PanelSnapshot =
+            bincode::deserialize(&bytes).expect("deserialize panel snapshot");
+        assert_eq!(snapshot, restored);
+        assert_eq!(
+            restored.raw_text.get("quantity").map(String::as_str),
+            Some("-")
+        );
     }
 
     #[test]

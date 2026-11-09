@@ -104,9 +104,8 @@ struct AnswerCommand {
     state: String,
     /// Objects are gathered first under this prompt (-OBJECTSCALE).
     select_prompt: Option<String>,
-    /// When the selection was ended: the Enter that ended it reaches the
-    /// first prompt too, and must not answer it.
-    gathered_at: Option<std::time::Instant>,
+    /// The objects gathered so far.
+    gathered: Vec<Handle>,
 }
 
 impl CadCommand for AnswerCommand {
@@ -142,15 +141,8 @@ impl CadCommand for AnswerCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if handles.is_empty() {
-            return CmdResult::Cancel;
-        }
-        if let Ok(mut session) = serde_json::from_str::<Session>(&self.state) {
-            session.handles = hex(&handles);
-            self.state = serde_json::to_string(&session).unwrap_or_default();
-        }
-        self.select_prompt = None;
-        self.gathered_at = Some(std::time::Instant::now());
+        // Keep gathering until Enter.
+        self.gathered = handles;
         CmdResult::NeedPoint
     }
 
@@ -167,12 +159,17 @@ impl CadCommand for AnswerCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self
-            .gathered_at
-            .take()
-            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(150))
-        {
-            return CmdResult::NeedPointQuiet;
+        if self.select_prompt.is_some() {
+            // Enter ends the selection; nothing picked ends the command.
+            if self.gathered.is_empty() {
+                return CmdResult::Cancel;
+            }
+            if let Ok(mut session) = serde_json::from_str::<Session>(&self.state) {
+                session.handles = hex(&self.gathered);
+                self.state = serde_json::to_string(&session).unwrap_or_default();
+            }
+            self.select_prompt = None;
+            return CmdResult::NeedPoint;
         }
         CmdResult::Dispatch(format!("_ANNOSCALEANS {}	", self.state))
     }
@@ -187,6 +184,7 @@ pub(crate) struct AnnoSelectCommand {
     name: &'static str,
     prompt: String,
     action: &'static str,
+    gathered: Vec<Handle>,
 }
 
 impl CadCommand for AnnoSelectCommand {
@@ -203,11 +201,9 @@ impl CadCommand for AnnoSelectCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if handles.is_empty() {
-            CmdResult::Cancel
-        } else {
-            CmdResult::Relaunch(self.action.to_string(), handles)
-        }
+        // Keep gathering until Enter.
+        self.gathered = handles;
+        CmdResult::NeedPoint
     }
 
     fn on_point(&mut self, _point: glam::DVec3) -> CmdResult {
@@ -215,7 +211,11 @@ impl CadCommand for AnnoSelectCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        if self.gathered.is_empty() {
+            CmdResult::Cancel
+        } else {
+            CmdResult::Relaunch(self.action.to_string(), std::mem::take(&mut self.gathered))
+        }
     }
 }
 
@@ -373,6 +373,7 @@ impl OpenCADStudio {
             name,
             prompt,
             action,
+            gathered: Vec::new(),
         };
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
@@ -750,7 +751,7 @@ impl OpenCADStudio {
             options,
             state,
             select_prompt,
-            gathered_at: None,
+            gathered: Vec::new(),
         };
         self.command_line.push_info(&command.prompt());
         self.command_line.set_step_options(command.options());

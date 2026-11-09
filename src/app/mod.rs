@@ -1563,6 +1563,10 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_title_hover: Option<crate::ui::dock::PanelId>,
     /// Edge whose icon-strip pallet menu (+) is open.
     pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
+    /// Where a right-click opened that menu; `None` opens it at the + button.
+    pub(crate) dock_edge_menu_y: Option<f32>,
+    /// Last pointer height over an icon strip.
+    pub(crate) dock_strip_pointer_y: f32,
     /// Floating pallet whose title-bar right-click menu is open.
     pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
     /// Open tool dialogs, back to front (see `tool_windows`).
@@ -6504,6 +6508,8 @@ impl OpenCADStudio {
             dock_drag_last: None,
             dock_title_hover: None,
             dock_edge_menu: None,
+            dock_edge_menu_y: None,
+            dock_strip_pointer_y: 0.0,
             dock_grip_hover: None,
             dock_icon_hover: None,
             xref_col_drag: None,

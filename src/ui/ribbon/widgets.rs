@@ -349,6 +349,16 @@ pub(super) fn automatic_large_button<'a>(
     })
 }
 
+/// A large button whose label stays on one line, as wide as that line (a
+/// collapsed panel's title). A label without a line break is measured by
+/// `measure_split_width` as one unwrapped line.
+pub(super) fn automatic_one_line_button<'a>(
+    label: String,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    automatic_split_button(label.replace('\n', " "), content)
+}
+
 /// A large split button sized to its label (see `measure_split_width`).
 fn automatic_split_button<'a>(
     label: String,

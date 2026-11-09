@@ -362,7 +362,7 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
     flow(move |q| {
         let option = q.keyword(
             crate::t!(
-                "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Apply/?] <Restore>:"
+                "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Compare/Apply/?] <Restore>:"
             )
             .into_owned(),
             Some("RESTORE"),
@@ -372,6 +372,7 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                 ("Restore", "RESTORE"),
                 ("STatus", "STATUS"),
                 ("Variables", "VARIABLES"),
+                ("Compare", "COMPARE"),
                 ("Apply", "APPLY"),
                 ("?", "?"),
             ],
@@ -451,7 +452,26 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                 run("-DIMSTYLE", &[option, &name])
             }
             "STATUS" => run("-DIMSTYLE", &["VARIABLES", &current]),
-
+            "COMPARE" => {
+                let name = q.text(
+                    crate::t!(
+                        "-DIMSTYLE  Compare styles, first name or [?]:"
+                    )
+                    .into_owned(),
+                    None,
+                )?;
+                if name == "?" {
+                    return run("-DIMSTYLE", &["?", "*"]);
+                }
+                let other = q.text(
+                    crate::t!(
+                        "-DIMSTYLE  Compare styles, the second name:"
+                    )
+                    .into_owned(),
+                    None,
+                )?;
+                run("-DIMSTYLE", &[option, &name, &other])
+            }
             _ => {
                 let names = q.text(
                     crate::t!("-DIMSTYLE  Enter dimension style(s) to list <*>:").into_owned(),
@@ -1453,7 +1473,17 @@ impl OpenCADStudio {
                 for line in lines {
                     self.command_line.push_output(&line);
                 }
-            }                let doc = &self.tabs[i].scene.document;
+            }
+            "COMPARE" => {
+                let first_name = name.clone();
+                let second_name = arg(2);
+                if second_name.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Usage: -DIMSTYLE COMPARE <first> <second>").as_ref(),
+                    );
+                    return;
+                }
+                let doc = &self.tabs[i].scene.document;
                 let Some(first) = doc
                     .dim_styles
                     .iter()

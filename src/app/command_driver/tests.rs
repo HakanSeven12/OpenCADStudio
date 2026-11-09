@@ -7030,4 +7030,13 @@ mod batch5_tests {
         assert_eq!(style.dimtxt, 4.5);
     }
 
+    #[test]
+    fn dimstyle_compare_reports_the_differing_variables() {
+        let mut app = new_app();
+        let _ = app.run_command_line(r#"-DIMSTYLE ["COMPARE", "ISO-25", "Standard"]"#);
+        let out = out(&app);
+        assert!(out.contains("DIMTXT"), "{out}");
+        assert!(out.contains("DIMASZ"), "{out}");
+    }
+
 }

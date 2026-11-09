@@ -829,7 +829,7 @@ const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Ceiling on the STORED pixel count — what feeds the GPU upload, the PDF
 /// embed, and (on wasm) the session heap. Images over it still decode, up to
-/// `MAX_DECODE_BYTES`, but are Lanczos3-downsampled to the cap before
+/// `MAX_DECODE_BYTES`, but are area-averaged down to the cap before
 /// entering an `ImageModel`; the original BYTES stay registered for a future
 /// re-decode, and `DecodedImage::source_width/height` keep the file's true
 /// dimensions as the entity's sizing truth. Native plots may want the extra
@@ -930,29 +930,38 @@ fn tier_for_native(
     max_display_pixels: u64,
 ) -> DecodeTier {
     let pixels = width as u64 * height as u64;
-    if pixels.saturating_mul(peak_bpp).saturating_mul(codec_factor) > max_decode_bytes {
-        return DecodeTier::OverBudget;
-    }
-    if pixels <= max_display_pixels {
-        return DecodeTier::Full;
-    }
-    // The downsample holds the decoded RGBA, the resize's vertical-pass
-    // intermediate (width × new height in RGBA f32, 16 B/px) and the output
-    // at once, so that sum must fit the budget too.
-    let (target_w, target_h) = downsample_to_cap(width, height, max_display_pixels);
-    let resize_peak = pixels
-        .saturating_mul(4)
-        .saturating_add(
-            (width as u64)
-                .saturating_mul(target_h as u64)
-                .saturating_mul(16),
-        )
-        .saturating_add(target_w as u64 * target_h as u64 * 4);
-    if resize_peak > max_decode_bytes {
+    if decode_peak_bytes(width, height, peak_bpp, codec_factor, max_display_pixels)
+        > max_decode_bytes
+    {
         DecodeTier::OverBudget
+    } else if pixels <= max_display_pixels {
+        DecodeTier::Full
     } else {
         DecodeTier::Downsample
     }
+}
+
+/// The most memory decoding an image of this size holds at once: the
+/// decoder's native buffer next to its RGBA output, or, when it is over the
+/// display cap, the decoded RGBA next to the downsampled output (the area
+/// average needs no scratch of its own).
+fn decode_peak_bytes(
+    width: u32,
+    height: u32,
+    peak_bpp: u64,
+    codec_factor: u64,
+    max_display_pixels: u64,
+) -> u64 {
+    let pixels = width as u64 * height as u64;
+    let decode = pixels.saturating_mul(peak_bpp).saturating_mul(codec_factor);
+    if pixels <= max_display_pixels {
+        return decode;
+    }
+    let (target_w, target_h) = downsample_to_cap(width, height, max_display_pixels);
+    let resize = pixels
+        .saturating_mul(4)
+        .saturating_add(target_w as u64 * target_h as u64 * 4);
+    decode.max(resize)
 }
 
 /// Largest dimensions that keep `width × height` within `cap` while
@@ -979,9 +988,10 @@ enum DecodeAttempt {
     /// ready to store.
     Decoded(DecodedImage),
     /// The decoder's limits rejected the image: full RGBA would exceed
-    /// `MAX_DECODE_BYTES`. Carries the probed dimensions for the refusal
-    /// note; the caller decides how to surface it.
-    Refused { width: u32, height: u32 },
+    /// `MAX_DECODE_BYTES`. Carries the probed dimensions and the memory the
+    /// decode would need for the refusal note; the caller decides how to
+    /// surface it.
+    Refused { width: u32, height: u32, need: u64 },
     /// Unreadable, unsupported, or corrupt.
     Failed,
 }
@@ -1024,6 +1034,19 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
             max_display_pixels,
         )
     });
+    // What the refusal reports: the peak the tier billed, and never a figure
+    // under the limit for a decode the decoder itself refused.
+    let need = probed.map_or(max_decode_bytes + 1, |(width, height, format, color)| {
+        let footprint = native_footprint(format, Some(color));
+        decode_peak_bytes(
+            width,
+            height,
+            footprint.peak_bpp,
+            footprint.codec_factor,
+            max_display_pixels,
+        )
+        .max(max_decode_bytes + 1)
+    });
 
     // Trust the probe, not the decoder limits: the tier above bills the
     // decode's real peak (native bpp, codec scratch), so an OverBudget
@@ -1034,6 +1057,7 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
         return DecodeAttempt::Refused {
             width: probed.map_or(0, |(width, _, _, _)| width),
             height: probed.map_or(0, |(_, height, _, _)| height),
+            need,
         };
     }
 
@@ -1074,6 +1098,7 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
             return DecodeAttempt::Refused {
                 width: probed.map_or(0, |(width, _, _, _)| width),
                 height: probed.map_or(0, |(_, height, _, _)| height),
+                need,
             };
         }
         Err(_) => return DecodeAttempt::Failed,
@@ -1090,13 +1115,11 @@ fn decode_with_budgets<R: std::io::BufRead + std::io::Seek>(
             downsample_to_cap(width, height, max_display_pixels)
         }
     };
+    // An area average: right for the large reductions the cap makes, and it
+    // allocates only the output, so a raster of a few hundred megapixels
+    // still fits the budget (#2726).
     let rgba = if target_w != width || target_h != height {
-        image::imageops::resize(
-            &rgba,
-            target_w,
-            target_h,
-            image::imageops::FilterType::Lanczos3,
-        )
+        image::imageops::thumbnail(&rgba, target_w, target_h)
     } else {
         rgba
     };
@@ -1133,11 +1156,12 @@ fn decode_from_file(path: &str) -> DecodeAttempt {
 }
 
 /// Localized over-budget refusal for `path`: names the image, its probed
-/// dimensions, the decoded size the budget rejected, and the limit itself.
+/// dimensions, the memory its decode would need (`need` bytes), and the
+/// limit itself.
 /// TIFFs rejected here have no fallback path — the `tiff` crate is only a
 /// transitive dependency (via `image`'s tiff feature) and is deliberately
 /// not promoted to a direct one, so the refusal IS the handling.
-fn refusal_message(path: &str, width: u32, height: u32) -> String {
+fn refusal_message(path: &str, width: u32, height: u32, need: u64) -> String {
     let name = std::path::Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1152,10 +1176,7 @@ fn refusal_message(path: &str, width: u32, height: u32) -> String {
         )
         .into_owned();
     }
-    let decoded_mb = (width as u64)
-        .saturating_mul(height as u64)
-        .saturating_mul(4)
-        / (1024 * 1024);
+    let decoded_mb = need.div_ceil(1024 * 1024);
     let limit_mb = MAX_DECODE_BYTES / (1024 * 1024);
     crate::tf!(
         "\"{name}\" is {width}×{height} px and would decode to {decoded} MB, over the {limit} MB image limit of this build — it cannot be attached. Images within the limit are attached at a reduced display resolution when needed.",
@@ -1199,11 +1220,15 @@ pub fn take_decode_refusals() -> Vec<String> {
 fn decode_or_note(attempt: DecodeAttempt, path: &str) -> Option<DecodedImage> {
     match attempt {
         DecodeAttempt::Decoded(decoded) => Some(decoded),
-        DecodeAttempt::Refused { width, height } => {
+        DecodeAttempt::Refused {
+            width,
+            height,
+            need,
+        } => {
             // Several references can name the same over-budget file; keep
             // one note per distinct message so the command line is not
             // spammed by a drawing that inserts it repeatedly.
-            let message = refusal_message(path, width, height);
+            let message = refusal_message(path, width, height, need);
             let mut notes = refusal_notes()
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
@@ -1660,11 +1685,14 @@ mod tests {
             tier_for(400, 400, 2_000_000, 10_000),
             DecodeTier::Downsample
         );
-        // …unless the resize transient (decoded + f32 intermediate + output)
-        // is what overflows the budget.
+        // …unless the resize transient (decoded + output) is what
+        // overflows the budget.
+        assert_eq!(tier_for(400, 400, 650_000, 10_000), DecodeTier::OverBudget);
+        // A raster well over the display cap but whose decode and output
+        // fit downsamples (#2726: 13046×10168 needs ~800 MB of 2 GB).
         assert_eq!(
-            tier_for(400, 400, 1_000_000, 10_000),
-            DecodeTier::OverBudget
+            tier_for(13_046, 10_168, 2 * 1024 * 1024 * 1024, 8192 * 8192),
+            DecodeTier::Downsample
         );
         // RGBA over the decode budget.
         assert_eq!(
@@ -1769,7 +1797,7 @@ mod tests {
         // Decode budget below the full RGBA size: refused, carrying the
         // probed dimensions — no allocation was needed to discover them.
         match decode_with_budgets(open, 1_000, 1_000_000) {
-            DecodeAttempt::Refused { width, height } => assert_eq!((width, height), (120, 80)),
+            DecodeAttempt::Refused { width, height, .. } => assert_eq!((width, height), (120, 80)),
             _ => panic!("an over-budget png must be refused"),
         }
     }
@@ -1782,6 +1810,7 @@ mod tests {
         let refuse = || DecodeAttempt::Refused {
             width: 30000,
             height: 30000,
+            need: 30000 * 30000 * 4,
         };
         assert!(decode_or_note(refuse(), "C:/gis/aerial.tif").is_none());
         assert!(decode_or_note(refuse(), "C:/gis/aerial.tif").is_none());

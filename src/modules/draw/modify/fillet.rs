@@ -3569,6 +3569,25 @@ mod tests {
         assert_eq!(command.all_entities.len(), 2, "nothing was added");
     }
 
+    /// A zero radius with No trim makes no arc, so there is nothing to add.
+    /// The command says so and asks for a first object again, as a
+    /// zero-distance no-trim CHAMFER does, instead of waiting on the second
+    /// pick without a word.
+    #[test]
+    fn zero_radius_no_trim_fillet_reports_and_starts_over() {
+        let mut command = FilletCommand::new(0.0, open_corner());
+        command.trim = false;
+        command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        match command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReportError(message) => {
+                assert_eq!(message, "A zero radius with No trim leaves nothing to add.")
+            }
+            _ => panic!("zero-radius no-trim FILLET should report an error"),
+        }
+        assert!(matches!(command.step, FilletStep::First));
+        assert_eq!(command.all_entities.len(), 2, "nothing was added");
+    }
+
     fn wire_names(wires: &[WireModel]) -> Vec<&str> {
         wires.iter().map(|w| w.name.as_str()).collect()
     }

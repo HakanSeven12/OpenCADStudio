@@ -3409,11 +3409,13 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Yayın başlangıç noktasını belirtin:
     .arc-specify-second-point-of-arc = ARC  Yayın ikinci noktasını belirtin:
     .arc-specify-end-point-of-arc = ARC  Yayın bitiş noktasını belirtin:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
     .arc-specify-center-point-of-arc = ARC  Yayın merkez noktasını belirtin:
-    .arc-specify-included-angle = ARC  İç açıyı belirtin:
-    .arc-specify-length-of-chord = ARC  Kiriş uzunluğunu belirtin:
-    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Yayın başlangıç noktasındaki teğet yönünü belirtin:
-    .arc-specify-radius-of-arc = ARC  Yayın yarıçapını belirtin:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Yayın merkez noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-included-angle = ARC  İç açıyı belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-length-of-chord = ARC  Kiriş uzunluğunu belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Yayın başlangıç noktasındaki teğet yönünü belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-specify-radius-of-arc = ARC  Yayın yarıçapını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
     .chord-length = Kiriş uzunluğu
 
 modify =

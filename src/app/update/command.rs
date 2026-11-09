@@ -1068,11 +1068,20 @@ impl OpenCADStudio {
                     return task;
                 }
             }
-            if self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .map(|c| c.input_kind().wants_text())
-                .unwrap_or(false)
+            // A point prompt that also takes keywords reads a typed
+            // coordinate as the point: handing `300,50` to the step's text
+            // reader would turn the comma into a decimal mark (300.5).
+            let coordinate_at_point_step = parse_coord(&text).is_some()
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.point_step_accepts_keywords());
+            if !coordinate_at_point_step
+                && self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.input_kind().wants_text())
+                    .unwrap_or(false)
             {
                 // An empty submit must not be handed to on_text_input —
                 // a text step would commit the empty string (wiping a

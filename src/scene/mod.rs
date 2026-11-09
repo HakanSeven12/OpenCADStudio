@@ -2739,6 +2739,9 @@ pub struct Scene {
     /// entity/insert) re-tessellate only the visible wires (~baseline cost)
     /// instead of rebuilding every block defn (the edit-time spike).
     pub block_epoch: u64,
+    /// Process-wide identity of this scene, so that viewports of different
+    /// documents sharing the renderer keep separate GPU slots (#2304).
+    render_id: u64,
     /// Layer visibility changes since a `block_epoch` (`from`, `to`, and the
     /// definitions they touched): a cache built at `from` is brought to `to`
     /// by rebuilding only those definitions, not all of them (#2696).
@@ -3465,6 +3468,7 @@ impl Scene {
             geometry_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
+            render_id: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             block_visibility_edits: None,
             selection_generation: 0,
             #[cfg(any(test, not(target_arch = "wasm32")))]
@@ -5074,9 +5078,8 @@ impl Scene {
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
 
-    /// Stable per-viewport identity (mirrors the tag used by the renderer so
-    /// request resolution and builder consumption can never disagree — see
-    /// render.rs `instance_id` encoding).
+    /// Stable per-viewport identity within this document, so request
+    /// resolution and builder consumption can never disagree.
     pub fn instance_id_for(&self, inst: &ViewportInstance) -> u64 {
         if let Some(t) = inst.tile_idx {
             0x1000_0000_0000_0000 | (t as u64)
@@ -5085,6 +5088,13 @@ impl Scene {
         } else {
             0x3000_0000_0000_0000 | inst.handle.value()
         }
+    }
+
+    /// [`Self::instance_id_for`] made unique across documents: the key of the
+    /// viewport's GPU slot. The multiplier is odd, so scenes never map one
+    /// viewport id to the same key.
+    pub(in crate::scene) fn render_instance_id(&self, inst: &ViewportInstance) -> u64 {
+        self.instance_id_for(inst) ^ self.render_id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
     }
 
     /// REDRAW core: resolve a scope to the concrete `instance_id`s it targets
@@ -18168,6 +18178,15 @@ mod redraw_tests {
             grid_on: false,
             paper_sheet: false,
         }
+    }
+
+    #[test]
+    fn render_instance_id_is_per_scene_and_stable() {
+        let (a, b) = (Scene::new(), Scene::new());
+        let tile = tile_inst(0, true);
+        assert_eq!(a.instance_id_for(&tile), b.instance_id_for(&tile));
+        assert_ne!(a.render_instance_id(&tile), b.render_instance_id(&tile));
+        assert_eq!(a.render_instance_id(&tile), a.render_instance_id(&tile));
     }
 
     #[test]

@@ -204,7 +204,6 @@ impl OpenCADStudio {
     }
 
     /// Mutable access to the currently selected multileader style.
-
     pub(in crate::app) fn mleaderstyle_mut(
         &mut self,
         tab: usize,
@@ -223,7 +222,6 @@ impl OpenCADStudio {
     }
 
     /// Populate all edit buffers from the currently selected multileader style.
-
     pub(in crate::app) fn load_mleaderstyle_bufs(&mut self, tab: usize) {
         use document::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
@@ -273,7 +271,6 @@ impl OpenCADStudio {
     }
 
     /// Populate all edit buffers from the currently selected dim style.
-
     pub(in crate::app) fn load_dimstyle_bufs(&mut self, tab: usize) {
         let doc = &self.tabs[tab].scene.document;
         let Some(ds) = doc.dim_styles.get(&self.dimstyle_selected) else {
@@ -352,7 +349,6 @@ impl OpenCADStudio {
     }
 
     /// Write edit buffers back into the selected dim style document entry.
-
     pub(in crate::app) fn apply_dimstyle_bufs(&mut self, tab: usize) {
         let doc = &mut self.tabs[tab].scene.document;
 
@@ -500,7 +496,6 @@ impl OpenCADStudio {
     }
 
     /// Update a single string buffer field.
-
     pub(in crate::app) fn apply_ds_edit(&mut self, field: crate::app::DsField, val: String) {
         if self.selected_dimstyle_is_read_only() {
             return;
@@ -574,7 +569,6 @@ impl OpenCADStudio {
     }
 
     /// Toggle a boolean buffer field.
-
     pub(in crate::app) fn apply_ds_toggle(&mut self, field: crate::app::DsField) {
         if self.selected_dimstyle_is_read_only() {
             return;

@@ -1146,7 +1146,6 @@ fn polygon_edge_intersection(start: [f32; 2], end: [f32; 2], edge: u8, value: f3
 /// Clip a single segment (x0,y0)→(x1,y1) against the axis-aligned rectangle
 /// [xmin,xmax]×[ymin,ymax].  Returns the clipped endpoints or `None` if the
 /// segment is entirely outside.
-
 fn cs_clip(
     mut x0: f32,
     mut y0: f32,

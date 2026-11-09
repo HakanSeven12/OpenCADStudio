@@ -217,7 +217,6 @@ fn disabled_field_style(theme: &Theme, _status: text_input::Status) -> text_inpu
 }
 
 /// One `label : widget` row with a fixed-width label column.
-
 fn field_row<'a>(
     label: Cow<'static, str>,
     widget: Element<'a, Message>,

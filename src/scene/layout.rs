@@ -610,7 +610,6 @@ impl Scene {
     /// (clipped to its rectangle) in paper space. Derived from the same
     /// `active_viewports` enumeration the renderer uses, so the grid overlay can
     /// never drift from the views actually on screen (issue #121). The grid
-
     pub fn active_model_tile_bounds(&self, vw: f32, vh: f32) -> iced::Rectangle {
         if self.current_layout != "Model" {
             return iced::Rectangle {

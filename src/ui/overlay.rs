@@ -4608,7 +4608,6 @@ pub fn grid_segments(
 // ── Coloured UCS axes ──────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn draw_axes(
     frame: &mut canvas::Frame,
     view_rot: Mat4,

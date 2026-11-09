@@ -303,7 +303,6 @@ impl OpenCADStudio {
     /// Apply an explicit per-step [`DynSpec`](crate::command::DynSpec): rebuild
     /// the boxes from its roles (preserving typed buffers when the role set is
     /// unchanged), and set the guide + anchor.
-
     pub(in crate::app) fn apply_dyn_spec(&mut self, i: usize, spec: crate::command::DynSpec) {
         use crate::app::tab_document::DynFieldEntry;
         let new_roles: Vec<crate::command::DynRole> = spec.fields.iter().map(|f| f.role).collect();
@@ -325,13 +324,13 @@ impl OpenCADStudio {
         self.tabs[i].dyn_ref = spec.ref_point;
     }
 
-    /// Track cursor dwell over a selected entity's grip. Sets
-    /// `grip_hover` while the cursor sits within `GRIP_THRESHOLD_PX` of
-    /// a grip and opens `grip_popup` once the dwell exceeds the
-    /// threshold. Cursor drift clears both.
-    /// After the active Model tile changes, mirror its stored visual style
-    /// into the tab so the picker shows it and the tile renders with it
-    /// (the active tile draws with the tab's live render mode).
+    // Track cursor dwell over a selected entity's grip. Sets
+    // `grip_hover` while the cursor sits within `GRIP_THRESHOLD_PX` of
+    // a grip and opens `grip_popup` once the dwell exceeds the
+    // threshold. Cursor drift clears both.
+    // After the active Model tile changes, mirror its stored visual style
+    // into the tab so the picker shows it and the tile renders with it
+    // (the active tile draws with the tab's live render mode).
 
     /// Resolve the world point implied by the current dynamic-input field
     /// values. Locked fields use their typed buffer; the rest fall back to
@@ -521,7 +520,6 @@ impl OpenCADStudio {
     /// configuration becomes cartesian `[X(buf), Y]`, and a cartesian
     /// `[X, Y]` configuration extends to `[X, Y, Z]`. Default fallthrough
     /// is "advance to next field", matching `Tab`. See #35.
-
     pub(in crate::app) fn dyn_comma_advance(&mut self) {
         use crate::app::tab_document::{DynComponent, DynFieldEntry};
         let i = self.active_tab;
@@ -628,7 +626,6 @@ impl OpenCADStudio {
     /// way the cursor is dragging. Only applies to steps with an `Angle` field;
     /// an explicit `+`/`-` is left untouched. Returns the (possibly re-signed)
     /// text to feed `on_text_input`.
-
     pub(in crate::app) fn dyn_sign_angle_text(&self, i: usize, text: String) -> String {
         let has_angle = self.tabs[i]
             .dyn_fields
@@ -804,7 +801,7 @@ impl OpenCADStudio {
         }
     }
 
-    /// Mutable access to the currently selected table style.
+    // Mutable access to the currently selected table style.
 
     /// Point modifiers keep their parked command's live wires and source hide-set.
     pub(in crate::app) fn point_modifier_preview(

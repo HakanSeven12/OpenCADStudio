@@ -1982,16 +1982,16 @@ fn tessellate_entity_inner(
     bases
 }
 
-/// Build the 4 OBB corners (CCW: bl, br, tr, tl) of a Text / MText entity
-/// in its **native frame** — for top-level entities this is world coords,
-/// for block-defn subs it's block-local. No offset/transform applied.
-/// Width is approximated from glyph height × character count (TEXT) or
-/// from `rectangle_width` (MTEXT). Returns `None` for non-text entities.
-///
-/// `mtext_lines_override` lets the caller plug in a wrap-aware line count
-/// (from `text_support::mtext_line_count`). Without it, MText's OBB
-/// height collapses to a single line when the file omits `rectangle_height`,
-/// which makes downstream per-line LOD math degenerate.
+// Build the 4 OBB corners (CCW: bl, br, tr, tl) of a Text / MText entity
+// in its **native frame** — for top-level entities this is world coords,
+// for block-defn subs it's block-local. No offset/transform applied.
+// Width is approximated from glyph height × character count (TEXT) or
+// from `rectangle_width` (MTEXT). Returns `None` for non-text entities.
+//
+// `mtext_lines_override` lets the caller plug in a wrap-aware line count
+// (from `text_support::mtext_line_count`). Without it, MText's OBB
+// height collapses to a single line when the file omits `rectangle_height`,
+// which makes downstream per-line LOD math degenerate.
 
 /// Build a "low-LOD stub" wire for an entity that would otherwise be culled
 /// to nothing — the entity's AABB diagonal as a 2-point segment, plus the

@@ -699,7 +699,6 @@ pub fn circular_dependency_error(container_block: &str, inserted_block: &str) ->
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use document::entities::{

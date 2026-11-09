@@ -5,11 +5,11 @@ use iced::{Background, Border, Element, Theme};
 
 // ── Render-mode picker ──────────────────────────────────────────────────────
 
-/// Top-left viewport control bar: a single dark chip holding (optionally) the
-/// horizontal/vertical split buttons, the render-mode picker, and the grid /
-/// grid-snap toggles. `include_split` is off for paper-space viewports, which
-/// have no model-tile splitting. Grid / snap reflect the active viewport's
-/// state and emit `ToggleGrid` / `ToggleGridSnap`.
+// Top-left viewport control bar: a single dark chip holding (optionally) the
+// horizontal/vertical split buttons, the render-mode picker, and the grid /
+// grid-snap toggles. `include_split` is off for paper-space viewports, which
+// have no model-tile splitting. Grid / snap reflect the active viewport's
+// state and emit `ToggleGrid` / `ToggleGridSnap`.
 // ── ViewCube navigation controls (home / roll / nudge / UCS) ───────────────
 
 /// Place `el` at pixel offset (x, y) inside a fill layer (top-left origin).

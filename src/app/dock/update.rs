@@ -662,7 +662,13 @@ impl OpenCADStudio {
                     let _ = self.commit_parameters_manager(false);
                 }
                 self.show_parameters_manager = false;
-                self.tabs[i].parameters_panel = Default::default();
+                // The column choice is the pane's own setting, not the
+                // transient state of this opening: it survives the close.
+                let columns = self.tabs[i].parameters_panel.columns;
+                self.tabs[i].parameters_panel = crate::ui::window::parameters_manager::Panel {
+                    columns,
+                    ..Default::default()
+                };
             }
             PanelId::ExternalReferences => self.show_external_references = false,
             PanelId::Browser => self.show_browser = false,

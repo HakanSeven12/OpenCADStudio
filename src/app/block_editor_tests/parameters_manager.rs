@@ -1588,6 +1588,10 @@ fn the_header_menu_opens_and_an_entry_toggles_its_column_and_closes_the_menu() {
         !app.tabs[tab].parameters_panel.header_menu,
         "the menu starts closed"
     );
+    assert!(
+        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "Type starts hidden, as the recorded menu leaves it"
+    );
     let _ = app.update(Message::ParametersManagerHeaderMenu);
     assert!(
         app.tabs[tab].parameters_panel.header_menu,
@@ -1595,8 +1599,8 @@ fn the_header_menu_opens_and_an_entry_toggles_its_column_and_closes_the_menu() {
     );
     let _ = app.update(Message::ParametersManagerColumn(Column::Type));
     assert!(
-        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
-        "choosing Type hides that column"
+        app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing Type shows that column"
     );
     assert!(
         !app.tabs[tab].parameters_panel.header_menu,
@@ -1604,8 +1608,30 @@ fn the_header_menu_opens_and_an_entry_toggles_its_column_and_closes_the_menu() {
     );
     let _ = app.update(Message::ParametersManagerColumn(Column::Type));
     assert!(
-        app.tabs[tab].parameters_panel.columns[Column::Type.index()],
-        "choosing it again brings the column back"
+        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing it again hides the column"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn closing_the_manager_keeps_the_columns_that_were_shown() {
+    use crate::ui::window::parameters_manager::Column;
+    let (mut app, tab, _definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    let _ = app.update(Message::ParametersManagerColumn(Column::Description));
+    assert!(
+        app.tabs[tab].parameters_panel.columns[Column::Description.index()],
+        "Description can be turned on"
+    );
+    let _ = app.dispatch_command("PARAMETERSCLOSE");
+    let _ = app.dispatch_command("BPARAMETERS");
+    assert!(
+        app.tabs[tab].parameters_panel.columns[Column::Description.index()],
+        "and the pane that opens again still shows it"
+    );
+    assert!(
+        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "while Type stays hidden"
     );
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }

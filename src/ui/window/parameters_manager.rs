@@ -288,7 +288,9 @@ impl Default for Panel {
             search: String::new(),
             mode: manager::FilterMode::All,
             filter_menu: false,
-            columns: [true; 6],
+            // The columns the recorded header menu leaves ticked when it first
+            // opens: Type and Description start hidden.
+            columns: [true, true, false, true, true, false],
             header_menu: false,
         }
     }
@@ -1145,6 +1147,12 @@ mod tests {
         // `locate` draws the pane on this definition, so the open cell names it.
         let definition = document::Handle::new(1);
         let width = PanelId::ParametersManager.default_width();
+        // Description is hidden when the pane opens, so the cells under test
+        // are drawn by asking for the column outright.
+        let shown = || Panel {
+            columns: [true, true, false, true, true, true],
+            ..Panel::default()
+        };
         let open = |name: &str| Panel {
             editing: Some(Edit {
                 definition,
@@ -1154,7 +1162,7 @@ mod tests {
                 cell: Cell::Description,
             }),
             edit_buf: "typed note".to_owned(),
-            ..Panel::default()
+            ..shown()
         };
         let mut parameter = iced_test::simulator::Simulator::with_size(
             Default::default(),
@@ -1166,7 +1174,7 @@ mod tests {
             "the description cell of a parameter opens its own field"
         );
         assert!(
-            locate(&Panel::default(), "Left edge").is_some(),
+            locate(&shown(), "Left edge").is_some(),
             "a closed description cell prints the stored text"
         );
         assert!(
@@ -1273,24 +1281,28 @@ mod tests {
         )
     }
 
-    /// The pane opens with every toggled column shown and no menu over it.
+    /// The pane opens with the columns the recorded menu leaves ticked: Type
+    /// and Description start hidden, and Name always draws.
     #[test]
-    fn the_header_starts_with_every_toggled_column_shown() {
+    fn the_pane_opens_with_only_the_columns_the_recorded_menu_ticks() {
         let panel = Panel::default();
-        assert!(
-            panel.columns.iter().all(|&shown| shown),
-            "every column the menu can toggle is shown when the pane opens"
+        assert_eq!(
+            panel.columns,
+            [true, true, false, true, true, false],
+            "Expression, Value, Show and Order start shown; Type and Description start hidden"
         );
         assert!(!panel.header_menu, "with no column menu over the header");
         let mut ui = build(&panel);
         for column in Column::ALL {
-            assert!(
+            let shown = panel.columns[column.index()];
+            assert_eq!(
                 ui.find(iced::widget::Id::from(format!(
                     "parameters-manager-header-{}",
                     column.name()
                 )))
                 .is_ok(),
-                "the header draws {}",
+                shown,
+                "the header draws {} only when the menu leaves it ticked",
                 column.name()
             );
         }
@@ -1325,13 +1337,15 @@ mod tests {
                 "the menu lists {}",
                 column.name()
             );
-            assert!(
+            let shown = open.columns[column.index()];
+            assert_eq!(
                 ui.find(iced::widget::Id::from(format!(
                     "parameters-manager-column-check-{}",
                     column.name()
                 )))
                 .is_ok(),
-                "and ticks {}, which is shown",
+                shown,
+                "and ticks {} only while it is shown",
                 column.name()
             );
         }

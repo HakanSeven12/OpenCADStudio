@@ -7753,6 +7753,7 @@ hyperlink-dialog =
     .remove = Remove Link
     .help = HYPERLINK: link the selected objects to a file or web address (add #location to open a view or layout of it) or to a view of this drawing; the text to display is what the link shows.
 anno-scale-cmd =
+    .cannoscale-invalid = Cannot set CANNOSCALE to that value.
     .select-annotative = Select annotative objects:
     .updated-one = 1 object updated to support annotation scale <{ $scale }>.
     .updated-many = { $count } objects updated to support annotation scale <{ $scale }>.

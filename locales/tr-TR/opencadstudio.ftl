@@ -7673,6 +7673,7 @@ hyperlink-dialog =
     .remove = Bağlantıyı Kaldır
     .help = HYPERLINK: seçili nesneleri bir dosyaya veya web adresine (bir görünümünü ya da düzenini açmak için #konum ekleyin) veya bu çizimin bir görünümüne bağlar; görüntülenecek metin bağlantının gösterdiği yazıdır.
 anno-scale-cmd =
+    .cannoscale-invalid = CANNOSCALE bu değere ayarlanamaz.
     .select-annotative = Açıklamalı nesneleri seçin:
     .updated-one = 1 nesne <{ $scale }> açıklama ölçeğini destekleyecek biçimde güncellendi.
     .updated-many = { $count } nesne <{ $scale }> açıklama ölçeğini destekleyecek biçimde güncellendi.

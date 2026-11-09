@@ -104,6 +104,9 @@ struct AnswerCommand {
     state: String,
     /// Objects are gathered first under this prompt (-OBJECTSCALE).
     select_prompt: Option<String>,
+    /// When the selection was ended: the Enter that ended it reaches the
+    /// first prompt too, and must not answer it.
+    gathered_at: Option<std::time::Instant>,
 }
 
 impl CadCommand for AnswerCommand {
@@ -147,6 +150,7 @@ impl CadCommand for AnswerCommand {
             self.state = serde_json::to_string(&session).unwrap_or_default();
         }
         self.select_prompt = None;
+        self.gathered_at = Some(std::time::Instant::now());
         CmdResult::NeedPoint
     }
 
@@ -163,7 +167,14 @@ impl CadCommand for AnswerCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Dispatch(format!("_ANNOSCALEANS {}\t", self.state))
+        if self
+            .gathered_at
+            .take()
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(150))
+        {
+            return CmdResult::NeedPointQuiet;
+        }
+        CmdResult::Dispatch(format!("_ANNOSCALEANS {}	", self.state))
     }
 
     fn on_escape(&mut self) -> CmdResult {
@@ -739,6 +750,7 @@ impl OpenCADStudio {
             options,
             state,
             select_prompt,
+            gathered_at: None,
         };
         self.command_line.push_info(&command.prompt());
         self.command_line.set_step_options(command.options());
@@ -1028,9 +1040,8 @@ impl OpenCADStudio {
                             self.tabs[i].dirty = true;
                         }
                         None => {
-                            self.command_line.push_rejection(
-                                crate::t!("Cannot set CANNOSCALE to that value.").as_ref(),
-                            );
+                            self.command_line
+                                .push_rejection(&trs!("anno-scale-cmd", "cannoscale-invalid"));
                             self.command_line.push_rejection("*Invalid*");
                         }
                     }

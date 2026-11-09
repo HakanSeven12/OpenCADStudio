@@ -219,6 +219,42 @@ fn control_save_after_native_save_as_cannot_replace_the_previous_path() {
 }
 
 #[test]
+fn control_save_new_path_refuses_a_destination_created_after_the_request() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("current.dxf");
+    let destination = scratch.0.join("new.dxf");
+    let mut app = open_drawing(&path, true);
+    edit(&mut app);
+    let i = app.active_tab;
+    let current_bytes = std::fs::read(&path).unwrap();
+    let (accepted, task) = app.control_request(json!({
+        "protocol":1,
+        "op":"save",
+        "path":destination,
+        "request_id":"create-only-race",
+        "document_id":app.tabs[i].id,
+        "revision":app.tabs[i].edit_revision,
+        "client_id":"test",
+    }));
+    assert_eq!(accepted["status"], "accepted", "{accepted}");
+    assert!(!destination.exists());
+    let external = b"a different application created this before the worker ran";
+    std::fs::write(&destination, external).unwrap();
+
+    app.drive_headless_task(task).unwrap();
+    let saved = app
+        .control_request(json!({"op":"operation","request_id":"create-only-race"}))
+        .0;
+    assert_eq!(saved["ok"], false, "{saved}");
+    assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
+    assert_eq!(std::fs::read(&destination).unwrap(), external);
+    assert_eq!(std::fs::read(&path).unwrap(), current_bytes);
+    assert_eq!(app.tabs[i].current_path.as_ref(), Some(&path));
+    assert!(app.tabs[i].dirty);
+    assert!(!destination.with_extension("bak").exists());
+}
+
+#[test]
 fn control_save_current_and_new_paths_still_succeed() {
     for windowed in [false, true] {
         let scratch = Scratch::new();

@@ -2411,6 +2411,8 @@ pub(super) enum PendingClose {
 pub(super) enum SavePurpose {
     Manual,
     SaveAs,
+    /// Control Save As without permission to replace an existing destination.
+    SaveAsNew,
     Autosave,
 }
 

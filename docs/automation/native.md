@@ -52,6 +52,11 @@ A different existing destination is refused with `destination_exists` unless
 the native control request includes `"overwrite":true`. A new destination
 needs no overwrite acknowledgement. After a native Save As from A to B,
 a later control request naming A therefore needs explicit acknowledgement.
+The requirement to create a new file survives queued saves and is enforced
+atomically when the finished file is placed. If another application creates
+the destination first, the save fails and preserves that application's file.
+On Unix this uses a hard link beside the destination; a filesystem without
+hard-link support refuses the save rather than replacing an existing file.
 The MCP save schema and REST `/save` route do not yet expose `overwrite`.
 
 ### The legacy `run` line

@@ -2024,7 +2024,7 @@ impl OpenCADStudio {
         set_current_path: bool,
     ) -> Result<(), crate::io::SaveFailure> {
         let version = self.tabs[i].scene.document.version;
-        self.save_tab_synchronously_protected_as(i, path, version, set_current_path)
+        self.save_tab_synchronously_protected_as(i, path, version, set_current_path, false)
     }
 
     /// Synchronous protected save with an explicit output version. Automation
@@ -2037,6 +2037,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         version: document::DxfVersion,
         set_current_path: bool,
+        require_new_destination: bool,
     ) -> Result<(), crate::io::SaveFailure> {
         if self.tabs[i].block_test.is_some() {
             return Err(crate::io::SaveFailure::other(
@@ -2104,6 +2105,7 @@ impl OpenCADStudio {
             expected_fingerprint,
             verify_reader,
             false,
+            require_new_destination,
         )?;
 
         if set_current_path {
@@ -3702,7 +3704,10 @@ impl OpenCADStudio {
         }
         // Save-As across folders: rebase relative reference paths onto the
         // new base dir inside the snapshot only (live strings are untouched).
-        if purpose == crate::app::SavePurpose::SaveAs {
+        if matches!(
+            purpose,
+            crate::app::SavePurpose::SaveAs | crate::app::SavePurpose::SaveAsNew
+        ) {
             let old_base = self.tabs[i]
                 .current_path
                 .as_ref()
@@ -3833,6 +3838,7 @@ impl OpenCADStudio {
                             expected_fingerprint,
                             verify_reader,
                             allow_conversion_loss,
+                            purpose == crate::app::SavePurpose::SaveAsNew,
                         );
                         (result, refreshed_preview)
                     })
@@ -4009,7 +4015,9 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::t!("Autosaved 1 drawing").as_ref());
             }
-            crate::app::SavePurpose::Manual | crate::app::SavePurpose::SaveAs => {
+            crate::app::SavePurpose::Manual
+            | crate::app::SavePurpose::SaveAs
+            | crate::app::SavePurpose::SaveAsNew => {
                 let path_changed = outcome.set_current_path
                     && self.tabs[i]
                         .current_path
@@ -4034,7 +4042,10 @@ impl OpenCADStudio {
                     }
                     self.tabs[i].current_path = Some(outcome.path.clone());
                     self.tabs[i].scene.document.version = outcome.version;
-                    if outcome.purpose == crate::app::SavePurpose::SaveAs {
+                    if matches!(
+                        outcome.purpose,
+                        crate::app::SavePurpose::SaveAs | crate::app::SavePurpose::SaveAsNew
+                    ) {
                         self.tabs[i].recovery_save_as_required = false;
                         // Save-As across folders: the save snapshot was rebased
                         // in `queue_native_save`; rebase the live document too
@@ -4192,7 +4203,13 @@ impl OpenCADStudio {
             i,
             conflict.path,
             conflict.version,
-            conflict.purpose,
+            // This dialog answer explicitly authorizes replacing the file
+            // that appeared while a create-only control save was running.
+            if conflict.purpose == crate::app::SavePurpose::SaveAsNew {
+                crate::app::SavePurpose::SaveAs
+            } else {
+                conflict.purpose
+            },
             conflict.continuation,
             conflict.set_current_path,
             false,

@@ -1443,7 +1443,9 @@ impl OpenCADStudio {
                     .current_path
                     .as_deref()
                     .is_some_and(|current| super::update::native_paths_match(current, &path));
-                if !destination_is_current && path.exists() && req["overwrite"].as_bool() != Some(true) {
+                let require_new_destination =
+                    !destination_is_current && req["overwrite"].as_bool() != Some(true);
+                if require_new_destination && path.exists() {
                     return Err(failure(
                         "destination_exists",
                         "Destination exists; set overwrite=true to replace a different file",
@@ -1476,7 +1478,13 @@ impl OpenCADStudio {
                     "mtext_losses":losses.mtext_json(),
                 }));
                 if self.main_window.is_none() {
-                    self.save_tab_synchronously_protected_as(i, path, version, true)
+                    self.save_tab_synchronously_protected_as(
+                        i,
+                        path,
+                        version,
+                        true,
+                        require_new_destination,
+                    )
                         .map_err(|e| failure("save_failed", e))?;
                     Task::none()
                 } else {
@@ -1494,7 +1502,11 @@ impl OpenCADStudio {
                         i,
                         path,
                         version,
-                        super::SavePurpose::SaveAs,
+                        if require_new_destination {
+                            super::SavePurpose::SaveAsNew
+                        } else {
+                            super::SavePurpose::SaveAs
+                        },
                         super::SaveContinuation::None,
                         true,
                         true,

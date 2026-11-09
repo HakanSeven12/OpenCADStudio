@@ -2180,6 +2180,7 @@ mod save_failure_tests {
             Some(expected),
             None,
             false,
+            false,
         )
         .unwrap_err();
 
@@ -2215,11 +2216,44 @@ mod save_failure_tests {
             Some(expected),
             Some(reader),
             false,
+            false,
         )
         .unwrap_err();
 
         assert!(error.externally_modified);
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn create_only_save_refuses_even_a_matching_destination_fingerprint() {
+        let path = std::env::temp_dir().join(format!(
+            "ocs_create_only_{}_{}.dxf",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // The destination appeared before verification captured its baseline.
+        // A matching fingerprint must not grant permission to replace it.
+        std::fs::write(&path, b"another application's drawing").unwrap();
+        let observed = super::edit_lock::FileFingerprint::capture(&path).unwrap();
+        let error = super::save_owned_as_version_atomic(
+            codec::Document::new(),
+            &path,
+            codec::DxfVersion::AC1032,
+            true,
+            Some(observed),
+            None,
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert!(error.externally_modified);
+        assert_eq!(std::fs::read(&path).unwrap(), b"another application's drawing");
+        assert!(!path.with_extension("bak").exists());
         let _ = std::fs::remove_file(path);
     }
 }
@@ -2419,8 +2453,10 @@ pub fn save_as_version(
     let clone_started = iced::time::Instant::now();
     let snapshot = doc.clone();
     let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
-    save_owned_as_version_inner(snapshot, path, version, false, false, clone_ms, |_| Ok(()))
-        .map_err(|error| error.to_string())
+    save_owned_as_version_inner(
+        snapshot, path, version, false, false, clone_ms, false, |_| Ok(()),
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Save an owned document snapshot. Preparation, serialization, compression and
@@ -2436,23 +2472,33 @@ pub fn save_owned_as_version_atomic(
     expected_fingerprint: Option<edit_lock::FileFingerprint>,
     verify_reader: Option<std::fs::File>,
     allow_loss: bool,
+    require_new_destination: bool,
 ) -> Result<(), SaveFailure> {
-    save_owned_as_version_inner(doc, path, version, backup, allow_loss, 0.0, move |path| {
-        let Some(expected) = expected_fingerprint else {
-            return Ok(());
-        };
-        let current = match verify_reader {
-            Some(mut file) => match edit_lock::path_matches_file(path, &file) {
-                Ok(true) => edit_lock::FileFingerprint::capture_from(&mut file),
-                Ok(false) | Err(_) => return Err(SaveFailure::externally_modified(path)),
-            },
-            None => edit_lock::FileFingerprint::capture(path),
-        };
-        match current {
-            Ok(current) if current == expected => Ok(()),
-            _ => Err(SaveFailure::externally_modified(path)),
-        }
-    })
+    save_owned_as_version_inner(
+        doc,
+        path,
+        version,
+        backup,
+        allow_loss,
+        0.0,
+        require_new_destination,
+        move |path| {
+            let Some(expected) = expected_fingerprint else {
+                return Ok(());
+            };
+            let current = match verify_reader {
+                Some(mut file) => match edit_lock::path_matches_file(path, &file) {
+                    Ok(true) => edit_lock::FileFingerprint::capture_from(&mut file),
+                    Ok(false) | Err(_) => return Err(SaveFailure::externally_modified(path)),
+                },
+                None => edit_lock::FileFingerprint::capture(path),
+            };
+            match current {
+                Ok(current) if current == expected => Ok(()),
+                _ => Err(SaveFailure::externally_modified(path)),
+            }
+        },
+    )
 }
 
 fn save_owned_as_version_inner<F>(
@@ -2462,6 +2508,7 @@ fn save_owned_as_version_inner<F>(
     backup: bool,
     allow_loss: bool,
     clone_ms: f64,
+    require_new_destination: bool,
     before_replace: F,
 ) -> Result<(), SaveFailure>
 where
@@ -2507,11 +2554,14 @@ where
         let _ = std::fs::remove_file(&temp_path);
         return Err(error);
     }
-    if backup {
+    if backup && !require_new_destination {
         write_backup(path);
     }
-    if let Err(error) = replace_save_file(&temp_path, path) {
+    if let Err(error) = replace_save_file(&temp_path, path, require_new_destination) {
         let _ = std::fs::remove_file(&temp_path);
+        if require_new_destination && error.kind() == std::io::ErrorKind::AlreadyExists {
+            return Err(SaveFailure::externally_modified(path));
+        }
         return Err(SaveFailure::replacing(path, error));
     }
     if perf {
@@ -2549,12 +2599,28 @@ fn save_temp_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
+fn replace_save_file(
+    temp_path: &Path,
+    path: &Path,
+    require_new_destination: bool,
+) -> std::io::Result<()> {
+    if require_new_destination {
+        // Both names are in the same directory. Creating a hard link is
+        // atomic and never replaces an existing name, including a symlink.
+        // Fail safely on filesystems that cannot support this operation.
+        std::fs::hard_link(temp_path, path)?;
+        let _ = std::fs::remove_file(temp_path);
+        return Ok(());
+    }
     std::fs::rename(temp_path, path)
 }
 
 #[cfg(target_os = "windows")]
-fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
+fn replace_save_file(
+    temp_path: &Path,
+    path: &Path,
+    require_new_destination: bool,
+) -> std::io::Result<()> {
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
     // The temp name starts with a dot, and a Samba share stores such files
@@ -2566,7 +2632,7 @@ fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
     // freshly written drawing for a moment without delete sharing, which
     // refuses the replace. Retry briefly before reporting the file in use.
     let mut attempt = 0;
-    while let Err(error) = replace_save_file_inner(temp_path, path) {
+    while let Err(error) = replace_save_file_inner(temp_path, path, require_new_destination) {
         attempt += 1;
         if attempt >= 10 || !replace_error_is_file_in_use(&error) {
             return Err(error);
@@ -2592,7 +2658,26 @@ fn replace_save_file(temp_path: &Path, path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn replace_save_file_inner(temp_path: &Path, path: &Path) -> std::io::Result<()> {
+fn replace_save_file_inner(
+    temp_path: &Path,
+    path: &Path,
+    require_new_destination: bool,
+) -> std::io::Result<()> {
+    if require_new_destination {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+        let source: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let destination: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        // Omitting MOVEFILE_REPLACE_EXISTING makes the final placement
+        // reject a name that appeared after the control request.
+        return if unsafe {
+            MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH)
+        } == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        };
+    }
     if !path.exists() {
         return std::fs::rename(temp_path, path);
     }

@@ -670,12 +670,10 @@ impl OpenCADStudio {
                         .map(|(_, _, factor)| factor)
                         .or_else(|| parse_viewport_scale(&value));
                     let applied = factor
-                        .and_then(|factor| {
-                            Some(
-                                self.tabs[i]
-                                    .scene
-                                    .set_viewport_scale_factor_for(target, factor),
-                            )
+                        .map(|factor| {
+                            self.tabs[i]
+                                .scene
+                                .set_viewport_scale_factor_for(target, factor)
                         })
                         .unwrap_or(false);
                     if applied {
@@ -935,7 +933,7 @@ impl OpenCADStudio {
                 let saved = crate::app::VpMaxState {
                     layout: scene.current_layout.clone(),
                     handle,
-                    center: vp.center.clone(),
+                    center: vp.center,
                     width: vp.width,
                     height: vp.height,
                     view_height: vp.view_height,
@@ -1277,7 +1275,7 @@ impl OpenCADStudio {
                                 if vp.id > 1 && vp.common.owner_handle == layout_block {
                                     Some((
                                         vp.id,
-                                        vp.center.clone(),
+                                        vp.center,
                                         vp.width,
                                         vp.height,
                                         crate::scene::vp_effective_scale(

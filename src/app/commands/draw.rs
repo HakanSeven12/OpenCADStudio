@@ -1140,7 +1140,7 @@ impl OpenCADStudio {
                 let inherited = selected.iter().find_map(|handle| {
                     let model = self.tabs[i].scene.hatches.get(handle)?.clone();
                     let common = self.tabs[i].scene.document.get_entity(*handle)?.common();
-                    Some((model, common.color.clone(), common.transparency))
+                    Some((model, common.color, common.transparency))
                 });
                 let new_cmd = HatchCommand::new(boundary_sources, selected, inherited, plane)
                     .with_origin(self.tabs[i].scene.document.hatch_origin())

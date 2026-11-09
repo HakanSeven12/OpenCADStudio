@@ -394,7 +394,7 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                         builder.line_to(Point::new(x, y));
                     }
                 });
-                frame.stroke(&path, stroke.clone());
+                frame.stroke(&path, stroke);
             } else {
                 let path = canvas::Path::new(|builder| {
                     builder.move_to(head);
@@ -411,7 +411,7 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                         ));
                     }
                 });
-                frame.stroke(&path, stroke.clone());
+                frame.stroke(&path, stroke);
             }
             if self.landing && self.dogleg {
                 let gap = self
@@ -423,11 +423,11 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
                     .clamp(0.0, 8.0);
                 frame.stroke(
                     &canvas::Path::line(elbow, Point::new((elbow.x + tail.x) * 0.5 - gap, elbow.y)),
-                    stroke.clone(),
+                    stroke,
                 );
                 frame.stroke(
                     &canvas::Path::line(Point::new((elbow.x + tail.x) * 0.5 + gap, elbow.y), tail),
-                    stroke.clone(),
+                    stroke,
                 );
             }
         }

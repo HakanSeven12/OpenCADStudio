@@ -1058,7 +1058,7 @@ pub(crate) fn boundary_polyline_entities(
 ) -> Vec<EntityType> {
     let mut rings = Vec::new();
     for ring in regions.iter().flat_map(|region| region.iter()) {
-        if !rings.iter().any(|existing| *existing == ring) {
+        if !rings.contains(&ring) {
             rings.push(ring);
         }
     }

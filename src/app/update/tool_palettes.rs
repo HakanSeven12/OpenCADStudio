@@ -640,9 +640,7 @@ fn preview_wires_from_captured(
     for def in &deps.blocks {
         crate::app::command_driver::clipboard::import_block_def_graph(&mut doc, def, &records);
     }
-    if doc.block_records.get(block_name).is_none() {
-        return None;
-    }
+    doc.block_records.get(block_name)?;
     let mut scene = crate::scene::Scene::new();
     scene.document = doc;
     Some(scene.block_preview_wires(block_name))

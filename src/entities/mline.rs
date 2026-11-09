@@ -1002,13 +1002,11 @@ impl Grippable for MLine {
         };
         let position = match apply {
             GripApply::Translate(delta) => document::types::Vector3::new(
-                vertex.position.x + delta.x as f64,
-                vertex.position.y + delta.y as f64,
-                vertex.position.z + delta.z as f64,
+                vertex.position.x + delta.x,
+                vertex.position.y + delta.y,
+                vertex.position.z + delta.z,
             ),
-            GripApply::Absolute(point) => {
-                document::types::Vector3::new(point.x as f64, point.y as f64, point.z as f64)
-            }
+            GripApply::Absolute(point) => document::types::Vector3::new(point.x, point.y, point.z),
         };
         let count = self.vertices.len();
         let segment_count = if self.is_closed() {

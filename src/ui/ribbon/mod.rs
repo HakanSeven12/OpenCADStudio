@@ -1837,7 +1837,7 @@ impl Ribbon {
         );
         let (align_right, h_pad, top) = self.dd_anchor(open_id, panel_w, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
-            panel.into(),
+            panel,
             align_right,
             h_pad,
             top,

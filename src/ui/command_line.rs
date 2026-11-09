@@ -769,7 +769,7 @@ impl CommandLine {
             .history
             .iter()
             .flat_map(|entry| {
-                std::iter::repeat(entry.kind.clone()).take(entry.text.split('\n').count())
+                std::iter::repeat_n(entry.kind.clone(), entry.text.split('\n').count())
             })
             .collect();
         HistoryHighlightSettings { line_kinds }
@@ -1178,7 +1178,7 @@ impl CommandLine {
                             ));
                         }
 
-                        if let Some(color) = details.color.clone() {
+                        if let Some(color) = details.color {
                             let swatch_color =
                                 crate::ui::window::layers::iced_color_from_acad(&color);
 
@@ -1455,7 +1455,7 @@ impl CommandLine {
                     .align_x(iced::alignment::Horizontal::Left)
                     .align_y(iced::alignment::Vertical::Top),
             ];
-            opaque(panel).into()
+            opaque(panel)
         } else {
             container(column![]).height(0).into()
         };

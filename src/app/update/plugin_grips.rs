@@ -742,9 +742,9 @@ impl OpenCADStudio {
             crate::plugin::quad::retain_alive(|plugin| {
                 !self.disabled_plugins.contains(plugin)
                     && crate::plugin::external::with_manager(|manager| {
-                        !manager
+                        manager
                             .grip_endpoint(plugin)
-                            .is_some_and(|(_, _, alive)| !alive)
+                            .is_none_or(|(_, _, alive)| alive)
                     })
             });
             for i in 0..self.tabs.len() {
@@ -1078,7 +1078,7 @@ pub(in crate::app) fn patch_carrier_geometry(
     patched: &mut document::EntityType,
     fresh: &document::EntityType,
 ) -> Result<(), String> {
-    match (&mut *patched, &*fresh) {
+    match (&mut *patched, fresh) {
         (document::EntityType::Line(old), document::EntityType::Line(newer)) => {
             old.start = newer.start;
             old.end = newer.end;

@@ -22,6 +22,12 @@ use crate::scene::model::wire_model::WireModel;
 
 pub struct UngroupCommand;
 
+impl Default for UngroupCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UngroupCommand {
     pub fn new() -> Self {
         Self

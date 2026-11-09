@@ -884,7 +884,7 @@ impl XrefManagerPanel {
                 .padding([4, 8])
                 .width(Fill),
         )
-        .on_move(|p| Message::XrefColMove(p))
+        .on_move(Message::XrefColMove)
         .on_release(Message::XrefColRelease)
         .into();
 
@@ -1108,7 +1108,7 @@ impl XrefManagerPanel {
         // Panel-wide move/release tracking for the split drag (mirrors the
         // header divider tracking for columns).
         let content: Element<'_, Message> = mouse_area(content.spacing(0))
-            .on_move(|p| Message::XrefSplitMove(p))
+            .on_move(Message::XrefSplitMove)
             .on_release(Message::XrefSplitRelease)
             .into();
         // Fixed to the dock width like the block palette: the panel never
@@ -1300,7 +1300,7 @@ fn format_date(modified: Option<SystemTime>) -> String {
     let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
-    let d = doy as i64 - (153 * mp as u64 + 2) as i64 / 5 + 1;
+    let d = doy as i64 - (153 * mp + 2) as i64 / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as i64;
     format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
 }
@@ -1411,7 +1411,7 @@ fn split_button(
             button::Style {
                 background: Some(Background::Color(pair.color)),
                 border: Border {
-                    radius: radius.into(),
+                    radius,
                     color: palette.background.neutral.color,
                     width: 1.0,
                 },
@@ -1891,7 +1891,7 @@ fn xref_row<'a>(
                 let palette = theme.palette();
                 let pair = if is_selected {
                     palette.primary.weak
-                } else if index % 2 == 0 {
+                } else if index.is_multiple_of(2) {
                     palette.background.base
                 } else {
                     palette.background.weak
@@ -1961,7 +1961,7 @@ fn tree_row(
                 let palette = theme.palette();
                 let pair = if is_selected {
                     palette.primary.weak
-                } else if index % 2 == 0 {
+                } else if index.is_multiple_of(2) {
                     palette.background.base
                 } else {
                     palette.background.weak

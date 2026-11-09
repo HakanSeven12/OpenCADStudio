@@ -463,10 +463,8 @@ impl<'a> InRangeWires<'a> {
         } else {
             if self.heap.is_empty() {
                 self.heap.reserve(16);
-                for slot in &self.stack {
-                    if let Some(w) = slot {
-                        self.heap.push(*w);
-                    }
+                for w in self.stack.iter().flatten() {
+                    self.heap.push(*w);
                 }
             }
             self.heap.push(wire);
@@ -1156,7 +1154,7 @@ impl Snapper {
                             &rays[j]
                         };
                     let score = rank_ray(ranking_ray.origin, ranking_ray.dir, sd);
-                    if !best_x.as_ref().map_or(true, |(bd, _)| score < *bd) {
+                    if !best_x.as_ref().is_none_or(|(bd, _)| score < *bd) {
                         continue;
                     }
                     // Report an acquired tracking ray (not an auxiliary
@@ -1221,7 +1219,7 @@ impl Snapper {
             );
             let sd = screen_dist(aligned);
             let score = rank_ray(ray.origin, ray.dir, sd);
-            if sd < r && best.as_ref().map_or(true, |(bd, _)| score < *bd) {
+            if sd < r && best.as_ref().is_none_or(|(bd, _)| score < *bd) {
                 let dir_out = if t >= 0.0 { ray.dir } else { -ray.dir };
                 best = Some((
                     score,
@@ -1299,7 +1297,7 @@ impl Snapper {
         };
         // Restart the dwell when the hovered line changes (different direction,
         // or a parallel line far from the candidate's point on screen).
-        let same_candidate = self.parallel_dwell.map_or(false, |(cd, cp, _, _)| {
+        let same_candidate = self.parallel_dwell.is_some_and(|(cd, cp, _, _)| {
             parallel(cd, dir)
                 && screen_perp_dist(pt, cp, cd, view_rot, eye, bounds) < self.osnap_radius_px
         });
@@ -1308,7 +1306,7 @@ impl Snapper {
                 if !fired && now.duration_since(since).as_millis() >= PAR_DWELL_MS {
                     // Dwelt long enough: acquire this line, or remove it if it is
                     // already the reference (hovering it a second time toggles).
-                    let is_ref = self.parallel_ref.map_or(false, |(rd, rp)| {
+                    let is_ref = self.parallel_ref.is_some_and(|(rd, rp)| {
                         parallel(rd, dir)
                             && screen_perp_dist(pt, rp, rd, view_rot, eye, bounds)
                                 < self.osnap_radius_px
@@ -3227,7 +3225,7 @@ impl Snapper {
                     |world, snap_type, source| {
                         let screen = world_to_screen(world, view_rot, eye, bounds);
                         let d2 = dist2(screen, cursor_screen);
-                        if in_bounds(screen) && nearest.as_ref().map_or(true, |(n, _)| d2 < *n) {
+                        if in_bounds(screen) && nearest.as_ref().is_none_or(|(n, _)| d2 < *n) {
                             nearest = Some((
                                 d2,
                                 SnapResult {

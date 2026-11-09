@@ -137,6 +137,12 @@ enum StepCR {
     Diameter(DVec3),
 }
 
+impl Default for CircleCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircleCommand {
     pub fn new() -> Self {
         Self {
@@ -339,6 +345,12 @@ pub struct CircleCDCommand {
     plane: WorkingPlane,
 }
 
+impl Default for CircleCDCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircleCDCommand {
     pub fn new() -> Self {
         Self {
@@ -446,6 +458,12 @@ pub struct Circle2PCommand {
     plane: WorkingPlane,
 }
 
+impl Default for Circle2PCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Circle2PCommand {
     pub fn new() -> Self {
         Self {
@@ -515,6 +533,12 @@ impl CadCommand for Circle2PCommand {
 pub struct Circle3PCommand {
     pts: Vec<DVec3>,
     plane: WorkingPlane,
+}
+
+impl Default for Circle3PCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Circle3PCommand {
@@ -1313,6 +1337,12 @@ enum StepTTR {
     },
 }
 
+impl Default for CircleTTRCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircleTTRCommand {
     pub fn new() -> Self {
         Self {
@@ -1500,6 +1530,12 @@ pub struct CircleTTTCommand {
     objs: Vec<TangentObject>,
     hits: Vec<DVec3>,
     plane: WorkingPlane,
+}
+
+impl Default for CircleTTTCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CircleTTTCommand {

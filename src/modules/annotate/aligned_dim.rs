@@ -47,6 +47,12 @@ pub struct AlignedDimensionCommand {
     mtext_override: bool,
 }
 
+impl Default for AlignedDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AlignedDimensionCommand {
     pub fn new() -> Self {
         Self {

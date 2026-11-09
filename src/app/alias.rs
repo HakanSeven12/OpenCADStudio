@@ -227,7 +227,7 @@ pub(super) fn load_aliases() -> FxHashMap<String, String> {
         let Some(path) = alias_file_path() else {
             return default_map();
         };
-        return match std::fs::read_to_string(&path) {
+        match std::fs::read_to_string(&path) {
             Ok(body) => {
                 let mut map = parse_pgp(&body);
                 let seen = alias_version_file_path()
@@ -261,7 +261,7 @@ pub(super) fn load_aliases() -> FxHashMap<String, String> {
                 }
                 default_map()
             }
-        };
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -306,7 +306,7 @@ pub(super) fn save_map(map: &FxHashMap<String, String>) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        return std::fs::write(path, to_pgp(map));
+        std::fs::write(path, to_pgp(map))
     }
 
     #[cfg(target_arch = "wasm32")]

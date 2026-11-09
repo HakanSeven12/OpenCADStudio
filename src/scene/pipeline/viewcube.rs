@@ -1724,7 +1724,7 @@ fn create_resolve_texture(
 
 fn round_up_viewcube_texture(value: u32) -> u32 {
     const GRID: u32 = 128;
-    ((value.max(1) + GRID - 1) / GRID) * GRID
+    value.max(1).div_ceil(GRID) * GRID
 }
 
 // ── Hit test ──────────────────────────────────────────────────────────────

@@ -187,7 +187,7 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         }
         let ty = u32_at(data, off);
         let size = u32_at(data, off + 4) as usize;
-        if size < 8 || size % 4 != 0 || off + size > data.len() {
+        if size < 8 || !size.is_multiple_of(4) || off + size > data.len() {
             break;
         }
         let rec = &data[off..off + size];
@@ -344,7 +344,7 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
                     }
                 }
             }
-            62 | 63 | 64 => {
+            62..=64 => {
                 if let Some(path) = p.path.take() {
                     let close = ty != 64;
                     let stroke = ty != 62;

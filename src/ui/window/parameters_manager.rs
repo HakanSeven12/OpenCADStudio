@@ -129,7 +129,7 @@ impl<Message> canvas::Program<Message> for Glyph {
         };
         match self.0 {
             GlyphKind::GroupBox => {
-                frame.stroke(&square(reach), stroke.clone());
+                frame.stroke(&square(reach), stroke);
                 frame.stroke(
                     &canvas::Path::line(
                         Point::new(centre.x - reach + 2.0, centre.y),
@@ -692,7 +692,7 @@ pub fn view(
         ),
         body.push(
             container(
-                scrollable(column(lines.into_iter()).spacing(2))
+                scrollable(column(lines).spacing(2))
                     .width(Fill)
                     .height(Fill),
             )

@@ -1427,7 +1427,7 @@ impl OpenCADStudio {
         let gathering = self.tabs[i]
             .active_cmd
             .as_ref()
-            .map_or(false, |c| c.is_selection_gathering());
+            .is_some_and(|c| c.is_selection_gathering());
         if !gathering {
             return None;
         }
@@ -2009,11 +2009,9 @@ impl OpenCADStudio {
         }
         let is_mtp = token.trim_start_matches('_').eq_ignore_ascii_case("MTP")
             || token.trim_start_matches('_').eq_ignore_ascii_case("M2P");
-        if is_mtp {
-            if self.point_modifier_step(i) {
-                self.start_mtp_modifier(i);
-                return Task::none();
-            }
+        if is_mtp && self.point_modifier_step(i) {
+            self.start_mtp_modifier(i);
+            return Task::none();
         }
         if let Some(kind) = self.typed_snap_override(i, token) {
             self.apply_snap_override(kind);
@@ -2047,7 +2045,7 @@ impl OpenCADStudio {
             }
             self.last_point = Some(wcs);
             self.push_ucs_to_cmd(i);
-            return self.feed_command(StepInput::Point(wcs));
+            self.feed_command(StepInput::Point(wcs))
         } else {
             // The step reads the token first: at a great many point prompts a
             // bare number is the step's own value, not a distance — ROTATE's
@@ -2067,7 +2065,7 @@ impl OpenCADStudio {
             if let Some(distance) = self.try_direct_distance_entry(token) {
                 return distance;
             }
-            return task;
+            task
         }
     }
 

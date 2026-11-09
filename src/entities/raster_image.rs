@@ -268,14 +268,14 @@ impl Grippable for RasterImage {
         if grip_id == 0 {
             match apply {
                 GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x as f64;
-                    self.insertion_point.y += d.y as f64;
-                    self.insertion_point.z += d.z as f64;
+                    self.insertion_point.x += d.x;
+                    self.insertion_point.y += d.y;
+                    self.insertion_point.z += d.z;
                 }
                 GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x as f64;
-                    self.insertion_point.y = p.y as f64;
-                    self.insertion_point.z = p.z as f64;
+                    self.insertion_point.x = p.x;
+                    self.insertion_point.y = p.y;
+                    self.insertion_point.z = p.z;
                 }
             }
         }
@@ -439,8 +439,8 @@ impl Transformable for RasterImage {
                     p1,
                     p2,
                 );
-                let ax = (p2.x - p1.x) as f64;
-                let ay = (p2.y - p1.y) as f64;
+                let ax = p2.x - p1.x;
+                let ay = p2.y - p1.y;
                 let len2 = ax * ax + ay * ay;
                 if len2 > 1e-12 {
                     reflect_vec3(&mut entity.u_vector.x, &mut entity.u_vector.y, ax, ay, len2);
@@ -557,11 +557,11 @@ impl Grippable for Wipeout {
                 let current_world = [current.x, current.y, current.z];
                 let new_w = match apply {
                     GripApply::Translate(d) => [
-                        current_world[0] + d.x as f64,
-                        current_world[1] + d.y as f64,
-                        current_world[2] + d.z as f64,
+                        current_world[0] + d.x,
+                        current_world[1] + d.y,
+                        current_world[2] + d.z,
                     ],
-                    GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
+                    GripApply::Absolute(p) => [p.x, p.y, p.z],
                 };
                 if let Some(clip) = wipeout_world_to_clip(self, new_w) {
                     let closes = self.clip_boundary_vertices.len() > 3
@@ -833,8 +833,8 @@ impl Transformable for Wipeout {
                     p1,
                     p2,
                 );
-                let ax = (p2.x - p1.x) as f64;
-                let ay = (p2.y - p1.y) as f64;
+                let ax = p2.x - p1.x;
+                let ay = p2.y - p1.y;
                 let len2 = ax * ax + ay * ay;
                 if len2 > 1e-12 {
                     reflect_vec3(&mut entity.u_vector.x, &mut entity.u_vector.y, ax, ay, len2);

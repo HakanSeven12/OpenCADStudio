@@ -327,7 +327,7 @@ impl OpenCADStudio {
             };
             let base = crate::scene::render_graph::block_base_point(document, &inner.block_name);
             let local = crate::scene::render_graph::insert_transform_with_base(inner, base);
-            let outer = chain.last().expect("non-empty chain").forward.clone();
+            let outer = chain.last().expect("non-empty chain").forward;
             chain.push(crate::modules::draw::modify::refedit::ChainLevel {
                 insert: handle,
                 block_name: inner.block_name.clone(),
@@ -373,7 +373,7 @@ impl OpenCADStudio {
             extracted: extracted.clone(),
             added: HashSet::new(),
             removed: HashSet::new(),
-            forward: level.forward.clone(),
+            forward: level.forward,
             inverse,
             // Everything allocated from here on is part of the session.
             handle_watermark: document.next_handle().max(document.header.handle_seed),

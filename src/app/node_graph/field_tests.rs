@@ -300,11 +300,11 @@ fn tab_commits_and_walks_the_fields() {
     rig.typed("-12.75");
     rig.key(Named::Tab);
     assert_eq!(rig.number(id, "x"), -12.75, "Tab commits");
-    rig.typed("3.141592");
+    rig.typed("3.142592");
     rig.key(Named::Tab);
     rig.typed("0.001");
     rig.key(Named::Tab);
-    assert_point(rig.point(id), [-12.75, 3.141592, 0.001]);
+    assert_point(rig.point(id), [-12.75, 3.142592, 0.001]);
 }
 
 #[test]

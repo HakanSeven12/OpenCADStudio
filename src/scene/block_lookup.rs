@@ -670,8 +670,7 @@ pub(crate) fn validate(
     let cols = table.columns.len();
     if rows == 0
         || rows > 1000
-        || cols < 2
-        || cols > 64
+        || !(2..=64).contains(&cols)
         || table.column_count != cols as i32
         || table.expressions.len() != rows * cols
     {

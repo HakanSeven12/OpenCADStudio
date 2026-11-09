@@ -380,7 +380,7 @@ impl Scene {
         if !(aperture_px.is_finite() && aperture_px > 0.0) {
             return None;
         }
-        let perp_base = want_perp.then(|| base).flatten();
+        let perp_base = want_perp.then_some(base).flatten();
         // Eye-plane guard: a triangle behind the perspective eye mirrors onto
         // visible pixels and would otherwise win a snap for a hidden face (#64).
         let project = |world: glam::DVec3| -> Option<[f32; 2]> {
@@ -4039,7 +4039,7 @@ impl Scene {
         }
         // Complex-linetype glyphs ride the host entity's wire.
         let lt = crate::scene::view::render::linetype_name_for(&self.document, entity);
-        crate::io::linetypes::resolve_complex_lt(&self.document, &lt).is_some()
+        crate::io::linetypes::resolve_complex_lt(&self.document, lt).is_some()
     }
 
     /// Stage the cache categories an entity belongs to before erase removes the
@@ -5253,7 +5253,7 @@ impl Scene {
         }
         self.nav_changed_at
             .get()
-            .map_or(false, |t| t.elapsed().as_millis() < Self::NAV_SETTLE_MS)
+            .is_some_and(|t| t.elapsed().as_millis() < Self::NAV_SETTLE_MS)
     }
 
     pub(crate) fn record_nav_perf(&self, op: NavPerfOp, started: iced::time::Instant) {
@@ -5306,9 +5306,9 @@ impl Scene {
     /// (hatched) frame actually renders after the cursor stops, even when no
     /// input event would otherwise trigger a redraw. Read-only (no side effect).
     pub fn is_settling(&self) -> bool {
-        self.nav_changed_at.get().map_or(false, |t| {
-            t.elapsed().as_millis() < Self::NAV_SETTLE_MS + 130
-        })
+        self.nav_changed_at
+            .get()
+            .is_some_and(|t| t.elapsed().as_millis() < Self::NAV_SETTLE_MS + 130)
     }
 
     /// Prepare display geometry without changing the entity or resident caches.
@@ -11601,10 +11601,10 @@ impl Scene {
                         self.document
                             .layers
                             .get(&common.layer)
-                            .map(|layer| layer.color.clone())
-                            .unwrap_or(common.color.clone())
+                            .map(|layer| layer.color)
+                            .unwrap_or(common.color)
                     } else {
-                        common.color.clone()
+                        common.color
                     };
                     let object_color = color.rgb().map_or([255; 3], |(r, g, b)| [r, g, b]);
                     clouds.extend(point_cloud::placed(
@@ -11671,10 +11671,10 @@ impl Scene {
                 self.document
                     .layers
                     .get(&common.layer)
-                    .map(|layer| layer.color.clone())
-                    .unwrap_or(common.color.clone())
+                    .map(|layer| layer.color)
+                    .unwrap_or(common.color)
             } else {
-                common.color.clone()
+                common.color
             };
             let (r, g, b) = color.rgb().unwrap_or((255, 255, 255));
             wires.push(WireModel::solid_f64(
@@ -11895,7 +11895,7 @@ impl Scene {
                 if self.entity_temporarily_hidden(handle) {
                     return false;
                 }
-                if !targets.map_or(true, |targets| {
+                if !targets.is_none_or(|targets| {
                     matches!(entity, EntityType::Insert(_)) && targets.contains(&handle)
                 }) {
                     return false;

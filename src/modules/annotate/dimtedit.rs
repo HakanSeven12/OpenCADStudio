@@ -47,6 +47,12 @@ enum Placement {
     Home,
 }
 
+impl Default for DimTeditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DimTeditCommand {
     pub fn new() -> Self {
         Self {

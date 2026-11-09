@@ -131,12 +131,15 @@ pub(crate) fn mode(document: &Document, kind: FrameKind) -> i16 {
 
 pub(crate) fn master_mode(document: &Document) -> i16 {
     let first = mode(document, ALL_KINDS[0]);
-    ALL_KINDS
+    if ALL_KINDS
         .iter()
         .skip(1)
         .all(|kind| mode(document, *kind) == first)
-        .then_some(first)
-        .unwrap_or(3)
+    {
+        first
+    } else {
+        3
+    }
 }
 
 fn attach_root_entry(document: &mut Document, name: &str, handle: Handle) {

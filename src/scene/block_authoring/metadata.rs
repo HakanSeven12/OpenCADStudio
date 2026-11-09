@@ -303,10 +303,10 @@ fn owned_by(object: &ObjectType, graph: Handle) -> bool {
         _ => false,
     }
 }
-fn graph_nodes<'a>(
-    document: &'a Document,
+fn graph_nodes(
+    document: &Document,
     definition: Handle,
-) -> Result<Option<(Handle, &'a [document::objects::BlockEvaluationNode])>, &'static str> {
+) -> Result<Option<(Handle, &[document::objects::BlockEvaluationNode])>, &'static str> {
     let Some(graph) = super::graph(document, definition)? else {
         return Ok(None);
     };

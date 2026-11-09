@@ -509,7 +509,7 @@ pub fn tool_frame<'a>(
     ]
     .width(Length::Fill)
     .height(Length::Fixed(24.0));
-    let measured_content = sensor(content).on_resize(move |size| measured(size));
+    let measured_content = sensor(content).on_resize(measured);
     let body_base = column![Space::new().height(Length::Fixed(24.0)), measured_content].spacing(6);
     let grip = mouse_area(
         container(crate::ui::icons::themed_primary(

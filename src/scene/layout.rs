@@ -84,10 +84,10 @@ impl Scene {
         if let Some(EntityType::Viewport(sheet)) = self.document.get_entity(from.viewport).cloned()
         {
             if let Some(EntityType::Viewport(target)) = self.document.get_entity_mut(to.viewport) {
-                *target = Box::new(document::entities::Viewport {
+                **target = document::entities::Viewport {
                     common: target.common.clone(),
                     ..*sheet
-                });
+                };
             }
         }
         self.unopened_layouts.remove(name);

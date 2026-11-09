@@ -119,6 +119,12 @@ pub struct AngularDimensionCommand {
     quadrant_lock: Option<(f64, f64)>,
 }
 
+impl Default for AngularDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AngularDimensionCommand {
     pub fn new() -> Self {
         Self {

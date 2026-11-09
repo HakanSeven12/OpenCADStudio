@@ -361,6 +361,12 @@ pub struct MLeaderAlignCommand {
     spacing: f64,
 }
 
+impl Default for MLeaderAlignCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MLeaderAlignCommand {
     pub fn new() -> Self {
         Self {
@@ -678,6 +684,12 @@ pub struct MLeaderCollectCommand {
     step: CollectStep,
     handles: Vec<Handle>,
     layout: MLeaderCollectLayout,
+}
+
+impl Default for MLeaderCollectCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MLeaderCollectCommand {

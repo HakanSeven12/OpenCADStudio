@@ -9,6 +9,12 @@ pub struct IdCommand {
     plane: WorkingPlane,
 }
 
+impl Default for IdCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IdCommand {
     pub fn new() -> Self {
         Self {

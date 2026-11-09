@@ -29,6 +29,12 @@ enum DonutState {
     PlaceCenter,
 }
 
+impl Default for DonutCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DonutCommand {
     pub fn new() -> Self {
         let mut inner_diameter = defaults::get_donut_inner_diameter();

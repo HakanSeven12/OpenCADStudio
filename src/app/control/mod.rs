@@ -1667,7 +1667,7 @@ impl OpenCADStudio {
             .chain(Task::done(Message::ControlTaskDone(end)))
     }
     pub(super) fn control_step(&mut self, id: String, msg: Message) -> Task<Message> {
-        if !self.control.pending.as_ref().is_some_and(|p| p.id == id) {
+        if self.control.pending.as_ref().is_none_or(|p| p.id != id) {
             return Task::none();
         }
         let previous = self.active_tab;

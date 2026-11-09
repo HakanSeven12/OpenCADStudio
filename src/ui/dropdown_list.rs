@@ -2994,10 +2994,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer> for Dropdow
                     let cur_pos = state
                         .highlighted
                         .and_then(|h| selectable_indices.iter().position(|&i| i == h));
-                    let matched_pos =
-                        state
-                            .type_ahead
-                            .backspace(Instant::now(), cur_pos, labels.into_iter());
+                    let matched_pos = state.type_ahead.backspace(Instant::now(), cur_pos, labels);
                     if let Some(matched_pos) = matched_pos {
                         if let Some(&row_idx) = selectable_indices.get(matched_pos) {
                             state.highlighted = Some(row_idx);
@@ -3041,12 +3038,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer> for Dropdow
                                 let cur_pos = state
                                     .highlighted
                                     .and_then(|h| selectable_indices.iter().position(|&i| i == h));
-                                let matched_pos = state.type_ahead.push_char(
-                                    ch,
-                                    Instant::now(),
-                                    cur_pos,
-                                    labels.into_iter(),
-                                );
+                                let matched_pos =
+                                    state
+                                        .type_ahead
+                                        .push_char(ch, Instant::now(), cur_pos, labels);
                                 if let Some(matched_pos) = matched_pos {
                                     if let Some(&row_idx) = selectable_indices.get(matched_pos) {
                                         state.highlighted = Some(row_idx);

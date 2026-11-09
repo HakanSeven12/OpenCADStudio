@@ -27,6 +27,12 @@ pub struct SmoothConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for SmoothConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmoothConstraintCommand {
     pub fn new() -> Self {
         Self {

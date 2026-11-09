@@ -1565,10 +1565,10 @@ pub fn batch_bindings(step: &Value, index: usize) -> Result<Vec<&str>, String> {
             .as_object()
             .ok_or("binding must contain step and path")?;
         if source.len() != 2
-            || !source
+            || source
                 .get("step")
                 .and_then(Value::as_u64)
-                .is_some_and(|s| s < index as u64)
+                .is_none_or(|s| s >= index as u64)
         {
             return Err(
                 "binding must refer to an earlier step and contain only step and path".into(),

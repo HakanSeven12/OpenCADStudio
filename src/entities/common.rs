@@ -201,7 +201,7 @@ fn format_signed_length(value: f64) -> String {
             let whole = (rest / denom).floor();
             let mut n = (rest - whole * denom).round() as u64;
             let mut d = denom as u64;
-            while d > 1 && n % 2 == 0 && d % 2 == 0 {
+            while d > 1 && n.is_multiple_of(2) && d.is_multiple_of(2) {
                 n /= 2;
                 d /= 2;
             }
@@ -889,7 +889,7 @@ pub fn bulge_arc_to_tangent(
 /// Falls back to `triangulate_planar` if the vertex count is odd or less than 4.
 pub(crate) fn triangulate_band_ring(ring: &[[f64; 3]]) -> Vec<[f64; 3]> {
     let n = ring.len();
-    if n >= 4 && n % 2 == 0 {
+    if n >= 4 && n.is_multiple_of(2) {
         let m = n / 2;
         let mut tris = Vec::with_capacity((m - 1) * 6);
         for j in 0..m - 1 {
@@ -1318,8 +1318,8 @@ pub(crate) fn polyline_segment_fill(
         let sign = b.signum();
         let cx = (mx + sign * d_perp * perp_x) as f32;
         let cy = (my + sign * d_perp * perp_y) as f32;
-        let a0 = ((p0[1] - cy) as f32).atan2((p0[0] - cx) as f32);
-        let a1 = ((p1[1] - cy) as f32).atan2((p1[0] - cx) as f32);
+        let a0 = (p0[1] - cy).atan2(p0[0] - cx);
+        let a1 = (p1[1] - cy).atan2(p1[0] - cx);
         let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
         if ea < sa {
             ea += std::f32::consts::TAU;

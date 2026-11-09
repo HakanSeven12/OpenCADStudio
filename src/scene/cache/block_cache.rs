@@ -805,7 +805,7 @@ fn referenced_block_tree(doc: &Document, root: &str, anno_scale: f32) -> Vec<Str
 
 fn nested_instance_transform(nref: &NestedRef, offset: [f64; 3]) -> Transform {
     if offset == [0.0; 3] {
-        nref.xform.clone()
+        nref.xform
     } else {
         Transform::from_translation(Vector3::new(offset[0], offset[1], offset[2])).then(&nref.xform)
     }
@@ -2632,12 +2632,7 @@ fn expand_defn(
                             transform_aabb_xy(nested_defn.metrics.aabb_local, &composed),
                         )
                     });
-                let local = [
-                    world[0] as f32,
-                    world[1] as f32,
-                    world[2] as f32,
-                    world[3] as f32,
-                ];
+                let local = [world[0], world[1], world[2], world[3]];
                 if let Some(view) = ctx.view_aabb {
                     if aabb_disjoint_xy(local, view) {
                         continue;
@@ -3757,11 +3752,11 @@ fn emit_wire(
     }
 
     for p in &lw.key_vertices {
-        let v = accum_xform.apply(Vector3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+        let v = accum_xform.apply(Vector3::new(p[0], p[1], p[2]));
         entry.key_vertices.push([v.x, v.y, v.z]);
     }
     for (p, hint) in &lw.snap_pts {
-        let v = accum_xform.apply(Vector3::new(p.x as f64, p.y as f64, p.z as f64));
+        let v = accum_xform.apply(Vector3::new(p.x, p.y, p.z));
         entry
             .snap_pts
             .push((glam::DVec3::new(v.x, v.y, v.z), *hint));
@@ -3932,8 +3927,8 @@ fn transform_tangent(tg: &TangentGeom, t: &Transform) -> Option<TangentGeom> {
                 center[2] as f64,
             ));
             let m = &t.matrix.m;
-            let sx = ((m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]) as f64).sqrt();
-            let sy = ((m[1][0] * m[1][0] + m[1][1] * m[1][1] + m[1][2] * m[1][2]) as f64).sqrt();
+            let sx = (m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]).sqrt();
+            let sy = (m[1][0] * m[1][0] + m[1][1] * m[1][1] + m[1][2] * m[1][2]).sqrt();
             let s = ((sx + sy) * 0.5) as f32;
             Some(TangentGeom::Circle {
                 center: [(c.x) as f32, (c.y) as f32, (c.z) as f32],

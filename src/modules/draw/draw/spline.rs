@@ -39,6 +39,12 @@ pub struct SplineCommand {
     degree: usize,
 }
 
+impl Default for SplineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SplineCommand {
     pub fn new() -> Self {
         Self {

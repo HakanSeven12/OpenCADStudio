@@ -697,7 +697,7 @@ fn mtext_of_node(
             let last = lines
                 .iter()
                 .filter_map(text_line)
-                .last()
+                .next_back()
                 .map_or(first, |l| l.1);
             m.line_spacing_style = LineSpacingStyle::AtLeast;
             m.line_spacing_factor = 1.0;

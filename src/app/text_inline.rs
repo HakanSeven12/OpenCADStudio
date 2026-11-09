@@ -313,10 +313,8 @@ impl super::OpenCADStudio {
                 .header
                 .current_text_style_name
                 .clone();
-            if !cur_style.is_empty() {
-                if t.style.trim().is_empty() {
-                    t.style = cur_style;
-                }
+            if !cur_style.is_empty() && t.style.trim().is_empty() {
+                t.style = cur_style;
             }
             // TEXT asks an annotative style for the paper height; the entity
             // stores the model height of the scale it is created at.

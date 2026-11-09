@@ -241,15 +241,11 @@ pub(crate) fn style_for_property<'a>(
         .and_then(|column| column.style.as_ref());
     // A column's style wins over its row's (measured with named cell styles
     // on both: the column's applies where they cross).
-    for style in [column_style, row.style.as_ref(), table.base_style.as_ref()]
+    [column_style, row.style.as_ref(), table.base_style.as_ref()]
         .into_iter()
         .flatten()
-    {
-        if style.property_flags.contains(property) {
-            return Some(style);
-        }
-    }
-    None
+        .find(|&style| style.property_flags.contains(property))
+        .map(|v| v as _)
 }
 
 /// A cell's text height: the content's own format when it overrides it,
@@ -1243,7 +1239,7 @@ pub(crate) fn block_cell_inserts(
                         _ => (row_top + row_bottom) as f64 * 0.5,
                     };
                     let shift = h * (cell_x as f32 - x) + flow * (cell_y as f32 - y);
-                    position = position + shift;
+                    position += shift;
                 }
                 let mut insert = Insert::new(
                     record.name.clone(),
@@ -1448,7 +1444,7 @@ impl RenderConvertible for Table {
         // pipeline so inline `\W`, `\Q`, etc. compose with the style baseline.
         let resolved_style_for_handle =
             |handle: Option<document::Handle>, font_name: String| -> ResolvedTextStyle {
-                let style = handle.and_then(|h| lookup_style(h));
+                let style = handle.and_then(&lookup_style);
                 ResolvedTextStyle {
                     font_name,
                     width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
@@ -4997,7 +4993,7 @@ impl TableCellBordersExt for Table {
                 .map(|edge| {
                     style_for_border(self, table_row, column, cell, *edge)
                         .map(|style| pick(style, *edge))
-                        .unwrap_or_else(CellBorder::new)
+                        .unwrap_or_default()
                 })
                 .collect()
         };
@@ -5987,7 +5983,7 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
             let layout = layout_mtext(&MTextRenderOpts {
                 layer_color: None,
                 columns: Default::default(),
-                value: &text,
+                value: text,
                 insertion: [0.0; 3],
                 height: height as f32,
                 rect_w: width.max(0.0) as f32,

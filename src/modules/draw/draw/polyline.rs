@@ -340,6 +340,12 @@ pub struct PlineCommand {
     plane: WorkingPlane,
 }
 
+impl Default for PlineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlineCommand {
     pub fn new() -> Self {
         let w = super::super::defaults::get_pline_width();

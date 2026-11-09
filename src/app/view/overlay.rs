@@ -558,7 +558,6 @@ pub(super) fn table_cell_editor_overlay(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     )
-    .into()
 }
 
 pub(super) fn mtext_editor_overlay<'a>(

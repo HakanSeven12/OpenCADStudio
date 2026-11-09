@@ -32,6 +32,12 @@ pub struct DimJogLineCommand {
     dimension: Option<Dimension>,
 }
 
+impl Default for DimJogLineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DimJogLineCommand {
     pub fn new() -> Self {
         Self {

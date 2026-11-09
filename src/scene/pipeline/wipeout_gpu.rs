@@ -181,9 +181,7 @@ impl WipeoutPacking {
             boundary_size,
             std::mem::size_of::<FamilyBatchData>() as u64,
         ] {
-            if size > u64::from(limits.max_uniform_buffer_binding_size)
-                || size > limits.max_buffer_size
-            {
+            if size > limits.max_uniform_buffer_binding_size || size > limits.max_buffer_size {
                 return None;
             }
         }

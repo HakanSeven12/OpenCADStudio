@@ -85,7 +85,7 @@ pub fn codec_transform(t: &EntityTransform) -> Transform {
             p2,
             working_normal,
         } => reflection_about_working_line(*p1, *p2, *working_normal),
-        EntityTransform::Affine(transform) => transform.clone(),
+        EntityTransform::Affine(transform) => *transform,
     }
 }
 
@@ -152,19 +152,19 @@ pub fn reflected_point(p: DVec3, p1: DVec3, p2: DVec3, working_normal: DVec3) ->
 }
 
 pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: DVec3, p2: DVec3) {
-    let ax = (p2.x - p1.x) as f64;
-    let ay = (p2.y - p1.y) as f64;
+    let ax = p2.x - p1.x;
+    let ay = p2.y - p1.y;
     let len2 = ax * ax + ay * ay;
     if len2 < 1e-12 {
         return;
     }
-    let rx = *x - p1.x as f64;
-    let ry = *y - p1.y as f64;
+    let rx = *x - p1.x;
+    let ry = *y - p1.y;
     let dot = rx * ax + ry * ay;
     let mx = 2.0 * dot * ax / len2 - rx;
     let my = 2.0 * dot * ay / len2 - ry;
-    *x = p1.x as f64 + mx;
-    *y = p1.y as f64 + my;
+    *x = p1.x + mx;
+    *y = p1.y + my;
 }
 
 /// An ellipse / elliptical arc's image under any affine transform, through the

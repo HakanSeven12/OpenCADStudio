@@ -41,6 +41,12 @@ fn is_dimension(entity: &EntityType) -> bool {
     matches!(entity, EntityType::Dimension(_))
 }
 
+impl Default for DimBreakCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DimBreakCommand {
     pub fn new() -> Self {
         Self {

@@ -29,10 +29,10 @@ impl FieldContext for OcsFieldContext<'_> {
                 let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
                 Some(secs / 86_400.0 + 2_440_587.5 + utc_offset_days())
             };
-            return Some((
+            Some((
                 julian(meta.created().ok()?)?,
                 julian(meta.modified().ok()?)?,
-            ));
+            ))
         }
         #[cfg(target_arch = "wasm32")]
         None
@@ -64,7 +64,7 @@ impl FieldContext for OcsFieldContext<'_> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let path = self.0?.source_path.as_deref()?;
-            return std::fs::metadata(path).ok().map(|m| m.len());
+            std::fs::metadata(path).ok().map(|m| m.len())
         }
         #[cfg(target_arch = "wasm32")]
         None
@@ -79,13 +79,13 @@ impl FieldContext for OcsFieldContext<'_> {
         f: &mut dyn FnMut(&document::sheet_set::SheetSetDatabase) -> Option<String>,
     ) -> Option<String> {
         let sets = SHEET_SETS.read().ok()?;
-        sets.iter().find_map(|db| f(db))
+        sets.iter().find_map(f)
     }
 
     fn getenv(&self, name: &str) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            return std::env::var(name).ok().filter(|v| !v.is_empty());
+            std::env::var(name).ok().filter(|v| !v.is_empty())
         }
         #[cfg(target_arch = "wasm32")]
         {

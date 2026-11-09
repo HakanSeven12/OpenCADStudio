@@ -366,8 +366,8 @@ fn arc_points(bounds: [f64; 4], start: [f64; 2], end: [f64; 2]) -> Vec<[f64; 2]>
     // The unit vectors are stepped out from zero by turning the last one
     // through 1/99 turn in plain doubles, rounding and all, so the error
     // grows from step to step as the points come out.
-    const STEP_COS: f64 = 0.99798667647188444; // cos(2π/99)
-    const STEP_SIN: f64 = 0.063423919656564506; // sin(2π/99)
+    const STEP_COS: f64 = 0.997_986_676_471_884_4; // cos(2π/99)
+    const STEP_SIN: f64 = 0.063_423_919_656_564_5; // sin(2π/99)
     let mut turns = vec![(1.0f64, 0.0f64); ARC_STEPS as usize + 1];
     for k in 1..turns.len() {
         let (c, s) = turns[k - 1];

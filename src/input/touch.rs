@@ -125,7 +125,7 @@ impl TouchGestures {
                 };
                 let delta = centre - gesture.centre;
                 gesture.travel += (delta.x * delta.x + delta.y * delta.y).sqrt();
-                gesture.swept = gesture.swept + delta;
+                gesture.swept += delta;
                 let mut actions = Vec::new();
                 if count == 2 {
                     actions.push(TouchAction::Pan(delta));

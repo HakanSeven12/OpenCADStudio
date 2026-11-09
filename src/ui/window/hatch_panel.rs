@@ -168,8 +168,8 @@ fn preview<'a>(settings: &HatchSettings) -> Element<'a, Message> {
             crate::ui::window::gradient_editor::fill_preview(
                 *kind,
                 *invert,
-                settings.gradient_colors[0].clone(),
-                settings.gradient_colors[1].clone(),
+                settings.gradient_colors[0],
+                settings.gradient_colors[1],
                 settings.angle_deg,
             ),
         ),
@@ -237,13 +237,13 @@ pub fn view<'a>(
             .push(list(
                 tr("color-1"),
                 stops.clone(),
-                color_label(settings.gradient_colors[0].clone()),
+                color_label(settings.gradient_colors[0]),
                 HatchPanelMsg::GradientColor1,
             ))
             .push(list(
                 tr("color-2"),
                 stops,
-                color_label(settings.gradient_colors[1].clone()),
+                color_label(settings.gradient_colors[1]),
                 HatchPanelMsg::GradientColor2,
             ));
     } else {
@@ -255,19 +255,13 @@ pub fn view<'a>(
             .push(list(
                 tr("color"),
                 colors,
-                settings
-                    .color
-                    .clone()
-                    .map_or_else(current_label, color_label),
+                settings.color.map_or_else(current_label, color_label),
                 HatchPanelMsg::Color,
             ))
             .push(list(
                 tr("background"),
                 backgrounds,
-                settings
-                    .background
-                    .clone()
-                    .map_or_else(none_label, color_label),
+                settings.background.map_or_else(none_label, color_label),
                 HatchPanelMsg::Background,
             ));
     }

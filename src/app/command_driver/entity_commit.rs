@@ -863,11 +863,11 @@ impl OpenCADStudio {
     /// A hatch whose settings reorder it is undone with its sort table: the
     /// draw order lives in an object, outside the entity delta.
     fn hatch_undo_delta_safe(&self, i: usize) -> bool {
-        !self.tabs[i]
+        self.tabs[i]
             .active_cmd
             .as_ref()
             .and_then(|command| command.hatch_settings())
-            .is_some_and(|settings| settings.draw_order != 0)
+            .is_none_or(|settings| settings.draw_order == 0)
     }
 
     /// The layer a hatch of the running command goes on (the Hatch panel's,
@@ -964,7 +964,7 @@ impl OpenCADStudio {
             return;
         }
         if let Some(color) = &settings.color {
-            hatch.common.color = color.clone();
+            hatch.common.color = *color;
         }
         if let Some(percent) = settings.transparency {
             hatch.common.transparency = document::types::Transparency::from_percent(percent as f64);
@@ -1142,10 +1142,9 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, hatches.len(), self.hatch_undo_delta_safe(i));
         let (layer, hatch_options) = self.hatch_commit_layer(i);
         for hatch in hatches {
-            let new_handle =
-                self.tabs[i]
-                    .scene
-                    .add_hatch(hatch, Some(&layer), entity_style.clone());
+            let new_handle = self.tabs[i]
+                .scene
+                .add_hatch(hatch, Some(&layer), entity_style);
             self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
             if !new_handle.is_null() {
                 self.tabs[i].scene.select_entity(new_handle, true);

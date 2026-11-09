@@ -894,11 +894,11 @@ impl HatchCommand {
             separate: self.separate_hatches,
             keep_boundaries: self.retain_boundaries,
             gap_tolerance: self.gap_tolerance,
-            color: self.color.clone(),
-            background: self.background.clone(),
+            color: self.color,
+            background: self.background,
             layer: self.layer.clone(),
             transparency: self.transparency,
-            gradient_colors: self.gradient_colors.clone(),
+            gradient_colors: self.gradient_colors,
             draw_order: self.draw_order,
             annotative: self.annotative,
         }
@@ -1134,7 +1134,7 @@ impl HatchCommand {
             entity_style: self
                 .inherited
                 .as_ref()
-                .map(|(_, color, transparency)| (color.clone(), *transparency)),
+                .map(|(_, color, transparency)| (*color, *transparency)),
             message: self.current_mode_text(),
         }
     }
@@ -1772,7 +1772,7 @@ impl CadCommand for HatchCommand {
         let entity_style = self
             .inherited
             .as_ref()
-            .map(|(_, color, transparency)| (color.clone(), *transparency));
+            .map(|(_, color, transparency)| (*color, *transparency));
         if rings.is_empty() {
             CmdResult::Done
         } else if self.separate_hatches && !self.retain_boundaries {
@@ -2568,13 +2568,13 @@ impl CadCommand for BoundaryCommand {
         let hovered = self.picked_region([local.x, local.y]);
         let mut rings: Vec<&Vec<[f64; 2]>> = Vec::new();
         for ring in self.point_regions.iter().flat_map(|region| region.iter()) {
-            if !rings.iter().any(|existing| *existing == ring) {
+            if !rings.contains(&ring) {
                 rings.push(ring);
             }
         }
         if let Some(region) = &hovered {
             for ring in region {
-                if !rings.iter().any(|existing| *existing == ring) {
+                if !rings.contains(&ring) {
                     rings.push(ring);
                 }
             }

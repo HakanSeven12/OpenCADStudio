@@ -509,7 +509,7 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
         }
         ("DELETE", ["documents", id]) => {
             let mut fields = json!({});
-            if let Some(id) = id.parse::<u64>().ok() {
+            if let Ok(id) = id.parse::<u64>() {
                 fields["document_id"] = json!(id);
             }
             if request

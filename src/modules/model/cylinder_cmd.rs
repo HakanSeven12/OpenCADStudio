@@ -76,6 +76,12 @@ pub struct CylinderCommand {
     plane: WorkingPlane,
 }
 
+impl Default for CylinderCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CylinderCommand {
     pub fn new() -> Self {
         let remembered = defaults().lock().map(|value| *value).unwrap_or_default();

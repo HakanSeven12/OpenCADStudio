@@ -501,7 +501,7 @@ fn extended_colors(cfb: &Cfb) -> Vec<[u8; 3]> {
     for at in 0..attrs.len().saturating_sub(2) {
         // A zlib header: deflate, and a check value divisible by 31.
         let (a, b) = (attrs[at], attrs[at + 1]);
-        if a & 0x0f != 8 || ((a as u16) << 8 | b as u16) % 31 != 0 {
+        if a & 0x0f != 8 || !((a as u16) << 8 | b as u16).is_multiple_of(31) {
             continue;
         }
         // The record is a short XML list; the cap keeps a stream that

@@ -38,9 +38,9 @@ pub fn ribbon_modules_enabled(disabled: &rustc_hash::FxHashSet<String>) -> Vec<B
 pub fn plugin_command_names(disabled: &rustc_hash::FxHashSet<String>) -> Vec<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return crate::plugin::external::with_manager(|manager| {
+        crate::plugin::external::with_manager(|manager| {
             manager.command_names(|id| disabled.contains(id))
-        });
+        })
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -78,7 +78,7 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
                 ),
             );
         }
-        return handled;
+        handled
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -89,8 +89,8 @@ pub(crate) fn try_dispatch(app: &mut OpenCADStudio, tab: usize, cmd: &str) -> bo
 
 /// One dispatch attempt against the live manager.
 #[cfg(not(target_arch = "wasm32"))]
-fn dispatch_once<'a>(
-    app: &'a mut OpenCADStudio,
+fn dispatch_once(
+    app: &mut OpenCADStudio,
     tab: usize,
     cmd: &str,
     disabled: &rustc_hash::FxHashSet<String>,

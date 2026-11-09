@@ -56,7 +56,7 @@ impl OpenCADStudio {
             );
             return Task::none();
         }
-        self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
+        self.push_undo_snapshot(i, format!("{} parameter", kind.name()));
         let parameter = crate::scene::block_orientation_parameter::create_with_label(
             &mut self.tabs[i].scene.document,
             definition,
@@ -191,7 +191,7 @@ impl OpenCADStudio {
             self.command_line.push_error(crate::t!(error).as_ref());
             return Task::none();
         }
-        self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
+        self.push_undo_snapshot(i, format!("{} parameter", kind.name()));
         let parameter = crate::scene::block_distance_parameter::create_with(
             &mut self.tabs[i].scene.document,
             definition,

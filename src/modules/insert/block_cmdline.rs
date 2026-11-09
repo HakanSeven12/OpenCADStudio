@@ -134,7 +134,7 @@ impl BlockTable {
             entries.push((br.name.clone(), kind));
         }
         entries.sort_by(|a, b| sort_key(&a.0).cmp(&sort_key(&b.0)));
-        attributed.sort_by(|a, b| sort_key(a).cmp(&sort_key(b)));
+        attributed.sort_by_key(|a| sort_key(a));
         Self {
             entries,
             attributed,

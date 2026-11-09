@@ -91,6 +91,12 @@ pub struct LinearDimensionCommand {
     mtext_override: bool,
 }
 
+impl Default for LinearDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LinearDimensionCommand {
     pub fn new() -> Self {
         Self {

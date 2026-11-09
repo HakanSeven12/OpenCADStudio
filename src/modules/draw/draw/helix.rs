@@ -49,6 +49,12 @@ pub struct HelixCommand {
     plane: WorkingPlane,
 }
 
+impl Default for HelixCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HelixCommand {
     pub fn new() -> Self {
         let base_radius = defaults::get_helix_base_radius();

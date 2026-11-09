@@ -582,7 +582,6 @@ fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
         }
         "align_x" | "align_y" | "align_z" => {
             // Calculated display rows are intentionally not writable.
-            return;
         }
         "height" if v > 0.0 && !matches!(t.horizontal_alignment, HA::Aligned) => t.height = v,
         "rotation" if !matches!(t.horizontal_alignment, HA::Aligned | HA::Fit) => {
@@ -631,8 +630,8 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
         if let Some(ref mut a) = entity.alignment_point {
             crate::scene::view::transform::reflect_xy_point(&mut a.x, &mut a.y, p1, p2);
         }
-        let dx = (p2.x - p1.x) as f64;
-        let dy = (p2.y - p1.y) as f64;
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
         let line_angle = dy.atan2(dx);
         entity.rotation = 2.0 * line_angle - entity.rotation;
         entity.oblique_angle = -entity.oblique_angle;

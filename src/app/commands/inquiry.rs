@@ -194,8 +194,8 @@ impl OpenCADStudio {
                 || cmd.starts_with("QC ") =>
             {
                 let expr = cmd
-                    .splitn(2, char::is_whitespace)
-                    .nth(1)
+                    .split_once(char::is_whitespace)
+                    .map(|x| x.1)
                     .unwrap_or("")
                     .trim();
                 if expr.is_empty() {

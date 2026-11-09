@@ -444,7 +444,7 @@ impl SpatialGrid {
             }
             cell_entries
         };
-        let oversized = SpatialBvh2::build(&entries, oversized);
+        let oversized = SpatialBvh2::build(entries, oversized);
 
         Self {
             min,

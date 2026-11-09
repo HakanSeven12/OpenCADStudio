@@ -220,7 +220,7 @@ impl OpenCADStudio {
                 .filter_map(pick)
                 .map(str::to_string)
                 .collect();
-            v.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+            v.sort_by_key(|a| a.to_lowercase());
             v
         };
         match kind {

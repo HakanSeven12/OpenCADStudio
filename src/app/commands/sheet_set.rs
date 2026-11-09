@@ -298,8 +298,8 @@ fn model_view(doc: &document::Document, view: Option<&str>) -> Option<ModelView>
             center: Vector3::new(c.x, c.y, c.z),
             width: v.width.abs().max(1e-6),
             height: v.height.abs().max(1e-6),
-            target: v.target.clone(),
-            direction: v.direction.clone(),
+            target: v.target,
+            direction: v.direction,
         });
     }
     let (lo, hi) = (
@@ -2379,8 +2379,8 @@ impl OpenCADStudio {
                 vp.width = w;
                 vp.height = h;
                 vp.id = scene.next_viewport_id();
-                vp.view_target = mv.target.clone();
-                vp.view_direction = mv.direction.clone();
+                vp.view_target = mv.target;
+                vp.view_direction = mv.direction;
                 // ponytail: plan views only (the DCS offset is the world XY
                 // offset); a twisted or 3D view needs the view basis here.
                 vp.view_center =

@@ -757,8 +757,8 @@ fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
         common.handle = Handle::NULL;
         result.push(EntityType::Line(LineEnt {
             common,
-            start: v0.location.clone(),
-            end: v1.location.clone(),
+            start: v0.location,
+            end: v1.location,
             ..LineEnt::new()
         }));
     }
@@ -780,8 +780,8 @@ fn explode_polyline3d(p: &document::entities::Polyline3D) -> Vec<EntityType> {
         common.handle = Handle::NULL;
         result.push(EntityType::Line(LineEnt {
             common,
-            start: v0.position.clone(),
-            end: v1.position.clone(),
+            start: v0.position,
+            end: v1.position,
             ..LineEnt::new()
         }));
     }
@@ -800,7 +800,7 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
         .try_normalize()
         .unwrap_or(DVec3::Z);
     let normal = Vector3::new(normal.x, normal.y, normal.z);
-    let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
+    let plane = crate::entities::curve::ocs_plane(normal, elevation);
 
     let mut result = Vec::with_capacity(n_segs);
     for i in 0..n_segs {
@@ -819,18 +819,12 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
                 start: Vector3::new(start[0], start[1], start[2]),
                 end: Vector3::new(end[0], end[1], end[2]),
                 thickness: p.thickness,
-                normal: normal.clone(),
+                normal,
                 ..LineEnt::new()
             }));
-        } else if let Some(arc) = bulge_to_arc(
-            p0,
-            p1,
-            v0.bulge,
-            elevation,
-            &p.common,
-            p.thickness,
-            normal.clone(),
-        ) {
+        } else if let Some(arc) =
+            bulge_to_arc(p0, p1, v0.bulge, elevation, &p.common, p.thickness, normal)
+        {
             result.push(arc);
         }
     }
@@ -838,26 +832,23 @@ fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
 }
 
 pub fn normalize_insert_entity(mut entity: EntityType) -> EntityType {
-    match &mut entity {
-        EntityType::Ellipse(ell) => {
-            let major_len = ell.major_axis_length();
-            let full_span = {
-                let mut span = ell.end_parameter - ell.start_parameter;
-                if span < 0.0 {
-                    span += std::f64::consts::TAU;
-                }
-                (span - std::f64::consts::TAU).abs() < 1e-6
-            };
-            if (ell.minor_axis_ratio - 1.0).abs() < 1e-6 && full_span {
-                let mut circle = CircleEnt::new();
-                circle.common = ell.common.clone();
-                circle.center = ell.center;
-                circle.radius = major_len;
-                circle.normal = ell.normal;
-                entity = EntityType::Circle(circle);
+    if let EntityType::Ellipse(ell) = &mut entity {
+        let major_len = ell.major_axis_length();
+        let full_span = {
+            let mut span = ell.end_parameter - ell.start_parameter;
+            if span < 0.0 {
+                span += std::f64::consts::TAU;
             }
+            (span - std::f64::consts::TAU).abs() < 1e-6
+        };
+        if (ell.minor_axis_ratio - 1.0).abs() < 1e-6 && full_span {
+            let mut circle = CircleEnt::new();
+            circle.common = ell.common.clone();
+            circle.center = ell.center;
+            circle.radius = major_len;
+            circle.normal = ell.normal;
+            entity = EntityType::Circle(circle);
         }
-        _ => {}
     }
 
     entity.common_mut().handle = Handle::NULL;
@@ -898,7 +889,7 @@ fn explode_lwpolyline(p: &LwPolyline) -> Vec<EntityType> {
                 start: Vector3::new(p0[0], p0[1], elevation),
                 end: Vector3::new(p1[0], p1[1], elevation),
                 thickness: p.thickness,
-                normal: p.normal.clone(),
+                normal: p.normal,
                 ..LineEnt::new()
             };
             result.push(EntityType::Line(line));
@@ -911,7 +902,7 @@ fn explode_lwpolyline(p: &LwPolyline) -> Vec<EntityType> {
                 elevation,
                 &p.common,
                 p.thickness,
-                p.normal.clone(),
+                p.normal,
             ) {
                 result.push(arc);
             }
@@ -2192,8 +2183,8 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
         c.handle = Handle::NULL;
         EntityType::Line(LineEnt {
             common: c,
-            start: a.clone(),
-            end: b.clone(),
+            start: *a,
+            end: *b,
             ..LineEnt::new()
         })
     };

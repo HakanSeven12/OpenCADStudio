@@ -109,7 +109,7 @@ fn units(b: &[u8]) -> Option<Units> {
     let sub_per_master = int32(b, 1112)? as f64;
     let uor_per_sub = int32(b, 1116)? as f64;
     let origin = [vax_double(b, 1240)?, vax_double(b, 1248)?];
-    (sub_per_master > 0.0 && uor_per_sub > 0.0).then(|| Units {
+    (sub_per_master > 0.0 && uor_per_sub > 0.0).then_some(Units {
         uor_per_sub,
         sub_per_master,
         origin,

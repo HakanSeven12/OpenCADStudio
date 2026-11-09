@@ -44,7 +44,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, ()> {
             '^' => tokens.push(Token::Caret),
             '%' => tokens.push(Token::Percent),
             c if c.is_ascii_digit()
-                || (c == '.' && chars.peek().map_or(false, |c| c.is_ascii_digit())) =>
+                || (c == '.' && chars.peek().is_some_and(|c| c.is_ascii_digit())) =>
             {
                 let mut num_str = String::new();
                 if c == '.' {
@@ -158,12 +158,12 @@ impl Parser {
                 Some("+") => {
                     self.advance();
                     let right = self.parse_product(depth + 1)?;
-                    left = left + right;
+                    left += right;
                 }
                 Some("-") => {
                     self.advance();
                     let right = self.parse_product(depth + 1)?;
-                    left = left - right;
+                    left -= right;
                 }
                 _ => break,
             }
@@ -188,7 +188,7 @@ impl Parser {
                 Some("*") => {
                     self.advance();
                     let right = self.parse_power(depth + 1)?;
-                    left = left * right;
+                    left *= right;
                 }
                 Some("/") => {
                     self.advance();
@@ -202,12 +202,12 @@ impl Parser {
                             f64::NAN
                         });
                     }
-                    left = left / right;
+                    left /= right;
                 }
                 Some("%") => {
                     self.advance();
                     let right = self.parse_power(depth + 1)?;
-                    left = left % right;
+                    left %= right;
                 }
                 _ => break,
             }
@@ -246,7 +246,7 @@ impl Parser {
         }
         if let Some(Token::Plus) = self.peek() {
             self.advance();
-            return Ok(self.parse_unary(depth + 1)?);
+            return self.parse_unary(depth + 1);
         }
         self.parse_atom(depth + 1)
     }

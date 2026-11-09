@@ -1529,7 +1529,7 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
             let start = [l.start.x, l.start.y, l.start.z];
             let end = [l.end.x, l.end.y, l.end.z];
             let elevation = DVec3::from_array(start).dot(DVec3::new(normal.x, normal.y, normal.z));
-            let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
+            let plane = crate::entities::curve::ocs_plane(normal, elevation);
             let tolerance = kernel::space::coplanarity_tolerance(&[start, end]);
             if !plane.contains(end, tolerance) {
                 return None;
@@ -2264,7 +2264,7 @@ pub fn join_selection_extend(
                 let indices = if start { [1, 0] } else { [n - 2, n - 1] };
                 (
                     indices.map(|i| [p.vertices[i].location.x, p.vertices[i].location.y]),
-                    p.normal.clone(),
+                    p.normal,
                     p.elevation,
                 )
             }
@@ -2277,7 +2277,7 @@ pub fn join_selection_extend(
                 let indices = if start { [1, 0] } else { [n - 2, n - 1] };
                 (
                     indices.map(|i| [p.vertices[i].location.x, p.vertices[i].location.y]),
-                    p.normal.clone(),
+                    p.normal,
                     p.elevation,
                 )
             }
@@ -2289,8 +2289,8 @@ pub fn join_selection_extend(
     fn move_endpoint(entity: &mut EntityType, start: bool, point: [f64; 3]) -> Option<()> {
         match entity {
             EntityType::LwPolyline(p) => {
-                let local = crate::entities::curve::ocs_plane(p.normal.clone(), p.elevation)
-                    .project(point)?;
+                let local =
+                    crate::entities::curve::ocs_plane(p.normal, p.elevation).project(point)?;
                 let index = if start {
                     0
                 } else {
@@ -2299,8 +2299,8 @@ pub fn join_selection_extend(
                 p.vertices[index].location = Vector2::new(local[0], local[1]);
             }
             EntityType::Polyline2D(p) => {
-                let local = crate::entities::curve::ocs_plane(p.normal.clone(), p.elevation)
-                    .project(point)?;
+                let local =
+                    crate::entities::curve::ocs_plane(p.normal, p.elevation).project(point)?;
                 let index = if start {
                     0
                 } else {
@@ -2364,11 +2364,11 @@ pub fn join_selection_extend(
                         line.end = Vector3::new(b_points[1][0], b_points[1][1], b_points[1][2]);
                         match &a {
                             EntityType::LwPolyline(p) => {
-                                line.normal = p.normal.clone();
+                                line.normal = p.normal;
                                 line.thickness = p.thickness;
                             }
                             EntityType::Polyline2D(p) => {
-                                line.normal = p.normal.clone();
+                                line.normal = p.normal;
                                 line.thickness = p.thickness;
                             }
                             _ => continue,

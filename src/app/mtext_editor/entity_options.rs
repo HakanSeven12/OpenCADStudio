@@ -40,7 +40,7 @@ impl MTextEditorState {
                 (
                     m.background_fill_flags,
                     m.background_scale,
-                    m.background_color.clone(),
+                    m.background_color,
                 )
             });
         MaskDraft {
@@ -93,7 +93,7 @@ impl MTextEditorState {
         }
         mt.background_fill_flags = flags;
         if draft.on && !draft.window {
-            mt.background_color = draft.color.clone();
+            mt.background_color = draft.color;
         }
         if let Some(scale) = self.mask_scale_value() {
             mt.background_scale = scale;

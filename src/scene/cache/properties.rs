@@ -34,7 +34,7 @@ pub fn general_section(entity: &EntityType) -> PropSection {
         .map(|link| link.label())
         .unwrap_or_default();
 
-    let section = PropSection {
+    PropSection {
         title: t!("General").into_owned(),
         props: vec![
             Property {
@@ -90,9 +90,7 @@ pub fn general_section(entity: &EntityType) -> PropSection {
                 value: PropValue::Hyperlink(hyperlink),
             },
         ],
-    };
-
-    section
+    }
 }
 
 /// The "3D Visualization" group (Material), common to every graphical object.

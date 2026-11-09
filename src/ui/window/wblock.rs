@@ -18,30 +18,20 @@ static ICON_SELECT_OBJECTS: &[u8] =
 static ICON_QUICK_SELECT: &[u8] = include_bytes!("../../../assets/icons/blocks/quick_select.svg");
 static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WblockSourceMode {
     Block,
     EntireDrawing,
+    #[default]
     Objects,
 }
 
-impl Default for WblockSourceMode {
-    fn default() -> Self {
-        WblockSourceMode::Objects
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WblockObjectMode {
+    #[default]
     Retain,
     Convert,
     Delete,
-}
-
-impl Default for WblockObjectMode {
-    fn default() -> Self {
-        WblockObjectMode::Retain
-    }
 }
 
 /// Dropdown entry for the Unit picker.

@@ -81,10 +81,7 @@ impl QuickLayerCommand {
         }
 
         // A word inside the layer begins with typed text.
-        for (index, word) in name_lower
-            .split(|c: char| matches!(c, ' ' | '-' | '_' | '.'))
-            .enumerate()
-        {
+        for (index, word) in name_lower.split([' ', '-', '_', '.']).enumerate() {
             if word.starts_with(&query) {
                 return Some((2, index, name_lower.len(), name_lower));
             }
@@ -140,7 +137,7 @@ impl QuickLayerCommand {
     }
 
     pub(crate) fn decode_layer_name(encoded: &str) -> Option<String> {
-        if encoded.len() % 2 != 0 {
+        if !encoded.len().is_multiple_of(2) {
             return None;
         }
 
@@ -196,7 +193,7 @@ impl CadCommand for QuickLayerCommand {
                     .find(|layer| layer.name == name)
                     .map(|layer| CommandSuggestion {
                         value: layer.name.clone(),
-                        color: layer.color.clone(),
+                        color: layer.color,
                         visible: Some(layer.visible),
                         frozen: Some(layer.frozen),
                         locked: Some(layer.locked),

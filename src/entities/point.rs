@@ -277,14 +277,14 @@ fn apply_geom_prop(pt: &mut Point, field: &str, value: &str) {
 fn apply_grip(pt: &mut Point, _grip_id: usize, apply: GripApply) {
     match apply {
         GripApply::Absolute(p) => {
-            pt.location.x = p.x as f64;
-            pt.location.y = p.y as f64;
-            pt.location.z = p.z as f64;
+            pt.location.x = p.x;
+            pt.location.y = p.y;
+            pt.location.z = p.z;
         }
         GripApply::Translate(d) => {
-            pt.location.x += d.x as f64;
-            pt.location.y += d.y as f64;
-            pt.location.z += d.z as f64;
+            pt.location.x += d.x;
+            pt.location.y += d.y;
+            pt.location.z += d.z;
         }
     }
 }

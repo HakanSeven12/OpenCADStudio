@@ -6815,11 +6815,9 @@ impl OpenCADStudio {
             self.plot_dialog.scale_lw = false;
         }
         // A model-space plot cannot use the paper-only Layout area.
-        if cur == "Model" {
-            if self.plot_dialog.area == "Layout" {
-                self.plot_dialog.area = "Window".into();
-                self.normalize_common_plot_dialog();
-            }
+        if cur == "Model" && self.plot_dialog.area == "Layout" {
+            self.plot_dialog.area = "Window".into();
+            self.normalize_common_plot_dialog();
         }
         self.active_modal = Some(crate::app::ModalKind::Plot);
         // Loading printer capabilities is informational when Plot merely

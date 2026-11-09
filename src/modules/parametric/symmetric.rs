@@ -34,6 +34,12 @@ pub struct SymmetricConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for SymmetricConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SymmetricConstraintCommand {
     pub fn new() -> Self {
         Self {

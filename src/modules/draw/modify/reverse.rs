@@ -48,6 +48,12 @@ pub struct ReverseCommand {
     picked: Option<EntityType>,
 }
 
+impl Default for ReverseCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReverseCommand {
     pub fn new() -> Self {
         Self { picked: None }

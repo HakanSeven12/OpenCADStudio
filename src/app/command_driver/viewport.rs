@@ -7,11 +7,11 @@ impl OpenCADStudio {
         preserve_view: bool,
     ) {
         let i = self.active_tab;
-        let saved_view = preserve_view.then(|| {
+        let saved_view = preserve_view.then_some({
             (
-                viewport.view_target.clone(),
-                viewport.view_direction.clone(),
-                viewport.view_center.clone(),
+                viewport.view_target,
+                viewport.view_direction,
+                viewport.view_center,
                 viewport.view_height,
                 viewport.custom_scale,
                 viewport.lens_length,

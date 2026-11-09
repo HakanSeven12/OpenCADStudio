@@ -23,6 +23,12 @@ pub struct TangentConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for TangentConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TangentConstraintCommand {
     pub fn new() -> Self {
         Self {

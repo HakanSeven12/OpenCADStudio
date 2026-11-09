@@ -67,20 +67,20 @@ impl Grippable for Ray {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         match (grip_id, apply) {
             (0, GripApply::Translate(d)) => {
-                self.base_point.x += d.x as f64;
-                self.base_point.y += d.y as f64;
-                self.base_point.z += d.z as f64;
+                self.base_point.x += d.x;
+                self.base_point.y += d.y;
+                self.base_point.z += d.z;
             }
             (0, GripApply::Absolute(p)) => {
-                self.base_point.x = p.x as f64;
-                self.base_point.y = p.y as f64;
-                self.base_point.z = p.z as f64;
+                self.base_point.x = p.x;
+                self.base_point.y = p.y;
+                self.base_point.z = p.z;
             }
             (1, GripApply::Absolute(p)) => {
                 // New direction = grip point - base point, normalized.
-                let dx = p.x as f64 - self.base_point.x;
-                let dy = p.y as f64 - self.base_point.y;
-                let dz = p.z as f64 - self.base_point.z;
+                let dx = p.x - self.base_point.x;
+                let dy = p.y - self.base_point.y;
+                let dz = p.z - self.base_point.z;
                 let len = (dx * dx + dy * dy + dz * dz).sqrt();
                 if len > 1e-9 {
                     self.direction.x = dx / len;
@@ -155,8 +155,8 @@ impl Transformable for Ray {
                     p2,
                 );
                 // Mirror the direction: negate the component perpendicular to mirror axis.
-                let ax = (p2.x - p1.x) as f64;
-                let ay = (p2.y - p1.y) as f64;
+                let ax = p2.x - p1.x;
+                let ay = p2.y - p1.y;
                 let len2 = ax * ax + ay * ay;
                 if len2 > 1e-12 {
                     let d = &mut entity.direction;
@@ -223,19 +223,19 @@ impl Grippable for XLine {
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
         match (grip_id, apply) {
             (0, GripApply::Translate(d)) => {
-                self.base_point.x += d.x as f64;
-                self.base_point.y += d.y as f64;
-                self.base_point.z += d.z as f64;
+                self.base_point.x += d.x;
+                self.base_point.y += d.y;
+                self.base_point.z += d.z;
             }
             (0, GripApply::Absolute(p)) => {
-                self.base_point.x = p.x as f64;
-                self.base_point.y = p.y as f64;
-                self.base_point.z = p.z as f64;
+                self.base_point.x = p.x;
+                self.base_point.y = p.y;
+                self.base_point.z = p.z;
             }
             (1, GripApply::Absolute(p)) => {
-                let dx = p.x as f64 - self.base_point.x;
-                let dy = p.y as f64 - self.base_point.y;
-                let dz = p.z as f64 - self.base_point.z;
+                let dx = p.x - self.base_point.x;
+                let dy = p.y - self.base_point.y;
+                let dz = p.z - self.base_point.z;
                 let len = (dx * dx + dy * dy + dz * dz).sqrt();
                 if len > 1e-9 {
                     self.direction.x = dx / len;
@@ -316,8 +316,8 @@ impl Transformable for XLine {
                     p1,
                     p2,
                 );
-                let ax = (p2.x - p1.x) as f64;
-                let ay = (p2.y - p1.y) as f64;
+                let ax = p2.x - p1.x;
+                let ay = p2.y - p1.y;
                 let len2 = ax * ax + ay * ay;
                 if len2 > 1e-12 {
                     let d = &mut entity.direction;

@@ -81,6 +81,12 @@ pub struct BlockEditSession {
 /// Step 1: wait for the user to pick a single INSERT entity to edit.
 pub struct BlockEditPickCommand;
 
+impl Default for BlockEditPickCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockEditPickCommand {
     pub fn new() -> Self {
         Self

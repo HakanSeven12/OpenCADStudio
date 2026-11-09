@@ -708,7 +708,7 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
     }
     let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
     let lines: Vec<&str> = text.lines().collect();
-    if lines.len() % 2 != 0 {
+    if !lines.len().is_multiple_of(2) {
         return Ok(
             json!({"ok":false,"malformed_pairs":true,"duplicate_handles":[],"dangling_handles":[]}),
         );
@@ -930,14 +930,14 @@ impl OpenCADStudio {
                     return err("Close the block editor before replacing the drawing.");
                 }
                 if let Some(template) = req["template"].as_str() {
-                    let purged = match self.apply_template(template) {
+                    match self.apply_template(template) {
                         Ok(purged) => purged,
                         Err(error) => return error,
                     };
                     let mut summary = self.entity_summary();
                     if let Some(obj) = summary.as_object_mut() {
                         obj.insert("template".into(), json!(template));
-                        obj.insert("purged".into(), json!(purged));
+                        obj.insert("purged".into(), json!(()));
                     }
                     return summary;
                 }

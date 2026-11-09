@@ -54,6 +54,12 @@ pub struct HatcheditCommand {
     association_missed: bool,
 }
 
+impl Default for HatcheditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HatcheditCommand {
     pub fn new() -> Self {
         Self {

@@ -117,7 +117,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &document::Document) -
 fn build_attr_layout(
     mut input: AttrTextInputs<'_>,
     document: &document::Document,
-    mut cells: Option<&mut Option<AttrCells>>,
+    cells: Option<&mut Option<AttrCells>>,
 ) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
     let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
@@ -269,7 +269,7 @@ fn build_attr_layout(
             want_glyph_boxes: cells.is_some(),
             break_long_words: false,
         });
-        if let Some(out) = cells.as_deref_mut() {
+        if let Some(out) = cells {
             *out = Some((
                 layout.glyph_boxes.clone(),
                 [anchor_pt.x, anchor_pt.y],
@@ -478,10 +478,8 @@ impl Grippable for AttributeDefinition {
             self.insertion_point
         };
         let d = match apply {
-            GripApply::Translate(d) => glam::DVec3::new(d.x as f64, d.y as f64, d.z as f64),
-            GripApply::Absolute(p) => {
-                glam::DVec3::new(p.x as f64, p.y as f64, p.z as f64) - dv(current)
-            }
+            GripApply::Translate(d) => glam::DVec3::new(d.x, d.y, d.z),
+            GripApply::Absolute(p) => glam::DVec3::new(p.x, p.y, p.z) - dv(current),
         };
         // A two-point definition stretches the moved endpoint; any other
         // grip moves the whole text.
@@ -1102,20 +1100,20 @@ impl Grippable for AttributeEntity {
         if grip_id == 0 {
             match apply {
                 GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x as f64;
-                    self.insertion_point.y += d.y as f64;
-                    self.insertion_point.z += d.z as f64;
-                    self.alignment_point.x += d.x as f64;
-                    self.alignment_point.y += d.y as f64;
-                    self.alignment_point.z += d.z as f64;
+                    self.insertion_point.x += d.x;
+                    self.insertion_point.y += d.y;
+                    self.insertion_point.z += d.z;
+                    self.alignment_point.x += d.x;
+                    self.alignment_point.y += d.y;
+                    self.alignment_point.z += d.z;
                 }
                 GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x as f64;
-                    self.insertion_point.y = p.y as f64;
-                    self.insertion_point.z = p.z as f64;
-                    self.alignment_point.x = p.x as f64;
-                    self.alignment_point.y = p.y as f64;
-                    self.alignment_point.z = p.z as f64;
+                    self.insertion_point.x = p.x;
+                    self.insertion_point.y = p.y;
+                    self.insertion_point.z = p.z;
+                    self.alignment_point.x = p.x;
+                    self.alignment_point.y = p.y;
+                    self.alignment_point.z = p.z;
                 }
             }
         }

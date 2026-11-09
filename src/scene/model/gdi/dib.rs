@@ -83,13 +83,13 @@ pub fn decode_packed(dibdata: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 /// Split a record's trailing `BITMAPINFO + bits` region where the two ranges
 /// are given as offsets from the record start. Returns `(bmi, bits)` slices,
 /// or `None` when either range falls outside the record.
-pub fn ranges<'a>(
-    record: &'a [u8],
+pub fn ranges(
+    record: &[u8],
     off_bmi: usize,
     cb_bmi: usize,
     off_bits: usize,
     cb_bits: usize,
-) -> Option<(&'a [u8], &'a [u8])> {
+) -> Option<(&[u8], &[u8])> {
     let bmi = record.get(off_bmi..off_bmi.checked_add(cb_bmi)?)?;
     let bits = record.get(off_bits..off_bits.checked_add(cb_bits)?)?;
     Some((bmi, bits))

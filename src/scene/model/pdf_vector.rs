@@ -543,7 +543,7 @@ fn oc_section_layers(path: &str, page: &str) -> Option<Vec<Option<String>>> {
             .map(|s| super::pdf_layers::text_string(s.as_bytes()))
     };
     let mut out = Vec::new();
-    walk_operators(&page, &mut |op, resources| {
+    walk_operators(page, &mut |op, resources| {
         let TypedInstruction::BeginMarkedContentWithProperties(bdc) = op else {
             return;
         };
@@ -635,13 +635,13 @@ fn walk_steps<'a>(
             if depth >= 8 {
                 continue;
             }
-            let Some(stream) = resources.get_x_object(&x.0) else {
+            let Some(stream) = resources.get_x_object(x.0) else {
                 continue;
             };
-            if !stream
+            if stream
                 .dict()
                 .get::<Name<'_>>(b"Subtype")
-                .is_some_and(|t| t.as_ref() == b"Form")
+                .is_none_or(|t| t.as_ref() != b"Form")
             {
                 continue;
             }
@@ -746,7 +746,7 @@ fn assign_pens(
             Step::Op(op) => op,
             Step::FormStart(matrix) => {
                 let mut state = stack[stack.len() - 1].clone();
-                state.ctm = state.ctm * matrix;
+                state.ctm *= matrix;
                 floors.push(stack.len());
                 stack.push(state);
                 return;
@@ -769,12 +769,12 @@ fn assign_pens(
             }
             TypedInstruction::Transform(t) => {
                 let m = Affine::new([f(&t.0), f(&t.1), f(&t.2), f(&t.3), f(&t.4), f(&t.5)]);
-                stack[top].ctm = stack[top].ctm * m;
+                stack[top].ctm *= m;
             }
             TypedInstruction::LineWidth(w) => stack[top].width = f(&w.0),
             TypedInstruction::SetGraphicsState(gs) => {
                 let width = resources
-                    .get_ext_g_state(&gs.0)
+                    .get_ext_g_state(gs.0)
                     .and_then(|d: Dict<'_>| d.get::<f64>(b"LW"));
                 if let Some(width) = width {
                     stack[top].width = width;

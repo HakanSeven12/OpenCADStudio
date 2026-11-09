@@ -156,7 +156,7 @@ impl crate::app::OpenCADStudio {
             _ => return,
         };
         let copy: fn(&mut SpanProperties, &SpanProperties) = match field {
-            "height" => |p, t| p.height = t.height.clone(),
+            "height" => |p, t| p.height = t.height,
             "oblique" => |p, t| p.oblique_angle = t.oblique_angle,
             "width" => |p, t| p.width_factor = t.width_factor,
             _ => |p, t| p.tracking = t.tracking,
@@ -209,7 +209,7 @@ impl crate::app::OpenCADStudio {
                 range,
                 |_| Ok(code.clone()),
                 |p, t| {
-                    p.color = t.color.clone();
+                    p.color = t.color;
                     p.color_rgb = t.color_rgb;
                 },
             )

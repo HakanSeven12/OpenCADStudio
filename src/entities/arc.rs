@@ -300,8 +300,8 @@ fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
             p1,
             p2,
         );
-        let dx = (p2.x - p1.x) as f64;
-        let dy = (p2.y - p1.y) as f64;
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
         let line_angle = dy.atan2(dx);
         let tmp = entity.start_angle;
         entity.start_angle = 2.0 * line_angle - entity.end_angle;

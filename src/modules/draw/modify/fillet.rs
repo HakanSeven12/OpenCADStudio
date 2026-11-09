@@ -680,12 +680,12 @@ fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline
 
     for (i, original) in poly.vertices.iter().enumerate() {
         if let Some(corner) = corners[i] {
-            let mut tangent_in = original.clone();
+            let mut tangent_in = *original;
             tangent_in.location.x = corner.incoming[0];
             tangent_in.location.y = corner.incoming[1];
             tangent_in.bulge = corner.bulge;
 
-            let mut tangent_out = original.clone();
+            let mut tangent_out = *original;
             tangent_out.location.x = corner.outgoing[0];
             tangent_out.location.y = corner.outgoing[1];
 
@@ -695,7 +695,7 @@ fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline
             result.vertices.push(tangent_in);
             result.vertices.push(tangent_out);
         } else {
-            result.vertices.push(original.clone());
+            result.vertices.push(*original);
         }
     }
 
@@ -713,8 +713,8 @@ fn lwpoly_replace_corner(
 ) -> LwPolyline {
     let mut new_poly = poly.clone();
     new_poly.common.handle = Handle::NULL;
-    let orig = poly.vertices[corner_idx].clone();
-    let mut vt1 = orig.clone();
+    let orig = poly.vertices[corner_idx];
+    let mut vt1 = orig;
     vt1.location.x = t1[0];
     vt1.location.y = t1[1];
     vt1.bulge = bulge;
@@ -1319,7 +1319,7 @@ fn join_poly_fillet(
             // A closed polyline is opened at its closing segment first.
             let mut v = orig.vertices.clone();
             if orig.is_closed {
-                let mut last = v[0].clone();
+                let mut last = v[0];
                 last.bulge = 0.0;
                 v.push(last);
             }
@@ -1344,7 +1344,7 @@ fn join_poly_fillet(
     };
 
     let vertex = |p: [f64; 2], bulge: f64| {
-        let mut v = poly.vertices[seg_idx].clone();
+        let mut v = poly.vertices[seg_idx];
         v.location.x = p[0];
         v.location.y = p[1];
         v.bulge = bulge;
@@ -1827,7 +1827,7 @@ impl FilletCommand {
             .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         Self {
-            radius: radius as f64,
+            radius,
             trim: defaults::get_fillet_trim(),
             step: FilletStep::First,
             all_entities,
@@ -2123,14 +2123,12 @@ impl CadCommand for FilletCommand {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        let click = [pt.x as f64, pt.y as f64]; // drawing plane is world XY
+        let click = [pt.x, pt.y]; // drawing plane is world XY
 
         match &self.step {
             FilletStep::WaitingForRadius
             | FilletStep::RadiusSecondPoint { .. }
-            | FilletStep::TrimMode => {
-                return CmdResult::NeedPoint;
-            }
+            | FilletStep::TrimMode => CmdResult::NeedPoint,
 
             FilletStep::Polyline => {
                 let poly = self
@@ -2307,7 +2305,7 @@ impl CadCommand for FilletCommand {
         if handle.is_null() {
             return vec![];
         }
-        let click = [pt.x as f64, pt.y as f64];
+        let click = [pt.x, pt.y];
 
         match &self.step {
             FilletStep::WaitingForRadius
@@ -2604,7 +2602,7 @@ impl ChamferCommand {
             .collect();
         let entity_index = ModifyEntityIndex::build(&all_entities);
         Self {
-            dist1: dist as f64,
+            dist1: dist,
             dist2: defaults::get_chamfer_dist2(),
             trim: defaults::get_fillet_trim(),
             step: ChamferStep::First,
@@ -2926,12 +2924,10 @@ impl CadCommand for ChamferCommand {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
-        let click = [pt.x as f64, pt.y as f64];
+        let click = [pt.x, pt.y];
 
         match &self.step {
-            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => {
-                return CmdResult::NeedPoint;
-            }
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => CmdResult::NeedPoint,
             ChamferStep::First => {
                 match self.entity_index.get(&self.all_entities, handle) {
                     Some(e @ (EntityType::Line(_) | EntityType::XLine(_) | EntityType::Ray(_))) => {
@@ -3046,10 +3042,10 @@ impl CadCommand for ChamferCommand {
         if handle.is_null() {
             return vec![];
         }
-        let click = [pt.x as f64, pt.y as f64];
+        let click = [pt.x, pt.y];
 
         match &self.step {
-            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => return vec![],
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => vec![],
             ChamferStep::First => {
                 let pts = self
                     .entity_index

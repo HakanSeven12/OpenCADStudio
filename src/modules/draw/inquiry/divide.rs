@@ -32,6 +32,12 @@ pub struct CurveMarkerCommand<const MEASURE: bool> {
 pub type DivideCommand = CurveMarkerCommand<false>;
 pub type MeasureCommand = CurveMarkerCommand<true>;
 
+impl<const MEASURE: bool> Default for CurveMarkerCommand<MEASURE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const MEASURE: bool> CurveMarkerCommand<MEASURE> {
     pub fn new() -> Self {
         Self {

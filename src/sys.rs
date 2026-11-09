@@ -225,25 +225,23 @@ pub fn restore_window_if_minimized() -> bool {
 
                 // CRITICAL FIX: Only touch the main application window ("Window Class").
                 // NEVER touch "Winit Thread Event Target" or hidden helper windows!
-                if class_str.starts_with("Window Class") {
-                    if IsIconic(hwnd) != 0 {
-                        let fg = GetForegroundWindow();
-                        // Restore in background without activation (never steal user focus)
-                        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                        // Ensure it stays behind active user applications
-                        if fg != hwnd && !fg.is_null() {
-                            SetWindowPos(
-                                hwnd,
-                                HWND_BOTTOM,
-                                0,
-                                0,
-                                0,
-                                0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                            );
-                        }
-                        ctx.restored = true;
+                if class_str.starts_with("Window Class") && IsIconic(hwnd) != 0 {
+                    let fg = GetForegroundWindow();
+                    // Restore in background without activation (never steal user focus)
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    // Ensure it stays behind active user applications
+                    if fg != hwnd && !fg.is_null() {
+                        SetWindowPos(
+                            hwnd,
+                            HWND_BOTTOM,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
                     }
+                    ctx.restored = true;
                 }
             }
             1

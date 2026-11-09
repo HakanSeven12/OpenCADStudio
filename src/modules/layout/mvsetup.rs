@@ -142,7 +142,7 @@ impl MvsetupCommand {
                 viewport.height = height;
                 viewport.id = 2;
                 if self.arrangement == Arrangement::Engineering {
-                    viewport.view_direction = directions[(row * 2 + column) as usize].clone();
+                    viewport.view_direction = directions[(row * 2 + column) as usize];
                 }
                 viewports.push(EntityType::Viewport(Box::new(viewport)));
             }

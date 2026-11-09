@@ -14,7 +14,7 @@ impl OpenCADStudio {
                     ""
                 };
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
-                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
                         let info: Vec<String> = self.tabs[i]
@@ -1058,7 +1058,7 @@ impl OpenCADStudio {
                                     self.push_undo_snapshot(i, "TABLESTYLE SET");
                                     self.tabs[i].dirty = true;
                                     self.command_line.push_output(
-                                        &crate::tf!("Table style set to '{name}'.").as_ref(),
+                                        crate::tf!("Table style set to '{name}'.").as_ref(),
                                     );
                                 }
                                 None => {
@@ -1230,7 +1230,7 @@ impl OpenCADStudio {
                 use document::tables::DimStyle;
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
-                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     // No sub-command or "DIALOG" → open the DimStyle Manager dialog
                     "" | "DIALOG" | "UI" => {
@@ -1449,13 +1449,13 @@ impl OpenCADStudio {
                                 crate::t!("Usage: MLEADERSTYLE NEW <name> [property value …]")
                                     .as_ref(),
                             );
-                        } else if parts[2..].len() % 2 != 0 {
+                        } else if !parts[2..].len().is_multiple_of(2) {
                             self.command_line.push_error(
                                 crate::t!("MLEADERSTYLE: name each option and its value in pairs, e.g. NEW NOTE-2.5 TEXT 2.5 ARROW CLOSED.").as_ref(),
                             );
                         } else if parts[2..]
                             .chunks(2)
-                            .any(|pair| pair.get(1).map_or(true, |value| value.trim().is_empty()))
+                            .any(|pair| pair.get(1).is_none_or(|value| value.trim().is_empty()))
                         {
                             self.command_line.push_error(
                                 crate::t!("MLEADERSTYLE: an option is missing its value.").as_ref(),
@@ -1696,7 +1696,7 @@ impl OpenCADStudio {
                     ("STYLE", cmd.trim_start_matches("STYLE").trim())
                 };
                 let parts: Vec<&str> = rest.splitn(3, ' ').collect();
-                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "DIALOG" | "UI" => {
                         return Some(Task::done(Message::TextStyleDialogOpen));

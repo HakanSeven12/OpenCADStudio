@@ -2490,7 +2490,7 @@ fn layer_row<'a>(
                 let palette = theme.palette();
                 let (color, text_color) = if is_selected {
                     selection_colors(theme)
-                } else if index % 2 == 0 {
+                } else if index.is_multiple_of(2) {
                     (palette.background.base.color, palette.background.base.text)
                 } else {
                     (palette.background.weak.color, palette.background.weak.text)
@@ -2615,7 +2615,7 @@ fn menu_item(
             .style(move |theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                    background: hot.then(|| Background::Color(palette.background.strong.color)),
+                    background: hot.then_some(Background::Color(palette.background.strong.color)),
                     text_color: Some(palette.background.base.text),
                     ..Default::default()
                 }

@@ -42,6 +42,12 @@ pub struct OrdinateDimCommand {
     awaiting_angle: bool,
 }
 
+impl Default for OrdinateDimCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OrdinateDimCommand {
     pub fn new() -> Self {
         Self {

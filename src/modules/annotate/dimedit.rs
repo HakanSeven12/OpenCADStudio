@@ -32,6 +32,12 @@ pub struct DimEditCommand {
     step: Step,
 }
 
+impl Default for DimEditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DimEditCommand {
     pub fn new() -> Self {
         Self { step: Step::Choose }

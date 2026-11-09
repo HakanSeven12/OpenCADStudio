@@ -1068,7 +1068,7 @@ fn gdi_raster_print(
             }));
         }
         unsafe { SetStretchBltMode(hdc, COLORONCOLOR) };
-        let mut bmi = BITMAPINFO {
+        let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: src_w as i32,
@@ -1102,7 +1102,7 @@ fn gdi_raster_print(
                     src_w as i32,
                     src_h as i32,
                     bgra.as_ptr().cast(),
-                    &mut bmi,
+                    &bmi,
                     DIB_RGB_COLORS,
                     SRCCOPY,
                 )

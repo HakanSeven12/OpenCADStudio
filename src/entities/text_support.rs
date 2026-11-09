@@ -1281,7 +1281,11 @@ fn side_bearing(
         return 0.0;
     }
     let mut chars = text.chars().filter(|c| *c != LRM);
-    let ch = if trailing { chars.last() } else { chars.next() };
+    let ch = if trailing {
+        chars.next_back()
+    } else {
+        chars.next()
+    };
     let Some(glyph) = ch.and_then(|c| face.glyph(c)) else {
         return 0.0;
     };

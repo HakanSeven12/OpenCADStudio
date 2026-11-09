@@ -33,10 +33,10 @@ impl OpenCADStudio {
                 document
                     .layers
                     .get(&common.layer)
-                    .map(|layer| layer.color.clone())
-                    .unwrap_or(common.color.clone())
+                    .map(|layer| layer.color)
+                    .unwrap_or(common.color)
             } else {
-                common.color.clone()
+                common.color
             };
             let color = color.rgb().map_or([255; 3], |(r, g, b)| [r, g, b]);
             if let Some(placed) = crate::scene::model::point_cloud::placed(

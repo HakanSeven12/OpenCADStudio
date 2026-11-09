@@ -37,6 +37,12 @@ pub struct RadiusDimensionCommand {
     source_handle: Option<Handle>,
 }
 
+impl Default for RadiusDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RadiusDimensionCommand {
     pub fn new() -> Self {
         Self {

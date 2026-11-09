@@ -188,7 +188,7 @@ fn repository_is_installed(
 }
 
 fn trim_version_prefix(value: &str) -> &str {
-    value.trim_start_matches(|c| c == 'v' || c == 'V')
+    value.trim_start_matches(['v', 'V'])
 }
 
 fn newest_update(installed: &str, releases: &[ReleaseInfo]) -> Option<String> {

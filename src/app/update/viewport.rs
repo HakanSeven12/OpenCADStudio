@@ -1092,7 +1092,7 @@ impl OpenCADStudio {
         let mut handles: Vec<Handle> =
             scene::pick::hit_test::box_hit(a, p, crossing, &area_candidates, view_rot, eye, bounds)
                 .into_iter()
-                .filter_map(|s| Scene::handle_from_wire_name(s))
+                .filter_map(Scene::handle_from_wire_name)
                 .collect();
         timing.wires = elapsed(t_hit);
         handles.extend(scene::pick::hit_test::box_hit_hatch(
@@ -1460,7 +1460,7 @@ impl OpenCADStudio {
                     self.grip_popup = None;
                     return;
                 };
-                let same = self.grip_hover.as_ref().map_or(false, |h| {
+                let same = self.grip_hover.as_ref().is_some_and(|h| {
                     h.document == self.tabs[i].id && h.handle == handle && h.grip_id == grip_id
                 });
                 if !same {
@@ -1488,7 +1488,7 @@ impl OpenCADStudio {
                     && self
                         .grip_hover
                         .as_ref()
-                        .map_or(false, |h| h.started.elapsed().as_millis() >= HOVER_OPEN_MS)
+                        .is_some_and(|h| h.started.elapsed().as_millis() >= HOVER_OPEN_MS)
                 {
                     let entity_opt = self.tabs[i].scene.document.get_entity(handle);
                     if let Some(e) = entity_opt {
@@ -1866,7 +1866,7 @@ impl OpenCADStudio {
                     sel.gesture.poly_points.push(p);
                 }
             } else if sel.input.left_dragging && sel.gesture.poly_active {
-                if sel.gesture.poly_points.last().map_or(true, |lp| {
+                if sel.gesture.poly_points.last().is_none_or(|lp| {
                     let ddx = p.x - lp.x;
                     let ddy = p.y - lp.y;
                     ddx * ddx + ddy * ddy > 16.0
@@ -3958,8 +3958,8 @@ impl OpenCADStudio {
             // straight through; no paper mapping needed.
             let anchor = self.tabs[i].dyn_anchor.or(self.last_point);
             let dyn_ref = self.tabs[i].dyn_ref;
-            let lps = anchor.map(|a| proj(a));
-            let drs = dyn_ref.map(|r| proj(r));
+            let lps = anchor.map(&proj);
+            let drs = dyn_ref.map(&proj);
             self.tabs[i].last_point_screen = lps;
             self.tabs[i].dyn_ref_screen = drs;
 
@@ -4106,7 +4106,7 @@ impl OpenCADStudio {
                     pick_aperture,
                     &self.tabs[i].scene.draw_depth_map(),
                 )
-                .and_then(|s| Scene::handle_from_wire_name(s))
+                .and_then(Scene::handle_from_wire_name)
                 .or_else(|| {
                     if !include_fills {
                         return None;
@@ -6849,7 +6849,7 @@ impl OpenCADStudio {
                     pick_aperture,
                     &self.tabs[i].scene.draw_depth_map(),
                 )
-                .and_then(|s| Scene::handle_from_wire_name(s))
+                .and_then(Scene::handle_from_wire_name)
                 .or_else(|| {
                     if !include_fills {
                         return None;
@@ -7753,7 +7753,7 @@ properties={:.1}ms picked={}",
                                 pick_aperture,
                             )
                             .into_iter()
-                            .filter_map(|s| Scene::handle_from_wire_name(s))
+                            .filter_map(Scene::handle_from_wire_name)
                             .filter(|&h| self.tabs[i].scene.passes_selection_filter(h))
                             .filter(|&h| !self.tabs[i].scene.is_reference_only(h))
                             .collect();
@@ -7781,7 +7781,7 @@ properties={:.1}ms picked={}",
                                 pick_aperture,
                                 &self.tabs[i].scene.draw_depth_map(),
                             )
-                            .and_then(|s| Scene::handle_from_wire_name(s));
+                            .and_then(Scene::handle_from_wire_name);
                             let wire_ms = crate::perf::elapsed_ms(wire_started);
                             let mut hatch_models_ms = 0.0;
                             let mut hatch_test_ms = 0.0;
@@ -8000,14 +8000,15 @@ was_selected={}",
                     }
 
                     let crossing = box_crossing;
-                    if self.tabs[i].active_cmd.is_none() {
-                        if !self.shift_down && !self.select_remove_mode {
-                            self.tabs[i].last_crossing_window = if crossing {
-                                Some((command_min, command_max))
-                            } else {
-                                None
-                            };
-                        }
+                    if self.tabs[i].active_cmd.is_none()
+                        && !self.shift_down
+                        && !self.select_remove_mode
+                    {
+                        self.tabs[i].last_crossing_window = if crossing {
+                            Some((command_min, command_max))
+                        } else {
+                            None
+                        };
                     }
                     let (mut handles, timing) =
                         self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
@@ -8205,7 +8206,7 @@ properties={:.1}ms picked={}",
                     crate::ui::overlay::pick_box_aperture_px(self.pick_box),
                     &self.tabs[i].scene.draw_depth_map(),
                 )
-                .and_then(|s| Scene::handle_from_wire_name(s));
+                .and_then(Scene::handle_from_wire_name);
 
                 // Nothing with an editor was double-clicked: enter the
                 // clicked viewport.
@@ -8304,7 +8305,7 @@ properties={:.1}ms picked={}",
             crate::ui::overlay::pick_box_aperture_px(self.pick_box),
             &self.tabs[i].scene.draw_depth_map(),
         )
-        .and_then(|s| Scene::handle_from_wire_name(s))
+        .and_then(Scene::handle_from_wire_name)
         .or_else(|| {
             let hatches = self.tabs[i]
                 .scene
@@ -9452,12 +9453,10 @@ properties={:.1}ms picked={}",
                 .active_cmd
                 .as_ref()
                 .is_some_and(|command| matches!(command.name(), "MVIEW" | "MVSETUP"));
-        if context_changed {
-            if preserve_active_command {
-                // MVIEW and MVSETUP keep their step data, but all host-owned
-                // cursor/snap/dynamic-input state belongs to the old space.
-                self.reset_space_interaction_state();
-            }
+        if context_changed && preserve_active_command {
+            // MVIEW and MVSETUP keep their step data, but all host-owned
+            // cursor/snap/dynamic-input state belongs to the old space.
+            self.reset_space_interaction_state();
         }
         let cancel_task = if context_changed && !preserve_active_command {
             self.cancel_active_command_for_space_change()
@@ -9741,11 +9740,7 @@ properties={:.1}ms picked={}",
                     }
                     return Task::none();
                 }
-                let exists = self.tabs[i]
-                    .scene
-                    .layout_names()
-                    .iter()
-                    .any(|n| *n == new_name);
+                let exists = self.tabs[i].scene.layout_names().contains(&new_name);
                 if exists {
                     self.command_line
                         .push_error(crate::tf!("\"{}\" name already in use", new_name).as_ref());

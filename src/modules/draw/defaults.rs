@@ -3,43 +3,43 @@
 use std::cell::Cell;
 
 thread_local! {
-    static CIRCLE_RADIUS:   Cell<f64> = Cell::new(1.0);
-    static ROTATE_ANGLE:    Cell<f64> = Cell::new(0.0);   // degrees
-    static SCALE_FACTOR:    Cell<f64> = Cell::new(1.0);
-    static OFFSET_DIST:     Cell<f64> = Cell::new(1.0);
-    static FILLET_RADIUS:   Cell<f64> = Cell::new(0.0);
-    static CHAMFER_DIST1:   Cell<f64> = Cell::new(10.0);
-    static CHAMFER_DIST2:   Cell<f64> = Cell::new(10.0);
-    static ARRAY_ROWS:      Cell<f64> = Cell::new(2.0);
-    static ARRAY_COLS:      Cell<f64> = Cell::new(2.0);
-    static ARRAY_ROW_SP:    Cell<f64> = Cell::new(100.0);
-    static ARRAY_COL_SP:    Cell<f64> = Cell::new(100.0);
-    static ARRAY_P_COUNT:   Cell<f64> = Cell::new(6.0);
-    static ARRAY_P_ANGLE:   Cell<f64> = Cell::new(360.0); // degrees
-    static ARRAY_PATH_COUNT: Cell<f64> = Cell::new(6.0);
-    static ARRAY_PATH_SPACING: Cell<f64> = Cell::new(0.0);
-    static ARRAY_PATH_MEASURE: Cell<f64> = Cell::new(1.0);
-    static ARRAY_ASSOC:     Cell<f64> = Cell::new(1.0); // 1 = associative
-    static POLYGON_SIDES:   Cell<f64> = Cell::new(6.0);
-    static RECT_ELEVATION:  Cell<f64> = Cell::new(0.0);
-    static RECT_THICKNESS:  Cell<f64> = Cell::new(0.0);
-    static RECT_WIDTH:      Cell<f64> = Cell::new(0.0);
-    static PLINE_WIDTH:     Cell<f64> = Cell::new(0.0);   // PLINEWID
-    static RECT_ROTATION:   Cell<f64> = Cell::new(0.0);   // degrees
-    static RECT_CHAMFER1:   Cell<f64> = Cell::new(0.0);
-    static RECT_CHAMFER2:   Cell<f64> = Cell::new(0.0);
-    static RECT_FILLET:     Cell<f64> = Cell::new(0.0);
-    static RECT_AREA:       Cell<f64> = Cell::new(100.0);
-    static RECT_LENGTH:     Cell<f64> = Cell::new(10.0);
-    static RECT_SIDE:       Cell<f64> = Cell::new(10.0);
-    static DONUT_INNER_DIAMETER: Cell<f64> = Cell::new(0.5);
-    static DONUT_OUTER_DIAMETER: Cell<f64> = Cell::new(1.0);
-    static HELIX_BASE_RADIUS: Cell<f64> = Cell::new(1.0);
-    static HELIX_HEIGHT: Cell<f64> = Cell::new(1.0);
-    static HELIX_TURNS: Cell<f64> = Cell::new(3.0);
-    static HELIX_COUNTER_CLOCKWISE: Cell<bool> = Cell::new(true);
-    static FILLET_TRIM:     Cell<bool> = Cell::new(true);   // TRIMMODE
-    static PELLIPSE:        Cell<bool> = Cell::new(false);  // ELLIPSE draws a polyline
+    static CIRCLE_RADIUS:   Cell<f64> = const { Cell::new(1.0) };
+    static ROTATE_ANGLE:    Cell<f64> = const { Cell::new(0.0) };   // degrees
+    static SCALE_FACTOR:    Cell<f64> = const { Cell::new(1.0) };
+    static OFFSET_DIST:     Cell<f64> = const { Cell::new(1.0) };
+    static FILLET_RADIUS:   Cell<f64> = const { Cell::new(0.0) };
+    static CHAMFER_DIST1:   Cell<f64> = const { Cell::new(10.0) };
+    static CHAMFER_DIST2:   Cell<f64> = const { Cell::new(10.0) };
+    static ARRAY_ROWS:      Cell<f64> = const { Cell::new(2.0) };
+    static ARRAY_COLS:      Cell<f64> = const { Cell::new(2.0) };
+    static ARRAY_ROW_SP:    Cell<f64> = const { Cell::new(100.0) };
+    static ARRAY_COL_SP:    Cell<f64> = const { Cell::new(100.0) };
+    static ARRAY_P_COUNT:   Cell<f64> = const { Cell::new(6.0) };
+    static ARRAY_P_ANGLE:   Cell<f64> = const { Cell::new(360.0) }; // degrees
+    static ARRAY_PATH_COUNT: Cell<f64> = const { Cell::new(6.0) };
+    static ARRAY_PATH_SPACING: Cell<f64> = const { Cell::new(0.0) };
+    static ARRAY_PATH_MEASURE: Cell<f64> = const { Cell::new(1.0) };
+    static ARRAY_ASSOC:     Cell<f64> = const { Cell::new(1.0) }; // 1 = associative
+    static POLYGON_SIDES:   Cell<f64> = const { Cell::new(6.0) };
+    static RECT_ELEVATION:  Cell<f64> = const { Cell::new(0.0) };
+    static RECT_THICKNESS:  Cell<f64> = const { Cell::new(0.0) };
+    static RECT_WIDTH:      Cell<f64> = const { Cell::new(0.0) };
+    static PLINE_WIDTH:     Cell<f64> = const { Cell::new(0.0) };   // PLINEWID
+    static RECT_ROTATION:   Cell<f64> = const { Cell::new(0.0) };   // degrees
+    static RECT_CHAMFER1:   Cell<f64> = const { Cell::new(0.0) };
+    static RECT_CHAMFER2:   Cell<f64> = const { Cell::new(0.0) };
+    static RECT_FILLET:     Cell<f64> = const { Cell::new(0.0) };
+    static RECT_AREA:       Cell<f64> = const { Cell::new(100.0) };
+    static RECT_LENGTH:     Cell<f64> = const { Cell::new(10.0) };
+    static RECT_SIDE:       Cell<f64> = const { Cell::new(10.0) };
+    static DONUT_INNER_DIAMETER: Cell<f64> = const { Cell::new(0.5) };
+    static DONUT_OUTER_DIAMETER: Cell<f64> = const { Cell::new(1.0) };
+    static HELIX_BASE_RADIUS: Cell<f64> = const { Cell::new(1.0) };
+    static HELIX_HEIGHT: Cell<f64> = const { Cell::new(1.0) };
+    static HELIX_TURNS: Cell<f64> = const { Cell::new(3.0) };
+    static HELIX_COUNTER_CLOCKWISE: Cell<bool> = const { Cell::new(true) };
+    static FILLET_TRIM:     Cell<bool> = const { Cell::new(true) };   // TRIMMODE
+    static PELLIPSE:        Cell<bool> = const { Cell::new(false) };  // ELLIPSE draws a polyline
 }
 
 macro_rules! accessors {

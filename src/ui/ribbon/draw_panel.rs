@@ -756,7 +756,7 @@ fn slide_out_button(
         .width(cell)
         .height(cell)
         .padding((cell - CELL_ICON) / 2.0);
-    let tip = super::widgets::tool_tip_text(&t!(tool.tool.label), &command);
+    let tip = super::widgets::tool_tip_text(&t!(tool.tool.label), command);
     let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
         .delay(Duration::from_millis(400))
         .style(tip_style)

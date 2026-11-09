@@ -939,7 +939,7 @@ impl SectionCommand {
                     constant_width: s.width,
                     ..Default::default()
                 };
-                pline.common.color = color.clone();
+                pline.common.color = color;
                 if let Some(layer) = &s.layer {
                     pline.common.layer = layer.clone();
                 }
@@ -950,7 +950,7 @@ impl SectionCommand {
                         vector(plane.to_world(w[0].extend(0.0))),
                         vector(plane.to_world(w[1].extend(0.0))),
                     );
-                    line.common.color = color.clone();
+                    line.common.color = color;
                     if let Some(layer) = &s.layer {
                         line.common.layer = layer.clone();
                     }

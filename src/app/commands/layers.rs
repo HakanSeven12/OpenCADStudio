@@ -641,7 +641,7 @@ impl OpenCADStudio {
                     .collect::<Vec<_>>();
                 let undo = self.begin_layer_undo(i, "LAYON", &names);
                 for name in &names {
-                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
+                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                         dl.turn_on();
                     }
                 }
@@ -663,7 +663,7 @@ impl OpenCADStudio {
                     .collect::<Vec<_>>();
                 let undo = self.begin_layer_undo(i, "LAYTHW", &names);
                 for name in &names {
-                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
+                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                         dl.thaw();
                     }
                 }
@@ -880,7 +880,7 @@ impl OpenCADStudio {
                     .map(|layer| {
                         QuickLayerEntry::new(
                             layer.name.clone(),
-                            layer.color.clone(),
+                            layer.color,
                             layer.visible,
                             layer.frozen,
                             layer.locked,
@@ -1078,7 +1078,7 @@ impl OpenCADStudio {
                                 .push_info(crate::t!("GROUP: no groups in this drawing.").as_ref());
                         } else {
                             self.command_line.push_output(
-                                &crate::tf!("Groups:\n  {}", rows.join("\n  ")).as_ref(),
+                                crate::tf!("Groups:\n  {}", rows.join("\n  ")).as_ref(),
                             );
                         }
                     }
@@ -1095,15 +1095,14 @@ impl OpenCADStudio {
                             .any(|group| group.name.eq_ignore_ascii_case(old))
                         {
                             self.command_line
-                                .push_error(&crate::tf!("GROUP: no group named '{old}'.").as_ref());
+                                .push_error(crate::tf!("GROUP: no group named '{old}'.").as_ref());
                         } else if self.tabs[i]
                             .scene
                             .groups()
                             .any(|group| group.name.eq_ignore_ascii_case(new))
                         {
                             self.command_line.push_error(
-                                &crate::tf!("GROUP: a group named '{new}' already exists.")
-                                    .as_ref(),
+                                crate::tf!("GROUP: a group named '{new}' already exists.").as_ref(),
                             );
                         } else {
                             let undo = self.begin_group_undo(i, "GROUP RENAME");
@@ -1112,7 +1111,7 @@ impl OpenCADStudio {
                             self.commit_group_undo(i, undo);
                             if renamed {
                                 self.command_line.push_output(
-                                    &crate::tf!("GROUP: renamed '{old}' to '{new}'.").as_ref(),
+                                    crate::tf!("GROUP: renamed '{old}' to '{new}'.").as_ref(),
                                 );
                             }
                         }
@@ -1122,7 +1121,7 @@ impl OpenCADStudio {
                         let name = parts.get(1).copied().unwrap_or("");
                         if name.is_empty() {
                             self.command_line.push_error(
-                                &crate::tf!(
+                                crate::tf!(
                                     "Usage: GROUP {} <group name> [handle ...]",
                                     if adding { "ADD" } else { "REMOVE" }
                                 )
@@ -1133,9 +1132,8 @@ impl OpenCADStudio {
                             .groups()
                             .any(|group| group.name.eq_ignore_ascii_case(name))
                         {
-                            self.command_line.push_error(
-                                &crate::tf!("GROUP: no group named '{name}'.").as_ref(),
-                            );
+                            self.command_line
+                                .push_error(crate::tf!("GROUP: no group named '{name}'.").as_ref());
                         } else {
                             let mut handles: Vec<document::Handle> = parts
                                 .get(2..)
@@ -1167,7 +1165,7 @@ impl OpenCADStudio {
                             });
                             if handles.is_empty() {
                                 self.command_line.push_info(
-                                    &crate::tf!(
+                                    crate::tf!(
                                         "GROUP: nothing to {}.",
                                         if adding { "add" } else { "remove" }
                                     )
@@ -1194,7 +1192,7 @@ impl OpenCADStudio {
                                 self.tabs[i].dirty = true;
                                 self.commit_group_undo(i, undo);
                                 self.command_line.push_output(
-                                    &crate::tf!(
+                                    crate::tf!(
                                         "GROUP: {} {} object(s) {} '{name}'.",
                                         if adding { "added" } else { "removed" },
                                         changed,

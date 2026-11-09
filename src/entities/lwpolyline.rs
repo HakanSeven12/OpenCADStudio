@@ -851,12 +851,12 @@ fn apply_grip(pline: &mut LwPolyline, grip_id: usize, apply: GripApply) {
         let v = &mut pline.vertices[grip_id];
         match apply {
             GripApply::Absolute(p) => {
-                v.location.x = p.x as f64;
-                v.location.y = p.y as f64;
+                v.location.x = p.x;
+                v.location.y = p.y;
             }
             GripApply::Translate(d) => {
-                v.location.x += d.x as f64;
-                v.location.y += d.y as f64;
+                v.location.x += d.x;
+                v.location.y += d.y;
             }
         }
     } else {
@@ -1080,7 +1080,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
         let is_arc = self
             .vertices
             .get(seg)
-            .map_or(false, |v| v.bulge.abs() >= 1e-9);
+            .is_some_and(|v| v.bulge.abs() >= 1e-9);
         let convert = if is_arc {
             GripMenuItem {
                 label: "Convert to Line",
@@ -1107,8 +1107,12 @@ impl crate::entities::traits::Grippable for LwPolyline {
         if is_rectangle(self) && seg < 4 {
             // Moving an edge changes the dimension perpendicular to it.
             items.push(GripMenuItem {
-                label: if seg % 2 == 0 { "Height" } else { "Width" },
-                action: if seg % 2 == 0 {
+                label: if seg.is_multiple_of(2) {
+                    "Height"
+                } else {
+                    "Width"
+                },
+                action: if seg.is_multiple_of(2) {
                     GripMenuAction::RectangleHeight
                 } else {
                     GripMenuAction::RectangleWidth
@@ -1290,7 +1294,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
                 // moves it with the cursor until the placement click.
                 if grip_id == n - 1 && !self.is_closed {
                     self.vertices[grip_id].bulge = 0.0;
-                    let mut new_v = self.vertices[grip_id].clone();
+                    let mut new_v = self.vertices[grip_id];
                     new_v.bulge = 0.0;
                     new_v.vertex_id = 0;
                     self.vertices.push(new_v);

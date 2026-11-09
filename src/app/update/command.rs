@@ -218,7 +218,7 @@ impl OpenCADStudio {
             self.tabs[idx].dirty = false;
         }
         // Start tab is fixed — close requests on it are no-ops.
-        if self.tabs.get(idx).map_or(false, |t| t.is_start) {
+        if self.tabs.get(idx).is_some_and(|t| t.is_start) {
             return Task::none();
         }
         if self
@@ -244,7 +244,7 @@ impl OpenCADStudio {
             self.cancel_insert_attr_dialog();
             self.close_active_modal();
         }
-        if self.tabs.get(idx).map_or(false, |t| t.dirty) {
+        if self.tabs.get(idx).is_some_and(|t| t.dirty) {
             self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
             return self.open_unsaved_dialog_window();
         }
@@ -1012,12 +1012,10 @@ impl OpenCADStudio {
             }
             let is_mtp = raw.trim_start_matches('_').eq_ignore_ascii_case("MTP")
                 || raw.trim_start_matches('_').eq_ignore_ascii_case("M2P");
-            if is_mtp {
-                if self.point_modifier_step(i) {
-                    self.command_line.input.clear();
-                    self.start_mtp_modifier(i);
-                    return self.focus_cmd_input();
-                }
+            if is_mtp && self.point_modifier_step(i) {
+                self.command_line.input.clear();
+                self.start_mtp_modifier(i);
+                return self.focus_cmd_input();
             }
             if let Some(kind) = self.typed_snap_override(i, &raw) {
                 self.command_line.input.clear();
@@ -3817,7 +3815,7 @@ impl OpenCADStudio {
                         model.name = name.clone();
                     }
                 }
-                self.invalidate_property_targets(i, &handles);
+                self.invalidate_property_targets(i, handles);
                 self.tabs[i].dirty = true;
                 self.refresh_properties();
             }
@@ -4160,9 +4158,9 @@ impl OpenCADStudio {
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             vp.ucs_handle = ucs.handle;
-                            vp.ucs_origin = ucs.origin.clone();
-                            vp.ucs_x_axis = ucs.x_axis.clone();
-                            vp.ucs_y_axis = ucs.y_axis.clone();
+                            vp.ucs_origin = ucs.origin;
+                            vp.ucs_x_axis = ucs.x_axis;
+                            vp.ucs_y_axis = ucs.y_axis;
                             vp.ucs_per_viewport = true;
                         }
                     });
@@ -4187,8 +4185,8 @@ impl OpenCADStudio {
                         if let Some(document::EntityType::Viewport(vp)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
-                            vp.view_target = view.target.clone();
-                            vp.view_direction = view.direction.clone();
+                            vp.view_target = view.target;
+                            vp.view_direction = view.direction;
                             if view.height > 0.0 {
                                 vp.view_height = view.height;
                             }
@@ -6185,7 +6183,7 @@ pub(crate) fn attr_row_from_entity(
     let fmt = |v: f64| format!("{v}");
     let ad_meta = meta.get(&a.tag);
     let prompt = ad_meta.map(|m| m.prompt.clone()).unwrap_or_default();
-    let is_constant = a.flags.constant || ad_meta.map_or(false, |m| m.constant);
+    let is_constant = a.flags.constant || ad_meta.is_some_and(|m| m.constant);
     AttrRow {
         tag: a.tag.clone(),
         prompt,

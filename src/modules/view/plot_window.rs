@@ -12,6 +12,12 @@ pub struct PlotWindowCommand {
     p1: Option<DVec3>,
 }
 
+impl Default for PlotWindowCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlotWindowCommand {
     pub fn new() -> Self {
         Self { p1: None }

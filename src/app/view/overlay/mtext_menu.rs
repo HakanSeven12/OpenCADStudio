@@ -774,10 +774,7 @@ fn background_panel(ed: &MTextEditorState) -> Element<'static, Message> {
             scrollable(color_select::color_list(
                 color_select::ColorExtras::default(),
                 |color| Message::MTextMaskColor(Some(color)),
-                Message::OpenColorWindow(
-                    crate::app::ColorPickTarget::MTextMask,
-                    mask.color.clone(),
-                ),
+                Message::OpenColorWindow(crate::app::ColorPickTarget::MTextMask, mask.color),
             ))
             .height(Length::Shrink.max(220.0))
             .into(),

@@ -718,7 +718,7 @@ fn split_mixed_polyline(
             .map(|(_, &w)| w);
         let has_line_taper = real_widths
             .next()
-            .map_or(false, |w0| real_widths.any(|w| (w - w0).abs() > 1e-6));
+            .is_some_and(|w0| real_widths.any(|w| (w - w0).abs() > 1e-6));
         let taper_widths = if has_line_taper {
             straight_widths
         } else {
@@ -1590,11 +1590,7 @@ fn tessellate_wires(
                 }
 
                 let snap_pts = te.snap_pts;
-                let key_vertices: Vec<[f64; 3]> = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
+                let key_vertices: Vec<[f64; 3]> = te.key_vertices.into_iter().collect();
 
                 // Derive the pick box from the rendered glyph quads.
                 let text_aabb = if !sdf_verts.is_empty() {
@@ -2145,11 +2141,7 @@ fn tessellate_wires(
                         // constant on-screen size. (#139)
                         let s = world_per_pixel.map(|w| (w * 0.75).max(1e-6)).unwrap_or(0.1);
                         let snap_pts = te.snap_pts;
-                        let key_vertices: Vec<[f64; 3]> = te
-                            .key_vertices
-                            .into_iter()
-                            .map(|[kx, ky, kz]| [kx, ky, kz])
-                            .collect();
+                        let key_vertices: Vec<[f64; 3]> = te.key_vertices.into_iter().collect();
                         return vec![WireModel {
                             bg_adapt: None,
                             point_marker: None,
@@ -2208,11 +2200,7 @@ fn tessellate_wires(
                 // don't jitter on camera movement.
                 let (local_pts, local_pts_low) = points_to_ds(points);
                 let snap_pts = te.snap_pts;
-                let key_vertices: Vec<[f64; 3]> = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
+                let key_vertices: Vec<[f64; 3]> = te.key_vertices.into_iter().collect();
                 let (fill_tris, fill_tris_low) = points_to_ds(te.fill_tris);
                 // Only a real 3-D mesh surface (PolyfaceMesh / PolygonMesh /
                 // the modern subdivision Mesh) fill renders shaded-only with
@@ -2457,11 +2445,7 @@ fn tessellate_wires(
                 solid,
             } => {
                 let (local_pts, local_pts_low) = points_to_ds(points);
-                let key_vertices = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
+                let key_vertices = te.key_vertices.into_iter().collect();
                 let station_data = crate::scene::model::wire_model::encode_pattern_stations(
                     stations,
                     source_length,
@@ -2559,11 +2543,7 @@ fn tessellate_wires(
             RenderObject::SegmentedLines(points) => {
                 let (local_pts, local_pts_low) = points_to_ds(points);
                 let snap_pts = te.snap_pts;
-                let key_vertices: Vec<[f64; 3]> = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
+                let key_vertices: Vec<[f64; 3]> = te.key_vertices.into_iter().collect();
                 // A wide polyline with PLINEGEN=0 arrives here: same shader-band
                 // treatment as the Contour arm, restarting the dash per segment.
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
@@ -2660,11 +2640,7 @@ fn tessellate_wires(
                 );
                 let (pick_tris, pick_tris_low) = points_to_ds(te.pick_tris);
                 let world_width = widths.iter().copied().fold(0.0f32, f32::max);
-                let key_vertices: Vec<[f64; 3]> = te
-                    .key_vertices
-                    .into_iter()
-                    .map(|[x, y, z]| [x, y, z])
-                    .collect();
+                let key_vertices: Vec<[f64; 3]> = te.key_vertices.into_iter().collect();
 
                 if has_arc && can_split {
                     let seg_widths = polyline_segment_widths(entity);

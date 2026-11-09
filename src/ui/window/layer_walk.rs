@@ -1194,7 +1194,7 @@ fn walk_row(
         let palette = theme.palette();
         let pair = if is_selected {
             palette.primary.weak
-        } else if position % 2 == 0 {
+        } else if position.is_multiple_of(2) {
             palette.background.base
         } else {
             palette.background.weak

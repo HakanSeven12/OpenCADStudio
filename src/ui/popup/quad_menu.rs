@@ -199,7 +199,7 @@ impl QuadMru {
     /// a quad (the `Message::QuadRun` wrapper).
     pub fn record_for(&mut self, type_key: &str, command: &str) {
         record(
-            &mut self.per_type.entry(type_key.to_string()).or_default(),
+            self.per_type.entry(type_key.to_string()).or_default(),
             command,
         );
     }
@@ -271,7 +271,7 @@ fn glyph_abbrev(label: &str) -> String {
 
 /// Push `command` when not already present.
 fn push_unique(commands: &mut Vec<String>, command: String) {
-    if !commands.iter().any(|c| *c == command) {
+    if !commands.contains(&command) {
         commands.push(command);
     }
 }
@@ -403,7 +403,7 @@ pub fn quad_panels_for_target(
                 plugin_panels
                     .iter()
                     .filter(|p| target.matches_applies(&p.applies_to))
-                    .map(|p| plugin_panel(p)),
+                    .map(plugin_panel),
             );
         }
         QuadTarget::Selection { type_keys, .. } => {
@@ -424,7 +424,7 @@ pub fn quad_panels_for_target(
                 plugin_panels
                     .iter()
                     .filter(|p| target.matches_applies(&p.applies_to))
-                    .map(|p| plugin_panel(p)),
+                    .map(plugin_panel),
             );
         }
     }

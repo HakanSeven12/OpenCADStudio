@@ -49,7 +49,7 @@ pub(crate) fn draw_som_badge(
     if num_digits == 0 {
         return;
     }
-    let text_w = num_digits * 5 + (num_digits - 1) * 1;
+    let text_w = num_digits * 5 + (num_digits - 1);
     let badge_w = (text_w + 8) as i32;
     let badge_h = 13i32;
 
@@ -97,7 +97,7 @@ pub(crate) fn draw_som_badge(
                     let row_bits = DIGITS_5X7[d][r];
                     for c in 0..5 {
                         if (row_bits & (1 << (4 - c))) != 0 {
-                            let px = cur_x + c as i32;
+                            let px = cur_x + c;
                             let py = cur_y + r as i32;
                             if px >= 0 && px < img_w && py >= 0 && py < img_h {
                                 image.put_pixel(px as u32, py as u32, text_col);

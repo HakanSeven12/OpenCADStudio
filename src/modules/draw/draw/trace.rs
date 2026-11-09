@@ -48,6 +48,12 @@ pub struct TraceCommand {
     plane: WorkingPlane,
 }
 
+impl Default for TraceCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceCommand {
     pub fn new() -> Self {
         Self {

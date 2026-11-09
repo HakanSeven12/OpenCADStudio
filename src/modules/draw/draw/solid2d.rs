@@ -36,6 +36,12 @@ pub struct Solid2dCommand {
     plane: WorkingPlane,
 }
 
+impl Default for Solid2dCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Solid2dCommand {
     pub fn new() -> Self {
         Self {

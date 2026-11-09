@@ -575,7 +575,7 @@ struct LayerLook {
 impl LayerLook {
     fn of(layer: &document::tables::Layer) -> Self {
         Self {
-            color: layer.color.clone(),
+            color: layer.color,
             line_type: layer.line_type.to_uppercase(),
             line_weight: layer.line_weight,
             off: layer.flags.off,
@@ -2978,15 +2978,15 @@ fn restore_dependent_layers(
         let (Some(cur), Some(old)) = (doc.layers.get_mut(&n), kept.get(&n.to_uppercase())) else {
             continue;
         };
-        cur.flags = old.flags.clone();
-        cur.color = old.color.clone();
+        cur.flags = old.flags;
+        cur.color = old.color;
         cur.color_name = old.color_name.clone();
         cur.book_name = old.book_name.clone();
         cur.line_type = old.line_type.clone();
-        cur.line_weight = old.line_weight.clone();
+        cur.line_weight = old.line_weight;
         cur.plot_style = old.plot_style.clone();
         cur.is_plottable = old.is_plottable;
-        cur.transparency = old.transparency.clone();
+        cur.transparency = old.transparency;
     }
 }
 

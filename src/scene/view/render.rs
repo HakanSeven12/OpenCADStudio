@@ -390,7 +390,7 @@ impl shader::Primitive for Primitive {
             pipeline.block_geometry.clear();
             pipeline.gpu_error_epoch = errors_at_entry;
         }
-        let scale = viewport.scale_factor() as f32;
+        let scale = viewport.scale_factor();
         DEVICE_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
@@ -575,11 +575,11 @@ impl shader::Primitive for Primitive {
             let hatch_changed = inner
                 .cached_hatch_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.hatches));
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.hatches));
             let wipeout_changed = inner
                 .cached_wipeout_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.wipeout_hatches));
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.wipeout_hatches));
             if hatch_changed || fill_changed {
                 inner.upload_hatches(device, queue, if fill_mode { &vp.hatches[..] } else { &[] });
                 inner.cached_hatch_source = Some(Arc::clone(&vp.hatches));
@@ -587,7 +587,7 @@ impl shader::Primitive for Primitive {
             let preview_hatch_changed = inner
                 .cached_preview_hatch_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.preview_hatches));
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.preview_hatches));
             if preview_hatch_changed || fill_changed {
                 inner.upload_preview_hatches(device, queue, &vp.preview_hatches[..]);
                 inner.cached_preview_hatch_source = Some(Arc::clone(&vp.preview_hatches));
@@ -607,7 +607,7 @@ impl shader::Primitive for Primitive {
             if inner
                 .cached_image_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.images))
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.images))
             {
                 inner.upload_images(device, queue, &vp.images[..]);
                 inner.cached_image_source = Some(Arc::clone(&vp.images));
@@ -615,7 +615,7 @@ impl shader::Primitive for Primitive {
             if inner
                 .cached_point_cloud_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.point_clouds))
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.point_clouds))
             {
                 inner.upload_point_clouds(device, queue, &vp.point_clouds);
                 inner.cached_point_cloud_source = Some(Arc::clone(&vp.point_clouds));
@@ -638,11 +638,11 @@ impl shader::Primitive for Primitive {
             let text_source_changed = inner
                 .cached_text_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.text_verts));
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.text_verts));
             // A patch proves the text pass unchanged only when it applies to
             // the wire set this slot last uploaded.
             let text_wire_changed = vp.wire_content_id != inner.cached_wire_id
-                && vp.wire_patch.as_ref().map_or(true, |(base, patch)| {
+                && vp.wire_patch.as_ref().is_none_or(|(base, patch)| {
                     *base != inner.cached_wire_id || patch.text_pass_changed
                 });
             if text_source_changed || text_wire_changed {
@@ -672,12 +672,12 @@ impl shader::Primitive for Primitive {
             let face_source_changed = inner
                 .cached_face3d_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.face3d_wires));
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.face3d_wires));
             let face_depth_changed = inner
                 .cached_face3d_depth_source
                 .as_ref()
                 .and_then(std::sync::Weak::upgrade)
-                .map_or(true, |source| !Arc::ptr_eq(&source, &draw_depths));
+                .is_none_or(|source| !Arc::ptr_eq(&source, &draw_depths));
             let face_wire_changed =
                 inner.cached_face3d_key.0 != vp.wire_content_id && !face_pass_unchanged;
             let face_fill_mode_changed = face3d_fill_active != inner.cached_face3d_key.1;
@@ -696,7 +696,7 @@ impl shader::Primitive for Primitive {
                         vp.wire_patch.is_some(),
                         vp.wire_patch
                             .as_ref()
-                            .map_or(true, |(_, patch)| patch.face_pass_changed),
+                            .is_none_or(|(_, patch)| patch.face_pass_changed),
                         face_source_changed,
                         face_depth_changed,
                         face_wire_changed,
@@ -760,7 +760,7 @@ impl shader::Primitive for Primitive {
                     // A full draw-depth rebuild moves every label, which a patch
                     // of the changed entities alone would leave stale.
                     let base_ok = inner.wire_arena_depth_generation == vp.draw_depth_generation
-                        && vp.wire_patch.as_ref().map_or(false, |(base, patch)| {
+                        && vp.wire_patch.as_ref().is_some_and(|(base, patch)| {
                             inner.wire_arena_id == *base && !patch.changes.is_empty()
                         });
                     let patch = vp.wire_patch.as_ref().map(|(_, patch)| patch);
@@ -798,7 +798,7 @@ impl shader::Primitive for Primitive {
                         }
                     }
                     let fallback_touched = |mesh_edge: bool| {
-                        patch.map_or(true, |patch| {
+                        patch.is_none_or(|patch| {
                             patch.changes.iter().any(|(handle, _)| {
                                 inner.wire_arena_fallback_handles.contains(handle)
                                     || if mesh_edge {
@@ -1284,7 +1284,7 @@ retained_contributors={}",
             if inner
                 .cached_mesh_source
                 .as_ref()
-                .map_or(true, |source| !Arc::ptr_eq(source, &vp.meshes))
+                .is_none_or(|source| !Arc::ptr_eq(source, &vp.meshes))
             {
                 let patched = vp.wire_patch.as_ref().is_some_and(|(previous, patch)| {
                     *previous == inner.cached_mesh_content_id
@@ -3239,7 +3239,7 @@ impl Scene {
                             ClassObjectData::RenderEnvironment(env) => {
                                 if best_env
                                     .as_ref()
-                                    .map_or(true, |(best_h, _)| handle.value() < best_h.value())
+                                    .is_none_or(|(best_h, _)| handle.value() < best_h.value())
                                 {
                                     best_env = Some((*handle, env));
                                 }
@@ -3249,7 +3249,7 @@ impl Scene {
                                     && !settings.environment_image_filename.is_empty()
                                 {
                                     let key = (!settings.has_predefined, handle.value());
-                                    if best_preset.as_ref().map_or(true, |(best_h, best_s)| {
+                                    if best_preset.as_ref().is_none_or(|(best_h, best_s)| {
                                         key < (!best_s.has_predefined, best_h.value())
                                     }) {
                                         best_preset = Some((*handle, settings));
@@ -3262,7 +3262,7 @@ impl Scene {
                                     && !base.environment_image_filename.is_empty()
                                 {
                                     let key = (!base.has_predefined, handle.value());
-                                    if best_preset.as_ref().map_or(true, |(best_h, best_s)| {
+                                    if best_preset.as_ref().is_none_or(|(best_h, best_s)| {
                                         key < (!best_s.has_predefined, best_h.value())
                                     }) {
                                         best_preset = Some((*handle, base));
@@ -3275,7 +3275,7 @@ impl Scene {
                                     && !base.environment_image_filename.is_empty()
                                 {
                                     let key = (!base.has_predefined, handle.value());
-                                    if best_preset.as_ref().map_or(true, |(best_h, best_s)| {
+                                    if best_preset.as_ref().is_none_or(|(best_h, best_s)| {
                                         key < (!best_s.has_predefined, best_h.value())
                                     }) {
                                         best_preset = Some((*handle, base));
@@ -3755,7 +3755,7 @@ impl Scene {
                 boundary.push(boundary[0]);
                 hatches.push(HatchModel {
                     pattern_origin: None,
-                    render_instance: wire.render_instance.clone(),
+                    render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],
                     boundary: Arc::new(boundary),
                     boundary_wcs: None,

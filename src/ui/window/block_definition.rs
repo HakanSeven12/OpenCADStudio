@@ -24,17 +24,12 @@ static ICON_SELECT_OBJECTS: &[u8] =
 static ICON_QUICK_SELECT: &[u8] = include_bytes!("../../../assets/icons/blocks/quick_select.svg");
 static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum BlockObjectMode {
     Retain,
+    #[default]
     Convert,
     Delete,
-}
-
-impl Default for BlockObjectMode {
-    fn default() -> Self {
-        BlockObjectMode::Convert
-    }
 }
 
 /// Dropdown entry for the Block Unit picker.

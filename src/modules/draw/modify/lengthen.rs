@@ -64,6 +64,12 @@ enum LenState {
     },
 }
 
+impl Default for LengthenCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LengthenCommand {
     pub fn new() -> Self {
         Self {
@@ -440,7 +446,7 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
             result.vertices = vertices
                 .into_iter()
                 .map(|vertex| {
-                    let mut value = polyline.vertices[vertex.source].clone();
+                    let mut value = polyline.vertices[vertex.source];
                     value.location.x = vertex.position[0];
                     value.location.y = vertex.position[1];
                     value.bulge = vertex.bulge;

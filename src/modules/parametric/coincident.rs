@@ -40,6 +40,12 @@ pub struct CoincidentConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for CoincidentConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CoincidentConstraintCommand {
     pub fn new() -> Self {
         Self {

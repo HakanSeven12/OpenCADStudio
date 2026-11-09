@@ -3938,7 +3938,7 @@ fn tessellate_dimension_inner(
     };
 
     let text_layout = dimension_text_layout(dim, style, dim_txt, dim_scale, Some(document));
-    let moved_text = dimtmove_one_text(dim, style, dim_txt as f64, dim_scale, Some(document));
+    let moved_text = dimtmove_one_text(dim, style, dim_txt, dim_scale, Some(document));
     // Text out on its own leader leaves the dimension line as DIMTMOVE 2
     // does: no line chasing it, no turn toward it.
     let text_movement = if moved_text
@@ -7996,7 +7996,7 @@ fn reduce_fraction(mut n: u64, mut d: u64) -> String {
     if n == 0 {
         return String::new();
     }
-    while n % 2 == 0 && d % 2 == 0 {
+    while n.is_multiple_of(2) && d.is_multiple_of(2) {
         n /= 2;
         d /= 2;
     }
@@ -8209,16 +8209,18 @@ fn dimension_precision_origin(dim: &Dimension) -> Vector3 {
         Dimension::Arc(d) => d.center_point,
         Dimension::LargeRadial(d) => d.chord_point,
     };
-    (point.x.is_finite() && point.y.is_finite() && point.z.is_finite())
-        .then_some(point)
-        .unwrap_or_else(|| {
+    if point.x.is_finite() && point.y.is_finite() && point.z.is_finite() {
+        point
+    } else {
+        {
             let base = dim.base();
             if base.definition_point.x.is_finite() {
                 base.definition_point
             } else {
                 Vector3::ZERO
             }
-        })
+        }
+    }
 }
 
 fn point_from_origin(point: Vector3, origin: Vector3) -> Vector3 {

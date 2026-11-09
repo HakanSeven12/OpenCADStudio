@@ -24,7 +24,7 @@ use std::borrow::Cow;
 pub fn model_linetypes_follow_annotation(doc: &Document) -> bool {
     doc.drawing_variable("MSLTSCALE")
         .and_then(|value| value.trim().parse::<i32>().ok())
-        .map_or(true, |value| value != 0)
+        != Some(0)
 }
 
 /// Resolve a handle to a `Dictionary` object, if it is one.
@@ -2132,7 +2132,7 @@ fn annotation_flag(data: &document::xdata::ExtendedData) -> Option<bool> {
             document::xdata::XDataValue::Integer16(value) => Some(*value != 0),
             _ => None,
         })
-        .last()
+        .next_back()
 }
 
 fn definition_annotation_flag(doc: &Document, br: &document::tables::BlockRecord) -> Option<bool> {

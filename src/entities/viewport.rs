@@ -328,14 +328,14 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
 fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Translate(d)) => {
-            vp.center.x += d.x as f64;
-            vp.center.y += d.y as f64;
-            vp.center.z += d.z as f64;
+            vp.center.x += d.x;
+            vp.center.y += d.y;
+            vp.center.z += d.z;
         }
         (0, GripApply::Absolute(p)) => {
-            vp.center.x = p.x as f64;
-            vp.center.y = p.y as f64;
-            vp.center.z = p.z as f64;
+            vp.center.x = p.x;
+            vp.center.y = p.y;
+            vp.center.z = p.z;
         }
         (1..=4, GripApply::Absolute(p)) => {
             let hw = vp.width * 0.5;
@@ -347,7 +347,7 @@ fn apply_grip(vp: &mut Viewport, grip_id: usize, apply: GripApply) {
                 4 => (vp.center.x - hw, vp.center.y + hh),
                 _ => unreachable!(),
             };
-            resize_from_corners(vp, opposite, (p.x as f64, p.y as f64));
+            resize_from_corners(vp, opposite, (p.x, p.y));
         }
         _ => {}
     }

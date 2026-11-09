@@ -24,6 +24,12 @@ pub struct HorizontalConstraintCommand {
     plane: WorkingPlane,
 }
 
+impl Default for HorizontalConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HorizontalConstraintCommand {
     pub fn new() -> Self {
         Self::for_kind(ConstraintKind::Horizontal)

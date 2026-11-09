@@ -28,6 +28,12 @@ pub struct JoinCommand {
     /// source instead.
     needs_supported: bool,
 }
+impl Default for JoinCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JoinCommand {
     pub fn new() -> Self {
         Self {
@@ -97,8 +103,8 @@ impl CadCommand for JoinCommand {
                 let mut circle = document::entities::Circle::new();
                 circle.common = arc.common.clone();
                 circle.common.handle = Handle::NULL;
-                circle.center = arc.center.clone();
-                circle.normal = arc.normal.clone();
+                circle.center = arc.center;
+                circle.normal = arc.normal;
                 circle.radius = arc.radius;
                 circle.thickness = arc.thickness;
                 return Some(CmdResult::ReplaceMany(
@@ -235,8 +241,8 @@ pub fn join_to_source(
                             if span[1] - span[0] >= std::f64::consts::TAU {
                                 let mut circle = document::entities::Circle::new();
                                 circle.common = a.common.clone();
-                                circle.center = a.center.clone();
-                                circle.normal = a.normal.clone();
+                                circle.center = a.center;
+                                circle.normal = a.normal;
                                 circle.radius = a.radius;
                                 circle.thickness = a.thickness;
                                 EntityType::Circle(circle)
@@ -461,7 +467,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
             else {
                 return None;
             };
-            let z = crate::entities::curve::ocs_plane(p.normal.clone(), p.elevation).origin[2];
+            let z = crate::entities::curve::ocs_plane(p.normal, p.elevation).origin[2];
             Some(
                 curve
                     .vertices
@@ -710,8 +716,8 @@ fn join_chain(
         }
         if let EntityType::Polyline2D(source) = entities[0].1 {
             let mut polyline = source.clone();
-            let input = crate::entities::curve::ocs_plane(pl.normal.clone(), pl.elevation);
-            let output = crate::entities::curve::ocs_plane(source.normal.clone(), source.elevation);
+            let input = crate::entities::curve::ocs_plane(pl.normal, pl.elevation);
+            let output = crate::entities::curve::ocs_plane(source.normal, source.elevation);
             polyline.vertices = pl
                 .vertices
                 .iter()

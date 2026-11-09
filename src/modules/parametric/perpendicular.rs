@@ -17,6 +17,12 @@ pub struct PerpendicularConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for PerpendicularConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerpendicularConstraintCommand {
     pub fn new() -> Self {
         Self {

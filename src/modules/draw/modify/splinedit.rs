@@ -77,6 +77,12 @@ fn weights_are_rational(weights: &[f64]) -> bool {
     })
 }
 
+impl Default for SplineditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SplineditCommand {
     pub fn new() -> Self {
         Self {
@@ -117,7 +123,7 @@ impl SplineditCommand {
                 let elevation =
                     kernel::space::Vec3::from(points[0]).dot(kernel::space::Vec3::from(normal));
                 let normal = Vector3::new(normal[0], normal[1], normal[2]);
-                let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
+                let plane = crate::entities::curve::ocs_plane(normal, elevation);
                 let mut polyline = document::LwPolyline::new();
                 polyline.common = source.common.clone();
                 polyline.elevation = elevation;

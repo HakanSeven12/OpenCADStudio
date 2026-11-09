@@ -656,15 +656,18 @@ fn fit_spline_slopes(spl: &Spline, p: &[[f64; 3]]) -> Option<(Vec<f64>, [Vec<f64
     let h: Vec<f64> = (0..n - 1).map(|i| (t[i + 1] - t[i]).max(1e-9)).collect();
 
     let nonzero = |v: &document::types::Vector3| v.x * v.x + v.y * v.y + v.z * v.z > 1e-18;
-    let begin = nonzero(&spl.begin_tangent).then(|| {
+    let begin = nonzero(&spl.begin_tangent).then_some({
         [
             spl.begin_tangent.x,
             spl.begin_tangent.y,
             spl.begin_tangent.z,
         ]
     });
-    let end = nonzero(&spl.end_tangent)
-        .then(|| [spl.end_tangent.x, spl.end_tangent.y, spl.end_tangent.z]);
+    let end = nonzero(&spl.end_tangent).then_some([
+        spl.end_tangent.x,
+        spl.end_tangent.y,
+        spl.end_tangent.z,
+    ]);
 
     // Solve for the knot slopes m_i = dP/dt per coordinate. The tridiagonal is
     // the C² continuity system; the end rows are the clamped tangent (m fixed)
@@ -1116,10 +1119,11 @@ fn apply_geom_prop(spline: &mut Spline, field: &str, value: &str) {
                 if prepare_fit_point_view(spline) {
                     spline.cv_frame_visible = false;
                 }
-            } else if value == "Control Vertices" {
-                if !spline.flags.periodic && control_vertices(spline).len() >= 2 {
-                    spline.cv_frame_visible = true;
-                }
+            } else if value == "Control Vertices"
+                && !spline.flags.periodic
+                && control_vertices(spline).len() >= 2
+            {
+                spline.cv_frame_visible = true;
             }
             return;
         }
@@ -1274,10 +1278,9 @@ fn apply_grip(spline: &mut Spline, grip_id: usize, apply: GripApply) {
     } else if !editing_fit
         && (uses_fit_method(spline) || !spline.fit_points.is_empty())
         && !spline.flags.periodic
+        && !convert_to_control_method(spline)
     {
-        if !convert_to_control_method(spline) {
-            return;
-        }
+        return;
     }
     let target = if editing_fit {
         spline.fit_points.get_mut(grip_id)
@@ -1287,14 +1290,14 @@ fn apply_grip(spline: &mut Spline, grip_id: usize, apply: GripApply) {
     if let Some(cp) = target {
         match apply {
             GripApply::Absolute(p) => {
-                cp.x = p.x as f64;
-                cp.y = p.y as f64;
-                cp.z = p.z as f64;
+                cp.x = p.x;
+                cp.y = p.y;
+                cp.z = p.z;
             }
             GripApply::Translate(d) => {
-                cp.x += d.x as f64;
-                cp.y += d.y as f64;
-                cp.z += d.z as f64;
+                cp.x += d.x;
+                cp.y += d.y;
+                cp.z += d.z;
             }
         }
     }
@@ -1389,7 +1392,6 @@ impl crate::entities::traits::Grippable for Spline {
             A::ShowFit => {
                 if prepare_fit_point_view(self) {
                     self.cv_frame_visible = false;
-                    return;
                 }
             }
             A::ShowControlVertices
@@ -1397,7 +1399,6 @@ impl crate::entities::traits::Grippable for Spline {
                     && control_vertices(self).len() >= 2 =>
             {
                 self.cv_frame_visible = true;
-                return;
             }
             _ => {}
         }

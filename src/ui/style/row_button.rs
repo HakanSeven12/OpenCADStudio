@@ -24,7 +24,7 @@ pub(crate) fn cell_button_style(
             palette.background.strong
         } else if selected {
             palette.primary.weak
-        } else if index % 2 == 0 {
+        } else if index.is_multiple_of(2) {
             palette.background.base
         } else {
             palette.background.weak

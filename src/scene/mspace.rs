@@ -146,7 +146,7 @@ impl Scene {
         Some(ViewportFrame {
             viewport: vp_handle,
             paper_center,
-            model_target: glam::DVec2::new(cam.target.x as f64, cam.target.y as f64),
+            model_target: glam::DVec2::new(cam.target.x, cam.target.y),
             scale,
             twist,
             locked,

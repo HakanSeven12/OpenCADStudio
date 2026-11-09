@@ -64,13 +64,13 @@ fn draw_tangent_constraint_glyph(frame: &mut canvas::Frame, center: Point, color
     let tangent_end = Point::new(contact.x + 8.0, contact.y - 8.0);
     let stroke = canvas::Stroke::default().with_color(color).with_width(1.35);
 
-    frame.stroke(&canvas::Path::circle(circle_center, radius), stroke.clone());
+    frame.stroke(&canvas::Path::circle(circle_center, radius), stroke);
     frame.stroke(&canvas::Path::line(contact, tangent_end), stroke);
 }
 
 fn draw_concentric_constraint_glyph(frame: &mut canvas::Frame, center: Point, color: Color) {
     let stroke = canvas::Stroke::default().with_color(color).with_width(1.25);
-    frame.stroke(&canvas::Path::circle(center, 4.7), stroke.clone());
+    frame.stroke(&canvas::Path::circle(center, 4.7), stroke);
     frame.stroke(&canvas::Path::circle(center, 2.15), stroke);
 }
 
@@ -83,7 +83,7 @@ fn stroke_quad(frame: &mut canvas::Frame, corners: [Point; 4], stroke: &canvas::
         p.line_to(corners[3]);
         p.close();
     });
-    frame.stroke(&path, stroke.clone());
+    frame.stroke(&path, *stroke);
 }
 
 /// MATCHPROP's paintbrush cursor.
@@ -211,13 +211,13 @@ fn draw_vertical_constraint_glyph(
             Point::new(datum_x, center.y - 6.5),
             Point::new(datum_x, center.y + 6.5),
         ),
-        stroke.clone(),
+        stroke,
     );
     for step in 0..3 {
         let y = center.y - 4.5 + step as f32 * 4.0;
         frame.stroke(
             &canvas::Path::line(Point::new(datum_x, y), Point::new(datum_x - 4.0, y + 3.5)),
-            stroke.clone(),
+            stroke,
         );
     }
     frame.stroke(
@@ -2459,7 +2459,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                     },
                     ..Default::default()
                 };
-                frame.stroke(&path, stroke_style.clone());
+                frame.stroke(&path, stroke_style);
                 if let Some(cur) = self.selection.borrow().input.last_move_pos {
                     let start = self.selection.borrow().gesture.poly_points[0];
                     let last = *self.selection.borrow().gesture.poly_points.last().unwrap();
@@ -2678,7 +2678,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                     SnapType::Extension => {
                         if let Some((base, _, tip)) = extension_ray {
                             if let Some((a, b)) = clip_seg(base, tip, bounds) {
-                                frame.stroke(&canvas::Path::line(a, b), guide_dash.clone());
+                                frame.stroke(&canvas::Path::line(a, b), guide_dash);
                             }
                         }
                     }
@@ -2696,7 +2696,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 let tip =
                                     Point::new(sp.x + dx / len * 18.0, sp.y + dy / len * 18.0);
                                 if let Some((a, b)) = clip_seg(base, tip, bounds) {
-                                    frame.stroke(&canvas::Path::line(a, b), guide_dash.clone());
+                                    frame.stroke(&canvas::Path::line(a, b), guide_dash);
                                 }
                             }
                         }
@@ -2718,7 +2718,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 Point::new(sp.x - h, sp.y - h),
                                 Size::new(h * 2.0, h * 2.0),
                             );
-                            frame.stroke(&rect, stroke.clone());
+                            frame.stroke(&rect, stroke);
                             let r = 3.0_f32;
                             frame.fill(
                                 &canvas::Path::circle(sp, r),
@@ -2769,14 +2769,14 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 }
                                 b.close();
                             });
-                            frame.stroke(&path, stroke.clone());
+                            frame.stroke(&path, stroke);
                             frame.fill(&canvas::Path::circle(sp, 1.6), marker);
                         }
                         SnapType::Node => {
                             // Circle with an inscribed X.
                             let r = 5.5_f32;
                             let cpath = canvas::Path::circle(sp, r);
-                            frame.stroke(&cpath, stroke.clone());
+                            frame.stroke(&cpath, stroke);
                             let d = r * std::f32::consts::FRAC_1_SQRT_2;
                             let x1 = canvas::Path::new(|b| {
                                 b.move_to(Point::new(sp.x - d, sp.y - d));
@@ -2786,7 +2786,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.move_to(Point::new(sp.x - d, sp.y + d));
                                 b.line_to(Point::new(sp.x + d, sp.y - d));
                             });
-                            frame.stroke(&x1, stroke.clone());
+                            frame.stroke(&x1, stroke);
                             frame.stroke(&x2, stroke);
                         }
                         SnapType::Quadrant => {
@@ -2812,7 +2812,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.move_to(Point::new(sp.x - r, sp.y + r));
                                 b.line_to(Point::new(sp.x + r, sp.y - r));
                             });
-                            frame.stroke(&p1, stroke.clone());
+                            frame.stroke(&p1, stroke);
                             frame.stroke(&p2, stroke);
                         }
                         SnapType::ApparentIntersection => {
@@ -2823,7 +2823,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 Point::new(sp.x - r, sp.y - r),
                                 Size::new(r * 2.0, r * 2.0),
                             );
-                            frame.stroke(&rect, stroke.clone());
+                            frame.stroke(&rect, stroke);
                             let xr = r - 1.5;
                             let p1 = canvas::Path::new(|b| {
                                 b.move_to(Point::new(sp.x - xr, sp.y - xr));
@@ -2833,7 +2833,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.move_to(Point::new(sp.x - xr, sp.y + xr));
                                 b.line_to(Point::new(sp.x + xr, sp.y - xr));
                             });
-                            frame.stroke(&p1, stroke.clone());
+                            frame.stroke(&p1, stroke);
                             frame.stroke(&p2, stroke);
                         }
                         SnapType::Insertion => {
@@ -2847,7 +2847,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 Point::new(sp.x - r, sp.y - r * 0.5),
                                 Size::new(r * 2.0, r),
                             );
-                            frame.stroke(&outer, stroke.clone());
+                            frame.stroke(&outer, stroke);
                             frame.stroke(&inner, stroke);
                         }
                         SnapType::Perpendicular => {
@@ -2863,14 +2863,14 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.line_to(Point::new(sp.x, sp.y));
                                 b.line_to(Point::new(sp.x, sp.y + r));
                             });
-                            frame.stroke(&p, stroke.clone());
+                            frame.stroke(&p, stroke);
                             frame.stroke(&foot, stroke);
                         }
                         SnapType::Tangent => {
                             // Circle with a tangent bar across the top.
                             let r = 5.5_f32;
                             let c = canvas::Path::circle(sp, r);
-                            frame.stroke(&c, stroke.clone());
+                            frame.stroke(&c, stroke);
                             let bar = canvas::Path::new(|b| {
                                 b.move_to(Point::new(sp.x - r, sp.y - r));
                                 b.line_to(Point::new(sp.x + r, sp.y - r));
@@ -2917,7 +2917,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.move_to(Point::new(sp.x - r + off, sp.y + r));
                                 b.line_to(Point::new(sp.x + r + off, sp.y - r));
                             });
-                            frame.stroke(&b1, stroke.clone());
+                            frame.stroke(&b1, stroke);
                             frame.stroke(&b2, stroke);
                         }
                         SnapType::Grid => {
@@ -2930,7 +2930,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.move_to(Point::new(sp.x, sp.y - arm));
                                 b.line_to(Point::new(sp.x, sp.y + arm));
                             });
-                            frame.stroke(&h, stroke.clone());
+                            frame.stroke(&h, stroke);
                             frame.stroke(&v, stroke);
                         }
                         SnapType::Vertex => {
@@ -2980,7 +2980,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 b.line_to(Point::new(sp.x - r, sp.y + r));
                                 b.line_to(Point::new(sp.x + r, sp.y + r));
                             });
-                            frame.stroke(&p, stroke.clone());
+                            frame.stroke(&p, stroke);
                             frame.fill(&canvas::Path::circle(sp, 2.0_f32), marker);
                         }
                         SnapType::NearestFace => {
@@ -3002,7 +3002,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             // ── CAD crosshair cursor ──────────────────────────────────────────────
             let over_viewcube = self.show_viewcube && {
                 use crate::scene::{VIEWCUBE_PAD, VIEWCUBE_REGION_PX};
-                cursor.position_in(bounds).map_or(false, |pos| {
+                cursor.position_in(bounds).is_some_and(|pos| {
                     let vc_x = bounds.width - VIEWCUBE_REGION_PX - VIEWCUBE_PAD;
                     let vc_y = VIEWCUBE_PAD;
                     pos.x >= vc_x
@@ -3176,7 +3176,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 path.move_to(Point::new(cp.x - dir.x * gap, cp.y - dir.y * gap));
                                 path.line_to(Point::new(cp.x - dir.x * arm, cp.y - dir.y * arm));
                             });
-                            frame.stroke(&arms, stroke.clone());
+                            frame.stroke(&arms, stroke);
                         }
                     }
                     if point_mode {
@@ -3322,7 +3322,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                     b.move_to(Point::new(m.x - r + off, m.y + r));
                     b.line_to(Point::new(m.x + r + off, m.y - r));
                 });
-                frame.stroke(&b1, stroke.clone());
+                frame.stroke(&b1, stroke);
                 frame.stroke(&b2, stroke);
             }
         }));
@@ -3610,8 +3610,8 @@ impl canvas::Program<Message> for SelectionCanvas {
                             point.y - CONSTRAINT_HOVER_MARKER_RADIUS,
                         ),
                     );
-                    frame.stroke(&first, stroke.clone());
-                    frame.stroke(&second, stroke.clone());
+                    frame.stroke(&first, stroke);
+                    frame.stroke(&second, stroke);
                 }
                 if let Some(label) = &self.constraint_glyph_tooltip {
                     let (glyph_top_left, glyph_size) = (
@@ -3689,7 +3689,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                                 y: tp.y + sz,
                             },
                         );
-                        frame.stroke(&h, stroke.clone());
+                        frame.stroke(&h, stroke);
                         frame.stroke(&v, stroke);
                     }
                 },
@@ -4153,7 +4153,7 @@ impl GridProjection {
                 continue;
             };
             for (slot, gap) in best.iter_mut().zip([gap1, gap2]) {
-                if slot.map_or(true, |(_, _, best_gap)| gap > best_gap) {
+                if slot.is_none_or(|(_, _, best_gap)| gap > best_gap) {
                     *slot = Some((*screen, *world, gap));
                 }
             }

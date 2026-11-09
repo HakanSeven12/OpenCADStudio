@@ -426,7 +426,7 @@ pub(crate) fn main_window_event(
             None
         }
         iced::Event::Window(window::Event::Resized(sz)) => {
-            Some(Message::WindowResized(sz.width as f32, sz.height as f32))
+            Some(Message::WindowResized(sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
         iced::Event::Window(window::Event::Opened { scale_factor, .. })
@@ -1113,7 +1113,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     let current_vertex_grip: Option<usize> = tab
                         .properties
                         .prop_vertex_indicator_active
-                        .then(|| sel_h)
+                        .then_some(sel_h)
                         .flatten()
                         .and_then(|h| {
                             let indexed = match tab.scene.document.get_entity(h) {

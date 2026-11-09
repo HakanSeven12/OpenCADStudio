@@ -151,6 +151,12 @@ pub struct MeasureGeomCommand {
         std::cell::RefCell<Option<rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>>>,
 }
 
+impl Default for MeasureGeomCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeasureGeomCommand {
     pub fn new() -> Self {
         Self {

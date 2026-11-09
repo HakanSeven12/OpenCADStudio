@@ -278,7 +278,7 @@ fn stroke_edge(frame: &mut canvas::Frame, a: Point, b: Point, edge: &PreviewEdge
                     Point::new(a.x + nx * sign, a.y + ny * sign),
                     Point::new(b.x + nx * sign, b.y + ny * sign),
                 ),
-                stroke.clone(),
+                stroke,
             );
         }
     } else {

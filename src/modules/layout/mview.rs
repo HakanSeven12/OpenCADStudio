@@ -307,8 +307,8 @@ impl MviewCommand {
         viewport.width = width;
         viewport.height = height;
         viewport.id = 2;
-        viewport.view_target = view.target.clone();
-        viewport.view_direction = view.direction.clone();
+        viewport.view_target = view.target;
+        viewport.view_direction = view.direction;
         viewport.view_height = source_height;
         viewport.custom_scale = height / source_height;
         viewport.lens_length = view.lens_length;

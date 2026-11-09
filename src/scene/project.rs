@@ -25,8 +25,8 @@ impl Scene {
             .filter(|vp| {
                 vp.common.owner_handle == paper_block
                     && vp.is_on()
-                    && only_vp.map_or(true, |h| vp.common.handle == h)
-                    && exclude_vp.map_or(true, |h| vp.common.handle != h)
+                    && only_vp.is_none_or(|h| vp.common.handle == h)
+                    && (exclude_vp != Some(vp.common.handle))
             })
             .collect();
 
@@ -130,9 +130,9 @@ impl Scene {
             // already folded view_center through the (twisted) view basis and
             // applied the empty-WCS auto-fit, so taking its target keeps the CPU
             // projection identical to the GPU renderer under any twist.
-            let display_center_x = cam_frame.target.x as f64 + [0.0_f64; 3][0];
-            let display_center_y = cam_frame.target.y as f64 + [0.0_f64; 3][1];
-            let display_center_z = cam_frame.target.z as f64 + [0.0_f64; 3][2];
+            let display_center_x = cam_frame.target.x + [0.0_f64; 3][0];
+            let display_center_y = cam_frame.target.y + [0.0_f64; 3][1];
+            let display_center_z = cam_frame.target.z + [0.0_f64; 3][2];
             let view_right_d = (
                 view_right.x as f64,
                 view_right.y as f64,

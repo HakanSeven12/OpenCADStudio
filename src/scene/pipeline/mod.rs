@@ -1183,14 +1183,13 @@ impl Pipeline {
         #[cfg(not(target_arch = "wasm32"))]
         if std::env::var_os("RUST_LOG").is_some() {
             eprintln!(
-                "renderer pipelines: wire={} hatch={} mesh={} (storage buffers/stage: {})",
+                "renderer pipelines: wire={} hatch={} mesh=vertex (storage buffers/stage: {})",
                 if wire_mode.uses_storage() {
                     "storage"
                 } else {
                     "packed"
                 },
                 hatch_gpu.backend_name(),
-                "vertex",
                 device.limits().max_storage_buffers_per_shader_stage
             );
         }
@@ -4100,7 +4099,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .iter()
             .filter(|handle| !selected.contains(handle) && !edge_handles.contains(handle))
         {
-            if let Some(ranges) = self.mesh_ranges_by_handle.get(&handle) {
+            if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
                     kind: MeshHighlightKind::Hover,
@@ -5846,7 +5845,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 /// `alloc_size` — this is the mitigation for the Windows-Firefox freeze (#191).
 fn round_up_tex(n: u32) -> u32 {
     const GRID: u32 = 128;
-    ((n.max(1) + GRID - 1) / GRID) * GRID
+    n.max(1).div_ceil(GRID) * GRID
 }
 
 /// `true` when the world-XY AABB projects entirely outside the

@@ -572,7 +572,7 @@ pub(crate) fn wire_distances(wire: &WireModel) -> WireDashes {
     if pat_len <= 1e-6 || n < 2 {
         return WireDashes::default();
     }
-    let explicit = wire.pattern_stations.len() >= n + 1;
+    let explicit = wire.pattern_stations.len() > n;
     let (mut dists, has_break, total) = if explicit {
         (
             wire.pattern_stations[..n].to_vec(),

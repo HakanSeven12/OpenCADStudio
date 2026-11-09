@@ -321,7 +321,7 @@ fn tessellate_tolerance(
         |cell: &Cell| -> f32 { (content_width(cell, h, &text_style) + 2.0 * pad).max(min_cell_w) };
     let row_widths: Vec<Vec<f32>> = rows
         .iter()
-        .map(|row| row.iter().map(|c| cell_width(c)).collect())
+        .map(|row| row.iter().map(&cell_width).collect())
         .collect();
 
     let mut box_out: Vec<Vec<[f32; 2]>> = Vec::new();
@@ -575,14 +575,14 @@ impl Grippable for Tolerance {
         if grip_id == 0 {
             match apply {
                 GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x as f64;
-                    self.insertion_point.y += d.y as f64;
-                    self.insertion_point.z += d.z as f64;
+                    self.insertion_point.x += d.x;
+                    self.insertion_point.y += d.y;
+                    self.insertion_point.z += d.z;
                 }
                 GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x as f64;
-                    self.insertion_point.y = p.y as f64;
-                    self.insertion_point.z = p.z as f64;
+                    self.insertion_point.x = p.x;
+                    self.insertion_point.y = p.y;
+                    self.insertion_point.z = p.z;
                 }
             }
         }

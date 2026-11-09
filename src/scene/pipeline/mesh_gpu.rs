@@ -1236,7 +1236,7 @@ fn index_hash(indices: &[u32]) -> u64 {
 fn optimize_triangle_indices(indices: &[u32], vertex_count: usize) -> std::sync::Arc<[u32]> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return meshopt::optimize::optimize_vertex_cache(indices, vertex_count).into();
+        meshopt::optimize::optimize_vertex_cache(indices, vertex_count).into()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -2028,11 +2028,11 @@ pub fn build_mesh_batch_filtered(
         let include_faces = set
             .visual_style
             .as_ref()
-            .map_or(true, |style| style.face_visible());
+            .is_none_or(|style| style.face_visible());
         let include_edges = set
             .visual_style
             .as_ref()
-            .map_or(true, |style| style.edges_visible());
+            .is_none_or(|style| style.edges_visible());
         if !has_face_materials && !has_face_colors {
             let base_color = set
                 .material

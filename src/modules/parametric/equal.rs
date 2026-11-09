@@ -28,6 +28,12 @@ pub struct EqualConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for EqualConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EqualConstraintCommand {
     pub const NO_OBJECT: &'static str = "No object found.";
     pub const INVALID_OBJECT: &'static str =

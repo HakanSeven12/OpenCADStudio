@@ -456,6 +456,12 @@ pub struct UpdateFieldCommand {
     selected: Vec<Handle>,
 }
 
+impl Default for UpdateFieldCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UpdateFieldCommand {
     pub fn new() -> Self {
         Self {

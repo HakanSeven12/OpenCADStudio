@@ -111,7 +111,7 @@ impl OpenCADStudio {
             &self.tabs[i].scene.document,
             handle,
         );
-        let mut sections = dispatch::properties_sectioned(handle, entity, &text_style_names);
+        let mut sections = dispatch::properties_sectioned(handle, entity, text_style_names);
         if compact_solid {
             retain_compact_solid_sections(&mut sections);
         }
@@ -564,7 +564,7 @@ impl OpenCADStudio {
             // block, so seed the list with it and add the arrowhead
             // blocks (leading underscore) present in the drawing.
             // Filled in below from the current arrowhead. (#1820)
-            let arrow_names: Vec<String>;
+
             let block_names: Vec<String> = doc
                 .block_records
                 .iter()
@@ -597,7 +597,8 @@ impl OpenCADStudio {
                 doc,
                 ml.arrowhead_handle.unwrap_or(document::Handle::NULL),
             );
-            arrow_names = crate::entities::arrowheads::options([cur_arrow.as_str()]);
+            let arrow_names: Vec<String> =
+                crate::entities::arrowheads::options([cur_arrow.as_str()]);
             let cur_ltype = ml
                 .line_type_handle
                 .and_then(|h| {
@@ -952,7 +953,7 @@ impl OpenCADStudio {
                         .filter(|br| regular(br))
                         .map(|br| br.name.clone())
                         .collect();
-                    options.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+                    options.sort_by_key(|a| a.to_lowercase());
                     set_row_value(
                         &mut sections,
                         "block",
@@ -3830,7 +3831,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     _ => None,
                 });
             if let Some((handle, gizmo)) = gizmo {
-                handles.extend(std::iter::repeat(handle).take(gizmo.len()));
+                handles.extend(std::iter::repeat_n(handle, gizmo.len()));
                 grips.extend(gizmo);
             }
             let (grips, handles) = apply_grip_budget(grips, handles);
@@ -5669,30 +5670,30 @@ pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
 /// Convert INSUNITS (DXF group 70) to millimetres.
 pub(super) fn insunits_to_mm(code: i16) -> Option<f64> {
     Some(match code {
-        1 => 25.4,                        // Inches
-        2 => 304.8,                       // Feet
-        3 => 1_609_344.0,                 // Miles
-        4 => 1.0,                         // Millimeters
-        5 => 10.0,                        // Centimeters
-        6 => 1_000.0,                     // Meters
-        7 => 1_000_000.0,                 // Kilometers
-        8 => 0.000_025_4,                 // Microinches
-        9 => 0.025_4,                     // Mils
-        10 => 914.4,                      // Yards
-        11 => 1.0e-7,                     // Angstroms
-        12 => 1.0e-6,                     // Nanometers
-        13 => 0.001,                      // Microns
-        14 => 100.0,                      // Decimeters
-        15 => 10_000.0,                   // Decameters
-        16 => 100_000.0,                  // Hectometers
-        17 => 1.0e12,                     // Gigameters
-        18 => 1.495_978_707e14,           // Astronomical Units
-        19 => 9.460_730_472_580_8e18,     // Light Years
-        20 => 3.085_677_581_491_367_3e19, // Parsecs
-        21 => 1_200_000.0 / 3_937.0,      // US Survey Feet
-        22 => 100_000.0 / 3_937.0,        // US Survey Inches
-        23 => 3_600_000.0 / 3_937.0,      // US Survey Yards
-        24 => 6_336_000_000.0 / 3_937.0,  // US Survey Miles
+        1 => 25.4,                       // Inches
+        2 => 304.8,                      // Feet
+        3 => 1_609_344.0,                // Miles
+        4 => 1.0,                        // Millimeters
+        5 => 10.0,                       // Centimeters
+        6 => 1_000.0,                    // Meters
+        7 => 1_000_000.0,                // Kilometers
+        8 => 0.000_025_4,                // Microinches
+        9 => 0.025_4,                    // Mils
+        10 => 914.4,                     // Yards
+        11 => 1.0e-7,                    // Angstroms
+        12 => 1.0e-6,                    // Nanometers
+        13 => 0.001,                     // Microns
+        14 => 100.0,                     // Decimeters
+        15 => 10_000.0,                  // Decameters
+        16 => 100_000.0,                 // Hectometers
+        17 => 1.0e12,                    // Gigameters
+        18 => 1.495_978_707e14,          // Astronomical Units
+        19 => 9.460_730_472_580_8e18,    // Light Years
+        20 => 3.085_677_581_491_367e19,  // Parsecs
+        21 => 1_200_000.0 / 3_937.0,     // US Survey Feet
+        22 => 100_000.0 / 3_937.0,       // US Survey Inches
+        23 => 3_600_000.0 / 3_937.0,     // US Survey Yards
+        24 => 6_336_000_000.0 / 3_937.0, // US Survey Miles
         _ => return None,
     })
 }

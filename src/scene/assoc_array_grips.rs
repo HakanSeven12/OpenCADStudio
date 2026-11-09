@@ -412,8 +412,7 @@ impl Setup {
                 let world = if columns > 1 {
                     at(&self.points, [columns - 1, 0, 0])?
                 } else {
-                    let along = self.path_point(spacing)?;
-                    along
+                    self.path_point(spacing)?
                 };
                 let before = if columns > 1 {
                     at(&self.points, [columns - 2, 0, 0])?
@@ -680,9 +679,11 @@ impl Drag {
                         Vec::new()
                     }
                 } else if *spacing_param == "Radius" {
-                    (world > 1e-12)
-                        .then(|| vec![(*spacing_param, world / unit)])
-                        .unwrap_or_default()
+                    if world > 1e-12 {
+                        vec![(*spacing_param, world / unit)]
+                    } else {
+                        Default::default()
+                    }
                 } else {
                     vec![(*spacing_param, world / unit)]
                 }
@@ -726,9 +727,13 @@ impl Drag {
                             vec![("Items", items), ("FillAngle", spacing * (items - 1.0))]
                         }
                     }
-                    Kind::ItemCount => (angle > 1e-9)
-                        .then(|| vec![("FillAngle", angle)])
-                        .unwrap_or_default(),
+                    Kind::ItemCount => {
+                        if angle > 1e-9 {
+                            vec![("FillAngle", angle)]
+                        } else {
+                            Default::default()
+                        }
+                    }
                     _ => {
                         if angle < 1e-9 || *count < 2.0 {
                             return Vec::new();

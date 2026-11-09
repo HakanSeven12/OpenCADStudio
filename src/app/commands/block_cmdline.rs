@@ -450,9 +450,8 @@ impl OpenCADStudio {
                 mtext.common.xdictionary_handle = None;
                 mtext.common.reactors.clear();
             }
-            match doc.add_entity(EntityType::AttributeDefinition(definition)) {
-                Ok(handle) => new_handles.push(handle),
-                Err(_) => {}
+            if let Ok(handle) = doc.add_entity(EntityType::AttributeDefinition(definition)) {
+                new_handles.push(handle)
             }
         }
         if let Some(record) = doc.block_records.get_mut(&name) {

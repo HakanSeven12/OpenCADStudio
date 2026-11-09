@@ -636,8 +636,7 @@ impl OpenCADStudio {
                         .map(f64::to_degrees),
                 };
                 let invalid = (!state.insert_on_screen && placement.insert.is_none())
-                    || (!state.scale_on_screen
-                        && placement.scale.is_none_or(|s| s.iter().any(|v| *v == 0.0)))
+                    || (!state.scale_on_screen && placement.scale.is_none_or(|s| s.contains(&0.0)))
                     || (!state.rotation_on_screen && placement.rotation.is_none());
                 if invalid || state.path.is_empty() {
                     self.command_line

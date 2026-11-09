@@ -37,6 +37,12 @@ pub struct DiameterDimensionCommand {
     source_handle: Option<Handle>,
 }
 
+impl Default for DiameterDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiameterDimensionCommand {
     pub fn new() -> Self {
         Self {

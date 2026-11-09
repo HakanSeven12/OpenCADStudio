@@ -180,6 +180,12 @@ pub struct ArcLengthDimensionCommand {
     leader_enabled: bool,
 }
 
+impl Default for ArcLengthDimensionCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArcLengthDimensionCommand {
     pub fn new() -> Self {
         Self {

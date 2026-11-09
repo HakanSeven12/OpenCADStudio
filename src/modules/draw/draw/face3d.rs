@@ -52,6 +52,12 @@ pub struct Face3dCommand {
     pending_invisible: bool,
 }
 
+impl Default for Face3dCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Face3dCommand {
     pub fn new() -> Self {
         Self {

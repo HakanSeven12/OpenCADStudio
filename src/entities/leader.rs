@@ -170,13 +170,11 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
 
                 let delta = match apply {
                     GripApply::Absolute(p) => document::types::Vector3::new(
-                        p.x as f64 - old_elbow.x,
-                        p.y as f64 - old_elbow.y,
-                        p.z as f64 - old_elbow.z,
+                        p.x - old_elbow.x,
+                        p.y - old_elbow.y,
+                        p.z - old_elbow.z,
                     ),
-                    GripApply::Translate(d) => {
-                        document::types::Vector3::new(d.x as f64, d.y as f64, d.z as f64)
-                    }
+                    GripApply::Translate(d) => document::types::Vector3::new(d.x, d.y, d.z),
                 };
 
                 leader.vertices[n - 2].x = old_elbow.x + delta.x;
@@ -197,10 +195,10 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
 
                 match apply {
                     GripApply::Absolute(p) => {
-                        leader.vertices[n - 1].x = p.x as f64;
+                        leader.vertices[n - 1].x = p.x;
                     }
                     GripApply::Translate(d) => {
-                        leader.vertices[n - 1].x += d.x as f64;
+                        leader.vertices[n - 1].x += d.x;
                     }
                 }
 
@@ -213,21 +211,19 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
         if let Some(v) = leader.vertices.get_mut(grip_id) {
             match apply {
                 GripApply::Absolute(p) => {
-                    v.x = p.x as f64;
-                    v.y = p.y as f64;
-                    v.z = p.z as f64;
+                    v.x = p.x;
+                    v.y = p.y;
+                    v.z = p.z;
                 }
                 GripApply::Translate(d) => {
-                    v.x += d.x as f64;
-                    v.y += d.y as f64;
-                    v.z += d.z as f64;
+                    v.x += d.x;
+                    v.y += d.y;
+                    v.z += d.z;
                 }
             }
         }
     } else if let GripApply::Translate(d) = apply {
-        leader.translate(document::types::Vector3::new(
-            d.x as f64, d.y as f64, d.z as f64,
-        ));
+        leader.translate(document::types::Vector3::new(d.x, d.y, d.z));
     }
 }
 

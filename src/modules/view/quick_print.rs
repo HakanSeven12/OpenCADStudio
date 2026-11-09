@@ -11,6 +11,12 @@ pub struct QuickPrintCommand {
     handles: Vec<Handle>,
 }
 
+impl Default for QuickPrintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QuickPrintCommand {
     pub fn new() -> Self {
         Self {

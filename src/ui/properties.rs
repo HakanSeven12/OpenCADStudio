@@ -169,7 +169,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
                             Point::new(segment[0][0] as f32, bounds.height - segment[0][1] as f32),
                             Point::new(segment[1][0] as f32, bounds.height - segment[1][1] as f32),
                         ),
-                        stroke.clone(),
+                        stroke,
                     );
                 }
             }
@@ -1169,7 +1169,7 @@ impl PropertiesPanel {
             PropValue::EditChoice { value, options } => {
                 self.render_edit_choice_row(label, prop.field, value, options)
             }
-            PropValue::BoolToggle { field, value } => render_bool_row(label, *field, *value),
+            PropValue::BoolToggle { field, value } => render_bool_row(label, field, *value),
             PropValue::Stepper { display, .. } => render_stepper_row(label, display),
             PropValue::EditText(val) | PropValue::PlainText(val) => {
                 self.render_edit_row(label, prop.field, val)
@@ -1733,10 +1733,7 @@ impl PropertiesPanel {
                 .style(button::subtle)
                 .padding([2, 6])
                 .width(Length::Fill);
-            if typed
-                .as_deref()
-                .map_or(false, |t| t.eq_ignore_ascii_case(opt.as_str()))
-            {
+            if typed.is_some_and(|t| t.eq_ignore_ascii_case(opt.as_str())) {
                 initial_selected = Some(rows.len());
             }
             rows.push(DropdownRow::item(btn, value, msg));

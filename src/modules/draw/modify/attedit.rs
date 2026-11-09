@@ -18,6 +18,12 @@ pub struct AtteditCommand {
     picked: Option<document::Handle>,
 }
 
+impl Default for AtteditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AtteditCommand {
     pub fn new() -> Self {
         Self { picked: None }

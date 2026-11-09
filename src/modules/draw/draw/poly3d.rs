@@ -30,6 +30,12 @@ pub struct Poly3dCommand {
     points: Vec<DVec3>,
 }
 
+impl Default for Poly3dCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Poly3dCommand {
     pub fn new() -> Self {
         Self { points: Vec::new() }

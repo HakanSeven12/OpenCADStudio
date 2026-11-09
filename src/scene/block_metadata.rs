@@ -12,7 +12,7 @@ fn flag(data: Option<&ExtendedData>, app: &str) -> Option<bool> {
             XDataValue::Integer16(value) => Some(*value != 0),
             _ => None,
         })
-        .last()
+        .next_back()
 }
 
 fn link(data: Option<&ExtendedData>) -> Option<(String, String)> {

@@ -962,7 +962,7 @@ fn small_button<'a>(
                 .style(tip_style);
 
             PosReport::new(
-                *id,
+                id,
                 split_outline(
                     row![icon_with_tip, arr_with_tip]
                         .spacing(0)
@@ -1064,7 +1064,7 @@ fn small_button<'a>(
             .spacing(0)
             .width(Fill)
             .height(ROW_H);
-            PosReport::new(*id, split_outline(parts.into())).into()
+            PosReport::new(id, split_outline(parts.into())).into()
         }
 
         _ => text("").into(),
@@ -1374,7 +1374,7 @@ fn large_item<'a>(
             icon,
             items,
             default,
-        } => render_large_dropdown(*id, *icon, Some(*label), items, *default, ctx),
+        } => render_large_dropdown(id, *icon, Some(*label), items, default, ctx),
 
         RibbonItem::LabeledDropdown {
             id,
@@ -1382,7 +1382,7 @@ fn large_item<'a>(
             icon,
             items,
             default,
-        } => render_large_dropdown(*id, *icon, Some(*label), items, *default, ctx),
+        } => render_large_dropdown(id, *icon, Some(*label), items, default, ctx),
 
         RibbonItem::ToolGrid { columns } => columns
             .iter()
@@ -1413,7 +1413,7 @@ fn large_item<'a>(
             icon,
             items,
             default,
-        } => render_large_dropdown(*id, *icon, None, items, *default, ctx),
+        } => render_large_dropdown(id, *icon, None, items, default, ctx),
 
         RibbonItem::LayerComboGroup { row2, row3 } => {
             const TOOL_BUTTON_W: f32 = 26.0;

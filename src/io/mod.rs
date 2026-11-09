@@ -1686,7 +1686,7 @@ pub(crate) fn resolve_image_file(raw: &str, base_dir: Option<&Path>) -> Option<S
     if joined.is_file() {
         return Some(joined.to_string_lossy().into_owned());
     }
-    let name = raw.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(raw);
+    let name = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
     let cand = base_dir.join(name);
     if cand.is_file() {
         return Some(cand.to_string_lossy().into_owned());

@@ -612,14 +612,13 @@ impl<'a> RenderSceneGraph<'a> {
     /// layer of the reference that places it.
     fn document_visible(&self, entity: &EntityType, member: bool) -> bool {
         let common = entity.common();
-        if crate::scene::block_construction::is_construction(common) {
-            if member
+        if crate::scene::block_construction::is_construction(common)
+            && (member
                 || !self
                     .visibility_reveal
-                    .is_some_and(|handles| handles.contains(&common.handle))
-            {
-                return false;
-            }
+                    .is_some_and(|handles| handles.contains(&common.handle)))
+        {
+            return false;
         }
         if common.invisible
             && !self

@@ -20,6 +20,12 @@ pub struct FixConstraintCommand {
     step: Step,
 }
 
+impl Default for FixConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FixConstraintCommand {
     pub const INVALID_OBJECT: &'static str =
         "Invalid selection for Fixed. Select a line, polyline segment, circle, arc, ellipse or spline.";

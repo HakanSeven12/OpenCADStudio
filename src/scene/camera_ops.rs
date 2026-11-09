@@ -478,9 +478,9 @@ impl Scene {
             z: 0.0,
         };
         view.target = Vector3 {
-            x: cam.target.x as f64,
-            y: cam.target.y as f64,
-            z: cam.target.z as f64,
+            x: cam.target.x,
+            y: cam.target.y,
+            z: cam.target.z,
         };
         view.direction = Vector3 {
             x: eye_dir.x as f64,
@@ -1268,7 +1268,7 @@ impl Scene {
             .enumerate()
             .find_map(|(index, entry)| {
                 (is_active_vport_name(&entry.name)
-                    && bounds.map_or(true, |(ll, ur)| Self::vport_rect_matches(entry, ll, ur)))
+                    && bounds.is_none_or(|(ll, ur)| Self::vport_rect_matches(entry, ll, ur)))
                 .then_some(index)
             })
     }
@@ -1584,9 +1584,9 @@ impl Scene {
             true
         } else {
             let target_wcs = document::types::Vector3 {
-                x: cam.target.x as f64,
-                y: cam.target.y as f64,
-                z: cam.target.z as f64,
+                x: cam.target.x,
+                y: cam.target.y,
+                z: cam.target.z,
             };
 
             // The sheet viewport entity is the authoritative paper-space view;

@@ -1713,11 +1713,7 @@ impl OpenCADStudio {
                 || cmd.starts_with("OBJECTSCALE ADD ")
                 || cmd.starts_with("OBJECTSCALE DELETE ") =>
             {
-                let adding = if cmd == "OBJECTSCALE ADD" || cmd.starts_with("OBJECTSCALE ADD ") {
-                    true
-                } else {
-                    false
-                };
+                let adding = cmd == "OBJECTSCALE ADD" || cmd.starts_with("OBJECTSCALE ADD ");
                 let explicit: Option<String> = if adding {
                     cmd.strip_prefix("OBJECTSCALE ADD")
                         .map(|r| r.trim().to_string())

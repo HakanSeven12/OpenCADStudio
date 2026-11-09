@@ -27,6 +27,12 @@ pub fn tool() -> ToolDef {
 
 pub struct DdeditCommand;
 
+impl Default for DdeditCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DdeditCommand {
     pub fn new() -> Self {
         Self

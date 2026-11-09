@@ -286,9 +286,7 @@ fn basepoint_target(
     let node = basepoint.parameter.parameter.element.eval.node_id;
     let mut bindings = action.codes.iter().filter(|binding| binding.code == node);
     if !action.action.action_ids.contains(&node)
-        || !bindings
-            .next()
-            .is_some_and(|binding| binding.indexes == [0])
+        || bindings.next().is_none_or(|binding| binding.indexes != [0])
         || bindings.next().is_some()
     {
         return Err("The Stretch action has an invalid Base Point binding.");

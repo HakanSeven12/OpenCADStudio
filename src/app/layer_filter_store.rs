@@ -198,7 +198,7 @@ pub(crate) fn write_layer_filters(document: &mut Document, filters: &[StoredLaye
             XRecordEntry::string(1, KIND),
             XRecordEntry::new(90, XRecordValue::Int32(VERSION)),
             XRecordEntry::string(300, &stored.name),
-            XRecordEntry::string(301, &to_expression(&stored.filter)),
+            XRecordEntry::string(301, to_expression(&stored.filter)),
         ];
         document
             .objects

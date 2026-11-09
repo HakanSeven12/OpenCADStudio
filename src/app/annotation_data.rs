@@ -503,7 +503,7 @@ fn data_link_choices(doc: &Document) -> Vec<DataLinkChoice> {
     links
 }
 
-fn data_link<'a>(doc: &'a Document, handle: Handle) -> Option<&'a DataLink> {
+fn data_link(doc: &Document, handle: Handle) -> Option<&DataLink> {
     match doc.objects.get(&handle) {
         Some(ObjectType::ClassObject(object)) => match &object.data {
             ClassObjectData::DataLink(link) => Some(link),
@@ -513,7 +513,7 @@ fn data_link<'a>(doc: &'a Document, handle: Handle) -> Option<&'a DataLink> {
     }
 }
 
-fn data_link_mut<'a>(doc: &'a mut Document, handle: Handle) -> Option<&'a mut DataLink> {
+fn data_link_mut(doc: &mut Document, handle: Handle) -> Option<&mut DataLink> {
     match doc.objects.get_mut(&handle) {
         Some(ObjectType::ClassObject(object)) => match &mut object.data {
             ClassObjectData::DataLink(link) => Some(link),

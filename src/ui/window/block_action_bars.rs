@@ -189,5 +189,4 @@ pub(crate) fn view(
                 ..Default::default()
             }),
     )
-    .into()
 }

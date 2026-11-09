@@ -547,22 +547,22 @@ fn apply_grip(line: &mut Line, grip_id: usize, apply: GripApply) {
     }
     match (grip_id, apply) {
         (0, GripApply::Absolute(p)) => {
-            line.start.x = p.x as f64;
-            line.start.y = p.y as f64;
-            line.start.z = p.z as f64;
+            line.start.x = p.x;
+            line.start.y = p.y;
+            line.start.z = p.z;
         }
         (1, GripApply::Absolute(p)) => {
-            line.end.x = p.x as f64;
-            line.end.y = p.y as f64;
-            line.end.z = p.z as f64;
+            line.end.x = p.x;
+            line.end.y = p.y;
+            line.end.z = p.z;
         }
         (2, GripApply::Translate(d)) => {
-            line.start.x += d.x as f64;
-            line.start.y += d.y as f64;
-            line.start.z += d.z as f64;
-            line.end.x += d.x as f64;
-            line.end.y += d.y as f64;
-            line.end.z += d.z as f64;
+            line.start.x += d.x;
+            line.start.y += d.y;
+            line.start.z += d.z;
+            line.end.x += d.x;
+            line.end.y += d.y;
+            line.end.z += d.z;
         }
         _ => {}
     }

@@ -15,6 +15,12 @@ pub struct DistCommand {
     plane: WorkingPlane,
 }
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/measure.svg"));
+impl Default for DistCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DistCommand {
     pub fn new() -> Self {
         Self {

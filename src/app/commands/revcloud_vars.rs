@@ -32,7 +32,7 @@ impl OpenCADStudio {
             ),
             _ => return false,
         };
-        let prompt = crate::ui::command_line::value_prompt(&name, &current);
+        let prompt = crate::ui::command_line::value_prompt(name, &current);
         let second_prompt = || crate::tr!("revcloud-cmd", "second-point");
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
             if first_point.is_some() {

@@ -104,17 +104,16 @@ impl Face {
         // LFF substitutes only cover names we can't load.
         if font_name.to_ascii_lowercase().ends_with(".shx")
             && std::path::Path::new(font_name).is_file()
+            && shx::font_metrics(font_name).is_some()
         {
-            if shx::font_metrics(font_name).is_some() {
-                let word = shx::font_glyph(font_name, ' ' as u16)
-                    .map(|g| g.advance)
-                    .filter(|a| *a > 0.0)
-                    .unwrap_or(4.5);
-                return Face::Shx {
-                    path: font_name.to_string(),
-                    word,
-                };
-            }
+            let word = shx::font_glyph(font_name, ' ' as u16)
+                .map(|g| g.advance)
+                .filter(|a| *a > 0.0)
+                .unwrap_or(4.5);
+            return Face::Shx {
+                path: font_name.to_string(),
+                word,
+            };
         }
         let is_builtin = lff::is_builtin(font_name);
         // A missing `.shx` file draws with a stroke substitute, never with a

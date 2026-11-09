@@ -398,6 +398,12 @@ pub struct RectCommand {
     hatch: bool,
 }
 
+impl Default for RectCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RectCommand {
     /// The rectangle HATCH draws as a boundary, with the same modes.
     pub fn for_hatch() -> Self {
@@ -996,6 +1002,12 @@ pub struct RectRotCommand {
     plane: WorkingPlane,
 }
 
+impl Default for RectRotCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RectRotCommand {
     pub fn new() -> Self {
         Self {
@@ -1122,6 +1134,12 @@ pub struct RectCenCommand {
     plane: WorkingPlane,
 }
 
+impl Default for RectCenCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RectCenCommand {
     pub fn new() -> Self {
         Self {
@@ -1210,6 +1228,12 @@ thread_local! {
     /// The inscribed/circumscribed choice is offered as the default next
     /// time (commands run on the UI thread).
     static POLYGON_CIRCUMSCRIBED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+impl Default for PolyCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PolyCommand {
@@ -1431,6 +1455,12 @@ pub struct PolyCCommand {
     plane: WorkingPlane,
 }
 
+impl Default for PolyCCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PolyCCommand {
     pub fn new() -> Self {
         Self {
@@ -1556,6 +1586,12 @@ pub struct PolyECommand {
     step: u8,
     a: DVec3,
     plane: WorkingPlane,
+}
+
+impl Default for PolyECommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PolyECommand {

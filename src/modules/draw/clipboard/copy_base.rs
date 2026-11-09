@@ -10,6 +10,12 @@ use crate::command::{CadCommand, CmdResult};
 
 pub struct CopyBaseCommand;
 
+impl Default for CopyBaseCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CopyBaseCommand {
     pub fn new() -> Self {
         Self

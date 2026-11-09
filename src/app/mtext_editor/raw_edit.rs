@@ -515,7 +515,7 @@ fn only_format_changed(kind: MTextFmt, before: &SpanProperties, after: &SpanProp
             let Some(new) = normalized.font.as_ref() else {
                 return false;
             };
-            let same_face = before.font.as_ref().map_or(true, |old| {
+            let same_face = before.font.as_ref().is_none_or(|old| {
                 old.name.trim().is_empty() || (old.name == new.name && old.italic == new.italic)
             });
             if !same_face {

@@ -10,6 +10,12 @@ pub struct ConcentricConstraintCommand {
     picked_entity: Option<EntityType>,
 }
 
+impl Default for ConcentricConstraintCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConcentricConstraintCommand {
     pub fn new() -> Self {
         Self {

@@ -21,6 +21,12 @@ pub struct RayCommand {
     base: Option<DVec3>,
 }
 
+impl Default for RayCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RayCommand {
     pub fn new() -> Self {
         Self { base: None }
@@ -146,6 +152,12 @@ enum XLineMode {
     OffsetDistance,
     OffsetPick,
     OffsetSide,
+}
+
+impl Default for XLineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl XLineCommand {

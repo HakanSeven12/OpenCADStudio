@@ -25,6 +25,12 @@ pub struct Mesh3dCommand {
     points: Vec<DVec3>,
 }
 
+impl Default for Mesh3dCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mesh3dCommand {
     pub fn new() -> Self {
         Self {

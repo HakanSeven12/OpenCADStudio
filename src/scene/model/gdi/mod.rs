@@ -152,6 +152,12 @@ struct DcSnapshot {
     clip: (f32, f32, f32, f32),
 }
 
+impl Default for Dc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dc {
     pub fn new() -> Self {
         Dc {

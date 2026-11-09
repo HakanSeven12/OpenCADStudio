@@ -35,7 +35,7 @@ impl std::error::Error for LineTooLong {}
 pub fn is_line_too_long(error: &std::io::Error) -> bool {
     error
         .get_ref()
-        .map_or(false, |inner| inner.is::<LineTooLong>())
+        .is_some_and(|inner| inner.is::<LineTooLong>())
 }
 
 /// `BufRead::read_line` capped at `cap` bytes — the whole line including its

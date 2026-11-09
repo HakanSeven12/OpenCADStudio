@@ -355,7 +355,7 @@ fn is_cancel_for(line: &str, mkey: &str) -> bool {
     message
         .get("params")
         .and_then(|params| params.get("requestId"))
-        .is_some_and(|id| id.to_string() == mkey)
+        .is_some_and(|id| mcp_key(id) == mkey)
 }
 
 fn wait_deadline(op: &str, wait_seconds: f64) -> Duration {
@@ -1967,7 +1967,7 @@ fn read_resource(
                         if result["ok"].as_bool() != Some(true)
                             || result["status"].as_str() != Some("completed")
                         {
-                            return Err(result.to_string().into());
+                            return Err(result.to_string());
                         }
                         let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
                         let _ = std::fs::remove_file(path);
@@ -2200,7 +2200,7 @@ fn call_tool(
             let scope = arguments["scope"].as_str().unwrap_or("viewport");
             let max_dimension = arguments["max_dimension"].as_u64().unwrap_or(1600);
             let delivery = arguments["delivery"].as_str().unwrap_or("inline");
-            refuse_retired_capture_parameters(&arguments).map_err(CallError::from)?;
+            refuse_retired_capture_parameters(arguments).map_err(CallError::from)?;
             let tile = arguments.get("tile");
             let want_manifest = arguments["pyramid_manifest"].as_bool().unwrap_or(false);
 
@@ -2825,9 +2825,7 @@ fn handle_message(
     }
     let id = message.get("id").cloned();
     let method = message.get("method").and_then(Value::as_str)?;
-    if id.is_none() {
-        return None;
-    }
+    id.as_ref()?;
     let id = id.unwrap();
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
     if let Some(requested) = params["_meta"]["io.modelcontextprotocol/protocolVersion"].as_str() {
@@ -3086,7 +3084,7 @@ pub fn sync_agent_tool_schemas() -> bool {
         return false;
     }
     let base_dir = mcp_root.join("opencadstudio");
-    if let Err(_) = std::fs::create_dir_all(&base_dir) {
+    if std::fs::create_dir_all(&base_dir).is_err() {
         return false;
     }
 

@@ -65,7 +65,7 @@ fn item_face(item: &RibbonItem, want: &str) -> Option<(&'static str, IconKind)> 
             ModuleEvent::Command(cmd) => cmd.eq_ignore_ascii_case(want),
             _ => false,
         };
-        (runs || tool.id.eq_ignore_ascii_case(want)).then(|| (tool.label, tool.icon))
+        (runs || tool.id.eq_ignore_ascii_case(want)).then_some((tool.label, tool.icon))
     };
     match item {
         RibbonItem::Tool(t) | RibbonItem::LabeledTool(t) | RibbonItem::LargeTool(t) => tool_face(t),

@@ -33,6 +33,12 @@ pub struct DimCenterCommand {
     picked: Option<EntityType>,
 }
 
+impl Default for DimCenterCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DimCenterCommand {
     pub fn new() -> Self {
         Self { picked: None }
@@ -281,6 +287,12 @@ pub struct CenterReassociateCommand {
     target: Option<(Handle, bool)>,
     first: Option<(Handle, DVec3)>,
     picked: Option<EntityType>,
+}
+
+impl Default for CenterReassociateCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CenterReassociateCommand {

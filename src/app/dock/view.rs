@@ -312,7 +312,7 @@ impl OpenCADStudio {
                     ]
                     .into()
                 } else {
-                    glyph.into()
+                    glyph
                 };
                 let cell = container(glyph)
                     .center_x(Length::Fixed(STRIP_CELL_H))

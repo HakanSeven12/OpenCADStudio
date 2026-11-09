@@ -241,8 +241,8 @@ impl OpenCADStudio {
                             .filter(|f| f.is_finite())
                             .ok_or_else(|| failure("invalid_axis", "mirror axis points must be finite"))
                     };
-                    let p1 = glam::DVec3::new(coord(&a, 0)?, coord(&a, 1)?, 0.0);
-                    let p2 = glam::DVec3::new(coord(&b, 0)?, coord(&b, 1)?, 0.0);
+                    let p1 = glam::DVec3::new(coord(a, 0)?, coord(a, 1)?, 0.0);
+                    let p2 = glam::DVec3::new(coord(b, 0)?, coord(b, 1)?, 0.0);
                     if p1 == p2 {
                         return Err(failure(
                             "invalid_axis",

@@ -54,36 +54,33 @@ impl canvas::Program<Message> for GlyphCanvas {
             2 => {
                 frame.stroke(
                     &line(Point::new(cx - r, cy), Point::new(cx + r, cy)),
-                    stroke.clone(),
+                    stroke,
                 );
                 frame.stroke(
                     &line(Point::new(cx, cy - r), Point::new(cx, cy + r)),
-                    stroke.clone(),
+                    stroke,
                 );
             }
             3 => {
                 frame.stroke(
                     &line(Point::new(cx - r, cy - r), Point::new(cx + r, cy + r)),
-                    stroke.clone(),
+                    stroke,
                 );
                 frame.stroke(
                     &line(Point::new(cx - r, cy + r), Point::new(cx + r, cy - r)),
-                    stroke.clone(),
+                    stroke,
                 );
             }
-            4 => frame.stroke(
-                &line(Point::new(cx, cy), Point::new(cx, cy - r)),
-                stroke.clone(),
-            ),
+            4 => frame.stroke(&line(Point::new(cx, cy), Point::new(cx, cy - r)), stroke),
             _ => {}
         }
         if self.mode & 32 != 0 {
-            frame.stroke(&canvas::Path::circle(Point::new(cx, cy), r), stroke.clone());
+            frame.stroke(&canvas::Path::circle(Point::new(cx, cy), r), stroke);
         }
         if self.mode & 64 != 0 {
             let sq =
                 canvas::Path::rectangle(Point::new(cx - r, cy - r), Size::new(2.0 * r, 2.0 * r));
-            frame.stroke(&sq, stroke.clone());
+            frame.stroke(&sq, stroke);
         }
         vec![frame.into_geometry()]
     }

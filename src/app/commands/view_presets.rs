@@ -517,7 +517,7 @@ impl OpenCADStudio {
             preview: None,
             viewport: {
                 let (width, height) = self.tabs[i].scene.selection.borrow().view.vp_size;
-                [width as f32, height as f32]
+                [width, height]
             },
             canvas: [0, 1, 2].map(|k| (canvas[k].clamp(0.0, 1.0) * 255.0).round() as u8),
         };

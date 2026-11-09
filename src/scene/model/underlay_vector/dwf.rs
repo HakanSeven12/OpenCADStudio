@@ -1311,10 +1311,7 @@ mod xps {
         let cy1 = -coef * ry * x1 / rx;
         let cx = c * cx1 - s * cy1 + (p0[0] + p1[0]) / 2.0;
         let cy = s * cx1 + c * cy1 + (p0[1] + p1[1]) / 2.0;
-        let ang = |ux: f64, uy: f64, vx: f64, vy: f64| {
-            let a = (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
-            a
-        };
+        let ang = |ux: f64, uy: f64, vx: f64, vy: f64| (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
         let t1 = ang(1.0, 0.0, (x1 - cx1) / rx, (y1 - cy1) / ry);
         let mut dt = ang(
             (x1 - cx1) / rx,

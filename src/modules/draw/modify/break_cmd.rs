@@ -169,7 +169,7 @@ fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
             } else {
                 segment.source_index
             };
-            let mut output = p.vertices[source].clone();
+            let mut output = p.vertices[source];
             output.location.x = vertex.position[0];
             output.location.y = vertex.position[1];
             if !last || segment.to != 1.0 {
@@ -272,6 +272,12 @@ pub struct BreakInteractiveCommand {
     p1: Option<DVec3>,
 }
 
+impl Default for BreakInteractiveCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BreakInteractiveCommand {
     pub fn new() -> Self {
         Self {
@@ -365,6 +371,12 @@ impl CadCommand for BreakInteractiveCommand {
 
 pub struct BreakAtPointCommand {
     target: Option<Handle>,
+}
+
+impl Default for BreakAtPointCommand {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BreakAtPointCommand {

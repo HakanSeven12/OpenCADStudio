@@ -42,6 +42,12 @@ pub struct LineCommand {
     deferred_tangent: Option<(TangentObject, DVec3)>,
 }
 
+impl Default for LineCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LineCommand {
     pub fn new() -> Self {
         Self {

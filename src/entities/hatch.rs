@@ -227,7 +227,7 @@ pub fn pack_background_color(c: &document::types::Color) -> i32 {
     (match c {
         Color::ByLayer => 0xC0000000u32,
         Color::ByBlock => 0xC1000000u32,
-        Color::Index(i) => 0xC3000000u32 | (*i as u8 as u32),
+        Color::Index(i) => 0xC3000000u32 | (*i as u32),
         _ => {
             let (r, g, b) = c.rgb().unwrap_or((255, 255, 255));
             0xC2000000u32 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
@@ -1131,7 +1131,7 @@ fn boundary_points(hatch: &Hatch) -> Vec<(BoundaryPoint, [f64; 2])> {
         }
         // A closed chain: the last line ends where the first one starts.
         if let Some(last) = pending_end {
-            let end = line(last).unwrap().end.clone();
+            let end = line(last).unwrap().end;
             match first_start.map(|slot| (slot, &mut out[slot])) {
                 Some((
                     _,
@@ -1251,14 +1251,14 @@ fn edit_boundary_vertex(
             match action {
                 A::AddVertex => {
                     if vertex + 1 == n && !polyline.is_closed {
-                        let last = polyline.vertices[vertex].clone();
+                        let last = polyline.vertices[vertex];
                         polyline
                             .vertices
                             .push(document::types::Vector3::new(last.x, last.y, 0.0));
                         return;
                     }
-                    let a = polyline.vertices[vertex].clone();
-                    let b = polyline.vertices[(vertex + 1) % n].clone();
+                    let a = polyline.vertices[vertex];
+                    let b = polyline.vertices[(vertex + 1) % n];
                     let (cx, cy) = (b.x - a.x, b.y - a.y);
                     // The arc's midpoint sits off the chord by the sagitta,
                     // to the right of a positive (counter-clockwise) bulge.
@@ -1294,8 +1294,8 @@ fn edit_boundary_vertex(
                         (line.start.y + line.end.y) * 0.5,
                     );
                     let tail = document::entities::LineEdge {
-                        start: mid.clone(),
-                        end: line.end.clone(),
+                        start: mid,
+                        end: line.end,
                     };
                     line.end = mid;
                     edges.insert(edge + 1, BoundaryEdge::Line(tail));

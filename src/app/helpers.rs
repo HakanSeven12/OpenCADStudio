@@ -54,7 +54,7 @@ pub(crate) fn parse_coord(text: &str) -> Option<(glam::DVec3, CoordKind)> {
         }
         // A cylindrical `distance<angle,z` splits on the comma — but a
         // surveyor's bearing has none, so nothing here can eat one.
-        let (angle, z) = match angles.split_once(|c| c == ',' || c == ';') {
+        let (angle, z) = match angles.split_once([',', ';']) {
             Some((angle, z)) => (parse_direction(angle)?, parse_length(z)?),
             None => (parse_direction(angles)?, 0.0),
         };
@@ -64,7 +64,7 @@ pub(crate) fn parse_coord(text: &str) -> Option<(glam::DVec3, CoordKind)> {
         ));
     }
     let parts: Vec<f64> = rest
-        .split(|c| c == ',' || c == ';')
+        .split([',', ';'])
         .map(parse_length)
         .collect::<Option<Vec<f64>>>()?;
     match parts.as_slice() {

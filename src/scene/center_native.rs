@@ -502,12 +502,16 @@ fn export_one(document: &mut Document, handle: Handle) {
     for (index, dependency) in geometry.iter().enumerate() {
         let source = &sources[index];
         // Dependencies on the same object are chained to each other.
-        let previous = (index > 0 && sources[index - 1].handle == source.handle)
-            .then(|| geometry[index - 1])
-            .unwrap_or(Handle::NULL);
-        let next = (index + 1 < sources.len() && sources[index + 1].handle == source.handle)
-            .then(|| geometry[index + 1])
-            .unwrap_or(Handle::NULL);
+        let previous = if index > 0 && sources[index - 1].handle == source.handle {
+            geometry[index - 1]
+        } else {
+            Handle::NULL
+        };
+        let next = if index + 1 < sources.len() && sources[index + 1].handle == source.handle {
+            geometry[index + 1]
+        } else {
+            Handle::NULL
+        };
         document.objects.insert(
             *dependency,
             associative(

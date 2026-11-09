@@ -653,9 +653,7 @@ impl CadCommand for DimBaselineCommand {
             self.offset_pending = true;
             return Some(CmdResult::NeedPoint);
         }
-        if self.base.is_none() {
-            return None;
-        }
+        self.base.as_ref()?;
         match word.as_str() {
             "S" | "SELECT" => {
                 self.base = None;

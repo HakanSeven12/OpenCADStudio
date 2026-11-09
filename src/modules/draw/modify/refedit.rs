@@ -706,6 +706,12 @@ pub struct RefSetCommand {
     selected: Vec<Handle>,
 }
 
+impl Default for RefSetCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RefSetCommand {
     pub fn new() -> Self {
         Self {
@@ -794,6 +800,12 @@ impl CadCommand for RefSetCommand {
 
 /// `Enter option [Save/Discard reference changes] <Save>:`
 pub struct RefCloseCommand;
+
+impl Default for RefCloseCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl RefCloseCommand {
     pub fn new() -> Self {

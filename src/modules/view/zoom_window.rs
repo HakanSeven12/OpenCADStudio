@@ -24,6 +24,12 @@ pub struct ZoomWindowCommand {
     scale_prompt: bool,
 }
 
+impl Default for ZoomWindowCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ZoomWindowCommand {
     pub fn new() -> Self {
         Self {
@@ -100,7 +106,7 @@ impl CadCommand for ZoomWindowCommand {
             upper
                 if upper.ends_with('X')
                     || upper.ends_with("XP")
-                    || crate::app::expr_eval::eval_number(&upper).is_some() =>
+                    || crate::app::expr_eval::eval_number(upper).is_some() =>
             {
                 return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
             }

@@ -4983,7 +4983,7 @@ mod tests {
         // that lacks fonts asks for them, and the second one's prompt used to
         // close the first's and then itself: the prompt is a tool of its
         // drawing, and leaving that drawing closed every open tool of its
-        // kind, the fresh one included. (#2635)
+        // kind, the fresh one included.
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         let dir = std::env::temp_dir();

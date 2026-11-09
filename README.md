@@ -112,6 +112,12 @@ Choose one of these signed packages, `x86_64` for Intel and AMD processors or `a
 - `OpenCADStudio-*-windows-x86_64-installer.msi` / `…-windows-arm64-installer.msi` — recommended installer with Start Menu shortcuts, DWG/DXF file associations, and drawing thumbnails.
 - `OpenCADStudio-*-windows-x86_64-portable.exe` / `…-windows-arm64-portable.exe` — standalone application; no installation required.
 
+Or install via Windows Package Manager:
+
+```powershell
+winget install HakanSeven.OpenCADStudio
+```
+
 ### Linux
 
 Download the AppImage (`linux-x86_64` or `linux-aarch64` for ARM), make it executable, and run it:

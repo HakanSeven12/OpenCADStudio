@@ -186,6 +186,9 @@ fn panel_measure_key(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     crate::sys::ui_font::generation().hash(&mut hasher);
+    // Panel titles and labels are measured translated, so a language switch
+    // has to measure them again.
+    crate::i18n::language_generation().hash(&mut hasher);
     groups.len().hash(&mut hasher);
     for group in groups {
         group.title.hash(&mut hasher);
@@ -2829,6 +2832,18 @@ mod tests {
             measurement_key("TEST", "TEST"),
             measurement_key("TEST", "OTHER")
         );
+    }
+
+    /// Panel widths are measured with translated labels, so switching the
+    /// language must not reuse the old measurements.
+    #[test]
+    fn panel_measure_fingerprint_changes_with_the_language() {
+        let before = measurement_key("TEST", "TEST");
+        // Reloading English bumps the language generation like any switch,
+        // without changing the locale other tests see.
+        crate::i18n::set_language(crate::i18n::Language::EnUs)
+            .expect("English locale must be available");
+        assert_ne!(before, measurement_key("TEST", "TEST"));
     }
 
     #[test]

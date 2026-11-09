@@ -10273,6 +10273,45 @@ mod rapid_drawing_tests {
     }
 
     #[test]
+    fn dynamic_ucs_aligns_drawing_commands_but_not_move_or_copy() {
+        for (command, aligns) in [("LINE", true), ("MOVE", false), ("COPY", false)] {
+            let mut app = drawing_app("LINE");
+            let _ = app.run_command_line("CANCEL");
+            app.tabs[app.active_tab].active_cmd = None;
+            assert_eq!(
+                app.automation_op(r#"{"op":"run","cmd":"BOX -50,-50,0 50,50 10"}"#)["ok"],
+                true
+            );
+            app.tabs[app.active_tab].scene.select_all_visible();
+            let _ = app.run_command_line(command);
+            assert_eq!(
+                app.tabs[app.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.name()),
+                Some(command)
+            );
+            app.dynamic_ucs = true;
+            let at = screen(&app, glam::DVec3::new(0.0, 0.0, 10.0));
+            app.tabs[app.active_tab]
+                .scene
+                .selection
+                .borrow_mut()
+                .input
+                .last_move_pos = Some(at);
+
+            let picked = app.apply_dynamic_ucs(None);
+
+            assert_eq!(picked.is_some(), aligns, "{command}");
+            assert_eq!(
+                app.tabs[app.active_tab].active_ucs.is_some(),
+                aligns,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
     fn ortho_in_a_3d_view_runs_up_the_z_axis_and_keeps_that_level() {
         let mut app = drawing_app("LINE");
         let _ = app.apply_view_preset("SWISO");

@@ -1,5 +1,35 @@
 use super::*;
 
+/// Whether a command's first point may align the UCS to a solid face. Commands
+/// that only pick points to measure a displacement or locate an edit have no
+/// use for a plane, and changing the UCS under them moves the UCS icon and
+/// reinterprets typed coordinates (#2721). ROTATE, MIRROR and ALIGN keep it:
+/// their result depends on the working plane.
+fn dynamic_ucs_applies(command: &str) -> bool {
+    !command.starts_with("UCS")
+        && !matches!(
+            command,
+            "SELECT"
+                | "MOVE"
+                | "COPY"
+                | "NCOPY"
+                | "SCALE"
+                | "STRETCH"
+                | "OFFSET"
+                | "TRIM"
+                | "EXTEND"
+                | "FILLET"
+                | "CHAMFER"
+                | "BREAK"
+                | "BREAKATPOINT"
+                | "LENGTHEN"
+                | "ARRAYRECT"
+                | "ARRAYPOLAR"
+                | "ARRAYPATH"
+                | "ARRAY3D"
+        )
+}
+
 impl OpenCADStudio {
     pub(in crate::app) fn reject_locked_edit(&mut self, i: usize, handle: Handle) -> bool {
         let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) else {
@@ -805,7 +835,7 @@ impl OpenCADStudio {
             || self.tabs[i]
                 .active_cmd
                 .as_ref()
-                .is_none_or(|command| command.name().starts_with("UCS"))
+                .is_none_or(|command| !dynamic_ucs_applies(command.name()))
         {
             return None;
         }

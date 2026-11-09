@@ -1,19 +1,22 @@
 # OpenCADStudio - Unreleased (2026-11-08 to Present)
 
-> **Summary:** Added a parameter order cell to the Parameters Manager and the `EATTEDIT` command, and corrected named `ATTSYNC`, the attribute definition card and the attribute manager's labels.
+> **Summary:** Added a parameter order cell to the Parameters Manager, the `EATTEDIT` command, an SHX Big Font picker in Text Style settings, and corrected Big5 SHX big-font code-page detection, named `ATTSYNC`, the attribute definition card and the attribute manager's labels.
 
 ### 🌟 Notable Release Notes
 
+* **Big Font Picker & Big5 Code Page Detection:** The Text Style manager now includes a dedicated SHX big-font picker (listing drawing big fonts and local/support folder SHX files). Big-font code-page detection no longer assumes every font with "china" in its name is GBK, allowing Traditional Chinese Big5 fonts such as `china1.shx` and `chineset.shx` to decode correctly instead of rendering mojibake. Legacy shape-only `chinese.shx` references alias to `chineset.shx` when present.
 * **Parameters Manager Order:** Each parameter carries a whole-number rank that every one of its rows prints and that is kept with the parameter in the drawing, so it survives saving and reopening. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **`EATTEDIT` and `ATTSYNC`:** `EATTEDIT` opens the attribute editor on a selected reference or starts the pick; `ATTSYNC <block>` synchronises a named block directly. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 
 ### 🚀 New Features
 
+* **Big Font Picker:** The Text Style manager replaces the plain numeric input for big-font files with a dedicated font picker listing big fonts in the drawing, SHX files adjacent to the drawing, and SHX files in configured font folders.
 * **Parameter Order:** The Parameters Manager's Order cell takes a whole-number rank for the parameter its row names; both rows of an XY or polar parameter print the same rank; an emptied cell clears it; the listed rows stay alphabetical.
 * **`EATTEDIT`:** The command reaches the editor `ATTEDIT` opens, on a selected block reference or after the pick, and completes from the command line.
 
 ### 🐛 Bug Fixes
 
+* **Big Font Code Page Detection:** Removed the heuristic that forced `ansi_936` (GBK) for big-font files containing `"china"` in their name. Big5 big-fonts like `china1.shx` and `chineset.shx` (which contain trail bytes `< 0xA1`) are now correctly identified as `ansi_950` (Big5) instead of producing mojibake in viewports and exports. Legacy shape-only `chinese.shx` files alias to `chineset.shx` when available.
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
 * **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.
 * **Attribute Definition Editor:** Card headings use the palettes' muted label colour and the pick buttons draw a dotted square over a crosshair.

@@ -891,9 +891,12 @@ impl OpenCADStudio {
                     .collect();
                 let current = tab.scene.document.header.current_annotation_scale.clone();
                 let selected = &self.scale_manager_selected;
-                let at = scales.iter().position(|(name, _)| name.eq_ignore_ascii_case(selected));
+                let at = scales
+                    .iter()
+                    .position(|(name, _)| name.eq_ignore_ascii_case(selected));
                 let header = &tab.scene.document.header;
-                let paper_unit: i16 = if matches!(header.insertion_units, 1..=3 | 8..=10 | 21..=24) {
+                let paper_unit: i16 = if matches!(header.insertion_units, 1..=3 | 8..=10 | 21..=24)
+                {
                     1
                 } else {
                     4
@@ -1081,6 +1084,7 @@ impl OpenCADStudio {
                             invalid_fields: draft.invalid_fields(),
                             use_big_font: draft.big_font_on,
                             font_picker: &self.textstyle_font_picker,
+                            bigfont_picker: &self.textstyle_bigfont_picker,
                             turned_off: draft.turned_off.clone(),
                             apply_summary: apply_summary.clone(),
                             preview: preview.clone(),

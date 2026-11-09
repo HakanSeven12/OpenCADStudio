@@ -1223,8 +1223,13 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("QSELECT")
             // XPLODE takes its property overrides on one line.
             || tokens[0].eq_ignore_ascii_case("XPLODE")
+            // -SETBYLAYER takes its keyword list on one line.
+            || tokens[0].eq_ignore_ascii_case("-SETBYLAYER")
             // BLOCKREPLACE's picked pair arrives as one private apply line.
             || tokens[0].eq_ignore_ascii_case("_BLOCKREPLACE_APPLY")
+            // -DIMSTYLE takes its option list on one line (the write
+            // form of VARIABLES), e.g. `-DIMSTYLE VARIABLES ISO-25 DIMTXT 3.0`.
+            || tokens[0].eq_ignore_ascii_case("-DIMSTYLE")
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERGROUP")

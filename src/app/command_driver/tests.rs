@@ -7012,4 +7012,22 @@ mod batch5_tests {
         };
         assert_eq!(step.options().len(), 2);
     }
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history_plain_text()
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn dimstyle_variables_accepts_a_write_and_keeps_it() {
+        let mut app = new_app();
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "ISO-25", "DIMTXT", "4.5"]"#);
+        let out = out(&app);
+        assert!(out.contains("DIMTXT = 4.5"), "{out}");
+        let doc = &app.tabs[app.active_tab].scene.document;
+        let style = doc.dim_styles.get("ISO-25").expect("ISO-25 exists");
+        assert_eq!(style.dimtxt, 4.5);
+    }
+
 }

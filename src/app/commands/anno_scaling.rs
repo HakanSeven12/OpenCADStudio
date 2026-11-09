@@ -14,6 +14,14 @@ use iced::Task;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicI16, Ordering};
 
+/// A localized message without the bidi isolation marks Fluent puts round
+/// its arguments; the command line shows them as stray characters.
+macro_rules! trs {
+    ($($arg:tt)*) => {
+        crate::tr!($($arg)*).replace(['\u{2068}', '\u{2069}'], "")
+    };
+}
+
 static SELECTION_ANNO_DISPLAY: AtomicI16 = AtomicI16::new(1);
 static ANNO_MONITOR: AtomicI16 = AtomicI16::new(-2);
 
@@ -94,6 +102,8 @@ struct AnswerCommand {
     prompt: String,
     options: Vec<CmdOption>,
     state: String,
+    /// Objects are gathered first under this prompt (-OBJECTSCALE).
+    select_prompt: Option<String>,
 }
 
 impl CadCommand for AnswerCommand {
@@ -102,19 +112,42 @@ impl CadCommand for AnswerCommand {
     }
 
     fn prompt(&self) -> String {
-        self.prompt.clone()
+        self.select_prompt.clone().unwrap_or_else(|| self.prompt.clone())
     }
 
     fn options(&self) -> Vec<CmdOption> {
+        if self.select_prompt.is_some() {
+            return Vec::new();
+        }
         self.options.clone()
     }
 
     fn input_kind(&self) -> InputKind {
-        InputKind::SingleToken
+        if self.select_prompt.is_some() {
+            InputKind::Point
+        } else {
+            InputKind::SingleToken
+        }
     }
 
     fn wants_text_input(&self) -> bool {
-        true
+        self.select_prompt.is_none()
+    }
+
+    fn is_selection_gathering(&self) -> bool {
+        self.select_prompt.is_some()
+    }
+
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        if handles.is_empty() {
+            return CmdResult::Cancel;
+        }
+        if let Ok(mut session) = serde_json::from_str::<Session>(&self.state) {
+            session.handles = hex(&handles);
+            self.state = serde_json::to_string(&session).unwrap_or_default();
+        }
+        self.select_prompt = None;
+        CmdResult::NeedPoint
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
@@ -249,17 +282,16 @@ impl OpenCADStudio {
                 let handles = self.anno_selected(i);
                 Some(self.anno_remove(i, &handles))
             }
-            "-OBJECTSCALE" => Some(self.anno_select(i, "-OBJECTSCALE", "_ANNOSCALEOBJ_APPLY", true)),
-            "ANNOSCALEOBJ_APPLY" => {
-                let handles = self.anno_selected(i);
+            "-OBJECTSCALE" => {
                 self.tabs[i].scene.deselect_all();
-                Some(self.anno_scale_prompt(
+                Some(self.anno_scale_prompt_with(
                     Session {
                         step: Step::ObjOption,
-                        handles: hex(&handles),
+                        handles: Vec::new(),
                         snapped: false,
                     },
                     i,
+                    Some(trs!("anno-scale-cmd", "select-annotative")),
                 ))
             }
             "OBJECTSCALE" if arg.is_some_and(|arg| arg.eq_ignore_ascii_case("ADD")) => {
@@ -273,7 +305,7 @@ impl OpenCADStudio {
             }
             "ANNOSCALEDLG_APPLY" => Some(Task::done(Message::AnnoObjectScaleOpen)),
             "ANNORESET" => {
-                self.command_line.push_output(&crate::tr!("anno-scale-cmd", "reset-intro"));
+                self.command_line.push_output(&trs!("anno-scale-cmd", "reset-intro"));
                 Some(self.anno_select(i, "ANNORESET", "_ANNORESET_APPLY", false))
             }
             "ANNORESET_APPLY" => {
@@ -322,7 +354,7 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         self.tabs[i].scene.deselect_all();
         let prompt = if annotative_prompt {
-            crate::tr!("anno-scale-cmd", "select-annotative")
+            trs!("anno-scale-cmd", "select-annotative")
         } else {
             crate::t!("Select objects:").into_owned()
         };
@@ -406,9 +438,9 @@ impl OpenCADStudio {
             self.anno_bump(i, &missing);
         }
         let message = if targets.len() == 1 {
-            crate::tr!("anno-scale-cmd", "updated-one", scale = name)
+            trs!("anno-scale-cmd", "updated-one", scale = name)
         } else {
-            crate::tr!("anno-scale-cmd", "updated-many", count = targets.len(), scale = name)
+            trs!("anno-scale-cmd", "updated-many", count = targets.len(), scale = name)
         };
         self.command_line.push_output(&message);
     }
@@ -467,21 +499,21 @@ impl OpenCADStudio {
         }
         let removed = removals.len();
         self.command_line.push_output(&if removed == 1 {
-            crate::tr!("anno-scale-cmd", "removed-one")
+            trs!("anno-scale-cmd", "removed-one")
         } else {
-            crate::tr!("anno-scale-cmd", "removed-many", count = removed)
+            trs!("anno-scale-cmd", "removed-many", count = removed)
         });
         if removed == 0 {
             if unsupported > 0 {
                 self.command_line.push_output(&if unsupported == 1 {
-                    crate::tr!("anno-scale-cmd", "not-supported-one", scale = name)
+                    trs!("anno-scale-cmd", "not-supported-one", scale = name)
                 } else {
-                    crate::tr!("anno-scale-cmd", "not-supported-many", count = unsupported, scale = name)
+                    trs!("anno-scale-cmd", "not-supported-many", count = unsupported, scale = name)
                 });
             }
             if cannot > 0 {
                 self.command_line
-                    .push_output(&crate::tr!("anno-scale-cmd", "cannot-remove", count = cannot));
+                    .push_output(&trs!("anno-scale-cmd", "cannot-remove", count = cannot));
             }
         }
     }
@@ -530,9 +562,9 @@ impl OpenCADStudio {
         let skipped = handles.len() - supported.len();
         if skipped > 0 {
             self.command_line.push_output(&if skipped == 1 {
-                crate::tr!("anno-scale-cmd", "not-annotative-one", found = handles.len())
+                trs!("anno-scale-cmd", "not-annotative-one", found = handles.len())
             } else {
-                crate::tr!("anno-scale-cmd", "not-annotative-many", found = handles.len(), count = skipped)
+                trs!("anno-scale-cmd", "not-annotative-many", found = handles.len(), count = skipped)
             });
         }
         let reset: Vec<Handle> = supported
@@ -572,12 +604,21 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "ANNOUPDATE");
         let mut changed = Vec::new();
         for handle in handles {
+            // Only an object the update really changed counts as updated.
+            let annotative = |doc: &document::Document| {
+                doc.get_entity(*handle)
+                    .is_some_and(|entity| crate::scene::annotative::is_annotative(doc, entity))
+            };
+            let before = self.tabs[i].scene.document.get_entity(*handle).cloned();
+            let was_annotative = annotative(&self.tabs[i].scene.document);
             if crate::scene::annotative::update_entity_from_annotation_style(
                 &mut self.tabs[i].scene.document,
                 *handle,
                 scale,
                 paper_to_model,
-            ) {
+            ) && (self.tabs[i].scene.document.get_entity(*handle) != before.as_ref()
+                || annotative(&self.tabs[i].scene.document) != was_annotative)
+            {
                 changed.push(*handle);
             }
         }
@@ -585,9 +626,9 @@ impl OpenCADStudio {
             self.anno_bump(i, &changed);
         }
         self.command_line.push_output(&if changed.len() == 1 {
-            crate::tr!("anno-scale-cmd", "updated-found-one", found = handles.len())
+            trs!("anno-scale-cmd", "updated-found-one", found = handles.len())
         } else {
-            crate::tr!("anno-scale-cmd", "updated-found-many", found = handles.len(), count = changed.len())
+            trs!("anno-scale-cmd", "updated-found-many", found = handles.len(), count = changed.len())
         });
         Task::none()
     }
@@ -613,6 +654,15 @@ impl OpenCADStudio {
     }
 
     fn anno_scale_prompt(&mut self, session: Session, i: usize) -> Task<Message> {
+        self.anno_scale_prompt_with(session, i, None)
+    }
+
+    fn anno_scale_prompt_with(
+        &mut self,
+        session: Session,
+        i: usize,
+        select_prompt: Option<String>,
+    ) -> Task<Message> {
         let current = self
             .anno_current_scale(i)
             .map(|(name, _)| name)
@@ -620,7 +670,7 @@ impl OpenCADStudio {
         let (name, prompt, options): (&'static str, String, Vec<CmdOption>) = match &session.step {
             Step::ObjOption => (
                 "-OBJECTSCALE",
-                crate::tr!("anno-scale-cmd", "option"),
+                trs!("anno-scale-cmd", "option"),
                 vec![
                     CmdOption::new("Add", "A"),
                     CmdOption::new("Delete", "D"),
@@ -630,24 +680,24 @@ impl OpenCADStudio {
             Step::ObjAdd { first } => (
                 "-OBJECTSCALE",
                 if *first {
-                    crate::tr!("anno-scale-cmd", "add-scale-default", scale = current.as_str())
+                    trs!("anno-scale-cmd", "add-scale-default", scale = current.as_str())
                 } else {
-                    crate::tr!("anno-scale-cmd", "add-scale")
+                    trs!("anno-scale-cmd", "add-scale")
                 },
                 vec![CmdOption::new("?", "?")],
             ),
             Step::ObjDelete { first } => (
                 "-OBJECTSCALE",
                 if *first {
-                    crate::tr!("anno-scale-cmd", "delete-scale-default", scale = current.as_str())
+                    trs!("anno-scale-cmd", "delete-scale-default", scale = current.as_str())
                 } else {
-                    crate::tr!("anno-scale-cmd", "delete-scale")
+                    trs!("anno-scale-cmd", "delete-scale")
                 },
                 vec![CmdOption::new("?", "?")],
             ),
             Step::ListOption => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-option"),
+                trs!("anno-scale-cmd", "list-option"),
                 vec![
                     CmdOption::new("?", "?"),
                     CmdOption::new("Add", "A"),
@@ -658,27 +708,27 @@ impl OpenCADStudio {
             ),
             Step::ListName => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-name"),
+                trs!("anno-scale-cmd", "list-name"),
                 Vec::new(),
             ),
             Step::ListRatio { .. } => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-ratio"),
+                trs!("anno-scale-cmd", "list-ratio"),
                 Vec::new(),
             ),
             Step::ListRedefine { name } => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-exists", name = name.as_str()),
+                trs!("anno-scale-cmd", "list-exists", name = name.as_str()),
                 vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
             ),
             Step::ListDelete => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-delete"),
+                trs!("anno-scale-cmd", "list-delete"),
                 Vec::new(),
             ),
             Step::ListReset => (
                 "-SCALELISTEDIT",
-                crate::tr!("anno-scale-cmd", "list-reset"),
+                trs!("anno-scale-cmd", "list-reset"),
                 vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
             ),
         };
@@ -688,6 +738,7 @@ impl OpenCADStudio {
             prompt,
             options,
             state,
+            select_prompt,
         };
         self.command_line.push_info(&command.prompt());
         self.command_line.set_step_options(command.options());
@@ -704,7 +755,7 @@ impl OpenCADStudio {
         let upper = text.to_ascii_uppercase();
         let invalid = |app: &mut Self| {
             app.command_line
-                .push_rejection(&crate::tr!("anno-scale-cmd", "invalid-keyword"));
+                .push_rejection(&trs!("anno-scale-cmd", "invalid-keyword"));
         };
         let objects = session.objects();
         let next = match session.step.clone() {
@@ -766,7 +817,7 @@ impl OpenCADStudio {
                             Some(&mut session),
                             label,
                         ),
-                        None => self.command_line.push_output(&crate::tr!(
+                        None => self.command_line.push_output(&trs!(
                             "anno-scale-cmd",
                             "scale-not-found",
                             name = text
@@ -823,7 +874,7 @@ impl OpenCADStudio {
                 }
                 None => {
                     self.command_line
-                        .push_rejection(&crate::tr!("anno-scale-cmd", "list-bad-ratio"));
+                        .push_rejection(&trs!("anno-scale-cmd", "list-bad-ratio"));
                     Some(Step::ListRatio { name })
                 }
             },
@@ -852,13 +903,13 @@ impl OpenCADStudio {
                         }
                     });
                     match found {
-                        None => self.command_line.push_output(&crate::tr!(
+                        None => self.command_line.push_output(&trs!(
                             "anno-scale-cmd",
                             "scale-not-found",
                             name = text
                         )),
                         Some(name) if self.anno_scale_referenced(i, &name) => {
-                            self.command_line.push_output(&crate::tr!(
+                            self.command_line.push_output(&trs!(
                                 "anno-scale-cmd",
                                 "list-referenced",
                                 name = name.as_str()
@@ -868,7 +919,7 @@ impl OpenCADStudio {
                             self.anno_snapshot(i, "-SCALELISTEDIT", Some(&mut session));
                             self.tabs[i].scene.remove_scale(&name);
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&crate::tr!(
+                            self.command_line.push_output(&trs!(
                                 "anno-scale-cmd",
                                 "list-deleted",
                                 name = name.as_str()
@@ -890,12 +941,12 @@ impl OpenCADStudio {
                     self.tabs[i].scene.reset_scale_list(&keep);
                     self.tabs[i].dirty = true;
                     self.command_line
-                        .push_output(&crate::tr!("anno-scale-cmd", "list-reset-done"));
+                        .push_output(&trs!("anno-scale-cmd", "list-reset-done"));
                     Some(Step::ListOption)
                 }
                 "" | "N" | "NO" => {
                     self.command_line
-                        .push_output(&crate::tr!("anno-scale-cmd", "list-reset-kept"));
+                        .push_output(&trs!("anno-scale-cmd", "list-reset-kept"));
                     Some(Step::ListOption)
                 }
                 _ => {

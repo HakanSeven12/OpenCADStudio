@@ -67,16 +67,35 @@ impl State {
             .collect()
     }
 
-    /// Delete is offered while a listed scale is selected and every object
-    /// keeps at least one of its scales.
+    /// Delete is offered while a listed scale is selected (measured: also
+    /// when that would take every scale off an object).
     pub fn can_delete(&self) -> bool {
+        !self.selected_listed().is_empty()
+    }
+
+    /// Takes the picked scales off every object; an object they would leave
+    /// without a scale keeps its first one in the list order.
+    pub fn delete_picked(&mut self) {
         let picked = self.selected_listed();
-        !picked.is_empty()
-            && self.staged.iter().all(|(_, scales)| {
-                scales
-                    .iter()
-                    .any(|scale| !picked.iter().any(|p| p.eq_ignore_ascii_case(scale)))
-            })
+        let order = self.order.clone();
+        for (_, scales) in &mut self.staged {
+            let mut kept: Vec<String> = scales
+                .iter()
+                .filter(|s| !picked.iter().any(|p| p.eq_ignore_ascii_case(s)))
+                .cloned()
+                .collect();
+            if kept.is_empty() {
+                let first = scales.iter().min_by_key(|s| {
+                    order
+                        .iter()
+                        .position(|o| o.eq_ignore_ascii_case(s))
+                        .unwrap_or(usize::MAX)
+                });
+                kept.extend(first.cloned());
+            }
+            *scales = kept;
+        }
+        self.selected.clear();
     }
 
     /// A click on `name`: Ctrl toggles it, Shift selects the run from the

@@ -1930,6 +1930,54 @@ impl OpenCADStudio {
             }
         }
 
+        // An annotative hatch gives its pattern scale (and the spacing and
+        // pen width that follow it) on paper, as the reference does.
+        if let Some(per_paper) = self.tabs[i]
+            .scene
+            .annotative_hatch_model_per_paper(entity.common().handle)
+        {
+            let shown = crate::scene::annotative::entity_for_annotation_context(
+                doc,
+                entity,
+                annotation_scale_handle,
+            );
+            if let document::EntityType::Hatch(hatch) = shown.as_ref() {
+                let paper = hatch.pattern_scale / per_paper;
+                for section in sections.iter_mut() {
+                    for row in section.props.iter_mut() {
+                        let read_only = matches!(
+                            row.value,
+                            crate::scene::model::object::PropValue::ReadOnly(_)
+                        );
+                        match row.field {
+                            "pattern_scale" | "spacing" => {
+                                *row = crate::entities::common::num_prop(
+                                    &row.label.clone(),
+                                    row.field,
+                                    paper,
+                                    !read_only,
+                                );
+                            }
+                            "iso_pen_width" if read_only => {
+                                row.value = crate::scene::model::object::PropValue::ReadOnly(
+                                    format!("{paper:.2} mm"),
+                                );
+                            }
+                            "iso_pen_width" => {
+                                *row = crate::entities::common::num_prop(
+                                    &row.label.clone(),
+                                    row.field,
+                                    paper,
+                                    true,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
         // Single-line text height rows depend on both the
         // justification and the active annotation scale. Aligned
         // text derives its paper height from the two endpoints,
@@ -1998,7 +2046,15 @@ impl OpenCADStudio {
             );
             // Annotative multiline text shows its defined box twice, as on
             // paper (editable as the box is) and in the model (read-only).
-            if let document::EntityType::MText(text) = entity {
+            // The box is per representation: the shown scale's is the model
+            // size, its paper size that over the scale's model-per-paper.
+            let shown = crate::scene::annotative::entity_for_annotation_context(
+                doc,
+                entity,
+                annotation_scale_handle,
+            );
+            if let document::EntityType::MText(text) = shown.as_ref() {
+                let per_paper = (model_factor * ratio).max(1.0e-12);
                 let rows = [
                     ("rect_w", "rect_w_model", text.rectangle_width, "Paper defined width", "Model defined width"),
                     (
@@ -2009,7 +2065,7 @@ impl OpenCADStudio {
                         "Model defined height",
                     ),
                 ];
-                for (field, model_field, stored, paper_label, model_label) in rows {
+                for (field, model_field, model, paper_label, model_label) in rows {
                     for section in sections.iter_mut() {
                         if let Some(row) = section.props.iter_mut().find(|row| row.field == field) {
                             let editable = !matches!(
@@ -2019,7 +2075,7 @@ impl OpenCADStudio {
                             *row = crate::entities::common::num_prop(
                                 crate::t!(paper_label).as_ref(),
                                 field,
-                                stored / model_factor,
+                                model / per_paper,
                                 editable,
                             );
                         }
@@ -2031,7 +2087,7 @@ impl OpenCADStudio {
                         crate::entities::common::ro_prop(
                             crate::t!(model_label).as_ref(),
                             model_field,
-                            crate::entities::common::format_length(stored * ratio),
+                            crate::entities::common::format_length(model),
                         ),
                     );
                 }

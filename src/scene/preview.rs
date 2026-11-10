@@ -823,17 +823,26 @@ impl Scene {
                 ]
             };
             let badge = rect(left, centre - 5.5 * pixel, left + 17.0 * pixel, centre + 5.5 * pixel);
+            // An exclamation mark: a bar over a dot.
             let bar = rect(
                 left + 7.0 * pixel,
-                centre - 2.5 * pixel,
+                centre - 0.5 * pixel,
                 left + 10.0 * pixel,
                 centre + 4.5 * pixel,
+            );
+            let dot = rect(
+                left + 7.0 * pixel,
+                centre - 3.5 * pixel,
+                left + 10.0 * pixel,
+                centre - 1.5 * pixel,
             );
             if let Some(model) = Self::indicator_box(&badge, [0.996, 0.851, 0.004, 1.0]) {
                 out.push(model);
             }
-            if let Some(model) = Self::indicator_box(&bar, [0.08, 0.08, 0.08, 1.0]) {
-                out.push(model);
+            for mark in [bar, dot] {
+                if let Some(model) = Self::indicator_box(&mark, [0.08, 0.08, 0.08, 1.0]) {
+                    out.push(model);
+                }
             }
         }
         out

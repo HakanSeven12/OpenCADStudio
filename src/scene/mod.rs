@@ -7551,6 +7551,32 @@ impl Scene {
         Some(model_per_paper / ratio)
     }
 
+    /// For an annotative hatch, the model units per paper unit of the
+    /// representation it shows (the current scale's, else its default
+    /// one). Its Properties give the pattern scale on paper.
+    pub(crate) fn annotative_hatch_model_per_paper(&self, handle: Handle) -> Option<f64> {
+        let entity = self.document.get_entity(handle)?;
+        if !matches!(entity, EntityType::Hatch(_))
+            || !crate::scene::annotative::is_annotative(&self.document, entity)
+        {
+            return None;
+        }
+        let scale = crate::scene::annotative::active_object_context_for_scale(
+            &self.document,
+            handle,
+            self.displayed_annotation_scale_handle(),
+        )
+        .map(|context| context.scale)
+        .or_else(|| self.displayed_annotation_scale_handle())?;
+        match self.document.objects.get(&scale) {
+            Some(ObjectType::Scale(scale)) => {
+                let factor = self.effective_scale_factor(scale);
+                (factor > 1.0e-12).then(|| 1.0 / factor)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn displayed_annotation_scale_handle(&self) -> Option<Handle> {
         if self.current_layout == "Model" {
             return self.scale_object_handle(&self.document.header.current_annotation_scale);

@@ -5654,6 +5654,30 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            // An annotative hatch's scale rows are on paper.
+                            "pattern_scale" | "spacing" | "iso_pen_width"
+                                if self.tabs[i]
+                                    .scene
+                                    .annotative_hatch_model_per_paper(handle)
+                                    .is_some() =>
+                            {
+                                let per_paper = self.tabs[i]
+                                    .scene
+                                    .annotative_hatch_model_per_paper(handle)
+                                    .unwrap_or(1.0);
+                                if let (Ok(paper), Some(entity)) = (
+                                    val.trim().parse::<f64>(),
+                                    self.tabs[i].scene.document.get_entity_mut(handle),
+                                ) {
+                                    crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                                        entity,
+                                        field,
+                                        &(paper * per_paper).to_string(),
+                                        plane,
+                                    );
+                                }
+                                self.tabs[i].scene.sync_displayed_annotation_context(handle);
+                            }
                             // Annotative text: the row holds the paper height
                             // (and, for multiline text, the paper width and
                             // height of its box).
@@ -5663,10 +5687,22 @@ impl OpenCADStudio {
                                     .annotative_text_height_factor(handle)
                                     .is_some() =>
                             {
-                                let factor = self.tabs[i]
+                                let mut factor = self.tabs[i]
                                     .scene
                                     .annotative_text_height_factor(handle)
                                     .unwrap_or(1.0);
+                                // The box rows are the shown representation's:
+                                // its model size is the paper size times that
+                                // scale's model-per-paper.
+                                if matches!(field, "rect_w" | "rect_h") {
+                                    let shown = self.tabs[i].scene.displayed_annotation_scale_handle();
+                                    factor *= crate::scene::annotative::text_context_ratio(
+                                        &self.tabs[i].scene.document,
+                                        handle,
+                                        shown,
+                                    )
+                                    .unwrap_or(1.0);
+                                }
                                 if let (Ok(paper), Some(entity)) = (
                                     val.trim().parse::<f64>(),
                                     self.tabs[i].scene.document.get_entity_mut(handle),
@@ -5677,6 +5713,10 @@ impl OpenCADStudio {
                                         &(paper * factor).to_string(),
                                         plane,
                                     );
+                                }
+                                // The shown representation keeps the new box.
+                                if matches!(field, "rect_w" | "rect_h") {
+                                    self.tabs[i].scene.sync_displayed_annotation_context(handle);
                                 }
                             }
                             "hyperlink" => {

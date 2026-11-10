@@ -6931,11 +6931,7 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleDelete => {
                 if self.anno_object_scale.can_delete() {
-                    let picked = self.anno_object_scale.selected_listed();
-                    self.anno_object_scale.selected.clear();
-                    for (_, scales) in &mut self.anno_object_scale.staged {
-                        scales.retain(|s| !picked.iter().any(|p| p.eq_ignore_ascii_case(s)));
-                    }
+                    self.anno_object_scale.delete_picked();
                 }
                 Task::none()
             }

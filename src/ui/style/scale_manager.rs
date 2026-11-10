@@ -178,8 +178,15 @@ pub fn view_window<'a, 'b>(
     let list_panel = container(
         column![
             text(t!("Scales")).size(10).style(muted_text_style),
-            // The scrollbar sits beside the rows, so it never covers a ratio.
-            container(scrollable(column(rows).spacing(1)).spacing(4).height(sizing.height))
+            // The rows leave room on the right for the scrollbar, so it never
+            // covers a ratio.
+            container(
+                scrollable(column(rows).spacing(1).padding(iced::Padding {
+                    right: 12.0,
+                    ..iced::Padding::ZERO
+                }))
+                .height(sizing.height)
+            )
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {

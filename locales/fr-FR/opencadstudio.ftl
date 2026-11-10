@@ -1186,6 +1186,7 @@ common =
     .size = Taille
     .sketchy = Croquis
     .snap-override-label-next-pick-only = Accrochage temporaire : __ocs_fmt_0__ (prochaine sélection uniquement).
+    .no-snap-found-for-specified-point = Aucun __ocs_fmt_0__ trouvé pour le point spécifié.
     .solid-created = Solide créé.
     .source-object-not-found = Objet source introuvable.
     .spacing = Espacement

@@ -1174,6 +1174,7 @@ common =
     .size = आकार
     .sketchy = रेखाचित्र
     .snap-override-label-next-pick-only = स्नैप ओवरराइड: __ocs_fmt_0__ (अकेले केवल पिक)।
+    .no-snap-found-for-specified-point = निर्दिष्ट बिंदु के लिए कोई __ocs_fmt_0__ नहीं मिला।
     .solid-created = ठोस बनाया गया।
     .source-object-not-found = स्रोत ऑब्जेक्ट नहीं मिला।
     .spacing = रिक्ति

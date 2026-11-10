@@ -1162,6 +1162,7 @@ common =
     .size = Boyut
     .sketchy = Eskiz
     .snap-override-label-next-pick-only = Yakalama geçersiz kılma: __ocs_fmt_0__ (yalnızca sonraki seçim).
+    .no-snap-found-for-specified-point = Belirtilen nokta için __ocs_fmt_0__ bulunamadı.
     .solid-created = Katı oluşturuldu.
     .source-object-not-found = Kaynak nesne bulunamadı.
     .spacing = Aralık

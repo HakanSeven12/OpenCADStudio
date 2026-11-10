@@ -1185,6 +1185,7 @@ common =
     .size = 크기
     .sketchy = 스케치
     .snap-override-label-next-pick-only = 스냅 재정의: __ocs_fmt_0__(다음 선택에만 해당)
+    .no-snap-found-for-specified-point = 지정한 점에서 __ocs_fmt_0__을(를) 찾을 수 없습니다.
     .solid-created = 솔리드가 생성되었습니다.
     .source-object-not-found = 소스 개체를 찾을 수 없습니다.
     .spacing = 간격

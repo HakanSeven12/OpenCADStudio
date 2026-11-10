@@ -1190,6 +1190,7 @@ common =
     .size = Velikost
     .sketchy = Skica
     .snap-override-label-next-pick-only = Přepsání uchopení: __ocs_fmt_0__ (pouze pro další výběr).
+    .no-snap-found-for-specified-point = Pro zadaný bod nebyl nalezen __ocs_fmt_0__.
     .solid-created = Těleso vytvořeno.
     .source-object-not-found = Zdrojový objekt nebyl nalezen.
     .spacing = Rozteč

@@ -1172,6 +1172,7 @@ common =
     .size = Kích thước
     .sketchy = Sơ sài
     .snap-override-label-next-pick-only = Ghi đè truy bắt: __ocs_fmt_0__ (chỉ lần chọn kế tiếp).
+    .no-snap-found-for-specified-point = Không tìm thấy __ocs_fmt_0__ cho điểm đã chỉ định.
     .solid-created = Đã tạo khối rắn.
     .source-object-not-found = Đối tượng nguồn không được tìm thấy.
     .spacing = Khoảng cách

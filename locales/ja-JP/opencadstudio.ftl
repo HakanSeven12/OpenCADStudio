@@ -1176,6 +1176,7 @@ common =
     .size = サイズ
     .sketchy = スケッチ
     .snap-override-label-next-pick-only = スナップ優先: __ocs_fmt_0__（次の選択のみ）。
+    .no-snap-found-for-specified-point = 指定した点に __ocs_fmt_0__ が見つかりません。
     .solid-created = ソリッドを作成しました。
     .source-object-not-found = 元オブジェクトが見つかりません。
     .spacing = 間隔

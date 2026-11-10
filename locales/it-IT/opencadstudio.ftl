@@ -1185,6 +1185,7 @@ common =
     .size = Dimensioni
     .sketchy = Schizzo
     .snap-override-label-next-pick-only = Sostituzione dello snap: __ocs_fmt_0__ (solo scelta successiva).
+    .no-snap-found-for-specified-point = Nessun __ocs_fmt_0__ trovato per il punto specificato.
     .solid-created = Solido creato.
     .source-object-not-found = Oggetto di origine non trovato.
     .spacing = Distanziamento

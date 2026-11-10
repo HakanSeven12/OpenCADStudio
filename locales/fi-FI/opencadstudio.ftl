@@ -1185,6 +1185,7 @@ common =
     .size = Koko
     .sketchy = Luonnos
     .snap-override-label-next-pick-only = Snap-ohitus: __ocs_fmt_0__ (vain seuraava valinta).
+    .no-snap-found-for-specified-point = Määritetylle pisteelle ei löytynyt kohtaa __ocs_fmt_0__.
     .solid-created = Kiinteä luotu.
     .source-object-not-found = Lähdeobjektia ei löydy.
     .spacing = Välit

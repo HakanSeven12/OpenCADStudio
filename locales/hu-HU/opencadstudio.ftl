@@ -1184,6 +1184,7 @@ common =
     .size = Méret
     .sketchy = Vázlatos
     .snap-override-label-next-pick-only = Ideiglenes tárgyraszter: __ocs_fmt_0__ (csak a következő pontnál).
+    .no-snap-found-for-specified-point = A megadott ponthoz nem található __ocs_fmt_0__.
     .solid-created = Test létrehozva.
     .source-object-not-found = A forrásobjektum nem található.
     .spacing = Térköz

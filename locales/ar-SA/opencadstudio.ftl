@@ -1198,6 +1198,7 @@ common =
     .size = الحجم
     .sketchy = تخطيطي
     .snap-override-label-next-pick-only = تجاوز الالتقاط: __ocs_fmt_0__ (للاختيار التالي فقط).
+    .no-snap-found-for-specified-point = لم يتم العثور على __ocs_fmt_0__ عند النقطة المحددة.
     .solid-created = أُنشئ المجسم.
     .source-object-not-found = لم يُعثر على الكائن المصدر.
     .spacing = التباعد

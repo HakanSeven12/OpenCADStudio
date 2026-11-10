@@ -1189,6 +1189,7 @@ common =
     .size = Размер
     .sketchy = Эскизный
     .snap-override-label-next-pick-only = Переопределение по щелчку: __ocs_fmt_0__ (только следующий выбор).
+    .no-snap-found-for-specified-point = Для указанной точки не найдено: __ocs_fmt_0__.
     .solid-created = Твердое создание.
     .source-object-not-found = Источник объекта не найден.
     .spacing = Интервал

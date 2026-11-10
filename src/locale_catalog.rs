@@ -3772,6 +3772,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Sketch" => Some(("draw", "sketch")),
         "Sketchy" => Some(("common", "sketchy")),
         "Snap override: {label} (next pick only)." => Some(("common", "snap-override-label-next-pick-only")),
+        "No {label} found for specified point." => Some(("common", "no-snap-found-for-specified-point")),
         "Snap to\nUnderlays" => Some(("insert", "snap-to-underlays")),
         "Softness" => Some(("properties", "softness")),
         "Solid" => Some(("properties", "solid")),

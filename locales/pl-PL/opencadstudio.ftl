@@ -1185,6 +1185,7 @@ common =
     .size = Rozmiar
     .sketchy = Szkicowy
     .snap-override-label-next-pick-only = Nadpisanie przyciągania: __ocs_fmt_0__ (tylko następny wybór).
+    .no-snap-found-for-specified-point = Nie znaleziono __ocs_fmt_0__ dla wskazanego punktu.
     .solid-created = Utworzono bryłę.
     .source-object-not-found = Nie znaleziono obiektu źródłowego.
     .spacing = Odstępy

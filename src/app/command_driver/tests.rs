@@ -7529,4 +7529,52 @@ mod batch6_tests {
             "the refused value is not written"
         );
     }
+
+    #[test]
+    fn dimstyle_rename_and_delete_through_the_command_line() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        // Create a style from the current one, rename it, restyle a
+        // dimension to it, and delete it after deleting the dimension.
+        let _ = app.run_command_line(r#"-DIMSTYLE ["SAVE", "SHEET-1-50"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["RENAME", "SHEET-1-50", "SHEET_1_50"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("SHEET_1_50"), "{out}");
+        assert!(app
+            .tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get("SHEET-1-50")
+            .is_none());
+        assert!(app
+            .tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .contains("SHEET_1_50"));
+
+        // Set it current, confirm it is current, then delete it.
+        let _ = app.run_command_line(r#"-DIMSTYLE ["RESTORE", "SHEET_1_50"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["DELETE", "SHEET_1_50"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("current style"), "{out}");
+        assert!(app
+            .tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .contains("SHEET_1_50"), "the current style is not deleted");
+
+        let _ = app.run_command_line(r#"-DIMSTYLE ["RESTORE", "ISO-25"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["DELETE", "SHEET_1_50"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("deleted"), "{out}");
+        assert!(!app
+            .tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .contains("SHEET_1_50"));
+    }
 }

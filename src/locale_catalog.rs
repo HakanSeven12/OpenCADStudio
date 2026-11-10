@@ -7191,7 +7191,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "-STYLE  Display text backwards? [Yes/No] <No>:" => Some(("dash-command", "style-backwards")),
         "-STYLE  Display text upside-down? [Yes/No] <No>:" => Some(("dash-command", "style-upside-down")),
         "-STYLE  Vertically? [Yes/No] <No>:" => Some(("dash-command", "style-vertical")),
-        "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Apply/?] <Restore>:" => Some(("dash-command", "dimstyle-option")),
+        "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Compare/Rename/Delete/Apply/?] <Restore>:" => Some(("dash-command", "dimstyle-option")),
         "-DIMSTYLE  Enter name for new dimension style or [?]:" => Some(("dash-command", "dimstyle-save-name")),
         "-DIMSTYLE  That name is already in use, redefine it? [Yes/No] <No>:" => Some(("dash-command", "dimstyle-redefine")),
         "-DIMSTYLE  Enter a dimension style name or [?] <%{name}>:" => Some(("dash-command", "dimstyle-name")),

@@ -454,7 +454,7 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
     flow(move |q| {
         let option = q.keyword(
             crate::t!(
-                "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Compare/Apply/?] <Restore>:"
+                "-DIMSTYLE  Enter a dimension style option [ANnotative/Save/Restore/STatus/Variables/Compare/Rename/Delete/Apply/?] <Restore>:"
             )
             .into_owned(),
             Some("RESTORE"),
@@ -465,6 +465,8 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                 ("STatus", "STATUS"),
                 ("Variables", "VARIABLES"),
                 ("Compare", "COMPARE"),
+                ("Rename", "RENAME"),
+                ("Delete", "DELETE"),
                 ("Apply", "APPLY"),
                 ("?", "?"),
             ],
@@ -540,6 +542,40 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                 )?;
                 if name == "?" {
                     return run("-DIMSTYLE", &["?", "*"]);
+                }
+                run("-DIMSTYLE", &[option, &name])
+            }
+            "RENAME" => {
+                let old = q.text(
+                    crate::t!("-DIMSTYLE  Enter the dimension style name to rename:")
+                        .into_owned(),
+                    None,
+                )?;
+                if old == "?" {
+                    return run("-DIMSTYLE", &["?", "*"]);
+                }
+                let new_name = q.text(
+                    crate::t!("-DIMSTYLE  Enter the new name for the style:")
+                        .into_owned(),
+                    None,
+                )?;
+                run("-DIMSTYLE", &[option, &old, &new_name])
+            }
+            "DELETE" => {
+                let name = q.text(
+                    crate::t!("-DIMSTYLE  Enter the dimension style name to delete:")
+                        .into_owned(),
+                    None,
+                )?;
+                if name == "?" {
+                    return run("-DIMSTYLE", &["?", "*"]);
+                }
+                if !q.yes_no(
+                    crate::tf!("-DIMSTYLE  Delete style '{}'? [Yes/No] <No>:", name)
+                        .into_owned(),
+                    false,
+                )? {
+                    return Ok(PromptStep::Finish);
                 }
                 run("-DIMSTYLE", &[option, &name])
             }
@@ -1725,6 +1761,179 @@ impl OpenCADStudio {
                         .push_error(crate::tf!("DIMSTYLE: '{}' not found.", name).as_ref()),
                 }
             }
+            "RENAME" => {
+                let new_name = arg(2);
+                if new_name.trim().is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Usage: -DIMSTYLE RENAME <old> <new>").as_ref(),
+                    );
+                    return;
+                }
+                let Some(old_name) = self
+                    .tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .find(|style| style.name.eq_ignore_ascii_case(&name))
+                    .map(|style| style.name.clone())
+                else {
+                    self.command_line.push_error(
+                        crate::tf!("DIMSTYLE: '{}' not found.", name).as_ref(),
+                    );
+                    return;
+                };
+                if self
+                    .tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .any(|style| style.name.eq_ignore_ascii_case(&new_name))
+                {
+                    self.command_line.push_error(
+                        crate::tf!("DIMSTYLE: '{}' is already in use.", new_name).as_ref(),
+                    );
+                    return;
+                }
+                // Whole-document snapshot: the table rekey and the restyle of
+                // the dimensions using the style land in one undo step.
+                self.push_undo_snapshot(i, "DIMSTYLE RENAME");
+                match self
+                    .tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .rename(&old_name, new_name.clone())
+                {
+                    Ok(()) => {
+                        let restyle: Vec<document::Handle> = self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|entity| match entity {
+                                document::EntityType::Dimension(dimension)
+                                    if dimension.base().style_name.eq_ignore_ascii_case(&old_name) =>
+                                {
+                                    Some(dimension.base().common.handle)
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let mut restyled = 0usize;
+                        for handle in &restyle {
+                            if let Some(document::EntityType::Dimension(dimension)) =
+                                self.tabs[i].scene.document.get_entity_mut(*handle)
+                            {
+                                dimension.base_mut().style_name = new_name.clone();
+                                restyled += 1;
+                            }
+                            self.tabs[i].scene.invalidate_dim_block_recorded(*handle);
+                        }
+                        if self.tabs[i]
+                            .scene
+                            .document
+                            .header
+                            .current_dimstyle_name
+                            .eq_ignore_ascii_case(&old_name)
+                        {
+                            let _ = self.on_ribbon_style_changed(
+                                crate::modules::StyleKey::DimStyle,
+                                new_name.clone(),
+                            );
+                        }
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.invalidate_dim_style_dependencies(&old_name);
+                        self.tabs[i].scene.invalidate_dim_style_dependencies(&new_name);
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "DIMSTYLE: '{}' renamed to '{}'{}.",
+                                old_name,
+                                new_name,
+                                if restyled > 0 {
+                                    format!(", {restyled} dimension(s) restyled")
+                                } else {
+                                    String::new()
+                                }
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(
+                            crate::tf!("DIMSTYLE: {}.", error).as_ref(),
+                        );
+                    }
+                }
+                return;
+            }
+            "DELETE" => {
+                let Some(style_name) = self
+                    .tabs[i]
+                    .scene
+                    .document
+                    .dim_styles
+                    .iter()
+                    .find(|style| style.name.eq_ignore_ascii_case(&name))
+                    .map(|style| style.name.clone())
+                else {
+                    self.command_line.push_error(
+                        crate::tf!("DIMSTYLE: '{}' not found.", name).as_ref(),
+                    );
+                    return;
+                };
+                let current = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_dimstyle_name
+                    .clone();
+                if style_name.eq_ignore_ascii_case(&current) {
+                    self.command_line.push_error(
+                        crate::tf!(
+                            "DIMSTYLE: '{}' is the current style and cannot be deleted.",
+                            current
+                        )
+                        .as_ref(),
+                    );
+                    return;
+                }
+                let in_use = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter(|entity| {
+                        matches!(entity, document::EntityType::Dimension(dimension)
+                            if dimension.base().style_name.eq_ignore_ascii_case(&style_name))
+                    })
+                    .count();
+                if in_use > 0 {
+                    self.command_line.push_error(
+                        crate::tf!(
+                            "DIMSTYLE: '{}' is used by {} dimension(s); delete those first.",
+                            style_name,
+                            in_use
+                        )
+                        .as_ref(),
+                    );
+                    return;
+                }
+                let pending = self.begin_dim_style_undo(
+                    i,
+                    "DIMSTYLE DELETE",
+                    std::slice::from_ref(&style_name),
+                );
+                let _ = self.tabs[i].scene.document.dim_styles.remove(&style_name);
+                self.commit_dim_style_undo(i, pending);
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.invalidate_dim_style_dependencies(&style_name);
+                let _ =
+                    self.on_ribbon_style_changed(crate::modules::StyleKey::DimStyle, current);
+                self.command_line.push_output(
+                    crate::tf!("DIMSTYLE: '{}' deleted.", style_name).as_ref(),
+                );
+                return;
+            }
             "VARIABLES" => {
                 if args.len() >= 4 {
                     // Write form: VARIABLES <style> <var> <value>. The value
@@ -1895,13 +2104,25 @@ impl OpenCADStudio {
                 return;
             }
             _ => {
+                let current = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_dimstyle_name
+                    .clone();
                 let names: Vec<String> = self.tabs[i]
                     .scene
                     .document
                     .dim_styles
                     .iter()
                     .filter(|style| listed(&style.name, &name))
-                    .map(|style| style.name.clone())
+                    .map(|style| {
+                        if style.name.eq_ignore_ascii_case(&current) {
+                            format!("{} (current)", style.name)
+                        } else {
+                            style.name.clone()
+                        }
+                    })
                     .collect();
                 self.command_line
                     .push_output(crate::tf!("DimStyles: {}", names.join(", ")).as_ref());

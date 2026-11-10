@@ -1313,7 +1313,7 @@ impl OpenCADStudio {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 let result =
-                    self.save_tab_synchronously_protected_as(i, path.clone(), version, true);
+                    self.save_tab_synchronously_protected_as(i, path.clone(), version, true, false);
                 #[cfg(target_arch = "wasm32")]
                 let result = crate::io::save(&self.tabs[i].scene.document, &path)
                     .map_err(crate::io::SaveFailure::other);
@@ -2527,7 +2527,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         let version = app.tabs[i].scene.document.version;
-        app.save_tab_synchronously_protected_as(i, path.clone(), version, true)
+        app.save_tab_synchronously_protected_as(i, path.clone(), version, true, false)
             .expect("initial protected save");
 
         let result = app

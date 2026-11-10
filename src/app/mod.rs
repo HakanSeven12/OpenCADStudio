@@ -2419,6 +2419,8 @@ pub(super) enum PendingClose {
 pub(super) enum SavePurpose {
     Manual,
     SaveAs,
+    /// Control Save As without permission to replace an existing destination.
+    SaveAsNew,
     Autosave,
 }
 
@@ -2556,6 +2558,7 @@ pub struct SaveOutcome {
     revision: u64,
     camera_generation: u64,
     path: PathBuf,
+    physical_path: Option<PathBuf>,
     version: document::DxfVersion,
     previous_autosave: Option<PathBuf>,
     set_current_path: bool,

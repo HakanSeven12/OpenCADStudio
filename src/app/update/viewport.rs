@@ -10701,6 +10701,40 @@ mod rapid_drawing_tests {
         }
     }
 
+    /// The interaction index is built from the hover dwell, which does not
+    /// run while a command is active. A command's snaps and picks query that
+    /// index too: once an edit (a LAYOFF pick) replaced the wire set, every
+    /// move and click of the command scanned the whole drawing until the
+    /// command ended. A move during a command asks for the index itself.
+    #[test]
+    fn a_move_during_a_command_asks_for_the_interaction_index() {
+        use crate::modules::draw::layers::layoff::LayerOffCommand;
+        use document::{entities::Line, types::Vector3, EntityType};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        // More wires than the index threshold, so the drawing wants one.
+        for k in 0..5_000 {
+            let y = k as f64 * 0.01;
+            app.tabs[i]
+                .scene
+                .add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, y, 0.0),
+                    Vector3::new(10.0, y, 0.0),
+                )));
+        }
+        app.tabs[i].active_cmd = Some(Box::new(LayerOffCommand::default()));
+        assert!(app.active_interaction_index.is_none());
+
+        let _ = app.on_viewport_move(iced::Point::new(400.0, 300.0));
+        assert!(
+            app.active_interaction_index.is_some(),
+            "a move during a command should start the interaction index build"
+        );
+    }
+
     #[test]
     fn stretch_cursor_move_keeps_live_lines_visible_even_during_fast_pointer_updates() {
         use crate::command::{CadCommand, CmdResult};

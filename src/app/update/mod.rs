@@ -12067,12 +12067,14 @@ impl OpenCADStudio {
 
             Message::ShowViewCubeChanged(show) => {
                 self.show_viewcube = show;
+                self.ribbon.set_viewcube(show);
                 self.persist_settings_if_changed();
                 Task::none()
             }
 
             Message::ShowUcsIconChanged(show) => {
                 self.show_ucs_icon = show;
+                self.ribbon.set_ucs_icon(show);
                 self.persist_settings_if_changed();
                 Task::none()
             }

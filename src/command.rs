@@ -1934,7 +1934,7 @@ pub enum CmdResult {
         options: crate::modules::block_editor::orientation_parameter::Options,
     },
     /// Place a native two-point parameter: Linear and Polar take a base, end and
-    /// label pick; XY takes its grip count and labels itself at the endpoint.
+    /// label pick; Linear and XY take their grip count before they are placed.
     PlaceBlockDistanceParameter {
         document_id: u64,
         definition: Handle,
@@ -1942,7 +1942,7 @@ pub enum CmdResult {
         base: DVec3,
         end: DVec3,
         label: DVec3,
-        /// XY parameter grip count chosen at authoring time, when asked.
+        /// Grips chosen at authoring time for the kinds that ask, when asked.
         grips: Option<usize>,
         /// Answers given to the base-point prompt's options; a missing answer
         /// keeps the parameter's own default.

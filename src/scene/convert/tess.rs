@@ -879,22 +879,35 @@ fn proxy_preview_wires(
         } else {
             1.0
         };
+        // Lay out unrotated, shift by the alignment, then turn.
         let (strokes, _) = crate::scene::text::lff::tessellate_text_ex(
             [0.0, 0.0],
             t.height as f32,
-            t.rotation as f32,
+            0.0,
             width as f32,
             t.oblique as f32,
             font,
             &t.text,
         );
+        let (min_x, max_x) = strokes
+            .iter()
+            .flatten()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
+        let shift_x = if min_x <= max_x {
+            -(min_x as f64 + t.align[0] * (max_x - min_x) as f64)
+        } else {
+            0.0
+        };
+        let shift_y = -t.align[1] * t.height;
+        let (sin, cos) = t.rotation.sin_cos();
         for stroke in strokes.iter().filter(|s| s.len() >= 2) {
             let run: Vec<[f64; 3]> = stroke
                 .iter()
                 .map(|&[x, y]| {
+                    let (x, y) = (x as f64 + shift_x, y as f64 + shift_y);
                     [
-                        t.position[0] + x as f64,
-                        t.position[1] + y as f64,
+                        t.position[0] + x * cos - y * sin,
+                        t.position[1] + x * sin + y * cos,
                         t.position[2],
                     ]
                 })
@@ -1263,10 +1276,10 @@ fn tessellate_entity_inner(
         },
         _ => None,
     };
-    // ── Civil 3D labels and profile views: lines plus generated text ─────────
+    // ── Civil 3D objects: lines and text styled by their Civil 3D style ─────
     if let EntityType::Extended(entity) = e {
         if let document::entities::ExtendedEntityData::Arch(data) = &entity.data {
-            if let Some(dec) = crate::entities::civil::decoded(data, document) {
+            if let Some(dec) = crate::entities::civil::decoded(data, e.common().handle.value(), document) {
                 let inherited = ProxyInherit {
                     color: entity_color,
                     aci,

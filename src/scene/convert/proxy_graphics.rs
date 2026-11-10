@@ -102,6 +102,9 @@ pub struct ProxyText {
     pub text: String,
     pub font: String,
     pub style: ProxyStyle,
+    /// Where `position` sits on the text, as fractions of its width and
+    /// height: `[0, 0]` is the baseline start, `[1, 0.5]` middle right.
+    pub align: [f64; 2],
 }
 
 /// Everything a preview decodes to.
@@ -604,6 +607,7 @@ fn decode_text(d: &[u8], unicode: bool) -> Option<(ProxyText, DVec3)> {
             text,
             font: String::new(),
             style: ProxyStyle::default(),
+            align: [0.0, 0.0],
         },
         dir,
     ))
@@ -634,6 +638,7 @@ fn decode_text2(d: &[u8], unicode: bool) -> Option<(ProxyText, DVec3)> {
             text,
             font,
             style: ProxyStyle::default(),
+            align: [0.0, 0.0],
         },
         dir,
     ))

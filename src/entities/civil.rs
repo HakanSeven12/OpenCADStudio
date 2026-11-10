@@ -5,29 +5,36 @@
 
 use document::classes::arch::ArchEntityData;
 use document::classes::arch::ArchObject;
-use document::classes::civil::{parse_format, AssemblyLayout, property, CivilKind, LabelPart, LabelText, ProfileViewFrame, TinSurface};
+use document::classes::civil::{
+    parse_format, property, AlignmentPiece, AssemblyLayout, CivilKind, DisplayComponent, LabelPart, LabelText,
+    ProfilePiece, ProfileViewFrame, TinSurface,
+};
 use document::objects::ObjectType;
 use document::entities::{EntityType, ExtendedEntityData};
 use document::types::Handle;
 
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
-use crate::scene::convert::proxy_graphics::{Decoded, ProxyPolyline, ProxyStyle, ProxyText};
+use crate::scene::convert::proxy_graphics::{
+    Decoded, ProxyColor, ProxyPolyline, ProxyStyle, ProxyText, LT_BYBLOCK, LT_BYLAYER,
+};
 use document::types::Vector2;
 
 const NAN: [f64; 3] = [f64::NAN; 3];
 
 type Key = (usize, usize);
 
-/// Decoded points of the slow kinds (TIN, corridor), keyed by the record
-/// bytes they came from; an edited record has new bytes and decodes again.
+/// Decoded geometry of the slow kinds (TIN, corridor), keyed by the record
+/// bytes it came from; an edited record has new bytes and decodes again.
 // ponytail: never evicts; bound it if drawings are edited heavily in one session.
-fn cached(
+fn cached<T: Clone + Default + Send + Sync + 'static>(
     data: &ArchEntityData,
-    build: impl FnOnce(&ArchEntityData) -> Option<Vec<[f64; 3]>>,
-) -> Vec<[f64; 3]> {
+    tag: u64,
+    build: impl FnOnce(&ArchEntityData) -> Option<T>,
+) -> T {
+    use std::any::Any;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<Key, Arc<Vec<[f64; 3]>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<(Key, u64), Arc<dyn Any + Send + Sync>>>> = OnceLock::new();
     let Some(raw) = data.raw_dwg_data.as_ref() else {
         return build(data).unwrap_or_default();
     };
@@ -35,40 +42,24 @@ fn cached(
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         raw.hash(&mut hasher);
-        (hasher.finish() as usize, raw.len())
+        ((hasher.finish() as usize, raw.len()), tag)
     };
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
-        return hit.as_ref().clone();
+    let hit = cache.lock().ok().and_then(|c| c.get(&key).cloned());
+    if let Some(value) = hit.and_then(|hit| hit.downcast_ref::<T>().cloned()) {
+        return value;
     }
-    let points = build(data).unwrap_or_default();
+    let value = build(data).unwrap_or_default();
     if let Ok(mut c) = cache.lock() {
-        c.insert(key, Arc::new(points.clone()));
+        c.insert(key, Arc::new(value.clone()));
     }
-    points
+    value
 }
 
+/// Every line a Civil 3D object draws, for picking and extents.
 pub(crate) fn render(data: &ArchEntityData, handle: u64, document: &document::Document) -> Option<RenderEntity> {
-    let points = match data.civil_kind()? {
-        CivilKind::TinSurface => cached(data, |data| tin_edges(&data.tin_surface()?).into()),
-        CivilKind::Alignment => chains(
-            data.alignment_polylines()
-                .into_iter()
-                .map(|run| run.into_iter().map(|p| [p.x, p.y, 0.0]).collect()),
-        ),
-        CivilKind::ProfileView => profile_view(data, document)?,
-        CivilKind::Assembly => assembly_baseline(data)?,
-        CivilKind::Subassembly => subassembly_links(data, handle, document)?,
-        CivilKind::SampleLineGroup => sample_line_points(data, document)?,
-        CivilKind::Corridor => cached(data, |data| {
-            Some(chains(
-                data.corridor_feature_lines()
-                    .into_iter()
-                    .map(|run| run.into_iter().map(|(_, p)| [p.x, p.y, p.z]).collect()),
-            ))
-        }),
-        _ => return None,
-    };
+    let drawn = decoded(data, handle, document)?;
+    let points = chains(drawn.polylines.into_iter().map(|p| p.points));
     (points.len() >= 2).then(|| RenderEntity {
         object: RenderObject::Lines(points),
         snap_pts: Vec::new(),
@@ -79,28 +70,379 @@ pub(crate) fn render(data: &ArchEntityData, handle: u64, document: &document::Do
     })
 }
 
-/// Vertical marker through the baseline point, as tall as the assembly.
-fn assembly_baseline(data: &ArchEntityData) -> Option<Vec<[f64; 3]>> {
-    let origin = data.assembly_layout()?.origin;
-    let ys = data.profiles.iter().flatten().map(|p| p.y);
-    let (low, high) = ys.fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), y| (l.min(y), h.max(y)));
-    (low < high).then(|| vec![[origin.x, low, 0.0], [origin.x, high, 0.0]])
+/// Display components of the first `class` style among `handles`.
+fn style_components(document: &document::Document, handles: &[u64], class: &str) -> Option<Vec<DisplayComponent>> {
+    let style = handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == class)?;
+    Some(style.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h)))
 }
 
-/// Links of a subassembly shape, placed at its attachment point.
-fn subassembly_links(data: &ArchEntityData, handle: u64, document: &document::Document) -> Option<Vec<[f64; 3]>> {
+/// How component `index` of a style draws, `None` when the style hides it.
+/// Without a style the object's own properties apply. A component on layer
+/// 0 draws on the object's layer, as Civil 3D does.
+fn component(document: &document::Document, components: Option<&[DisplayComponent]>, index: usize) -> Option<ProxyStyle> {
+    use document::types::Color;
+    let Some(components) = components else {
+        return Some(ProxyStyle::default());
+    };
+    let c = components.get(index)?;
+    if !c.visible {
+        return None;
+    }
+    let layer = document
+        .layers
+        .iter()
+        .position(|l| l.handle.value() == c.layer && l.name != "0")
+        .map(|i| i as u32);
+    let by = |name: &str, wanted: &str| name.eq_ignore_ascii_case(wanted);
+    let linetype = match document.line_types.iter().find(|lt| lt.handle.value() == c.linetype) {
+        Some(lt) if by(&lt.name, "ByBlock") => LT_BYBLOCK,
+        Some(lt) if !by(&lt.name, "ByLayer") => document
+            .line_types
+            .iter()
+            .filter(|t| !by(&t.name, "ByLayer") && !by(&t.name, "ByBlock"))
+            .position(|t| t.handle == lt.handle)
+            .map_or(LT_BYLAYER, |i| i as u32),
+        _ => LT_BYLAYER,
+    };
+    let color = match c.color {
+        Color::ByLayer => ProxyColor::ByLayer,
+        Color::ByBlock | Color::None => ProxyColor::ByBlock,
+        Color::Index(i) => ProxyColor::Aci(i),
+        Color::Rgb { r, g, b } => ProxyColor::Rgb(r, g, b),
+    };
+    Some(ProxyStyle {
+        color,
+        layer,
+        linetype,
+        lineweight: c.lineweight,
+    })
+}
+
+/// Lines drawn with a component's style; nothing when it is hidden.
+fn styled(out: &mut Decoded, style: Option<ProxyStyle>, points: Vec<[f64; 3]>) {
+    if let Some(style) = style {
+        if points.len() > 1 {
+            out.polylines.push(ProxyPolyline { points, style });
+        }
+    }
+}
+
+/// Surface style components in plan view (`SurfaceDisplayStyleType`).
+const SURFACE_TRIANGLES: usize = 1;
+const SURFACE_BOUNDARY: usize = 2;
+const SURFACE_MAJOR_CONTOUR: usize = 3;
+const SURFACE_MINOR_CONTOUR: usize = 4;
+
+fn tin_surface(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) {
+    let handles = data.decode().handles;
+    let components = style_components(document, &handles, "AECC_SURFACE_STYLE");
+    let components = components.as_deref();
+    let draw = |out: &mut Decoded, index: usize, tag: u64, build: &dyn Fn(&TinSurface) -> Vec<[f64; 3]>| {
+        if let Some(style) = component(document, components, index) {
+            styled(out, Some(style), cached(data, tag, |d| Some(build(&d.tin_surface()?))));
+        }
+    };
+    draw(out, SURFACE_TRIANGLES, 1, &tin_edges);
+    draw(out, SURFACE_BOUNDARY, 2, &|surface| {
+        chains(
+            surface
+                .boundary()
+                .into_iter()
+                .map(|run| run.into_iter().map(|p| [p.x, p.y, p.z]).collect()),
+        )
+    });
+    let intervals = handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == "AECC_SURFACE_STYLE")
+        .and_then(|style| style.surface_contour_intervals());
+    if let Some((minor, major)) = intervals {
+        let is_major = move |z: f64| ((z / major).round() * major - z).abs() < 1e-6 * major.max(1.0);
+        let contours = move |surface: &TinSurface, want_major: bool| {
+            chains(
+                surface
+                    .contours(minor)
+                    .into_iter()
+                    .filter(|(z, _)| is_major(*z) == want_major)
+                    .map(|(_, run)| run.into_iter().map(|p| [p.x, p.y, p.z]).collect()),
+            )
+        };
+        let tag = |kind: u64, interval: f64| kind ^ interval.to_bits().rotate_left(8);
+        draw(out, SURFACE_MAJOR_CONTOUR, tag(3, major) ^ minor.to_bits(), &|s| contours(s, true));
+        draw(out, SURFACE_MINOR_CONTOUR, tag(4, minor) ^ major.to_bits(), &|s| contours(s, false));
+    }
+}
+
+/// Feature lines of a corridor, each code's group drawn with the feature
+/// line style the corridor gives that code.
+fn corridor(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) {
+    let groups: Vec<Vec<[f64; 3]>> = cached(data, 0, |data| {
+        Some(
+            data.corridor_feature_line_groups()
+                .into_iter()
+                .map(|group| {
+                    chains(
+                        group
+                            .into_iter()
+                            .map(|run| run.into_iter().map(|(_, p)| [p.x, p.y, p.z]).collect()),
+                    )
+                })
+                .collect(),
+        )
+    });
+    // Body handles: a null, the corridor style, the code set style, then
+    // one feature line style per code, in code order.
+    let handles = data.decode().handles;
+    let styles: Vec<&ArchObject> = handles
+        .iter()
+        .skip(3)
+        .map_while(|h| object_arch(document, *h).filter(|o| o.dxf_name == "AECC_FEATURELINE_STYLE"))
+        .collect();
+    // ponytail: a code without feature lines has no group, so groups and
+    // codes pair up only when their counts match; otherwise the corridor
+    // keeps its own properties. Pair them by code once the corridor's
+    // assembly codes are decoded.
+    let matched = styles.len() == groups.len();
+    for (index, points) in groups.into_iter().enumerate() {
+        let style = if matched {
+            let components = styles[index].display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
+            // Feature line style component 0: the line in plan.
+            component(document, Some(&components), 0)
+        } else {
+            Some(ProxyStyle::default())
+        };
+        styled(out, style, points);
+    }
+}
+
+/// Alignment style components in plan view (`AlignmentDisplayStyleType`),
+/// drawn only outside the alignment's masked station ranges.
+fn alignment(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) {
+    let components = style_components(document, &data.decode().handles, "AECC_ALIGNMENT_STYLE");
+    let masks = data.alignment_masked_ranges();
+    let mut station = data.alignment_start_station().unwrap_or(0.0);
+    for (piece, points) in data.alignment_pieces() {
+        let index = match piece {
+            AlignmentPiece::Line => 0,
+            AlignmentPiece::Curve => 1,
+            AlignmentPiece::Spiral => 2,
+        };
+        let style = component(document, components.as_deref(), index);
+        for run in unmasked(&points, station, &masks) {
+            styled(out, style, run.into_iter().map(|p| [p.x, p.y, 0.0]).collect());
+        }
+        station += points.windows(2).map(|w| w[0].distance(&w[1])).sum::<f64>();
+    }
+}
+
+/// Whether `station` lies in a masked range.
+fn masked(station: f64, masks: &[(f64, f64)]) -> bool {
+    masks.iter().any(|&(from, to)| station > from && station < to)
+}
+
+/// Parts of a polyline starting at station `start` outside `masks`, cut
+/// exactly at the range ends.
+fn unmasked(points: &[Vector2], start: f64, masks: &[(f64, f64)]) -> Vec<Vec<Vector2>> {
+    if masks.is_empty() {
+        return vec![points.to_vec()];
+    }
+    let mut out = Vec::new();
+    let mut current: Vec<Vector2> = Vec::new();
+    let mut station = start;
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let length = a.distance(&b);
+        // Split this segment at every range end inside it.
+        let mut cuts: Vec<f64> = masks
+            .iter()
+            .flat_map(|&(from, to)| [from, to])
+            .filter(|&s| s > station && s < station + length)
+            .collect();
+        cuts.sort_by(f64::total_cmp);
+        let mut s0 = station;
+        let mut p0 = a;
+        for s1 in cuts.into_iter().chain([station + length]) {
+            let p1 = if length > 0.0 { a + (b - a) * ((s1 - station) / length) } else { b };
+            if masked((s0 + s1) / 2.0, masks) {
+                if current.len() > 1 {
+                    out.push(std::mem::take(&mut current));
+                }
+                current.clear();
+            } else {
+                if current.is_empty() {
+                    current.push(p0);
+                }
+                current.push(p1);
+            }
+            s0 = s1;
+            p0 = p1;
+        }
+        station += length;
+    }
+    if current.len() > 1 {
+        out.push(current);
+    }
+    out
+}
+
+/// A marker style's point symbol at `at` (`Marker::kind` bits: low 2 plus,
+/// 3 cross, 4 tick; +32 circle, +64 square).
+fn marker(out: &mut Decoded, style: Option<ProxyStyle>, at: Vector2, symbol: &document::classes::civil::Marker, scale: f64) {
+    let size = symbol.size * if symbol.absolute { 1.0 } else { scale };
+    let p = |x: f64, y: f64| [at.x + x, at.y + y, 0.0];
+    if symbol.kind & 32 != 0 {
+        let r = size / 2.0;
+        styled(out, style, (0..=48).map(|i| {
+            let a = i as f64 / 48.0 * std::f64::consts::TAU;
+            p(r * a.cos(), r * a.sin())
+        }).collect());
+    }
+    if symbol.kind & 64 != 0 {
+        let h = size / 2.0;
+        styled(out, style, vec![p(-h, -h), p(-h, h), p(h, h), p(h, -h), p(-h, -h)]);
+    }
+    match symbol.kind & 31 {
+        2 => {
+            styled(out, style, vec![p(-size, 0.0), p(size, 0.0)]);
+            styled(out, style, vec![p(0.0, -size), p(0.0, size)]);
+        }
+        3 => {
+            let d = size * std::f64::consts::FRAC_1_SQRT_2;
+            styled(out, style, vec![p(-d, -d), p(d, d)]);
+            styled(out, style, vec![p(-d, d), p(d, -d)]);
+        }
+        4 => styled(out, style, vec![p(0.0, 0.0), p(0.0, size)]),
+        _ => {}
+    }
+}
+
+/// The marker style object's symbol and its first component's style.
+fn marker_style(document: &document::Document, handle: u64) -> Option<(document::classes::civil::Marker, Option<ProxyStyle>)> {
+    let object = object_arch(document, handle)?;
+    let symbol = object.marker()?;
+    let components = object.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
+    Some((symbol, component(document, Some(&components), 0)))
+}
+
+/// An assembly's baseline marker, baseline line and assembly marker, from
+/// its style's marker styles (baseline, offset, baseline line, offset line,
+/// assembly).
+fn assembly(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let origin = data.assembly_layout()?.origin;
+    let at = Vector2::new(origin.x, origin.y);
+    let style = data
+        .decode()
+        .handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == "AECC_ASSEMBLY_STYLE")?;
+    let markers = style.decode().handles;
+    let scale = drawing_scale(document);
+    if let Some((symbol, line_style)) = markers.get(2).and_then(|h| marker_style(document, *h)) {
+        let half = symbol.size * if symbol.absolute { 1.0 } else { scale } / 2.0;
+        styled(out, line_style, vec![[at.x, at.y + half, 0.0], [at.x, at.y - half, 0.0]]);
+    }
+    for index in [0, 4] {
+        if let Some((symbol, marker_layer)) = markers.get(index).and_then(|h| marker_style(document, *h)) {
+            marker(out, marker_layer, at, &symbol, scale);
+        }
+    }
+    Some(())
+}
+
+/// A subassembly's links, area borders and point markers at its attachment
+/// point, each styled by its code through the code set style: the first
+/// code the set lists picks the style; codes the set does not list, or no
+/// codes, take the set's defaults.
+fn subassembly(data: &ArchEntityData, handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
     let shape = data.subassembly_shape()?;
     let assembly = arch_of(document, data.subassembly_assembly()?, CivilKind::Assembly)?;
     let layout = assembly.assembly_layout()?;
     let origin = subassembly_origin(document, &layout, handle, layout.attachments.len())?;
-    Some(chains(shape.links.iter().map(|link| {
-        link.iter()
-            .map(|&i| {
-                let p = origin + shape.points[i as usize];
-                [p.x, p.y, 0.0]
+    let code_set = data
+        .decode()
+        .handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == "AECC_ROADWAY_STYLE_SET");
+    let entries = code_set.map(|c| c.code_set()).unwrap_or_default();
+    let defaults = code_set.map(|c| c.code_set_defaults()).unwrap_or_default();
+    // Every code the set lists draws with its own style; codes it does not
+    // list, or no codes, take a default (uncoded marker, link, shape, then
+    // the same for unlisted codes).
+    let pick = |codes: &[String], class: &str, uncoded: usize, unlisted: usize| -> Vec<u64> {
+        if codes.is_empty() {
+            return defaults.get(uncoded).copied().into_iter().collect();
+        }
+        let listed: Vec<u64> = codes
+            .iter()
+            .filter_map(|code| {
+                entries
+                    .iter()
+                    .find(|(c, style)| c == code && object_arch(document, *style).is_some_and(|o| o.dxf_name == class))
+                    .map(|(_, style)| *style)
             })
-            .collect()
-    })))
+            .collect();
+        if listed.is_empty() {
+            defaults.get(unlisted).copied().into_iter().collect()
+        } else {
+            listed
+        }
+    };
+    let first_component = |style: u64, index: usize| {
+        let object = object_arch(document, style)?;
+        let components = object.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
+        component(document, Some(&components), index)
+    };
+    let point = |i: u32| {
+        let p = origin + shape.points[i as usize];
+        [p.x, p.y, 0.0]
+    };
+    for (index, link) in shape.links.iter().enumerate() {
+        let codes = shape.link_codes.get(index).map(Vec::as_slice).unwrap_or(&[]);
+        for style in pick(codes, "AECC_ROADWAYLINK_STYLE", 1, 4) {
+            styled(out, first_component(style, 0), link.iter().map(|&i| point(i)).collect());
+        }
+    }
+    for (index, area) in shape.areas.iter().enumerate() {
+        let codes = shape.area_codes.get(index).map(Vec::as_slice).unwrap_or(&[]);
+        if let Some(border) = area_border(&shape, area) {
+            for style in pick(codes, "AECC_ROADWAYSHAPE_STYLE", 2, 5) {
+                styled(out, first_component(style, 0), border.iter().map(|&i| point(i)).collect());
+            }
+        }
+    }
+    let scale = drawing_scale(document);
+    for (index, p) in shape.points.iter().enumerate() {
+        let codes = shape.point_codes.get(index).map(Vec::as_slice).unwrap_or(&[]);
+        for style in pick(codes, "AECC_ROADWAYMARKER_STYLE", 0, 3) {
+            if let Some((symbol, layer_style)) = marker_style(document, style) {
+                marker(out, layer_style, origin + *p, &symbol, scale);
+            }
+        }
+    }
+    Some(())
+}
+
+/// Point indices around an area, chaining its links end to end.
+fn area_border(shape: &document::classes::civil::SubassemblyShape, area: &[u32]) -> Option<Vec<u32>> {
+    let ends = |link: u32| {
+        let l = shape.links.get(link as usize)?;
+        Some((*l.first()?, *l.last()?))
+    };
+    let mut remaining: Vec<(u32, u32)> = area.iter().map(|&l| ends(l)).collect::<Option<_>>()?;
+    let (a, b) = remaining.remove(0);
+    let mut ring = vec![a, b];
+    while !remaining.is_empty() {
+        let tail = *ring.last()?;
+        let position = remaining.iter().position(|&(p, q)| p == tail || q == tail)?;
+        let (p, q) = remaining.remove(position);
+        ring.push(if p == tail { q } else { p });
+    }
+    Some(ring)
 }
 
 /// Drawing position of a subassembly's origin: the parent point it hangs
@@ -163,46 +505,6 @@ fn chains(runs: impl Iterator<Item = Vec<[f64; 3]>>) -> Vec<[f64; 3]> {
     points
 }
 
-/// Frame, grid, and the profiles the view lists.
-fn profile_view(data: &ArchEntityData, document: &document::Document) -> Option<Vec<[f64; 3]>> {
-    let frame = data.profile_view_frame()?;
-    let at = |station: f64, elevation: f64| {
-        let p = frame.to_drawing(station, elevation);
-        [p.x, p.y, 0.0]
-    };
-    let mut runs: Vec<Vec<[f64; 3]>> = Vec::new();
-    let (s0, s1, e0, e1) = (
-        frame.station_min,
-        frame.station_max,
-        frame.elevation_min,
-        frame.elevation_max,
-    );
-    runs.push(vec![at(s0, e0), at(s1, e0), at(s1, e1), at(s0, e1), at(s0, e0)]);
-    for station in grid(s0, s1, 100.0) {
-        runs.push(vec![at(station, e0), at(station, e1)]);
-    }
-    for elevation in grid(e0, e1, 10.0) {
-        runs.push(vec![at(s0, elevation), at(s1, elevation)]);
-    }
-    for handle in data.decode().handles {
-        if let Some(profile) = profile_entity(document, handle) {
-            for run in profile.profile_polylines() {
-                runs.extend(clip_to_view(&frame, &run));
-            }
-        }
-    }
-    Some(chains(runs.into_iter()))
-}
-
-/// Interior grid values on multiples of `step`.
-fn grid(from: f64, to: f64, step: f64) -> impl Iterator<Item = f64> {
-    let first = (from / step).floor() as i64 + 1;
-    let last = (to / step).ceil() as i64 - 1;
-    let count = (last - first + 1).clamp(0, 500);
-    (first..first + count)
-        .map(move |i| i as f64 * step)
-        .filter(move |v| *v > from && *v < to)
-}
 
 fn profile_entity(document: &document::Document, handle: u64) -> Option<&ArchEntityData> {
     let EntityType::Extended(entity) = document.get_entity(Handle::new(handle))? else {
@@ -238,16 +540,40 @@ fn clip_to_view(frame: &ProfileViewFrame, run: &[document::types::Vector2]) -> V
 /// (2.5 mm plotted).
 const DEFAULT_PLOTTED_HEIGHT: f64 = 0.0025;
 
-/// Lines and generated text for Civil 3D objects that carry text: label
-/// groups and profile views. `None` for everything else.
-pub(crate) fn decoded(data: &ArchEntityData, document: &document::Document) -> Option<Decoded> {
+/// What a Civil 3D object draws, styled by its style's display
+/// components. `None` for classes this module does not draw; an object its
+/// style hides draws nothing.
+pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::Document) -> Option<Decoded> {
     let mut out = Decoded::default();
     match data.civil_kind()? {
-        CivilKind::ProfileView => profile_view_text(data, document, &mut out)?,
-        CivilKind::Label => label_group(data, document, &mut out)?,
+        CivilKind::TinSurface => tin_surface(data, document, &mut out),
+        CivilKind::Alignment => alignment(data, document, &mut out),
+        CivilKind::ProfileView => {
+            profile_view(data, document, &mut out);
+        }
+        CivilKind::Label => {
+            label_group(data, document, &mut out);
+        }
+        CivilKind::SampleLineGroup => {
+            let handles = data.decode().handles;
+            let group = style_components(document, &handles, "AECC_SAMPLE_LINE_GROUP_STYLE");
+            let lines = style_components(document, &handles, "AECC_SAMPLE_LINE_STYLE");
+            // Plan components: the group style's lines, then the sample line
+            // style's `SampleLineDisplayStyleType::Lines`.
+            if component(document, group.as_deref(), 0).is_some() {
+                styled(&mut out, component(document, lines.as_deref(), 0), sample_line_points(data, document).unwrap_or_default());
+            }
+        }
+        CivilKind::Corridor => corridor(data, document, &mut out),
+        CivilKind::Assembly => {
+            assembly(data, document, &mut out);
+        }
+        CivilKind::Subassembly => {
+            subassembly(data, handle, document, &mut out);
+        }
         _ => return None,
     }
-    (!out.is_empty()).then_some(out)
+    Some(out)
 }
 
 fn line(out: &mut Decoded, points: Vec<[f64; 3]>) {
@@ -257,10 +583,78 @@ fn line(out: &mut Decoded, points: Vec<[f64; 3]>) {
     });
 }
 
-/// A label style as drawn: its layer and text components.
+/// A label style as drawn: its layer, text components and tick blocks.
 struct LabelStyle {
     layer: Option<u32>,
     components: Vec<LabelText>,
+    /// `(block record handle, plotted size)` of each tick component.
+    ticks: Vec<(u64, f64)>,
+    /// `(plotted length, angle to the anchor's direction)` of each line
+    /// component.
+    lines: Vec<(f64, f64)>,
+}
+
+/// A label's own line components draw on the label's layer.
+fn label_line_style(layer: Option<u32>) -> ProxyStyle {
+    ProxyStyle {
+        layer,
+        color: ProxyColor::ByLayer,
+        linetype: LT_BYLAYER,
+        ..ProxyStyle::default()
+    }
+}
+
+/// Lines of a tick block placed at `at`, turned by `angle` and scaled to
+/// `size` drawing units, on the label's layer.
+fn tick(out: &mut Decoded, document: &document::Document, layer: Option<u32>, block: u64, at: Vector2, angle: f64, size: f64) {
+    let Some(record) = document.block_records.iter().find(|b| b.handle.value() == block) else {
+        return;
+    };
+    // The tick block is scaled so its larger extent is `size`.
+    let mut low = [f64::MAX; 2];
+    let mut high = [f64::MIN; 2];
+    let mut grow = |x: f64, y: f64, r: f64| {
+        low = [low[0].min(x - r), low[1].min(y - r)];
+        high = [high[0].max(x + r), high[1].max(y + r)];
+    };
+    for entity in document.entities_in_block(&record.name) {
+        match entity {
+            EntityType::Line(l) => {
+                grow(l.start.x, l.start.y, 0.0);
+                grow(l.end.x, l.end.y, 0.0);
+            }
+            EntityType::Circle(c) => grow(c.center.x, c.center.y, c.radius),
+            EntityType::LwPolyline(p) => p.vertices.iter().for_each(|v| grow(v.location.x, v.location.y, 0.0)),
+            _ => {}
+        }
+    }
+    let extent = (high[0] - low[0]).max(high[1] - low[1]);
+    let size = if extent > 1e-12 { size / extent } else { size };
+    let (sin, cos) = angle.sin_cos();
+    let place = |x: f64, y: f64| [at.x + (x * cos - y * sin) * size, at.y + (x * sin + y * cos) * size, 0.0];
+    let style = label_line_style(layer);
+    for entity in document.entities_in_block(&record.name) {
+        let points = match entity {
+            EntityType::Line(l) => vec![place(l.start.x, l.start.y), place(l.end.x, l.end.y)],
+            EntityType::Circle(c) => (0..=64)
+                .map(|i| {
+                    let a = i as f64 / 64.0 * std::f64::consts::TAU;
+                    place(c.center.x + c.radius * a.cos(), c.center.y + c.radius * a.sin())
+                })
+                .collect(),
+            EntityType::LwPolyline(p) => {
+                let mut points: Vec<[f64; 3]> = p.vertices.iter().map(|v| place(v.location.x, v.location.y)).collect();
+                if p.is_closed {
+                    if let Some(first) = points.first().copied() {
+                        points.push(first);
+                    }
+                }
+                points
+            }
+            _ => continue,
+        };
+        styled(out, Some(style), points);
+    }
 }
 
 fn object_arch(document: &document::Document, handle: u64) -> Option<&ArchObject> {
@@ -299,7 +693,40 @@ fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
         })
         .filter_map(|h| object_arch(document, *h)?.label_text())
         .collect();
-    LabelStyle { layer, components }
+    let mut seen = Vec::new();
+    let ticks = handles
+        .iter()
+        .filter(|h| {
+            let fresh = !seen.contains(*h);
+            seen.push(**h);
+            fresh
+        })
+        .filter_map(|h| object_arch(document, *h)?.label_tick())
+        .collect();
+    let mut seen = Vec::new();
+    let lines = handles
+        .iter()
+        .filter(|h| {
+            let fresh = !seen.contains(*h);
+            seen.push(**h);
+            fresh
+        })
+        .filter_map(|h| object_arch(document, *h)?.label_line())
+        .collect();
+    LabelStyle { layer, components, ticks, lines }
+}
+
+/// Stroke font of Civil 3D label text: the drawing's Standard text style
+/// font.
+// ponytail: every component here uses Standard; read each text component's
+// own style once its reference is decoded.
+fn label_font(document: &document::Document) -> String {
+    document
+        .text_styles
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case("Standard"))
+        .map(|s| s.font_file.clone())
+        .unwrap_or_default()
 }
 
 /// Drawing units per plotted unit. Civil 3D stores plotted sizes in the
@@ -335,30 +762,64 @@ fn component_lines(component: &LabelText, value: &dyn Fn(u32, &[u32]) -> Option<
     Some(lines)
 }
 
-/// Place a label: each component's lines stacked from `at` along `angle`,
-/// offset across it by the component's own offset.
+/// Angle past which label text is turned around to stay readable: text
+/// reading between it and half a turn further reads the other way.
+// ponytail: 110°, the value in this drawing's label styles; read each
+// style's own once its field is decoded.
+const READABILITY_BIAS: f64 = 110.0 * std::f64::consts::PI / 180.0;
+
+/// MTEXT line spacing at the default factor, in text heights.
+const LINE_SPACING: f64 = 5.0 / 3.0;
+
+/// Place a label's text components at `anchor`, in the frame of the
+/// anchor's direction `frame` (radians): each component sits at its offset
+/// along and across that direction, turned by its own rotation, held by its
+/// attachment point and border gap, and turned around when it would read
+/// upside down.
 fn place(
     out: &mut Decoded,
     document: &document::Document,
     style: &LabelStyle,
-    at: Vector2,
-    angle: f64,
+    anchor: Vector2,
+    frame: f64,
     value: &dyn Fn(u32, &[u32]) -> Option<String>,
 ) {
     let scale = drawing_scale(document);
-    let across = Vector2::new(-angle.sin(), angle.cos());
-    let mut row = 0.0;
+    let (fs, fc) = frame.sin_cos();
     for component in &style.components {
         let Some(lines) = component_lines(component, value) else {
             continue;
         };
+        let lines: Vec<String> = lines.into_iter().filter(|l| !l.trim().is_empty()).collect();
+        if lines.is_empty() {
+            continue;
+        }
         let height = component.height.unwrap_or(DEFAULT_PLOTTED_HEIGHT) * scale;
-        let shift = component.y_offset.unwrap_or(0.0) * scale;
-        for line_text in lines {
-            if line_text.trim().is_empty() {
-                continue;
-            }
-            let p = at + across * (shift - row);
+        let (x, y) = (component.x_offset * scale, component.y_offset * scale);
+        let mut at = anchor + Vector2::new(x * fc - y * fs, x * fs + y * fc);
+        let mut angle = frame + component.rotation;
+        // Fractions of the text box: 0 left / bottom, 1 right / top.
+        let column = f64::from(component.attachment % 3) * 0.5;
+        let row = 1.0 - f64::from(component.attachment / 3) * 0.5;
+        let gap = component.gap * scale;
+        let (u, v) = (Vector2::new(angle.cos(), angle.sin()), Vector2::new(-angle.sin(), angle.cos()));
+        at = at + u * (gap * (1.0 - 2.0 * column)) + v * (gap * (1.0 - 2.0 * row));
+        let (mut column, mut row) = (column, row);
+        let reading = angle.rem_euclid(std::f64::consts::TAU);
+        if reading > READABILITY_BIAS && reading <= READABILITY_BIAS + std::f64::consts::PI {
+            // Same box, read from the other end.
+            angle += std::f64::consts::PI;
+            column = 1.0 - column;
+            row = 1.0 - row;
+        }
+        let v = Vector2::new(-angle.sin(), angle.cos());
+        let spacing = height * LINE_SPACING;
+        let block = height + spacing * (lines.len() - 1) as f64;
+        // Each line hangs from its own top; the block's top is where the
+        // attachment point puts it.
+        let top = at + v * (block * (1.0 - row));
+        for (i, line_text) in lines.into_iter().enumerate() {
+            let p = top - v * (spacing * i as f64);
             out.texts.push(ProxyText {
                 position: [p.x, p.y, 0.0],
                 height,
@@ -366,13 +827,13 @@ fn place(
                 width_factor: 1.0,
                 oblique: 0.0,
                 text: line_text,
-                font: String::new(),
+                font: label_font(document),
                 style: ProxyStyle {
                     layer: style.layer,
                     ..ProxyStyle::default()
                 },
+                align: [column, 1.0],
             });
-            row += height * 1.5;
         }
     }
 }
@@ -431,19 +892,22 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let runs = alignment.alignment_polylines();
             let run = runs.first()?;
             let scale = drawing_scale(document);
-            let tick = if major { 0.002 } else { 0.001 } * scale;
+            let _ = major;
             for station in data.label_stations() {
                 let Some((at, d)) = point_at(run, station - start) else {
                     continue;
                 };
-                let n = Vector2::new(-d.y, d.x);
-                let (a, b) = (at - n * tick, at + n * tick);
-                line(out, vec![[a.x, a.y, 0.0], [b.x, b.y, 0.0]]);
+                let b = at;
+                if let Some(style) = &style {
+                    for &(block, size) in &style.ticks {
+                        tick(out, document, style.layer, block, at, d.y.atan2(d.x), size * scale);
+                    }
+                }
                 if let Some(style) = &style {
                     let value = |property: u32, options: &[u32]| {
                         (property == p::STATION).then(|| LabelPart::format_value(options, station))
                     };
-                    place(out, document, style, b, upright(n.y.atan2(n.x)), &value);
+                    place(out, document, style, b, d.y.atan2(d.x), &value);
                 }
             }
         }
@@ -453,21 +917,37 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let start = alignment.alignment_start_station().unwrap_or(0.0);
             let runs = alignment.alignment_polylines();
             let run = runs.first()?;
-            let reach = 0.006 * drawing_scale(document);
+            let scale = drawing_scale(document);
+            let masks = alignment.alignment_masked_ranges();
             for point in alignment.alignment_geometry_points() {
+                if masked(start + point.distance, &masks) {
+                    continue;
+                }
                 let Some((at, d)) = point_at(run, point.distance) else {
                     continue;
                 };
-                let n = Vector2::new(-d.y, d.x);
-                let tip = at + n * reach;
-                line(out, vec![[at.x, at.y, 0.0], [tip.x, tip.y, 0.0]]);
+                let heading = d.y.atan2(d.x);
+                for &(block, size) in &style.ticks {
+                    tick(out, document, style.layer, block, at, heading, size * scale);
+                }
+                // The text hangs from the end of the line component, in its
+                // direction.
+                let (tip, frame) = match style.lines.first() {
+                    Some(&(length, angle)) => {
+                        let frame = heading + angle;
+                        let tip = at + Vector2::new(frame.cos(), frame.sin()) * (length * scale);
+                        styled(out, Some(label_line_style(style.layer)), vec![[at.x, at.y, 0.0], [tip.x, tip.y, 0.0]]);
+                        (tip, frame)
+                    }
+                    None => (at, heading),
+                };
                 let station = start + point.distance;
                 let value = |property: u32, options: &[u32]| match property {
                     p::GEOMETRY_POINT => Some(point.name.to_string()),
                     p::STATION => Some(LabelPart::format_value(options, station)),
                     _ => None,
                 };
-                place(out, document, &style, tip, upright(n.y.atan2(n.x)), &value);
+                place(out, document, &style, tip, frame, &value);
             }
         }
         "AECC_SAMPLELINE_LABELING" => {
@@ -487,7 +967,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                     .collect();
                 let value = |property: u32, _: &[u32]| (property == p::SAMPLE_LINE_NAME).then(|| name.clone());
                 let d = right - left;
-                place(out, document, &style, left, upright(d.y.atan2(d.x)), &value);
+                place(out, document, &style, left, d.y.atan2(d.x), &value);
             }
         }
         "AECC_STATION_ELEVATION_LABEL" => {
@@ -546,23 +1026,36 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                             .any(|part| matches!(part, LabelPart::Field { property, .. } if *property == p::STATION))
                     })
                 })?;
-            let below = 0.004 * drawing_scale(document);
+            let scale = drawing_scale(document);
+            // The band hangs below the view, its top on the view's bottom.
+            let height = band.band_height().unwrap_or(0.0) * scale;
+            let top = frame.origin.y;
+            let band_components = band.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
+            let ticks = component(document, Some(&band_components), BAND_MAJOR_TICKS);
             for station in data.label_stations() {
                 let x = frame.to_drawing(station, frame.elevation_min).x;
+                styled(out, ticks, vec![[x, top, 0.0], [x, top - height, 0.0]]);
                 let value = |property: u32, options: &[u32]| match property {
                     p::STATION => Some(LabelPart::format_value(options, station)),
                     EG_ELEVATION => elevation_at(&eg, station).map(|v| LabelPart::format_value(options, v)),
                     FG_ELEVATION => elevation_at(&fg, station).map(|v| LabelPart::format_value(options, v)),
                     _ => None,
                 };
-                place(
-                    out,
-                    document,
-                    &style,
-                    Vector2::new(x, frame.origin.y - below),
-                    std::f64::consts::FRAC_PI_2,
-                    &value,
-                );
+                // Each text hangs from the band's top, middle or bottom.
+                for text in &style.components {
+                    let y = match text.anchor_point {
+                        Some(1) => top - height / 2.0,
+                        Some(2) => top - height,
+                        _ => top,
+                    };
+                    let single = LabelStyle {
+                        layer: style.layer,
+                        components: vec![text.clone()],
+                        ticks: Vec::new(),
+                        lines: Vec::new(),
+                    };
+                    place(out, document, &single, Vector2::new(x, y), 0.0, &value);
+                }
             }
         }
         "AECC_VALIGNMENT_LINE_LABEL_GROUP"
@@ -600,21 +1093,24 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let value = |property: u32, options: &[u32]| {
                             (property == p::TANGENT_GRADE).then(|| LabelPart::format_value(options, g))
                         };
-                        place(out, document, &style, at(mid), upright((b.y - a.y).atan2(b.x - a.x)), &value);
+                        place(out, document, &style, at(mid), (b.y - a.y).atan2(b.x - a.x), &value);
                     }
                     "AECC_VALIGNMENT_PVI_LABEL_GROUP" => {
                         if !inside(pvi.point) {
                             continue;
                         }
                         let q = at(pvi.point);
-                        let top = q + Vector2::new(0.0, 0.04 * scale);
-                        line(out, vec![[q.x, q.y, 0.0], [top.x, top.y, 0.0]]);
+                        let Some(&(length, angle)) = style.lines.first() else {
+                            continue;
+                        };
+                        let top = q + Vector2::new(angle.cos(), angle.sin()) * (length * scale);
+                        styled(out, Some(label_line_style(style.layer)), vec![[q.x, q.y, 0.0], [top.x, top.y, 0.0]]);
                         let value = |property: u32, options: &[u32]| match property {
                             p::PVI_STATION => Some(LabelPart::format_value(options, pvi.point.x)),
                             p::PVI_ELEVATION => Some(LabelPart::format_value(options, pvi.point.y)),
                             _ => None,
                         };
-                        place(out, document, &style, top, std::f64::consts::FRAC_PI_2, &value);
+                        place(out, document, &style, top, angle, &value);
                     }
                     _ => {
                         let (Some(g0), Some(g1)) = (grade_in, grade_out) else {
@@ -718,21 +1214,79 @@ fn elevation_at(runs: &[Vec<Vector2>], station: f64) -> Option<f64> {
     })
 }
 
-/// Frame, grid, profiles and axis annotation of a profile view, with the
-/// view style's station and elevation formats.
-fn profile_view_text(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
-    let frame = data.profile_view_frame()?;
-    for run in profile_view(data, document)?.split(|p| p[0].is_nan()) {
-        if run.len() > 1 {
-            line(out, run.to_vec());
-        }
+/// Profile view style components (`ProfileViewDisplayStyleType`, in
+/// record order): per axis the line, its major and minor annotation and
+/// ticks; then the grid.
+const VIEW_LEFT: usize = 1;
+const VIEW_RIGHT: usize = 7;
+const VIEW_TOP: usize = 13;
+const VIEW_BOTTOM: usize = 19;
+const VIEW_GRID_HORIZONTAL_MAJOR: usize = 25;
+const VIEW_GRID_HORIZONTAL_MINOR: usize = 26;
+const VIEW_GRID_VERTICAL_MAJOR: usize = 27;
+const VIEW_GRID_VERTICAL_MINOR: usize = 28;
+const VIEW_GRID_GEOMETRY_POINTS: usize = 29;
+/// Offsets from an axis's line component to its other components.
+const AXIS_MAJOR_ANNOTATION: usize = 2;
+const AXIS_MINOR_ANNOTATION: usize = 3;
+const AXIS_MAJOR_TICKS: usize = 4;
+const AXIS_MINOR_TICKS: usize = 5;
+
+/// Profile style components in profile views: a leading record, then
+/// `ProfileDisplayStyleProfileType` in value order.
+const PROFILE_LINE: usize = 1;
+const PROFILE_SYMMETRICAL_PARABOLA: usize = 3;
+const PROFILE_LINE_EXTENSIONS: usize = 6;
+/// Data band style: ticks at the band's major stations.
+const BAND_MAJOR_TICKS: usize = 3;
+
+/// Multiples of `step` from `from` to `to`, both ends included.
+fn multiples(from: f64, to: f64, step: f64) -> Vec<f64> {
+    if !(step > 0.0) || to < from {
+        return Vec::new();
     }
-    let view_style = data
-        .decode()
-        .handles
+    let eps = 1e-9 * step.max(1.0);
+    let first = (from / step - eps).ceil() as i64;
+    let last = (to / step + eps).floor() as i64;
+    (first..=last.min(first + 10_000)).map(|i| i as f64 * step).collect()
+}
+
+/// Axes, ticks, annotation, grid and profiles of a profile view, each
+/// styled by its component; profiles by the style the view gives them.
+fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let frame = data.profile_view_frame()?;
+    let handles = data.decode().handles;
+    let view_style = handles
         .iter()
         .filter_map(|h| object_arch(document, *h))
         .find(|o| o.dxf_name == "AECC_PROFILE_VIEW_STYLE");
+    let components = view_style.map(|s| s.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h)));
+    let style = |index| component(document, components.as_deref(), index);
+    let scale = drawing_scale(document);
+    let at = |station: f64, elevation: f64| {
+        let p = frame.to_drawing(station, elevation);
+        [p.x, p.y, 0.0]
+    };
+    let (s0, s1, e0, e1) = (
+        frame.station_min,
+        frame.station_max,
+        frame.elevation_min,
+        frame.elevation_max,
+    );
+    styled(out, style(VIEW_LEFT), vec![at(s0, e0), at(s0, e1)]);
+    styled(out, style(VIEW_RIGHT), vec![at(s1, e0), at(s1, e1)]);
+    styled(out, style(VIEW_TOP), vec![at(s0, e1), at(s1, e1)]);
+    styled(out, style(VIEW_BOTTOM), vec![at(s0, e0), at(s1, e0)]);
+    // A vertical line at every geometry point of the view's alignment.
+    if let Some(alignment) = handles.iter().find_map(|h| arch_of(document, *h, CivilKind::Alignment)) {
+        let start = alignment.alignment_start_station().unwrap_or(0.0);
+        for point in alignment.alignment_geometry_points() {
+            let station = start + point.distance;
+            if (s0..=s1).contains(&station) {
+                styled(out, style(VIEW_GRID_GEOMETRY_POINTS), vec![at(station, e0), at(station, e1)]);
+            }
+        }
+    }
     let formats: Vec<Vec<LabelPart>> = view_style
         .map(|s| s.inline_strings())
         .unwrap_or_default()
@@ -748,36 +1302,108 @@ fn profile_view_text(data: &ArchEntityData, document: &document::Document, out: 
     };
     let station_options = field_options(property::STATION).unwrap_or_default();
     let elevation_options = field_options(ELEVATION).unwrap_or_default();
-    let height = DEFAULT_PLOTTED_HEIGHT * drawing_scale(document);
-    let label = |out: &mut Decoded, at: Vector2, value: String| {
-        out.texts.push(ProxyText {
-            position: [at.x, at.y, 0.0],
-            height,
-            rotation: 0.0,
-            width_factor: 1.0,
-            oblique: 0.0,
-            text: value,
-            font: String::new(),
-            style: ProxyStyle::default(),
-        });
-    };
-    let (s0, s1, e0, e1) = (
-        frame.station_min,
-        frame.station_max,
-        frame.elevation_min,
-        frame.elevation_max,
-    );
-    for station in grid(s0, s1, 100.0).chain([s0, s1]) {
-        let q = frame.to_drawing(station, e0);
-        let value = LabelPart::format_value(&station_options, station);
-        label(out, Vector2::new(q.x - height, q.y - 2.0 * height), value);
+    if let Some(axes) = view_style.and_then(|s| s.profile_view_axes()) {
+        for elevation in multiples(e0, e1, axes.left.major_interval) {
+            styled(out, style(VIEW_GRID_HORIZONTAL_MAJOR), vec![at(s0, elevation), at(s1, elevation)]);
+        }
+        for elevation in multiples(e0, e1, axes.left.minor_interval) {
+            styled(out, style(VIEW_GRID_HORIZONTAL_MINOR), vec![at(s0, elevation), at(s1, elevation)]);
+        }
+        for station in multiples(s0, s1, axes.bottom.major_interval) {
+            styled(out, style(VIEW_GRID_VERTICAL_MAJOR), vec![at(station, e0), at(station, e1)]);
+        }
+        for station in multiples(s0, s1, axes.bottom.minor_interval) {
+            styled(out, style(VIEW_GRID_VERTICAL_MINOR), vec![at(station, e0), at(station, e1)]);
+        }
+        // (axis, line component, ticks run along stations, fixed value,
+        // outward direction, text alignment)
+        let sides = [
+            (axes.left, VIEW_LEFT, false, s0, Vector2::new(-1.0, 0.0), [1.0, 0.5]),
+            (axes.right, VIEW_RIGHT, false, s1, Vector2::new(1.0, 0.0), [0.0, 0.5]),
+            (axes.top, VIEW_TOP, true, e1, Vector2::new(0.0, 1.0), [0.5, 0.0]),
+            (axes.bottom, VIEW_BOTTOM, true, e0, Vector2::new(0.0, -1.0), [0.5, 1.0]),
+        ];
+        for (axis, line, along_stations, fixed, outward, align) in sides {
+            let (from, to) = if along_stations { (s0, s1) } else { (e0, e1) };
+            let point = |v: f64| {
+                let [x, y, _] = if along_stations { at(v, fixed) } else { at(fixed, v) };
+                Vector2::new(x, y)
+            };
+            let options = if along_stations { &station_options } else { &elevation_options };
+            for (interval, size, height, ticks, annotation) in [
+                (axis.minor_interval, axis.minor_tick_size, axis.minor_text_height, AXIS_MINOR_TICKS, AXIS_MINOR_ANNOTATION),
+                (axis.major_interval, axis.major_tick_size, axis.major_text_height, AXIS_MAJOR_TICKS, AXIS_MAJOR_ANNOTATION),
+            ] {
+                let half = size * scale / 2.0;
+                for value in multiples(from, to, interval) {
+                    let p = point(value);
+                    let (a, b) = (p - outward * half, p + outward * half);
+                    styled(out, style(line + ticks), vec![[a.x, a.y, 0.0], [b.x, b.y, 0.0]]);
+                    if let Some(text_style) = style(line + annotation) {
+                        out.texts.push(ProxyText {
+                            position: [b.x, b.y, 0.0],
+                            height: height * scale,
+                            rotation: 0.0,
+                            width_factor: 1.0,
+                            oblique: 0.0,
+                            text: LabelPart::format_value(options, value),
+                            font: label_font(document),
+                            style: text_style,
+                            align,
+                        });
+                    }
+                }
+            }
+        }
     }
-    for elevation in grid(e0, e1, 10.0).chain([e0, e1]) {
-        let value = LabelPart::format_value(&elevation_options, elevation);
-        let q = frame.to_drawing(s0, elevation);
-        label(out, Vector2::new(q.x - (value.len() as f64 + 1.0) * height, q.y - height / 2.0), value.clone());
-        let r = frame.to_drawing(s1, elevation);
-        label(out, Vector2::new(r.x + height, r.y - height / 2.0), value);
+    // The view lists each profile, followed by the style it draws that
+    // profile with; without one the profile's own style applies.
+    // The view's bands list profiles again; each profile draws once.
+    let mut drawn: Vec<u64> = Vec::new();
+    for (index, handle) in handles.iter().enumerate() {
+        let Some(profile) = profile_entity(document, *handle) else {
+            continue;
+        };
+        if drawn.contains(handle) {
+            continue;
+        }
+        drawn.push(*handle);
+        let given = handles
+            .get(index + 1)
+            .and_then(|h| object_arch(document, *h))
+            .filter(|o| o.dxf_name == "AECC_PROFILE_STYLE")
+            .map(|o| o.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h)));
+        let profile_components =
+            given.or_else(|| style_components(document, &profile.decode().handles, "AECC_PROFILE_STYLE"));
+        for (piece, run) in profile.profile_pieces() {
+            let index = match piece {
+                ProfilePiece::Tangent => PROFILE_LINE,
+                ProfilePiece::Parabola => PROFILE_SYMMETRICAL_PARABOLA,
+            };
+            let piece_style = component(document, profile_components.as_deref(), index);
+            for clipped in clip_to_view(&frame, &run) {
+                styled(out, piece_style, clipped);
+            }
+        }
+        // Tangents carried on to the PVI over each vertical curve.
+        let extension_style = component(document, profile_components.as_deref(), PROFILE_LINE_EXTENSIONS);
+        for w in profile.profile_pvis().windows(3) {
+            let (a, pvi, b) = (w[0].point, w[1], w[2].point);
+            let half = pvi.curve_length / 2.0;
+            if half <= 0.0 {
+                continue;
+            }
+            let p = pvi.point;
+            let grade = |q: Vector2| (p.y - q.y) / (p.x - q.x);
+            let run = [
+                Vector2::new(p.x - half, p.y - grade(a) * half),
+                p,
+                Vector2::new(p.x + half, p.y + grade(b) * half),
+            ];
+            for clipped in clip_to_view(&frame, &run) {
+                styled(out, extension_style, clipped);
+            }
+        }
     }
     Some(())
 }

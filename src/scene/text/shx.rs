@@ -79,8 +79,16 @@ fn shape_cache() -> &'static Mutex<HashMap<(String, u16), Option<(ShapePolylines
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Whether `path` is a file on disk.
+/// Whether `path` is a file on disk. A file that was already read is known
+/// without asking: every text resolves its font's face, and the question
+/// costs far more than drawing the text, on every thread at once.
 pub fn file_on_disk(path: &str) -> bool {
+    if file_cache()
+        .lock()
+        .is_ok_and(|files| files.get(path).is_some_and(Option::is_some))
+    {
+        return true;
+    }
     #[cfg(test)]
     DISK_CHECKS.with(|count| count.set(count.get() + 1));
     std::path::Path::new(path).is_file()

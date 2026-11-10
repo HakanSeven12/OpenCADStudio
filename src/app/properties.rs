@@ -1996,6 +1996,46 @@ impl OpenCADStudio {
                     crate::entities::common::format_length(stored * ratio),
                 ),
             );
+            // Annotative multiline text shows its defined box twice, as on
+            // paper (editable as the box is) and in the model (read-only).
+            if let document::EntityType::MText(text) = entity {
+                let rows = [
+                    ("rect_w", "rect_w_model", text.rectangle_width, "Paper defined width", "Model defined width"),
+                    (
+                        "rect_h",
+                        "rect_h_model",
+                        text.rectangle_height.unwrap_or(0.0),
+                        "Paper defined height",
+                        "Model defined height",
+                    ),
+                ];
+                for (field, model_field, stored, paper_label, model_label) in rows {
+                    for section in sections.iter_mut() {
+                        if let Some(row) = section.props.iter_mut().find(|row| row.field == field) {
+                            let editable = !matches!(
+                                row.value,
+                                crate::scene::model::object::PropValue::ReadOnly(_)
+                            );
+                            *row = crate::entities::common::num_prop(
+                                crate::t!(paper_label).as_ref(),
+                                field,
+                                stored / model_factor,
+                                editable,
+                            );
+                        }
+                    }
+
+                    insert_row_after(
+                        &mut sections,
+                        field,
+                        crate::entities::common::ro_prop(
+                            crate::t!(model_label).as_ref(),
+                            model_field,
+                            crate::entities::common::format_length(stored * ratio),
+                        ),
+                    );
+                }
+            }
             // Text and multiline text: Match orientation to layout, the
             // AcadAnnoPO flag (an attribute definition has no such row).
             if !matches!(entity, document::EntityType::AttributeDefinition(_)) {

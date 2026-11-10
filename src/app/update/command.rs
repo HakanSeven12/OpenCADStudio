@@ -5654,8 +5654,10 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
-                            // Annotative text: the row holds the paper height.
-                            "height" | "att_h"
+                            // Annotative text: the row holds the paper height
+                            // (and, for multiline text, the paper width and
+                            // height of its box).
+                            "height" | "att_h" | "rect_w" | "rect_h"
                                 if self.tabs[i]
                                     .scene
                                     .annotative_text_height_factor(handle)

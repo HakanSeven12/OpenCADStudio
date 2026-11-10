@@ -6808,6 +6808,8 @@ impl OpenCADStudio {
                 // without Apply.
                 self.scale_stage_begin();
                 self.scale_reset_asking = false;
+                self.scale_delete_asking = false;
+                self.scale_edit_adding = false;
                 // Fallback scales are virtual (no real objects), so they can't
                 // be edited or renamed. Materialise the standard set into real
                 // staged objects so the manager behaves like a drawing with its
@@ -6830,6 +6832,7 @@ impl OpenCADStudio {
                 {
                     self.load_scale_editor(&first);
                 }
+                self.scale_manager_multi = vec![self.scale_manager_selected.clone()];
                 self.active_modal = Some(crate::app::ModalKind::ScaleManager);
                 Task::none()
             }
@@ -6869,6 +6872,7 @@ impl OpenCADStudio {
                                 (*handle, names)
                             })
                             .collect(),
+                        order: self.tabs[i].scene.scale_names_in_list_order(),
                         ..Default::default()
                     };
                     self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
@@ -6877,10 +6881,17 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleCommon(common) => {
                 self.anno_object_scale.common_only = common;
+                // The shared list opens on its first scale when none of the
+                // selected ones is in it.
+                if common && self.anno_object_scale.selected_listed().is_empty() {
+                    self.anno_object_scale.selected =
+                        self.anno_object_scale.listed().into_iter().take(1).collect();
+                }
                 Task::none()
             }
             Message::AnnoObjectScaleSelect(name) => {
-                self.anno_object_scale.selected = Some(name);
+                let (ctrl, shift) = (self.ctrl_down, self.shift_down);
+                self.anno_object_scale.click(name, ctrl, shift);
                 Task::none()
             }
             Message::AnnoObjectScaleAdd => {
@@ -6920,10 +6931,10 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleDelete => {
                 if self.anno_object_scale.can_delete() {
-                    if let Some(name) = self.anno_object_scale.selected.take() {
-                        for (_, scales) in &mut self.anno_object_scale.staged {
-                            scales.retain(|s| !s.eq_ignore_ascii_case(&name));
-                        }
+                    let picked = self.anno_object_scale.selected_listed();
+                    self.anno_object_scale.selected.clear();
+                    for (_, scales) in &mut self.anno_object_scale.staged {
+                        scales.retain(|s| !picked.iter().any(|p| p.eq_ignore_ascii_case(s)));
                     }
                 }
                 Task::none()
@@ -7079,10 +7090,32 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerSelect(name) => {
-                // Stage the current editor edits before switching so they aren't
-                // lost, then load the newly-selected scale.
-                self.scale_rename = None;
-                self.scale_apply_current();
+                // Ctrl toggles a row, Shift picks the run from the last
+                // clicked row, a plain click picks the row alone.
+                let i = self.active_tab;
+                let order = self.tabs[i].scene.scale_names_in_list_order();
+                let at = |n: &str| order.iter().position(|o| o.eq_ignore_ascii_case(n));
+                let anchor = self.scale_manager_selected.clone();
+                if self.shift_down && !anchor.is_empty() {
+                    if let (Some(a), Some(b)) = (at(&anchor), at(&name)) {
+                        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+                        self.scale_manager_multi = order[a..=b].to_vec();
+                    }
+                    return Task::none();
+                }
+                if self.ctrl_down {
+                    if let Some(pos) = self
+                        .scale_manager_multi
+                        .iter()
+                        .position(|s| s.eq_ignore_ascii_case(&name))
+                    {
+                        self.scale_manager_multi.remove(pos);
+                        return Task::none();
+                    }
+                    self.scale_manager_multi.push(name.clone());
+                } else {
+                    self.scale_manager_multi = vec![name.clone()];
+                }
                 self.load_scale_editor(&name);
                 Task::none()
             }
@@ -7095,16 +7128,27 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerNew => {
-                // Add a new scale to the list immediately (staged) and select it,
-                // like the style managers' New. The user edits its name / ratio;
-                // it's kept only if Apply is pressed before the window closes.
-                self.scale_apply_current();
-                let i = self.active_tab;
-                let name = self.unique_scale_name("New Scale");
-                if self.tabs[i].scene.add_scale(&name, 1.0, 1.0) {
-                    self.load_scale_editor(&name);
-                    self.scale_stage_mark();
+                // Add opens the card with a fresh name and 1 : 1; the scale
+                // joins the list's end only when the card is applied.
+                self.scale_edit_adding = true;
+                self.scale_rename_buf = self.unique_scale_name("New Scale");
+                self.scale_rename = Some(String::new());
+                self.scale_manager_paper_buf = "1".into();
+                self.scale_manager_drawing_buf = "1".into();
+                iced::widget::operation::focus(crate::ui::style::scale_manager::rename_input_id())
+            }
+            Message::ScaleManagerEdit => {
+                let name = self.scale_manager_selected.clone();
+                if name.is_empty() || self.scale_manager_multi.len() > 1 {
+                    return Task::none();
                 }
+                self.update(Message::ScaleRenameStart(name))
+            }
+            Message::ScaleManagerEditCancel => {
+                self.scale_rename = None;
+                self.scale_edit_adding = false;
+                let selected = self.scale_manager_selected.clone();
+                self.load_scale_editor(&selected);
                 Task::none()
             }
             Message::ScaleManagerCopy => {
@@ -7126,8 +7170,10 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleRenameStart(name) => {
-                // Stage current editor edits, then rename this row inline.
-                self.scale_apply_current();
+                // Double-click or Edit...: the card edits this scale.
+                self.scale_edit_adding = false;
+                self.scale_manager_multi = vec![name.clone()];
+                self.load_scale_editor(&name);
                 self.scale_rename_buf = name.clone();
                 self.scale_rename = Some(name);
                 iced::widget::operation::focus(crate::ui::style::scale_manager::rename_input_id())
@@ -7138,6 +7184,32 @@ impl OpenCADStudio {
             }
             Message::ScaleRenameCommit => {
                 let i = self.active_tab;
+                if self.scale_edit_adding {
+                    // Add: a unique name and a positive ratio make the scale.
+                    let name = self.scale_rename_buf.trim().to_string();
+                    let paper = self.scale_manager_paper_buf.trim().parse::<f64>().ok();
+                    let drawing = self.scale_manager_drawing_buf.trim().parse::<f64>().ok();
+                    let (Some(paper), Some(drawing)) = (paper, drawing) else {
+                        return Task::none();
+                    };
+                    if name.is_empty()
+                        || paper <= 0.0
+                        || drawing <= 0.0
+                        || self.tabs[i].scene.scale_paper_drawing(&name).is_some()
+                    {
+                        return Task::none();
+                    }
+                    if self.tabs[i].scene.add_scale(&name, paper, drawing) {
+                        self.scale_stage_mark();
+                        self.scale_edit_adding = false;
+                        self.scale_rename = None;
+                        self.scale_manager_multi = vec![name.clone()];
+                        self.load_scale_editor(&name);
+                    }
+                    return Task::none();
+                }
+                // Edit: the ratio first, then the name.
+                self.scale_apply_current();
                 if let Some(old) = self.scale_rename.take() {
                     let new = self.scale_rename_buf.trim().to_string();
                     if !new.is_empty() && !new.eq_ignore_ascii_case(&old) {
@@ -7172,7 +7244,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerMove(step) => {
-                self.scale_apply_current();
+                if self.scale_manager_multi.len() > 1 {
+                    return Task::none();
+                }
                 let i = self.active_tab;
                 let selected = self.scale_manager_selected.clone();
                 if self.tabs[i].scene.move_scale(&selected, step) {
@@ -7190,7 +7264,6 @@ impl OpenCADStudio {
                     // Reset takes effect at once, as the reference's does:
                     // the scales in use stay, the rest go, the chosen default
                     // list is added after them.
-                    self.scale_apply_current();
                     let i = self.active_tab;
                     let keep: Vec<String> = self.tabs[i]
                         .scene
@@ -7205,13 +7278,13 @@ impl OpenCADStudio {
                     self.scale_stage_commit();
                     let first = self.tabs[i].scene.scale_names_in_list_order().into_iter().next();
                     if let Some(first) = first {
+                        self.scale_manager_multi = vec![first.clone()];
                         self.load_scale_editor(&first);
                     }
                 }
                 Task::none()
             }
             Message::ScaleManagerOk => {
-                self.scale_apply_current();
                 self.scale_stage_commit();
                 self.close_active_modal();
                 Task::none()
@@ -7225,21 +7298,35 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerDelete => {
-                // Staged: reverted on close unless a later Apply commits it.
+                // Staged: reverted on close unless OK commits it. A scale in
+                // use is never deleted; with some in use among the picked
+                // ones the window asks before dropping the rest.
                 let i = self.active_tab;
-                let sel = self.scale_manager_selected.clone();
-                let cur = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .current_annotation_scale
-                    .clone();
-                // A scale in use is never deleted.
-                if !sel.is_empty()
-                    && !sel.eq_ignore_ascii_case(&cur)
-                    && self.tabs[i].scene.scale_in_use_count(&sel) == 0
-                {
-                    if self.tabs[i].scene.remove_scale(&sel) {
+                let picked = self.scale_manager_multi.clone();
+                let used = picked.iter().filter(|name| self.anno_scale_referenced(i, name)).count();
+                if picked.is_empty() || used == picked.len() {
+                    return Task::none();
+                }
+                if used > 0 {
+                    self.scale_delete_asking = true;
+                    return Task::none();
+                }
+                self.update(Message::ScaleManagerDeleteChoice(true))
+            }
+            Message::ScaleManagerDeleteChoice(delete) => {
+                self.scale_delete_asking = false;
+                if delete {
+                    let i = self.active_tab;
+                    let picked = std::mem::take(&mut self.scale_manager_multi);
+                    let unused: Vec<String> = picked
+                        .into_iter()
+                        .filter(|name| !self.anno_scale_referenced(i, name))
+                        .collect();
+                    let mut removed = false;
+                    for name in &unused {
+                        removed |= self.tabs[i].scene.remove_scale(name);
+                    }
+                    if removed {
                         self.scale_manager_selected.clear();
                         self.scale_manager_paper_buf.clear();
                         self.scale_manager_drawing_buf.clear();

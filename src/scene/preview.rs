@@ -767,8 +767,9 @@ impl Scene {
 
     /// ANNOMONITOR 1: a yellow alert badge with an exclamation bar beside
     /// the text of every dimension whose association no longer resolves
-    /// (measured: 17 x 11 px, 5 px right of the text, a quarter of the text
-    /// height above its middle; nothing at 0, -1 or -2). Screen size.
+    /// (measured: 17 x 11 px, upright, its middle 13 px right of and 14 px
+    /// above the end the text reads to, whatever the text's angle; nothing
+    /// at 0, -1 or -2). Screen size.
     pub(super) fn anno_monitor_overlay(&self, pixel: f64) -> Vec<HatchModel> {
         if crate::scene::annotative::anno_monitor() != 1 {
             return Vec::new();
@@ -803,13 +804,15 @@ impl Scene {
             if !broken {
                 continue;
             }
-            let Some((middle, width, height)) = crate::entities::dimension::as_dimension(entity)
+            let Some((middle, width, _, angle)) = crate::entities::dimension::as_dimension(entity)
                 .and_then(|dim| crate::entities::dimension::text_box(dim, &self.document))
             else {
                 continue;
             };
-            let left = middle.x + width * 0.5 + 5.0 * pixel;
-            let centre = middle.y + 0.25 * height;
+            let end_x = middle.x + angle.cos() * width * 0.5;
+            let end_y = middle.y + angle.sin() * width * 0.5;
+            let left = end_x + 4.5 * pixel;
+            let centre = end_y + 14.0 * pixel;
             let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
                 let z = middle.z as f32;
                 [

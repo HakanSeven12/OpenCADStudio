@@ -20,16 +20,30 @@ pub fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("scale-rename-input")
 }
 
-/// What the list buttons may do for the selected scale, and the line that
-/// describes it.
+/// What the list buttons may do for the selected scales, and the line that
+/// describes them.
 #[derive(Clone)]
 pub struct ListState {
     pub can_up: bool,
     pub can_down: bool,
+    pub can_edit: bool,
     pub can_delete: bool,
     pub units: String,
     /// Reset asks which default list to restore.
     pub reset_asking: bool,
+    /// Delete asks whether to drop the selected scales not in use.
+    pub delete_asking: bool,
+}
+
+/// The Edit / Add card: the scale's name and its paper : drawing units, with
+/// the units line it would read as.
+#[derive(Clone)]
+pub struct EditCard<'a> {
+    pub adding: bool,
+    pub name: &'a str,
+    pub paper: &'a str,
+    pub drawing: &'a str,
+    pub preview: String,
 }
 
 /// `1 paper Millimeter = 2 drawing Meters`: the paper unit of the drawing's
@@ -73,37 +87,44 @@ fn unit_name(code: i16, plural: bool) -> Cow<'static, str> {
 }
 
 /// `scales` is (name, "paper:drawing" ratio label) in the drawing's list
-/// order. The editor buffers hold the paper / drawing units of the selected
-/// scale.
-#[allow(clippy::too_many_arguments)]
+/// order; `selected` the picked rows (Ctrl adds, Shift extends). `edit` opens
+/// the Edit / Add card in place of the details panel.
 pub fn view_window<'a, 'b>(
     list: ListState,
     scales: &'b [(String, String)],
-    selected: &'b str,
+    selected: &'b [String],
     current: &'b str,
-    rename_active: Option<&'b str>,
-    rename_buf: &'a str,
-    paper_buf: &'a str,
-    drawing_buf: &'a str,
+    edit: Option<EditCard<'a>>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    // ── Toolbar: Add / Delete / Move Up / Move Down | Reset ──────────────
+    let editing = edit.is_some();
+    let idle = |msg: Message| (!editing).then_some(msg);
+    // ── Toolbar: Add / Edit / Delete / Move Up / Move Down | Reset ───────
     let toolbar = container(
         row![
-            tb_button(t!("Add"), Message::ScaleManagerNew, false),
+            tb_button_maybe(t!("Add..."), idle(Message::ScaleManagerNew), false),
             tb_button_maybe(
-                t!("Delete"),
-                list.can_delete.then_some(Message::ScaleManagerDelete),
+                t!("Edit…"),
+                list.can_edit.then_some(Message::ScaleManagerEdit).filter(|_| !editing),
                 false
             ),
-            tb_button_maybe(t!("Move Up"), list.can_up.then_some(Message::ScaleManagerMove(-1)), false),
+            tb_button_maybe(
+                t!("Delete"),
+                list.can_delete.then_some(Message::ScaleManagerDelete).filter(|_| !editing),
+                false
+            ),
+            tb_button_maybe(
+                t!("Move Up"),
+                list.can_up.then_some(Message::ScaleManagerMove(-1)).filter(|_| !editing),
+                false
+            ),
             tb_button_maybe(
                 t!("Move Down"),
-                list.can_down.then_some(Message::ScaleManagerMove(1)),
+                list.can_down.then_some(Message::ScaleManagerMove(1)).filter(|_| !editing),
                 false
             ),
             Space::new().width(sizing.width),
-            tb_button(t!("Reset"), Message::ScaleManagerReset, false),
+            tb_button_maybe(t!("Reset"), idle(Message::ScaleManagerReset), false),
         ]
         .spacing(4)
         .align_y(iced::Center),
@@ -116,57 +137,49 @@ pub fn view_window<'a, 'b>(
     .padding([5, 8]);
 
     // ── Left: scale list ──────────────────────────────────────────────────
-    let rows: Vec<Element<'_, Message>> =
-        scales
-            .iter()
-            .map(|(name, ratio)| {
-                // The row being renamed shows an inline text field; a single click
-                // selects, a double click starts renaming.
-                if rename_active == Some(name.as_str()) {
-                    return text_input("", rename_buf)
-                        .id(rename_input_id())
-                        .on_input(Message::ScaleRenameEdit)
-                        .on_submit(Message::ScaleRenameCommit)
-                        .size(11)
-                        .padding([4, 8])
-                        .width(sizing.width)
-                        .into();
-                }
-                let is_sel = name.as_str() == selected;
-                let is_cur = name.eq_ignore_ascii_case(current);
-                let check = crate::ui::icons::themed_check_cell(is_cur);
-                // The ratio keeps its whole width; the name takes the rest.
-                let label = row![
-                    check,
-                    text(name.clone()).size(11).width(iced::Length::Fill),
-                    text(ratio.clone())
-                        .size(10)
-                        .style(muted_text_style)
-                        .width(iced::Length::Shrink),
-                ]
-                .spacing(4)
-                .align_y(iced::Center);
-                let cell = container(label).padding([4, 8]).width(sizing.width).style(
-                    move |theme: &Theme| {
-                        let pair = theme.palette().primary.strong;
-                        container::Style {
-                            background: is_sel.then_some(Background::Color(pair.color)),
-                            text_color: is_sel.then_some(pair.text),
-                            ..Default::default()
-                        }
-                    },
-                );
-                mouse_area(cell)
-                    .on_press(Message::ScaleManagerSelect(name.clone()))
+    let rows: Vec<Element<'_, Message>> = scales
+        .iter()
+        .map(|(name, ratio)| {
+            let is_sel = selected.iter().any(|s| s.eq_ignore_ascii_case(name));
+            let is_cur = name.eq_ignore_ascii_case(current);
+            let check = crate::ui::icons::themed_check_cell(is_cur);
+            // The ratio keeps its whole width; the name takes the rest.
+            let label = row![
+                check,
+                text(name.clone()).size(11).width(iced::Length::Fill),
+                text(ratio.clone())
+                    .size(10)
+                    .style(muted_text_style)
+                    .width(iced::Length::Shrink),
+            ]
+            .spacing(4)
+            .align_y(iced::Center);
+            let cell = container(label).padding([4, 8]).width(sizing.width).style(
+                move |theme: &Theme| {
+                    let pair = theme.palette().primary.strong;
+                    container::Style {
+                        background: is_sel.then_some(Background::Color(pair.color)),
+                        text_color: is_sel.then_some(pair.text),
+                        ..Default::default()
+                    }
+                },
+            );
+            let area = mouse_area(cell);
+            if editing {
+                area.into()
+            } else {
+                area.on_press(Message::ScaleManagerSelect(name.clone()))
                     .on_double_click(Message::ScaleRenameStart(name.clone()))
                     .into()
-            })
-            .collect();
+            }
+        })
+        .collect();
 
     let list_panel = container(
         column![
             text(t!("Scales")).size(10).style(muted_text_style),
-            container(scrollable(column(rows).spacing(1)).height(sizing.height))
+            // The scrollbar sits beside the rows, so it never covers a ratio.
+            container(scrollable(column(rows).spacing(1)).spacing(4).height(sizing.height))
                 .style(|theme: &Theme| {
                     let palette = theme.palette();
                     container::Style {
@@ -186,7 +199,7 @@ pub fn view_window<'a, 'b>(
         .spacing(4)
         .height(sizing.height),
     )
-    .width(250)
+    .width(270)
     .height(sizing.height)
     .padding(iced::Padding {
         top: 12.0,
@@ -195,45 +208,42 @@ pub fn view_window<'a, 'b>(
         left: 12.0,
     });
 
-    // ── Right: editor (name + paper:drawing) ──────────────────────────────
-    let field = |label: Cow<'static, str>,
-                 ph: Cow<'static, str>,
-                 value: &str,
-                 on: fn(String) -> Message| {
-        row![
-            text(label).size(11).style(muted_text_style).width(96),
-            text_input(ph.as_ref(), value)
-                .on_input(on)
-                .style(|theme, status| field_style_with_radius(theme, status, 4.0))
-                .size(12)
-                .padding([5, 8])
-                .width(sizing.width),
-        ]
-        .align_y(iced::Center)
-        .spacing(6)
+    // ── Right: the selected scale, or the Edit / Add card ────────────────
+    let right: Element<'a, Message> = match edit {
+        Some(card) => edit_card(card, sizing),
+        None => {
+            let (name, ratio) = match selected {
+                [one] => scales
+                    .iter()
+                    .find(|(n, _)| n.eq_ignore_ascii_case(one))
+                    .map(|(n, r)| (n.clone(), r.clone()))
+                    .unwrap_or_default(),
+                _ => (String::new(), String::new()),
+            };
+            container(
+                column![
+                    text(t!("Scale")).size(10).style(muted_text_style),
+                    text(name).size(15),
+                    text(ratio).size(12).style(muted_text_style),
+                    Space::new().height(4),
+                    text(list.units.clone()).size(11),
+                    Space::new().height(6),
+                    text(t!("Double-click a scale or use Edit… to change its name and its paper : drawing units. Ctrl or Shift click picks several scales. Nothing is kept unless you click OK."))
+                        .size(10)
+                        .style(muted_text_style),
+                ]
+                .spacing(8),
+            )
+            .width(sizing.width)
+            .height(sizing.height)
+            .padding(12)
+            .into()
+        }
     };
 
-    let editor = container(
-        column![
-            text(Cow::Borrowed("Scale")).size(10).style(muted_text_style),
-            field(t!("Paper units"), Cow::Borrowed("1"), paper_buf, Message::ScaleManagerPaperBuf),
-            field(t!("Drawing units"), Cow::Borrowed("50"), drawing_buf, Message::ScaleManagerDrawingBuf),
-            Space::new().height(6),
-            text(list.units.clone()).size(11),
-            Space::new().height(6),
-            text(t!("Double-click a scale to rename it; edit its paper : drawing ratio here. Add puts a new scale at the end of the list. Nothing is kept unless you click OK."))
-                .size(10)
-                .style(muted_text_style),
-        ]
-        .spacing(8),
-    )
-    .width(sizing.width)
-    .height(sizing.height)
-    .padding(12);
-
-    let body = row![list_panel, vsep(sizing.height), editor].height(sizing.height);
-    // Reset asks which default list to restore before it purges anything.
+    let body = row![list_panel, vsep(sizing.height), right].height(sizing.height);
     let footer: Element<'a, Message> = if list.reset_asking {
+        // Reset asks which default list to restore before it purges anything.
         row![
             text(t!("Restore which default list? Unreferenced scales are purged.")).size(11),
             Space::new().width(sizing.width),
@@ -245,11 +255,22 @@ pub fn view_window<'a, 'b>(
         .spacing(4)
         .align_y(iced::Center)
         .into()
+    } else if list.delete_asking {
+        row![
+            text(t!("Scales in use cannot be deleted. Delete the selected scales not in use?"))
+                .size(11),
+            Space::new().width(sizing.width),
+            tb_button(t!("Yes"), Message::ScaleManagerDeleteChoice(true), true),
+            tb_button(t!("No"), Message::ScaleManagerDeleteChoice(false), false),
+        ]
+        .spacing(4)
+        .align_y(iced::Center)
+        .into()
     } else {
         row![
             Space::new().width(sizing.width),
-            tb_button(t!("Cancel"), Message::CloseModal, false),
-            tb_button(t!("OK"), Message::ScaleManagerOk, true),
+            tb_button_maybe(t!("Cancel"), idle(Message::CloseModal), false),
+            tb_button_maybe(t!("OK"), idle(Message::ScaleManagerOk), true),
         ]
         .spacing(4)
         .into()
@@ -262,11 +283,84 @@ pub fn view_window<'a, 'b>(
         hdivider(sizing.width),
         container(footer).padding([6, 8]),
     ])
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        ..Default::default()
+    })
+    .width(sizing.width)
+    .height(sizing.height)
+    .into()
+}
+
+/// The Edit / Add card: an accented panel with the name, the two unit
+/// fields, the units line they make and its own Cancel / Apply.
+fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let field = |label: Cow<'static, str>,
+                 ph: Cow<'static, str>,
+                 value: &str,
+                 on: fn(String) -> Message,
+                 id: Option<iced::widget::Id>| {
+        let mut input = text_input(ph.as_ref(), value)
+            .on_input(on)
+            .on_submit(Message::ScaleRenameCommit)
+            .style(|theme, status| field_style_with_radius(theme, status, 4.0))
+            .size(12)
+            .padding([5, 8])
+            .width(sizing.width);
+        if let Some(id) = id {
+            input = input.id(id);
+        }
+        row![text(label).size(11).style(muted_text_style).width(104), input]
+            .align_y(iced::Center)
+            .spacing(6)
+    };
+    let title = if card.adding { t!("Add Scale") } else { t!("Edit Scale") };
+    let ok_label = if card.adding { t!("Add") } else { t!("Apply") };
+    let inner = container(
+        column![
+            text(title).size(13),
+            field(
+                t!("Name"),
+                Cow::Borrowed("1:50"),
+                card.name,
+                Message::ScaleRenameEdit,
+                Some(rename_input_id())
+            ),
+            field(t!("Paper units"), Cow::Borrowed("1"), card.paper, Message::ScaleManagerPaperBuf, None),
+            field(
+                t!("Drawing units"),
+                Cow::Borrowed("50"),
+                card.drawing,
+                Message::ScaleManagerDrawingBuf,
+                None
+            ),
+            text(card.preview).size(11).style(muted_text_style),
+            row![
+                Space::new().width(sizing.width),
+                tb_button(t!("Cancel"), Message::ScaleManagerEditCancel, false),
+                tb_button(ok_label, Message::ScaleRenameCommit, true),
+            ]
+            .spacing(4),
+        ]
+        .spacing(10),
+    )
+    .padding(12)
+    .width(sizing.width)
+    .style(|theme: &Theme| {
+        let palette = theme.palette();
+        container::Style {
+            background: Some(Background::Color(palette.background.weak.color)),
+            border: Border {
+                color: palette.primary.base.color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
             ..Default::default()
-        })
+        }
+    });
+    container(inner)
         .width(sizing.width)
         .height(sizing.height)
+        .padding(12)
         .into()
 }

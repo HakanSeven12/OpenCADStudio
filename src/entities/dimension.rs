@@ -6892,9 +6892,9 @@ fn dimension_text_style_name(
         .unwrap_or_else(|| dim.base().style_name.clone())
 }
 
-/// A dimension's text box as drawn — its middle point, width and height —
-/// for markers placed beside the text (ANNOMONITOR).
-pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3, f64, f64)> {
+/// A dimension's text box as drawn — its middle point, width, height and
+/// reading angle — for markers placed beside the text (ANNOMONITOR).
+pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3, f64, f64, f64)> {
     let source = document
         .dim_styles
         .iter()
@@ -6903,7 +6903,9 @@ pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3,
     let scale = if style.dimscale > 1e-9 { style.dimscale } else { 1.0 };
     let height = style.dimtxt * scale;
     let width = dimension_text_width(dim, Some(&style), height, Some(document));
-    Some((dim.base().text_middle_point, width, height))
+    // An automatic text point is not stored: use where the text draws.
+    let middle = stored_text_point(dim).or_else(|| automatic_text_position(document, dim))?;
+    Some((middle, width, height, dimension_text_rotation(dim, Some(&style))))
 }
 
 /// The width of a dimension's text as it draws: the extent of its ink in

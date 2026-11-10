@@ -898,35 +898,64 @@ impl OpenCADStudio {
                 } else {
                     4
                 };
-                let units = tab
-                    .scene
-                    .scale_paper_drawing(selected)
-                    .map(|(paper, drawing)| {
-                        crate::ui::style::scale_manager::units_line(
-                            paper,
-                            drawing,
-                            paper_unit,
-                            header.insertion_units,
-                        )
-                    })
-                    .unwrap_or_default();
+                let units_of = |paper: f64, drawing: f64| {
+                    crate::ui::style::scale_manager::units_line(
+                        paper,
+                        drawing,
+                        paper_unit,
+                        header.insertion_units,
+                    )
+                };
+                // The picked rows still in the list.
+                let picked: Vec<String> = self
+                    .scale_manager_multi
+                    .iter()
+                    .filter(|name| scales.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)))
+                    .cloned()
+                    .collect();
+                let single = picked.len() == 1 && at.is_some();
+                let units = if picked.len() > 1 {
+                    crate::t!("Varies: multiple scales selected.").into_owned()
+                } else {
+                    tab.scene
+                        .scale_paper_drawing(selected)
+                        .map(|(paper, drawing)| units_of(paper, drawing))
+                        .unwrap_or_default()
+                };
                 let list = crate::ui::style::scale_manager::ListState {
-                    can_up: at.is_some_and(|at| at > 0),
-                    can_down: at.is_some_and(|at| at + 1 < scales.len()),
-                    can_delete: at.is_some() && !self.anno_scale_referenced(i, selected),
+                    can_up: single && at.is_some_and(|at| at > 0),
+                    can_down: single && at.is_some_and(|at| at + 1 < scales.len()),
+                    can_edit: single,
+                    can_delete: picked.iter().any(|name| !self.anno_scale_referenced(i, name)),
                     units,
                     reset_asking: self.scale_reset_asking,
+                    delete_asking: self.scale_delete_asking,
                 };
-                sized_flow(ex, 620, 380, |flow| {
+                let preview = {
+                    let paper = self.scale_manager_paper_buf.trim().parse::<f64>().ok();
+                    let drawing = self.scale_manager_drawing_buf.trim().parse::<f64>().ok();
+                    match (paper, drawing) {
+                        (Some(p), Some(d)) if p > 0.0 && d > 0.0 => units_of(p, d),
+                        _ => crate::t!("Paper and drawing units must be positive numbers.")
+                            .into_owned(),
+                    }
+                };
+                let edit = self.scale_rename.as_ref().map(|_| {
+                    crate::ui::style::scale_manager::EditCard {
+                        adding: self.scale_edit_adding,
+                        name: &self.scale_rename_buf,
+                        paper: &self.scale_manager_paper_buf,
+                        drawing: &self.scale_manager_drawing_buf,
+                        preview: preview.clone(),
+                    }
+                });
+                sized_flow(ex, 660, 400, |flow| {
                     crate::ui::style::scale_manager::view_window(
                         list.clone(),
                         &scales,
-                        &self.scale_manager_selected,
+                        &picked,
                         &current,
-                        self.scale_rename.as_deref(),
-                        &self.scale_rename_buf,
-                        &self.scale_manager_paper_buf,
-                        &self.scale_manager_drawing_buf,
+                        edit.clone(),
                         flow,
                     )
                 })

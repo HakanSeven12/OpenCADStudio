@@ -179,16 +179,21 @@ fn tin_surface(data: &ArchEntityData, document: &document::Document, out: &mut D
 /// Feature lines of a corridor, each code's group drawn with the feature
 /// line style the corridor gives that code.
 fn corridor(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) {
-    let groups: Vec<Vec<[f64; 3]>> = cached(data, 0, |data| {
+    let baselines: Vec<Vec<Vec<[f64; 3]>>> = cached(data, 0, |data| {
         Some(
-            data.corridor_feature_line_groups()
+            data.corridor_baselines()
                 .into_iter()
-                .map(|group| {
-                    chains(
-                        group
-                            .into_iter()
-                            .map(|run| run.into_iter().map(|(_, p)| [p.x, p.y, p.z]).collect()),
-                    )
+                .map(|groups| {
+                    groups
+                        .into_iter()
+                        .map(|group| {
+                            chains(
+                                group
+                                    .into_iter()
+                                    .map(|run| run.into_iter().map(|(_, p)| [p.x, p.y, p.z]).collect()),
+                            )
+                        })
+                        .collect()
                 })
                 .collect(),
         )
@@ -201,20 +206,22 @@ fn corridor(data: &ArchEntityData, document: &document::Document, out: &mut Deco
         .skip(3)
         .map_while(|h| object_arch(document, *h).filter(|o| o.dxf_name == "AECC_FEATURELINE_STYLE"))
         .collect();
-    // ponytail: a code without feature lines has no group, so groups and
-    // codes pair up only when their counts match; otherwise the corridor
-    // keeps its own properties. Pair them by code once the corridor's
-    // assembly codes are decoded.
-    let matched = styles.len() == groups.len();
-    for (index, points) in groups.into_iter().enumerate() {
-        let style = if matched {
-            let components = styles[index].display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
-            // Feature line style component 0: the line in plan.
-            component(document, Some(&components), 0)
-        } else {
-            Some(ProxyStyle::default())
-        };
-        styled(out, style, points);
+    for groups in baselines {
+        // ponytail: a code without feature lines has no group, so a
+        // baseline's groups and the codes pair up only when their counts
+        // match; otherwise the corridor keeps its own properties. Pair them
+        // by code once the corridor's assembly codes are decoded.
+        let matched = styles.len() == groups.len();
+        for (index, points) in groups.into_iter().enumerate() {
+            let style = if matched {
+                let components = styles[index].display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
+                // Feature line style component 0: the line in plan.
+                component(document, Some(&components), 0)
+            } else {
+                Some(ProxyStyle::default())
+            };
+            styled(out, style, points);
+        }
     }
 }
 
@@ -850,20 +857,25 @@ fn arch_of(document: &document::Document, handle: u64, kind: CivilKind) -> Optio
 
 /// Point and unit direction at `distance` along a polyline.
 fn point_at(run: &[Vector2], distance: f64) -> Option<(Vector2, Vector2)> {
+    // A station the record stores may pass the polyline's end by the
+    // rounding of its curves; it still names the end.
+    const END_TOLERANCE: f64 = 1e-3;
     let mut left = distance;
+    let mut last = None;
     for pair in run.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let length = a.distance(&b);
         if length <= 0.0 {
             continue;
         }
+        let d = (b - a) * (1.0 / length);
         if left <= length {
-            let d = (b - a) * (1.0 / length);
             return Some((a + d * left, d));
         }
         left -= length;
+        last = Some((b, d));
     }
-    None
+    last.filter(|_| left <= END_TOLERANCE)
 }
 
 /// Reading angle that keeps text upright.

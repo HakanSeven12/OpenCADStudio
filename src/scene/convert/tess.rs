@@ -1304,6 +1304,12 @@ fn tessellate_entity_inner(
                     sel,
                 );
             }
+            // A Civil 3D object's preview is only its bounding box, or a
+            // placeholder box at the origin in older drawings; it is never
+            // what Civil 3D draws, so a class not decoded draws nothing.
+            if data.civil_kind().is_some() {
+                return Vec::new();
+            }
         }
     }
     if let Some(blob) = proxy_blob {
@@ -2401,6 +2407,74 @@ pub(crate) fn is_unindexable_entity(e: &document::EntityType) -> bool {
         e,
         E::Insert(_) | E::Viewport(_) | E::Block(_) | E::BlockEnd(_)
     )
+}
+
+#[cfg(test)]
+mod civil_proxy_tests {
+    use super::*;
+    use document::classes::arch::{ArchEntityData, ArchKind};
+    use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, ProxyGraphicRecord, ProxyGraphics};
+
+    fn boxed(dxf_name: &str, document: &mut document::Document) -> EntityType {
+        let mut data = Vec::new();
+        let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 0.4], [0.0, 0.4], [0.0, 0.0]];
+        data.extend_from_slice(&(corners.len() as u32).to_le_bytes());
+        for [x, y] in corners {
+            for v in [x, y, 0.0f64] {
+                data.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        let mut common = EntityCommon::default();
+        common.handle = document.allocate_handle();
+        common.layer = "0".into();
+        common.set_proxy_graphics(&ProxyGraphics {
+            records: vec![ProxyGraphicRecord::Unknown { record_type: 6, data }],
+        });
+        EntityType::Extended(Box::new(ExtendedEntity {
+            common,
+            data: ExtendedEntityData::Arch(ArchEntityData {
+                dxf_name: dxf_name.into(),
+                cpp_class_name: String::new(),
+                kind: ArchKind::Other,
+                profiles: Vec::new(),
+                dwg_type_code: 0,
+                dwg_handle_bits: 0,
+                dwg_source_version: None,
+                raw_dwg_data: None,
+                raw_dxf_codes: None,
+                fields: Vec::new(),
+                preview: Vec::new(),
+            }),
+        }))
+    }
+
+    fn wires(document: &document::Document, entity: &EntityType) -> Vec<WireModel> {
+        tessellate_entity(
+            document,
+            &HashSet::default(),
+            None,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            None,
+            entity,
+            None,
+            None,
+            None,
+            None,
+            &HashSet::default(),
+        )
+    }
+
+    /// A Civil 3D object's cached preview is only a box (a placeholder at
+    /// the origin in older drawings); an Arch object's preview is its shape.
+    #[test]
+    fn civil_preview_box_is_not_drawn() {
+        let mut document = document::Document::new();
+        let parcel = boxed("AECC_PARCEL", &mut document);
+        let wall = boxed("AEC_WALL", &mut document);
+        assert!(wires(&document, &parcel).is_empty());
+        assert!(wires(&document, &wall).iter().any(|w| !w.points.is_empty()));
+    }
 }
 
 #[cfg(test)]

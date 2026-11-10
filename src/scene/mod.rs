@@ -9302,6 +9302,7 @@ impl Scene {
             1.0
         };
         let blk = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
+        let blk_done = t_patch.elapsed();
         let empty_sel: HashSet<Handle> = HashSet::default();
         let mut new_runs: HashMap<Handle, Vec<WireModel>> = HashMap::default();
         let mut memo_updates: Vec<(Handle, Arc<Vec<WireModel>>)> = Vec::new();
@@ -9319,6 +9320,7 @@ impl Scene {
         // and the others as a stub of it. Longest runs first gives the full
         // run back to the reference whose slots held it; in the journal's
         // order another reference could get it and grow past its slots.
+        let mut from_memo = 0usize;
         let mut tess_order: Vec<(Handle, ChangeKind)> = deltas.clone();
         tess_order.sort_by_key(|(h, _)| {
             std::cmp::Reverse(
@@ -9364,6 +9366,7 @@ impl Scene {
             if let Some(mut faded) = memoized {
                 self.apply_refedit_fade(&mut faded, bg);
                 new_runs.insert(*h, faded);
+                from_memo += 1;
                 continue;
             }
             let mut raw = tessellate_entity(
@@ -9389,12 +9392,14 @@ impl Scene {
             self.apply_refedit_fade(&mut faded, bg);
             new_runs.insert(*h, faded);
         }
+        let tessellated = memo_updates.len();
         {
             let mut memo = self.resident_tess_memo.borrow_mut();
             for (h, a) in memo_updates {
                 memo.insert(h, MemoRun::Owned(a));
             }
         }
+        let tess_done = t_patch.elapsed();
         // Capture whether any replaced/removed OLD run fed the Face3D/fill
         // pass before blanking its resident slots. Treating every removal as a
         // face change made deleting an ordinary line rescan/re-upload the whole
@@ -9634,6 +9639,7 @@ impl Scene {
                 .values()
                 .any(|run| run.iter().any(|wire| !wire.text_verts.is_empty()));
 
+        let place_done = t_patch.elapsed();
         let arc = Arc::new(reclaim.wires.take().unwrap_or_default());
         self.last_tess_wires.set(arc.len());
         self.resident_patch_hits
@@ -9681,9 +9687,11 @@ impl Scene {
                 }
             }
         }
+        let gpu_done = t_patch.elapsed();
         if shareable {
             self.bind_memo_to_set(&arc, &layout.ranges);
         }
+        let bind_done = t_patch.elapsed();
         let cur_epoch = self.geometry_epoch;
         // Same bound as the full build: this path used to rely on the epoch
         // prune alone, so weakening that without a cap here would let
@@ -9705,11 +9713,21 @@ impl Scene {
             },
         );
         if perf {
+            let ms = |from: std::time::Duration, to: std::time::Duration| {
+                to.saturating_sub(from).as_secs_f64() * 1000.0
+            };
             crate::perf_record!(
-                "[perf] resident-patch {:>7.1}ms wires={} changes={}",
+                "[perf] resident-patch {:>7.1}ms [blk_cache={:.1} tess={:.1} place={:.1} gpu_patch={:.1} memo_bind={:.1}] wires={} changes={} tessellated={} from_memo={}",
                 t_patch.elapsed().as_secs_f64() * 1000.0,
+                blk_done.as_secs_f64() * 1000.0,
+                ms(blk_done, tess_done),
+                ms(tess_done, place_done),
+                ms(place_done, gpu_done),
+                ms(gpu_done, bind_done),
                 arc.len(),
                 deltas.len(),
+                tessellated,
+                from_memo,
             );
         }
         Some(arc)

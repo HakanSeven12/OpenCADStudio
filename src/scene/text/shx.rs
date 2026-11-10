@@ -79,6 +79,19 @@ fn shape_cache() -> &'static Mutex<HashMap<(String, u16), Option<(ShapePolylines
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Whether `path` is a file on disk.
+pub fn file_on_disk(path: &str) -> bool {
+    #[cfg(test)]
+    DISK_CHECKS.with(|count| count.set(count.get() + 1));
+    std::path::Path::new(path).is_file()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has asked the disk for a font file.
+    pub(crate) static DISK_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn load_file(path: &str) -> Option<Arc<ShxFile>> {
     if let Ok(c) = file_cache().lock() {
         if let Some(hit) = c.get(path) {
@@ -752,6 +765,26 @@ pub(crate) mod tests {
         b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
         b.extend_from_slice(&glyph);
         b
+    }
+
+    /// Every text drawn with an `.shx` font resolves its face, more than
+    /// once. A font file already read must not send each of them to the
+    /// disk to ask whether the file is there.
+    #[test]
+    fn a_loaded_font_file_is_not_looked_for_on_disk_again() {
+        use crate::scene::text::font_face::Face;
+        let path = tmp("looked-for-once.shx", &synthetic_unifont());
+        let checks = || DISK_CHECKS.with(std::cell::Cell::get);
+
+        let before = checks();
+        for _ in 0..50 {
+            assert!(matches!(Face::resolve(&path), Face::Shx { .. }));
+        }
+        assert_eq!(
+            checks() - before,
+            1,
+            "fifty texts in one font must ask the disk for its file once"
+        );
     }
 
     #[test]

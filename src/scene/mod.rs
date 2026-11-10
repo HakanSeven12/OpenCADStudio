@@ -6908,15 +6908,20 @@ impl Scene {
         5, 10, 20, 30, 40, 50, 60, 70, 75, 80, 100, 150, 200, 250, 500, 1000, 2000, 5000,
     ];
 
-    /// The drawing's unit scales (those flagged as the unit entry).
+    /// The drawing's unit scale: the first scale of the list flagged as the
+    /// unit entry (a 1 : 1 ratio flags itself, so later ones are ordinary).
     fn unit_scale_names(&self) -> Vec<String> {
-        self.document
-            .objects
-            .values()
-            .filter_map(|object| match object {
-                ObjectType::Scale(scale) if scale.is_unit_scale => Some(scale.name.clone()),
-                _ => None,
+        self.scale_names_in_list_order()
+            .into_iter()
+            .find(|name| {
+                self.scale_object_handle(name)
+                    .and_then(|handle| match self.document.objects.get(&handle) {
+                        Some(ObjectType::Scale(scale)) => Some(scale.is_unit_scale),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
             })
+            .into_iter()
             .collect()
     }
 

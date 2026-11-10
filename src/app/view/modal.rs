@@ -884,7 +884,14 @@ impl OpenCADStudio {
                         let ratio = tab
                             .scene
                             .scale_paper_drawing(&name)
-                            .map(|(p, d)| format!("{p}:{d}"))
+                            .map(|(p, d)| {
+                                // Six decimals at most, trailing zeros dropped.
+                                let short = |v: f64| {
+                                    let text = format!("{v:.6}");
+                                    text.trim_end_matches('0').trim_end_matches('.').to_string()
+                                };
+                                format!("{}:{}", short(p), short(d))
+                            })
                             .unwrap_or_default();
                         (name, ratio)
                     })

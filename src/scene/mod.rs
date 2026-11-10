@@ -3796,6 +3796,7 @@ impl Scene {
             (stale, self.block_visibility_edits.as_ref())
         {
             if epoch == *from && *to == self.block_epoch {
+                let started = crate::perf::enabled().then(iced::time::Instant::now);
                 let solid_snaps: HashMap<Handle, _> = self
                     .block_meshes
                     .keys()
@@ -3815,6 +3816,13 @@ impl Scene {
                 );
                 if self.constraint_shading_active() {
                     built.disable_prototypes();
+                }
+                if started.is_some() {
+                    crate::perf_record!(
+                        "[perf] blk_cache-rebuild total={:.1}ms changed={}",
+                        crate::perf::elapsed_ms(started),
+                        names.len(),
+                    );
                 }
                 let arc = Arc::new(built);
                 self.block_defn_cache
@@ -15856,8 +15864,17 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 .filter_map(|entity| records.get(&entity.common().owner_handle))
                 .map(|name| name.to_string())
                 .collect();
+            // Switches made before the cache is rebuilt add up into one edit
+            // from the cache's epoch. Once a cache was rebuilt at `from`, the
+            // edit starts there: carrying the older base along made every
+            // later switch miss it and rebuild all the definitions.
+            let rebuilt_at_from = self
+                .block_defn_cache
+                .borrow()
+                .values()
+                .any(|(epoch, _)| *epoch == from);
             self.block_visibility_edits = match self.block_visibility_edits.take() {
-                Some((base, to, mut names)) if to == from => {
+                Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
                     names.extend(touched);
                     Some((base, self.block_epoch, names))
                 }

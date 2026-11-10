@@ -509,7 +509,11 @@ impl OpenCADStudio {
             .map(|tool| tool.kind)
             .collect();
         for kind in kinds {
-            if self.enter_tool(kind) {
+            // A dialog of the same kind that the drawing now shown has just
+            // opened (a second drawing's missing-fonts prompt) is active but
+            // not the parked tool: drop only the stale tool and leave it up.
+            let fresh = self.active_modal == Some(kind) && self.tool_focus != Some(kind);
+            if !fresh && self.enter_tool(kind) {
                 self.close_active_modal();
                 if self.active_modal == Some(kind) {
                     self.active_modal = None;

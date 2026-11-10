@@ -45,6 +45,7 @@ pub(crate) mod commands;
 #[cfg(test)]
 mod dim_constraint_value_tests;
 pub(crate) mod dim_viewport;
+mod dim_variables;
 #[cfg(test)]
 mod dimension_convert_tests;
 #[cfg(test)]

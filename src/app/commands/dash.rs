@@ -1727,25 +1727,11 @@ impl OpenCADStudio {
             }
             "VARIABLES" => {
                 if args.len() >= 4 {
-                    // Write form: VARIABLES <style> <var> <value>. Listing is
-                    // unchanged; the value goes through an undo step and the
-                    // style's dependencies are refreshed.
+                    // Write form: VARIABLES <style> <var> <value>. The value
+                    // goes through the shared variable table: name lookup,
+                    // per-variable validation and an undo step.
                     let variable = arg(2).to_ascii_uppercase();
-                    let parsed: f64 = match arg(3).trim().parse::<f64>() {
-                        Ok(value) if value.is_finite() => value,
-                        _ => {
-                            self.command_line.push_error(
-                                crate::tf!(
-                                    "DIMSTYLE: '{}' is not a valid value for {}.",
-                                    arg(3),
-                                    variable
-                                )
-                                .as_ref(),
-                            );
-                            return;
-                        }
-                    };
-                    let Some(style) = self
+                    let Some(style_name) = self
                         .tabs[i]
                         .scene
                         .document
@@ -1759,51 +1745,71 @@ impl OpenCADStudio {
                         );
                         return;
                     };
-                    let selectable = matches!(
-                        variable.as_str(),
-                        "DIMASZ" | "DIMCEN" | "DIMDLE" | "DIMDLI" | "DIMEXE" | "DIMEXO"
-                            | "DIMGAP" | "DIMLFAC" | "DIMTSZ" | "DIMTVP"
-                    ) || (matches!(variable.as_str(), "DIMSCALE" | "DIMTXT") && parsed > 0.0);
-                    if !selectable {
-                        self.command_line.push_error(
-                            crate::tf!(
-                                "DIMSTYLE: '{}' cannot be set to {}.",
-                                variable,
-                                parsed
-                            )
-                            .as_ref(),
-                        );
-                        return;
-                    }
                     let pending = self.begin_dim_style_undo(
                         i,
                         "DIMSTYLE VARIABLES",
-                        std::slice::from_ref(&style),
+                        std::slice::from_ref(&style_name),
                     );
-                    if let Some(s) = self.tabs[i].scene.document.dim_styles.get_mut(&style) {
-                        let slot = match variable.as_str() {
-                            "DIMASZ" => &mut s.dimasz,
-                            "DIMCEN" => &mut s.dimcen,
-                            "DIMDLE" => &mut s.dimdle,
-                            "DIMDLI" => &mut s.dimdli,
-                            "DIMEXE" => &mut s.dimexe,
-                            "DIMEXO" => &mut s.dimexo,
-                            "DIMGAP" => &mut s.dimgap,
-                            "DIMLFAC" => &mut s.dimlfac,
-                            "DIMSCALE" => &mut s.dimscale,
-                            "DIMTSZ" => &mut s.dimtsz,
-                            "DIMTVP" => &mut s.dimtvp,
-                            _ => &mut s.dimtxt,
-                        };
-                        *slot = parsed;
+                    let result = {
+                        let doc = &mut self.tabs[i].scene.document;
+                        // Owned lookup tables: the closures that resolve block
+                        // and text-style names hold nothing borrowed from the
+                        // document, so the style table can be borrowed mutably.
+                        let block_names: std::collections::HashMap<String, (document::Handle, String)> =
+                            doc.block_records
+                                .iter()
+                                .map(|record| (record.name.to_lowercase(), (record.handle, record.name.clone())))
+                                .collect();
+                        let text_style_names: std::collections::HashMap<String, (document::Handle, String)> =
+                            doc.text_styles
+                                .iter()
+                                .map(|ts| (ts.name.to_lowercase(), (ts.handle, ts.name.clone())))
+                                .collect();
+                        let resolve_block = move |text: &str| block_names.get(&text.to_lowercase()).cloned();
+                        let resolve_style = move |text: &str| text_style_names.get(&text.to_lowercase()).cloned();
+                        match doc.dim_styles.get_mut(&style_name) {
+                            Some(s) => Some(crate::app::dim_variables::set(
+                                s,
+                                &variable,
+                                arg(3).trim(),
+                                &resolve_block,
+                                &resolve_style,
+                            )),
+                            None => None,
+                        }
+                    };
+                    match result {
+                        Some(Ok((_old, new_value))) => {
+                            self.commit_dim_style_undo(i, pending);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].scene.invalidate_dim_style_dependencies(&style_name);
+                            let _ = self.on_ribbon_style_changed(
+                                crate::modules::StyleKey::DimStyle,
+                                style_name.clone(),
+                            );
+                            self.command_line.push_output(
+                                crate::tf!(
+                                    "DIMSTYLE: {} = {} in '{}'.",
+                                    variable,
+                                    new_value,
+                                    style_name
+                                )
+                                .as_ref(),
+                            );
+                        }
+                        Some(Err(reason)) => {
+                            self.commit_dim_style_undo(i, pending);
+                            self.command_line.push_error(
+                                crate::tf!("DIMSTYLE: {}.", reason).as_ref(),
+                            );
+                        }
+                        None => {
+                            self.commit_dim_style_undo(i, pending);
+                            self.command_line.push_error(
+                                crate::tf!("DIMSTYLE: '{}' not found.", style_name).as_ref(),
+                            );
+                        }
                     }
-                    self.commit_dim_style_undo(i, pending);
-                    self.tabs[i].scene.invalidate_dim_style_dependencies(&style);
-                    let _ = self
-                        .on_ribbon_style_changed(crate::modules::StyleKey::DimStyle, style.clone());
-                    self.command_line.push_output(
-                        crate::tf!("DIMSTYLE: {} = {} in '{}'.", variable, parsed, style).as_ref(),
-                    );
                     return;
                 }
                 let doc = &self.tabs[i].scene.document;
@@ -1812,26 +1818,8 @@ impl OpenCADStudio {
                         .push_error(crate::tf!("DIMSTYLE: '{}' not found.", name).as_ref());
                     return;
                 };
-                let lines: Vec<String> = [
-                    ("DIMASZ", s.dimasz),
-                    ("DIMCEN", s.dimcen),
-                    ("DIMDLE", s.dimdle),
-                    ("DIMDLI", s.dimdli),
-                    ("DIMEXE", s.dimexe),
-                    ("DIMEXO", s.dimexo),
-                    ("DIMGAP", s.dimgap),
-                    ("DIMLFAC", s.dimlfac),
-                    ("DIMSCALE", s.dimscale),
-                    ("DIMTSZ", s.dimtsz),
-                    ("DIMTVP", s.dimtvp),
-                    ("DIMTXT", s.dimtxt),
-                ]
-                .iter()
-                .map(|(var, value)| format!("{var:<10}{value:.4}"))
-                .chain(std::iter::once(format!("{:<10}{}", "DIMTXSTY", s.dimtxsty)))
-                .collect();
                 self.command_line.push_output(&s.name.clone());
-                for line in lines {
+                for line in crate::app::dim_variables::dump(s) {
                     self.command_line.push_output(&line);
                 }
             }
@@ -1867,27 +1855,25 @@ impl OpenCADStudio {
                     );
                     return;
                 };
-                let fields: Vec<(&str, f64, f64)> = vec![
-                    ("DIMASZ", first.dimasz, second.dimasz),
-                    ("DIMCEN", first.dimcen, second.dimcen),
-                    ("DIMDLE", first.dimdle, second.dimdle),
-                    ("DIMDLI", first.dimdli, second.dimdli),
-                    ("DIMEXE", first.dimexe, second.dimexe),
-                    ("DIMEXO", first.dimexo, second.dimexo),
-                    ("DIMGAP", first.dimgap, second.dimgap),
-                    ("DIMLFAC", first.dimlfac, second.dimlfac),
-                    ("DIMSCALE", first.dimscale, second.dimscale),
-                    ("DIMTSZ", first.dimtsz, second.dimtsz),
-                    ("DIMTVP", first.dimtvp, second.dimtvp),
-                    ("DIMTXT", first.dimtxt, second.dimtxt),
-                ];
+                let fields: Vec<(&str, String, String)> = crate::app::dim_variables::DIM_VARIABLES
+                    .iter()
+                    .map(|variable| {
+                        (
+                            variable.name,
+                            crate::app::dim_variables::get(&first, variable.name)
+                                .unwrap_or_default(),
+                            crate::app::dim_variables::get(&second, variable.name)
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .collect();
                 let mut differences = 0;
                 for (var, first, second) in fields {
-                    if (first - second).abs() > 1e-9 {
+                    if first != second {
                         differences += 1;
                         self.command_line.push_output(
                             crate::tf!(
-                                "{} {:.4} vs {:.4}",
+                                "{} {} vs {}",
                                 var,
                                 first,
                                 second
@@ -1895,12 +1881,6 @@ impl OpenCADStudio {
                             .as_ref(),
                         );
                     }
-                }
-                if first.dimtxsty != second.dimtxsty {
-                    differences += 1;
-                    self.command_line.push_output(
-                        crate::tf!("DIMTXSTY {} vs {}", first.dimtxsty, second.dimtxsty).as_ref(),
-                    );
                 }
                 if differences == 0 {
                     self.command_line.push_output(

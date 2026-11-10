@@ -7220,6 +7220,10 @@ mod batch6_tests {
     use super::*;
     use crate::app::OpenCADStudio;
 
+    fn out_text(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
     fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
@@ -7387,6 +7391,142 @@ mod batch6_tests {
         assert!(
             !frozen_of(&app, viewport).contains(&walls),
             "viewport 1 is thawed again"
+        );
+    }
+
+    #[test]
+    fn dimstyle_variables_dumps_the_variable_table() {
+        let mut app = new_app();
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "ISO-25"]"#);
+        let out = out_text(&app);
+        // The history holds 64 entries, so the listing arrives as a suffix of
+        // the 79-line dump; the complete content is checked in the module's
+        // unit tests. Here the trailing rows must be there, aligned, with
+        // current values.
+        let rows = crate::app::dim_variables::DIM_VARIABLES
+            .iter()
+            .filter(|variable| out.contains(variable.name))
+            .count();
+        assert!(rows >= 60, "expected the tail of the table, got {rows}: {out}");
+        let line = out
+            .lines()
+            .find(|line| line.trim_start().starts_with("DIMTXT"))
+            .expect("the DIMTXT row prints");
+        assert!(line.contains("2.5"), "{line}");
+        let line = out
+            .lines()
+            .find(|line| line.trim_start().starts_with("DIMASZ"))
+            .expect("the DIMASZ row prints");
+        assert!(line.contains("2.5"), "{line}");
+        assert!(
+            out.contains("Dimension text height"),
+            "descriptions print: {out}"
+        );
+    }
+
+    #[test]
+    fn dimstyle_create_with_variables_set_current_marks_new_dimensions() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let _ = app.run_command_line(r#"-DIMSTYLE ["SAVE", "SHEET-1-50"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "SHEET-1-50", "DIMTXT", "2.5"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["RESTORE", "SHEET-1-50"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("SHEET-1-50"), "{out}");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .header
+                .current_dimstyle_name,
+            "SHEET-1-50"
+        );
+
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let dimension = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension),
+                _ => None,
+            })
+            .expect("the DIMLINEAR command placed a dimension");
+        assert_eq!(
+            dimension.base().style_name,
+            "SHEET-1-50",
+            "the new dimension carries the new style"
+        );
+    }
+
+    #[test]
+    fn dimstyle_compare_reports_all_differing_variables() {
+        let mut app = new_app();
+        let _ = app.run_command_line(r#"-DIMSTYLE ["SAVE", "SHEET-A"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "SHEET-A", "DIMTXT", "9.0"]"#);
+        let _ = app.run_command_line(r#"-DIMSTYLE ["COMPARE", "ISO-25", "SHEET-A"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("DIMTXT"), "{out}");
+
+        let _ = app.run_command_line(r#"-DIMSTYLE ["COMPARE", "ISO-25", "ISO-25"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("identical"), "{out}");
+    }
+
+    #[test]
+    fn dimstyle_variables_sets_dimtxt_to_3_and_keeps_it() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "ISO-25", "DIMTXT", "3.0"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("DIMTXT = 3"), "{out}");
+        let style = app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get("ISO-25")
+            .expect("ISO-25 exists");
+        assert_eq!(style.dimtxt, 3.0);
+    }
+
+    #[test]
+    fn dimstyle_variables_rejects_an_out_of_range_value_and_keeps_the_style() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let before = app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get("ISO-25")
+            .unwrap()
+            .dimtxt;
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "ISO-25", "DIMTXT", "-1"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("DIMSTYLE"), "{out}");
+        assert!(out.contains("must be greater than 0"), "{out}");
+        let after = app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get("ISO-25")
+            .unwrap()
+            .dimtxt;
+        assert_eq!(before, after, "the refused value is not written");
+
+        // And a boolean keyword with a wrong kind of value is refused too.
+        let _ = app.run_command_line(r#"-DIMSTYLE ["VARIABLES", "ISO-25", "DIMTOL", "banana"]"#);
+        let out = out_text(&app);
+        assert!(out.contains("DIMSTYLE"), "{out}");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .dim_styles
+                .get("ISO-25")
+                .unwrap()
+                .dimtol,
+            false,
+            "the refused value is not written"
         );
     }
 }

@@ -6450,6 +6450,7 @@ plot =
     .name-drawing-layout = Výkres - rozvržení
     .raster-dpi = DPI rastru
     .vector-dpi = DPI vektoru
+    .text-as-outlines = Text as outlines
     .open-when-done = Po dokončení otevřít v prohlížeči
     .no-page-setups = (žádná nastavení stránky)
     .none = <žádné>

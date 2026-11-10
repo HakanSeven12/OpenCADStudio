@@ -6449,6 +6449,7 @@ plot =
     .name-drawing-layout = Чертёж - лист
     .raster-dpi = DPI растра
     .vector-dpi = DPI вектора
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (без настройки страниц)
     .none = <нет>

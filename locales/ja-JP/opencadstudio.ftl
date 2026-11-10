@@ -6436,6 +6436,7 @@ plot =
     .name-drawing-layout = 図面 - レイアウト
     .raster-dpi = ラスター DPI
     .vector-dpi = ベクトル DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = （ページ設定なし）
     .none = <なし>

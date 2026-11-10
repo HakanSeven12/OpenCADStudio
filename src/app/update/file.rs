@@ -7386,6 +7386,9 @@ impl OpenCADStudio {
                     PlotFlag::HidePaperspace => d.hide_paperspace = !d.hide_paperspace,
                     PlotFlag::SaveToLayout => d.save_to_layout = !d.save_to_layout,
                     PlotFlag::OpenWhenDone => d.open_when_done = !d.open_when_done,
+                    PlotFlag::TextAsOutlines if d.to_file && d.file_svg => {
+                        d.text_as_outlines = !d.text_as_outlines;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -8113,6 +8116,7 @@ impl OpenCADStudio {
             quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
             raster_dpi: d.raster_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
+            text_as_outlines: d.text_as_outlines,
         }
     }
 
@@ -9466,6 +9470,28 @@ mod plot_paper_tests {
             .plot_settings_for("Layout1")
             .unwrap();
         assert_eq!(ps.printer_name, "DWG To PDF.pc3");
+    }
+
+    #[test]
+    fn text_as_outlines_is_an_svg_only_plot_preference() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert!(!app.plot_dialog.text_as_outlines);
+        assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::TextAsOutlines,
+        ));
+        assert!(app.plot_dialog.text_as_outlines);
+        assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
+
+        // PDF ignores the stored SVG preference, and its hidden checkbox cannot
+        // be toggled by a synthetic message.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::TextAsOutlines,
+        ));
+        assert!(app.plot_dialog.text_as_outlines);
     }
 
     #[test]

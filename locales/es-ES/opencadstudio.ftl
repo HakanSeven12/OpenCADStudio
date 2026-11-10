@@ -6448,6 +6448,7 @@ plot =
     .name-drawing-layout = Dibujo - presentación
     .raster-dpi = PPP ráster
     .vector-dpi = PPP vectorial
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (sin configuraciones de página)
     .none = <ninguno>

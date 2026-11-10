@@ -5744,6 +5744,41 @@ mod tests {
     }
 
     #[test]
+    fn plot_op_svg_text_as_outlines_uses_vector_paths() {
+        let svg = std::env::temp_dir().join(format!("ocs-outline-{}.svg", std::process::id()));
+        let mut svg_text = String::new();
+        let mut stable = false;
+        for _ in 0..8 {
+            let mut app = OpenCADStudio::new_for_test();
+            request(&mut app, json!({"op":"new"}));
+            let generation = crate::scene::text::sdf_atlas::generation();
+            let text = document::entities::MText::with_value(
+                "OUTLINE",
+                document::types::Vector3::new(10.0, 10.0, 0.0),
+            );
+            app.tabs[app.active_tab]
+                .scene
+                .add_entity(document::EntityType::MText(Box::new(text)));
+            let response = request(
+                &mut app,
+                json!({"op":"plot","path":svg.to_string_lossy(),"text_as_outlines":true}),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            if crate::scene::text::sdf_atlas::generation() == generation {
+                stable = true;
+                break;
+            }
+        }
+        assert!(stable, "glyph atlas did not stabilize after eight attempts");
+        assert!(!svg_text.contains("<text"));
+        assert!(!svg_text.contains("font-family"));
+        assert!(svg_text.contains("<path"));
+        roxmltree::Document::parse(&svg_text).expect("well-formed outline SVG");
+        let _ = std::fs::remove_file(&svg);
+    }
+
+    #[test]
     fn plot_op_applies_ctb_colors_through_layer_aci() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));

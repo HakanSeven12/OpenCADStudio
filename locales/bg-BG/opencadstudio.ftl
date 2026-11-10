@@ -6448,6 +6448,7 @@ plot =
     .name-drawing-layout = Чертеж - оформление
     .raster-dpi = Растерно DPI
     .vector-dpi = Векторно DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (няма настройки на страница)
     .none = <няма>

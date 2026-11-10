@@ -7,10 +7,9 @@
 // backend puts in its page CTM, so the two outputs agree geometrically.
 //
 // Scope notes (prototype):
-// - Text goes out as searchable `<text>` runs (same `SearchableTextRun` source
-//   as the PDF search layer). SDF-quad vector outlines are not emitted, and
-//   there is no `Tz`-style advance width-matching: centered/right-aligned runs
-//   may highlight slightly off their glyphs in text-heavy viewers.
+// - Text defaults to searchable `<text>` runs (the same `SearchableTextRun`
+//   source as the PDF search layer). `text_as_outlines` instead re-emits the
+//   positioned SDF quads as font-independent vector strokes and fills.
 // - Stationed dash phases (`pattern_stations`, PLINEGEN) are approximated with
 //   a plain `stroke-dasharray`; non-affine (perspective) image quads are drawn
 //   with their affine corner fit.
@@ -116,6 +115,27 @@ pub fn build_svg(
         scale: page.scale.max(1e-6) as f64,
         rotation_deg: page.rotation_deg,
     };
+    // Snapshot page glyphs before laying out the stamp. Stamp insertion can
+    // grow/rescale the atlas, but the page quads still carry their original UVs
+    // and must keep using this pre-stamp geometry snapshot.
+    let glyphs = if page.options.text_as_outlines {
+        glyph_snapshot()
+    } else {
+        None
+    };
+    let stamp = page.options.stamp.then(plot_stamp_label);
+    let stamp_wire = if page.options.text_as_outlines {
+        stamp.as_deref().and_then(stamp_outline_wire)
+    } else {
+        None
+    };
+    // The stamp uses the post-layout UVs. Keep this separate even when the
+    // atlas did not grow so the ordering above remains explicit and tested.
+    let stamp_glyphs = if stamp_wire.is_some() {
+        glyph_snapshot()
+    } else {
+        None
+    };
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\"");
@@ -182,11 +202,38 @@ pub fn build_svg(
     }
     out.push_str(" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n");
 
-    emit_page_content(&mut out, page, plot_style, &map)?;
+    emit_page_content(&mut out, page, plot_style, &map, glyphs.as_ref())?;
 
     out.push_str("</g>\n");
-    if page.options.stamp {
-        out.push_str(&stamp_element(paper_w, paper_h));
+    if let Some(label) = stamp {
+        let outlined = match (stamp_wire.as_ref(), stamp_glyphs.as_ref()) {
+            (Some(wire), Some(glyphs)) => {
+                out.push_str("<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n");
+                let outlined = emit_text_outlines(
+                    &mut out,
+                    wire,
+                    OutlineContext {
+                        ox: 0.0,
+                        oy: 0.0,
+                        plot_style: None,
+                        options: page.options,
+                        map: &PageMap {
+                            paper_w,
+                            paper_h,
+                            scale: 1.0,
+                            rotation_deg: 0,
+                        },
+                        glyphs,
+                    },
+                );
+                out.push_str("</g>\n");
+                outlined
+            }
+            _ => false,
+        };
+        if !outlined {
+            out.push_str(&stamp_element(&label, paper_h));
+        }
     }
     out.push_str("</svg>\n");
     Ok(out)
@@ -231,6 +278,7 @@ fn emit_page_content(
     page: &PlotPage,
     plot_style: Option<&PlotStyleTable>,
     map: &PageMap,
+    glyphs: Option<&GlyphSnapshot>,
 ) -> Result<(), String> {
     let content = &page.content;
     let (ox, oy) = (page.offset_x, page.offset_y);
@@ -263,7 +311,9 @@ fn emit_page_content(
             }
             items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
             sequence += 1;
-            if !wire.searchable_text.is_empty() {
+            if !wire.searchable_text.is_empty()
+                || (options.text_as_outlines && !wire.text_verts.is_empty())
+            {
                 items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
                 sequence += 1;
             }
@@ -293,7 +343,23 @@ fn emit_page_content(
                 }
                 DrawItem::Hatch(hatch) => emit_hatch(out, hatch, ox, oy, plot_style, options, map),
                 DrawItem::Text(wire) => {
-                    emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map)
+                    let outlined = glyphs.is_some_and(|glyphs| {
+                        emit_text_outlines(
+                            out,
+                            &wire.wire,
+                            OutlineContext {
+                                ox,
+                                oy,
+                                plot_style,
+                                options,
+                                map,
+                                glyphs,
+                            },
+                        )
+                    });
+                    if !outlined {
+                        emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map);
+                    }
                 }
                 DrawItem::Wire(wire) => {
                     emit_wire(out, &wire.wire, ox, oy, plot_style, options, map)
@@ -648,6 +714,300 @@ fn emit_hatch(
     ));
 }
 
+// ── Optional text as vector outlines ───────────────────────────────────────
+
+struct GlyphSnapshot {
+    table: std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
+    solid_key: u64,
+}
+
+impl GlyphSnapshot {
+    fn from_atlas(atlas: &crate::scene::text::sdf_atlas::GlyphAtlas) -> Self {
+        Self {
+            table: atlas.export_table(),
+            solid_key: crate::scene::text::sdf_atlas::uv_key(atlas.solid_uv()),
+        }
+    }
+}
+
+fn glyph_snapshot() -> Option<GlyphSnapshot> {
+    let atlas = crate::scene::text::sdf_atlas::text_atlas().lock().ok()?;
+    Some(GlyphSnapshot::from_atlas(&atlas))
+}
+
+/// `None` rejects a non-finite alpha; `Some(false)` is intentionally invisible.
+/// Both the preflight and emission passes use this exact classification.
+fn outline_visibility(alpha: f32) -> Option<bool> {
+    alpha.is_finite().then_some(alpha >= 0.01)
+}
+
+fn outline_path<'a>(paths: &'a mut Vec<(String, String)>, style: String) -> &'a mut String {
+    if paths.last().is_none_or(|(current, _)| current != &style) {
+        paths.push((style, String::new()));
+    }
+    &mut paths.last_mut().expect("just pushed").1
+}
+
+struct OutlineContext<'a> {
+    ox: f64,
+    oy: f64,
+    plot_style: Option<&'a PlotStyleTable>,
+    options: PlotOptions,
+    map: &'a PageMap,
+    glyphs: &'a GlyphSnapshot,
+}
+
+/// Validate one visible quad and all geometry it would emit. This runs for the
+/// whole wire before anything is appended, so one malformed glyph cannot leave
+/// a partial label or suppress the searchable fallback.
+fn outline_quad_is_valid(
+    quad: &[crate::scene::pipeline::text_gpu::TextVertex],
+    glyphs: &GlyphSnapshot,
+    ox: f64,
+    oy: f64,
+    map: &PageMap,
+) -> bool {
+    use crate::scene::text::sdf_atlas;
+
+    let vertex_xy = |vertex: &crate::scene::pipeline::text_gpu::TextVertex| {
+        [
+            vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
+            vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
+        ]
+    };
+    let corners = [0, 1, 2, 5].map(|index| vertex_xy(&quad[index]));
+    if corners
+        .iter()
+        .flatten()
+        .any(|coordinate| !coordinate.is_finite())
+    {
+        return false;
+    }
+    let page_point = |point: [f64; 2]| map.apply(point[0] + ox, point[1] + oy);
+    if corners
+        .iter()
+        .map(|&point| page_point(point))
+        .any(|(x, y)| !x.is_finite() || !y.is_finite())
+    {
+        return false;
+    }
+
+    let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
+    if key == glyphs.solid_key {
+        return true;
+    }
+    let Some(glyph) = glyphs.table.get(&key) else {
+        return false;
+    };
+    let (pmin, pmax) = (glyph.plane_min, glyph.plane_max);
+    let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
+    if !pmin.iter().chain(pmax.iter()).all(|v| v.is_finite()) || sx.abs() < 1e-9 || sy.abs() < 1e-9
+    {
+        return false;
+    }
+    let bl = corners[0];
+    let br = corners[1];
+    let tl = corners[3];
+    let valid_glyph_point = |point: &[f32; 2]| {
+        if !point.iter().all(|coordinate| coordinate.is_finite()) {
+            return false;
+        }
+        let u = ((point[0] - pmin[0]) / sx) as f64;
+        let v = ((point[1] - pmin[1]) / sy) as f64;
+        let world = [
+            bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]),
+            bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]),
+        ];
+        let (x, y) = page_point(world);
+        x.is_finite() && y.is_finite()
+    };
+    if !glyph.fill_tris.is_empty() {
+        glyph.fill_tris.len().is_multiple_of(3) && glyph.fill_tris.iter().all(valid_glyph_point)
+    } else {
+        // Empty substrokes carry no geometry; a one-point stroke is a visible
+        // dot and is emitted as a zero-length round-cap segment below.
+        glyph.strokes.iter().any(|stroke| !stroke.is_empty())
+            && glyph
+                .strokes
+                .iter()
+                .all(|stroke| stroke.iter().all(valid_glyph_point))
+    }
+}
+
+/// Re-emit the placed SDF quads as font-independent vector paths. Returns false
+/// before emitting anything when any visible glyph or mapped point is unusable,
+/// so the caller keeps the complete searchable `<text>` fallback.
+fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContext) -> bool {
+    use crate::scene::text::sdf_atlas;
+
+    let verts = &wire.text_verts;
+    if verts.is_empty() || verts.len() % 6 != 0 {
+        return false;
+    }
+    let key_of = |quad: &[crate::scene::pipeline::text_gpu::TextVertex]| {
+        sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]])
+    };
+    for quad in verts.chunks_exact(6) {
+        match outline_visibility(quad[0].color[3]) {
+            None => return false,
+            Some(false) => continue,
+            Some(true) => {}
+        }
+        if !outline_quad_is_valid(quad, context.glyphs, context.ox, context.oy, context.map) {
+            return false;
+        }
+    }
+
+    let mut ctb_color = None;
+    let mut lw_override_mm = None;
+    let mut screening = 1.0;
+    if let Some(table) = context.plot_style {
+        if wire.aci > 0 {
+            ctb_color = table.resolve_color(wire.aci);
+            screening = table.resolve_screening(wire.aci);
+            if context.options.object_lineweights {
+                lw_override_mm = table.resolve_lineweight(wire.aci).map(|mm| mm as f64);
+            }
+        }
+    }
+    let options = context.options;
+    let map_page = context.map;
+    let vertex_xy = |v: &crate::scene::pipeline::text_gpu::TextVertex| {
+        [
+            v.pos[0] as f64 + v.pos_low[0] as f64,
+            v.pos[1] as f64 + v.pos_low[1] as f64,
+        ]
+    };
+    // Coalesce only adjacent equal styles. Global grouping would reorder
+    // overlapping glyphs when inline colors change within one text run.
+    let mut paths = Vec::<(String, String)>::new();
+
+    for quad in verts.chunks_exact(6) {
+        let a = quad[0].color[3];
+        match outline_visibility(a) {
+            None => return false,
+            Some(false) => continue,
+            Some(true) => {}
+        }
+        let rgb = ctb_color.unwrap_or_else(|| {
+            adapt_to_paper([quad[0].color[0], quad[0].color[1], quad[0].color[2]])
+        });
+        let color = plotted_color(rgb, a, screening, options);
+        let opacity = svg_opacity(a, options.transparency);
+        let fill_style = || {
+            format!(
+                "fill=\"{}\" fill-rule=\"nonzero\" stroke=\"none\"{}",
+                hex_color(color),
+                opacity
+            )
+        };
+
+        // Quad corners are [bl, br, tr, bl, tr, tl]. Work in f64 until the
+        // final page mapping so UTM-scale text keeps its local glyph detail.
+        let bl = vertex_xy(&quad[0]);
+        let br = vertex_xy(&quad[1]);
+        let tr = vertex_xy(&quad[2]);
+        let tl = vertex_xy(&quad[5]);
+        let page_point =
+            |point: [f64; 2]| map_page.apply(point[0] + context.ox, point[1] + context.oy);
+        let key = key_of(quad);
+        if let Some(glyph) = context.glyphs.table.get(&key) {
+            let (pmin, pmax) = (glyph.plane_min, glyph.plane_max);
+            let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
+            let glyph_point = |point: [f32; 2]| {
+                let u = ((point[0] - pmin[0]) / sx) as f64;
+                let v = ((point[1] - pmin[1]) / sy) as f64;
+                [
+                    bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]),
+                    bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]),
+                ]
+            };
+            if !glyph.fill_tris.is_empty() {
+                let d = outline_path(&mut paths, fill_style());
+                for triangle in glyph.fill_tris.chunks_exact(3) {
+                    let points = triangle
+                        .iter()
+                        .map(|&point| page_point(glyph_point(point)))
+                        .collect::<Vec<_>>();
+                    d.push_str(&format!(
+                        "M {} {} L {} {} L {} {} Z ",
+                        fmt(points[0].0),
+                        fmt(points[0].1),
+                        fmt(points[1].0),
+                        fmt(points[1].1),
+                        fmt(points[2].0),
+                        fmt(points[2].1),
+                    ));
+                }
+            } else {
+                let width_mm = if let Some(mm) = lw_override_mm {
+                    let mm = if glyph.bold { mm * 1.7 } else { mm };
+                    if options.scale_lineweights {
+                        mm * map_page.scale
+                    } else {
+                        mm
+                    }
+                } else {
+                    let glyph_unit = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2)).sqrt()
+                        / sy.abs() as f64) as f32;
+                    (2.0 * sdf_atlas::stroke_pen_half_units(glyph.bold) * glyph_unit) as f64
+                        * map_page.scale
+                }
+                .max(0.1 * PT_TO_MM);
+                let style = format!(
+                    "fill=\"none\" stroke=\"{}\" stroke-width=\"{}\"{}",
+                    hex_color(color),
+                    fmt(width_mm),
+                    opacity
+                );
+                let d = outline_path(&mut paths, style);
+                for stroke in &glyph.strokes {
+                    if stroke.is_empty() {
+                        continue;
+                    }
+                    for (index, &point) in stroke.iter().enumerate() {
+                        let (x, y) = page_point(glyph_point(point));
+                        d.push_str(&format!(
+                            "{} {} {} ",
+                            if index == 0 { 'M' } else { 'L' },
+                            fmt(x),
+                            fmt(y)
+                        ));
+                    }
+                    if stroke.len() == 1 {
+                        let (x, y) = page_point(glyph_point(stroke[0]));
+                        d.push_str(&format!("L {} {} ", fmt(x), fmt(y)));
+                    }
+                }
+            }
+        } else if key == context.glyphs.solid_key {
+            // Atlas solid tile: underline, overline, and strike decorations.
+            let points = [bl, br, tr, tl].map(page_point);
+            outline_path(&mut paths, fill_style()).push_str(&format!(
+                "M {} {} L {} {} L {} {} L {} {} Z ",
+                fmt(points[0].0),
+                fmt(points[0].1),
+                fmt(points[1].0),
+                fmt(points[1].1),
+                fmt(points[2].0),
+                fmt(points[2].1),
+                fmt(points[3].0),
+                fmt(points[3].1),
+            ));
+        } else {
+            // Defensive only: preflight rejects this before any output.
+            return false;
+        }
+    }
+
+    for (style, d) in paths {
+        if !d.is_empty() {
+            out.push_str(&format!("<path d=\"{}\" {style}/>\n", d.trim_end()));
+        }
+    }
+    true
+}
+
 // ── Searchable text as visible <text> ──────────────────────────────────────
 
 fn emit_searchable_text(
@@ -891,7 +1251,7 @@ fn svg_opacity(alpha: f32, transparency: bool) -> String {
     }
 }
 
-fn stamp_element(_paper_w: f64, paper_h: f64) -> String {
+fn plot_stamp_label() -> String {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -899,11 +1259,65 @@ fn stamp_element(_paper_w: f64, paper_h: f64) -> String {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "user".into());
+    format!("Open CAD Studio | {user} | {timestamp}")
+}
+
+fn stamp_glyph_quads(
+    atlas: &mut crate::scene::text::sdf_atlas::GlyphAtlas,
+    label: &str,
+) -> Vec<crate::scene::text::glyph_quads::GlyphQuad> {
+    crate::scene::text::glyph_quads::layout_glyph_quads(
+        atlas,
+        (2.12 * HELVETICA_CAP_RATIO) as f32,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        "Helvetica",
+        false,
+        label,
+    )
+    .0
+}
+
+fn stamp_wire_from_atlas(
+    atlas: &mut crate::scene::text::sdf_atlas::GlyphAtlas,
+    label: &str,
+) -> Option<WireModel> {
+    use crate::scene::text::sdf_atlas;
+
+    // Growing the atlas midway through the stamp rescales earlier stamp quads
+    // too. Re-layout until the complete stamp belongs to one generation.
+    for _ in 0..8 {
+        let generation = sdf_atlas::generation();
+        let quads = stamp_glyph_quads(atlas, label);
+        if sdf_atlas::generation() != generation {
+            continue;
+        }
+        let mut wire = WireModel::default();
+        crate::scene::pipeline::text_gpu::push_glyph_vertices(
+            &mut wire.text_verts,
+            &quads,
+            [4.0, 3.0, 0.0],
+            1.0,
+            [0.25, 0.25, 0.25, 1.0],
+            0.0,
+        );
+        return Some(wire);
+    }
+    None
+}
+
+fn stamp_outline_wire(label: &str) -> Option<WireModel> {
+    let mut atlas = crate::scene::text::sdf_atlas::text_atlas().lock().ok()?;
+    stamp_wire_from_atlas(&mut atlas, label)
+}
+
+fn stamp_element(label: &str, paper_h: f64) -> String {
     format!(
-        "<text x=\"4\" y=\"{}\" font-size=\"2.12\" fill=\"#404040\" font-family=\"sans-serif\">Open CAD Studio | {} | {}</text>\n",
+        "<text x=\"4\" y=\"{}\" font-size=\"2.12\" fill=\"#404040\" font-family=\"sans-serif\">{}</text>\n",
         fmt(paper_h - 3.0),
-        xml_escape(&user),
-        timestamp
+        xml_escape(label),
     )
 }
 
@@ -1134,44 +1548,314 @@ mod tests {
             );
         }
     }
-
     #[test]
-    fn xml_escape_replaces_every_codepoint_forbidden_by_xml_10() {
-        assert_eq!(
-            xml_escape("A\u{0}\u{2}\u{b}\u{c}\u{1f}B"),
-            "A\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}B"
+    fn text_as_outlines_replaces_font_dependent_text_with_vector_paths() {
+        // Other tests share and can reset the global atlas. Rebuild the quads
+        // whenever that happens, as the existing PDF export regressions do.
+        let mut text = String::new();
+        let mut outlined = String::new();
+        let mut fallback = String::new();
+        let mut stable = false;
+        for _ in 0..8 {
+            let generation = crate::scene::text::sdf_atlas::generation();
+            let mtext = document::entities::MText::with_value(
+                "AB",
+                document::types::Vector3::new(10.0, 10.0, 0.0),
+            );
+            let wires = crate::scene::convert::tessellate::tessellate(
+                &document::Document::new(),
+                document::Handle::new(124),
+                &document::EntityType::MText(Box::new(mtext)),
+                false,
+                [1.0; 4],
+                0.0,
+                [0.0; 8],
+                1.0,
+                1.0,
+                None,
+                None,
+                None,
+                [1.0; 4],
+                false,
+            );
+            assert!(wires.iter().any(|wire| !wire.text_verts.is_empty()));
+            let wires = wires
+                .into_iter()
+                .map(|wire| PlotWire {
+                    wire,
+                    draw_depth: 0.5,
+                })
+                .collect::<Vec<_>>();
+            let render = |outlines| {
+                let content = crate::io::plot::PlotContent {
+                    wires: std::sync::Arc::new(wires.clone()),
+                    ..Default::default()
+                };
+                let mut page = page_with(content, 210.0, 297.0);
+                page.options.text_as_outlines = outlines;
+                page.options.stamp = true;
+                build_svg(&page, None).expect("builds")
+            };
+            text = render(false);
+            outlined = render(true);
+
+            // A stale/unknown atlas key must not drop the label or emit a
+            // partial outline run: retain the original searchable text.
+            let mut fallback_wires = wires.clone();
+            for vertex in fallback_wires
+                .iter_mut()
+                .flat_map(|wire| wire.wire.text_verts.iter_mut())
+            {
+                vertex.uv = [-1.0, -1.0];
+            }
+            let content = crate::io::plot::PlotContent {
+                wires: std::sync::Arc::new(fallback_wires),
+                ..Default::default()
+            };
+            let mut page = page_with(content, 210.0, 297.0);
+            page.options.text_as_outlines = true;
+            fallback = build_svg(&page, None).expect("fallback builds");
+            if crate::scene::text::sdf_atlas::generation() == generation {
+                stable = true;
+                break;
+            }
+        }
+        assert!(stable, "glyph atlas did not stabilize after eight attempts");
+
+        assert!(text.contains("<text"), "default mode must keep text runs");
+        assert!(
+            text.contains("Open CAD Studio |"),
+            "the default plot stamp remains searchable"
         );
-        assert_eq!(xml_escape("\u{fffe}\u{ffff}"), "\u{fffd}\u{fffd}");
-        assert_eq!(xml_escape("tab\tline\ncarriage\r"), "tab\tline\ncarriage\r");
-        assert_eq!(
-            xml_escape("C1:\u{80}; Unicode:č😀"),
-            "C1:\u{80}; Unicode:č😀"
+        assert!(
+            !outlined.contains("<text") && !outlined.contains("font-family"),
+            "outline mode must not need a viewer font: {outlined}"
+        );
+        assert!(
+            outlined.lines().any(|line| line.starts_with("<path")),
+            "outline mode emitted no vector glyphs: {outlined}"
+        );
+        roxmltree::Document::parse(&outlined).expect("outline SVG is well-formed XML");
+        assert!(fallback.contains(">AB</text>"), "{fallback}");
+    }
+    #[test]
+    fn text_outlines_preserve_inline_colors_rotation_and_decoration_placement() {
+        use crate::scene::text::sdf_atlas::{self, GlyphAtlas};
+
+        // A local atlas keeps this geometry assertion independent of other
+        // tests resetting the process-global atlas used by the full builder.
+        let mut atlas = GlyphAtlas::new(512, 512);
+        let mut wire = WireModel::default();
+        for (text, origin, color) in [
+            ("R", [40.0, 50.0, 0.0], [1.0, 0.0, 0.0, 1.0]),
+            (r"\LG\l", [45.0, 50.0, 0.0], [0.0, 1.0, 0.0, 1.0]),
+        ] {
+            let (quads, _) = crate::scene::text::glyph_quads::layout_glyph_quads(
+                &mut atlas,
+                2.5,
+                std::f32::consts::FRAC_PI_6,
+                1.0,
+                0.0,
+                1.0,
+                "txt",
+                false,
+                text,
+            );
+            crate::scene::pipeline::text_gpu::push_glyph_vertices(
+                &mut wire.text_verts,
+                &quads,
+                origin,
+                1.0,
+                color,
+                0.0,
+            );
+        }
+        let glyphs = GlyphSnapshot {
+            table: atlas.export_table(),
+            solid_key: sdf_atlas::uv_key(atlas.solid_uv()),
+        };
+        let vertex_xy = |vertex: &crate::scene::pipeline::text_gpu::TextVertex| {
+            [
+                vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
+                vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
+            ]
+        };
+        let decoration = wire
+            .text_verts
+            .chunks_exact(6)
+            .find(|quad| sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]) == glyphs.solid_key)
+            .expect("generated underline quad");
+        let corners = [0, 1, 2, 5].map(|index| vertex_xy(&decoration[index]));
+        let map = PageMap {
+            paper_w: 210.0,
+            paper_h: 297.0,
+            scale: 1.0,
+            rotation_deg: 0,
+        };
+        let points = corners.map(|point| map.apply(point[0], point[1]));
+        let expected_decoration = format!(
+            "M {} {} L {} {} L {} {} L {} {} Z",
+            fmt(points[0].0),
+            fmt(points[0].1),
+            fmt(points[1].0),
+            fmt(points[1].1),
+            fmt(points[2].0),
+            fmt(points[2].1),
+            fmt(points[3].0),
+            fmt(points[3].1),
+        );
+
+        let emit = |wire: &WireModel, glyphs: &GlyphSnapshot| {
+            let mut out = String::new();
+            let emitted = emit_text_outlines(
+                &mut out,
+                wire,
+                OutlineContext {
+                    ox: 0.0,
+                    oy: 0.0,
+                    plot_style: None,
+                    options: PlotOptions {
+                        text_as_outlines: true,
+                        ..Default::default()
+                    },
+                    map: &map,
+                    glyphs,
+                },
+            );
+            (emitted, out)
+        };
+        let (emitted, paths) = emit(&wire, &glyphs);
+        assert!(emitted);
+        assert!(!paths.contains("<text") && !paths.contains("font-family"));
+        assert!(paths.contains("#ff0000"), "red run missing: {paths}");
+        assert!(paths.contains("#00ff00"), "green run missing: {paths}");
+        assert!(
+            paths.contains(&expected_decoration),
+            "rotated underline moved: expected {expected_decoration} in {paths}"
+        );
+        let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{paths}</svg>");
+        roxmltree::Document::parse(&svg).expect("well-formed outline SVG");
+
+        // The second quad is malformed after a valid first quad. Nothing from
+        // the valid prefix may escape before the whole-wire fallback decision.
+        let mut malformed = wire.clone();
+        malformed.text_verts[6].pos[0] = f32::NAN;
+        let (emitted, partial) = emit(&malformed, &glyphs);
+        assert!(!emitted && partial.is_empty(), "partial label: {partial}");
+
+        let first_key = sdf_atlas::uv_key([wire.text_verts[5].uv[0], wire.text_verts[5].uv[1]]);
+        let mut degenerate = GlyphSnapshot {
+            table: glyphs.table.clone(),
+            solid_key: glyphs.solid_key,
+        };
+        let glyph = degenerate.table.get_mut(&first_key).expect("first glyph");
+        glyph.plane_max = glyph.plane_min;
+        let (emitted, partial) = emit(&wire, &degenerate);
+        assert!(!emitted && partial.is_empty(), "partial label: {partial}");
+
+        let mut nonfinite_alpha = wire.clone();
+        nonfinite_alpha.text_verts[6].color[3] = f32::NAN;
+        nonfinite_alpha.text_verts[11].uv = [-1.0, -1.0];
+        let (emitted, partial) = emit(&nonfinite_alpha, &glyphs);
+        assert!(!emitted && partial.is_empty(), "partial label: {partial}");
+
+        // Empty substrokes are ignored and a one-point stroke becomes a
+        // zero-length segment, painted as a dot by the inherited round cap.
+        let mut point_wire = WireModel::default();
+        point_wire.text_verts = wire.text_verts[..6].to_vec();
+        let mut point_glyphs = GlyphSnapshot {
+            table: glyphs.table.clone(),
+            solid_key: glyphs.solid_key,
+        };
+        let glyph = point_glyphs.table.get_mut(&first_key).expect("point glyph");
+        let point = glyph.plane_min;
+        glyph.fill_tris.clear();
+        glyph.strokes = vec![Vec::new(), vec![point]];
+        let (emitted, point_path) = emit(&point_wire, &point_glyphs);
+        let origin = vertex_xy(&point_wire.text_verts[0]);
+        let (x, y) = map.apply(origin[0], origin[1]);
+        let expected_dot = format!("M {} {} L {} {}", fmt(x), fmt(y), fmt(x), fmt(y));
+        assert!(
+            emitted && point_path.contains(&expected_dot),
+            "{point_path}"
         );
     }
-
+    /// With the atlas keeping its UVs across growth (tiles persist), one
+    /// snapshot taken after the stamp's layout serves the page text and the
+    /// stamp alike: the drawing quads laid out before the growth still
+    /// resolve, and there is no pre-stamp snapshot to keep.
     #[test]
-    fn forbidden_xml_control_in_text_does_not_invalidate_the_document() {
-        let mut wire = WireModel::default();
-        wire.searchable_text = vec![crate::scene::model::wire_model::SearchableTextRun {
-            text: "before\u{2}after".to_string(),
-            origin: [10.0, 20.0, 0.0],
-            height: 2.0,
-            rotation: 0.0,
-            color: [0.0, 0.0, 0.0, 1.0],
-            bold: false,
-            font: "Arial".to_string(),
-            adv_width: 10.0,
-        }];
-        let content = crate::io::plot::PlotContent {
-            wires: std::sync::Arc::new(vec![PlotWire {
-                wire,
-                draw_depth: 0.5,
-            }]),
-            ..Default::default()
+    fn stamp_atlas_growth_keeps_one_post_stamp_snapshot_valid() {
+        use crate::scene::text::glyph_quads::layout_glyph_quads;
+        use crate::scene::text::sdf_atlas::{self, GlyphAtlas};
+
+        let mut atlas = GlyphAtlas::new(64, 64);
+        let (drawing_quads, _) =
+            layout_glyph_quads(&mut atlas, 2.5, 0.0, 1.0, 0.0, 1.0, "txt", false, "A");
+        let mut drawing = WireModel::default();
+        crate::scene::pipeline::text_gpu::push_glyph_vertices(
+            &mut drawing.text_verts,
+            &drawing_quads,
+            [20.0, 20.0, 0.0],
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+            0.0,
+        );
+        let drawing_key =
+            sdf_atlas::uv_key([drawing.text_verts[5].uv[0], drawing.text_verts[5].uv[1]]);
+
+        let height_before_stamp = atlas.height();
+        let label = plot_stamp_label();
+        let (stamp_quads, _) =
+            layout_glyph_quads(&mut atlas, 2.5, 0.0, 1.0, 0.0, 1.0, "txt", false, &label);
+        let mut stamp = WireModel::default();
+        crate::scene::pipeline::text_gpu::push_glyph_vertices(
+            &mut stamp.text_verts,
+            &stamp_quads,
+            [4.0, 3.0, 0.0],
+            1.0,
+            [0.25, 0.25, 0.25, 1.0],
+            0.0,
+        );
+        assert!(
+            atlas.height() > height_before_stamp,
+            "the generated stamp must force this small atlas to grow"
+        );
+        // The single post-stamp snapshot is all the export keeps.
+        let glyphs = GlyphSnapshot::from_atlas(&atlas);
+        assert!(
+            glyphs.table.contains_key(&drawing_key),
+            "growth keeps UVs, so the one post-stamp snapshot still serves the page"
+        );
+        let map = PageMap {
+            paper_w: 210.0,
+            paper_h: 297.0,
+            scale: 1.0,
+            rotation_deg: 0,
         };
-        let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
-        assert!(svg.contains("before\u{fffd}after"), "{svg}");
-        roxmltree::Document::parse(&svg).expect("the exported SVG is well-formed XML");
+        let emit = |wire: &WireModel, glyphs: &GlyphSnapshot| {
+            let mut out = String::new();
+            let emitted = emit_text_outlines(
+                &mut out,
+                wire,
+                OutlineContext {
+                    ox: 0.0,
+                    oy: 0.0,
+                    plot_style: None,
+                    options: PlotOptions {
+                        text_as_outlines: true,
+                        ..Default::default()
+                    },
+                    map: &map,
+                    glyphs,
+                },
+            );
+            (emitted, out)
+        };
+        let (emitted, page_paths) = emit(&drawing, &glyphs);
+        assert!(emitted && !page_paths.is_empty(), "page text: {page_paths}");
+        let (emitted, stamp_paths) = emit(&stamp, &glyphs);
+        assert!(emitted && !stamp_paths.is_empty(), "stamp text: {stamp_paths}");
     }
 
     #[test]

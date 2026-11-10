@@ -6753,7 +6753,7 @@ impl Scene {
         let cannoscale_value = self
             .scale_object_handle(&self.document.header.current_annotation_scale)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => Some(self.effective_scale_factor(scale)),
+                Some(ObjectType::Scale(scale)) => Some(scale.factor()),
                 _ => None,
             })
             .unwrap_or(self.document.header.annotation_scale_value);
@@ -6790,6 +6790,10 @@ impl Scene {
     /// unit (1 paper = 0.2 drawing for a metre-based "1:200"). A custom
     /// scale, including "1:100 m", always keeps its own stored ratio.
     /// Normalize only exact standard names with exact legacy ratios.
+    ///
+    /// Viewport and plot scales only: the annotation multiplier is the
+    /// scale's own ratio whatever the drawing units (#2354), so a centimetre
+    /// drawing's 1:50 draws annotative text 50 times its paper height.
     fn effective_scale_factor(&self, scale: &document::objects::Scale) -> f64 {
         let stored = scale.factor();
         let legacy_standard = self.default_scales().iter().any(|&(name, base)| {
@@ -7289,7 +7293,7 @@ impl Scene {
                 return None;
             };
 
-            let factor = self.effective_scale_factor(scale);
+            let factor = scale.factor();
             (scale.name.clone(), factor, 1.0 / factor)
         };
 
@@ -7515,7 +7519,7 @@ impl Scene {
         .or_else(|| self.displayed_annotation_scale_handle());
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => Some(1.0 / self.effective_scale_factor(scale)),
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -8268,7 +8272,7 @@ impl Scene {
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
                 Some(ObjectType::Scale(scale)) => {
-                    Some((1.0 / self.effective_scale_factor(scale)) as f32)
+                    Some(scale.inverse_factor() as f32)
                 }
                 _ => None,
             })
@@ -19309,10 +19313,11 @@ mod layout_cache_tests {
                     // and viewport apply the physically correct effective ratio.
                     let (paper, drawing) = scene.scale_ratio(name).unwrap();
                     assert!((paper / drawing - 1.0 / drawing_units).abs() < 1.0e-9);
+                    // The annotation multiplier is the scale's own ratio,
+                    // whatever the units: DIMTXT and text heights are in
+                    // drawing units (#2354).
                     assert!(scene.set_annotation_scale_named(name).is_some());
-                    assert!(
-                        ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
-                    );
+                    assert!(((scene.annotation_scale as f64) - drawing_units).abs() < 1.0e-5);
                 }
             }
         }

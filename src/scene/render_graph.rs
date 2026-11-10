@@ -722,6 +722,42 @@ fn rebuild_disagrees_with_picture(document: &Document, handle: Handle) -> bool {
         && (measured - kept).abs() > 1e-6 * measured.abs().max(kept.abs()).max(1.0)
 }
 
+/// An annotative dimension's picture drawn at another size than its scale
+/// gives: text far from DIMTXT times the scale. Earlier versions of this
+/// program saved such pictures at 1:1, and they came back oversized on every
+/// open; the dimension is rebuilt instead.
+fn picture_off_scale(
+    document: &Document,
+    dimension: &document::entities::Dimension,
+    record: &document::tables::BlockRecord,
+) -> bool {
+    let name = dimension.base().style_name.trim();
+    let Some(style) = document.dim_styles.iter().find(|style| {
+        style.name.eq_ignore_ascii_case(name)
+            || (name.is_empty() && style.name.eq_ignore_ascii_case("Standard"))
+    }) else {
+        return false;
+    };
+    let style_annotative = style.annotative;
+    let style = crate::entities::dimension::resolved_dimension_style(style, dimension, document);
+    // A fixed DIMSCALE, or a non-annotative one (DIMSCALE 0 there follows
+    // the viewport), sizes the picture, not the annotation scale.
+    if !(style.annotative || style_annotative) || style.dimscale > 1e-6 {
+        return false;
+    }
+    let expected = style.dimtxt
+        * crate::modules::draw::modify::explode::annotative_picture_scale(dimension, document);
+    let drawn = record.entity_handles.iter().find_map(|handle| match document.get_entity(*handle) {
+        Some(EntityType::Text(text)) => Some(text.height),
+        Some(EntityType::MText(text)) => Some(text.height),
+        _ => None,
+    });
+    match drawn {
+        Some(drawn) if expected > 0.0 && drawn > 0.0 => !(0.8..=1.25).contains(&(drawn / expected)),
+        _ => false,
+    }
+}
+
 /// The block reference that places a dimension's picture block: at the
 /// dimension's insertion point, with its insertion rotation and scale. The
 /// point is stored in the dimension's OCS; the picture's sub-entities are in
@@ -968,9 +1004,10 @@ fn entity_owned_block_uses(
                 let base = dimension.base();
                 let mut insert = dimension_picture_insert(base, record.name.clone());
                 insert.common = base.common.clone();
-                let picture = !crate::scene::annotative::is_annotative(document, entity)
+                let picture = (!crate::scene::annotative::is_annotative(document, entity)
                     || single_scale_picture(document, base.common.handle, &record.name)
-                    || rebuild_disagrees_with_picture(document, base.common.handle);
+                    || rebuild_disagrees_with_picture(document, base.common.handle))
+                    && !picture_off_scale(document, dimension, record);
                 vec![block_use(
                     document,
                     insert,

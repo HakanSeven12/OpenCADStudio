@@ -150,44 +150,54 @@ fn line_at(layer: &str, y: f64) -> EntityType {
     )
 }
 
-/// Block `LINES` holds two lines and a circle on layer A and the same on
-/// layer B. All its references but the first carry the lines as one stub of
-/// the first one's wires. Six references to it come before a line.
-fn six_references() -> Scene {
+/// Each block holds two lines and a circle on layer A and the same on layer
+/// B. All the references to a block but one carry its lines as one stub of
+/// that one's wires. `each` references to every block, taking turns, come
+/// before a line.
+fn stub_references(blocks: &[&str], each: usize) -> Scene {
     let mut scene = Scene::new();
     for name in ["A", "B"] {
         scene.document.layers.add(Layer::new(name)).unwrap();
     }
-    scene
-        .define_block_from_owned_entities(
-            vec![
-                line_at("A", 0.5),
-                line_at("A", 1.0),
-                on_layer(circle(1.0), "A"),
-                line_at("B", -0.5),
-                line_at("B", -1.0),
-                on_layer(circle(2.0), "B"),
-            ],
-            "LINES",
-            glam::DVec3::ZERO,
-        )
-        .expect("the definition is created");
-    for k in 0..6 {
+    for (index, block) in blocks.iter().enumerate() {
+        // Another size for each block, so no two blocks share a shape.
+        let size = 1.0 + index as f64;
+        scene
+            .define_block_from_owned_entities(
+                vec![
+                    line_at("A", 0.5 * size),
+                    line_at("A", size),
+                    on_layer(circle(size), "A"),
+                    line_at("B", -0.5 * size),
+                    line_at("B", -size),
+                    on_layer(circle(2.0 * size), "B"),
+                ],
+                block,
+                glam::DVec3::ZERO,
+            )
+            .expect("the definition is created");
+    }
+    for k in 0..each * blocks.len() {
         scene.add_entity(EntityType::Insert(Insert::new(
-            "LINES",
+            blocks[k % blocks.len()],
             Vector3::new(50.0 + 100.0 * k as f64, 50.0, 0.0),
         )));
     }
     scene.add_entity(EntityType::Line(Line::from_points(
-        Vector3::new(900.0, 50.0, 0.0),
-        Vector3::new(910.0, 50.0, 0.0),
+        Vector3::new(-100.0, 50.0, 0.0),
+        Vector3::new(-90.0, 50.0, 0.0),
     )));
     scene
 }
 
-#[test]
-fn references_drawn_as_stubs_are_patched_when_a_layer_inside_switches() {
-    let mut scene = six_references();
+fn six_references() -> Scene {
+    stub_references(&["LINES"], 6)
+}
+
+/// Switching A off and back on patches the set both times, and it draws
+/// what a newly built set draws, whichever reference carries a full run.
+fn patches_both_ways(build: impl Fn() -> Scene) {
+    let mut scene = build();
     let before = drawn(&scene);
 
     let hits = scene.resident_patch_hits.get();
@@ -196,10 +206,9 @@ fn references_drawn_as_stubs_are_patched_when_a_layer_inside_switches() {
     assert_eq!(
         scene.resident_patch_hits.get(),
         hits + 1,
-        "the reference that carried the full run must get it back, so no \
-         reference grows past its slots and the set is patched"
+        "the reference that carried the full run must get it back, so no          reference grows past its slots and the set is patched"
     );
-    let mut fresh = six_references();
+    let mut fresh = build();
     switch(&mut fresh, "A", false);
     assert_eq!(
         shape(&off),
@@ -220,6 +229,18 @@ fn references_drawn_as_stubs_are_patched_when_a_layer_inside_switches() {
         shape(&before),
         "A back on draws what it drew before"
     );
+}
+
+/// The changed references are tessellated side by side, block by block:
+/// every block's full run must still go back to the reference that held it.
+#[test]
+fn references_to_several_blocks_are_patched_together() {
+    patches_both_ways(|| stub_references(&["P", "Q", "R", "S", "T", "U", "V", "W"], 5));
+}
+
+#[test]
+fn references_drawn_as_stubs_are_patched_when_a_layer_inside_switches() {
+    patches_both_ways(six_references);
 }
 
 #[test]

@@ -9321,6 +9321,12 @@ impl Scene {
         // run back to the reference whose slots held it; in the journal's
         // order another reference could get it and grow past its slots.
         let mut from_memo = 0usize;
+        // What is tessellated afresh, in groups that run side by side. The
+        // references to one block share a group and keep their order in it,
+        // so the block's full run still goes to the one that held it; any
+        // other entity is a group of its own.
+        let mut groups: Vec<Vec<(Handle, &EntityType)>> = Vec::new();
+        let mut group_of_block: HashMap<&str, usize> = HashMap::default();
         let mut tess_order: Vec<(Handle, ChangeKind)> = deltas.clone();
         tess_order.sort_by_key(|(h, _)| {
             std::cmp::Reverse(
@@ -9369,28 +9375,61 @@ impl Scene {
                 from_memo += 1;
                 continue;
             }
-            let mut raw = tessellate_entity(
-                &self.document,
-                &empty_sel,
-                avp,
-                bg,
-                anno,
-                annotation_scale_handle,
-                e,
-                Some(&blk),
-                None,
-                None,
-                self.viewport_lt_for(anno_scale_override),
-                self.reference_only.handles(),
-            );
+            let group = match e {
+                EntityType::Insert(insert) => *group_of_block
+                    .entry(insert.block_name.as_str())
+                    .or_insert_with(|| {
+                        groups.push(Vec::new());
+                        groups.len() - 1
+                    }),
+                _ => {
+                    groups.push(Vec::new());
+                    groups.len() - 1
+                }
+            };
+            groups[group].push((*h, e));
+        }
+        // A layer switched off inside a block changes thousands of
+        // references at once: tessellate on all cores, as the full build does.
+        let tessellated: Vec<(Handle, Vec<WireModel>)> = {
+            use crate::par::prelude::*;
+            let document = &self.document;
+            let selection = &empty_sel;
+            let block_cache: &cache::block_cache::BlockCache = &blk;
+            let viewport_lt = self.viewport_lt_for(anno_scale_override);
+            let reference_only = self.reference_only.handles();
+            groups
+                .par_iter()
+                .flat_map_iter(move |group| {
+                    group.iter().map(move |&(h, e)| {
+                        let wires = tessellate_entity(
+                            document,
+                            selection,
+                            avp,
+                            bg,
+                            anno,
+                            annotation_scale_handle,
+                            e,
+                            Some(block_cache),
+                            None,
+                            None,
+                            viewport_lt,
+                            reference_only,
+                        );
+                        (h, wires)
+                    })
+                })
+                .collect()
+        };
+        for (h, mut raw) in tessellated {
             // Solid B-rep corners snap via the mesh edge list (their wire
             // path is an empty shell). Enrich before the memo/assembly split
             // so both share the same snap-bearing wires.
-            self.attach_solid_snaps(*h, &mut raw);
-            memo_updates.push((*h, Arc::new(raw.clone())));
+            self.attach_solid_snaps(h, &mut raw);
+            memo_updates.push((h, Arc::new(raw.clone())));
             let mut faded = raw;
             self.apply_refedit_fade(&mut faded, bg);
-            new_runs.insert(*h, faded);
+            new_runs.insert(h, faded);
         }
         let tessellated = memo_updates.len();
         {

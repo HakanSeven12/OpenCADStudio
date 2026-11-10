@@ -69,6 +69,65 @@ fn insert_attribute_properties(doc: &Document, insert: &document::entities::Inse
         .unwrap_or_default()
 }
 
+/// The dynamic-block rows of a reference, shared by every extraction of
+/// dynamic content: each is `(key, label, value)` with the upper-cased
+/// parameter label as the key.
+fn dynamic_rows(doc: &Document, insert: &document::entities::Insert) -> Vec<(String, String, String)> {
+    use crate::scene::model::object::PropValue;
+    let mut rows = Vec::new();
+    for row in crate::scene::block_parameter_properties::properties(
+        doc,
+        None,
+        0,
+        insert.common.handle,
+    ) {
+        let value = match row.value {
+            PropValue::BlockNumber { value, .. } => value,
+            PropValue::BlockChoice { selected, options, .. } => {
+                options.get(selected).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        let label = row.label.clone();
+        rows.push((format!("Parameter.{}", label.to_uppercase()), label, value));
+    }
+    for row in crate::scene::block_lookup::reference_properties(
+        doc,
+        None,
+        0,
+        insert.common.handle,
+    ) {
+        let value = match row.value {
+            PropValue::BlockChoice { selected, options, .. } => {
+                options.get(selected).cloned().unwrap_or_default()
+            }
+            PropValue::ReadOnlyWithTooltip { value, .. } => value,
+            _ => continue,
+        };
+        let label = row.label.clone();
+        rows.push((format!("Lookup.{}", label.to_uppercase()), label, value));
+    }
+    rows
+}
+
+/// The dynamic-block parameter and lookup properties of a reference, shared
+/// by every extraction of dynamic content.
+fn dynamic_properties(doc: &Document, insert: &document::entities::Insert) -> Vec<Property> {
+    let mut seen = std::collections::HashSet::new();
+    let mut list = Vec::new();
+    for (key, label, _) in dynamic_rows(doc, insert) {
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        list.push(Property {
+            key: leaked(&key),
+            name: leaked(&label),
+            category: DYNAMICS,
+        });
+    }
+    list
+}
+
 /// The block-attribute values of an object, keyed by upper-cased tag.
 fn insert_attribute_values(
     doc: &Document,
@@ -117,6 +176,7 @@ const fn p(key: &'static str, name: &'static str, category: &'static str) -> Pro
 
 const GENERAL: &str = "General";
 const ATTRIBUTES: &str = "Attributes";
+const DYNAMICS: &str = "Dynamics";
 const GEOMETRY: &str = "Geometry";
 const DRAWING: &str = "Drawing";
 const TEXT: &str = "Text";
@@ -289,6 +349,7 @@ pub(crate) fn properties(entity: &EntityType, doc: &Document) -> Vec<Property> {
         EntityType::Insert(insert) => {
             list.extend_from_slice(&BLOCK);
             list.extend(insert_attribute_properties(doc, insert));
+            list.extend(dynamic_properties(doc, insert));
         }
         _ => {}
     }
@@ -488,7 +549,16 @@ pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts, doc: &
             _ => String::new(),
         };
     }
-
+    if key.starts_with("Parameter.") || key.starts_with("Lookup.") {
+        return match entity {
+            EntityType::Insert(insert) => dynamic_rows(doc, insert)
+                .into_iter()
+                .find(|(row_key, _, _)| row_key == key)
+                .map(|(_, _, value)| value)
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+    }
     match entity {
         EntityType::Line(line) => {
             let d = [

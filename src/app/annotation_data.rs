@@ -3446,6 +3446,85 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_block_parameters_are_listed_as_columns() {
+        use super::*;
+        use crate::scene::block_actions as actions;
+        use crate::scene::block_distance_parameter as distance;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+        use glam::DVec3;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let reference;
+        {
+            let doc = &mut app.tabs[i].scene.document;
+            let mut record = document::tables::BlockRecord::new("FLAG");
+            record.handle = doc.allocate_handle();
+            let owner = record.handle;
+            doc.block_records.add(record).unwrap();
+            let mut line = Line::new();
+            line.start = Vector3::ZERO;
+            line.end = Vector3::new(10.0, 0.0, 0.0);
+            line.common.owner_handle = owner;
+            let line_handle = doc.add_entity(EntityType::Line(line)).unwrap();
+            doc.block_records.get_mut("FLAG").unwrap().entity_handles = vec![line_handle];
+
+            let insert = Insert::new("FLAG", Vector3::new(100.0, 50.0, 0.0));
+            reference = doc.add_entity(EntityType::Insert(insert)).unwrap();
+        }
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+
+        let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        // Build a distance parameter with a move action so the reference
+        // really is dynamic.
+        let source = &app.tabs[i].scene.document;
+        let member = source.block_records.get("FLAG").unwrap().entity_handles[0];
+        let parameter = distance::create(
+            &mut app.tabs[i].scene.document,
+            def,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let _ = actions::create(&mut app.tabs[i].scene.document, def, actions::Kind::Move, parameter, &[member], DVec3::ZERO).unwrap();
+        let p = actions::all_parameters(&app.tabs[i].scene.document, def)
+            .into_iter()
+            .find(|p| p.handle == parameter)
+            .unwrap();
+        let name = p.name.clone();
+
+        let _ = app.dispatch_command("BSAVE");
+        let _ = app.dispatch_command("BCLOSE");
+
+        let doc = &app.tabs[i].scene.document;
+        let mut records = Vec::new();
+        collect_records(
+            doc,
+            None,
+            None,
+            &std::collections::BTreeSet::from(["FLAG".to_string()]),
+            &mut records,
+        );
+        assert_eq!(records.len(), 1);
+        let dyn_value = records[0]
+            .values
+            .iter()
+            .find(|(key, _)| key.starts_with("Parameter."))
+            .map(|(_, value)| value.clone());
+        assert_eq!(
+            dyn_value,
+            Some("10".to_string()),
+            "the extraction reports the parameter value (name: {name})"
+        );
+        assert!(records[0].values.keys().any(|key| key.starts_with("Parameter.")));
+        let _ = reference;
+    }
+
+    #[test]
     fn workbook_metadata_bytes_rejects_non_workbooks() {
         assert!(workbook_metadata_bytes(b"not a workbook").is_err());
     }

@@ -2213,7 +2213,9 @@ pub fn validate_entity_mutation(
             if old.embedded_mtext != new.embedded_mtext {
                 return Err("AttributeEntity.embedded_mtext is unmapped and read-only".into());
             }
+            // A missing link (attributes read from a file have none) may be filled in.
             if old.attdef_handle != new.attdef_handle
+                && !old.attdef_handle.is_null()
                 && !(old.tag != new.tag && !new.attdef_handle.is_null())
             {
                 return Err("AttributeEntity.attdef_handle is read-only".into());
@@ -3806,6 +3808,81 @@ mod tests {
                 .unwrap_err()
                 .contains("no whitespace")
         );
+    }
+
+    #[cfg(feature = "host")]
+    #[test]
+    fn attribute_without_definition_link_can_be_edited() {
+        use crate::host::document::{
+            self,
+            entities::{Block, BlockEnd},
+            types::{Handle, Vector3},
+        };
+        let mut document = document::Document::new();
+        let next = document.next_handle();
+        let record_handle = Handle::new(next);
+        let block_handle = Handle::new(next + 1);
+        let end_handle = Handle::new(next + 2);
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
+        record.handle = record_handle;
+        record.block_entity_handle = block_handle;
+        record.block_end_handle = end_handle;
+        document.block_records.add(record).unwrap();
+        let mut block = Block::new("TAGBLOCK", Vector3::ZERO);
+        block.common.handle = block_handle;
+        block.common.owner_handle = record_handle;
+        document
+            .add_entity(document::EntityType::Block(block))
+            .unwrap();
+        let mut end = BlockEnd::new();
+        end.common.handle = end_handle;
+        end.common.owner_handle = record_handle;
+        document
+            .add_entity(document::EntityType::BlockEnd(end))
+            .unwrap();
+        let mut definition = document::entities::AttributeDefinition::new(
+            "PART_NO".into(),
+            "Part number".into(),
+            "PN-001".into(),
+        );
+        definition.common.owner_handle = record_handle;
+        let definition_handle = document
+            .add_entity(document::EntityType::AttributeDefinition(definition))
+            .unwrap();
+        let insert_handle = document
+            .add_entity(document::EntityType::Insert(
+                document::entities::Insert::new("TAGBLOCK", Vector3::ZERO),
+            ))
+            .unwrap();
+
+        // An attribute read from a DXF or DWG file has no definition link.
+        let mut loaded =
+            document::entities::AttributeEntity::new("PART_NO".into(), "PN-101".into());
+        loaded.common.owner_handle = insert_handle;
+        assert!(loaded.attdef_handle.is_null());
+        let mut edited = loaded.clone();
+        edited.value = "PN-202".into();
+        let mut edited = document::EntityType::AttributeEntity(edited);
+        bind_canvas_entity_references(&document, &mut edited).unwrap();
+        assert!(matches!(&edited,
+            document::EntityType::AttributeEntity(value) if value.attdef_handle == definition_handle));
+        validate_entity_mutation(
+            &document::EntityType::AttributeEntity(loaded.clone()),
+            &edited,
+        )
+        .unwrap();
+
+        // A link that is already set stays read-only.
+        let mut bound = loaded;
+        bound.attdef_handle = definition_handle;
+        let mut moved = bound.clone();
+        moved.attdef_handle = insert_handle;
+        assert!(validate_entity_mutation(
+            &document::EntityType::AttributeEntity(bound),
+            &document::EntityType::AttributeEntity(moved)
+        )
+        .unwrap_err()
+        .contains("read-only"));
     }
     #[cfg(feature = "host")]
     #[test]

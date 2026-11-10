@@ -4601,15 +4601,7 @@ impl OpenCADStudio {
                     previews.push(guide);
                 }
             }
-            // A drawing command previews the new object in the colour it will
-            // get: the current colour, or the current layer's when ByLayer.
-            if let Some(color) = self.creation_preview_color(i) {
-                for wire in &mut previews {
-                    if wire.color == crate::scene::WireModel::CYAN {
-                        wire.color = color;
-                    }
-                }
-            }
+            self.tint_creation_preview(i, &mut previews);
             let preview_hidden = modifier_hidden.unwrap_or_else(|| {
                 self.tabs[i]
                     .active_cmd
@@ -4714,6 +4706,23 @@ impl OpenCADStudio {
             rgba,
             tab.scene.bg_color,
         ))
+    }
+
+    /// A drawing command previews the new object in the colour it will get:
+    /// the current colour, or the current layer's when ByLayer. Both passes
+    /// that rebuild a command preview call this: the full pointer-move pass
+    /// and `refresh_active_cmd_preview`, which the snap dwell tick runs on
+    /// the frames between full passes while the pointer moves. Without it on
+    /// either one, the preview would switch colour from frame to frame.
+    pub(super) fn tint_creation_preview(&self, i: usize, previews: &mut [crate::scene::WireModel]) {
+        let Some(color) = self.creation_preview_color(i) else {
+            return;
+        };
+        for wire in previews {
+            if wire.color == crate::scene::WireModel::CYAN {
+                wire.color = color;
+            }
+        }
     }
 
     /// The navigation style's action for `held` and the modifiers now down.

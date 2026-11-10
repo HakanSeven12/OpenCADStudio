@@ -911,6 +911,10 @@ fn resolved_content_geometry(
     cell: &document::entities::table::TableCell,
     content_index: usize,
 ) -> Option<document::entities::table::CellContentGeometry> {
+    // The stored placement is the file's layout of the table as saved; an
+    // edit drops the table's picture block, and from then on alignment,
+    // margins and text place the content (as for a table drawn here).
+    table.block_record_handle?;
     if let Some(geometry) = cell
         .contents
         .get(content_index)
@@ -4699,6 +4703,49 @@ mod tests {
         assert_eq!(
             (text(&left, 3, 2), text(&left, 3, 1), text(&left, 3, 0)),
             ("A".into(), "A".into(), String::new())
+        );
+    }
+
+    /// A file keeps where each cell's text sat when it was saved. That
+    /// placement holds only while the table is as the file left it: once
+    /// the table is edited (its picture block dropped), the cell's
+    /// alignment places the content again.
+    #[test]
+    fn a_files_stored_cell_placement_is_dropped_once_the_table_is_edited() {
+        use document::types::{Handle, Vector3};
+        let document = document::Document::new();
+        let mut table = Table::new(Vector3::ZERO, 2, 2);
+        table.set_cell_text(1, 1, "x");
+        let at = Vector3::new(1.0, -0.5, 0.0);
+        table.cell_mut(1, 1).unwrap().contents[0].geometry =
+            Some(document::entities::table::CellContentGeometry {
+                distance_to_top_left: at,
+                distance_to_center: at,
+                width: 0.2,
+                height: 0.2,
+                outer_width: 0.2,
+                outer_height: 0.2,
+                flags: 0,
+            });
+        table.block_record_handle = Some(Handle::new(0x2A));
+        let placed = |t: &Table| {
+            let cell = t.cell(1, 1).unwrap();
+            resolved_content_geometry(&document, t, 1, 1, cell, 0).is_some()
+        };
+        assert!(placed(&table), "as opened: the file's placement");
+        let style = table
+            .cell_mut(1, 1)
+            .unwrap()
+            .style
+            .get_or_insert_with(Default::default);
+        style.alignment = 1;
+        style
+            .property_flags
+            .insert(document::entities::table::CellStylePropertyFlags::ALIGNMENT);
+        table.block_record_handle = None;
+        assert!(
+            !placed(&table),
+            "after an edit the cell's alignment places the text"
         );
     }
 

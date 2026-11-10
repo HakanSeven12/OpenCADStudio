@@ -14,7 +14,7 @@ const DRAWING_TEXTS: usize = 10_000;
 const UNIQUE_TEXTS: usize = 3_758;
 type Geometry = (Vec<Vec<[f32; 2]>>, Vec<[f32; 2]>);
 
-struct FixtureText {
+pub(crate) struct FixtureText {
     text: String,
     origin: [f32; 2],
     rotation: f32,
@@ -22,7 +22,7 @@ struct FixtureText {
 
 // Reproduce the source drawing's pattern and repetition histograms without
 // storing its text or depending on the drawing at benchmark time.
-fn fixture() -> Vec<FixtureText> {
+pub(crate) fn fixture() -> Vec<FixtureText> {
     let mut values = Vec::with_capacity(DRAWING_TEXTS);
     for (value, count) in [("Ab", 2017), ("c1", 1981), ("XYZd", 1980)] {
         values.extend(std::iter::repeat_n(value.to_string(), count));
@@ -160,7 +160,7 @@ fn tessellate(font: &str, texts: &[String]) -> Vec<Geometry> {
         .collect()
 }
 
-fn tessellate_drawing(font: &str, texts: &[FixtureText]) -> Vec<Geometry> {
+pub(crate) fn tessellate_drawing(font: &str, texts: &[FixtureText]) -> Vec<Geometry> {
     texts
         .iter()
         .map(|item| {
@@ -210,7 +210,7 @@ fn shape_digest(runs: &[Arc<ttf_glyph::ShapedRun>]) -> String {
     }
     format!("{:x}", h.finalize())
 }
-fn geometry_digest(geometry: &[Geometry]) -> String {
+pub(crate) fn geometry_digest(geometry: &[Geometry]) -> String {
     let mut h = Sha256::new();
     for (strokes, fill) in geometry {
         add_usize(&mut h, strokes.len());
@@ -221,7 +221,7 @@ fn geometry_digest(geometry: &[Geometry]) -> String {
     }
     format!("{:x}", h.finalize())
 }
-fn fixture_digest(texts: &[FixtureText]) -> String {
+pub(crate) fn fixture_digest(texts: &[FixtureText]) -> String {
     let mut h = Sha256::new();
     for text in texts {
         add_usize(&mut h, text.text.len());

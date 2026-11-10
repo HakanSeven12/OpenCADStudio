@@ -153,6 +153,23 @@ model a fresh process or cold operating-system caches. This benchmark does not
 measure memory, GPU rendering, or drawing-open latency; use the drawing-open
 allocation probe and GUI startup benchmark for those metrics.
 
+For Rust allocation counts and live/peak requested bytes on the same full
+synthetic workload, run a fresh process with:
+
+```sh
+cargo bench --locked --bench text_shaping_memory -- --font Arial
+cargo bench --locked --bench text_shaping_memory -- --self-test
+```
+
+The allocation probe uses a counting global allocator, initializes fonts and
+the fixture before its baseline, clears text caches, and records memory while
+geometry is alive, after dropping it, and after clearing text caches. It emits
+the same fixture, font, and geometry hashes as the timing benchmark. It counts
+Rust System allocator requested bytes, excluding allocator overhead, foreign
+allocations, GUI, GPU and child processes; allocation byte totals exclude
+reallocation sizes. Counting allocations adds overhead, so the probe is kept
+separate from the timing benchmark.
+
 ---
 
 ## Benchmark Suite Catalog (31 Metrics)

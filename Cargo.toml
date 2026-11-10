@@ -372,6 +372,10 @@ harness = false
 name = "text_shaping_geometry"
 harness = false
 
+[[bench]]
+name = "text_shaping_memory"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

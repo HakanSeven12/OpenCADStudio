@@ -1815,6 +1815,7 @@ impl OpenCADStudio {
             self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none();
         let started = Instant::now();
         let task = self.on_viewport_move_inner(p);
+        let index = self.command_interaction_index_task();
         let cost = started.elapsed();
         // Give the next pass as long to arrive as this one took to answer.
         // The moves that arrive meanwhile cost nothing, so the queue drains
@@ -1837,7 +1838,34 @@ impl OpenCADStudio {
             self.tabs[self.active_tab].snap_result = None;
             self.snap_dwell = None;
         }
-        task
+        Task::batch([task, index])
+    }
+
+    /// The hover dwell starts the interaction index build, but it does not
+    /// run while a command is active. A command's snaps and picks query the
+    /// same index, and without it each one scans every wire: after an edit
+    /// replaced the wire set (a LAYOFF pick on a large drawing), every move
+    /// and click of the command took a second or more. A move during a
+    /// command asks for the index here instead.
+    fn command_interaction_index_task(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        if i >= self.tabs.len() || self.tabs[i].active_cmd.is_none() {
+            return Task::none();
+        }
+        let canvas_sz = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: canvas_sz.0,
+            height: canvas_sz.1,
+        };
+        let edit_cam = self.tabs[i]
+            .scene
+            .viewport_edit_frame(canvas_sz)
+            .map(|(cam, _)| cam);
+        let (_, _, wires) = self.pick_view(i, &edit_cam, bounds);
+        self.prepare_interaction_index_task(i, wires, bounds.height)
+            .unwrap_or_else(Task::none)
     }
 
     fn on_viewport_move_inner(&mut self, p: Point) -> Task<Message> {

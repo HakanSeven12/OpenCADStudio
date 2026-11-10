@@ -3007,6 +3007,107 @@ mod area_query_tests {
         );
     }
 
+    /// A wire that only snaps and has no finite box, as an insert's marker.
+    fn marker(name: &str) -> WireModel {
+        use crate::scene::model::wire_model::SnapHint;
+        let mut marker = WireModel::solid(name.to_string(), Vec::new(), [1.0; 4], false);
+        marker.snap_pts = vec![(DVec3::ZERO, SnapHint::Insertion)];
+        marker
+    }
+
+    /// The two blank slots the resident set leaves: a hidden entity's, with
+    /// an empty box and no name, and the rest of a run that got shorter,
+    /// under its entity's name with the default unbounded box.
+    fn blank_slots() -> [WireModel; 2] {
+        let mut hidden = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
+        hidden.aabb = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let spare = WireModel::solid("5".to_string(), Vec::new(), [0.0; 4], false);
+        [hidden, spare]
+    }
+
+    fn names(candidates: &InteractionCandidates) -> Vec<String> {
+        let mut names: Vec<String> = candidates.iter().map(|w| w.name.clone()).collect();
+        names.sort();
+        names
+    }
+
+    /// The resident set leaves blank slots behind: where an entity is hidden
+    /// (an empty box) and where a run got shorter (the default unbounded
+    /// box). They hold nothing to pick or snap, so no query lists them. A
+    /// wire with no finite box that does hold something still reaches every
+    /// query.
+    #[test]
+    fn blank_slots_are_not_candidates() {
+        let mut wires = sample();
+        wires.extend(blank_slots());
+        wires.push(marker("21"));
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+
+        let away = index.query_xy(Arc::clone(&arc), [50.0, 50.0, 51.0, 51.0]);
+        assert_eq!(
+            names(&away),
+            ["21"],
+            "away from every object only the marker is listed, not the blank slots"
+        );
+        let on_five = index.query_xy(Arc::clone(&arc), [-0.45, -0.45, -0.3, 0.1]);
+        assert_eq!(names(&on_five), ["21", "5"]);
+    }
+
+    /// With no index yet, the fallback copies the wires the caller is about
+    /// to hit-test. A plain wire whose box misses the query is left out, as
+    /// a block copy's leaf is: it could not be hit there. So is a blank
+    /// slot. A far wire with a snap point in the query stays.
+    #[test]
+    fn a_local_expansion_leaves_out_plain_wires_away_from_the_aperture() {
+        let proto = vec![wire(
+            "leaf",
+            vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0, 1.0],
+        )];
+        let mut stub = crate::scene::model::instance_model::stub_wire(
+            Arc::new(proto),
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        stub.name = "30".to_string();
+        let far = wire(
+            "40",
+            vec![[300.0, 300.0, 0.0], [301.0, 301.0, 0.0]],
+            [300.0, 300.0, 301.0, 301.0],
+        );
+        let mut wires = sample();
+        // An arc 300 units away whose centre, a snap point, is at the origin.
+        let mut arc_far = wire(
+            "50",
+            vec![[300.0, -1.0, 0.0], [300.0, 1.0, 0.0]],
+            [300.0, -1.0, 300.0, 1.0],
+        );
+        arc_far.snap_pts = vec![(
+            DVec3::ZERO,
+            crate::scene::model::wire_model::SnapHint::Center,
+        )];
+        wires.extend([stub, far, arc_far, marker("21")]);
+        wires.extend(blank_slots());
+        let arc = Arc::new(wires);
+
+        let aperture = [-5.0, -5.0, 5.0, 5.0];
+        let local = InteractionCandidates::all_near(Arc::clone(&arc), aperture).materialize_stubs();
+        assert_eq!(
+            names(&local),
+            ["13", "21", "30", "5", "50", "9"],
+            "the wires near the aperture, the block copy (30), the marker and \
+             the arc centred there; not the plain wire 300 units away, nor \
+             the blank slots"
+        );
+    }
+
     /// An index-restricted result depends on the query, not just the wires, so
     /// it must never be served from the whole-set cache.
     #[test]

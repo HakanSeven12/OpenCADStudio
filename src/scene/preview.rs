@@ -799,7 +799,12 @@ impl Scene {
             let broken = self
                 .dimension_association_status(handle)
                 .iter()
-                .any(|(_, status)| !matches!(status, crate::scene::dimension_assoc::ReferenceStatus::Resolved));
+                .any(|(_, status)| {
+                    !matches!(
+                        status,
+                        crate::scene::dimension_assoc::ReferenceStatus::Resolved
+                    )
+                });
             if !broken {
                 continue;
             }
@@ -819,7 +824,12 @@ impl Scene {
                     glam::Vec3::new(x0 as f32, y1 as f32, z),
                 ]
             };
-            let badge = rect(left, centre - 5.5 * pixel, left + 17.0 * pixel, centre + 5.5 * pixel);
+            let badge = rect(
+                left,
+                centre - 5.5 * pixel,
+                left + 17.0 * pixel,
+                centre + 5.5 * pixel,
+            );
             let bar = rect(
                 left + 7.0 * pixel,
                 centre - 2.5 * pixel,

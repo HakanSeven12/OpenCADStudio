@@ -4,7 +4,9 @@ use iced::Task;
 use std::path::PathBuf;
 
 mod anno_scaling;
-pub(crate) use anno_scaling::{anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display};
+pub(crate) use anno_scaling::{
+    anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display,
+};
 mod attdef;
 mod attman;
 mod block_cmdline;

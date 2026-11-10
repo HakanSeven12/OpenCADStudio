@@ -6989,7 +6989,10 @@ impl Scene {
             })
             .unwrap_or_default();
         if listed.is_empty() {
-            self.scale_list().into_iter().map(|(name, _, _)| name).collect()
+            self.scale_list()
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect()
         } else {
             listed
         }

@@ -1089,6 +1089,7 @@ impl OpenCADStudio {
                     | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
                     | "SELECTIONCYCLING"
+                    | "VPCONTROL"
                     | "OSNAPZ"
                     | "SELECTSIMILARMODE"
                     | "UCSDETECT"
@@ -1900,6 +1901,30 @@ impl OpenCADStudio {
                                 self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
+                                self.command_line.push_output(&prompt);
+                                self.pending_setvar = Some(name.clone());
+                            }
+                            None => {
+                                self.command_line.push_output(&prompt);
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "VPCONTROL" {
+                        let current = i16::from(self.show_viewport_controls);
+                        let prompt = crate::ui::command_line::value_prompt("VPCONTROL", &current);
+                        match value
+                            .as_deref()
+                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
+                        {
+                            Some(Some(mode)) => {
+                                self.show_viewport_controls = mode == 1;
+                                self.persist_settings_if_changed();
+                            }
+                            Some(None) => {
+                                self.command_line
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&prompt);
                                 self.pending_setvar = Some(name.clone());
                             }

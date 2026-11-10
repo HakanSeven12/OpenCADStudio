@@ -1303,6 +1303,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
         "SELECTIONCYCLING",
+        "VPCONTROL",
         "OSNAPZ",
         "SELECTSIMILARMODE",
         "UCSDETECT",

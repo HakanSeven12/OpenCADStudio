@@ -2395,7 +2395,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // further. Outside the chip the Fill container is transparent so
             // viewport drawing / selection is unaffected. In a paper layout
             // the active viewport gets its own picker (below) instead.
-            if !is_paper && !tab.is_start {
+            if !is_paper && !tab.is_start && self.show_viewport_controls {
                 let (vw, vh) = tab.scene.selection.borrow().view.vp_size;
                 let rect = tab.scene.active_model_tile_bounds(vw, vh);
                 // Unified control chip: split buttons + render-mode picker +
@@ -2491,38 +2491,40 @@ bg={bg_ms:.1}ms n={view_count}"
                 let border_layer = iced::widget::pin(border_frame).position(iced::Point::new(x, y));
                 viewport_stack = viewport_stack.push(border_layer);
 
-                let vp_mode = tab
-                    .scene
-                    .active_viewport_render_mode()
-                    .unwrap_or(document::entities::ViewportRenderMode::Wireframe2D);
-                // Adaptive (same as model): the picker measures its real width into
-                // `render_bar_w` and swaps to an empty spacer only when the viewport
-                // can't hold it; the ViewCube reads that width to decide overlap.
-                let bar = viewport_controls(
-                    vp_mode,
-                    self.show_grid,
-                    self.snapper.grid_snap(),
-                    false,
-                    0,
-                    self.render_mode_menu_open,
-                    self.render_mode_preview,
-                    named_visual_style(&tab.scene, vp_mode),
-                    (false, 0),
-                );
-                let adaptive: Element<'_, Message> = DensitySwap::new(vec![
-                    iced::widget::opaque(bar),
-                    Space::new()
-                        .width(iced::Length::Fixed(0.0))
-                        .height(iced::Length::Fixed(0.0))
-                        .into(),
-                ])
-                .report_width0(self.render_bar_w.clone())
-                .into();
-                let picker_layer = iced::widget::pin(
-                    container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
-                )
-                .position(iced::Point::new(x + 4.0, y + 4.0));
-                viewport_stack = viewport_stack.push(picker_layer);
+                if self.show_viewport_controls {
+                    let vp_mode = tab
+                        .scene
+                        .active_viewport_render_mode()
+                        .unwrap_or(document::entities::ViewportRenderMode::Wireframe2D);
+                    // Adaptive (same as model): the picker measures its real width into
+                    // `render_bar_w` and swaps to an empty spacer only when the viewport
+                    // can't hold it; the ViewCube reads that width to decide overlap.
+                    let bar = viewport_controls(
+                        vp_mode,
+                        self.show_grid,
+                        self.snapper.grid_snap(),
+                        false,
+                        0,
+                        self.render_mode_menu_open,
+                        self.render_mode_preview,
+                        named_visual_style(&tab.scene, vp_mode),
+                        (false, 0),
+                    );
+                    let adaptive: Element<'_, Message> = DensitySwap::new(vec![
+                        iced::widget::opaque(bar),
+                        Space::new()
+                            .width(iced::Length::Fixed(0.0))
+                            .height(iced::Length::Fixed(0.0))
+                            .into(),
+                    ])
+                    .report_width0(self.render_bar_w.clone())
+                    .into();
+                    let picker_layer = iced::widget::pin(
+                        container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
+                    )
+                    .position(iced::Point::new(x + 4.0, y + 4.0));
+                    viewport_stack = viewport_stack.push(picker_layer);
+                }
 
                 // Hide the ViewCube first — before the render bar — when they collide.
                 if viewcube_visible {
@@ -3402,6 +3404,8 @@ bg={bg_ms:.1}ms n={view_count}"
                                 .map(crate::entities::object_data::geo_system_label),
                         },
                         crate::ui::statusbar::StatusBarModes {
+                            grid: self.show_grid,
+                            grid_snap: self.snapper.grid_snap(),
                             ortho_mode: self.ortho_mode,
                             polar_mode: self.polar_mode,
                             polar_increment_deg: self.polar_increment_deg,

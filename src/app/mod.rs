@@ -1512,6 +1512,8 @@ pub(super) struct OpenCADStudio {
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
+    /// Show the viewport controls in the drawing's corner (VPCONTROL).
+    show_viewport_controls: bool,
     /// Anchor the UCS icon to the projected UCS origin when it is on-screen,
     /// falling back to the corner otherwise (UCSICON ORigin / NOorigin).
     ucs_icon_at_origin: bool,
@@ -6564,6 +6566,7 @@ impl OpenCADStudio {
             transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
+            show_viewport_controls: true,
             ucs_icon_at_origin: true,
             show_viewcube: true,
             render_bar_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),

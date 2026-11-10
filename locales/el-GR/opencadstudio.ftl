@@ -3548,6 +3548,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Επιλέξτε πρώτη γραμμή  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Επιλέξτε δεύτερη γραμμή  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  Επιλέξτε το γειτονικό τμήμα της πολυγραμμής  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  Δώστε πλήθος στοιχείων διάταξης:
     .copy-specify-second-point-for-n-item-array-bas = COPY  Ορίστε δεύτερο σημείο για διάταξη __ocs_arg_n__ στοιχείων  [βάση __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Συνέχεια

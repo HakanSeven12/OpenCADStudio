@@ -3555,6 +3555,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Chọn đường thẳng thứ nhất  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Chọn đường thẳng thứ hai  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER Chọn đoạn polyline liền kề [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  Nhập số phần tử của mảng:
     .copy-specify-second-point-for-n-item-array-bas = COPY  Chỉ định điểm thứ hai cho mảng __ocs_arg_n__ phần tử  [gốc __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Tính liên tục

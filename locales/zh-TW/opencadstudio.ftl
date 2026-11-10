@@ -3547,6 +3547,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  選擇第一條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  選擇第二條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  選擇相鄰的多段線線段  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  輸入要陣列的項目數：
     .copy-specify-second-point-for-n-item-array-bas = COPY  指定 __ocs_arg_n__ 項陣列的第二點  [基點 __ocs_arg_bx__,__ocs_arg_by__]：
     .continuity = 連續性

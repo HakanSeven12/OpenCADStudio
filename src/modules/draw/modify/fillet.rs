@@ -554,6 +554,79 @@ fn segment_parameter(point: [f64; 2], start: [f64; 2], end: [f64; 2]) -> Option<
 ///
 /// Initial scope deliberately handles straight-segment corners only. Corners
 /// adjacent to an existing bulge arc are preserved unchanged.
+/// Chamfer every corner of an LwPolyline where two straight segments meet:
+/// `d1` back along the segment into the corner, `d2` along the one out of it.
+/// A corner whose segments are too short for the distances is left as it is,
+/// and so is the whole polyline when two chamfers would overlap on a segment.
+fn chamfer_entire_lwpolyline(poly: &LwPolyline, d1: f64, d2: f64) -> Option<LwPolyline> {
+    let n = poly.vertices.len();
+    if n < 3 || (d1 <= 1.0e-9 && d2 <= 1.0e-9) {
+        return None;
+    }
+    let at = |i: usize| [poly.vertices[i].location.x, poly.vertices[i].location.y];
+    let along = |from: [f64; 2], to: [f64; 2], d: f64| {
+        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+        let len = dx.hypot(dy);
+        (d <= len + 1.0e-9 && len > 1.0e-12)
+            .then(|| [from[0] + dx / len * d, from[1] + dy / len * d])
+    };
+    // (point on the incoming segment, point on the outgoing one) per corner.
+    let mut corners: Vec<Option<([f64; 2], [f64; 2])>> = vec![None; n];
+    let (first, end) = if poly.is_closed { (0, n) } else { (1, n - 1) };
+    for i in first..end {
+        let prev = if i == 0 { n - 1 } else { i - 1 };
+        let next = (i + 1) % n;
+        if poly.vertices[prev].bulge.abs() >= 1.0e-9 || poly.vertices[i].bulge.abs() >= 1.0e-9 {
+            continue;
+        }
+        let (a, b, c) = (at(prev), at(i), at(next));
+        // Collinear segments have no corner to cut.
+        let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        if cross.abs() < 1.0e-12 {
+            continue;
+        }
+        if let (Some(cut_in), Some(cut_out)) = (along(b, a, d1), along(b, c, d2)) {
+            corners[i] = Some((cut_in, cut_out));
+        }
+    }
+    if corners.iter().all(Option::is_none) {
+        return None;
+    }
+    // Two chamfers on one segment must not cross each other.
+    let segments = if poly.is_closed { n } else { n - 1 };
+    for i in 0..segments {
+        let next = (i + 1) % n;
+        let (start, end) = (at(i), at(next));
+        let from = corners[i].map_or(start, |corner| corner.1);
+        let to = corners[next].map_or(end, |corner| corner.0);
+        match (
+            segment_parameter(from, start, end),
+            segment_parameter(to, start, end),
+        ) {
+            (Some(t0), Some(t1)) if t0 > t1 + 1.0e-9 => return None,
+            _ => {}
+        }
+    }
+    let mut result = poly.clone();
+    result.common.handle = Handle::NULL;
+    result.vertices.clear();
+    for (i, original) in poly.vertices.iter().enumerate() {
+        match corners[i] {
+            Some((cut_in, cut_out)) => {
+                for point in [cut_in, cut_out] {
+                    let mut vertex = *original;
+                    vertex.location.x = point[0];
+                    vertex.location.y = point[1];
+                    vertex.bulge = 0.0;
+                    result.vertices.push(vertex);
+                }
+            }
+            None => result.vertices.push(*original),
+        }
+    }
+    Some(result)
+}
+
 fn fillet_entire_lwpolyline(poly: &LwPolyline, radius: f64) -> Option<LwPolyline> {
     let n = poly.vertices.len();
 
@@ -1887,10 +1960,17 @@ impl FilletCommand {
                 .iter()
                 .any(|(handle, _)| entity.common().handle == *handle)
         });
+        // The stored copies get fresh handles; until `on_entity_replaced`
+        // hands them over the cached copies carry none, so a later pick of a
+        // replaced line finds it.
         self.all_entities.extend(
             replacements
                 .iter()
-                .flat_map(|(_, entities)| entities.iter().cloned()),
+                .flat_map(|(_, entities)| entities.iter().cloned())
+                .map(|mut entity| {
+                    entity.common_mut().handle = Handle::NULL;
+                    entity
+                }),
         );
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         self.step = FilletStep::First;
@@ -2563,6 +2643,8 @@ fn chamfer_lwpoly_corner(
 
 enum ChamferStep {
     First,
+    /// Polyline option: the next pick chamfers every corner of a polyline.
+    Polyline,
     WaitingForDist1,
     WaitingForDist2,
     Second {
@@ -2661,10 +2743,17 @@ impl ChamferCommand {
                 .iter()
                 .any(|(handle, _)| entity.common().handle == *handle)
         });
+        // The stored copies get fresh handles; until `on_entity_replaced`
+        // hands them over the cached copies carry none, so a later pick of a
+        // replaced line finds it.
         self.all_entities.extend(
             replacements
                 .iter()
-                .flat_map(|(_, entities)| entities.iter().cloned()),
+                .flat_map(|(_, entities)| entities.iter().cloned())
+                .map(|mut entity| {
+                    entity.common_mut().handle = Handle::NULL;
+                    entity
+                }),
         );
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
         self.step = ChamferStep::First;
@@ -2741,6 +2830,16 @@ impl CadCommand for ChamferCommand {
                 )
                 .into_owned()
             }
+            ChamferStep::Polyline => {
+                let d1 = format!("{:.4}", self.dist1);
+                let d2 = format!("{:.4}", self.dist2);
+                t!(
+                    "CHAMFER  Select 2D polyline  [D1=%{d1} D2=%{d2}]:",
+                    d1 = d1,
+                    d2 = d2
+                )
+                .into_owned()
+            }
         }
     }
 
@@ -2753,6 +2852,7 @@ impl CadCommand for ChamferCommand {
                 if self.made > 0 {
                     opts.push(CmdOption::new("Undo", "U"));
                 }
+                opts.push(CmdOption::new("Polyline", "P"));
                 opts.push(CmdOption::new("Distance", "D"));
                 if !self.multiple {
                     opts.push(CmdOption::new("Multiple", "M"));
@@ -2764,7 +2864,9 @@ impl CadCommand for ChamferCommand {
                 });
                 opts
             }
-            ChamferStep::Second { .. } | ChamferStep::SecondPoly { .. } => {
+            ChamferStep::Second { .. }
+            | ChamferStep::SecondPoly { .. }
+            | ChamferStep::Polyline => {
                 vec![
                     CmdOption::new("Distance", "D"),
                     if self.trim {
@@ -2832,7 +2934,10 @@ impl CadCommand for ChamferCommand {
                 // Invalid — stay and re-prompt
                 Some(CmdResult::NeedPoint)
             }
-            ChamferStep::First | ChamferStep::Second { .. } | ChamferStep::SecondPoly { .. } => {
+            ChamferStep::First
+            | ChamferStep::Second { .. }
+            | ChamferStep::SecondPoly { .. }
+            | ChamferStep::Polyline => {
                 let t = text.trim();
                 let upper = t.to_uppercase();
                 if matches!(upper.as_str(), "N" | "NOTRIM" | "NO TRIM" | "TRIM=FALSE") {
@@ -2847,6 +2952,10 @@ impl CadCommand for ChamferCommand {
                 }
                 if matches!(self.step, ChamferStep::First) {
                     match upper.as_str() {
+                        "P" | "POLYLINE" => {
+                            self.step = ChamferStep::Polyline;
+                            return Some(CmdResult::NeedPoint);
+                        }
                         "M" | "MULTIPLE" => {
                             self.multiple = true;
                             return Some(CmdResult::NeedPoint);
@@ -2910,6 +3019,21 @@ impl CadCommand for ChamferCommand {
         true
     }
 
+    fn on_entity_replaced(&mut self, _old: Handle, new_handles: &[Handle]) {
+        let mut handles = new_handles.iter().copied();
+        for entity in self
+            .all_entities
+            .iter_mut()
+            .filter(|entity| entity.common().handle.is_null())
+        {
+            let Some(handle) = handles.next() else {
+                break;
+            };
+            entity.common_mut().handle = handle;
+        }
+        self.entity_index = ModifyEntityIndex::build(&self.all_entities);
+    }
+
     fn on_entities_committed(&mut self, entities: &[EntityType]) {
         let mut handles = entities.iter().map(|entity| entity.common().handle);
         for entity in self
@@ -2940,6 +3064,18 @@ impl CadCommand for ChamferCommand {
 
         match &self.step {
             ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => CmdResult::NeedPoint,
+            ChamferStep::Polyline => {
+                let result = match self.entity_index.get(&self.all_entities, handle) {
+                    Some(EntityType::LwPolyline(poly)) => {
+                        chamfer_entire_lwpolyline(poly, self.dist1, self.dist2)
+                    }
+                    _ => None,
+                };
+                match result {
+                    Some(poly) => self.commit(vec![(handle, vec![EntityType::LwPolyline(poly)])]),
+                    None => CmdResult::NeedPoint,
+                }
+            }
             ChamferStep::First => {
                 match self.entity_index.get(&self.all_entities, handle) {
                     Some(e @ (EntityType::Line(_) | EntityType::XLine(_) | EntityType::Ray(_))) => {
@@ -3058,6 +3194,21 @@ impl CadCommand for ChamferCommand {
 
         match &self.step {
             ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => vec![],
+            ChamferStep::Polyline => match self.entity_index.get(&self.all_entities, handle) {
+                Some(EntityType::LwPolyline(poly)) => {
+                    chamfer_entire_lwpolyline(poly, self.dist1, self.dist2)
+                        .map(|poly| {
+                            vec![WireModel::solid(
+                                "chamfer_polyline_preview".into(),
+                                lwpoly_pts(&poly),
+                                WireModel::CYAN,
+                                false,
+                            )]
+                        })
+                        .unwrap_or_default()
+                }
+                _ => vec![],
+            },
             ChamferStep::First => {
                 let pts = self
                     .entity_index

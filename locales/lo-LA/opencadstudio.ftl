@@ -3549,6 +3549,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  ເລືອກເສັ້ນທຳອິດ  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  ເລືອກເສັ້ນທີສອງ  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  ເລືອກສ່ວນໂພລີລາຍທີ່ຕິດກັນ  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  ປ້ອນຈຳນວນຊິ້ນສ່ວນທີ່ຈະຈັດລຽງ:
     .copy-specify-second-point-for-n-item-array-bas = COPY  ກຳນົດຈຸດທີສອງສຳລັບການຈັດລຽງ __ocs_arg_n__ ຊິ້ນສ່ວນ  [ຈຸດຫຼັກ __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = ຄວາມຕໍ່ເນື່ອງ

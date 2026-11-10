@@ -3549,6 +3549,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Select first line  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Select second line  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  Select the adjacent polyline segment  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  Enter number of items to array:
     .copy-specify-second-point-for-n-item-array-bas = COPY  Specify second point for __ocs_arg_n__-item array  [base __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Continuity

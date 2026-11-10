@@ -3530,6 +3530,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Birinci çizgiyi seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  İkinci çizgiyi seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  Bitişik çoklu çizgi parçasını seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  2B çoklu çizgiyi seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  Dizideki öğe sayısını girin:
     .copy-specify-second-point-for-n-item-array-bas = COPY  __ocs_arg_n__ öğeli dizi için ikinci noktayı belirtin [temel __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Süreklilik

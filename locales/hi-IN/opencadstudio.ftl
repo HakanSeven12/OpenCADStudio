@@ -3536,6 +3536,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER पहली लाइन चुनें [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER दूसरी लाइन चुनें [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER पास वाला पॉलीलाइन खंड चुनें [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY आइटमों की संख्या सरणी में दर्ज करें:
     .copy-specify-second-point-for-n-item-array-bas = COPY __ocs_arg_n__-item सरणी के लिए दूसरे बिंदु को निर्दिष्ट करें [base __ocs_arg_bx__, __ocs_arg_by__]:
     .continuity = निरंतरता

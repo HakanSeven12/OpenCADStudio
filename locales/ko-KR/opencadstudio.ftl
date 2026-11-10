@@ -3547,6 +3547,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER 첫 번째 줄 선택 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER 두 번째 줄 선택 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER 인접한 폴리선 세그먼트 선택 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array =COPY Enter 배열할 항목 수:
     .copy-specify-second-point-for-n-item-array-bas = COPY __ocs_arg_n__ 항목 배열에 대한 두 번째 점 지정 [기본 __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = 연속성

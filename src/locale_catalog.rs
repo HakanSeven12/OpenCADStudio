@@ -1570,6 +1570,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "CHAMFER  Select first line  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-first-line-d1-d1-d2-d2")),
         "CHAMFER  Select second line  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-second-line-d1-d1-d2-d2")),
         "CHAMFER  Select the adjacent polyline segment  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-the-adjacent-polyline-segment-d")),
+        "CHAMFER  Select 2D polyline  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-2d-polyline-d")),
         "CHPROP  new colour (name / 1-255 / ByLayer):" => Some(("styles", "chprop-new-colour-name-1-255-bylayer")),
         "CHPROP  new layer name:" => Some(("styles", "chprop-new-layer-name")),
         "CHPROP  new linetype name:" => Some(("styles", "chprop-new-linetype-name")),

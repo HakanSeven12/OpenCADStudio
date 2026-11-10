@@ -3548,6 +3548,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER Selecteer eerste regel [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER Selecteer tweede regel [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER Selecteer het aangrenzende polylijnsegment [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY Aantal items in de array invoeren:
     .copy-specify-second-point-for-n-item-array-bas = COPY Geef tweede punt voor __ocs_arg_n__-itemarray [base __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Continuïteit

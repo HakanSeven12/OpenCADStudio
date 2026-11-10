@@ -3547,6 +3547,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Избери първа линия  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Избери втора линия  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  Избери съседния сегмент от полилинията  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  Въведи брой елементи за масив:
     .copy-specify-second-point-for-n-item-array-bas = COPY  Посочи втора точка за масив от __ocs_arg_n__ елемента  [база __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Непрекъснатост

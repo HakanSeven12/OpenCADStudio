@@ -3548,6 +3548,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER Erste Zeile auswählen [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER Wählen Sie die zweite Zeile [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER Wählen Sie das benachbarte Polyliniensegment [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY Geben Sie die Anzahl der Elemente zum Array ein:
     .copy-specify-second-point-for-n-item-array-bas = COPY Geben Sie den zweiten Punkt für das __ocs_arg_n__-Item-Array an [Basis __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = Kontinuität

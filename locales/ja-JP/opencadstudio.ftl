@@ -3538,6 +3538,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  1 本目の線を選択 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  2 本目の線を選択 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  隣接するポリライン区間を選択 [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  配列複写する項目数を入力:
     .copy-specify-second-point-for-n-item-array-bas = COPY  __ocs_arg_n__ 項目配列の 2 点目を指定 [基点 __ocs_arg_bx__,__ocs_arg_by__]:
     .continuity = 連続性

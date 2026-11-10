@@ -1478,7 +1478,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "LAYWALK",
         "LI",
         "LINETYPE",
-        "DDLTYPE",
         "LIST",
         "LTSCALE",
         "LWDISPLAY",

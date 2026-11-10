@@ -3,8 +3,8 @@
 //!
 //! A linetype is written whole or not at all: anything the format cannot
 //! represent is reported as a [`SkipReason`] instead of being written wrong.
-//! Limits only AutoCAD enforces are reported as a [`LinWarning`], and the
-//! definition is kept intact.
+//! Limits that only some other programs enforce are reported as a
+//! [`LinWarning`], and the definition is kept intact.
 
 use super::{bundled_shape_name, find_shape_file, parse};
 use document::tables::linetype::{LineTypeComplexContent, LineTypeComplexData};
@@ -48,7 +48,7 @@ impl SkipReason {
     }
 }
 
-/// A limit AutoCAD applies to `.lin` files that this definition goes past.
+/// A limit other programs apply to `.lin` files that this definition goes past.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinWarning {
     LongDescription,
@@ -301,8 +301,12 @@ pub fn save_definition(
     if let Some((_, reason)) = output.skipped.first() {
         return Err(SaveError::Skipped(*reason));
     }
+    // The rest of the file is written back as it is read: a file that is not
+    // UTF-8 would come back with its other definitions mangled.
     let existing = match std::fs::read(path) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Ok(bytes) => String::from_utf8(bytes).map_err(|_| {
+            SaveError::Io(crate::t!("the library file is not UTF-8 text").into_owned())
+        })?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(SaveError::Io(error.to_string())),
     };

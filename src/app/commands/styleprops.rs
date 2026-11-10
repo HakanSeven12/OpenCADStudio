@@ -240,7 +240,7 @@ impl OpenCADStudio {
             }
 
             // ── LINETYPE management ───────────────────────────────────────
-            "LINETYPE" | "LT" | "DDLTYPE" => {
+            "LINETYPE" | "LT" => {
                 return Some(
                     self.on_linetype_message(crate::ui::style::linetype::LinetypeMsg::Open),
                 );

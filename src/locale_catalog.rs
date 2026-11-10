@@ -2547,7 +2547,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "-LINETYPE  Enter file to write:" => Some(("styles", "dash-linetype-enter-file-to-write")),
         "-LINETYPE: this option needs the desktop program." => Some(("styles", "dash-linetype-needs-the-desktop-program")),
         "Skipped {names}: {reason}." => Some(("styles", "skipped-names-reason")),
-        "Warning: AutoCAD may refuse {names}: {warning}." => Some(("styles", "warning-autocad-may-refuse-names")),
+        "Warning: other programs may refuse {names}: {warning}." => Some(("styles", "warning-other-programs-may-refuse-names")),
         "-LINETYPE: none of the named linetypes can be written." => Some(("styles", "dash-linetype-none-can-be-written")),
         "Wrote {count} linetype(s) to {shown}." => Some(("styles", "wrote-count-linetypes-to-shown")),
         "-LINETYPE: could not write {shown}: {reason}" => Some(("styles", "dash-linetype-could-not-write")),
@@ -2567,6 +2567,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "more than 12 pattern elements" => Some(("styles", "lin-warn-too-many-elements")),
         "pattern starts with a gap" => Some(("styles", "lin-warn-leading-gap")),
         "non-ASCII characters" => Some(("styles", "lin-warn-non-ascii")),
+        "-LINETYPE: {shown} already exists. Choose another file name." => Some(("styles", "dash-linetype-file-already-exists")),
+        "the library file is not UTF-8 text" => Some(("styles", "lin-library-not-utf8")),
         "LIST: no entities selected. Select entities first." => Some(("inquiry", "list-no-entities-selected-select-entities-firs")),
         "LOFT  Select first cross-section:" => Some(("insert", "loft-select-first-cross-section")),
 

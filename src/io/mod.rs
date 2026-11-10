@@ -2232,8 +2232,6 @@ mod save_failure_tests {
 /// picked from outside the plot styles folder is copied into it (unless a
 /// file of that name is already there), so the dialog lists it from now on
 /// and page setups naming it resolve after a restart.
-/// Pick a `.lin` linetype definition file and return its folder (where the
-/// shape files it names are looked for; none on the web) and text (#1588).
 /// Where a linetype export is written, or `None` when the user cancelled.
 pub async fn pick_linetype_export_path(suggested: String) -> Option<String> {
     let handle = crate::sys::file_dialog()
@@ -2245,6 +2243,8 @@ pub async fn pick_linetype_export_path(suggested: String) -> Option<String> {
     Some(crate::sys::handle_path(&handle).display().to_string())
 }
 
+/// Pick a `.lin` linetype definition file and return its folder (where the
+/// shape files it names are looked for; none on the web) and text (#1588).
 pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Load Linetypes").as_ref())

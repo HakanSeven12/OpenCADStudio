@@ -915,7 +915,7 @@ fn export_to_a_bad_place_writes_nothing() {
 #[test]
 fn a_long_description_is_kept_with_a_warning() {
     let mut app = fresh();
-    let long = "A description well past the forty-seven characters AutoCAD allows";
+    let long = "A description well past the forty-seven characters other programs allow";
     run(
         &mut app,
         &format!(r#"-LINETYPE CREATE WORDY "{long}" 1,-1"#),
@@ -927,7 +927,7 @@ fn a_long_description_is_kept_with_a_warning() {
         &format!(r#"-LINETYPE EXPORT WORDY "{}""#, path.display()),
     );
     assert!(
-        output(&app).contains("Warning: AutoCAD may refuse WORDY"),
+        output(&app).contains("Warning: other programs may refuse WORDY"),
         "{}",
         output(&app)
     );

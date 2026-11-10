@@ -6289,7 +6289,7 @@ styles =
     .dash-linetype-enter-file-to-write = -LINETYPE  Enter file to write:
     .dash-linetype-needs-the-desktop-program = -LINETYPE: this option needs the desktop program.
     .skipped-names-reason = Skipped __ocs_fmt_0__: __ocs_fmt_1__.
-    .warning-autocad-may-refuse-names = Warning: AutoCAD may refuse __ocs_fmt_0__: __ocs_fmt_1__.
+    .warning-other-programs-may-refuse-names = Warning: other programs may refuse __ocs_fmt_0__: __ocs_fmt_1__.
     .dash-linetype-none-can-be-written = -LINETYPE: none of the named linetypes can be written.
     .wrote-count-linetypes-to-shown = Wrote __ocs_fmt_0__ linetype(s) to __ocs_fmt_1__.
     .dash-linetype-could-not-write = -LINETYPE: could not write __ocs_fmt_0__: __ocs_fmt_1__
@@ -6309,6 +6309,8 @@ styles =
     .lin-warn-too-many-elements = more than 12 pattern elements
     .lin-warn-leading-gap = pattern starts with a gap
     .lin-warn-non-ascii = non-ASCII characters
+    .dash-linetype-file-already-exists = -LINETYPE: __ocs_fmt_0__ already exists. Choose another file name.
+    .lin-library-not-utf8 = the library file is not UTF-8 text
     .ltscale-new-global-line-type-scale = LTSCALE  нов глобален мащаб на тип линия:
     .ltscale-v-4 = LTSCALE = __ocs_fmt_0__
     .ltscale-set-to-v-4 = LTSCALE зададен на __ocs_fmt_0__

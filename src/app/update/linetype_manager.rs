@@ -164,6 +164,7 @@ impl OpenCADStudio {
                     .map(|length| PreviewElement {
                         length,
                         label: None,
+                        shape: false,
                     })
                     .collect();
             }
@@ -182,10 +183,12 @@ impl OpenCADStudio {
                                 LineTypeComplexContent::Text { text } => {
                                     (!text.trim().is_empty()).then(|| text.clone())
                                 }
-                                LineTypeComplexContent::Shape { .. } => {
-                                    (!data.style_handle.is_null()).then(|| "◆".to_owned())
-                                }
+                                LineTypeComplexContent::Shape { .. } => None,
                             }),
+                        shape: element.complex.as_ref().is_some_and(|data| {
+                            matches!(data.content, LineTypeComplexContent::Shape { .. })
+                                && !data.style_handle.is_null()
+                        }),
                     })
                     .collect()
             })
@@ -201,7 +204,7 @@ impl OpenCADStudio {
         // Already open, perhaps behind the main window: bring it up and keep
         // what it holds. Beginning again would lose the unapplied changes and
         // what Close restores.
-        if self.active_modal == Some(kind) || self.tool_open(kind) {
+        if self.dialog_open(kind) {
             let raised = self.raise_tool(kind);
             return self.raise_tool_window(kind).unwrap_or(raised);
         }
@@ -383,7 +386,7 @@ impl OpenCADStudio {
                     self.linetype_draft.rows.remove(index);
                 }
             }
-            LinetypeMsg::ElementMove(index, up) => {
+            LinetypeMsg::ElementMove(index, up) if self.linetype_editable() => {
                 let rows = &mut self.linetype_draft.rows;
                 let other = if up {
                     index.checked_sub(1)
@@ -394,6 +397,7 @@ impl OpenCADStudio {
                     rows.swap(index, other);
                 }
             }
+            LinetypeMsg::ElementMove(..) => {}
             LinetypeMsg::Scale(field, value) => {
                 self.linetype_keys_active = false;
                 match field {
@@ -426,7 +430,7 @@ impl OpenCADStudio {
                     } else {
                         self.linetype_selected.clone()
                     };
-                    self.dash_linetype_export(i, &names, &path);
+                    self.dash_linetype_export(i, &names, &path, true);
                     self.remember_library_status();
                 }
             }

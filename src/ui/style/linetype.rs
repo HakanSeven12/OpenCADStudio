@@ -174,12 +174,13 @@ impl LinetypeDraft {
     }
 }
 
-/// One element for the preview. `label` is the text or a shape marker it
-/// carries.
+/// One element for the preview. `label` is the text it carries; `shape`
+/// marks one that carries a shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewElement {
     pub length: f64,
     pub label: Option<String>,
+    pub shape: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,6 +188,7 @@ pub enum PreviewMark {
     Dash { from: f32, to: f32 },
     Dot { at: f32 },
     Label { at: f32, text: String },
+    Shape { at: f32 },
 }
 
 /// Where the pattern's marks fall across `width`, a few repeats wide so its
@@ -218,6 +220,9 @@ pub fn preview_marks(elements: &[PreviewElement], width: f32) -> Vec<PreviewMark
                     at,
                     text: label.clone(),
                 });
+            }
+            if element.shape {
+                marks.push(PreviewMark::Shape { at });
             }
             pen += element.length.abs();
         }
@@ -253,6 +258,18 @@ impl canvas::Program<Message> for PreviewCanvas {
                 ),
                 PreviewMark::Dot { at } => {
                     frame.fill(&canvas::Path::circle(Point::new(at + MARGIN, y), 1.6), ink)
+                }
+                // A drawn diamond: a glyph may be missing from the font.
+                PreviewMark::Shape { at } => {
+                    let (x, r) = (at + MARGIN, 4.0);
+                    let diamond = canvas::Path::new(|path| {
+                        path.move_to(Point::new(x, y - r));
+                        path.line_to(Point::new(x + r, y));
+                        path.line_to(Point::new(x, y + r));
+                        path.line_to(Point::new(x - r, y));
+                        path.close();
+                    });
+                    frame.fill(&diamond, ink);
                 }
                 PreviewMark::Label { at, text } => frame.fill_text(canvas::Text {
                     content: text,
@@ -535,6 +552,7 @@ mod tests {
             .map(|length| PreviewElement {
                 length: *length,
                 label: None,
+                shape: false,
             })
             .collect()
     }

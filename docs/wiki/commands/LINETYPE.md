@@ -61,7 +61,7 @@ A pattern is a comma-separated list of 2 to 12 lengths: a positive number is a d
 - **Delete** refuses a linetype that is current or still used by an object, layer, block, style or saved layer state. `PURGE` removes the ones nothing uses.
 - **Export** and **Save** skip a linetype a `.lin` file cannot hold, and say which and why. Text containing a double quote or a square bracket is one example.
 - Text in an exported linetype needs a text style of the same name in the drawing that loads it, or only the dashes load.
-- A definition past AutoCAD's own limits (a description over 47 characters, a pattern line over 80 characters, more than 12 elements) is written in full, with a warning.
+- A definition past the limits some other programs apply (a description over 47 characters, a pattern line over 80 characters, more than 12 elements) is written in full, with a warning.
 - A drawing keeps the linetypes it already holds when a library changes.
 - For a file path with spaces, use the one-line form with the path in double quotes. An answer at a prompt ends at the first space.
 - **Export**, **Save** and **Reload** are not available in the web version.

@@ -1112,7 +1112,7 @@ impl OpenCADStudio {
         match (option.as_str(), args.len()) {
             ("?" | "LIST", 1) => return self.dispatch_command("LINETYPE LIST"),
             ("L" | "LOAD", 1) => return self.dispatch_command("LINETYPE LOAD"),
-            ("E" | "EXPORT", 3) => self.dash_linetype_export(i, arg(1), arg(2)),
+            ("E" | "EXPORT", 3) => self.dash_linetype_export(i, arg(1), arg(2), false),
             ("SA" | "SAVE", 2) => self.dash_linetype_save(i, arg(1)),
             ("REL" | "RELOAD", 1) => self.dash_linetype_reload(),
             ("S" | "SET", 2) => {
@@ -1204,8 +1204,8 @@ impl OpenCADStudio {
         available
     }
 
-    /// One line per reason for what was left out, and for what AutoCAD may
-    /// refuse in what was written.
+    /// One line per reason for what was left out, and for what other programs
+    /// may refuse in what was written.
     fn report_lin_output(&mut self, output: &crate::io::linetypes::writer::LinOutput) {
         fn grouped<R: Copy + PartialEq>(items: &[(String, R)]) -> Vec<(R, String)> {
             let mut groups: Vec<(R, Vec<&str>)> = Vec::new();
@@ -1228,13 +1228,33 @@ impl OpenCADStudio {
         for (warning, names) in grouped(&output.warnings) {
             let warning = warning.label();
             self.command_line
-                .push_info(crate::tf!("Warning: AutoCAD may refuse {names}: {warning}.").as_ref());
+                .push_info(crate::tf!("Warning: other programs may refuse {names}: {warning}.").as_ref());
         }
     }
 
-    pub(in crate::app) fn dash_linetype_export(&mut self, i: usize, names: &str, file: &str) {
+    /// `overwrite` only when the user already agreed to replace the file (the
+    /// save dialog asks); a typed path never replaces an existing file.
+    pub(in crate::app) fn dash_linetype_export(
+        &mut self,
+        i: usize,
+        names: &str,
+        file: &str,
+        overwrite: bool,
+    ) {
         use crate::io::linetypes::writer;
         if !self.linetype_files_available() {
+            return;
+        }
+        let mut path = std::path::PathBuf::from(file);
+        if path.extension().is_none() {
+            path.set_extension("lin");
+        }
+        let shown = path.display().to_string();
+        if !overwrite && path.exists() {
+            self.command_line.push_error(
+                crate::tf!("-LINETYPE: {shown} already exists. Choose another file name.")
+                    .as_ref(),
+            );
             return;
         }
         let document = &self.tabs[i].scene.document;
@@ -1251,11 +1271,6 @@ impl OpenCADStudio {
             );
             return;
         }
-        let mut path = std::path::PathBuf::from(file);
-        if path.extension().is_none() {
-            path.set_extension("lin");
-        }
-        let shown = path.display().to_string();
         match writer::write_atomic(&path, &output.text) {
             Ok(()) => {
                 let count = output.written.len();

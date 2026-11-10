@@ -3372,6 +3372,31 @@ mod tests {
             .sum()
     }
 
+    /// A style whose `.shx` file is not on disk is searched for in the font
+    /// folders once, not again for every text drawn in that style.
+    #[test]
+    fn a_missing_font_file_is_searched_for_once_for_many_texts() {
+        let mut doc = document::CadDocument::default();
+        let mut gone = document::tables::TextStyle::new("GONE");
+        gone.font_file = "ocs_no_such_font_for_lookup.shx".into();
+        doc.text_styles.add(gone).unwrap();
+        let doc: document::Document = doc.into();
+        let searches = || crate::io::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
+
+        let before = searches();
+        for _ in 0..50 {
+            assert_eq!(
+                resolve_text_style("GONE", &doc).font_name,
+                "ocs_no_such_font_for_lookup.shx"
+            );
+        }
+        assert_eq!(
+            searches() - before,
+            1,
+            "fifty texts in one style must share one search of the font folders"
+        );
+    }
+
     /// AutoCAD 2025 places a bottom-attached MTEXT by the ink of its last
     /// line (in romand.shx "-3,45" sits 0.1905·h up, "Agp" 0.3333·h, "ABC"
     /// on the point) and centres a middle-attached one on its ink box.

@@ -170,6 +170,8 @@ pub fn folder_shx_fonts() -> Vec<String> {
 /// A font file previously downloaded into the local fonts directory, matched
 /// case-insensitively by file name.
 pub fn local_font_file(name: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    FOLDER_SEARCHES.with(|count| count.set(count.get() + 1));
     let file = name.rsplit(['/', '\\']).next()?;
     let lower = file.to_ascii_lowercase();
     fonts_dir()
@@ -186,6 +188,13 @@ pub fn local_font_file(name: &str) -> Option<PathBuf> {
                 .find(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase() == lower)
                 .map(|entry| entry.path())
         })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has searched the font folders.
+    pub(crate) static FOLDER_SEARCHES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
 }
 
 /// List the community folder through the GitHub contents API.

@@ -1601,6 +1601,10 @@ pub(super) struct OpenCADStudio {
     pub(crate) tool_focus: Option<ModalKind>,
     /// The tool dialog the keyboard goes to, as it went to a modal one.
     pub(crate) keyboard_tool: Option<ModalKind>,
+    /// Desktop: a dialog window opened again while open, to bring to the
+    /// front once the update settles.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) tool_window_to_raise: Option<iced::window::Id>,
     /// A tool dialog's frame being moved or resized.
     pub(crate) tool_drag: Option<tool_windows::ToolDrag>,
     /// Desktop: the windows of their own (tool dialogs and pallets).
@@ -6572,6 +6576,8 @@ impl OpenCADStudio {
             tool_windows: Vec::new(),
             tool_focus: None,
             keyboard_tool: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            tool_window_to_raise: None,
             tool_drag: None,
             #[cfg(not(target_arch = "wasm32"))]
             os_windows: Vec::new(),

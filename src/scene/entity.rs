@@ -2174,7 +2174,7 @@ impl Scene {
                 self.constraint_palette(),
             )
         });
-        let mut models: Vec<HatchModel> = self
+        let (mut models, mut hosts): (Vec<_>, Vec<_>) = self
             .hatches
             .iter()
             .filter(|(&handle, _)| {
@@ -2210,13 +2210,15 @@ impl Scene {
                         }
                     }
                 }
-                backdrop.into_iter().chain(std::iter::once(model))
+                backdrop
+                    .into_iter()
+                    .chain(std::iter::once(model))
+                    .map(move |model| (model, handle))
             })
-            .collect();
+            .unzip();
 
         // Background for adapting block-child hatch colours at the leaf (#221).
         // Instanced/owned hatch leaves are produced by the shared scene graph.
-        let mut hosts = vec![Handle::NULL; models.len()];
         for (host, model) in self.instanced_hatch_models_hosted_for_document(
             &self.document,
             target_block,
@@ -2505,8 +2507,9 @@ impl Scene {
         let mut hatch_block_memo = std::collections::HashMap::new();
         let mut models = Vec::new();
         let mut hatch_sources = rustc_hash::FxHashMap::default();
-        graph.walk_root(
+        graph.walk_root_filtered(
             self.render_scene_root(layout_block),
+            targets,
             |entity, context| {
                 let common = entity.common();
 
@@ -2525,9 +2528,8 @@ impl Scene {
                 {
                     return false;
                 }
-                if let Some(targets) = targets {
-                    return matches!(entity, EntityType::Insert(_))
-                        && targets.contains(&common.handle);
+                if targets.is_some() {
+                    return matches!(entity, EntityType::Insert(_));
                 }
                 let block_uses: Vec<_> =
                     crate::scene::render_graph::entity_render_block_uses(document, entity, 1.0)

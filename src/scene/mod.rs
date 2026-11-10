@@ -650,7 +650,7 @@ fn drop_stale_complex_lt(
     }
     if scene.dependency_index_cache.borrow().is_none() {
         let index = scene.rebuild_dependency_index();
-        *scene.dependency_index_cache.borrow_mut() = Some(index);
+        *scene.dependency_index_cache.borrow_mut() = Some(Arc::new(index));
     }
     if let Some(index) = scene.dependency_index_cache.borrow().as_ref() {
         for handle in &index.annotation_geometry.render_handles {
@@ -720,6 +720,7 @@ struct SceneDependencyIndex {
     /// Block name (normalised) → the layout entities that draw it, nested
     /// references included.
     block_roots: HashMap<String, HashSet<Handle>>,
+    wipeout_hosts: HashSet<Handle>,
 }
 
 fn hatch_interaction_aabb(hatch: &model::hatch_model::HatchModel) -> Option<[f64; 4]> {
@@ -1048,6 +1049,7 @@ struct GeometryDelta {
     /// consumers must remain conservative.
     removed_categories: HashMap<Handle, u16>,
     full: bool,
+    layer_visibility_only: bool,
 }
 
 /// The desk a paper layout lays its sheet on — the surface visible around the
@@ -1195,6 +1197,7 @@ fn resident_memo_enabled() -> bool {
 
 #[derive(Clone)]
 pub struct PreparedOpenGeometry {
+    dependency_index: Option<Arc<SceneDependencyIndex>>,
     pub wires: Arc<Vec<WireModel>>,
     pub interaction_index: Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>>,
     /// Loader-computed spatial entity index, re-stamped by the receiving scene.
@@ -2076,12 +2079,20 @@ pub fn prepare_open_geometry(
             .into_iter()
             .map(|(key, (_epoch, cache))| (key, cache))
             .collect();
+    // Layer changes are interactive. Build their reverse lookup beside the
+    // other loader indexes so the first pick doesn't scan the whole DWG.
+    let dependency_index = scene
+        .dependency_index_cache
+        .get_mut()
+        .take()
+        .unwrap_or_else(|| Arc::new(scene.rebuild_dependency_index()));
     let doc = std::mem::replace(&mut scene.document, Document::new());
     caches.meshes = std::mem::take(&mut scene.meshes);
     caches.block_meshes = std::mem::take(&mut scene.block_meshes);
     (
         doc,
         PreparedOpenGeometry {
+            dependency_index: Some(dependency_index),
             wires,
             interaction_index,
             entity_index,
@@ -3062,7 +3073,7 @@ pub struct Scene {
     /// entities whose resident wire runs actually change. Kept independent from
     /// `geometry_epoch`: a layer colour toggle can reuse the index, invalidate
     /// only its dependants, and avoid a whole-document scan on every toggle.
-    dependency_index_cache: RefCell<Option<SceneDependencyIndex>>,
+    dependency_index_cache: RefCell<Option<Arc<SceneDependencyIndex>>>,
     /// Tables added or changed since the drawing was opened or last saved:
     /// their stored cell geometry is marked out of date (flag 7) in the
     /// next save.
@@ -3875,6 +3886,7 @@ impl Scene {
         if !self.hidden_dynamic_dimensions.is_empty() {
             return;
         }
+        *self.dependency_index_cache.borrow_mut() = prepared.dependency_index;
         let block = self.model_space_block_handle();
         let scale = crate::scene::annotative::scale_handle_by_name(
             &self.document,
@@ -3962,6 +3974,7 @@ impl Scene {
             changes,
             removed_categories,
             full,
+            layer_visibility_only: false,
         });
         while ring.len() > GEOMETRY_JOURNAL_CAP {
             if let Some(ev) = ring.pop_front() {
@@ -4502,7 +4515,7 @@ impl Scene {
             return;
         }
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
+            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
         }
         // One pass over the drawing for all hosts: which block definition
         // holds an entity, which INSERT draws an attribute, which tables
@@ -10173,9 +10186,23 @@ impl Scene {
         let memo = RefCell::new(std::collections::HashMap::new());
         let mut redo: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
         let mut rebuilt_inserts: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
+        let mut rebuilt_direct = Vec::new();
         for (handle, _) in &changes {
             if self.hatches.contains_key(handle) {
-                return None;
+                // Direct hatches can be updated by handle. A hatch inside a
+                // block can affect many placements and still needs the full
+                // path.
+                let entity = self.document.get_entity(*handle)?;
+                if !self.belongs_to_visible_block(
+                    *handle,
+                    entity.common().owner_handle,
+                    target_block,
+                ) {
+                    return None;
+                }
+                redo.insert(*handle);
+                rebuilt_direct.push(*handle);
+                continue;
             }
             match self.document.get_entity(*handle) {
                 // Gone: harmless when it drew fills as a reference, unknown
@@ -10232,6 +10259,33 @@ impl Scene {
             }
             models.push(model.clone());
             new_hosts.push(*host);
+        }
+        if !rebuilt_direct.is_empty() {
+            let all_visible = self.annotation_all_visible();
+            let bg = if self.current_layout == "Model" {
+                self.bg_color
+            } else {
+                self.paper_bg_color
+            };
+            let depths = self.draw_depth_map();
+            for handle in rebuilt_direct {
+                if !self.hatch_fill_shown(handle, target_block, None, scale, all_visible) {
+                    continue;
+                }
+                let (backdrop, fill) = self.synced_hatch_model(
+                    handle,
+                    &self.hatches[&handle],
+                    scale,
+                    None,
+                    bg,
+                    &depths,
+                    false,
+                );
+                for model in backdrop.into_iter().chain(std::iter::once(fill)) {
+                    models.push(model);
+                    new_hosts.push(handle);
+                }
+            }
         }
         let fresh_count = fresh.len();
         for (host, model) in fresh {
@@ -10401,8 +10455,13 @@ impl Scene {
     /// 96 ms a frame, 153 frames of one measured drag, 14.8 s in all — while
     /// the same drag in model space kept them. Sharing the predicate is what
     /// stops the two drifting apart again.
-    fn wipeout_cache_current(&self, cached_epoch: u64) -> bool {
+    fn wipeout_cache_current(&self, cached_epoch: u64, cached_empty: bool) -> bool {
         let any_wipeout = std::cell::OnceCell::<bool>::new();
+        let dependencies = self.dependency_index_cache.borrow();
+        let mask_hosts = dependencies
+            .as_ref()
+            .filter(|_| cached_empty && self.block_edit_block.is_none())
+            .map(|index| &index.wipeout_hosts);
         self.category_cache_valid(
             cached_epoch,
             CACHE_CATEGORY_WIPEOUT | CACHE_CATEGORY_INSERT_HATCH,
@@ -10411,6 +10470,12 @@ impl Scene {
                 // moving plain geometry leaves the set as it was.
                 match self.document.get_entity(h) {
                     Some(EntityType::Wipeout(_)) => true,
+                    // An empty cache has no old placements to remove. If the
+                    // live graph also has no path from this entity to a mask,
+                    // this edit cannot add one to the cached view.
+                    Some(_) if mask_hosts.is_some() => {
+                        mask_hosts.is_some_and(|hosts| hosts.contains(&h))
+                    }
                     // Without a single mask in the drawing no INSERT can place
                     // one; skip walking the block tree of every edited INSERT.
                     Some(EntityType::Insert(_))
@@ -10439,7 +10504,9 @@ impl Scene {
             let reuse = {
                 let cache = self.wipeout_cache.borrow();
                 match cache.get(&key) {
-                    Some((cached_epoch, arc)) if self.wipeout_cache_current(*cached_epoch) => {
+                    Some((cached_epoch, arc))
+                        if self.wipeout_cache_current(*cached_epoch, arc.is_empty()) =>
+                    {
                         Some(Arc::clone(arc))
                     }
                     _ => None,
@@ -11731,7 +11798,9 @@ impl Scene {
         let key = (target_block, self.current_layout.clone(), sig);
         {
             let reuse = match self.frozen_wipeout_cache.borrow().get(&key) {
-                Some((cached_epoch, arc)) if self.wipeout_cache_current(*cached_epoch) => {
+                Some((cached_epoch, arc))
+                    if self.wipeout_cache_current(*cached_epoch, arc.is_empty()) =>
+                {
                     Some(Arc::clone(arc))
                 }
                 _ => None,
@@ -12728,7 +12797,7 @@ impl Scene {
                 crate::scene::pick::interaction_index::InteractionCandidates::all(wires),
             );
         }
-        self.indexed_interaction_candidates_xy(wires, aabb, false, false, None)
+        self.indexed_interaction_candidates_xy(wires, aabb, false, false, false, None)
     }
 
     /// Small simple sets are cheaper to scan. Either many wires or substantial
@@ -12923,6 +12992,18 @@ impl Scene {
 
     const INTERACTION_OVERLAY_MAX_HANDLES: usize = 2_048;
 
+    fn interaction_overlay_can_replay(&self, base_epoch: u64, changes: usize) -> bool {
+        changes <= Self::INTERACTION_OVERLAY_MAX_HANDLES
+            || self
+                .geometry_deltas
+                .borrow()
+                .iter()
+                .filter(|delta| delta.epoch > base_epoch && !delta.layer_visibility_only)
+                .map(|delta| delta.changes.len())
+                .sum::<usize>()
+                <= Self::INTERACTION_OVERLAY_MAX_HANDLES
+    }
+
     fn interaction_overlay_base(&self) -> Option<OverlayBase> {
         let space_key = self.interaction_space_key();
         let (epoch, index) = {
@@ -12940,7 +13021,7 @@ impl Scene {
                     && *geometry_epoch == self.geometry_epoch
                     && *cached_space == space_key
                 {
-                    return (changes.len() <= Self::INTERACTION_OVERLAY_MAX_HANDLES).then_some((
+                    return self.interaction_overlay_can_replay(epoch, changes.len()).then_some((
                         epoch,
                         index,
                         Arc::clone(changes),
@@ -12951,7 +13032,8 @@ impl Scene {
         let changes = Arc::new(self.replay_since(epoch)?);
         *self.interaction_overlay_changes.borrow_mut() =
             Some((epoch, self.geometry_epoch, space_key, Arc::clone(&changes)));
-        (changes.len() <= Self::INTERACTION_OVERLAY_MAX_HANDLES).then_some((epoch, index, changes))
+        self.interaction_overlay_can_replay(epoch, changes.len())
+            .then_some((epoch, index, changes))
     }
 
     /// Recover the wire snapshot that was indexed by an immutable overlay
@@ -13094,6 +13176,7 @@ impl Scene {
         aabb: [f64; 4],
         allow_pending_empty: bool,
         area_only: bool,
+        pick_only: bool,
         snap: Option<SnapQueryCategory>,
     ) -> InteractionCandidates {
         // The stubbed query falls back to the whole unindexed set when no
@@ -13105,6 +13188,7 @@ impl Scene {
             aabb,
             allow_pending_empty,
             area_only,
+            pick_only,
             snap,
         ))
     }
@@ -13117,10 +13201,12 @@ impl Scene {
         aabb: [f64; 4],
         allow_pending_empty: bool,
         area_only: bool,
+        pick_only: bool,
         snap: Option<SnapQueryCategory>,
     ) -> InteractionCandidates {
         let direct = |index: &InteractionIndex, wires| match snap {
             Some(category) => index.query_snap_xy_with_category(wires, aabb, category),
+            None if pick_only => index.query_xy_selection(wires, aabb, true),
             None if area_only => index.query_xy_area(wires, aabb),
             None => index.query_xy(wires, aabb),
         };
@@ -13137,6 +13223,7 @@ impl Scene {
             let base_parts = snap.map(|category| base.snap_candidate_parts_xy(aabb, category));
             let keys = match &base_parts {
                 Some(parts) => base.snap_candidate_keys(parts),
+                None if pick_only => base.query_pick_wire_keys_xy(aabb),
                 None => base.query_wire_keys_xy(aabb),
             };
             let key_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -13148,6 +13235,7 @@ impl Scene {
                 snap.map(|category| changed_index.snap_candidate_parts_xy(aabb, category));
             let changed_keys = match &changed_parts {
                 Some(parts) => changed_index.snap_candidate_keys(parts),
+                None if pick_only => changed_index.query_pick_wire_keys_xy(aabb),
                 None => changed_index.query_wire_keys_xy(aabb),
             };
             let t_local = iced::time::Instant::now();
@@ -13179,14 +13267,21 @@ impl Scene {
                     );
                     result
                 }
-                _ if area_only => {
-                    let mut result =
-                        base.query_remapped_xy_area(Arc::clone(&local), &base_slots, aabb);
-                    result.extend_indexed_area(changed_index.query_remapped_xy_area(
+                _ if area_only || pick_only => {
+                    let mut result = base.query_remapped_xy_area(
+                        Arc::clone(&local), &base_slots, aabb, pick_only,
+                    );
+                    let replacements = changed_index.query_remapped_xy_area(
                         local,
                         &changed_slots,
                         aabb,
-                    ));
+                        pick_only,
+                    );
+                    if pick_only {
+                        result.extend_indexed(replacements);
+                    } else {
+                        result.extend_indexed_area(replacements);
+                    }
                     result
                 }
                 _ => {
@@ -13659,21 +13754,21 @@ impl Scene {
             }
             return self.materialize_stubs_cached(InteractionCandidates::all(wires));
         }
-        // Snap features are indexed at their own points; only picking grows
-        // the aperture to cover screen-sized markers and wide strokes.
+        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+        // Flat picks bring marker wires in separately. One large PDSIZE
+        // marker should never expand the search for every ordinary edge.
         let radius_px = if snap.is_some() {
             radius_px
         } else {
             self.indexed_interaction_pick_radius(
                 &wires,
                 radius_px,
-                bounds.height,
+                if flat_ortho { 0.0 } else { bounds.height },
                 include_line_weight,
             )
         };
-        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
-            && view_rot.z_axis.y.abs() < 1e-9
-            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
         if !flat_ortho {
             let clip = view_rot * (cursor - eye).as_vec3().extend(1.0);
             if !clip.is_finite() || clip.w <= 1e-6 {
@@ -13727,7 +13822,9 @@ impl Scene {
             cursor.x + radius,
             cursor.y + radius,
         ];
-        self.indexed_interaction_candidates_xy(wires, query, allow_pending_empty, false, snap)
+        self.indexed_interaction_candidates_xy(
+            wires, query, allow_pending_empty, false, snap.is_none(), snap,
+        )
     }
 
     /// Shared rectangular broad phase for box/lasso/fence and command windows.
@@ -13777,6 +13874,7 @@ impl Scene {
                 [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad],
                 false,
                 true,
+                false,
                 None,
             )
         } else {
@@ -13854,7 +13952,8 @@ impl Scene {
     /// joined it and vanished from its preview (#1891).
     pub fn interaction_handles_in_world_aabb(&self, aabb: [f64; 4]) -> HashSet<Handle> {
         let wires = self.hit_test_wires();
-        let candidates = self.indexed_interaction_candidates_xy(wires, aabb, false, false, None);
+        let candidates =
+            self.indexed_interaction_candidates_xy(wires, aabb, false, false, false, None);
         let mut handles: HashSet<Handle> = candidates
             .iter()
             .filter(|wire| wire_meets_xy_box(wire, aabb))
@@ -15392,6 +15491,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             | EntityType::Shape(_) => 2,
             EntityType::Hatch(_) => 3,
             EntityType::Insert(insert) if !insert.attributes.is_empty() => 4,
+            EntityType::Wipeout(_) => 5,
             _ => 0,
         };
         category.hash(&mut hasher);
@@ -15599,6 +15699,17 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             } else {
                 RenderHandles::SelfOnly(common.handle)
             };
+            if matches!(entity, EntityType::Wipeout(_)) {
+                match &render_handles {
+                    RenderHandles::SelfOnly(handle) => {
+                        index.wipeout_hosts.insert(*handle);
+                    }
+                    RenderHandles::Block(Some(roots)) => {
+                        index.wipeout_hosts.extend(roots.iter().copied());
+                    }
+                    RenderHandles::Block(None) => {}
+                }
+            }
             let block_uses = block_uses_of
                 .get(&common.handle)
                 .map(|uses| uses.as_slice())
@@ -15804,7 +15915,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
 
     fn dependency_targets(&self, kind: DependencyKind, names: &[String]) -> DependencyTargets {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
+            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
         }
         let cache = self.dependency_index_cache.borrow();
         let index = cache.as_ref().unwrap();
@@ -15936,6 +16047,13 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             .map(|&handle| (handle, ChangeKind::Modified))
             .collect();
         self.bump_entities_restyled(&changes);
+        // A series of layer toggles can name thousands of handles, but most
+        // are hidden and never enter the overlay's replacement index.
+        // Keep using the base instead of rescanning all resident geometry.
+        if let Some(delta) = self.geometry_deltas.get_mut().back_mut() {
+            debug_assert_eq!(delta.epoch, self.geometry_epoch);
+            delta.layer_visibility_only = true;
+        }
         let mut tm = self.tess_memo.borrow_mut();
         let mut rm = self.resident_tess_memo.borrow_mut();
         for (handle, culled, resident) in kept {
@@ -15973,7 +16091,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
 
     pub fn invalidate_object_style_dependencies(&mut self, handles: &[Handle]) {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
+            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
         }
         let mut combined = DependencyTargets::default();
         if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
@@ -15998,12 +16116,12 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         select: impl FnOnce(&SceneDependencyIndex) -> &DependencyTargets,
     ) {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(self.rebuild_dependency_index());
+            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
         }
         let targets = self
             .dependency_index_cache
             .borrow()
-            .as_ref()
+            .as_deref()
             .map(select)
             .cloned()
             .unwrap_or_default();
@@ -17265,6 +17383,7 @@ mod journal_tests {
         // Install it under the receiving scene's epoch.
         scene.bump_geometry();
         scene.install_prepared_open_geometry(PreparedOpenGeometry {
+            dependency_index: None,
             wires: Arc::new(Vec::new()),
             interaction_index: None,
             entity_index: None,

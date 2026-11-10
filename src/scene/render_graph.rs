@@ -341,8 +341,22 @@ impl<'a> RenderSceneGraph<'a> {
     /// Walk direct root entities and every referenced block subtree. `visible`
     /// can add session-only rules such as isolate/preview hiding; returning
     /// false for an Insert removes its whole subtree.
-    pub fn walk_root<V, F>(&self, root: SceneRoot, mut visible: V, mut leaf: F)
+    pub fn walk_root<V, F>(&self, root: SceneRoot, visible: V, leaf: F)
     where
+        V: FnMut(&EntityType, &InstanceContext) -> bool,
+        F: FnMut(&EntityType, &InstanceContext),
+    {
+        self.walk_root_filtered(root, None, visible, leaf);
+    }
+
+    /// Limit the walk to named root entities without pruning their children.
+    pub(crate) fn walk_root_filtered<V, F>(
+        &self,
+        root: SceneRoot,
+        targets: Option<&rustc_hash::FxHashSet<Handle>>,
+        mut visible: V,
+        mut leaf: F,
+    ) where
         V: FnMut(&EntityType, &InstanceContext) -> bool,
         F: FnMut(&EntityType, &InstanceContext),
     {
@@ -360,6 +374,9 @@ impl<'a> RenderSceneGraph<'a> {
             return;
         };
         for &handle in &record.entity_handles {
+            if targets.is_some_and(|targets| !targets.contains(&handle)) {
+                continue;
+            }
             let Some(source) = self.document.get_entity(handle) else {
                 continue;
             };

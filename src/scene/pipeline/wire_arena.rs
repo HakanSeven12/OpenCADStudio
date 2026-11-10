@@ -1576,7 +1576,7 @@ impl PackedWireArena {
 }
 
 enum PersistentWireArenaKind {
-    Indexed(WireArena),
+    Indexed(Vec<WireArena>),
     Packed(PackedWireArena),
 }
 
@@ -1596,9 +1596,34 @@ impl PersistentWireArena {
         mesh_edge: bool,
     ) -> Option<Self> {
         let inner = if let Some(const_bgl) = const_bgl {
-            PersistentWireArenaKind::Indexed(WireArena::build(
-                device, queue, wires, depth_map, const_bgl, mesh_edge,
-            )?)
+            let instance_limit = super::gpu_budget::max_arena_elements::<WireInstance>(device);
+            let const_limit =
+                super::gpu_budget::max_arena_storage_elements::<WireConst>(device);
+            let mut arenas = Vec::new();
+            let mut start = 0;
+            let mut instances = 0;
+            for (_, first, end) in handle_ranges(wires)? {
+                let run_instances: usize = wires[first..end]
+                    .iter()
+                    .map(|wire| wire.points.len().saturating_sub(1))
+                    .sum();
+                // Keep each entity in one buffer and keep submission order
+                // across buffers. Each buffer has its own constant binding.
+                if first > start
+                    && (instances + run_instances > instance_limit || end - start >= const_limit)
+                {
+                    arenas.push(WireArena::build(
+                        device, queue, &wires[start..first], depth_map, const_bgl, mesh_edge,
+                    )?);
+                    start = first;
+                    instances = 0;
+                }
+                instances += run_instances;
+            }
+            arenas.push(WireArena::build(
+                device, queue, &wires[start..], depth_map, const_bgl, mesh_edge,
+            )?);
+            PersistentWireArenaKind::Indexed(arenas)
         } else {
             PersistentWireArenaKind::Packed(PackedWireArena::build(
                 device, queue, wires, depth_map, mesh_edge,
@@ -1616,8 +1641,33 @@ impl PersistentWireArena {
         depth_map: &FxHashMap<u64, [f32; 2]>,
     ) -> bool {
         match &mut self.inner {
-            PersistentWireArenaKind::Indexed(arena) => {
-                arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map)
+            PersistentWireArenaKind::Indexed(arenas) => {
+                if let [arena] = arenas.as_mut_slice() {
+                    return arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map);
+                }
+                let last = arenas.len() - 1;
+                let mut by_arena = vec![Vec::new(); arenas.len()];
+                for &(handle, kind) in changes {
+                    let owner = arenas.iter().position(|arena| {
+                        arena.slabs.contains_key(&handle) || arena.vacant.contains_key(&handle)
+                    });
+                    if let Some(owner) = owner {
+                        by_arena[owner].push((handle, kind));
+                    } else if !matches!(kind, ChangeKind::Removed)
+                        && runs.get(&handle).is_some_and(|run| !run.is_empty())
+                    {
+                        // A newly visible run with no reserved slot may belong
+                        // before any of these buffers in submission order.
+                        if !new_handles_are_suffix {
+                            return false;
+                        }
+                        by_arena[last].push((handle, kind));
+                    }
+                }
+                arenas.iter_mut().zip(by_arena).all(|(arena, changes)| {
+                    changes.is_empty()
+                        || arena.patch(queue, &changes, runs, new_handles_are_suffix, depth_map)
+                })
             }
             PersistentWireArenaKind::Packed(arena) => {
                 arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map)
@@ -1627,7 +1677,9 @@ impl PersistentWireArena {
 
     pub fn wire_gpus(&self) -> Vec<WireGpu> {
         match &self.inner {
-            PersistentWireArenaKind::Indexed(arena) => arena.wire_gpus(),
+            PersistentWireArenaKind::Indexed(arenas) => {
+                arenas.iter().flat_map(WireArena::wire_gpus).collect()
+            }
             PersistentWireArenaKind::Packed(arena) => arena.wire_gpus(),
         }
     }
@@ -1637,9 +1689,10 @@ impl PersistentWireArena {
     /// what a memory budget has to answer for.
     pub fn gpu_bytes(&self) -> u64 {
         match &self.inner {
-            PersistentWireArenaKind::Indexed(arena) => {
-                arena.inst_buf.size() + arena.const_buf.size()
-            }
+            PersistentWireArenaKind::Indexed(arenas) => arenas
+                .iter()
+                .map(|arena| arena.inst_buf.size() + arena.const_buf.size())
+                .sum(),
             PersistentWireArenaKind::Packed(arena) => arena.inst_buf.size(),
         }
     }
@@ -1652,9 +1705,10 @@ impl PersistentWireArena {
         clip_h: u32,
     ) -> Vec<WireGpu> {
         match &self.inner {
-            PersistentWireArenaKind::Indexed(arena) => {
-                arena.wire_gpus_visible(view_rot, eye, clip_w, clip_h)
-            }
+            PersistentWireArenaKind::Indexed(arenas) => arenas
+                .iter()
+                .flat_map(|arena| arena.wire_gpus_visible(view_rot, eye, clip_w, clip_h))
+                .collect(),
             PersistentWireArenaKind::Packed(arena) => {
                 arena.wire_gpus_visible(view_rot, eye, clip_w, clip_h)
             }

@@ -3621,6 +3621,61 @@ mod attedit_dash_tests {
         );
     }
 
+    /// A tag the definition renames is a new tag with the definition's default:
+    /// the value the old tag carried is dropped rather than moved onto it.
+    #[test]
+    fn attsync_drops_the_value_of_a_tag_the_definition_renamed() {
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let definition = |tag: &str, default: &str| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), default.into())
+            })
+        };
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "RENAMED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![definition("TITLE", "")],
+        );
+        let mut insert = Insert::new("RENAMED", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TITLE".into(), "kept".into()));
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        assert!(!reference.is_null(), "the reference is placed");
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "RENAMED",
+                Vector3::new(0.0, 0.0, 0.0),
+                vec![definition("SHEET", "fresh")],
+            )
+            .expect("the definition renames its tag");
+
+        let _ = app.run_command_line("ATTSYNC RENAMED");
+
+        let document = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = document.get_entity(reference).expect("reference") else {
+            panic!("not an insert");
+        };
+        let pairs: Vec<(String, String)> = insert
+            .attributes
+            .iter()
+            .map(|a| (a.tag.clone(), a.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("SHEET".into(), "fresh".into())],
+            "the renamed tag arrives with its default and the old tag leaves"
+        );
+    }
+
     /// BATTMAN opens on the drawing's attributed block, counts its references
     /// and lists the block's definitions in their own order.
     #[test]

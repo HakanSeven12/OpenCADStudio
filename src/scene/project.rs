@@ -98,6 +98,9 @@ impl Scene {
                 let view = (cam_frame.rotation * glam::Vec3::Z).as_dvec3().to_array();
                 let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle));
                 model_wires.to_mut().extend(mesh_wires);
+                for wire in model_wires.to_mut() {
+                    wire.resample_plot_curve();
+                }
             }
 
             // ── Project and clip wires into viewport ──────────────────────

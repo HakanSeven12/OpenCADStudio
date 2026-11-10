@@ -589,6 +589,7 @@ fn plot_scene_content(
                         }));
                 }
                 plot_owner_aci(scene, &mut wire);
+                wire.resample_plot_curve();
                 crate::io::pdf_export::PlotWire { wire, draw_depth }
             })
             .collect::<Vec<_>>()

@@ -2644,17 +2644,38 @@ impl MultiLeaderFrameTess for MultiLeader {
             // insertion Y to that connection instead of the stored text_location.y
             // so the text meets the landing exactly — the two can disagree by a
             // few percent because our MText line height need not match the writer's.
-            // Only for UNROTATED text: an angled context stores its true anchor in
-            // text_location, and snapping Y alone would shear it off its baseline.
             // An underlined line sits its underline gap above that connection.
-            let local_ins_y = match ml.text_attachment_direction {
-                TextAttachmentDirectionType::Horizontal if rot.abs() < 1e-3 => ml
-                    .context
-                    .leader_roots
-                    .first()
-                    .map(|r| r.connection_point.y as f32 + underline_lift)
-                    .unwrap_or(ins.y as f32),
-                _ => ins.y as f32,
+            //
+            // Rotated text needs the same snap, but along the text frame's up
+            // axis: an angled label is stored with its anchor free of the
+            // connection (survey exporters leave it a block height plus a gap
+            // away), and a Y-only snap would shear it off its rotated baseline.
+            // Riding the up axis keeps the block's attachment line on the
+            // connection's line.
+            let (local_ins_x, local_ins_y) = match ml.text_attachment_direction {
+                TextAttachmentDirectionType::Horizontal if rot.abs() < 1e-3 => (
+                    local_ins_x,
+                    ml.context
+                        .leader_roots
+                        .first()
+                        .map(|r| r.connection_point.y as f32 + underline_lift)
+                        .unwrap_or(ins.y as f32),
+                ),
+                TextAttachmentDirectionType::Horizontal => match ml.context.leader_roots.first() {
+                    Some(root) => {
+                        let up_x = -(rot.sin()) as f64;
+                        let up_y = rot.cos() as f64;
+                        let rel_x = root.connection_point.x - text_loc_w.x;
+                        let rel_y = root.connection_point.y - text_loc_w.y;
+                        let shift = rel_x * up_x + rel_y * up_y + underline_lift as f64;
+                        (
+                            (local_ins_x as f64 + up_x * shift) as f32,
+                            (ins.y as f64 + up_y * shift) as f32,
+                        )
+                    }
+                    _ => (local_ins_x, ins.y as f32),
+                },
+                _ => (local_ins_x, ins.y as f32),
             };
 
             // Resolve text style via handle when available, falling back to STANDARD.
@@ -3626,6 +3647,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An angled label written with its anchor free of the connection — a
+    /// survey export leaves `text_location` a block height plus a gap away
+    /// from `connection_point` — must still have its attachment line ride the
+    /// leader's connection, exactly like an unrotated label. The ink must not
+    /// keep the stored, off-leader placement.
+    #[test]
+    fn rotated_text_attaches_to_its_connection() {
+        use document::entities::multileader::TextAttachmentPointType;
+        use document::types::Vector3;
+        let doc = Document::default();
+        // 55° text direction; the leader runs against the reading direction.
+        let th = 1.0_f64;
+        let (tx, ty) = ((55.0f64).to_radians().cos(), (55.0f64).to_radians().sin());
+        let (up_x, up_y) = (-ty, tx);
+        let build = |anchor_perp: f64| {
+            let mut ml = MultiLeader::default();
+            ml.content_type = LeaderContentType::MText;
+            ml.path_type = MultiLeaderPathType::StraightLineSegments;
+            ml.enable_landing = true;
+            ml.enable_dogleg = true;
+            let ctx = &mut ml.context;
+            ctx.text_string = "R724\\P SR502-pilíř".to_string();
+            ctx.text_height = th;
+            ctx.landing_gap = 0.5;
+            ctx.text_rotation = 0.0; // direction vector governs below
+            ctx.text_direction = Vector3::new(tx, ty, 0.0);
+            ctx.text_attachment_point = TextAttachmentPointType::Center;
+            ctx.text_left_attachment = TextAttachmentType::BottomLine;
+            ctx.text_right_attachment = TextAttachmentType::BottomLine;
+            // The connection the leader lands on; the writer left the anchor
+            // `anchor_perp` up the text's up axis from it.
+            ctx.text_location = Vector3::new(
+                10.0 + up_x * anchor_perp,
+                5.0 + up_y * anchor_perp,
+                0.0,
+            );
+            let root = ctx.add_leader_root();
+            root.connection_point = Vector3::new(10.0, 5.0, 0.0);
+            root.direction = Vector3::new(-tx, -ty, 0.0);
+            root.landing_distance = 0.0;
+            let mut line = document::entities::multileader::LeaderLine::default();
+            line.points = vec![Vector3::new(10.0 + tx * 2.5, 5.0 + ty * 2.5, 0.0)];
+            root.lines = vec![line];
+            ml
+        };
+        let tess = |ml: &MultiLeader| {
+            ml.tessellate(
+                &doc,
+                document::Handle::default(),
+                false,
+                [1.0, 1.0, 1.0, 1.0],
+                1.0,
+                1.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [0.0, 0.0, 0.0, 1.0],
+                1.0,
+            )
+        };
+        // Ink perp-distance above the connection: smallest projection of any
+        // stroke point onto the text's up axis, measured from (10, 5).
+        let ink_perp = |ml: &MultiLeader| {
+            let wires = tess(ml);
+            wires
+                .iter()
+                .skip(1) // wire 0 is the leader itself
+                .flat_map(|w| w.points.iter().chain(w.fill_tris.iter()))
+                .filter(|p| p[0].is_finite())
+                .map(|p| (f64::from(p[0]) - 10.0) * up_x + (f64::from(p[1]) - 5.0) * up_y)
+                .fold(f64::INFINITY, f64::min)
+        };
+        // A writer that parked the anchor a block height plus a gap above the
+        // connection: before the fix the ink rode the raw anchor (~4·h away).
+        let anchor_free = build(4.0 * th);
+        let attached = ink_perp(&anchor_free);
+        assert!(
+            attached.abs() < 1.2 * th,
+            "rotated ink stays {attached}·h above the connection"
+        );
+        // An anchor already placed on the connection (this app's own command
+        // writes one) must not move the block past the underline gap.
+        let anchored = build(0.0);
+        let riding = ink_perp(&anchored);
+        assert!(
+            riding.abs() < 1.2 * th,
+            "an on-connection anchor is displaced to {riding}·h"
+        );
     }
 
     /// Values from an MLEADER made in the reference program: block LABEL (circle r4 at its

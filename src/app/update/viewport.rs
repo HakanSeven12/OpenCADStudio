@@ -10790,6 +10790,8 @@ mod rapid_drawing_tests {
                 );
             }
         }
+    }
+
     /// The interaction index is built from the hover dwell, which does not
     /// run while a command is active. A command's snaps and picks query that
     /// index too: once an edit (a LAYOFF pick) replaced the wire set, every

@@ -185,7 +185,7 @@ fn resolve_style(
         };
         let mut big_path = resolve_big(big);
         // If the referenced big font is not a valid big font (e.g. legacy Chinese
-        // shape-only container `chinese.shx`), try standard AutoCAD bigfont alias
+        // shape-only container `chinese.shx`), try the standard Big5 big font
         // `chineset.shx`.
         if big_path
             .as_deref()

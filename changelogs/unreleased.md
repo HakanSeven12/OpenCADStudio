@@ -4,7 +4,6 @@
 
 ### 🌟 Notable Release Notes
 
-* **Big Font Picker & Big5 Code Page Detection:** The Text Style manager now includes a dedicated SHX big-font picker (listing drawing big fonts and local/support folder SHX files). Big-font code-page detection no longer assumes every font with "china" in its name is GBK, allowing Traditional Chinese Big5 fonts such as `china1.shx` and `chineset.shx` to decode correctly instead of rendering mojibake. Legacy shape-only `chinese.shx` references alias to `chineset.shx` when present.
 * **Parameters Manager Order:** Each parameter carries a whole-number rank that every one of its rows prints and that is kept with the parameter in the drawing, so it survives saving and reopening. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **`EATTEDIT` and `ATTSYNC`:** `EATTEDIT` opens the attribute editor on a selected reference or starts the pick; `ATTSYNC <block>` synchronises a named block directly. *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 

@@ -1801,6 +1801,10 @@ enum FilletStep {
     },
 }
 
+/// The refusal a no-trim FILLET prints when the radius is zero: there is no
+/// arc to add.
+const NO_TRIM_FILLET_ZERO: &str = "A zero radius with No trim leaves nothing to add.";
+
 pub struct FilletCommand {
     radius: f64,
     /// Whether the picked source entities are shortened to the tangent points
@@ -2197,9 +2201,17 @@ impl CadCommand for FilletCommand {
                             // No trim: the objects stay as they are; only the
                             // arc is added (#1558).
                             if !self.trim {
-                                return maybe_arc
-                                    .map(|arc| self.continue_after_addition(arc))
-                                    .unwrap_or(CmdResult::NeedPoint);
+                                return match maybe_arc {
+                                    Some(arc) => self.continue_after_addition(arc),
+                                    // A zero radius makes no arc: say so and
+                                    // start over, as a zero-distance no-trim
+                                    // CHAMFER does.
+                                    None => {
+                                        self.step = FilletStep::First;
+                                        self.resume_second = None;
+                                        CmdResult::ReportError(NO_TRIM_FILLET_ZERO.to_string())
+                                    }
+                                };
                             }
                             // A polyline filleted with a line or arc takes
                             // the fillet and the other object in.

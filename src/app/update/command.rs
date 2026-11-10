@@ -1142,7 +1142,18 @@ impl OpenCADStudio {
                         }
                     }
                 };
+                // An object snap override typed before the point snaps it.
+                let (wcs_pt, snapped) = match self.typed_override_snap(i, wcs_pt) {
+                    Some(Err(())) => return self.focus_cmd_input(),
+                    Some(Ok(Some(hit))) => (hit.world, Some(hit)),
+                    Some(Ok(None)) | None => (wcs_pt, None),
+                };
                 if !self.command_point_allowed(i, wcs_pt) {
+                    return Task::none();
+                }
+                // The accepted-snap list stays index-parallel with the
+                // points the command collects, as on the feed path.
+                if !self.record_accepted_snap(i, snapped, None, wcs_pt) {
                     return Task::none();
                 }
                 self.last_point = Some(wcs_pt);

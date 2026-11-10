@@ -577,6 +577,17 @@ impl Snapper {
         self.snap_enabled = false;
     }
 
+    /// The one-shot override waiting for the next point: `Some(Some(t))` for
+    /// a mode, `Some(None)` for the None override, `None` when none is set.
+    pub fn pending_override(&self) -> Option<Option<SnapType>> {
+        self.override_saved.as_ref()?;
+        Some(if self.snap_enabled {
+            self.enabled.iter().next().copied()
+        } else {
+            None
+        })
+    }
+
     /// Restore the pre-override snap configuration. No-op when inactive.
     pub fn clear_override(&mut self) {
         if let Some((enabled, on)) = self.override_saved.take() {

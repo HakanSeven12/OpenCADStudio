@@ -5119,6 +5119,46 @@ impl OpenCADStudio {
         hit
     }
 
+    /// [`Self::snap_query`] over the given wires only (the object under a
+    /// typed point, say) instead of the drawing's candidates.
+    pub(in crate::app) fn snap_over_wires(
+        &mut self,
+        i: usize,
+        world: glam::DVec3,
+        from: Option<glam::DVec3>,
+        wires: &Vec<crate::scene::model::wire_model::WireModel>,
+    ) -> Option<crate::snap::SnapResult> {
+        let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+        if vw <= 1.0 || vh <= 1.0 {
+            return None;
+        }
+        let tile_b = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile_b.width,
+            height: tile_b.height,
+        };
+        let (view_rot, eye, px) = {
+            let cam = self.tabs[i].scene.camera.borrow();
+            (
+                cam.view_proj_rte(bounds),
+                cam.eye(),
+                cam.project(world, bounds)?,
+            )
+        };
+        let p = Point::new(px.x, px.y);
+        let raw = self.cursor_model_point(i, &None, p, bounds);
+        let live_from = self.snapper.from_point;
+        self.snapper.from_point = from.or(self.last_point);
+        let (go, gr) = self.drafting_grid_basis(i);
+        let hit = self
+            .snapper
+            .snap(raw, p, wires, view_rot, eye, bounds, go, gr, None);
+        self.snapper.from_point = live_from;
+        hit
+    }
+
     /// Apply one frame of a UCS-icon grip drag: map the cursor onto the active
     /// UCS plane (so the move stays in-plane) and either slide the origin there
     /// or rotate the chosen axis to point at it, keeping a right-handed frame

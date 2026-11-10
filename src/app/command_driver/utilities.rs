@@ -935,16 +935,31 @@ impl OpenCADStudio {
         } else {
             input
         };
+        // A typed point after an object snap override snaps where it lands.
+        let mut snapped = None;
+        let input = match input {
+            StepInput::Point(point) if !default_start => match self.typed_override_snap(i, point) {
+                Some(Err(())) => return (Task::none(), true),
+                Some(Ok(Some(hit))) => {
+                    let world = hit.world;
+                    snapped = Some(hit);
+                    StepInput::Point(world)
+                }
+                _ => StepInput::Point(point),
+            },
+            other => other,
+        };
         if let StepInput::Point(point) = &input {
             if !self.command_point_allowed(i, *point) {
                 return (Task::none(), true);
             }
             self.angle_override = None;
-            // Typed / dynamic-input / headless points carry no snap, but the
-            // accepted-snap list must stay index-parallel with the points the
-            // command collects. Interactive picks record themselves in
-            // the click handler and never reach here.
-            if !self.record_accepted_snap(i, None, None, *point) {
+            // Typed / dynamic-input / headless points carry no snap (unless an
+            // override snapped them), but the accepted-snap list must stay
+            // index-parallel with the points the command collects.
+            // Interactive picks record themselves in the click handler and
+            // never reach here.
+            if !self.record_accepted_snap(i, snapped, None, *point) {
                 return (Task::none(), true);
             }
             self.snapper.clear_override();

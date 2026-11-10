@@ -102,6 +102,69 @@ impl OpenCADStudio {
         (!offered).then_some(kind)
     }
 
+    /// A typed coordinate under a one-shot object snap override (`END` then
+    /// `40.5,0`) snaps the way a pick at that point would: the feature of the
+    /// override's kind nearest the point on the object under the aperture
+    /// there. `None` when no override is waiting; `Some(Err(()))` when none
+    /// is found — the point is refused and the prompt asks again, the
+    /// override spent.
+    pub(crate) fn typed_override_snap(
+        &mut self,
+        i: usize,
+        wcs: glam::DVec3,
+    ) -> Option<Result<Option<SnapResult>, ()>> {
+        let mode = self.snapper.pending_override()?;
+        let Some(mode) = mode else {
+            return Some(Ok(None));
+        };
+        let from = self.last_point;
+        if let Some(hit) = self.snap_query(i, wcs, from) {
+            return Some(Ok(Some(hit)));
+        }
+        // No feature inside the aperture: the object under it answers with
+        // its own nearest feature of that kind, however far along it lies.
+        let saved = std::mem::replace(
+            &mut self.snapper.enabled,
+            std::iter::once(crate::snap::SnapType::Nearest).collect(),
+        );
+        let under = self.snap_query(i, wcs, from);
+        self.snapper.enabled = saved;
+        let owner = under.and_then(|hit| hit.source).map(|source| source.handle);
+        if let Some(owner) = owner {
+            let wires: Vec<_> = self.tabs[i]
+                .scene
+                .hit_test_wires()
+                .iter()
+                .filter(|wire| {
+                    crate::scene::Scene::handle_from_wire_name(&wire.name) == Some(owner)
+                })
+                .cloned()
+                .collect();
+            let radius = self.snapper.osnap_radius_px;
+            self.snapper.osnap_radius_px = f32::MAX / 4.0;
+            let hit = self.snap_over_wires(i, wcs, from, &wires);
+            self.snapper.osnap_radius_px = radius;
+            if let Some(hit) = hit {
+                return Some(Ok(Some(hit)));
+            }
+        }
+        let label = crate::snap::ALL_SNAP_MODES
+            .iter()
+            .chain(crate::snap::ALL_3D_SNAP_MODES.iter())
+            .find(|(m, _, _)| *m == mode)
+            .map(|(_, _, l)| *l)
+            .unwrap_or("Snap");
+        self.command_line
+            .push_rejection(crate::tf!("No {label} found for specified point.").as_ref());
+        self.command_line
+            .push_rejection(crate::t!("Invalid point.").as_ref());
+        self.snapper.clear_override();
+        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+            self.command_line.push_info(&prompt);
+        }
+        Some(Err(()))
+    }
+
     /// Keys while the snap override menu is open: a snap's letter (see
     /// [`crate::snap::override_menu_key`]) picks it; any other command-line
     /// key is swallowed so it cannot land in the prompt behind the menu.

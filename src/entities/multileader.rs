@@ -3022,7 +3022,14 @@ impl MultiLeaderFrameTess for MultiLeader {
                         wcs_corners[3],
                     ];
                     wires.push(WireModel {
-                        bg_adapt: None,
+                        bg_adapt: (!selected && ctx.background_fill_enabled).then(|| {
+                            Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                                raw_color: fill_color,
+                                canvas_color: true,
+                                preserve_color: true,
+                                ..Default::default()
+                            })
+                        }),
                         point_marker: None,
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
@@ -3197,6 +3204,12 @@ mod tests {
             .find(|w| w.fill_tris.len() == 6 && w.points.is_empty() && w.text_verts.is_empty())
             .expect("Should produce a background mask quad");
         assert_eq!(mask.color, bg_color);
+        assert!(
+            mask.bg_adapt
+                .as_deref()
+                .is_some_and(|adapt| adapt.canvas_color),
+            "the drawing-background mask must keep its semantic canvas tag"
+        );
     }
 
     #[test]

@@ -1077,6 +1077,55 @@ mod tests {
     }
 
     #[test]
+    fn mtext_canvas_mask_is_white_on_paper_but_explicit_fill_keeps_its_color() {
+        for (flags, expected_fill) in [(0x02, "#ffffff"), (0x01, "#ff0000")] {
+            let mut text = document::entities::MText::with_value(
+                "MASK",
+                document::types::Vector3::new(10.0, 10.0, 0.0),
+            );
+            text.height = 2.5;
+            text.background_fill_flags = flags;
+            text.background_color = document::types::Color::Index(1);
+            let wires = crate::scene::convert::tessellate::tessellate(
+                &document::Document::new(),
+                document::Handle::new(123),
+                &document::EntityType::MText(Box::new(text)),
+                false,
+                [1.0; 4],
+                0.0,
+                [0.0; 8],
+                1.0,
+                1.0,
+                None,
+                None,
+                [0.0, 0.0, 0.0, 1.0],
+                false,
+            );
+            let fills = wires
+                .into_iter()
+                .filter(|wire| wire.points.is_empty() && !wire.fill_tris.is_empty())
+                .map(|wire| PlotWire {
+                    wire,
+                    draw_depth: 0.5,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(fills.len(), 1, "flags={flags:#x}");
+            let content = crate::io::plot::PlotContent {
+                wires: std::sync::Arc::new(fills),
+                ..Default::default()
+            };
+            let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
+            assert!(
+                svg.lines().any(|line| {
+                    line.starts_with("<path")
+                        && line.contains(&format!("fill=\"{expected_fill}\""))
+                }),
+                "flags={flags:#x}: wrong mask color in {svg}"
+            );
+        }
+    }
+
+    #[test]
     fn clip_rect_becomes_a_clip_path() {
         let mut page = page_with(Default::default(), 210.0, 297.0);
         page.clip = Some((10.0, 20.0, 100.0, 50.0));

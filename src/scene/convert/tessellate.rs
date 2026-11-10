@@ -1709,7 +1709,14 @@ fn tessellate_wires(
                                         }
                                     }
                                     wires.push(WireModel {
-                                        bg_adapt: None,
+                                        bg_adapt: (m.background_fill_flags & 0x02 != 0).then(|| {
+                                            Box::new(crate::scene::model::wire_model::BgAdaptInputs {
+                                                raw_color: fill_color,
+                                                canvas_color: true,
+                                                preserve_color: true,
+                                                ..Default::default()
+                                            })
+                                        }),
                                         point_marker: None,
                                         taper_widths: Vec::new(),
                                         pattern_stations: Vec::new(),

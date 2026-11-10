@@ -141,6 +141,12 @@ impl PluginPanelState {
 
     pub fn update_values(&mut self, values: HashMap<String, DialogValue>) {
         for (k, v) in values {
+            if k == "title" {
+                if let DialogValue::Text(title) = v {
+                    self.def.title = title;
+                }
+                continue;
+            }
             match v {
                 DialogValue::Text(s) => {
                     self.text_values.insert(k, s);
@@ -1417,6 +1423,26 @@ mod tests {
         ] {
             assert_eq!(snapshot.raw_text.get(id).map(String::as_str), Some(raw));
         }
+    }
+
+    #[test]
+    fn title_updates_preserve_live_form_values_and_control_schema() {
+        let mut state = panel_state(vec![text_control("length", "1.0")]);
+        let original_controls = state.def.controls.clone();
+        state.update_values(HashMap::from([
+            (
+                "title".to_string(),
+                DialogValue::Text("IFC properties - Alignment-Axis-h-seg-001".to_string()),
+            ),
+            (
+                "length".to_string(),
+                DialogValue::Text("2.5".to_string()),
+            ),
+        ]));
+        assert_eq!(state.def.title, "IFC properties - Alignment-Axis-h-seg-001");
+        assert_eq!(state.def.controls, original_controls);
+        assert_eq!(state.text_values.get("length").map(String::as_str), Some("2.5"));
+        assert!(!state.text_values.contains_key("title"));
     }
 
     #[test]

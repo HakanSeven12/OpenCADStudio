@@ -17801,4 +17801,53 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(!host.update_panel_for_plugin("OTHER", "panel", std::collections::HashMap::new(),));
         assert!(host.panel_snapshot_for_plugin("OTHER", "Panel").is_err());
     }
+
+    #[test]
+    fn api17_explicit_plugin_panel_reopens_in_clean_screen_without_document_writes() {
+        use ocs_plugin_api::dialog::{DialogControl, PanelDef};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        app.clean_screen = true;
+        let mut host = HostSession::new(&mut app, 0);
+        for id in ["cvifc.ifc_h_properties", "cvifc.ifc_v_properties"] {
+            let panel = PanelDef::new(id, "IFC Alignment Segment")
+                .with_command(format!("CVI_IFC_{}_PANEL", if id.ends_with("h_properties") { "H" } else { "V" }))
+                .with_control(DialogControl::Text {
+                    id: "source_record".into(),
+                    label: "Source record".into(),
+                    default: "Alignment-Axis-h-seg-001".into(),
+                })
+                .with_control(DialogControl::Button {
+                    id: "apply".into(),
+                    label: "Apply".into(),
+                    action: Some("CVI_IFC_PANEL_APPLY".into()),
+                    align_h: None,
+                    width: None,
+                });
+            assert!(host.register_panel_for_plugin("opencad.civil_ifc", panel));
+        }
+        let panel_id = crate::ui::dock::PanelId::Plugin(1);
+        let other_id = crate::ui::dock::PanelId::Plugin(2);
+        assert!(!host.app.dock_panel_visible(panel_id));
+        assert!(host.toggle_panel_for_plugin(
+            "opencad.civil_ifc",
+            "cvifc.ifc_h_properties",
+            Some(true),
+        ));
+        assert!(host.app.dock_panel_visible(panel_id));
+        assert!(
+            matches!(
+                host.app.dock.location(panel_id),
+                Some((crate::app::config::DockSide::Right, _))
+            ),
+            "an explicit show places a new panel into the default dock"
+        );
+        assert!(host.app.dock_panel_on_screen(panel_id));
+        assert!(!host.app.dock_panel_visible(other_id));
+        assert!(host.app.plugin_panels["cvifc.ifc_h_properties"].visible);
+        assert!(!host.app.plugin_panels["cvifc.ifc_v_properties"].visible);
+        assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
+        assert!(host.app.tabs[0].history.pending.is_none());
+    }
 }

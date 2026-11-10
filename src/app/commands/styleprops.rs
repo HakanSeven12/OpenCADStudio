@@ -4795,6 +4795,11 @@ impl OpenCADStudio {
             if type_str != "LAYER" {
                 self.tabs[i].scene.bump_geometry_no_blocks();
             }
+            if type_str == "BLOCK" {
+                // The palette's rows show definition names; a rename moves
+                // them.
+                self.refresh_block_palette();
+            }
             if type_str == "UCS" {
                 self.tabs[i].scene.bump_ucs_epoch();
                 if let Some(active) = self.tabs[i].active_ucs.as_mut() {

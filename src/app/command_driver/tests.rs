@@ -7460,6 +7460,90 @@ mod batch6_tests {
     }
 
     #[test]
+    fn blocks_palette_menu_renames_a_definition_and_rekeys_its_references() {
+        use crate::app::Message;
+        use crate::ui::window::block_palette::{BlockPaletteMsg, Item, MenuAction};
+
+        let mut app = new_app();
+        let i = app.active_tab;
+        {
+            let doc = &mut app.tabs[i].scene.document;
+            let mut record = document::tables::BlockRecord::new("VALVE");
+            record.handle = doc.allocate_handle();
+            let owner = record.handle;
+            doc.block_records.add(record).unwrap();
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::ZERO;
+            line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
+            line.common.owner_handle = owner;
+            let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+            doc.block_records.get_mut("VALVE").unwrap().entity_handles = vec![line_handle];
+            let insert = document::entities::Insert::new(
+                "VALVE",
+                document::types::Vector3::new(5.0, 5.0, 0.0),
+            );
+            let _ = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        }
+
+        // Right-click the current-drawing entry and choose Rename Block.
+        let _ = app.update(Message::BlockPalette(BlockPaletteMsg::Menu(
+            Item::Current("VALVE".into()),
+            MenuAction::Rename,
+        )));
+        let out = out_text(&app);
+        assert!(out.contains("Enter new block name"), "{out}");
+
+        // Type the new name; nothing happens until it is submitted.
+        let _ = app.feed_active_cmd("GATE-VALVE");
+        let out = out_text(&app);
+        assert!(out.contains("RENAME"), "{out}");
+        let doc = &app.tabs[i].scene.document;
+        assert!(doc.block_records.get("VALVE").is_none(), "old name is gone");
+        assert!(
+            doc.block_records.get("GATE-VALVE").is_some(),
+            "the new name exists in the table"
+        );
+        let insert = doc
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert),
+                _ => None,
+            })
+            .expect("the reference exists");
+        assert_eq!(insert.block_name, "GATE-VALVE", "the reference follows");
+    }
+
+    #[test]
+    fn blocks_palette_rename_cancelled_with_empty_input_changes_nothing() {
+        use crate::app::Message;
+        use crate::ui::window::block_palette::{BlockPaletteMsg, Item, MenuAction};
+
+        let mut app = new_app();
+        let i = app.active_tab;
+        {
+            let doc = &mut app.tabs[i].scene.document;
+            let mut record = document::tables::BlockRecord::new("VALVE");
+            record.handle = doc.allocate_handle();
+            doc.block_records.add(record).unwrap();
+        }
+
+        let _ = app.update(Message::BlockPalette(BlockPaletteMsg::Menu(
+            Item::Current("VALVE".into()),
+            MenuAction::Rename,
+        )));
+        assert!(app.tabs[i].active_cmd.is_some(), "the rename command starts");
+        let _ = app.feed_active_cmd("");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .contains("VALVE"),
+            "the empty input leaves the definition alone"
+        );
+    }
+
+    #[test]
     fn dimstyle_compare_reports_all_differing_variables() {
         let mut app = new_app();
         let _ = app.run_command_line(r#"-DIMSTYLE ["SAVE", "SHEET-A"]"#);

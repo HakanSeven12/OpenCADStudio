@@ -6,12 +6,59 @@ use std::path::{Path, PathBuf};
 
 use crate::app::settings::PaletteBlockRef;
 use crate::app::{Message, OpenCADStudio};
+use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::modules::insert::insert_block::{BlockCatalog, InsertBlockCommand};
 use crate::ui::window::block_palette::{
     BlockEntry, BlockPaletteMsg, BlockPreview, ChangeHint, Item, LibraryEntry, MenuAction,
     OptionMsg, Tab,
 };
+use glam::DVec3;
 use iced::Task;
+
+/// A one-line prompt for a palette block's new name. The answer runs
+/// through the shared `RENAME` dispatcher, so the palette, the command
+/// line and plugins all re-key the definition and its references the
+/// same way.
+struct PaletteBlockRenameCommand {
+    old: String,
+}
+
+impl CadCommand for PaletteBlockRenameCommand {
+    fn name(&self) -> &'static str {
+        "BLOCKRENAME"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!("Enter new block name <%{old}>:", old = self.old.as_str()).into_owned()
+    }
+
+    fn input_kind(&self) -> InputKind {
+        InputKind::FreeText
+    }
+
+    fn wants_text_input(&self) -> bool {
+        true
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let value = text.trim();
+        if value.is_empty() {
+            return None;
+        }
+        Some(CmdResult::Dispatch(format!(
+            "RENAME BLOCK {} {value}",
+            self.old
+        )))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
 
 /// Library folders remembered in the Libraries list.
 const MAX_LIBRARIES: usize = 10;
@@ -553,6 +600,15 @@ impl OpenCADStudio {
                     self.block_palette.favorites.retain(|f| !same(f, &r));
                     self.persist_settings_if_changed();
                 }
+            }
+            MenuAction::Rename => {
+                let name = item.name();
+                let i = self.active_tab;
+                self.tabs[i].active_cmd = Some(Box::new(PaletteBlockRenameCommand {
+                    old: name.clone(),
+                }));
+                self.command_line
+                    .push_info(&crate::tf!("Enter new block name <{name}>:"));
             }
             MenuAction::Edit => {
                 let name = item.name();

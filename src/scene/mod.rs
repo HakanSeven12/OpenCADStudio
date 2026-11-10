@@ -9305,7 +9305,7 @@ impl Scene {
         let blk_done = t_patch.elapsed();
         let empty_sel: HashSet<Handle> = HashSet::default();
         let mut new_runs: HashMap<Handle, Vec<WireModel>> = HashMap::default();
-        let mut memo_updates: Vec<(Handle, Arc<Vec<WireModel>>)> = Vec::new();
+        let mut memo_updates: Vec<(Handle, MemoRun)> = Vec::new();
         let mut visible_changed: HashSet<Handle> = HashSet::default();
         // Every geometry edit drops its handle's memo entry, so an entry that
         // survived its delta marks a visibility-only change: its wires come
@@ -9426,7 +9426,18 @@ impl Scene {
             // path is an empty shell). Enrich before the memo/assembly split
             // so both share the same snap-bearing wires.
             self.attach_solid_snaps(h, &mut raw);
-            memo_updates.push((h, Arc::new(raw.clone())));
+            // A set the memo shares its runs with holds these wires as they
+            // are: the memo is bound to it below and needs no copy of its
+            // own. Should the patch decline first, a pending entry counts as
+            // a miss and the full build tessellates the entity again.
+            memo_updates.push((
+                h,
+                if shareable {
+                    MemoRun::Pending
+                } else {
+                    MemoRun::Owned(Arc::new(raw.clone()))
+                },
+            ));
             let mut faded = raw;
             self.apply_refedit_fade(&mut faded, bg);
             new_runs.insert(h, faded);
@@ -9434,8 +9445,8 @@ impl Scene {
         let tessellated = memo_updates.len();
         {
             let mut memo = self.resident_tess_memo.borrow_mut();
-            for (h, a) in memo_updates {
-                memo.insert(h, MemoRun::Owned(a));
+            for (h, run) in memo_updates {
+                memo.insert(h, run);
             }
         }
         let tess_done = t_patch.elapsed();
@@ -9500,6 +9511,15 @@ impl Scene {
         // blanks the old slots; same-shaped Undo/Redo restores them in place.
         // Only a true tail add/resize touches Vec length (and shifts the handful
         // of synthesized marker wires, never the drawing's entity runs).
+        // The GPU patch takes a copy of every changed run. With thousands of
+        // them, the copies are made side by side.
+        let mut gpu_copies: HashMap<Handle, Arc<Vec<WireModel>>> = {
+            use crate::par::prelude::*;
+            new_runs
+                .par_iter()
+                .map(|(handle, run)| (*handle, Arc::new(run.clone())))
+                .collect()
+        };
         let mut gpu_runs: HashMap<Handle, Arc<Vec<WireModel>>> = HashMap::default();
         let mut index_edits = Vec::new();
         for &(handle, kind) in &deltas {
@@ -9508,7 +9528,7 @@ impl Scene {
             } else {
                 new_runs.remove(&handle).unwrap_or_default()
             };
-            gpu_runs.insert(handle, Arc::new(new_run.clone()));
+            gpu_runs.insert(handle, gpu_copies.remove(&handle).unwrap_or_default());
             let new_len = new_run.len();
             let old_range = layout.ranges.remove(&handle);
 
@@ -9517,26 +9537,38 @@ impl Scene {
                     if start + old_len > layout.marker_start {
                         return declined("hide-outside-entity-runs");
                     }
-                    // A hidden entity's memo run lives in these slots: copy it
-                    // out before blanking them, for when it is shown again.
-                    if backed_here && !matches!(kind, ChangeKind::Removed) {
-                        let mut memo = self.resident_tess_memo.borrow_mut();
-                        if let Some(run) = memo.get_mut(&handle) {
-                            if matches!(run, MemoRun::InSet) {
-                                *run = MemoRun::Owned(Arc::new(
-                                    owned[start..start + old_len].to_vec(),
-                                ));
-                            }
-                        }
-                    }
-                    for slot in &mut owned[start..start + old_len] {
-                        *slot = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
-                        slot.aabb = [
+                    let blank = || {
+                        let mut wire = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
+                        wire.aabb = [
                             f32::INFINITY,
                             f32::INFINITY,
                             f32::NEG_INFINITY,
                             f32::NEG_INFINITY,
                         ];
+                        wire
+                    };
+                    // A hidden entity's memo run lives in these slots: it
+                    // moves out as they are blanked, for when it is shown
+                    // again.
+                    let mut moved_out = false;
+                    if backed_here && !matches!(kind, ChangeKind::Removed) {
+                        let mut memo = self.resident_tess_memo.borrow_mut();
+                        if let Some(run) = memo.get_mut(&handle) {
+                            if matches!(run, MemoRun::InSet) {
+                                *run = MemoRun::Owned(Arc::new(
+                                    owned[start..start + old_len]
+                                        .iter_mut()
+                                        .map(|slot| std::mem::replace(slot, blank()))
+                                        .collect(),
+                                ));
+                                moved_out = true;
+                            }
+                        }
+                    }
+                    if !moved_out {
+                        for slot in &mut owned[start..start + old_len] {
+                            *slot = blank();
+                        }
                     }
                     layout.vacant.insert(handle, (start, old_len));
                     layout.tombstoned_wires = layout.tombstoned_wires.saturating_add(old_len);

@@ -88,6 +88,7 @@ cosmic-text = "0.15"
 unicode-bidi = "0.3"
 lyon_tessellation = "1.0.20"
 pollster = "0.4"
+lru = { version = "0.16.4", default-features = false }
 
 [dev-dependencies]
 fluent-syntax = "0.12"

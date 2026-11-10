@@ -17,7 +17,9 @@
 
 use crate::scene::text::lff::Glyph;
 use crate::scene::text::sysfont;
+use lru::LruCache;
 use rustc_hash::FxHashMap as HashMap;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lyon_tessellation::math::point;
@@ -651,11 +653,189 @@ pub fn char_cells(run: &ShapedRun, text: &str) -> Vec<(f32, f32)> {
 /// left to right; layout also uses it to close a right-to-left run.
 pub(crate) const LRM: char = '\u{200E}';
 
-type ShapeCache = HashMap<(String, String), Option<Arc<ShapedRun>>>;
+// A shaped run owns positioned copies of every outline and fill triangle. A
+// drawing with thousands of distinct strings can otherwise retain those copies
+// for the entire process lifetime, even after its document has closed.
+const SHAPE_CACHE_MAX_ENTRIES: usize = 2048;
+const SHAPE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+struct CachedShape {
+    value: Option<Arc<ShapedRun>>,
+    estimated_bytes: usize,
+}
+
+struct ShapeCache {
+    entries: LruCache<(String, String), CachedShape>,
+    estimated_bytes: usize,
+    max_bytes: usize,
+}
+
+impl ShapeCache {
+    fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: LruCache::new(NonZeroUsize::new(max_entries).expect("nonzero cache capacity")),
+            estimated_bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(&mut self, key: &(String, String)) -> Option<Option<Arc<ShapedRun>>> {
+        self.entries.get(key).map(|entry| entry.value.clone())
+    }
+
+    fn insert(&mut self, key: (String, String), value: Option<Arc<ShapedRun>>) {
+        let bytes = estimated_shape_bytes(&key, &value);
+        if bytes > self.max_bytes {
+            return;
+        }
+        if let Some(old) = self.entries.pop(&key) {
+            self.estimated_bytes -= old.estimated_bytes;
+        }
+        while self.estimated_bytes > self.max_bytes - bytes {
+            let Some((_, old)) = self.entries.pop_lru() else {
+                break;
+            };
+            self.estimated_bytes -= old.estimated_bytes;
+        }
+        if let Some((_, old)) = self.entries.push(
+            key,
+            CachedShape {
+                value,
+                estimated_bytes: bytes,
+            },
+        ) {
+            self.estimated_bytes -= old.estimated_bytes;
+        }
+        self.estimated_bytes += bytes;
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.estimated_bytes = 0;
+    }
+}
+
+/// Estimate owned capacity, including keys and positioned outlines. Allocator
+/// bookkeeping and the cache's hash table are not included; the entry limit
+/// independently bounds its per-entry bookkeeping.
+fn estimated_shape_bytes(key: &(String, String), value: &Option<Arc<ShapedRun>>) -> usize {
+    use std::mem::size_of;
+    let mut bytes = size_of::<(String, String)>()
+        .saturating_add(size_of::<CachedShape>())
+        .saturating_add(key.0.capacity())
+        .saturating_add(key.1.capacity());
+    if let Some(run) = value {
+        bytes = bytes
+            .saturating_add(size_of::<ShapedRun>())
+            .saturating_add(2 * size_of::<usize>())
+            .saturating_add(
+                run.glyphs
+                    .capacity()
+                    .saturating_mul(size_of::<PlacedGlyph>()),
+            )
+            .saturating_add(
+                run.cells
+                    .capacity()
+                    .saturating_mul(size_of::<(usize, usize, f32, f32)>()),
+            );
+        for glyph in &run.glyphs {
+            bytes = bytes
+                .saturating_add(
+                    glyph
+                        .strokes
+                        .capacity()
+                        .saturating_mul(size_of::<Vec<[f32; 2]>>()),
+                )
+                .saturating_add(
+                    glyph
+                        .fill_tris
+                        .capacity()
+                        .saturating_mul(size_of::<[f32; 2]>()),
+                );
+            for contour in &glyph.strokes {
+                bytes =
+                    bytes.saturating_add(contour.capacity().saturating_mul(size_of::<[f32; 2]>()));
+            }
+        }
+    }
+    bytes
+}
 
 fn shape_cache() -> &'static Mutex<ShapeCache> {
     static CACHE: OnceLock<Mutex<ShapeCache>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::default()))
+    CACHE.get_or_init(|| {
+        Mutex::new(ShapeCache::new(
+            SHAPE_CACHE_MAX_ENTRIES,
+            SHAPE_CACHE_MAX_BYTES,
+        ))
+    })
+}
+
+#[cfg(test)]
+mod shape_cache_tests {
+    use super::*;
+
+    fn key(text: &str) -> (String, String) {
+        ("Arial".into(), text.into())
+    }
+
+    fn run() -> Arc<ShapedRun> {
+        Arc::new(ShapedRun {
+            glyphs: vec![PlacedGlyph {
+                strokes: vec![vec![[1.0, 2.0], [3.0, 4.0]]],
+                fill_tris: vec![[5.0, 6.0]],
+            }],
+            advance: 12.0,
+            cells: vec![(0, 1, 0.0, 12.0)],
+        })
+    }
+
+    #[test]
+    fn evicts_the_least_recently_used_entry_and_keeps_borrowed_runs_alive() {
+        let mut cache = ShapeCache::new(2, usize::MAX);
+        let first = run();
+        cache.insert(key("a"), Some(first.clone()));
+        cache.insert(key("b"), Some(run()));
+        assert!(Arc::ptr_eq(&cache.get(&key("a")).unwrap().unwrap(), &first));
+        cache.insert(key("c"), Some(run()));
+        assert!(cache.get(&key("b")).is_none());
+        assert!(cache.get(&key("a")).is_some());
+        assert!(cache.get(&key("c")).is_some());
+        assert_eq!(first.glyphs[0].strokes[0][0], [1.0, 2.0]);
+    }
+
+    #[test]
+    fn byte_budget_evicts_and_replacement_keeps_accounting_correct() {
+        let value = Some(run());
+        let bytes = estimated_shape_bytes(&key("a"), &value);
+        let mut cache = ShapeCache::new(10, bytes * 2);
+        cache.insert(key("a"), value.clone());
+        cache.insert(key("b"), value.clone());
+        cache.insert(key("c"), value);
+        assert!(cache.get(&key("a")).is_none());
+        assert!(cache.estimated_bytes <= bytes * 2);
+        cache.insert(key("c"), None);
+        assert!(matches!(cache.get(&key("c")), Some(None)));
+        let expected: usize = cache
+            .entries
+            .iter()
+            .map(|(_, item)| item.estimated_bytes)
+            .sum();
+        assert_eq!(cache.estimated_bytes, expected);
+        cache.clear();
+        assert_eq!(cache.estimated_bytes, 0);
+        assert!(cache.get(&key("c")).is_none());
+    }
+
+    #[test]
+    fn oversized_run_is_not_retained() {
+        let value = Some(run());
+        let bytes = estimated_shape_bytes(&key("a"), &value);
+        let mut cache = ShapeCache::new(2, bytes - 1);
+        cache.insert(key("a"), value);
+        assert!(cache.get(&key("a")).is_none());
+        assert_eq!(cache.estimated_bytes, 0);
+    }
 }
 
 /// Pixel font size the layout runs at. Positions and outlines are normalized
@@ -687,7 +867,7 @@ pub fn shape_run(family: &str, text: &str) -> Option<Arc<ShapedRun>> {
     }
     let key = (family.to_string(), text.to_string());
     if let Some(hit) = shape_cache().lock().unwrap().get(&key) {
-        return hit.clone();
+        return hit;
     }
 
     let built = build_shaped(family, text).map(Arc::new);

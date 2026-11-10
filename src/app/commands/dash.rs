@@ -1232,7 +1232,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn dash_linetype_export(&mut self, i: usize, names: &str, file: &str) {
+    pub(in crate::app) fn dash_linetype_export(&mut self, i: usize, names: &str, file: &str) {
         use crate::io::linetypes::writer;
         if !self.linetype_files_available() {
             return;
@@ -1268,7 +1268,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn dash_linetype_save(&mut self, i: usize, name: &str) {
+    pub(in crate::app) fn dash_linetype_save(&mut self, i: usize, name: &str) {
         use crate::io::linetypes::{catalog_has, writer};
         if !self.linetype_files_available() {
             return;
@@ -1309,7 +1309,7 @@ impl OpenCADStudio {
         }
     }
 
-    fn dash_linetype_reload(&mut self) {
+    pub(in crate::app) fn dash_linetype_reload(&mut self) {
         if !self.linetype_files_available() {
             return;
         }

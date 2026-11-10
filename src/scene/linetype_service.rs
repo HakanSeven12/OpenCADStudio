@@ -15,7 +15,7 @@ use document::tables::linetype::LineTypeElement;
 use document::tables::LineType;
 use document::types::Handle;
 use document::{Document, EntityType};
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashMap;
 use std::fmt;
 
 /// `.lin` files and DXF readers allow this many dash-length specifications.
@@ -87,8 +87,9 @@ impl std::error::Error for LinetypeError {}
 /// that do not carry a name, so they keep working through a rename.
 #[derive(Default)]
 pub struct LinetypeUsage {
-    names: FxHashSet<String>,
-    handles: FxHashSet<Handle>,
+    names: FxHashMap<String, usize>,
+    handles: FxHashMap<Handle, usize>,
+    current: String,
 }
 
 impl LinetypeUsage {
@@ -136,7 +137,7 @@ impl LinetypeUsage {
         for layer in doc.layers.iter() {
             usage.name(&layer.line_type);
         }
-        usage.name(&doc.header.current_linetype_name);
+        usage.current = doc.header.current_linetype_name.to_uppercase();
         for style in doc.dim_styles.iter() {
             usage.handle(Some(style.dimltex_handle));
             usage.handle(Some(style.dimltex1_handle));
@@ -165,19 +166,29 @@ impl LinetypeUsage {
 
     fn name(&mut self, name: &str) {
         if !name.is_empty() {
-            self.names.insert(name.to_uppercase());
+            *self.names.entry(name.to_uppercase()).or_default() += 1;
         }
     }
 
     fn handle(&mut self, handle: Option<Handle>) {
         if let Some(handle) = handle.filter(|handle| !handle.is_null()) {
-            self.handles.insert(handle);
+            *self.handles.entry(handle).or_default() += 1;
         }
     }
 
+    /// Whether the drawing needs `linetype`, the current one included.
     pub fn contains(&self, linetype: &LineType) -> bool {
-        self.names.contains(&linetype.name.to_uppercase())
-            || self.handles.contains(&linetype.handle)
+        self.current == linetype.name.to_uppercase() || self.count(linetype) > 0
+    }
+
+    /// How many objects, layers and styles refer to `linetype`.
+    pub fn count(&self, linetype: &LineType) -> usize {
+        let named = self
+            .names
+            .get(&linetype.name.to_uppercase())
+            .copied()
+            .unwrap_or(0);
+        named + self.handles.get(&linetype.handle).copied().unwrap_or(0)
     }
 }
 
@@ -357,19 +368,49 @@ pub fn apply_rename(doc: &mut Document, rename: &LinetypeRename) -> Result<Handl
 /// Point everything that stores linetype `old` by name at `new`. References
 /// by handle follow the table entry on their own.
 pub fn rename_references(doc: &mut Document, old: &str, new: &str) {
+    for handle in entities_naming(doc, old) {
+        if let Some(entity) = doc.get_entity_mut(handle) {
+            retarget_entity(entity, old, new);
+        }
+    }
+    rename_table_references(doc, old, new);
+}
+
+/// The entities that store linetype `name`, on themselves or an attribute.
+pub fn entities_naming(doc: &Document, name: &str) -> Vec<Handle> {
+    let names = |linetype: &str| linetype.eq_ignore_ascii_case(name);
+    doc.entities()
+        .filter(|entity| {
+            names(&entity.common().linetype)
+                || matches!(entity, EntityType::Insert(insert)
+                    if insert.attributes.iter().any(|a| names(&a.common.linetype)))
+        })
+        .map(|entity| entity.common().handle)
+        .collect()
+}
+
+pub fn retarget_entity(entity: &mut EntityType, old: &str, new: &str) {
     let retarget = |slot: &mut String| {
         if slot.eq_ignore_ascii_case(old) {
             *slot = new.to_owned();
         }
     };
-    for entity in doc.entities_mut() {
-        retarget(&mut entity.common_mut().linetype);
-        if let EntityType::Insert(insert) = entity {
-            for attribute in &mut insert.attributes {
-                retarget(&mut attribute.common.linetype);
-            }
+    retarget(&mut entity.common_mut().linetype);
+    if let EntityType::Insert(insert) = entity {
+        for attribute in &mut insert.attributes {
+            retarget(&mut attribute.common.linetype);
         }
     }
+}
+
+/// Everything but entities: layers, the current linetype, multiline styles
+/// and saved layer states.
+pub fn rename_table_references(doc: &mut Document, old: &str, new: &str) {
+    let retarget = |slot: &mut String| {
+        if slot.eq_ignore_ascii_case(old) {
+            *slot = new.to_owned();
+        }
+    };
     for layer in doc.layers.iter_mut() {
         retarget(&mut layer.line_type);
     }

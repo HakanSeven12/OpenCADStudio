@@ -781,14 +781,7 @@ fn split_quoted_keeps_quoted_runs_together() {
 
 // ── Linetype files ───────────────────────────────────────────────────────
 
-/// The library folder and the catalog are one per process.
-static LIBRARY: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn library_lock() -> std::sync::MutexGuard<'static, ()> {
-    LIBRARY
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+use super::linetype_library_lock as library_lock;
 
 fn file_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(

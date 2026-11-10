@@ -240,7 +240,13 @@ impl OpenCADStudio {
             }
 
             // ── LINETYPE management ───────────────────────────────────────
-            "LINETYPE" | "LT" => {
+            "LINETYPE" | "LT" | "DDLTYPE" => {
+                return Some(
+                    self.on_linetype_message(crate::ui::style::linetype::LinetypeMsg::Open),
+                );
+            }
+            // A bare LINETYPE in a script keeps its prompts.
+            "LINETYPE PROMPT" => {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
                     "LINETYPE",
@@ -263,6 +269,11 @@ impl OpenCADStudio {
                 let parts = dash::split_quoted(raw_rest);
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
+                    "DIALOG" | "UI" => {
+                        return Some(
+                            self.on_linetype_message(crate::ui::style::linetype::LinetypeMsg::Open),
+                        );
+                    }
                     // Load the definitions of a `.lin` file (#1588).
                     "LOAD" | "L" => {
                         return Some(Task::perform(

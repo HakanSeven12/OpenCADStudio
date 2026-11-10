@@ -50,6 +50,12 @@ pub struct Scaffold<'a, 'b> {
     /// Referenced styles may be copied but not changed, renamed, deleted, or
     /// made current.
     pub read_only: bool,
+    /// A locked entry can still be made current and Apply stays on: ByLayer
+    /// and the like are read only but are ordinary choices of current.
+    pub locked_keeps_actions: bool,
+    /// Told where the list has scrolled, for a manager whose arrow keys
+    /// keep the selection in view.
+    pub on_list_scroll: Option<fn(iced::widget::scrollable::Viewport) -> Message>,
     /// "Styles in use" list filter: whether it is on and the message that
     /// sets it. `None` for managers without one.
     pub in_use_filter: Option<(bool, fn(bool) -> Message)>,
@@ -80,6 +86,11 @@ const DELETE: &[u8] = include_bytes!("../../../assets/icons/ui/trash.svg");
 const IMPORT: &[u8] = include_bytes!("../../../assets/icons/ui/import.svg");
 const SET_CURRENT: &[u8] = include_bytes!("../../../assets/icons/ui/set_current.svg");
 const APPLY: &[u8] = include_bytes!("../../../assets/icons/ui/check.svg");
+
+/// The Linetype Manager's list, scrolled to follow its arrow keys.
+pub fn linetype_list_id() -> iced::widget::Id {
+    iced::widget::Id::new("linetype-manager-list")
+}
 
 pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
     let width = s.sizing.width;
@@ -139,14 +150,14 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .push(tool_button(
             SET_CURRENT,
             t!("Set Current"),
-            (!s.read_only).then_some(s.on_set_current),
+            (!s.read_only || s.locked_keeps_actions).then_some(s.on_set_current),
             false,
             compact,
         ))
         .push(tool_button(
             APPLY,
             t!("Apply"),
-            (!s.read_only && editable).then_some(s.on_apply),
+            ((!s.read_only || s.locked_keeps_actions) && editable).then_some(s.on_apply),
             true,
             compact,
         ))
@@ -196,11 +207,15 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
             text(t!("Styles")).size(10).style(muted_text_style),
             filter,
             // The scrollbar gets its own gutter instead of covering the counts.
-            container(
-                scrollable(column(rows).spacing(1))
+            container({
+                let list = scrollable(column(rows).spacing(1))
                     .spacing(2)
-                    .height(height)
-            )
+                    .height(height);
+                match s.on_list_scroll {
+                    Some(on_scroll) => list.id(linetype_list_id()).on_scroll(on_scroll),
+                    None => list,
+                }
+            })
             .style(|theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {

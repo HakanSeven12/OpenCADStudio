@@ -5,12 +5,106 @@
 use document::types::Color;
 use document::{Document, EntityType};
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 /// One extractable property: its key, display name and category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Property {
     pub key: &'static str,
     pub name: &'static str,
     pub category: &'static str,
+}
+
+fn leaked(tag: &str) -> &'static str {
+    static KEYS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut keys = KEYS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("extraction catalog lock");
+    if let Some(found) = keys.get(tag) {
+        return found;
+    }
+    let leaked: &'static str = Box::leak(tag.to_string().into_boxed_str());
+    keys.insert(leaked.to_string(), leaked);
+    leaked
+}
+
+/// The prefix of a per-attribute property key.
+///
+/// The `Attribute.` prefix is ours; the rest is the upper-cased tag so the
+/// key never shadows a built-in one.
+pub(crate) const ATTRIBUTE_PREFIX: &str = "Attribute.";
+
+/// The properties for an object's block attributes: one per tag the block
+/// declares, whether the value is placed on this instance or falls back to
+/// the definition's default for constant attributes.
+fn insert_attribute_properties(doc: &Document, insert: &document::entities::Insert) -> Vec<Property> {
+    doc.block_records
+        .get(&insert.block_name)
+        .map(|record| {
+            let mut seen = std::collections::HashSet::new();
+            record
+                .entity_handles
+                .iter()
+                .filter_map(|handle| doc.get_entity(*handle))
+                .filter_map(|entity| match entity {
+                    EntityType::AttributeDefinition(definition) => Some(definition.clone()),
+                    _ => None,
+                })
+                .filter(|definition| {
+                    // Keep the first definition for a repeated tag.
+                    seen.insert(definition.tag.to_uppercase())
+                })
+                .map(|definition| {
+                    let tag = definition.tag.to_uppercase();
+                    Property {
+                        key: leaked(&format!("{ATTRIBUTE_PREFIX}{tag}")),
+                        name: leaked(&tag),
+                        category: ATTRIBUTES,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The block-attribute values of an object, keyed by upper-cased tag.
+fn insert_attribute_values(
+    doc: &Document,
+    insert: &document::entities::Insert,
+) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    if let Some(record) = doc.block_records.get(&insert.block_name) {
+        for handle in &record.entity_handles {
+            if let Some(EntityType::AttributeDefinition(definition)) = doc.get_entity(*handle) {
+                let tag = definition.tag.to_uppercase();
+                if values.contains_key(&tag) {
+                    continue;
+                }
+                let value = if let Some(placed) = insert
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.tag.eq_ignore_ascii_case(&tag))
+                {
+                    placed.value.clone()
+                } else if definition.flags.constant {
+                    definition.default_value.clone()
+                } else {
+                    String::new()
+                };
+                values.insert(tag, value);
+            }
+        }
+    }
+    for attribute in &insert.attributes {
+        // An instance can carry a value for a tag whose definition has been
+        // removed; surface it rather than dropping it silently.
+        values
+            .entry(attribute.tag.to_uppercase())
+            .or_insert_with(|| attribute.value.clone());
+    }
+    values
 }
 
 const fn p(key: &'static str, name: &'static str, category: &'static str) -> Property {
@@ -22,6 +116,7 @@ const fn p(key: &'static str, name: &'static str, category: &'static str) -> Pro
 }
 
 const GENERAL: &str = "General";
+const ATTRIBUTES: &str = "Attributes";
 const GEOMETRY: &str = "Geometry";
 const DRAWING: &str = "Drawing";
 const TEXT: &str = "Text";
@@ -181,20 +276,22 @@ pub(crate) fn object_name(entity: &EntityType) -> (String, bool) {
 }
 
 /// The properties an object offers, in no particular order.
-pub(crate) fn properties(entity: &EntityType) -> Vec<Property> {
+pub(crate) fn properties(entity: &EntityType, doc: &Document) -> Vec<Property> {
     let mut list: Vec<Property> = ENTITY_PROPERTIES.to_vec();
     list.extend(DRAWING_PROPERTIES);
-    let specific: &[Property] = match entity {
-        EntityType::Line(_) => &LINE,
-        EntityType::Circle(_) => &CIRCLE,
-        EntityType::Arc(_) => &ARC,
-        EntityType::Text(_) => &SINGLE_LINE_TEXT,
-        EntityType::MText(_) => &MULTILINE_TEXT,
-        EntityType::LwPolyline(_) => &POLYLINE,
-        EntityType::Insert(_) => &BLOCK,
-        _ => &[],
-    };
-    list.extend_from_slice(specific);
+    match entity {
+        EntityType::Line(_) => list.extend_from_slice(&LINE),
+        EntityType::Circle(_) => list.extend_from_slice(&CIRCLE),
+        EntityType::Arc(_) => list.extend_from_slice(&ARC),
+        EntityType::Text(_) => list.extend_from_slice(&SINGLE_LINE_TEXT),
+        EntityType::MText(_) => list.extend_from_slice(&MULTILINE_TEXT),
+        EntityType::LwPolyline(_) => list.extend_from_slice(&POLYLINE),
+        EntityType::Insert(insert) => {
+            list.extend_from_slice(&BLOCK);
+            list.extend(insert_attribute_properties(doc, insert));
+        }
+        _ => {}
+    }
     if matches!(entity, EntityType::Text(_) | EntityType::MText(_)) {
         list.extend(TEXT_GEOMETRY);
     }
@@ -327,7 +424,7 @@ fn lineweight_text(weight: &document::types::LineWeight) -> String {
 }
 
 /// The value of property `key` for an object, as the extraction shows it.
-pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts) -> String {
+pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts, doc: &Document) -> String {
     let lin = |v: f64| format!("{v:.prec$}", prec = facts.linear_precision);
     let ang = |radians: f64| {
         // Degrees at the angular precision; a full turn reads as zero.
@@ -383,6 +480,15 @@ pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts) -> Str
         "AcDxDwgSummaryDwgTotalEditingTime" => return facts.editing_time.clone(),
         _ => {}
     }
+    if let Some(tag) = key.strip_prefix(ATTRIBUTE_PREFIX) {
+        return match entity {
+            EntityType::Insert(insert) => insert_attribute_values(doc, insert)
+                .remove(tag)
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+    }
+
     match entity {
         EntityType::Line(line) => {
             let d = [

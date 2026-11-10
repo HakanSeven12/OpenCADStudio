@@ -1227,6 +1227,8 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("-SETBYLAYER")
             // BLOCKREPLACE's picked pair arrives as one private apply line.
             || tokens[0].eq_ignore_ascii_case("_BLOCKREPLACE_APPLY")
+            // -LINETYPE takes its option and quoted names on one line.
+            || tokens[0].eq_ignore_ascii_case("-LINETYPE")
             // -DIMSTYLE takes its option list on one line (the write
             // form of VARIABLES), e.g. `-DIMSTYLE VARIABLES ISO-25 DIMTXT 3.0`.
             || tokens[0].eq_ignore_ascii_case("-DIMSTYLE")

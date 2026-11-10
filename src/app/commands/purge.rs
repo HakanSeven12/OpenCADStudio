@@ -152,33 +152,8 @@ pub(crate) fn purge_pass(
         .filter(|row| !row.text_style_name.is_empty())
         .map(|row| row.text_style_name.to_uppercase())
         .collect();
-    // Dimension styles reach their dimension and extension line
-    // linetypes by handle.
-    let dimstyle_linetypes: rustc_hash::FxHashSet<document::Handle> = doc
-        .dim_styles
-        .iter()
-        .flat_map(|ds| [ds.dimltex_handle, ds.dimltex1_handle, ds.dimltex2_handle])
-        .filter(|h| !h.is_null())
-        .collect();
-    // Linetypes: entity references plus every layer's own
-    // linetype — a ByLayer entity reaches it through the layer.
-    let used_linetypes: rustc_hash::FxHashSet<String> = doc
-        .entities()
-        .map(|e| e.common())
-        .chain(insert_attributes().map(|a| &a.common))
-        .filter_map(|common| {
-            let lt = &common.linetype;
-            if lt.is_empty() || lt == "ByLayer" || lt == "ByBlock" {
-                None
-            } else {
-                Some(lt.clone())
-            }
-        })
-        .chain(doc.layers.iter().map(|l| l.line_type.clone()))
-        .chain(std::iter::once(doc.header.current_linetype_name.clone()))
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_uppercase())
-        .collect();
+    // The shared service's scan, so PURGE and a linetype delete agree.
+    let used_linetypes = crate::scene::linetype_service::LinetypeUsage::of(doc);
 
     // Build removal lists (still immutable)
     let layer_remove: Vec<String> = if do_layers {
@@ -221,8 +196,7 @@ pub(crate) fn purge_pass(
             .filter(|lt| {
                 !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
                     && !xref_dependent(&lt.name, lt.xref_dependent)
-                    && !used_linetypes.contains(&lt.name.to_uppercase())
-                    && !dimstyle_linetypes.contains(&lt.handle)
+                    && !used_linetypes.contains(lt)
             })
             .map(|lt| lt.name.clone())
             .collect()

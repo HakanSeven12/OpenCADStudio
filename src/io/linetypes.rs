@@ -327,18 +327,28 @@ pub fn repair_document(doc: &mut Document) {
 /// picker offers beside the drawing's own. Picking one loads it with
 /// [`ensure_catalog_linetype`].
 pub fn catalog_missing_from(doc: &Document) -> Vec<(String, String)> {
-    static CATALOG: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    CATALOG
-        .get_or_init(|| {
-            parse(lin_source())
-                .into_iter()
-                .map(|lt| (lt.name, lt.description))
-                .collect()
-        })
+    catalog()
         .iter()
         .filter(|(name, _)| !doc.line_types.contains(name))
         .cloned()
         .collect()
+}
+
+/// Whether the catalog defines a linetype called `name`.
+pub fn catalog_has(name: &str) -> bool {
+    catalog()
+        .iter()
+        .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+}
+
+fn catalog() -> &'static [(String, String)] {
+    static CATALOG: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        parse(lin_source())
+            .into_iter()
+            .map(|lt| (lt.name, lt.description))
+            .collect()
+    })
 }
 
 /// Load catalog linetype `name` into `doc` when the drawing lacks it.

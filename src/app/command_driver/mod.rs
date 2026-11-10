@@ -1209,6 +1209,15 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::VpLayerOverride {
+                vp_handle,
+                layer,
+                channel,
+                value,
+            } => {
+                self.handle_vp_layer_override(vp_handle, &layer, channel, &value);
+            }
+
             CmdResult::VpLayerUpdate {
                 vp_handle,
                 freeze,

@@ -7214,3 +7214,179 @@ mod batch5_tests {
         assert!(text.contains("reset 1 entity"), "{text}");
     }
 }
+/// Batch 6: per-viewport layer overrides and other gaps closed on HEAD.
+#[cfg(test)]
+mod batch6_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn add_layer(app: &mut OpenCADStudio, name: &str, color: document::types::Color) -> document::Handle {
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+        let mut layer = document::tables::Layer::new(name);
+        layer.handle = doc.allocate_handle();
+        layer.color = color;
+        let handle = layer.handle;
+        doc.layers.add(layer).unwrap();
+        handle
+    }
+
+    /// Add a layout (with its page setup) and a viewport to it; call again
+    /// with the same name to add another viewport to that layout.
+    fn add_viewport(app: &mut OpenCADStudio, layout: &str) -> document::Handle {
+        let i = app.active_tab;
+        if app.tabs[i].scene.add_layout(layout).is_ok() {
+            app.tabs[i].scene.initialize_layout_page_setup(layout);
+        }
+        let next_id = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Viewport(vp) => Some(vp.id),
+                _ => None,
+            })
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(2);
+        let mut viewport = document::entities::Viewport::new();
+        viewport.center = document::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.width = 200.0;
+        viewport.height = 150.0;
+        viewport.id = next_id;
+        viewport.status = document::entities::ViewportStatusFlags::default_on();
+        app.tabs[i]
+            .scene
+            .document
+            .add_entity_to_layout(document::EntityType::Viewport(Box::new(viewport)), layout)
+            .expect("the layout accepts a viewport")
+    }
+
+    #[test]
+    fn vplayer_sets_colour_linetype_lineweight_and_alpha_overrides() {
+        use document::objects::KnownXRecordKind as Kind;
+        type Channel = crate::command::VpOverrideChannel;
+
+        let mut app = new_app();
+        let i = app.active_tab;
+        let walls = add_layer(&mut app, "WALLS", document::types::Color::Index(1));
+        let viewport = add_viewport(&mut app, "Sheet1");
+        let other_viewport = add_viewport(&mut app, "Sheet1");
+
+        // COLOR
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Color, "3");
+        let color_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            Kind::LayerViewportColorOverride,
+        );
+        assert_eq!(color_overrides, vec![(viewport, document::objects::XRecordValue::Int32(0xC300_0003u32 as i32))]);
+        assert!(
+            !color_overrides.iter().any(|(handle, _)| *handle == other_viewport),
+            "viewport 2 must not carry the override: {color_overrides:?}"
+        );
+
+        // LINETYPE (dashed ships in the default linetypes)
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Linetype, "DASHED");
+        let line_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            Kind::LayerViewportLinetypeOverride,
+        );
+        let lt_handle = line_overrides.iter().next().cloned();
+        assert!(lt_handle.is_some(), "{line_overrides:?}");
+
+        // LINEWEIGHT
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Lineweight, "0.53");
+        let lw_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            Kind::LayerViewportLineweightOverride,
+        );
+        assert!(lw_overrides
+            .iter()
+            .any(|(handle, value)| *handle == viewport && *value == document::objects::XRecordValue::Int32(53)));
+
+        // ALPHA (77% transparent)
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Alpha, "77");
+        let alpha_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            Kind::LayerViewportAlphaOverride,
+        );
+        assert!(alpha_overrides.iter().any(|(handle, _)| *handle == viewport));
+    }
+
+    #[test]
+    fn vplayer_rejects_a_bad_value_and_changes_nothing() {
+        type Channel = crate::command::VpOverrideChannel;
+
+        let mut app = new_app();
+        let i = app.active_tab;
+        let walls = add_layer(&mut app, "WALLS", document::types::Color::Index(1));
+        let viewport = add_viewport(&mut app, "Sheet2");
+
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Color, "not-a-color");
+        let color_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            document::objects::KnownXRecordKind::LayerViewportColorOverride,
+        );
+        assert!(color_overrides.is_empty(), "{color_overrides:?}");
+
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Linetype, "NoSuchLinetype");
+        let lt_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        );
+        assert!(lt_overrides.is_empty(), "{lt_overrides:?}");
+
+        app.handle_vp_layer_override(viewport, "WALLS", Channel::Alpha, "99");
+        let alpha_overrides = app.tabs[i].scene.document.layer_viewport_overrides(
+            walls,
+            document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+        );
+        assert!(alpha_overrides.is_empty(), "{alpha_overrides:?}");
+    }
+
+    #[test]
+    fn vplayer_freeze_stays_in_the_viewport_and_leaves_the_layer_thawed() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let walls = add_layer(&mut app, "WALLS", document::types::Color::Index(1));
+        let viewport = add_viewport(&mut app, "Sheet3");
+        let other_viewport = add_viewport(&mut app, "Sheet3");
+
+        app.handle_vp_layer_update(viewport, vec!["WALLS".into()], vec![]);
+
+        // VP Freeze is a separate property: the global layer stays thawed.
+        let global = app
+            .tabs[i]
+            .scene
+            .document
+            .layers
+            .get("WALLS")
+            .expect("the layer exists");
+        assert!(!global.flags.frozen, "the layer itself must stay thawed");
+        let frozen_of = |app: &OpenCADStudio, handle: document::Handle| match app.tabs[i].scene.document.get_entity(handle) {
+            Some(document::EntityType::Viewport(vp)) => vp.frozen_layers.clone(),
+            other => panic!("expected a viewport, got {other:?}"),
+        };
+        assert!(
+            frozen_of(&app, viewport).contains(&walls),
+            "viewport 1 carries the VP freeze"
+        );
+        assert!(
+            !frozen_of(&app, other_viewport).contains(&walls),
+            "viewport 2 is unchanged"
+        );
+
+        // Thawing takes the freeze out of the viewport again.
+        app.handle_vp_layer_update(viewport, vec![], vec!["WALLS".into()]);
+        assert!(
+            !frozen_of(&app, viewport).contains(&walls),
+            "viewport 1 is thawed again"
+        );
+    }
+}

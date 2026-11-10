@@ -7818,11 +7818,33 @@ impl Scene {
                             })
                     })
                     .collect();
+                let overridden = self
+                    .document
+                    .layers
+                    .iter()
+                    .filter(|layer| {
+                        [
+                            document::objects::KnownXRecordKind::LayerViewportColorOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+                            document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+                        ]
+                        .into_iter()
+                        .any(|kind| {
+                            self.document
+                                .layer_viewport_overrides(layer.handle, kind)
+                                .into_iter()
+                                .any(|(viewport, _)| viewport == handle)
+                        })
+                    })
+                    .map(|layer| layer.handle)
+                    .collect();
                 crate::ui::window::layers::ViewportLayers {
                     handle,
                     label,
                     frozen,
                     colors,
+                    overridden,
                 }
             })
             .collect()

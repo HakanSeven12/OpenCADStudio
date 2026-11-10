@@ -2503,6 +2503,13 @@ pub enum CmdResult {
         freeze: Vec<String>,
         thaw: Vec<String>,
     },
+    /// Give a layer a per-viewport property override; command stays active.
+    VpLayerOverride {
+        vp_handle: Handle,
+        layer: String,
+        channel: VpOverrideChannel,
+        value: String,
+    },
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
     PasteClipboard {
         base_pt: DVec3,
@@ -3048,6 +3055,15 @@ impl CmdOption {
             keyword: String::new(),
         }
     }
+}
+
+/// The per-viewport layer override channel VPLAYER writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VpOverrideChannel {
+    Color,
+    Linetype,
+    Lineweight,
+    Alpha,
 }
 
 /// What kind of input the command's current step expects from the command line.

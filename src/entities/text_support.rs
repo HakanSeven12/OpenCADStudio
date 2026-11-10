@@ -103,10 +103,7 @@ fn resolve_style(
                     .as_deref()
                     .map(std::path::Path::new)
                     .and_then(|p| p.parent());
-                crate::io::resolve_image_file(&shx_file, base).or_else(|| {
-                    crate::io::font_repo::local_font_file(&shx_file)
-                        .map(|path| path.to_string_lossy().into_owned())
-                })
+                crate::io::font_repo::font_file_path(&shx_file, base)
             });
             if let Some(p) = shx_path {
                 p
@@ -177,12 +174,7 @@ fn resolve_style(
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.parent());
-        let resolve_big = |name: &str| {
-            crate::io::resolve_image_file(name, base).or_else(|| {
-                crate::io::font_repo::local_font_file(name)
-                    .map(|p| p.to_string_lossy().into_owned())
-            })
-        };
+        let resolve_big = |name: &str| crate::io::font_repo::font_file_path(name, base);
         let mut big_path = resolve_big(big);
         // If the referenced big font is not a valid big font (e.g. legacy Chinese
         // shape-only container `chinese.shx`), try the standard Big5 big font

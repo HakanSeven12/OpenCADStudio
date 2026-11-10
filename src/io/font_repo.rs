@@ -34,6 +34,7 @@ pub fn fonts_folder() -> Option<PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_fonts_folder(folder: Option<PathBuf>) {
     *FONTS_FOLDER.write().unwrap_or_else(|e| e.into_inner()) = folder;
+    forget_font_paths();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -58,6 +59,7 @@ pub fn support_folder() -> Option<PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_support_folder(folder: Option<PathBuf>) {
     *SUPPORT_FOLDER.write().unwrap_or_else(|e| e.into_inner()) = folder;
+    forget_font_paths();
 }
 
 /// Local store for fonts downloaded from the community repository. Text
@@ -190,6 +192,53 @@ pub fn local_font_file(name: &str) -> Option<PathBuf> {
         })
 }
 
+/// How long a font file lookup is remembered.
+const FONT_PATH_MEMORY: std::time::Duration = std::time::Duration::from_secs(2);
+
+type FontPaths =
+    std::collections::HashMap<(String, Option<PathBuf>), (iced::time::Instant, Option<String>)>;
+
+fn font_paths() -> &'static std::sync::RwLock<FontPaths> {
+    static PATHS: std::sync::OnceLock<std::sync::RwLock<FontPaths>> = std::sync::OnceLock::new();
+    PATHS.get_or_init(Default::default)
+}
+
+/// Where the font file `name` is on disk: as stored or next to the drawing
+/// (`base` is its folder), then in the fonts and support folders.
+///
+/// Every text asks this for its style's font, and a file that is not there
+/// costs a listing of both folders. The answer is remembered for two seconds,
+/// so the texts of a drawing share one search while it opens or is redrawn,
+/// and a font copied in by hand is found on the redraw after. It is forgotten
+/// at once when the folders change or a font is downloaded.
+pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
+    let key = (name.to_string(), base.map(Path::to_path_buf));
+    if let Some((found_at, found)) = font_paths()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
+        if found_at.elapsed() < FONT_PATH_MEMORY {
+            return found.clone();
+        }
+    }
+    let found = crate::io::resolve_image_file(name, base)
+        .or_else(|| local_font_file(name).map(|path| path.to_string_lossy().into_owned()));
+    font_paths()
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, (iced::time::Instant::now(), found.clone()));
+    found
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn forget_font_paths() {
+    font_paths()
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
 #[cfg(test)]
 thread_local! {
     /// How many times this thread has searched the font folders.
@@ -300,6 +349,7 @@ pub fn download_fonts(
             .map_err(|e| format!("Could not save {}: {e}", dest.display()))?;
         downloaded.push((file.to_string(), dest));
     }
+    forget_font_paths();
     Ok(downloaded)
 }
 

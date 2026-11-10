@@ -6912,21 +6912,21 @@ impl Scene {
         5, 10, 20, 30, 40, 50, 60, 70, 75, 80, 100, 150, 200, 250, 500, 1000, 2000, 5000,
     ];
 
-    /// The drawing's unit scale: the first scale of the list flagged as the
-    /// unit entry (a 1 : 1 ratio flags itself, so later ones are ordinary).
+    /// The drawing's unit scale: the 1 : 1 entry named by the millimetres one
+    /// drawing unit holds ("1:1000" in a metre drawing), as the metric list
+    /// adds it. Any 1 : 1 scale flags itself, so the flag alone cannot tell.
     fn unit_scale_names(&self) -> Vec<String> {
-        self.scale_names_in_list_order()
-            .into_iter()
-            .find(|name| {
-                self.scale_object_handle(name)
-                    .and_then(|handle| match self.document.objects.get(&handle) {
-                        Some(ObjectType::Scale(scale)) => Some(scale.is_unit_scale),
-                        _ => None,
-                    })
-                    .unwrap_or(false)
-            })
+        let name = Self::unit_scale_name_for(self.default_scale_unit_factor());
+        self.scale_paper_drawing(&name)
+            .filter(|(paper, drawing)| (paper - drawing).abs() < 1.0e-9)
+            .map(|_| name)
             .into_iter()
             .collect()
+    }
+
+    fn unit_scale_name_for(unit: f64) -> String {
+        let text = format!("{unit:.6}");
+        format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
     }
 
     fn add_metric_reset_scales(&mut self) {
@@ -6934,11 +6934,7 @@ impl Scene {
         // named by the millimetres one drawing unit holds (1:1000 for
         // metres), then the standard ratios as they are; a name the list
         // keeps is not added again.
-        let unit = self.default_scale_unit_factor();
-        let unit_name = {
-            let text = format!("{unit:.6}");
-            format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
-        };
+        let unit_name = Self::unit_scale_name_for(self.default_scale_unit_factor());
         if self.add_scale(&unit_name, 1.0, 1.0) {
             if let Some(handle) = self.scale_object_handle(&unit_name) {
                 if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {

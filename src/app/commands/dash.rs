@@ -58,24 +58,41 @@ pub(super) fn split_quoted(line: &str) -> Vec<String> {
     words
 }
 
-const LINETYPE_OPTIONS: [(&str, &str); 6] = [
+const LINETYPE_OPTIONS: [(&str, &str); 9] = [
     ("?", "?"),
     ("Create", "CREATE"),
     ("Delete", "DELETE"),
+    ("Export", "EXPORT"),
     ("Load", "LOAD"),
+    ("RELoad", "RELOAD"),
     ("Rename", "RENAME"),
+    ("SAve", "SAVE"),
     ("Set", "SET"),
 ];
 
 fn linetype_flow() -> PromptFlow {
     flow(|q| {
         let option = q.keyword(
-            crate::t!("-LINETYPE  Enter an option [?/Create/Delete/Load/Rename/Set]:").into_owned(),
+            crate::t!(
+                "-LINETYPE  Enter an option [?/Create/Delete/Export/Load/RELoad/Rename/SAve/Set]:"
+            )
+            .into_owned(),
             None,
             &LINETYPE_OPTIONS,
         )?;
-        if matches!(option, "?" | "LOAD") {
+        if matches!(option, "?" | "LOAD" | "RELOAD") {
             return run("-LINETYPE", &[option]);
+        }
+        if option == "EXPORT" {
+            let names = q.text(
+                crate::t!("-LINETYPE  Enter linetype names to export <*>:").into_owned(),
+                Some("*".into()),
+            )?;
+            let file = q.text(
+                crate::t!("-LINETYPE  Enter file to write:").into_owned(),
+                None,
+            )?;
+            return run("-LINETYPE", &[option, &names, &file]);
         }
         let name = q.text(
             crate::t!("-LINETYPE  Enter linetype name:").into_owned(),
@@ -1084,7 +1101,7 @@ impl OpenCADStudio {
         use crate::scene::linetype_service as service;
         let usage = |app: &mut Self| {
             app.command_line.push_info(
-                crate::t!("Usage: -LINETYPE CREATE <name> [description] <pattern> | RENAME <old> <new> | DELETE <name> | LIST | LOAD | SET <name>").as_ref(),
+                crate::t!("Usage: -LINETYPE CREATE <name> [description] <pattern> | RENAME <old> <new> | DELETE <name> | EXPORT <names> <file> | SAVE <name> | RELOAD | LIST | LOAD | SET <name>").as_ref(),
             );
         };
         let option = args.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -1095,6 +1112,9 @@ impl OpenCADStudio {
         match (option.as_str(), args.len()) {
             ("?" | "LIST", 1) => return self.dispatch_command("LINETYPE LIST"),
             ("L" | "LOAD", 1) => return self.dispatch_command("LINETYPE LOAD"),
+            ("E" | "EXPORT", 3) => self.dash_linetype_export(i, arg(1), arg(2)),
+            ("SA" | "SAVE", 2) => self.dash_linetype_save(i, arg(1)),
+            ("REL" | "RELOAD", 1) => self.dash_linetype_reload(),
             ("S" | "SET", 2) => {
                 return self.dispatch_command(&format!("LINETYPE SET \"{}\"", arg(1)));
             }
@@ -1171,6 +1191,140 @@ impl OpenCADStudio {
             _ => usage(self),
         }
         Task::none()
+    }
+
+    /// Whether this build can reach a folder; says so when it cannot.
+    fn linetype_files_available(&mut self) -> bool {
+        let available = !cfg!(target_arch = "wasm32");
+        if !available {
+            self.command_line.push_error(
+                crate::t!("-LINETYPE: this option needs the desktop program.").as_ref(),
+            );
+        }
+        available
+    }
+
+    /// One line per reason for what was left out, and for what AutoCAD may
+    /// refuse in what was written.
+    fn report_lin_output(&mut self, output: &crate::io::linetypes::writer::LinOutput) {
+        fn grouped<R: Copy + PartialEq>(items: &[(String, R)]) -> Vec<(R, String)> {
+            let mut groups: Vec<(R, Vec<&str>)> = Vec::new();
+            for (name, reason) in items {
+                match groups.iter_mut().find(|(known, _)| known == reason) {
+                    Some((_, names)) => names.push(name),
+                    None => groups.push((*reason, vec![name])),
+                }
+            }
+            groups
+                .into_iter()
+                .map(|(reason, names)| (reason, names.join(", ")))
+                .collect()
+        }
+        for (reason, names) in grouped(&output.skipped) {
+            let reason = reason.label();
+            self.command_line
+                .push_info(crate::tf!("Skipped {names}: {reason}.").as_ref());
+        }
+        for (warning, names) in grouped(&output.warnings) {
+            let warning = warning.label();
+            self.command_line
+                .push_info(crate::tf!("Warning: AutoCAD may refuse {names}: {warning}.").as_ref());
+        }
+    }
+
+    fn dash_linetype_export(&mut self, i: usize, names: &str, file: &str) {
+        use crate::io::linetypes::writer;
+        if !self.linetype_files_available() {
+            return;
+        }
+        let document = &self.tabs[i].scene.document;
+        let wanted: Vec<_> = document
+            .line_types
+            .iter()
+            .filter(|linetype| listed(&linetype.name, names))
+            .collect();
+        let output = writer::write_linetypes(document, wanted);
+        self.report_lin_output(&output);
+        if output.written.is_empty() {
+            self.command_line.push_error(
+                crate::t!("-LINETYPE: none of the named linetypes can be written.").as_ref(),
+            );
+            return;
+        }
+        let mut path = std::path::PathBuf::from(file);
+        if path.extension().is_none() {
+            path.set_extension("lin");
+        }
+        let shown = path.display().to_string();
+        match writer::write_atomic(&path, &output.text) {
+            Ok(()) => {
+                let count = output.written.len();
+                self.command_line
+                    .push_output(crate::tf!("Wrote {count} linetype(s) to {shown}.").as_ref());
+            }
+            Err(reason) => self
+                .command_line
+                .push_error(crate::tf!("-LINETYPE: could not write {shown}: {reason}").as_ref()),
+        }
+    }
+
+    fn dash_linetype_save(&mut self, i: usize, name: &str) {
+        use crate::io::linetypes::{catalog_has, writer};
+        if !self.linetype_files_available() {
+            return;
+        }
+        let Some(path) = writer::library_path() else {
+            self.command_line.push_error(
+                crate::t!("-LINETYPE: this option needs the desktop program.").as_ref(),
+            );
+            return;
+        };
+        let document = &self.tabs[i].scene.document;
+        match writer::save_definition(&path, document, name, catalog_has) {
+            Ok(output) => {
+                self.report_lin_output(&output);
+                self.command_line
+                    .push_output(crate::tf!("Linetype \"{name}\" saved to your library.").as_ref());
+                self.refresh_linetype_catalog();
+            }
+            Err(writer::SaveError::NotFound) => {
+                let error = crate::scene::linetype_service::LinetypeError::NotFound(name.into());
+                self.command_line.push_error(&format!("-LINETYPE: {error}"));
+            }
+            Err(writer::SaveError::Skipped(reason)) => {
+                let reason = reason.label();
+                self.command_line.push_error(
+                    crate::tf!("-LINETYPE: \"{name}\" cannot be saved: {reason}.").as_ref(),
+                );
+            }
+            Err(writer::SaveError::Reserved) => self.command_line.push_error(
+                crate::tf!("-LINETYPE: the built-in catalog or another library file already defines \"{name}\".").as_ref(),
+            ),
+            Err(writer::SaveError::Io(reason)) => {
+                let shown = path.display().to_string();
+                self.command_line.push_error(
+                    crate::tf!("-LINETYPE: could not write {shown}: {reason}").as_ref(),
+                );
+            }
+        }
+    }
+
+    fn dash_linetype_reload(&mut self) {
+        if !self.linetype_files_available() {
+            return;
+        }
+        self.refresh_linetype_catalog();
+        self.command_line
+            .push_output(crate::t!("Linetype library reloaded.").as_ref());
+    }
+
+    /// Reread the library, and redraw what might have used the old catalog.
+    fn refresh_linetype_catalog(&mut self) {
+        crate::io::linetypes::refresh_catalog();
+        for tab in &mut self.tabs {
+            tab.scene.bump_geometry();
+        }
+        self.sync_ribbon_layers();
     }
 
     fn finish_linetype_change(&mut self, i: usize, names: &[String]) {

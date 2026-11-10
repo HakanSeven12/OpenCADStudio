@@ -638,7 +638,10 @@ fn the_first_line_after_set_takes_the_new_linetype() {
     let mut app = with_fence();
     app.tabs[app.active_tab].is_start = false;
     assert!(
-        app.ribbon.available_linetypes.iter().any(|item| item.name == "FENCE"),
+        app.ribbon
+            .available_linetypes
+            .iter()
+            .any(|item| item.name == "FENCE"),
         "the ribbon lists a new linetype"
     );
     typed(&mut app, "-LINETYPE SET FENCE");
@@ -774,4 +777,287 @@ fn split_quoted_keeps_quoted_runs_together() {
     );
     assert_eq!(dash::split_quoted("  A   B "), vec!["A", "B"]);
     assert!(dash::split_quoted("").is_empty());
+}
+
+// ── Linetype files ───────────────────────────────────────────────────────
+
+/// The library folder and the catalog are one per process.
+static LIBRARY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn library_lock() -> std::sync::MutexGuard<'static, ()> {
+    LIBRARY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn file_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "ocs lin cmd {tag} {}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn loaded_from(path: &std::path::Path) -> Document {
+    let mut document = Document::new();
+    let text = std::fs::read_to_string(path).unwrap();
+    crate::io::linetypes::populate_document_from_source(&mut document, &text, None);
+    document
+}
+
+#[test]
+fn an_exported_linetype_draws_the_same_after_loading() {
+    let mut app = fresh();
+    run(&mut app, "-LINETYPE CREATE MY-FENCE 1.5,-0.25,0.5,-0.75");
+    let dir = file_dir("export");
+    // A path with spaces, and no extension: .lin is added.
+    let path = dir.join("my fence");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT MY-FENCE "{}""#, path.display()),
+    );
+    let written = dir.join("my fence.lin");
+    assert!(written.is_file(), "{}", output(&app));
+    assert!(
+        output(&app).contains("Wrote 1 linetype(s)"),
+        "{}",
+        output(&app)
+    );
+    let document = loaded_from(&written);
+    assert_eq!(
+        document.line_types.get("MY-FENCE").unwrap().pattern_length,
+        3.0
+    );
+
+    let (sin, cos) = 30.0_f64.to_radians().sin_cos();
+    let corner = (3.7 * cos, 3.7 * sin);
+    let run_out = 3.8 * std::f64::consts::FRAC_1_SQRT_2;
+    let mut polyline = LwPolyline::default();
+    polyline.vertices = [(0.0, 0.0), corner, (corner.0 + run_out, corner.1 - run_out)]
+        .iter()
+        .map(|&(x, y)| LwVertex::new(Vector2::new(x, y)))
+        .collect();
+    polyline.plinegen = true;
+    polyline.common.linetype = "MY-FENCE".into();
+    let wire = tessellate(&document, EntityType::LwPolyline(polyline));
+    assert_layout(&drawn_spans(&wire));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn export_selects_by_name_list_and_wildcard() {
+    let mut app = with_fence();
+    run(&mut app, "-LINETYPE CREATE FARM 2,-1");
+    run(&mut app, "-LINETYPE CREATE POSTS 3,-1");
+    let dir = file_dir("select");
+    let names = |path: &std::path::Path| -> Vec<String> {
+        let mut found: Vec<String> = loaded_from(path)
+            .line_types
+            .iter()
+            .filter(|linetype| !linetype.elements.is_empty())
+            .map(|linetype| linetype.name.clone())
+            .collect();
+        found.sort();
+        found
+    };
+    let list = dir.join("list.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT "fence,POSTS" "{}""#, list.display()),
+    );
+    assert_eq!(names(&list), vec!["FENCE", "POSTS"], "{}", output(&app));
+    let wild = dir.join("wild.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT F* "{}""#, wild.display()),
+    );
+    let found = names(&wild);
+    assert!(found.contains(&"FENCE".to_owned()) && found.contains(&"FARM".to_owned()));
+    assert!(!found.contains(&"POSTS".to_owned()));
+    let all = dir.join("all.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT * "{}""#, all.display()),
+    );
+    assert!(
+        names(&all).contains(&"POSTS".to_owned()),
+        "{}",
+        output(&app)
+    );
+    assert!(output(&app).contains("Skipped"), "{}", output(&app));
+    assert!(output(&app).contains("Continuous"), "{}", output(&app));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn export_to_a_bad_place_writes_nothing() {
+    let mut app = with_fence();
+    let dir = file_dir("bad");
+    let missing = dir.join("no such folder").join("out.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT FENCE "{}""#, missing.display()),
+    );
+    assert!(!missing.exists());
+    assert!(output(&app).contains("could not write"), "{}", output(&app));
+    let none = dir.join("none.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT NOSUCH "{}""#, none.display()),
+    );
+    assert!(!none.exists(), "no matching linetype, no file");
+    assert!(
+        output(&app).contains("none of the named"),
+        "{}",
+        output(&app)
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_long_description_is_kept_with_a_warning() {
+    let mut app = fresh();
+    let long = "A description well past the forty-seven characters AutoCAD allows";
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE CREATE WORDY "{long}" 1,-1"#),
+    );
+    let dir = file_dir("long");
+    let path = dir.join("wordy.lin");
+    run(
+        &mut app,
+        &format!(r#"-LINETYPE EXPORT WORDY "{}""#, path.display()),
+    );
+    assert!(
+        output(&app).contains("Warning: AutoCAD may refuse WORDY"),
+        "{}",
+        output(&app)
+    );
+    assert_eq!(
+        loaded_from(&path)
+            .line_types
+            .get("WORDY")
+            .unwrap()
+            .description,
+        long
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_export_prompts_ask_for_names_and_a_file() {
+    let mut app = with_fence();
+    // A prompt answer ends at a space; the one-line form takes quoted paths.
+    let path = std::env::temp_dir().join(format!("ocs-lin-asked-{}.lin", std::process::id()));
+    for answer in ["-LINETYPE", "E", "FENCE", path.to_str().unwrap()] {
+        script(&mut app, answer);
+    }
+    assert!(path.is_file(), "{}", output(&app));
+    assert!(app.tabs[app.active_tab].active_cmd.is_none());
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn a_saved_linetype_is_offered_at_once_and_a_reload_removes_it() {
+    let _guard = library_lock();
+    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let _ = std::fs::remove_file(&library);
+    crate::io::linetypes::refresh_catalog();
+
+    let mut app = fresh();
+    run(&mut app, "-LINETYPE CREATE ZZ-SAVED 7,-2,1,-3");
+    assert!(!crate::io::linetypes::catalog_has("ZZ-SAVED"));
+    run(&mut app, "-LINETYPE SAVE ZZ-SAVED");
+    assert!(
+        output(&app).contains("saved to your library"),
+        "{}",
+        output(&app)
+    );
+    assert!(
+        crate::io::linetypes::catalog_has("ZZ-SAVED"),
+        "no restart needed"
+    );
+
+    let mut other = Document::new();
+    assert!(crate::io::linetypes::catalog_missing_from(&other)
+        .iter()
+        .any(|(name, _)| name == "ZZ-SAVED"));
+    assert!(crate::io::linetypes::ensure_catalog_linetype(
+        &mut other, "ZZ-SAVED"
+    ));
+    assert_eq!(
+        other.line_types.get("ZZ-SAVED").unwrap().pattern_length,
+        13.0
+    );
+
+    // The drawing's own definition does not follow the library.
+    std::fs::remove_file(&library).unwrap();
+    run(&mut app, "-LINETYPE RELOAD");
+    assert!(output(&app).contains("reloaded"), "{}", output(&app));
+    assert!(!crate::io::linetypes::catalog_has("ZZ-SAVED"));
+    assert_eq!(lengths(&app, "ZZ-SAVED"), vec![7.0, -2.0, 1.0, -3.0]);
+}
+
+#[test]
+fn a_reload_reads_new_files_and_the_bundled_definition_wins_a_clash() {
+    let _guard = library_lock();
+    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let folder = library.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&folder).unwrap();
+    let dropped = folder.join("zz-dropped.lin");
+    std::fs::write(
+        &dropped,
+        "*ZZ-DROPPED,New\nA,4,-1\n*DASHED,Hijack\nA,99,-99\n",
+    )
+    .unwrap();
+
+    let mut app = fresh();
+    let bundled = Document::new();
+    let mut before = bundled.clone();
+    crate::io::linetypes::populate_document(&mut before);
+    let dashed = before.line_types.get("DASHED").unwrap().pattern_length;
+
+    run(&mut app, "-LINETYPE RELOAD");
+    assert!(crate::io::linetypes::catalog_has("ZZ-DROPPED"));
+    let mut after = Document::new();
+    crate::io::linetypes::populate_document(&mut after);
+    assert_eq!(
+        after.line_types.get("DASHED").unwrap().pattern_length,
+        dashed
+    );
+    assert!(
+        app.ribbon
+            .available_linetypes
+            .iter()
+            .any(|item| item.name == "ZZ-DROPPED"),
+        "the picker lists it"
+    );
+
+    std::fs::remove_file(&dropped).unwrap();
+    crate::io::linetypes::refresh_catalog();
+    assert!(!crate::io::linetypes::catalog_has("ZZ-DROPPED"));
+}
+
+#[test]
+fn saving_refuses_a_catalog_name_and_reports_what_cannot_be_written() {
+    let _guard = library_lock();
+    let library = crate::io::linetypes::writer::library_path().unwrap();
+    let _ = std::fs::remove_file(&library);
+    let mut app = fresh();
+    doc_mut(&mut app)
+        .line_types
+        .get_mut("DASHED")
+        .expect("catalog loaded");
+    run(&mut app, "-LINETYPE SAVE DASHED");
+    assert!(output(&app).contains("already defines"), "{}", output(&app));
+    run(&mut app, "-LINETYPE SAVE Continuous");
+    assert!(output(&app).contains("cannot be saved"), "{}", output(&app));
+    run(&mut app, "-LINETYPE SAVE NOSUCH");
+    assert!(output(&app).contains("does not exist"), "{}", output(&app));
+    assert!(!library.exists());
 }

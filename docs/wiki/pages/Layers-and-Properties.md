@@ -89,7 +89,7 @@ Set the colour for new objects with `COLOR`, or in the **Properties** panel of t
 | `MSLTSCALE` | Model-space linetypes by the annotation scale. |
 | `PSLTSCALE` | Linetypes in layout viewports by the viewport scale, so dashes look the same on paper at every scale. |
 
-To add your own linetypes, put `.lin` files in the `linetypes` folder of your settings folder or in the support folder (**Options › Files**) and restart the program.
+To add your own linetypes, put `.lin` files in the `linetypes` folder of your settings folder or in the support folder (**Options › Files**), then run `-LINETYPE RELOAD` or restart the program. `-LINETYPE SAVE` adds a linetype from the drawing to your own library, and `-LINETYPE EXPORT` writes linetypes to a `.lin` file.
 
 ## Lineweight
 

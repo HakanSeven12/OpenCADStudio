@@ -6,10 +6,12 @@
 //! [`complex_lt`] returns the complex segment catalog for CPU-side rendering.
 
 use rustc_hash::FxHashMap as HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
 
 use document::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
 use document::{Document, TableEntry};
+
+pub mod writer;
 
 // ── Complex linetype types ────────────────────────────────────────────────
 
@@ -93,14 +95,70 @@ pub struct ComplexLt {
     pub segments: Vec<LtSegment>,
 }
 
-static COMPLEX_CATALOG: OnceLock<HashMap<String, ComplexLt>> = OnceLock::new();
+/// Everything read from the bundled and the user's `.lin` files. Replaced as
+/// one piece by [`refresh_catalog`], so a reader never sees half of a reload.
+struct Catalog {
+    source: String,
+    complex: HashMap<String, ComplexLt>,
+    /// (name, description), the first definition of a name only.
+    entries: Vec<(String, String)>,
+}
+
+impl Catalog {
+    fn from_source(source: String) -> Self {
+        let complex = parse_complex(&source);
+        let mut seen = std::collections::HashSet::new();
+        let entries = parse(&source)
+            .into_iter()
+            .filter(|lt| seen.insert(lt.name.to_ascii_uppercase()))
+            .map(|lt| (lt.name, lt.description))
+            .collect();
+        Self {
+            source,
+            complex,
+            entries,
+        }
+    }
+
+    /// The bundled linetypes followed by the user's own `.lin` files.
+    fn load() -> Self {
+        Self::from_source(format!(
+            "{LIN_SOURCE}\n{}",
+            crate::io::patterns::user_definitions("linetypes", "lin")
+        ))
+    }
+}
+
+static CATALOG: RwLock<Option<Arc<Catalog>>> = RwLock::new(None);
+
+fn catalog() -> Arc<Catalog> {
+    let current = CATALOG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    current.unwrap_or_else(|| {
+        let loaded = Arc::new(Catalog::load());
+        CATALOG
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_or_insert(loaded)
+            .clone()
+    })
+}
+
+/// Read the user's `.lin` files again. A drawing keeps the definitions it
+/// already holds; only what it would load next changes.
+pub fn refresh_catalog() {
+    let loaded = Arc::new(Catalog::load());
+    *CATALOG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(loaded);
+}
 
 /// Look up a complex linetype by name (case-insensitive).
 /// Returns `None` for simple (dash-only) linetypes or unknown names.
-pub fn complex_lt(name: &str) -> Option<&'static ComplexLt> {
-    COMPLEX_CATALOG
-        .get_or_init(|| parse_complex(lin_source()))
-        .get(&name.to_ascii_uppercase())
+pub fn complex_lt(name: &str) -> Option<ComplexLt> {
+    catalog().complex.get(&name.to_ascii_uppercase()).cloned()
 }
 
 /// Build the full segment list — dashes, spaces, dots **and** embedded
@@ -271,22 +329,11 @@ pub fn resolve_complex_lt(document: &Document, name: &str) -> Option<ComplexLt> 
     if in_document {
         document_complex_lt(document, name)
     } else {
-        complex_lt(name).cloned()
+        complex_lt(name)
     }
 }
 
 const LIN_SOURCE: &str = include_str!("../../assets/linetypes/OpenCADStudio.lin");
-
-/// The bundled linetypes followed by the user's own `.lin` files.
-fn lin_source() -> &'static str {
-    static SOURCE: OnceLock<String> = OnceLock::new();
-    SOURCE.get_or_init(|| {
-        format!(
-            "{LIN_SOURCE}\n{}",
-            crate::io::patterns::user_definitions("linetypes", "lin")
-        )
-    })
-}
 
 // ── Pattern art extraction ────────────────────────────────────────────────
 
@@ -313,14 +360,14 @@ pub fn extract_pattern(desc: &str) -> String {
 
 /// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones.
 pub fn populate_document(doc: &mut Document) {
-    populate_document_from_source(doc, lin_source(), None);
+    populate_document_from_source(doc, &catalog().source, None);
 }
 
 /// Repair the catalog linetypes `doc` already has (see
 /// [`populate_document_from_source`]) without adding any: an opened drawing
 /// keeps exactly its own linetypes, so a purged one stays purged.
 pub fn repair_document(doc: &mut Document) {
-    populate_matching(doc, lin_source(), None, |_| false);
+    populate_matching(doc, &catalog().source, None, |_| false);
 }
 
 /// The catalog linetypes `doc` does not have, as (name, description): what a
@@ -328,6 +375,7 @@ pub fn repair_document(doc: &mut Document) {
 /// [`ensure_catalog_linetype`].
 pub fn catalog_missing_from(doc: &Document) -> Vec<(String, String)> {
     catalog()
+        .entries
         .iter()
         .filter(|(name, _)| !doc.line_types.contains(name))
         .cloned()
@@ -337,25 +385,16 @@ pub fn catalog_missing_from(doc: &Document) -> Vec<(String, String)> {
 /// Whether the catalog defines a linetype called `name`.
 pub fn catalog_has(name: &str) -> bool {
     catalog()
+        .entries
         .iter()
         .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
-}
-
-fn catalog() -> &'static [(String, String)] {
-    static CATALOG: OnceLock<Vec<(String, String)>> = OnceLock::new();
-    CATALOG.get_or_init(|| {
-        parse(lin_source())
-            .into_iter()
-            .map(|lt| (lt.name, lt.description))
-            .collect()
-    })
 }
 
 /// Load catalog linetype `name` into `doc` when the drawing lacks it.
 /// Returns whether it was added.
 pub fn ensure_catalog_linetype(doc: &mut Document, name: &str) -> bool {
     !doc.line_types.contains(name)
-        && populate_matching(doc, lin_source(), None, |candidate| {
+        && populate_matching(doc, &catalog().source, None, |candidate| {
             candidate.eq_ignore_ascii_case(name)
         }) > 0
 }
@@ -731,9 +770,8 @@ fn parse_complex(src: &str) -> HashMap<String, ComplexLt> {
         }
 
         if let Some(rest) = line.strip_prefix('*') {
-            if let Some((name, desc)) = rest.split_once(',') {
-                current = Some((name.trim().to_string(), desc.trim().to_string()));
-            }
+            let (name, desc) = rest.split_once(',').unwrap_or((rest, ""));
+            current = Some((name.trim().to_string(), desc.trim().to_string()));
         } else if line.to_ascii_uppercase().starts_with('A') {
             let Some((name, _desc)) = current.take() else {
                 continue;

@@ -2046,6 +2046,23 @@ impl OpenCADStudio {
             );
             // Annotative multiline text shows its defined box twice, as on
             // paper (editable as the box is) and in the model (read-only).
+            // Line space distance is measured on the model height (measured:
+            // 16.6667 for 2.5 paper text at 1:4).
+            if let document::EntityType::MText(text) = entity {
+                for section in sections.iter_mut() {
+                    if let Some(row) = section
+                        .props
+                        .iter_mut()
+                        .find(|row| row.field == "line_space_distance")
+                    {
+                        *row = crate::entities::common::edit_prop(
+                            &row.label.clone(),
+                            "line_space_distance",
+                            stored * ratio * 1.666_666_666_666_667 * text.line_spacing_factor,
+                        );
+                    }
+                }
+            }
             // The box is per representation: the shown scale's is the model
             // size, its paper size that over the scale's model-per-paper.
             let shown = crate::scene::annotative::entity_for_annotation_context(

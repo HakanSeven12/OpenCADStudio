@@ -248,6 +248,9 @@ pub fn view_window<'a, 'b>(
         }
     };
 
+    // The details panel keeps one width, so the window does not change
+    // size when the card opens.
+    let right = container(right).width(iced::Length::Fixed(440.0)).height(sizing.height);
     let body = row![list_panel, vsep(sizing.height), right].height(sizing.height);
     let footer: Element<'a, Message> = if list.reset_asking {
         // Reset asks which default list to restore before it purges anything.

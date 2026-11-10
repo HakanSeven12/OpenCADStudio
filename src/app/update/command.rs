@@ -5654,6 +5654,34 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            // Annotative multiline text: the distance is on the
+                            // model height of the shown representation.
+                            "line_space_distance"
+                                if self.tabs[i]
+                                    .scene
+                                    .annotative_text_height_factor(handle)
+                                    .is_some() =>
+                            {
+                                let shown = self.tabs[i].scene.displayed_annotation_scale_handle();
+                                let ratio = crate::scene::annotative::text_context_ratio(
+                                    &self.tabs[i].scene.document,
+                                    handle,
+                                    shown,
+                                )
+                                .unwrap_or(1.0)
+                                .max(1.0e-12);
+                                if let (Ok(model), Some(entity)) = (
+                                    val.trim().parse::<f64>(),
+                                    self.tabs[i].scene.document.get_entity_mut(handle),
+                                ) {
+                                    crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                                        entity,
+                                        field,
+                                        &(model / ratio).to_string(),
+                                        plane,
+                                    );
+                                }
+                            }
                             // An annotative hatch's scale rows are on paper.
                             "pattern_scale" | "spacing" | "iso_pen_width"
                                 if self.tabs[i]

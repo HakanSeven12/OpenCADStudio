@@ -6877,6 +6877,10 @@ impl Scene {
                 self.remove_scale(&name);
             }
         }
+        // The unit scale follows the scales in use (measured).
+        for unit in &unit_scales {
+            while self.move_scale(unit, 1) {}
+        }
         match (metric, imperial) {
             (true, false) => self.add_metric_reset_scales(),
             // Imperial alone: 1:1 and the architectural set, inches to

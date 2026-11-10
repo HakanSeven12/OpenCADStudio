@@ -55,6 +55,8 @@ mod annotation_visibility_tests;
 mod block_base_point_tests;
 #[cfg(test)]
 mod block_definition_handles_tests;
+#[cfg(test)]
+mod layer_visibility_block_cache_tests;
 mod boundary;
 mod camera_ops;
 #[cfg(test)]

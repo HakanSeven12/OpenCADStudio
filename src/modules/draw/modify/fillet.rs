@@ -3539,7 +3539,7 @@ mod tests {
     fn chamfer_multiple_keeps_going_and_single_ends() {
         let lines = || vec![line(0.0, 0.0, 10.0, 0.0, 1), line(0.0, 0.0, 0.0, 10.0, 2)];
         let mut single = ChamferCommand::new(1.0, lines());
-        assert_eq!(keywords(&single), ["D", "M", "N"]);
+        assert_eq!(keywords(&single), ["P", "D", "M", "N"]);
         single.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         assert!(matches!(
             single.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
@@ -3553,7 +3553,7 @@ mod tests {
         ));
         assert_eq!(
             keywords(&multi),
-            ["D", "N"],
+            ["P", "D", "N"],
             "Multiple is not offered twice"
         );
         multi.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
@@ -3565,7 +3565,7 @@ mod tests {
             }
             _ => panic!("multiple mode should keep the command active"),
         }
-        assert_eq!(keywords(&multi), ["U", "D", "N"]);
+        assert_eq!(keywords(&multi), ["U", "P", "D", "N"]);
         assert!(matches!(
             multi.on_text_input("U"),
             Some(CmdResult::UndoDocument)

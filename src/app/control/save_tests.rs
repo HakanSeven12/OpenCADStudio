@@ -8,9 +8,13 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new() -> Self {
+        // Tests run in parallel: a counter keeps two made in the same
+        // nanosecond apart.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "ocs-control-save-{}-{}",
+            "ocs-control-save-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

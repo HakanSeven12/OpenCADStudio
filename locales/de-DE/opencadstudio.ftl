@@ -1187,6 +1187,7 @@ common =
     .sketchy = Skizzenhaft
     .snap-override-label-next-pick-only = Snap Übersteuerung: __ocs_fmt_0__ (nur nächste Auswahl).
     .no-snap-found-for-specified-point = Kein __ocs_fmt_0__ für den angegebenen Punkt gefunden.
+    .invalid-point-input = Ungültige Punkteingabe.
     .solid-created = Volumenkörper erstellt.
     .source-object-not-found = Quellobjekt nicht gefunden.
     .spacing = Abstand

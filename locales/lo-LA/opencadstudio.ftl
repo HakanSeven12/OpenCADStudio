@@ -1180,6 +1180,7 @@ common =
     .sketchy = ແບບຮ່າງ
     .snap-override-label-next-pick-only = ປ່ຽນຄ່າສະແນັບຊົ່ວຄາວ: __ocs_fmt_0__ (ສຳລັບການເລືອກຄັ້ງຕໍ່ໄປເທົ່ານັ້ນ).
     .no-snap-found-for-specified-point = ບໍ່ພົບ __ocs_fmt_0__ ສຳລັບຈຸດທີ່ລະບຸ.
+    .invalid-point-input = ການປ້ອນຈຸດບໍ່ຖືກຕ້ອງ.
     .solid-created = ສ້າງຮູບຊົງຕັນແລ້ວ.
     .source-object-not-found = ບໍ່ພົບວັດຖຸຕົ້ນສະບັບ.
     .spacing = ໄລຍະຫ່າງ

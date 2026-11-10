@@ -1187,6 +1187,7 @@ common =
     .sketchy = Bosquejo
     .snap-override-label-next-pick-only = Modificación de referencia: __ocs_fmt_0__ (solo la siguiente designación).
     .no-snap-found-for-specified-point = No se ha encontrado __ocs_fmt_0__ en el punto especificado.
+    .invalid-point-input = Entrada de punto no válida.
     .solid-created = Se creó el sólido.
     .source-object-not-found = No se encontró el objeto de origen.
     .spacing = Espaciado

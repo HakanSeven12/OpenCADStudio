@@ -1173,6 +1173,7 @@ common =
     .sketchy = Sketchy
     .snap-override-label-next-pick-only = Snap override: __ocs_fmt_0__ (next pick only).
     .no-snap-found-for-specified-point = No __ocs_fmt_0__ found for specified point.
+    .invalid-point-input = Invalid point input.
     .solid-created = Solid created.
     .source-object-not-found = Source object not found.
     .spacing = Spacing

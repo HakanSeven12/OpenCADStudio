@@ -1186,6 +1186,7 @@ common =
     .sketchy = Luonnos
     .snap-override-label-next-pick-only = Snap-ohitus: __ocs_fmt_0__ (vain seuraava valinta).
     .no-snap-found-for-specified-point = Määritetylle pisteelle ei löytynyt kohtaa __ocs_fmt_0__.
+    .invalid-point-input = Virheellinen pisteen syöte.
     .solid-created = Kiinteä luotu.
     .source-object-not-found = Lähdeobjektia ei löydy.
     .spacing = Välit

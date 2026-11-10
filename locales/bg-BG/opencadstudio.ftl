@@ -1186,6 +1186,7 @@ common =
     .sketchy = Скициран
     .snap-override-label-next-pick-only = Прескачане на закачване: __ocs_fmt_0__ (само за следващото избиране).
     .no-snap-found-for-specified-point = Не е намерено __ocs_fmt_0__ за указаната точка.
+    .invalid-point-input = Невалидно въвеждане на точка.
     .solid-created = Тялото е създадено.
     .source-object-not-found = Изходният обект не е намерен.
     .spacing = Разстояние

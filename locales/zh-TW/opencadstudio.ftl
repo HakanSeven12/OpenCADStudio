@@ -1186,6 +1186,7 @@ common =
     .sketchy = 草圖
     .snap-override-label-next-pick-only = 鎖點覆寫：__ocs_fmt_0__（僅限下一個選取點）。
     .no-snap-found-for-specified-point = 在指定點找不到__ocs_fmt_0__。
+    .invalid-point-input = 點輸入無效。
     .solid-created = 已建立實體。
     .source-object-not-found = 找不到來源物件。
     .spacing = 間距

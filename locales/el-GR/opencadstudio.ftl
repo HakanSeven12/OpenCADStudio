@@ -1188,6 +1188,7 @@ common =
     .sketchy = Σκίτσο
     .snap-override-label-next-pick-only = Παράκαμψη έλξης: __ocs_fmt_0__ (μόνο για την επόμενη επιλογή).
     .no-snap-found-for-specified-point = Δεν βρέθηκε __ocs_fmt_0__ για το καθορισμένο σημείο.
+    .invalid-point-input = Μη έγκυρη εισαγωγή σημείου.
     .solid-created = Το στερεό δημιουργήθηκε.
     .source-object-not-found = Το αντικείμενο προέλευσης δεν βρέθηκε.
     .spacing = Απόσταση

@@ -156,10 +156,22 @@ impl OpenCADStudio {
             .unwrap_or("Snap");
         self.command_line
             .push_rejection(crate::tf!("No {label} found for specified point.").as_ref());
-        self.command_line
-            .push_rejection(crate::t!("Invalid point.").as_ref());
+        // A second line follows only on a prompt without options (measured):
+        // "Invalid point input." where Enter has a default (DIMLINEAR's
+        // object pick), "Invalid point." on a bare point prompt, nothing on
+        // a prompt offering [keywords].
+        let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        match prompt.as_deref() {
+            Some(text) if text.contains('[') => {}
+            Some(text) if text.contains('<') || text.contains("Enter") => self
+                .command_line
+                .push_rejection(crate::t!("Invalid point input.").as_ref()),
+            _ => self
+                .command_line
+                .push_rejection(crate::t!("Invalid point.").as_ref()),
+        }
         self.snapper.clear_override();
-        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+        if let Some(prompt) = prompt {
             self.command_line.push_info(&prompt);
         }
         Some(Err(()))

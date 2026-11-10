@@ -1174,6 +1174,7 @@ common =
     .sketchy = 勾画
     .snap-override-label-next-pick-only = 抓取覆盖 : __ocs_fmt_0__ (仅选择下一步) 。
     .no-snap-found-for-specified-point = 在指定点未找到__ocs_fmt_0__。
+    .invalid-point-input = 点输入无效。
     .solid-created = 实相所造.
     .source-object-not-found = 找不到源对象 。
     .spacing = 间距

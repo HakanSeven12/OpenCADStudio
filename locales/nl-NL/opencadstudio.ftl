@@ -1185,6 +1185,7 @@ common =
     .sketchy = Schetsmatig
     .snap-override-label-next-pick-only = Objectmagneet negeren: __ocs_fmt_0__ (alleen volgende selectie).
     .no-snap-found-for-specified-point = Geen __ocs_fmt_0__ gevonden voor het opgegeven punt.
+    .invalid-point-input = Ongeldige puntinvoer.
     .solid-created = Vast gemaakt.
     .source-object-not-found = Bronobject niet gevonden.
     .spacing = Afstand

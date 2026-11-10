@@ -1283,10 +1283,19 @@ fn tessellate_entity_inner(
         },
         _ => None,
     };
-    // ── Civil 3D objects: lines and text styled by their Civil 3D style ─────
+    // ── Civil 3D objects ─────────────────────────────────────────────────────
+    //
+    // The display cache Civil 3D saved, when it kept one, is what the object
+    // draws, styles applied; draw it as a proxy below. Otherwise the cache is
+    // a placeholder (the class name and a box) and the object is rebuilt from
+    // its record, styled by its Civil 3D style; a class not decoded draws
+    // nothing.
     if let EntityType::Extended(entity) = e {
         if let document::entities::ExtendedEntityData::Arch(data) = &entity.data {
-            if let Some(dec) = crate::entities::civil::decoded(data, e.common().handle.value(), document) {
+            if data.civil_kind().is_some() && !proxy_blob.as_deref().is_some_and(civil_drawn_cache) {
+                let Some(dec) = crate::entities::civil::decoded(data, e.common().handle.value(), document) else {
+                    return Vec::new();
+                };
                 let inherited = ProxyInherit {
                     color: entity_color,
                     aci,
@@ -1303,12 +1312,6 @@ fn tessellate_entity_inner(
                     bg_color,
                     sel,
                 );
-            }
-            // A Civil 3D object's preview is only its bounding box, or a
-            // placeholder box at the origin in older drawings; it is never
-            // what Civil 3D draws, so a class not decoded draws nothing.
-            if data.civil_kind().is_some() {
-                return Vec::new();
             }
         }
     }
@@ -2409,13 +2412,21 @@ pub(crate) fn is_unindexable_entity(e: &document::EntityType) -> bool {
     )
 }
 
+/// Whether a Civil 3D display cache holds what the object draws rather than
+/// a placeholder: a drawn cache opens with its layer, a placeholder with the
+/// class name as text (record 36).
+pub(crate) fn civil_drawn_cache(blob: &[u8]) -> bool {
+    // An 8-byte header, then records of `u32 size, u32 type, payload`.
+    blob.get(12..16).is_some_and(|t| u32::from_le_bytes([t[0], t[1], t[2], t[3]]) != 36)
+}
+
 #[cfg(test)]
 mod civil_proxy_tests {
     use super::*;
     use document::classes::arch::{ArchEntityData, ArchKind};
     use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, ProxyGraphicRecord, ProxyGraphics};
 
-    fn boxed(dxf_name: &str, document: &mut document::Document) -> EntityType {
+    fn boxed(dxf_name: &str, placeholder: bool, document: &mut document::Document) -> EntityType {
         let mut data = Vec::new();
         let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 0.4], [0.0, 0.4], [0.0, 0.0]];
         data.extend_from_slice(&(corners.len() as u32).to_le_bytes());
@@ -2424,12 +2435,27 @@ mod civil_proxy_tests {
                 data.extend_from_slice(&v.to_le_bytes());
             }
         }
+        let polyline = ProxyGraphicRecord::Unknown { record_type: 6, data };
+        // A placeholder opens with the class name; a drawn cache with its
+        // layer (record 16).
+        let records = if placeholder {
+            let name = document::entities::ProxyUnicodeText {
+                position: document::types::Vector3::new(0.0, 0.0, 0.0),
+                normal: document::types::Vector3::new(0.0, 0.0, 1.0),
+                direction: document::types::Vector3::new(1.0, 0.0, 0.0),
+                height: 0.2,
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                text: dxf_name.into(),
+            };
+            vec![ProxyGraphicRecord::UnicodeText(name), polyline, ProxyGraphicRecord::FillOff]
+        } else {
+            vec![ProxyGraphicRecord::Unknown { record_type: 16, data: 0u32.to_le_bytes().to_vec() }, polyline]
+        };
         let mut common = EntityCommon::default();
         common.handle = document.allocate_handle();
         common.layer = "0".into();
-        common.set_proxy_graphics(&ProxyGraphics {
-            records: vec![ProxyGraphicRecord::Unknown { record_type: 6, data }],
-        });
+        assert!(common.set_proxy_graphics(&ProxyGraphics { records }));
         EntityType::Extended(Box::new(ExtendedEntity {
             common,
             data: ExtendedEntityData::Arch(ArchEntityData {
@@ -2465,14 +2491,19 @@ mod civil_proxy_tests {
         )
     }
 
-    /// A Civil 3D object's cached preview is only a box (a placeholder at
-    /// the origin in older drawings); an Arch object's preview is its shape.
+    /// A Civil 3D object draws the display cache Civil 3D saved, decoded
+    /// class or not, but never a placeholder cache (class name and box at
+    /// the origin).
     #[test]
-    fn civil_preview_box_is_not_drawn() {
+    fn civil_drawn_cache_is_drawn_and_placeholder_is_not() {
         let mut document = document::Document::new();
-        let parcel = boxed("AECC_PARCEL", &mut document);
-        let wall = boxed("AEC_WALL", &mut document);
-        assert!(wires(&document, &parcel).is_empty());
+        for class in ["AECC_PARCEL", "AECC_ALIGNMENT"] {
+            let placeholder = boxed(class, true, &mut document);
+            let drawn = boxed(class, false, &mut document);
+            assert!(wires(&document, &placeholder).is_empty(), "{class}");
+            assert!(wires(&document, &drawn).iter().any(|w| !w.points.is_empty()), "{class}");
+        }
+        let wall = boxed("AEC_WALL", true, &mut document);
         assert!(wires(&document, &wall).iter().any(|w| !w.points.is_empty()));
     }
 }

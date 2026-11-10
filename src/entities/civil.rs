@@ -58,6 +58,14 @@ fn cached<T: Clone + Default + Send + Sync + 'static>(
 
 /// Every line a Civil 3D object draws, for picking and extents.
 pub(crate) fn render(data: &ArchEntityData, handle: u64, document: &document::Document) -> Option<RenderEntity> {
+    // A drawn display cache is what the object draws; it is picked as a proxy.
+    let cached = document
+        .get_entity(Handle::new(handle))
+        .and_then(|e| e.common().graphic_data.as_deref())
+        .is_some_and(crate::scene::convert::tess::civil_drawn_cache);
+    if cached {
+        return None;
+    }
     let drawn = decoded(data, handle, document)?;
     let points = chains(drawn.polylines.into_iter().map(|p| p.points));
     (points.len() >= 2).then(|| RenderEntity {

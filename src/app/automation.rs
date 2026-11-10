@@ -1366,7 +1366,11 @@ impl OpenCADStudio {
                 }
                 Some(iced_runtime::Action::Widget(_))
                 | Some(iced_runtime::Action::Tick)
-                | Some(iced_runtime::Action::Reload) => {}
+                | Some(iced_runtime::Action::Reload)
+                // Raising a window is for the person at the screen.
+                | Some(iced_runtime::Action::Window(
+                    iced_runtime::window::Action::GainFocus(_),
+                )) => {}
                 Some(action) => return Err(format!("GUI runtime required for {action:?}")),
                 None => {
                     streams.pop();

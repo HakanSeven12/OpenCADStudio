@@ -252,14 +252,14 @@ impl Camera {
     fn ortho_depth_range(&self) -> (f32, f32) {
         // Generous headroom based on the current screen size so that rotating any
         // geometry visible on screen in 3D never penetrates the near/far planes.
-        let view_extent = (self.ortho_size() * 3.0).max(10.0);
+        let view_extent = (self.ortho_size() * 3.0).max(100.0);
 
         let r = if let Some((min, max)) = self.model_bounds {
             self.depth_extent_in_view(min, max).max(view_extent)
         } else if self.depth_half_range > 0.0 {
             self.depth_half_range.max(view_extent)
         } else {
-            (self.distance * 1000.0).max(view_extent).max(10.0)
+            (self.distance * 1000.0).max(view_extent).max(5000.0)
         };
         (self.distance - r, self.distance + r)
     }
@@ -786,13 +786,14 @@ impl Camera {
         self.depth_half_range = self.depth_extent_in_view(min, max);
     }
 
-    /// Drop a fitted depth range after the drawing changes. Keeping either the
-    /// old box or its scalar fallback can clip newly-created geometry until the
-    /// next Zoom Extents. The unset projection uses its conservative fallback
-    /// until the scene refreshes the current model bounds.
+    /// Drop a fitted depth range box after the drawing changes. Keeping the
+    /// previous scalar depth range fallback prevents the depth frustum from
+    /// collapsing to zero during incremental edits (delete, move) while zoomed in,
+    /// until the scene refreshes the model bounds.
     pub(crate) fn invalidate_model_bounds(&mut self) {
         self.model_bounds = None;
-        self.depth_half_range = 0.0;
+        // Retain `self.depth_half_range` as conservative fallback instead of
+        // resetting to 0.0, avoiding near/far plane clipping on close zoom.
     }
 
     pub(crate) fn fitted_model_bounds(&self) -> Option<(DVec3, DVec3)> {

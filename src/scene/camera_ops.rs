@@ -107,6 +107,23 @@ fn fold_sane_bounds(
     {
         return;
     }
+    // High-coordinate (GIS/UTM) protection:
+    // If the drawing coordinates are in the survey/UTM range (> 10,000 m), an isolated (0, 0, 0)
+    // definition point (e.g. from an unplaced block, associative annotation, or mid-edit entity)
+    // must not stretch the bounding box across thousands of kilometres and shrink the model.
+    if let Some((cur_min, cur_max)) = *bounds {
+        let cur_center = (cur_min + cur_max) * 0.5;
+        if cur_center.length() > 10_000.0 && lo.length() < 1e-3 && hi.length() < 1e-3 {
+            return;
+        }
+        if cur_min.length() < 1e-3
+            && cur_max.length() < 1e-3
+            && (lo.length() > 10_000.0 || hi.length() > 10_000.0)
+        {
+            *bounds = Some((lo, hi));
+            return;
+        }
+    }
     *bounds = Some(match *bounds {
         Some((min, max)) => (min.min(lo), max.max(hi)),
         None => (lo, hi),

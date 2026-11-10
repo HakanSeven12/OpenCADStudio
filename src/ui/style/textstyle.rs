@@ -721,6 +721,8 @@ fn layout<'a>(
         on_set_current: Message::TextStyleDialogSetCurrent,
         on_apply: Message::TextStyleApply,
         read_only: v.read_only,
+        locked_keeps_actions: false,
+        on_list_scroll: None,
         in_use_filter: Some((v.in_use_only, Message::TextStyleInUseFilter)),
         apply_blocked: match v.invalid_fields {
             0 => None,

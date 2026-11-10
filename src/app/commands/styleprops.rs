@@ -241,6 +241,12 @@ impl OpenCADStudio {
 
             // ── LINETYPE management ───────────────────────────────────────
             "LINETYPE" | "LT" => {
+                return Some(
+                    self.on_linetype_message(crate::ui::style::linetype::LinetypeMsg::Open),
+                );
+            }
+            // A bare LINETYPE in a script keeps its prompts.
+            "LINETYPE PROMPT" => {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
                     "LINETYPE",
@@ -260,9 +266,14 @@ impl OpenCADStudio {
             }
             cmd if cmd.starts_with("LINETYPE ") || cmd.starts_with("LT ") => {
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
-                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let parts = dash::split_quoted(raw_rest);
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
+                    "DIALOG" | "UI" => {
+                        return Some(
+                            self.on_linetype_message(crate::ui::style::linetype::LinetypeMsg::Open),
+                        );
+                    }
                     // Load the definitions of a `.lin` file (#1588).
                     "LOAD" | "L" => {
                         return Some(Task::perform(
@@ -289,7 +300,7 @@ impl OpenCADStudio {
                     }
                     // Set the current linetype applied to newly drawn entities.
                     "SET" | "CURRENT" | "S" => {
-                        let name = parts.get(1).copied().unwrap_or("");
+                        let name = parts.get(1).map(String::as_str).unwrap_or("");
                         if name.is_empty() {
                             self.command_line.push_info(
                                 crate::t!("Usage: LINETYPE SET <name | ByLayer | ByBlock>")
@@ -320,6 +331,8 @@ impl OpenCADStudio {
                                     h.current_linetype_name = nm.clone();
                                     h.current_linetype_handle = handle;
                                     self.tabs[i].dirty = true;
+                                    // New objects take the ribbon's linetype.
+                                    self.sync_ribbon_from_selection();
                                     self.command_line.push_output(
                                         crate::tf!("Current linetype set to {nm}.").as_ref(),
                                     );
@@ -4889,19 +4902,7 @@ fn rename_symbol(doc: &mut document::Document, ty: &str, old: &str, new: &str) -
             if !rekey(&mut doc.line_types, old, new) {
                 return false;
             }
-            for e in doc.entities_mut() {
-                if e.common().linetype.eq_ignore_ascii_case(old) {
-                    e.common_mut().linetype = new.to_string();
-                }
-            }
-            for l in doc.layers.iter_mut() {
-                if l.line_type.eq_ignore_ascii_case(old) {
-                    l.line_type = new.to_string();
-                }
-            }
-            if doc.header.current_linetype_name.eq_ignore_ascii_case(old) {
-                doc.header.current_linetype_name = new.to_string();
-            }
+            crate::scene::linetype_service::rename_references(doc, old, new);
             true
         }
         "UCS" => {

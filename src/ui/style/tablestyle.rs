@@ -1035,6 +1035,8 @@ pub fn view_window<'a>(
         on_set_current: Message::TableStyleDialogSetCurrent,
         on_apply: Message::TableStyleApply,
         read_only: false,
+        locked_keeps_actions: false,
+        on_list_scroll: None,
         in_use_filter: Some((v.in_use_only, Message::TableStyleListInUse)),
         apply_blocked: None,
         rows: None,

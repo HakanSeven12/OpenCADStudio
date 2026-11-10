@@ -12,6 +12,17 @@ mod blocks;
 mod blockvars;
 mod center_vars;
 pub(crate) mod purge;
+#[cfg(test)]
+mod linetype_cmd_tests;
+
+/// The library folder and the catalog are one per process.
+#[cfg(test)]
+pub(crate) fn linetype_library_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LIBRARY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LIBRARY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 mod revcloud_vars;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
@@ -1001,6 +1012,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "BLOCKREPLACE",
         // Script forms of the table commands.
         "-LAYER",
+        "-LINETYPE",
         "-PURGE",
         "-OVERKILL",
         "-STYLE",

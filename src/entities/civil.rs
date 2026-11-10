@@ -1001,17 +1001,19 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
             let frame = view.profile_view_frame()?;
             let view_handles = view.decode().handles;
-            let profiles: Vec<_> = view_handles
+            // The view lists each band's style, then the alignment and the
+            // band's two profiles.
+            let band_at = view_handles.iter().position(|h| {
+                object_arch(document, *h).is_some_and(|o| o.dxf_name == "AECC_PROFILE_VIEW_DATA_BAND_STYLE")
+            })?;
+            let band = object_arch(document, view_handles[band_at])?;
+            let profiles: Vec<_> = view_handles[band_at + 1..]
                 .iter()
                 .filter_map(|h| arch_of(document, *h, CivilKind::Profile))
+                .take(2)
                 .collect();
             let eg = profiles.first().map(|p| p.profile_polylines()).unwrap_or_default();
             let fg = profiles.get(1).map(|p| p.profile_polylines()).unwrap_or_default();
-            // The band's major-station collector: the one labelling stations.
-            let band = view_handles
-                .iter()
-                .filter_map(|h| object_arch(document, *h))
-                .find(|o| o.dxf_name == "AECC_PROFILE_VIEW_DATA_BAND_STYLE")?;
             let style = band
                 .decode()
                 .handles
@@ -1085,13 +1087,29 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let (Some(next), Some(g)) = (pvis.get(index + 1), grade_out) else {
                             continue;
                         };
-                        let mid = (pvi.point + next.point) * 0.5;
+                        // Half way along the straight part of the tangent:
+                        // from the end of this PVI's curve to the start of
+                        // the next one's.
+                        let mid = if g.is_finite() {
+                            let from = pvi.point.x + pvi.curve_length / 2.0;
+                            let to = next.point.x - next.curve_length / 2.0;
+                            let station = (from + to) / 2.0;
+                            Vector2::new(station, pvi.point.y + g * (station - pvi.point.x))
+                        } else {
+                            (pvi.point + next.point) * 0.5
+                        };
                         if !inside(mid) {
                             continue;
                         }
                         let (a, b) = (at(pvi.point), at(next.point));
                         let value = |property: u32, options: &[u32]| {
-                            (property == p::TANGENT_GRADE).then(|| LabelPart::format_value(options, g))
+                            (property == p::TANGENT_GRADE).then(|| {
+                                if g.is_finite() {
+                                    LabelPart::format_value(options, g)
+                                } else {
+                                    "Vertical".to_string()
+                                }
+                            })
                         };
                         place(out, document, &style, at(mid), (b.y - a.y).atan2(b.x - a.x), &value);
                     }
@@ -1165,6 +1183,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
 
 /// Station/elevation label properties Civil 3D writes for profile views.
 const ELEVATION: u32 = 33_652_743;
+/// Elevations of a data band's first and second profile.
 const EG_ELEVATION: u32 = 33_661_044;
 const FG_ELEVATION: u32 = 33_661_045;
 
@@ -1335,10 +1354,22 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
                 (axis.major_interval, axis.major_tick_size, axis.major_text_height, AXIS_MAJOR_TICKS, AXIS_MAJOR_ANNOTATION),
             ] {
                 let half = size * scale / 2.0;
-                for value in multiples(from, to, interval) {
+                let mut values: Vec<(f64, bool)> = multiples(from, to, interval).into_iter().map(|v| (v, true)).collect();
+                // A station axis also labels the view's first and last
+                // station, without a tick of its own.
+                if along_stations && annotation == AXIS_MAJOR_ANNOTATION {
+                    for end in [from, to] {
+                        if !values.iter().any(|(v, _)| (v - end).abs() < 1e-6) {
+                            values.push((end, false));
+                        }
+                    }
+                }
+                for (value, tick) in values {
                     let p = point(value);
                     let (a, b) = (p - outward * half, p + outward * half);
-                    styled(out, style(line + ticks), vec![[a.x, a.y, 0.0], [b.x, b.y, 0.0]]);
+                    if tick {
+                        styled(out, style(line + ticks), vec![[a.x, a.y, 0.0], [b.x, b.y, 0.0]]);
+                    }
                     if let Some(text_style) = style(line + annotation) {
                         out.texts.push(ProxyText {
                             position: [b.x, b.y, 0.0],

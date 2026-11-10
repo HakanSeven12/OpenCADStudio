@@ -608,14 +608,109 @@ pub struct PlacedGlyph {
     pub fill_tris: Vec<[f32; 2]>,
 }
 
+/// Native runs share positioned geometry; web runs retain inline ownership.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RunGlyph = Arc<PlacedGlyph>;
+/// Web font databases are per-run, so their glyphs are not shared globally.
+#[cfg(target_arch = "wasm32")]
+pub type RunGlyph = PlacedGlyph;
+
 /// A fully shaped run.
 pub struct ShapedRun {
-    pub glyphs: Vec<PlacedGlyph>,
+    pub glyphs: Vec<RunGlyph>,
     /// Total pen advance of the run (9-unit).
     pub advance: f32,
     /// Every laid-out glyph (blank ones too) as the byte range of the text it
     /// shows and its visual [left, right] pen cell, 9-unit.
     pub cells: Vec<(usize, usize, f32, f32)>,
+}
+
+// Native shaping uses one process-wide FontSystem, so its face IDs remain
+// meaningful between runs. Web creates a fresh database per run and must not
+// share by those IDs across databases.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PositionedGlyphKey {
+    font: fontdb::ID,
+    weight: u16,
+    face_index: u32,
+    glyph: u16,
+    scale: u32,
+    x: u32,
+    y: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct PositionedGlyphCache {
+    entries: LruCache<PositionedGlyphKey, (Arc<PlacedGlyph>, usize)>,
+    bytes: usize,
+    max_bytes: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PositionedGlyphCache {
+    fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: LruCache::new(NonZeroUsize::new(max_entries).expect("nonzero cache capacity")),
+            bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(&mut self, key: &PositionedGlyphKey) -> Option<Arc<PlacedGlyph>> {
+        self.entries.get(key).map(|(glyph, _)| glyph.clone())
+    }
+
+    fn insert(&mut self, key: PositionedGlyphKey, glyph: Arc<PlacedGlyph>) {
+        use std::mem::size_of;
+        let bytes = glyph.strokes.iter().fold(
+            size_of::<PositionedGlyphKey>()
+                .saturating_add(size_of::<PlacedGlyph>())
+                .saturating_add(2 * size_of::<usize>())
+                .saturating_add(
+                    glyph
+                        .strokes
+                        .capacity()
+                        .saturating_mul(size_of::<Vec<[f32; 2]>>()),
+                )
+                .saturating_add(
+                    glyph
+                        .fill_tris
+                        .capacity()
+                        .saturating_mul(size_of::<[f32; 2]>()),
+                ),
+            |total, contour| {
+                total.saturating_add(contour.capacity().saturating_mul(size_of::<[f32; 2]>()))
+            },
+        );
+        if bytes > self.max_bytes {
+            return;
+        }
+        if let Some((_, old_bytes)) = self.entries.pop(&key) {
+            self.bytes -= old_bytes;
+        }
+        while self.bytes > self.max_bytes - bytes {
+            let Some((_, (_, old_bytes))) = self.entries.pop_lru() else {
+                break;
+            };
+            self.bytes -= old_bytes;
+        }
+        if let Some((_, (_, old_bytes))) = self.entries.push(key, (glyph, bytes)) {
+            self.bytes -= old_bytes;
+        }
+        self.bytes += bytes;
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn positioned_glyph_cache() -> &'static Mutex<PositionedGlyphCache> {
+    static CACHE: OnceLock<Mutex<PositionedGlyphCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(PositionedGlyphCache::new(4096, 8 * 1024 * 1024)))
 }
 
 /// Each character's visual [left, right] cell (9-unit) in logical order:
@@ -728,17 +823,21 @@ fn estimated_shape_bytes(key: &(String, String), value: &Option<Arc<ShapedRun>>)
         bytes = bytes
             .saturating_add(size_of::<ShapedRun>())
             .saturating_add(2 * size_of::<usize>())
-            .saturating_add(
-                run.glyphs
-                    .capacity()
-                    .saturating_mul(size_of::<PlacedGlyph>()),
-            )
+            .saturating_add(run.glyphs.capacity().saturating_mul(size_of::<RunGlyph>()))
             .saturating_add(
                 run.cells
                     .capacity()
                     .saturating_mul(size_of::<(usize, usize, f32, f32)>()),
             );
+        // Charge every referenced outline in full. Shared glyphs are therefore
+        // conservatively overcounted, keeping the run cache's bound safe.
         for glyph in &run.glyphs {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                bytes = bytes
+                    .saturating_add(size_of::<PlacedGlyph>())
+                    .saturating_add(2 * size_of::<usize>());
+            }
             bytes = bytes
                 .saturating_add(
                     glyph
@@ -784,7 +883,8 @@ mod shape_cache_tests {
             glyphs: vec![PlacedGlyph {
                 strokes: vec![vec![[1.0, 2.0], [3.0, 4.0]]],
                 fill_tris: vec![[5.0, 6.0]],
-            }],
+            }
+            .into()],
             advance: 12.0,
             cells: vec![(0, 1, 0.0, 12.0)],
         })
@@ -835,6 +935,55 @@ mod shape_cache_tests {
         cache.insert(key("a"), value);
         assert!(cache.get(&key("a")).is_none());
         assert_eq!(cache.estimated_bytes, 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn positioned_glyph_cache_shares_exact_keys_and_evicts_safely() {
+        let mut cache = PositionedGlyphCache::new(2, usize::MAX);
+        let first_key = PositionedGlyphKey {
+            font: fontdb::ID::dummy(),
+            weight: 400,
+            face_index: 0,
+            glyph: 1,
+            scale: 1.0_f32.to_bits(),
+            x: 0.0_f32.to_bits(),
+            y: 0.0_f32.to_bits(),
+        };
+        let mut other_key = first_key;
+        other_key.x = 1.0_f32.to_bits();
+        let mut third_key = first_key;
+        third_key.glyph = 2;
+        let first = run().glyphs[0].clone();
+        cache.insert(first_key, first.clone());
+        assert!(Arc::ptr_eq(&cache.get(&first_key).unwrap(), &first));
+        assert!(cache.get(&other_key).is_none());
+        cache.insert(other_key, run().glyphs[0].clone());
+        assert!(cache.get(&first_key).is_some());
+        cache.insert(third_key, run().glyphs[0].clone());
+        assert!(cache.get(&other_key).is_none());
+        assert!(cache.get(&first_key).is_some());
+        cache.clear();
+        assert_eq!(cache.bytes, 0);
+        assert_eq!(first.strokes[0][0], [1.0, 2.0]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn positioned_glyph_cache_rejects_oversized_outlines() {
+        let mut cache = PositionedGlyphCache::new(1, 1);
+        let key = PositionedGlyphKey {
+            font: fontdb::ID::dummy(),
+            weight: 400,
+            face_index: 0,
+            glyph: 1,
+            scale: 0,
+            x: 0,
+            y: 0,
+        };
+        cache.insert(key, run().glyphs[0].clone());
+        assert!(cache.get(&key).is_none());
+        assert_eq!(cache.bytes, 0);
     }
 }
 
@@ -906,6 +1055,8 @@ pub fn fallback_glyph(ch: char) -> Option<Arc<Glyph>> {
 pub fn clear_fallback_cache() {
     fallback_cache().lock().unwrap().clear();
     shape_cache().lock().unwrap().clear();
+    #[cfg(not(target_arch = "wasm32"))]
+    positioned_glyph_cache().lock().unwrap().clear();
     // Web only: the per-family outline cache can also hold stale `None`s —
     // the family only became resolvable when the font joined the sysfont
     // database (`register_web_font`). On desktop the font set never changes,
@@ -1266,7 +1417,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     // Pixel (at SHAPE_FS) → 9-unit cap-height factor.
     let px_to_9 = CAP_UNITS * upem_p / (SHAPE_FS * cap_p);
 
-    let mut glyphs: Vec<PlacedGlyph> = Vec::new();
+    let mut glyphs: Vec<Arc<PlacedGlyph>> = Vec::new();
     let mut cells = Vec::new();
     let mut advance = 0.0_f32;
     for run in buf.layout_runs() {
@@ -1297,6 +1448,22 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
             let pen_x = (g.x + SHAPE_FS * g.x_offset) * px_to_9;
             let pen_y = -(SHAPE_FS * g.y_offset) * px_to_9; // outlines are y-up
 
+            // Flattening uses the pen position in every floating-point
+            // operation. Sharing only exact positioned matches preserves the
+            // original curves and triangulation, including their rounding.
+            let key = PositionedGlyphKey {
+                font: g.font_id,
+                weight: g.font_weight.0,
+                face_index,
+                glyph: g.glyph_id,
+                scale: scale_g.to_bits(),
+                x: pen_x.to_bits(),
+                y: pen_y.to_bits(),
+            };
+            if let Some(glyph) = positioned_glyph_cache().lock().unwrap().get(&key) {
+                glyphs.push(glyph);
+                continue;
+            }
             let mut fl = OutlineFlattener::new(scale_g);
             fl.offset = [pen_x, pen_y];
             outline_glyph_into(
@@ -1309,10 +1476,15 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
             fl.flush();
             if !fl.contours.is_empty() {
                 let fill_tris = triangulate_contours(&fl.contours);
-                glyphs.push(PlacedGlyph {
+                let glyph = Arc::new(PlacedGlyph {
                     strokes: fl.contours,
                     fill_tris,
                 });
+                positioned_glyph_cache()
+                    .lock()
+                    .unwrap()
+                    .insert(key, glyph.clone());
+                glyphs.push(glyph);
             }
         }
     }

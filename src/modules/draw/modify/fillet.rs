@@ -1801,6 +1801,10 @@ enum FilletStep {
     },
 }
 
+/// The refusal a no-trim FILLET prints when the radius is zero: there is no
+/// arc to add.
+const NO_TRIM_FILLET_ZERO: &str = "A zero radius with No trim leaves nothing to add.";
+
 pub struct FilletCommand {
     radius: f64,
     /// Whether the picked source entities are shortened to the tangent points
@@ -2197,9 +2201,17 @@ impl CadCommand for FilletCommand {
                             // No trim: the objects stay as they are; only the
                             // arc is added (#1558).
                             if !self.trim {
-                                return maybe_arc
-                                    .map(|arc| self.continue_after_addition(arc))
-                                    .unwrap_or(CmdResult::NeedPoint);
+                                return match maybe_arc {
+                                    Some(arc) => self.continue_after_addition(arc),
+                                    // A zero radius makes no arc: say so and
+                                    // start over, as a zero-distance no-trim
+                                    // CHAMFER does.
+                                    None => {
+                                        self.step = FilletStep::First;
+                                        self.resume_second = None;
+                                        CmdResult::ReportError(NO_TRIM_FILLET_ZERO.to_string())
+                                    }
+                                };
                             }
                             // A polyline filleted with a line or arc takes
                             // the fillet and the other object in.
@@ -3566,6 +3578,25 @@ mod tests {
             _ => panic!("zero-distance no-trim CHAMFER should report an error"),
         }
         assert!(matches!(command.step, ChamferStep::First));
+        assert_eq!(command.all_entities.len(), 2, "nothing was added");
+    }
+
+    /// A zero radius with No trim makes no arc, so there is nothing to add.
+    /// The command says so and asks for a first object again, as a
+    /// zero-distance no-trim CHAMFER does, instead of waiting on the second
+    /// pick without a word.
+    #[test]
+    fn zero_radius_no_trim_fillet_reports_and_starts_over() {
+        let mut command = FilletCommand::new(0.0, open_corner());
+        command.trim = false;
+        command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        match command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReportError(message) => {
+                assert_eq!(message, "A zero radius with No trim leaves nothing to add.")
+            }
+            _ => panic!("zero-radius no-trim FILLET should report an error"),
+        }
+        assert!(matches!(command.step, FilletStep::First));
         assert_eq!(command.all_entities.len(), 2, "nothing was added");
     }
 

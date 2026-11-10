@@ -1414,6 +1414,13 @@ impl OpenCADStudio {
                 self.open_insert_attr_dialog(&block_name, &askable);
                 return None;
             }
+            if let Some(heading) = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|c| c.prompt_heading())
+            {
+                self.command_line.push_info(&heading);
+            }
             let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
             if let Some(p) = prompt {
                 self.command_line.push_info(&p);

@@ -1496,6 +1496,13 @@ impl OpenCADStudio {
             self.open_attribute_editor(ins_handle);
             return Some(Task::none());
         }
+        let heading = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|c| c.prompt_heading());
+        if let Some(h) = heading.filter(|_| !quiet) {
+            self.command_line.push_info(&h);
+        }
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
         if let Some(p) = prompt.filter(|_| !quiet) {
             self.command_line.push_info(&p);

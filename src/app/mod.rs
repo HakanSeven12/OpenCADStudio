@@ -2080,6 +2080,7 @@ pub(super) struct OpenCADStudio {
     /// any list operation and on Apply.
     textstyle_draft: text_style_draft::TextStyleDraft,
     textstyle_font_picker: crate::ui::font_picker::FontPickerState,
+    textstyle_bigfont_picker: crate::ui::font_picker::FontPickerState,
     /// The texts of every text style (ASCII-lowercase name), for "Where
     /// used" and the summary before Apply. Texts do not change while the
     /// manager is open; Apply walks the drawing again.
@@ -5828,6 +5829,8 @@ pub enum Message {
     TextStyleApply,
     /// The font picker: open, search or pick a stroke or TrueType font.
     TextStyleFont(crate::ui::font_picker::FontPickerEvent),
+    /// The big font picker: open, search or pick a double-byte SHX font.
+    TextStyleBigFont(crate::ui::font_picker::FontPickerEvent),
     /// Pick the TrueType face: regular, bold, italic or both.
     TextStyleFaceStyle(crate::ui::font_picker::FaceStyle),
     /// Flip a boolean flag on the selected text style (backward / upside_down /
@@ -6864,6 +6867,7 @@ impl OpenCADStudio {
             textstyle_compare: String::new(),
             textstyle_draft: Default::default(),
             textstyle_font_picker: Default::default(),
+            textstyle_bigfont_picker: Default::default(),
             textstyle_users: Default::default(),
             // TableStyle dialog
             tablestyle_selected: "Standard".to_string(),

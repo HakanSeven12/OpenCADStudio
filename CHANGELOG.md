@@ -8,7 +8,7 @@
 
 | Release | Date | Highlights | Details |
 | :--- | :--- | :--- | :--- |
-| **[Unreleased](changelogs/unreleased.md)** | *2026-11-08 to Present* | Parameters Manager parameter order, `EATTEDIT`, named `ATTSYNC`, and attribute-editor labelling | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[Unreleased](changelogs/unreleased.md)** | *2026-11-08 to Present* | Parameters Manager parameter order, `EATTEDIT`, named `ATTSYNC`, SHX Big Font picker & Big5 decoding, and attribute-editor labelling | [changelogs/unreleased.md](changelogs/unreleased.md) |
 | **[v2026.45](changelogs/v2026.45.md)** | *2026-11-08* | Layer Manager with in-drawing filters & Quick Select/FILTER, tables overhaul (cell styles, in-place editing, fill grips), quad cursor menu with plugin surface, Flip parameters & Parameters Manager, `BLOCKREPLACE`/`XPLODE`, HATCH/OFFSET/MATCHPROP/SELECT parity, annotation scale & complex linetypes, SVG import, CUI/Quick Access Toolbar, TRIM/OSNAP/OTRACK performance | [changelogs/v2026.45.md](changelogs/v2026.45.md) |
 | **[v2026.44](changelogs/v2026.44.md)** | *2026-11-01* | Shared OpenCADDocument model with IFCX and converter interchange, dimension/multileader/text/table overhauls, ribbon redesign, layer tools, Plugin API 14, MCP intent tools, and plotting/import/performance fixes | [changelogs/v2026.44.md](changelogs/v2026.44.md) |
 | **[v2026.43](changelogs/v2026.43.md)** | *2026-10-25* | Dynamic block authoring, QuickCalc, HATCH editing, expanded import/export, plugin grips, drafting tools, and broad reliability improvements | [changelogs/v2026.43.md](changelogs/v2026.43.md) |
@@ -22,7 +22,7 @@
 
 ## [Unreleased] - 2026-11-08
 
-> **Summary:** Added a whole-number parameter order to the Parameters Manager and the `EATTEDIT` command; corrected named `ATTSYNC`, the attribute definition card and the attribute manager's labels. See the [full Unreleased notes](changelogs/unreleased.md).
+> **Summary:** Added a whole-number parameter order to the Parameters Manager and the `EATTEDIT` command; added a dedicated SHX Big Font picker in Text Style settings; corrected Big5 SHX big-font code-page detection, named `ATTSYNC`, the attribute definition card and the attribute manager's labels. See the [full Unreleased notes](changelogs/unreleased.md).
 
 ## [v2026.45] - 2026-11-08
 

@@ -182,6 +182,61 @@ pub fn catalogue(doc: &Document, style_default: bool) -> Vec<FontEntry> {
     entries
 }
 
+/// Every big font the text style manager lists: big fonts in the drawing,
+/// SHX files next to the drawing, and SHX files in the font folders.
+pub fn catalogue_bigfont(doc: &Document) -> Vec<FontEntry> {
+    let entry = |choice, section| FontEntry {
+        choice,
+        section,
+        missing: None,
+    };
+    let mut entries: Vec<FontEntry> = Vec::new();
+    let base = doc
+        .source_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(|p| p.parent());
+
+    // 1. Big fonts referenced in this drawing:
+    for style in doc.text_styles.iter().filter(|style| !style.is_shape_file) {
+        let big = style.big_font_file.trim();
+        if !big.is_empty() && big.to_ascii_lowercase().ends_with(".shx") {
+            let choice = FontChoice::Stroke(big.to_string());
+            if !entries.iter().any(|e| e.choice.same_font(&choice)) {
+                entries.push(entry(choice, Section::Drawing));
+            }
+        }
+    }
+
+    // 2. SHX files next to the drawing:
+    if let Some(base) = base {
+        if let Ok(dir) = std::fs::read_dir(base) {
+            let mut local_files: Vec<String> = dir
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.to_ascii_lowercase().ends_with(".shx"))
+                .collect();
+            local_files.sort_by_key(|n| n.to_ascii_lowercase());
+            for file in local_files {
+                let choice = FontChoice::Stroke(file);
+                if !entries.iter().any(|e| e.choice.same_font(&choice)) {
+                    entries.push(entry(choice, Section::Drawing));
+                }
+            }
+        }
+    }
+
+    // 3. SHX files in font/support folders:
+    for file in crate::io::font_repo::folder_shx_fonts() {
+        let choice = FontChoice::Stroke(file);
+        if !entries.iter().any(|e| e.choice.same_font(&choice)) {
+            entries.push(entry(choice, Section::Folders));
+        }
+    }
+
+    entries
+}
+
 /// The font `style` draws with, as the picker names it; `None` when the
 /// style names none.
 pub fn style_font(style: &document::tables::TextStyle) -> Option<FontChoice> {
@@ -294,6 +349,38 @@ impl FontPickerState {
             FontPickerEvent::Search(query) => {
                 if !self.open {
                     self.refresh(doc, style_default);
+                }
+                self.open = true;
+                self.query = query;
+                None
+            }
+            FontPickerEvent::Pick(choice) => {
+                self.open = false;
+                self.query.clear();
+                Some(choice)
+            }
+        }
+    }
+
+    /// List the big fonts again, from `doc` and the folders as they are now.
+    pub fn refresh_bigfont(&mut self, doc: &Document) {
+        self.entries = catalogue_bigfont(doc);
+    }
+
+    /// Follow `event` for a big font picker; a pick closes the list and is returned.
+    pub fn update_bigfont(&mut self, event: FontPickerEvent, doc: &Document) -> Option<FontChoice> {
+        match event {
+            FontPickerEvent::Toggle => {
+                self.open = !self.open;
+                self.query.clear();
+                if self.open {
+                    self.refresh_bigfont(doc);
+                }
+                None
+            }
+            FontPickerEvent::Search(query) => {
+                if !self.open {
+                    self.refresh_bigfont(doc);
                 }
                 self.open = true;
                 self.query = query;

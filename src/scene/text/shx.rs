@@ -220,7 +220,6 @@ fn bigfont_code_page(path: &str, file: &ShxFile) -> &'static str {
         "ansi_932"
     } else if name.contains("gb")
         || name.contains("hz")
-        || name.contains("china")
         || !file
             .shapes
             .keys()
@@ -679,7 +678,7 @@ fn interpret(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Shape bytecode for a glyph: a horizontal 6-unit stroke, then end.
@@ -695,14 +694,14 @@ mod tests {
     }
 
     /// A `bigfont 1.0` with the Big5 codes of `中` (0xA4A4) and `一` (0xA440).
-    fn synthetic_bigfont() -> Vec<u8> {
+    pub(crate) fn synthetic_bigfont() -> Vec<u8> {
         bigfont_with(&[0xA4A4, 0xA440])
     }
 
     /// A `bigfont 1.0` with one glyph at each of `codes`, laid out like
     /// `chineset.shx`: header, 8-byte entries in a sparse table, font header
     /// shape 0 (`name NUL above below modes`).
-    fn bigfont_with(codes: &[u16]) -> Vec<u8> {
+    pub(crate) fn bigfont_with(codes: &[u16]) -> Vec<u8> {
         let mut b = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
         let entries = 2 + 2 * codes.len() as u16;
         b.extend_from_slice(&8u16.to_le_bytes());
@@ -773,6 +772,15 @@ mod tests {
         let path = tmp("fsdb.shx", &bigfont_with(&[0xD6D0, 0xB0EA]));
         assert!(bigfont_glyph(&path, '中').is_some());
         assert!(bigfont_glyph(&path, '國').is_none());
+    }
+
+    #[test]
+    fn a_china1_bigfont_is_read_as_big5() {
+        // Big5: `中` is A4A4, `一` is A440 (trail < A1), `筋` is B5AC.
+        // In GBK `筋` is BDEE; BDEE in Big5 is `踐`.
+        let path = tmp("china1.shx", &bigfont_with(&[0xA4A4, 0xA440, 0xB5AC]));
+        assert!(bigfont_glyph(&path, '中').is_some());
+        assert!(bigfont_glyph(&path, '筋').is_some());
     }
 
     #[test]

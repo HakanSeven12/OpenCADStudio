@@ -7067,7 +7067,10 @@ impl OpenCADStudio {
                     let all = targets.iter().all(|handle| has(doc, *handle));
                     for handle in &targets {
                         if all {
-                            if crate::scene::annotative::object_scale_memberships(doc, *handle).len() > 1 {
+                            if crate::scene::annotative::object_scale_memberships(doc, *handle)
+                                .len()
+                                > 1
+                            {
                                 crate::scene::annotative::remove_annotation_context_for_scale(
                                     doc, *handle, sh,
                                 );
@@ -7215,7 +7218,11 @@ impl OpenCADStudio {
                         .reset_scale_list_to(&keep, choice != 1, choice != 0);
                     self.scale_stage_mark();
                     self.scale_stage_commit();
-                    let first = self.tabs[i].scene.scale_names_in_list_order().into_iter().next();
+                    let first = self.tabs[i]
+                        .scene
+                        .scale_names_in_list_order()
+                        .into_iter()
+                        .next();
                     if let Some(first) = first {
                         self.load_scale_editor(&first);
                     }
@@ -14623,6 +14630,7 @@ impl OpenCADStudio {
                 if self.selected_textstyle_is_read_only() {
                     return Task::none();
                 }
+                self.textstyle_bigfont_picker.open = false;
                 let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 match self.textstyle_font_picker.update(event, doc, false) {
@@ -14635,6 +14643,25 @@ impl OpenCADStudio {
                     Some(FontChoice::StyleDefault) | None => {}
                 }
                 if is_toggle && self.textstyle_font_picker.open {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
+                }
+                Task::none()
+            }
+            Message::TextStyleBigFont(event) => {
+                if self.selected_textstyle_is_read_only() || !self.textstyle_draft.big_font_on {
+                    return Task::none();
+                }
+                self.textstyle_font_picker.open = false;
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
+                let doc = &self.tabs[self.active_tab].scene.document;
+                if let Some(picked) = self.textstyle_bigfont_picker.update_bigfont(event, doc) {
+                    if let FontChoice::Stroke(file) = picked {
+                        self.textstyle_draft.style.big_font_file = file;
+                    }
+                }
+                if is_toggle && self.textstyle_bigfont_picker.open {
                     return iced::widget::operation::focus(iced::widget::Id::new(
                         crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
                     ));

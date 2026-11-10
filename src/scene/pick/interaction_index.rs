@@ -706,7 +706,9 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
             aabb,
             value: wire_idx,
         });
-    } else {
+    } else if !holds_nothing(wire) {
+        // Every query lists a wire with no finite box. A blank slot of the
+        // resident set has none either, and nothing to pick or snap.
         batch.unbounded_wires.push(wire_idx);
     }
     if wire.point_marker.is_some() {
@@ -2045,8 +2047,9 @@ impl InteractionCandidates {
     }
 
     /// The candidates with every block-copy stub among them expanded into
-    /// the wires it stands for, so snapping and picking see each copy. Only
-    /// the copies' wires near an XY query are kept.
+    /// the wires it stands for, so snapping and picking see each copy. With
+    /// an XY query, only the wires near it are kept, the copies' and the
+    /// plain ones alike, and no blank slot.
     pub(crate) fn materialize_stubs(self) -> Self {
         if !self.iter().any(|wire| wire.stub.is_some()) {
             return self;
@@ -2055,6 +2058,16 @@ impl InteractionCandidates {
         let source_candidates = self.len();
         let mut wires = Vec::new();
         for wire in self.iter() {
+            // A blank slot holds nothing, and a plain wire whose box misses
+            // the query could not be hit there: neither is copied, like a
+            // block copy's leaf away from the query.
+            if wire.stub.is_none()
+                && self
+                    .query_aabb
+                    .is_some_and(|query| holds_nothing(wire) || misses_query(wire, query))
+            {
+                continue;
+            }
             crate::scene::model::instance_model::expand_stub_near_into(
                 wire,
                 self.query_aabb,
@@ -2351,6 +2364,50 @@ impl<'a> Iterator for WireIter<'a> {
             },
         }
     }
+}
+
+/// Whether a wire holds nothing to pick or snap: a blank slot of the
+/// resident set, left by a hidden entity or by a run that got shorter.
+fn holds_nothing(wire: &WireModel) -> bool {
+    wire.points.is_empty()
+        && wire.snap_pts.is_empty()
+        && wire.key_vertices.is_empty()
+        && wire.tangent_geoms.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.text_verts.is_empty()
+        && wire.searchable_text.is_empty()
+        && wire.point_marker.is_none()
+        && wire.stub.is_none()
+}
+
+/// Whether a wire's box lies outside `query` (world XY), together with
+/// every snap point and key vertex it has. A wire with no finite box, or
+/// drawn at a screen size, may reach anywhere.
+fn misses_query(wire: &WireModel, query: [f64; 4]) -> bool {
+    if wire.point_marker.is_some() {
+        return false;
+    }
+    let [min_x, min_y, max_x, max_y] = wire.aabb;
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return false;
+    }
+    // The f32 slack the index gives the same box.
+    let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+    let pad = (mag * f32::EPSILON * 2.0) as f64;
+    let outside = |x: f64, y: f64| x < query[0] || x > query[2] || y < query[1] || y > query[3];
+    (f64::from(max_x) + pad < query[0]
+        || f64::from(min_x) - pad > query[2]
+        || f64::from(max_y) + pad < query[1]
+        || f64::from(min_y) - pad > query[3])
+        && wire
+            .snap_pts
+            .iter()
+            .all(|(point, _)| outside(point.x, point.y))
+        && wire
+            .key_vertices
+            .iter()
+            .all(|point| outside(point[0], point[1]))
 }
 
 fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {

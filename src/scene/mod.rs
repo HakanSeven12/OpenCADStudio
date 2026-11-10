@@ -9296,7 +9296,22 @@ impl Scene {
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
             && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
             && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
-        for (h, kind) in &deltas {
+        // References to a block re-expanded after its definition changed
+        // share one prototype: the first one comes back with the full run
+        // and the others as a stub of it. Longest runs first gives the full
+        // run back to the reference whose slots held it; in the journal's
+        // order another reference could get it and grow past its slots.
+        let mut tess_order: Vec<(Handle, ChangeKind)> = deltas.clone();
+        tess_order.sort_by_key(|(h, _)| {
+            std::cmp::Reverse(
+                layout
+                    .ranges
+                    .get(h)
+                    .or_else(|| layout.vacant.get(h))
+                    .map_or(0, |&(_, len)| len),
+            )
+        });
+        for (h, kind) in &tess_order {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
             }
@@ -9503,17 +9518,31 @@ impl Scene {
                 if start + old_len > layout.marker_start || layout.marker_start > owned.len() {
                     return declined("run-outside-entity-runs");
                 }
-                if old_len == new_len {
+                // A shorter run that is not the last one keeps all its slots,
+                // so no later run moves and the handle index stays as it is:
+                // switching a layer off inside a block shortens every
+                // reference to that block, all through the set. The unused
+                // slots hold blank wires under the entity's name, with the
+                // default unbounded box: a window selection passes over such
+                // a wire, where an empty box would leave the entity out.
+                let mut new_run = new_run;
+                if new_len < old_len && start + old_len != layout.marker_start {
+                    let name = handle.value().to_string();
+                    new_run.resize_with(old_len, || {
+                        WireModel::solid(name.clone(), Vec::new(), [0.0; 4], false)
+                    });
+                }
+                if old_len == new_run.len() {
                     for (slot, wire) in owned[start..start + old_len].iter_mut().zip(new_run) {
                         *slot = wire;
                     }
-                    layout.ranges.insert(handle, (start, new_len));
+                    layout.ranges.insert(handle, (start, old_len));
                     continue;
                 }
-                // Shape-changing edits are relocation-free only for the
-                // terminal entity (the live-polyline case). A non-terminal
-                // resize takes the clean full-build fallback instead of
-                // shifting every following range.
+                // Any other shape change is relocation-free only for the
+                // terminal entity (the live-polyline case). A run that grows
+                // anywhere else takes the clean full-build fallback instead
+                // of shifting every following range.
                 if start + old_len != layout.marker_start {
                     return declined("resized-run-not-at-the-tail");
                 }

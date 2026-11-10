@@ -129,6 +129,99 @@ fn window_around_first(scene: &Scene) -> Vec<Handle> {
     hits
 }
 
+/// The drawn wires without the entity each belongs to, sorted: the same for
+/// two sets whichever reference to a block carries its full run.
+fn shape(set: &Drawn) -> Vec<(usize, usize, usize, usize)> {
+    let mut out: Vec<_> = set
+        .iter()
+        .map(|&(_, points, snaps, curves, text)| (points, snaps, curves, text))
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+fn line_at(layer: &str, y: f64) -> EntityType {
+    on_layer(
+        EntityType::Line(Line::from_points(
+            Vector3::new(-2.0, y, 0.0),
+            Vector3::new(2.0, y, 0.0),
+        )),
+        layer,
+    )
+}
+
+/// Block `LINES` holds two lines and a circle on layer A and the same on
+/// layer B. All its references but the first carry the lines as one stub of
+/// the first one's wires. Six references to it come before a line.
+fn six_references() -> Scene {
+    let mut scene = Scene::new();
+    for name in ["A", "B"] {
+        scene.document.layers.add(Layer::new(name)).unwrap();
+    }
+    scene
+        .define_block_from_owned_entities(
+            vec![
+                line_at("A", 0.5),
+                line_at("A", 1.0),
+                on_layer(circle(1.0), "A"),
+                line_at("B", -0.5),
+                line_at("B", -1.0),
+                on_layer(circle(2.0), "B"),
+            ],
+            "LINES",
+            glam::DVec3::ZERO,
+        )
+        .expect("the definition is created");
+    for k in 0..6 {
+        scene.add_entity(EntityType::Insert(Insert::new(
+            "LINES",
+            Vector3::new(50.0 + 100.0 * k as f64, 50.0, 0.0),
+        )));
+    }
+    scene.add_entity(EntityType::Line(Line::from_points(
+        Vector3::new(900.0, 50.0, 0.0),
+        Vector3::new(910.0, 50.0, 0.0),
+    )));
+    scene
+}
+
+#[test]
+fn references_drawn_as_stubs_are_patched_when_a_layer_inside_switches() {
+    let mut scene = six_references();
+    let before = drawn(&scene);
+
+    let hits = scene.resident_patch_hits.get();
+    switch(&mut scene, "A", false);
+    let off = drawn(&scene);
+    assert_eq!(
+        scene.resident_patch_hits.get(),
+        hits + 1,
+        "the reference that carried the full run must get it back, so no \
+         reference grows past its slots and the set is patched"
+    );
+    let mut fresh = six_references();
+    switch(&mut fresh, "A", false);
+    assert_eq!(
+        shape(&off),
+        shape(&drawn(&fresh)),
+        "the patched set draws what a new one does"
+    );
+
+    let hits = scene.resident_patch_hits.get();
+    switch(&mut scene, "A", true);
+    let on = drawn(&scene);
+    assert_eq!(
+        scene.resident_patch_hits.get(),
+        hits + 1,
+        "switching A back on patches the set again"
+    );
+    assert_eq!(
+        shape(&on),
+        shape(&before),
+        "A back on draws what it drew before"
+    );
+}
+
 #[test]
 fn a_layer_switched_off_inside_a_block_patches_the_references_in_place() {
     let (mut scene, first) = two_references();

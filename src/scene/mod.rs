@@ -59,6 +59,8 @@ mod boundary;
 mod camera_ops;
 #[cfg(test)]
 mod reference_only_tests;
+#[cfg(test)]
+mod resident_patch_shorter_runs_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod center_native;
 pub(crate) mod centerline;

@@ -836,6 +836,23 @@ mod tests {
     }
 
     #[test]
+    fn the_used_filter_matches_a_name_whole_rather_than_inside_a_longer_one() {
+        let mut rows = sample();
+        rows[0].name = "Distance1".into();
+        rows[1].name = "Distance10".into();
+        rows[2].expression = "Distance10*2".into();
+        let listed = manager::displayed(&rows, manager::FilterMode::UsedInExpressions, "*", "");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Distance10"],
+            "the expression names the longer identifier, not the shorter one"
+        );
+    }
+
+    #[test]
     fn the_pane_names_the_used_filter_in_its_footer() {
         let used = Panel {
             mode: manager::FilterMode::UsedInExpressions,

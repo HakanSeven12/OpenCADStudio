@@ -3463,7 +3463,17 @@ impl OpenCADStudio {
         };
         let number = |typed: &str| typed.trim().replace(',', ".").parse::<f64>().ok();
         match msg {
-            M::Accept => return self.feed_command(StepInput::Enter),
+            M::Accept => {
+                let edit = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|command| command.hatch_panel_edit());
+                if let Some((handle, before, after)) = edit {
+                    self.apply_hatch_panel_edit(handle, &before, &after);
+                    return Task::none();
+                }
+                return self.feed_command(StepInput::Enter);
+            }
             M::Cancel => return self.feed_command(StepInput::Escape),
             M::Kind(kind) => {
                 use crate::modules::draw::draw::hatch::HatchFill;

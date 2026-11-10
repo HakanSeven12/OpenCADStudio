@@ -701,6 +701,180 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
     }
 }
 
+/// Transparency as the Hatch panel shows it: a percentage, `None` when the
+/// hatch follows its layer or block.
+fn transparency_percent(t: document::types::Transparency) -> Option<u8> {
+    match t {
+        document::types::Transparency::Explicit(alpha) => {
+            Some((f64::from(alpha) * 100.0 / 255.0).round() as u8)
+        }
+        _ => None,
+    }
+}
+
+/// The Hatch panel's settings for an existing hatch, as HATCHEDIT shows
+/// them. A user-defined hatch's spacing is its pattern scale, as in the
+/// Properties palette.
+pub(crate) fn panel_settings(
+    h: &Hatch,
+    annotative: bool,
+) -> crate::modules::draw::draw::hatch::HatchSettings {
+    use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings, GRADIENT_COLORS};
+    use crate::scene::model::hatch_model::GradientKind;
+    let fill = if h.gradient_color.enabled {
+        let (kind, invert) = GradientKind::from_name(&h.gradient_color.name);
+        HatchFill::Gradient(kind, invert)
+    } else if h.is_solid {
+        HatchFill::Solid
+    } else if matches!(
+        h.pattern_type,
+        document::entities::HatchPatternType::UserDefined
+    ) {
+        HatchFill::User {
+            spacing: h.pattern_scale,
+            double: h.is_double,
+        }
+    } else {
+        HatchFill::Pattern(h.pattern.name.clone())
+    };
+    let mut gradient_colors = GRADIENT_COLORS;
+    for (slot, entry) in gradient_colors.iter_mut().zip(&h.gradient_color.colors) {
+        *slot = entry.color;
+    }
+    let origin = h.pattern_origin();
+    HatchSettings {
+        fill,
+        angle_deg: if h.gradient_color.enabled {
+            h.gradient_color.angle
+        } else {
+            h.pattern_angle
+        }
+        .to_degrees(),
+        scale: h.pattern_scale,
+        origin: [origin.x, origin.y],
+        method: 0,
+        islands: h.style,
+        associative: h.is_associative,
+        separate: false,
+        keep_boundaries: false,
+        gap_tolerance: 0.0,
+        color: Some(h.common.color),
+        background: background_color(h),
+        layer: Some(h.common.layer.clone()),
+        transparency: transparency_percent(h.common.transparency),
+        gradient_colors,
+        draw_order: 0,
+        annotative,
+    }
+}
+
+/// Swap the hatch's lines for the predefined pattern `name`, kept at the
+/// hatch's scale, angle and origin.
+fn set_predefined_pattern(h: &mut Hatch, name: &str) {
+    if name.eq_ignore_ascii_case("SOLID") {
+        h.pattern = document::entities::HatchPattern::new("SOLID");
+        h.pattern_type = document::entities::HatchPatternType::Predefined;
+        h.is_solid = true;
+        h.gradient_color.enabled = false;
+        return;
+    }
+    let Some(entry) = crate::scene::model::hatch_patterns::find(name) else {
+        return;
+    };
+    let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+    scale_pattern_geometry(&mut pattern, h.pattern_scale.max(1.0e-6));
+    rotate_pattern_geometry(&mut pattern, h.pattern_angle);
+    let origin = h.pattern_origin();
+    translate_pattern_geometry(&mut pattern, origin.x, origin.y);
+    h.pattern = pattern;
+    h.pattern_type = document::entities::HatchPatternType::Predefined;
+    h.is_solid = false;
+    h.gradient_color.enabled = false;
+}
+
+/// Apply what changed on the Hatch panel between `before` and `after` to an
+/// existing hatch (HATCHEDIT's OK). Fields the panel did not change keep
+/// the hatch's own values; colour, layer and transparency are set by the
+/// caller, which owns the layer table.
+pub(crate) fn apply_panel_settings(
+    h: &mut Hatch,
+    before: &crate::modules::draw::draw::hatch::HatchSettings,
+    after: &crate::modules::draw::draw::hatch::HatchSettings,
+) {
+    use crate::modules::draw::draw::hatch::HatchFill;
+    use document::entities::HatchPatternType;
+    let number = |value: f64| value.to_string();
+    if after.fill != before.fill {
+        match &after.fill {
+            HatchFill::Solid => set_predefined_pattern(h, "SOLID"),
+            HatchFill::Pattern(name) => set_predefined_pattern(h, name),
+            HatchFill::User { spacing, double } => {
+                h.gradient_color.enabled = false;
+                if h.pattern_type != HatchPatternType::UserDefined {
+                    apply_geom_prop(h, "pattern_type_label", "User Defined");
+                }
+                h.is_solid = false;
+                apply_geom_prop(h, "spacing", &number(*spacing));
+                h.is_double = *double;
+            }
+            HatchFill::Gradient(kind, invert) => {
+                h.is_solid = true;
+                h.gradient_color.enabled = true;
+                h.gradient_color.name = kind.dxf_name(*invert).to_string();
+                h.gradient_color.angle = after.angle_deg.to_radians();
+                h.gradient_color.is_single_color = false;
+                h.gradient_color.colors = after
+                    .gradient_colors
+                    .iter()
+                    .enumerate()
+                    .map(|(n, color)| document::entities::hatch::GradientColorEntry {
+                        value: n as f64,
+                        color: *color,
+                        ..Default::default()
+                    })
+                    .collect();
+            }
+        }
+    } else if after.gradient_colors != before.gradient_colors && h.gradient_color.enabled {
+        for (entry, color) in h
+            .gradient_color
+            .colors
+            .iter_mut()
+            .zip(&after.gradient_colors)
+        {
+            entry.color = *color;
+        }
+    }
+    if after.angle_deg != before.angle_deg {
+        apply_geom_prop(h, "pattern_angle", &number(after.angle_deg));
+    }
+    if after.scale != before.scale && !matches!(after.fill, HatchFill::User { .. }) {
+        apply_geom_prop(h, "pattern_scale", &number(after.scale));
+    }
+    if after.origin != before.origin {
+        h.set_pattern_origin(document::types::Vector2::new(
+            after.origin[0],
+            after.origin[1],
+        ));
+    }
+    if after.islands != before.islands {
+        h.style = after.islands;
+    }
+    if after.associative != before.associative {
+        apply_geom_prop(
+            h,
+            "associative",
+            if after.associative { "true" } else { "false" },
+        );
+    }
+    if after.background != before.background {
+        match &after.background {
+            Some(color) => set_background_color(h, color),
+            None => clear_background_color(h),
+        }
+    }
+}
+
 fn apply_transform(h: &mut Hatch, t: &EntityTransform) {
     crate::scene::view::transform::apply_standard_entity_transform(h, t, |entity, p1, p2| {
         // Keep boundary directions, angles, and sweeps consistent.

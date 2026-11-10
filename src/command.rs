@@ -3888,6 +3888,18 @@ pub trait CadCommand: Send {
     /// Settings edited in the Hatch panel.
     fn set_hatch_settings(&mut self, _settings: crate::modules::draw::draw::hatch::HatchSettings) {}
 
+    /// HATCHEDIT's panel edit: the hatch, the settings the panel opened
+    /// with, and the settings it shows now. Default `None`.
+    fn hatch_panel_edit(
+        &self,
+    ) -> Option<(
+        Handle,
+        crate::modules::draw::draw::hatch::HatchSettings,
+        crate::modules::draw::draw::hatch::HatchSettings,
+    )> {
+        None
+    }
+
     /// The step draws a window that selects objects rather than placing
     /// geometry: no coordinate boxes at the cursor. Default `false`.
     fn selects_by_window(&self) -> bool {

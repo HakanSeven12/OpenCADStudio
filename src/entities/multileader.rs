@@ -2618,7 +2618,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             // Subtract world_offset in f64 before casting to f32: drawings often
             // sit at large absolute coordinates and casting first then subtracting
             // throws away the precision needed for the rotated sub-glyph offsets.
-            let mut local_ins_x = (ins.x) as f32;
+            let local_ins_x = (ins.x) as f32;
             let z = (ins.z) as f32;
 
             // The context stores the resolved display rotation.
@@ -2633,11 +2633,6 @@ impl MultiLeaderFrameTess for MultiLeader {
             }
 
             let vertical_attach = active_vertical_attachment(ml);
-            let underline_lift = if underlined_line(vertical_attach, 1).is_some() {
-                height * MLEADER_UNDERLINE_GAP
-            } else {
-                0.0
-            };
 
             // Resolve text style via handle when available, falling back to STANDARD.
             let style_name = ctx
@@ -2709,6 +2704,16 @@ impl MultiLeaderFrameTess for MultiLeader {
             };
             let metrics = layout_mtext(&mtext_opts);
             let block_w = metrics.line_widths.iter().cloned().fold(0.0_f32, f32::max) as f64;
+            // Local up-axis position of the line that actually meets the leader.
+            // BottomLine is an underline attachment, not a bottom-ink one: its
+            // rule sits 0.2 × height below the selected line's real baseline.
+            // Using that baseline also accounts for descenders, paragraph
+            // spacing and exact line spacing; a nominal line-index calculation
+            // leaves the rule off the leader on those labels.
+            let attachment_up = underlined_line(vertical_attach, metrics.line_count)
+                .and_then(|li| metrics.line_baselines.get(li).copied())
+                .map(|baseline| baseline - height * MLEADER_UNDERLINE_GAP)
+                .unwrap_or(0.0);
 
             // Horizontal leaders attach at the connection point: the dogleg runs
             // horizontally at connection_point.y, and the text's attachment line
@@ -2716,7 +2721,9 @@ impl MultiLeaderFrameTess for MultiLeader {
             // insertion Y to that connection instead of the stored text_location.y
             // so the text meets the landing exactly — the two can disagree by a
             // few percent because our MText line height need not match the writer's.
-            // An underlined line sits its underline gap above that connection.
+            // For an underline attachment, `attachment_up` is the rule's offset
+            // from the insertion, so the insertion goes on the opposite side of
+            // the connection by that amount.
             //
             // Rotated text needs the same snap, but along the text frame's up
             // axis: an angled label is stored with its anchor free of the
@@ -2730,7 +2737,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     ml.context
                         .leader_roots
                         .first()
-                        .map(|r| r.connection_point.y as f32 + underline_lift)
+                        .map(|r| r.connection_point.y as f32 - attachment_up)
                         .unwrap_or(ins.y as f32),
                 ),
                 TextAttachmentDirectionType::Horizontal => match ml.context.leader_roots.first() {
@@ -2739,7 +2746,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         let up_y = cos_r as f64;
                         let rel_x = root.connection_point.x - ins.x;
                         let rel_y = root.connection_point.y - ins.y;
-                        let shift = rel_x * up_x + rel_y * up_y + underline_lift as f64;
+                        let shift = rel_x * up_x + rel_y * up_y - attachment_up as f64;
                         (
                             (local_ins_x as f64 + up_x * shift) as f32,
                             (ins.y as f64 + up_y * shift) as f32,
@@ -2991,32 +2998,60 @@ impl MultiLeaderFrameTess for MultiLeader {
             if let Some(li) = underlined_line(vertical_attach, layout.line_count) {
                 let (mut x0, mut x1) = (-max_line_w * h_anchor, max_line_w * (1.0 - h_anchor));
                 let mut connect_x = None;
+                let mut connect_point = None;
                 if let Some([x, y]) = landing_end_w {
-                    connect_x = Some((x - local_ins_x) * cos_r + (y - local_ins_y) * sin_r);
-                } else if let Some(root) = ml.context.leader_roots.first() {
+                    connect_point = Some([x as f64, y as f64]);
                     connect_x = Some(
-                        ((root.connection_point.x - local_ins_x as f64) * cos_r as f64
-                            + (root.connection_point.y - local_ins_y as f64) * sin_r as f64)
+                        ((x as f64 - local_ins_x as f64) * cos_r as f64
+                            + (y as f64 - local_ins_y as f64) * sin_r as f64)
+                            as f32,
+                    );
+                } else if let Some(root) = ml.context.leader_roots.first() {
+                    let cp = root.connection_point;
+                    connect_point = Some([cp.x, cp.y]);
+                    connect_x = Some(
+                        ((cp.x - local_ins_x as f64) * cos_r as f64
+                            + (cp.y - local_ins_y as f64) * sin_r as f64)
                             as f32,
                     );
                 }
                 if let Some(lx) = connect_x {
-                    x0 = x0.min(lx as f32);
-                    x1 = x1.max(lx as f32);
+                    x0 = x0.min(lx);
+                    x1 = x1.max(lx);
                 }
-                let y = v_offset - li as f32 * line_h - height * MLEADER_UNDERLINE_GAP;
-                let pts = vec![
-                    [
-                        local_ins_x + x0 * cos_r - y * sin_r,
-                        local_ins_y + x0 * sin_r + y * cos_r,
-                        z,
-                    ],
-                    [
-                        local_ins_x + x1 * cos_r - y * sin_r,
-                        local_ins_y + x1 * sin_r + y * cos_r,
-                        z,
-                    ],
-                ];
+                let y = layout
+                    .line_baselines
+                    .get(li)
+                    .copied()
+                    .unwrap_or(v_offset - li as f32 * line_h)
+                    - height * MLEADER_UNDERLINE_GAP;
+                // Build the joined rule around the leader endpoint itself.
+                // Reconstructing that endpoint from a large f32 insertion plus
+                // several local offsets leaves a visible gap at survey coords.
+                let pts = if let (Some([jx, jy]), Some(lx)) = (connect_point, connect_x) {
+                    let at = |x: f32| {
+                        let along = x as f64 - lx as f64;
+                        [
+                            (jx + along * cos_r as f64) as f32,
+                            (jy + along * sin_r as f64) as f32,
+                            z,
+                        ]
+                    };
+                    vec![at(x0), at(x1)]
+                } else {
+                    vec![
+                        [
+                            local_ins_x + x0 * cos_r - y * sin_r,
+                            local_ins_y + x0 * sin_r + y * cos_r,
+                            z,
+                        ],
+                        [
+                            local_ins_x + x1 * cos_r - y * sin_r,
+                            local_ins_y + x1 * sin_r + y * cos_r,
+                            z,
+                        ],
+                    ]
+                };
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
@@ -3796,6 +3831,21 @@ mod tests {
             attached.abs() < 1.2 * th,
             "rotated ink stays {attached}·h above the connection"
         );
+        let row = underline(&tess(&anchor_free)).expect("the bottom-line rule draws");
+        let mut connection_distance = f64::INFINITY;
+        for p in row {
+            let perp = (f64::from(p[0]) - 10.0) * up_x + (f64::from(p[1]) - 5.0) * up_y;
+            assert!(
+                perp.abs() < 1.0e-4,
+                "the rotated underline rides {perp} units off its connection"
+            );
+            connection_distance = connection_distance
+                .min(((f64::from(p[0]) - 10.0).powi(2) + (f64::from(p[1]) - 5.0).powi(2)).sqrt());
+        }
+        assert!(
+            connection_distance < 1.0e-4,
+            "the rotated underline stops {connection_distance} units short of the connection"
+        );
         // The approach edge must also sit one gap past the connection along
         // the reading direction — a writer that parked it half a block down
         // the row used to let the label pile onto its neighbour.
@@ -3807,10 +3857,14 @@ mod tests {
                 .skip(1)
                 .flat_map(|w| w.searchable_text.iter())
                 .filter(|r| r.origin[0].is_finite())
-                .map(|r| {
-                    (f64::from(r.origin[0]) - 10.0) * ux + (f64::from(r.origin[1]) - 5.0) * uy
+                .map(|r| (f64::from(r.origin[0]) - 10.0) * ux + (f64::from(r.origin[1]) - 5.0) * uy)
+                .fold(sign * f64::INFINITY, |a, v| {
+                    if sign * v < a {
+                        a
+                    } else {
+                        sign * v.max(a)
+                    }
                 })
-                .fold(sign * f64::INFINITY, |a, v| if sign * v < a { a } else { sign * v.max(a) })
         };
         let free_edge = along_edge(&anchor_free, -1.0);
         // Word origins sit upstream of the ink edge; what matters is that the
@@ -3890,12 +3944,43 @@ mod tests {
             "the row is level: {:?}",
             row.points
         );
+        for point in &row.points {
+            assert!(
+                point[1].abs() < 1e-3,
+                "the bottom line's descenders must not lift its underline off the connection: {point:?}"
+            );
+        }
         // The leader advances with the reading direction: the row's left end
         // must touch the connection at the origin, past the landing gap.
         let left = row.points[0][0].min(row.points[1][0]);
         assert!(
             left.abs() < 1e-3,
             "the row stops short of the connection: left={left}"
+        );
+
+        // At survey coordinates, rebuilding the connection from an f32 text
+        // insertion used to leave a visible residual even when the local math
+        // was right. The joined endpoint must come from the leader itself.
+        let mut far = ml.clone();
+        far.translate(Vector3::new(-547_468.676429, -1_043_053.245158, 0.0));
+        let far_row = underline(&tess(&far)).expect("the far-from-origin rule draws");
+        let cp = far.context.leader_roots[0].connection_point;
+        let rendered_cp = [cp.x as f32, cp.y as f32];
+        let distance = far_row
+            .iter()
+            .map(|p| {
+                ((f64::from(p[0]) - f64::from(rendered_cp[0])).powi(2)
+                    + (f64::from(p[1]) - f64::from(rendered_cp[1])).powi(2))
+                .sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            distance < 2.0e-5,
+            "the survey-coordinate underline misses the leader by {distance}"
+        );
+        assert!(
+            (far_row[0][1] - far_row[1][1]).abs() < 1.0e-5,
+            "the survey-coordinate underline must stay level: {far_row:?}"
         );
     }
 

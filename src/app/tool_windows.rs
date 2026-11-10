@@ -314,9 +314,14 @@ impl OpenCADStudio {
                 let tool = &mut self.tool_windows[index];
                 (tool.offset, tool.resize, tool.content_size) = geometry;
             }
-            // Opened again while open: it comes to the front where it is.
+            // Opened again while open: it comes to the front where it is,
+            // its own window too (it may be behind the main window).
             Some(index) => {
                 let tool = self.tool_windows.remove(index);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.tool_window_to_raise = tool.window;
+                }
                 self.tool_windows.push(tool);
                 self.keyboard_tool = Some(kind);
             }
@@ -394,7 +399,11 @@ impl OpenCADStudio {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.reconcile_os_windows()
+            let reconciled = self.reconcile_os_windows();
+            match self.tool_window_to_raise.take() {
+                Some(id) => Task::batch([reconciled, iced::window::gain_focus(id)]),
+                None => reconciled,
+            }
         }
         #[cfg(target_arch = "wasm32")]
         {

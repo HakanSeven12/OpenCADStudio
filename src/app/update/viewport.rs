@@ -2604,7 +2604,13 @@ impl OpenCADStudio {
                     && grip.targets.len() == 1
                     && !self.grip_text_verts.is_empty()
                     && snap.iter().all(|w| w.points.is_empty())
-                    && square_grip;
+                    && square_grip
+                    // An INSERT can contain several text attributes. A grip
+                    // moves only one of them, so its glyphs need live tessellation.
+                    && !self.grip_originals.iter().any(|(handle, entity)| {
+                        *handle == grip.handle
+                            && matches!(entity, document::EntityType::Insert(_))
+                    });
             }
             let setup_ms = grip_started.elapsed().as_secs_f64() * 1000.0;
             let snap_started = Instant::now();
@@ -10108,7 +10114,7 @@ properties={:.1}ms picked={}",
         let i = self.active_tab;
         let handles = std::mem::take(&mut self.grip_preview_handles);
         let originals = std::mem::take(&mut self.grip_originals);
-        let _ = std::mem::take(&mut self.grip_history_originals);
+        let context_originals = std::mem::take(&mut self.grip_history_originals);
         self.grip_dirty_before = None;
         self.grip_add_provisional = None;
         self.grip_reference_wires.clear();
@@ -10120,22 +10126,24 @@ properties={:.1}ms picked={}",
         self.tabs[i].scene.clear_preview_wire();
         if !originals.is_empty() {
             self.push_undo_snapshot(i, "GRIP");
+            // Copy while the moved placement and its annotation leaves are
+            // still live. The normal COPY path clones each attribute's own
+            // context dictionary onto fresh handles.
+            let source_handles: Vec<_> = originals.iter().map(|(handle, _)| *handle).collect();
+            self.tabs[i].scene.copy_entities(
+                &source_handles,
+                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+            );
+            for (_, objects) in context_originals {
+                for (handle, object) in objects {
+                    self.tabs[i].scene.document.objects.insert(handle, object);
+                }
+            }
             let mut restored = Vec::with_capacity(originals.len());
             for (handle, original) in &originals {
-                let Some(moved) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
-                    continue;
-                };
                 if self.tabs[i].scene.update_entity(original.clone()) {
                     restored.push((*handle, crate::scene::ChangeKind::Modified));
                 }
-                let copy = self.tabs[i].scene.add_entity_clone(moved);
-                // A copied associative array gets its own blocks and action.
-                crate::scene::assoc_array::clone_array_for_copy(
-                    &mut self.tabs[i].scene,
-                    *handle,
-                    copy,
-                    &Default::default(),
-                );
             }
             self.tabs[i]
                 .scene

@@ -629,7 +629,7 @@ impl Doc {
                         * (if agrees { 1.0 } else { -1.0 });
                     return spline(build::translated(&base, (n * distance).to_array())?);
                 }
-                let net = kernel::acis::offset_surface(&base, distance)?;
+                let net = ocs_acis::offset_surface(&base, distance)?;
                 // A point of the offset, to read the new radius off.
                 let ((u0, u1), (v0, v1)) = net.domain();
                 let p =

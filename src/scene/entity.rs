@@ -981,7 +981,7 @@ impl Scene {
                 let tree = self.document.solid_history_tree(handle);
                 let rebuilt = || {
                     tree.as_ref()
-                        .and_then(|tree| kernel::acis::rebuild_history_tree(tree).ok())
+                        .and_then(|tree| ocs_acis::rebuild_history_tree(tree).ok())
                 };
                 let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {

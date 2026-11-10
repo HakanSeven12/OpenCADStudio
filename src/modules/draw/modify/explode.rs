@@ -1006,7 +1006,7 @@ fn explode_region(region: &document::entities::Region) -> Vec<EntityType> {
                 .flatten()
         });
         if let Some(sat) = sat {
-            let (bodies, _loss) = kernel::acis::lift(&sat);
+            let (bodies, _loss) = ocs_acis::lift(&sat);
             for body in &bodies {
                 for face in body.face_keys() {
                     if let Some(profile) = kernel::brep::planar_face_profile(body, face) {

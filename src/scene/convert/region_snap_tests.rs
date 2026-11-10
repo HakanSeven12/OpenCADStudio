@@ -185,7 +185,7 @@ fn native_region_binary_without_wires_is_pickable_at_circular_boundary() {
     )
     .unwrap();
     let mut sat = SatDocument::new();
-    kernel::acis::append(&body, &mut sat).unwrap();
+    ocs_acis::append(&body, &mut sat).unwrap();
     let parsed = SatDocument::parse(&sat.to_sat_string()).unwrap();
     let mut region = Region::new();
     region.acis_data = AcisData {

@@ -3,7 +3,7 @@
 //! Analytic surfaces remain analytic instead of becoming facets.
 
 use document::entities::acis::{SabReader, SabWriter, SatDocument};
-use kernel::acis::append;
+use ocs_acis::append;
 use kernel::brep::Body;
 
 /// Returns `None` when the body contains an unsupported record form.
@@ -12,7 +12,7 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
     append(body, &mut document).ok()?;
     let document = SatDocument::parse(&document.to_sat_string()).ok()?;
     let valid = |candidate: &SatDocument| {
-        let (restored, loss) = kernel::acis::lift(candidate);
+        let (restored, loss) = ocs_acis::lift(candidate);
         loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
     };
     if !valid(&document) {
@@ -53,17 +53,17 @@ mod tests {
         assert!(body.validate().is_empty());
 
         let mut document = SatDocument::new();
-        kernel::acis::append(&body, &mut document).unwrap();
+        ocs_acis::append(&body, &mut document).unwrap();
         let text = document.to_sat_string();
         let parsed = SatDocument::parse(&text).unwrap();
-        let (restored, text_loss) = kernel::acis::lift(&parsed);
+        let (restored, text_loss) = ocs_acis::lift(&parsed);
         assert!(text_loss.is_empty(), "{text_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());
 
         let binary = SabWriter::write(&parsed);
         let parsed_binary = SabReader::read(&binary).unwrap();
-        let (restored, binary_loss) = kernel::acis::lift(&parsed_binary);
+        let (restored, binary_loss) = ocs_acis::lift(&parsed_binary);
         assert!(binary_loss.is_empty(), "{binary_loss:?}");
         assert_eq!(restored.len(), 1);
         assert!(restored[0].validate().is_empty());

@@ -995,7 +995,7 @@ pub fn polysolid(
         reference_point: Vector3::new(start.x, start.y, start.z),
         ..SolidHistorySweep::default()
     });
-    let body = kernel::acis::rebuild_body(&operation).ok()?;
+    let body = ocs_acis::rebuild_body(&operation).ok()?;
     Some((body, operation))
 }
 

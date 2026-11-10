@@ -169,7 +169,7 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
 
 pub(crate) fn kernel_acis_body(acis: &document::entities::AcisData) -> Option<KernelBody> {
     let sat = parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)?;
-    let (mut bodies, loss) = kernel::acis::lift(&sat);
+    let (mut bodies, loss) = ocs_acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {
         return None;
     }

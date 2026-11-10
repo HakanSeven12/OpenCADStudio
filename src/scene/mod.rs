@@ -170,7 +170,7 @@ pub(crate) fn tessellate_entity(
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
                 if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
-                    kernel::acis::loft_section_geometry(&[
+                    ocs_acis::loft_section_geometry(&[
                         document::entities::EmbeddedEntity::Region(region.clone()),
                     ])
                 {

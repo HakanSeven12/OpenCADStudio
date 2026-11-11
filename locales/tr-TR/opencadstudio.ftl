@@ -6388,6 +6388,7 @@ plot =
     .name-drawing-layout = Çizim - düzen
     .raster-dpi = Raster DPI
     .vector-dpi = Vektör DPI
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = PDF bitince görüntüleyicide aç
     .no-page-setups = (sayfa ayarı yok)
     .none = <yok>

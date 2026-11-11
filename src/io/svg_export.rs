@@ -22,11 +22,22 @@ use std::path::Path;
 use crate::io::pdf_export::adapt_to_paper;
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::WireModel;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 
 /// Screen pixels (96 dpi) to millimetres.
 const PX_TO_MM: f64 = 25.4 / 96.0;
+
+/// `vector-effect="non-scaling-stroke"` when the opt-in SVG option is on. It
+/// affects only stroked paths; the CAD plot scale and PDF output never change.
+fn non_scaling_stroke_attr(options: PlotOptions) -> &'static str {
+    if options.non_scaling_stroke {
+        " vector-effect=\"non-scaling-stroke\""
+    } else {
+        ""
+    }
+}
+
 /// PDF points to millimetres (for CTB lineweights, which resolve in mm already
 /// here — kept for the hairline floor only).
 const PT_TO_MM: f64 = 25.4 / 72.0;
@@ -411,10 +422,11 @@ fn emit_wire(
         return;
     }
     out.push_str(&format!(
-        "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\"{dash_attr}{opacity_attr}/>\n",
+        "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\"{dash_attr}{opacity_attr}{non_scaling}/>\n",
         d.trim_end(),
         hex_color([r, g, b]),
         fmt(width_mm.max(0.01)),
+        non_scaling = non_scaling_stroke_attr(options),
     ));
 }
 
@@ -587,11 +599,12 @@ fn emit_hatch(
             return;
         }
         out.push_str(&format!(
-            "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\"{}/>\n",
+            "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\"{}{non_scaling}/>\n",
             d.trim_end(),
             hex_color([r, g, b]),
             fmt(width_mm.max(0.01)),
             svg_opacity(a, options.transparency),
+            non_scaling = non_scaling_stroke_attr(options),
         ));
         return;
     }
@@ -989,6 +1002,130 @@ mod tests {
     }
 
     #[test]
+    fn non_scaling_stroke_is_opt_in_and_only_marks_stroked_paths() {
+        use crate::scene::model::hatch_model::PatFamily;
+
+        let line = WireModel::solid(
+            "L1".to_string(),
+            vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+            [1.0, 0.0, 0.0, 1.0],
+            false,
+        );
+        let mut fill = WireModel::default();
+        fill.color = [0.0, 0.0, 1.0, 1.0];
+        fill.fill_tris = vec![[5.0, 5.0, 0.0], [10.0, 5.0, 0.0], [5.0, 10.0, 0.0]];
+        let wires = std::sync::Arc::new(vec![
+            PlotWire {
+                wire: line,
+                draw_depth: 0.5,
+            },
+            PlotWire {
+                wire: fill,
+                draw_depth: 0.4,
+            },
+        ]);
+        let hatch = |pattern, color| HatchModel {
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![
+                [20.0, 20.0],
+                [40.0, 20.0],
+                [40.0, 40.0],
+                [20.0, 40.0],
+            ]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern,
+            name: "GENERATED".into(),
+            color,
+            aci: 0,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: 0.3,
+        };
+        let hatches = vec![
+            hatch(
+                HatchPattern::Pattern(vec![PatFamily {
+                    angle_deg: 0.0,
+                    x0: 0.0,
+                    y0: 0.0,
+                    dx: 0.0,
+                    dy: 5.0,
+                    dashes: Vec::new(),
+                }]),
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            hatch(HatchPattern::Solid, [1.0, 1.0, 0.0, 1.0]),
+        ];
+        let render = |enabled| {
+            let content = crate::io::plot::PlotContent {
+                wires: wires.clone(),
+                hatches: hatches.clone(),
+                ..Default::default()
+            };
+            let mut page = page_with(content, 210.0, 297.0);
+            page.options.non_scaling_stroke = enabled;
+            build_svg(&page, None).expect("SVG")
+        };
+        assert!(!render(false).contains("vector-effect"));
+        let svg = render(true);
+        let stroked = svg
+            .lines()
+            .find(|line| line.contains("stroke=\"#ff0000\""))
+            .expect("stroked line");
+        assert!(stroked.contains("vector-effect=\"non-scaling-stroke\""));
+        let filled = svg
+            .lines()
+            .find(|line| line.contains("fill=\"#0000ff\""))
+            .expect("filled triangle");
+        assert!(!filled.contains("vector-effect"));
+        let pattern = svg
+            .lines()
+            .find(|line| line.contains("stroke=\"#00ff00\""))
+            .expect("pattern-hatch stroke");
+        assert!(pattern.contains("vector-effect=\"non-scaling-stroke\""));
+        let solid_hatch = svg
+            .lines()
+            .find(|line| line.contains("fill=\"#ffff00\""))
+            .expect("solid hatch fill");
+        assert!(!solid_hatch.contains("vector-effect"));
+        assert_eq!(svg.matches("vector-effect=").count(), 2);
+        roxmltree::Document::parse(&svg).expect("well-formed SVG");
+
+        let pdf = |enabled| {
+            let content = crate::io::plot::PlotContent {
+                wires: wires.clone(),
+                hatches: hatches.clone(),
+                ..Default::default()
+            };
+            let mut page = page_with(content, 210.0, 297.0);
+            page.options.non_scaling_stroke = enabled;
+            crate::io::pdf_export::render_pdf_bytes(&[page], None).expect("PDF")
+        };
+        // Raw bytes and the stream-text trailer carry a per-render document ID;
+        // the decoded content stream is the deterministic part and must not
+        // react to this SVG-only flag.
+        let stream_text = |bytes: &[u8]| {
+            let text = crate::io::pdf_export::pdf_stream_text(bytes);
+            text.rsplit_once("%%EOF")
+                .map(|(_, content)| content.to_string())
+                .unwrap_or(text)
+        };
+        assert_eq!(
+            stream_text(&pdf(false)),
+            stream_text(&pdf(true)),
+            "the SVG-only flag changed the PDF content stream"
+        );
+    }
+
+    #[test]
     fn rotation_matches_the_pdf_ctm_convention() {
         // PDF 90°: x' = paper_w - s*y, y' = s*x, then SVG flips y.
         let map = PageMap {
@@ -1127,8 +1264,7 @@ mod tests {
             let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
             assert!(
                 svg.lines().any(|line| {
-                    line.starts_with("<path")
-                        && line.contains(&format!("fill=\"{expected_fill}\""))
+                    line.starts_with("<path") && line.contains(&format!("fill=\"{expected_fill}\""))
                 }),
                 "flags={flags:#x}: wrong mask color in {svg}"
             );

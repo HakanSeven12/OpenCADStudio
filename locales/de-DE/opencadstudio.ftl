@@ -6446,6 +6446,7 @@ plot =
     .name-drawing-layout = Zeichnung - Layout
     .raster-dpi = Raster-DPI
     .vector-dpi = Vektor-DPI
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (keine Seiten-Setups)
     .none = <keine>

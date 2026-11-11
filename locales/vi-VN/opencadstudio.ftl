@@ -6455,6 +6455,7 @@ plot =
     .name-drawing-layout = Bản vẽ - bố cục
     .raster-dpi = DPI raster
     .vector-dpi = DPI vector
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (không có thiết lập trang)
     .none = <không có>

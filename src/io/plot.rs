@@ -7,9 +7,9 @@
 // the historical `Pdf*` names as aliases so existing call sites keep working.
 
 use crate::io::plot_style::PlotStyleTable;
+use crate::scene::WireModel;
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::image_model::ImageModel;
-use crate::scene::WireModel;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -64,6 +64,18 @@ impl PlotQuality {
 }
 
 /// Output controls shared by preview, plot exports, and printer rendering.
+/// The shaded-viewport plot modes, in dialog, listing and validation order.
+pub const SHADE_PLOT_MODES: &[&str] = &[
+    "As displayed",
+    "2D Wireframe",
+    "3D Wireframe",
+    "Hidden Line",
+    "Flat Shaded",
+    "Gouraud Shaded",
+    "Flat Shaded + Edges",
+    "Gouraud Shaded + Edges",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlotOptions {
     pub object_lineweights: bool,
@@ -77,6 +89,9 @@ pub struct PlotOptions {
     /// Vector resolution in DPI: path points snap to that grid on paper,
     /// trading precision for size. `None` keeps full precision.
     pub vector_dpi: Option<u32>,
+    /// SVG: keep stroke widths constant under subsequent SVG transforms.
+    /// CAD plot scale is unchanged and PDF ignores this flag.
+    pub non_scaling_stroke: bool,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -128,6 +143,7 @@ impl Default for PlotOptions {
             quality: PlotQuality::Normal,
             raster_dpi: None,
             vector_dpi: None,
+            non_scaling_stroke: false,
         }
     }
 }

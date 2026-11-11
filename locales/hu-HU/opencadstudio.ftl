@@ -6431,6 +6431,7 @@ plot =
     .name-drawing-layout = Rajz - elrendezés
     .raster-dpi = Raszter DPI
     .vector-dpi = Vektor DPI
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Megnyitás megjelenítőben, ha kész
     .no-page-setups = (nincs oldalbeállítás)
     .none = <nincs>

@@ -6447,6 +6447,7 @@ plot =
     .name-drawing-layout = Piirustus - asettelu
     .raster-dpi = Rasterin DPI
     .vector-dpi = Vektorin DPI
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (ei sivuasetuksia)
     .none = <ei mitään>

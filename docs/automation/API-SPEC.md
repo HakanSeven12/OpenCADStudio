@@ -397,7 +397,7 @@ REST: `POST /blocks`, `DELETE /blocks/{name}` (add `?force=true` to erase the re
 |---|---|
 | `layout_create` | `name` — adds a layout with the default page setup and a sheet viewport; duplicates refused (`layout_exists`) |
 | `page_setup_set` | `layout` plus any of `paper` (catalog name), `orientation` (`portrait`/`landscape`), `fit:true` or `scale:"1:100"`, `center`, `window:[x0,y0,x1,y1]`, `plot_style`. Explicit fields win; the rest keeps the stored setup. The stored setup is what `plot` consumes by default. |
-| `plot` | `path`, `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `transparency`, `lineweights`, `merge_lines`, `stamp`, and `"per_page":true` (with `layout:"all"` writes **one PDF per layout**, returning `result.files`) |
+| `plot` | `path` (`.pdf` or `.svg`), `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `shade`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `apply_plot_styles`, `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, `stamp`, SVG-only `non_scaling_stroke` (default `false`), and `"per_page":true` (with `layout:"all"` writes **one output file per layout**, returning `result.files`) |
 
 Plotting writes PDF only, synchronously, with no device dialogs; result
 reports `{path, pages, page_sizes}` (millimetres).

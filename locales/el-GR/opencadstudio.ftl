@@ -6448,6 +6448,7 @@ plot =
     .name-drawing-layout = Σχέδιο - διάταξη
     .raster-dpi = DPI ράστερ
     .vector-dpi = DPI διανυσμάτων
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (δεν υπάρχουν διαμορφώσεις σελίδας)
     .none = <καμία>

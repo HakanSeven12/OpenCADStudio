@@ -6436,6 +6436,7 @@ plot =
     .name-drawing-layout = ड्रॉइंग - लेआउट
     .raster-dpi = रास्टर DPI
     .vector-dpi = वेक्टर DPI
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (कोई पृष्ठ सेटअप नहीं)
     .none = <कोई नहीं>

@@ -7383,6 +7383,11 @@ impl OpenCADStudio {
                         d.paperspace_last = !d.paperspace_last
                     }
                     PlotFlag::Stamp => d.stamp = !d.stamp,
+                    // SVG-only preference; hidden and inert for printer/PDF
+                    // output exactly like the SVG file-format gate checks.
+                    PlotFlag::NonScalingStroke if d.to_file && d.file_svg => {
+                        d.non_scaling_stroke = !d.non_scaling_stroke;
+                    }
                     PlotFlag::HidePaperspace => d.hide_paperspace = !d.hide_paperspace,
                     PlotFlag::SaveToLayout => d.save_to_layout = !d.save_to_layout,
                     PlotFlag::OpenWhenDone => d.open_when_done = !d.open_when_done,
@@ -8113,6 +8118,7 @@ impl OpenCADStudio {
             quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
             raster_dpi: d.raster_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
+            non_scaling_stroke: d.non_scaling_stroke,
         }
     }
 
@@ -8446,6 +8452,28 @@ impl OpenCADStudio {
 mod plot_paper_tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::ui::window::plot::PlotDlgMsg;
+
+    #[test]
+    fn non_scaling_stroke_is_an_svg_only_plot_preference() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert!(!app.plot_dialog.non_scaling_stroke);
+        assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::NonScalingStroke,
+        ));
+        assert!(app.plot_dialog.non_scaling_stroke);
+        assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+
+        // PDF ignores the stored SVG preference, and its hidden checkbox cannot
+        // be toggled by a synthetic message.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::NonScalingStroke,
+        ));
+        assert!(app.plot_dialog.non_scaling_stroke);
+    }
 
     /// A Model plot resolves top-level fills against the white sheet, not the
     /// dark screen: colour 7 and ByBlock fills used to plot white, and a

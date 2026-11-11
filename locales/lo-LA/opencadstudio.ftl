@@ -6449,6 +6449,7 @@ plot =
     .name-drawing-layout = ແບບແຕ້ມ - ໂຄງຮ່າງ
     .raster-dpi = DPI ແຣສເຕີ
     .vector-dpi = DPI ເວັກເຕີ
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (ບໍ່ມີການຕັ້ງຄ່າໜ້າ)
     .none = <ບໍ່ມີ>

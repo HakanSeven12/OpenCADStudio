@@ -785,6 +785,18 @@ mod tests {
     }
 
     #[test]
+    fn non_scaling_stroke_config_default_and_round_trip() {
+        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
+        assert!(!old.plot.non_scaling_stroke);
+
+        let mut original = AppConfig::default();
+        original.plot.non_scaling_stroke = true;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.plot.non_scaling_stroke);
+    }
+
+    #[test]
     fn ribbon_layout_defaults_and_round_trips() {
         use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
 

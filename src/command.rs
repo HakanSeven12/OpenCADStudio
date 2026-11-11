@@ -3057,6 +3057,13 @@ impl CmdOption {
     }
 }
 
+/// What a step shows: its prompt and option labels. Typed text that changed
+/// it was taken by the step, even with no result to apply.
+pub fn step_signature(command: &dyn CadCommand) -> (String, Vec<String>) {
+    let labels = command.options().into_iter().map(|o| o.label).collect();
+    (command.prompt(), labels)
+}
+
 /// The refusal a point prompt prints: the command's own message, else
 /// "Point or option keyword required." where it offers keywords and
 /// "Invalid point." where it does not.

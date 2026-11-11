@@ -1088,13 +1088,8 @@ impl OpenCADStudio {
                 // to the Enter handling below, which ends the step the
                 // same way a bare Enter does: unchanged.
                 if !text.is_empty() {
-                    self.push_ucs_to_cmd(i);
-                    if let Some(result) = self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .and_then(|c| c.on_text_input(&text))
-                    {
-                        return self.apply_cmd_result(result);
+                    if let Some(task) = self.offer_typed_text(i, &text) {
+                        return task;
                     }
                 }
             }
@@ -1182,13 +1177,8 @@ impl OpenCADStudio {
                 return Task::none();
             }
 
-            self.push_ucs_to_cmd(i);
-            if let Some(result) = self.tabs[i]
-                .active_cmd
-                .as_mut()
-                .and_then(|c| c.on_text_input(&text))
-            {
-                return self.apply_cmd_result(result);
+            if let Some(task) = self.offer_typed_text(i, &text) {
+                return task;
             }
 
             // Direct distance entry: if an anchor exists and a scalar distance was entered,
@@ -1224,6 +1214,24 @@ impl OpenCADStudio {
             return self.dispatch_command(&cmd);
         }
         Task::none()
+    }
+
+    /// Hand typed command-line text to the active command's step. A step
+    /// that took it without a result (a count, a toggle) still moved its
+    /// prompt on: that is taken too, or the same text was read again by the
+    /// next step — ARRAYPOLAR's item count became its angle (#1571).
+    fn offer_typed_text(&mut self, i: usize, text: &str) -> Option<Task<Message>> {
+        self.push_ucs_to_cmd(i);
+        let command = self.tabs[i].active_cmd.as_mut()?;
+        let before = crate::command::step_signature(command.as_ref());
+        if let Some(result) = command.on_text_input(text) {
+            return Some(self.apply_cmd_result(result));
+        }
+        if crate::command::step_signature(command.as_ref()) == before {
+            return None;
+        }
+        self.refresh_active_cmd_preview(i);
+        Some(self.focus_cmd_input())
     }
 
     /// Attempt direct distance entry: if an active command is expecting a point,

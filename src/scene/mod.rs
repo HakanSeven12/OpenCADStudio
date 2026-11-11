@@ -6622,11 +6622,13 @@ impl Scene {
                                 (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
                             }
                         } else {
-                            // Paper (0,0) is the printable area's corner, as in
-                            // the reference application: the sheet starts at
-                            // minus the stored margins (turned with the plot).
-                            // LIMMIN is not used; it goes stale when the device
-                            // or medium changes.
+                            // The printable area's corner sits at minus the
+                            // paper image origin (DXF 148/149, paper-space
+                            // units; 0 in most layouts), as in the reference
+                            // application: the sheet starts the stored margins
+                            // (turned with the plot) before it. LIMMIN is not
+                            // used; it goes stale when the device or medium
+                            // changes.
                             let (left, bottom, ..) = crate::scene::rotated_margins(
                                 (
                                     l.plot_margin_left,
@@ -6636,7 +6638,10 @@ impl Scene {
                                 ),
                                 l.plot_rotation,
                             );
-                            (-left * f, -bottom * f)
+                            (
+                                -l.paper_image_origin_x - left * f,
+                                -l.paper_image_origin_y - bottom * f,
+                            )
                         };
                         return Some(((ox, oy), (ox + pw, oy + ph)));
                     }

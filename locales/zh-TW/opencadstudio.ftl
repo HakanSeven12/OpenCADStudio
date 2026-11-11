@@ -344,7 +344,7 @@ modal =
     .plot-style-editor = 列印樣式編輯器
     .text-style-manager = 文字樣式管理器
     .multiline-style-manager = 多線樣式管理器
-    .linetype-manager = Linetype Manager
+    .linetype-manager = 線型管理員
     .table-style-manager = 表格樣式管理器
     .multileader-style-manager = 多重引線樣式管理器
     .dimension-style-manager = 標註樣式管理器
@@ -1019,7 +1019,7 @@ common =
     .pedit-cannot-convert-this-entity = PEDIT：無法轉換此實體。
     .pedit-operation-not-applicable-to-this-entity = PEDIT：該作業不適用於此實體。
     .perf = 效能
-    .polysolid-built-a-wall-solid-from-used-segment = POLYSOLID:從__ocs_fmt_0__部分(寬__ocs_fmt_1__,高__ocs_fmt_2__)中建起一堵牆固件。
+    .polysolid-built-a-wall-solid-from-used-segment = POLYSOLID: 從 __ocs_fmt_0__ 線段建立牆體實體（寬 __ocs_fmt_1__，高 __ocs_fmt_2__）。
     .polysolid-select-a-polyline-first = POLYSOLID：請先選取聚合線。
     .polysolid-the-polyline-has-no-usable-segments = POLYSOLID：聚合線沒有可用區段。
     .pspace = PSPACE，切換至圖紙空間
@@ -2204,7 +2204,7 @@ common =
     .of = __ocs_fmt_0__ / __ocs_fmt_1__ — __ocs_fmt_2__
     .replaced-1-occurrence-in-remaining-matching-object-s-remain = 已取代 __ocs_fmt_0__ 中的 1 處相符項目；還剩 __ocs_fmt_1__ 個相符物件。
     .replaced-replaced-occurrence-s-in-object-s = 已取代 __ocs_fmt_1__ 個物件中的 __ocs_fmt_0__ 處相符項目。
-    .search-was-not-found = FIND:"__ocs_fmt_0__"未找到.
+    .search-was-not-found = FIND:"__ocs_fmt_0__"找不到.
     .handle-x = { common.handle } __ocs_fmt_0__
     .block-x-text-x = { common.block } __ocs_fmt_0__, { common.text } __ocs_fmt_1__
     .block-x-attribute = { common.block } __ocs_fmt_0__, { common.attribute } __ocs_fmt_1__
@@ -2213,7 +2213,7 @@ common =
     .plotted-window-to = { common.plot } · { common.window } → __ocs_fmt_0__ ✓
     .plot-failed-e = 出圖失敗：__ocs_fmt_0__
     .layout-name-has-no-page-setup = 配置「__ocs_fmt_0__」沒有頁面設定。
-    .layout-name-plot-style-table-is-not-loaded = { common.layout } “__ocs_fmt_0__”: 繪圖樣式表 “% __ocs_fmt_1__” 未載入 。
+    .layout-name-plot-style-table-is-not-loaded = { common.layout } “__ocs_fmt_0__”: 出圖型式表 “% __ocs_fmt_1__” 未載入 。
     .layout-name-plot-area-is-empty = 配置「__ocs_fmt_0__」的出圖區域為空。
     .exported-layouts-to = { manage.export }: { layout.layouts } (__ocs_fmt_0__) → __ocs_fmt_1__ ✓
     .export-failed-error = 匯出失敗：__ocs_fmt_0__
@@ -2654,7 +2654,7 @@ common =
     .angstroms = 埃
     .astronomical-units = 天文單位
     .behavior = 行為
-    .block-already-exists-will-redefine-upon-ok = 區塊「__ocs_fmt_0__」已存在 — 按確定後將重新定義
+    .block-already-exists-will-redefine-upon-ok = 圖塊「__ocs_fmt_0__」已存在 — 按確定後將重新定義
     .block-creates-a-block-definition-from-objects-you-select = BLOCK 從選取的物件建立區塊定義。
     .block-definition = 區塊定義
     .block-name = 區塊名稱
@@ -3012,7 +3012,7 @@ inquiry =
     .usage-qselect-type-layer-color-linetype-value = 用法：QSELECT TYPE|LAYER|COLOR|LINETYPE <value>
     .x-x-y-y-z-z = X = __ocs_arg_x__，Y = __ocs_arg_y__，Z = __ocs_arg_z__
     .type-name-handle-x-layer-color-lt = __ocs_fmt_0__ 處理 :__ocs_fmt_1__ 層:__ocs_fmt_2__ 顏色:__ocs_fmt_3__LT:__ocs_fmt_4____ocs_fmt_5__
-    .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  面積=__ocs_fmt_1__  周邊=__ocs_fmt_2__  中心=(單位:千兆克;__ocs_fmt_3__,__ocs_fmt_4__)
+    .area-4-perimeter-4-centroid-4-4 = __ocs_fmt_0__  面積=__ocs_fmt_1__  周長=__ocs_fmt_2__  中心=(單位:千兆克;__ocs_fmt_3__,__ocs_fmt_4__)
 
 draw =
     .loaded-multiline-styles = 已載入的多線樣式：__ocs_fmt_0__
@@ -3548,7 +3548,7 @@ modify =
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  選擇第一條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  選擇第二條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
     .chamfer-select-the-adjacent-polyline-segment-d = CHAMFER  選擇相鄰的多段線線段  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
-    .chamfer-select-2d-polyline-d = CHAMFER  Select 2D polyline  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
+    .chamfer-select-2d-polyline-d = CHAMFER  選取 2D 聚合線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .copy-enter-number-of-items-to-array = COPY  輸入要陣列的項目數：
     .copy-specify-second-point-for-n-item-array-bas = COPY  指定 __ocs_arg_n__ 項陣列的第二點  [基點 __ocs_arg_bx__,__ocs_arg_by__]：
     .continuity = 連續性
@@ -3774,7 +3774,7 @@ layers =
     .new-vp-freeze = 新建視口凍結
     .new-layer-state = 新建圖層狀態
     .no-dim-styles-defined = 未定義標註樣式。
-    .no-hidden-objects = 無所隱去之物。
+    .no-hidden-objects = 沒有隱藏的物件。
     .no-layer-states-in-this-drawing = 此圖紙中沒有圖層狀態
     .no-matching-layer-states = 沒有匹配的圖層狀態
     .no-multiline-styles = 無多行樣式。

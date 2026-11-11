@@ -673,7 +673,10 @@ impl Scene {
                     }
                     if !points.is_empty() {
                         let mut wire = WireModel::solid(
-                            "viewport_hatch_pattern".into(),
+                            hatch
+                                .entity
+                                .map(|handle| handle.value().to_string())
+                                .unwrap_or_else(|| "viewport_hatch_pattern".to_string()),
                             points,
                             hatch.color,
                             false,

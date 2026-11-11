@@ -280,6 +280,7 @@ impl Scene {
             return None;
         }
         let mut model = HatchModel {
+            entity: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: origin,

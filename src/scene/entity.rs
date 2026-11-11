@@ -547,7 +547,8 @@ impl Scene {
                 keep.insert(handle);
             }
             self.invalidate_dependency_index();
-            if let Some(model) = hatch_seed {
+            if let Some(mut model) = hatch_seed {
+                model.entity = Some(handle);
                 self.hatches.insert(handle, model);
             }
             if let Some(model) = image_seed {
@@ -852,7 +853,8 @@ impl Scene {
         self.images.remove(&handle);
         self.meshes.remove(&handle);
         self.solid_models.remove(&handle);
-        if let Some(model) = hatch_seed {
+        if let Some(mut model) = hatch_seed {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
         if let Some(model) = image_seed {
@@ -939,7 +941,8 @@ impl Scene {
         self.images.remove(&handle);
         self.meshes.remove(&handle);
         self.solid_models.remove(&handle);
-        if let Some(model) = hatch_seed {
+        if let Some(mut model) = hatch_seed {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
         if let Some(model) = image_seed {
@@ -2575,6 +2578,7 @@ impl Scene {
                 let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color) else {
                     return;
                 };
+                model.entity = Some(source_hatch.common.handle);
                 if let Some((report, palette)) = &constraint_display {
                     if let Some(mut color) =
                         self.constraint_display_color(report, context.root_handle, palette)
@@ -2833,6 +2837,7 @@ impl Scene {
                 let fill_plane_boundary = Some(Arc::new(fill_plane.1));
                 let fill_plane = Some(fill_plane.0);
                 models.push(HatchModel {
+                    entity: None,
                     pattern_origin: None,
                     render_instance,
                     boundary: Arc::new(boundary),
@@ -3357,6 +3362,7 @@ impl Scene {
 
         let storage = crate::entities::curve::ocs_plane(dxf.normal, dxf.elevation);
         Some(HatchModel {
+            entity: None,
             pattern_origin: Some([dxf.pattern_origin().x, dxf.pattern_origin().y]),
             render_instance: None,
             boundary: std::sync::Arc::new(boundary_f32),
@@ -3466,7 +3472,8 @@ impl Scene {
             }
             _ => None,
         };
-        if let Some(model) = new_model {
+        if let Some(mut model) = new_model {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
     }
@@ -3502,7 +3509,7 @@ impl Scene {
             .into_par_iter()
             .filter_map(|(handle, kind)| {
                 // Paper-space entities live in sheet coordinates — world_offset must not
-                let model = match &kind {
+                let mut model = match &kind {
                     EntityType::Hatch(dxf) => {
                         let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
                         Self::hatch_model_from_dxf(dxf, color)
@@ -3513,6 +3520,9 @@ impl Scene {
                     }
                     _ => None,
                 };
+                if let Some(m) = model.as_mut() {
+                    m.entity = Some(handle);
+                }
                 model.map(|m| (handle, m))
             })
             .collect();
@@ -3755,6 +3765,7 @@ impl Scene {
             })
             .collect();
         HatchModel {
+            entity: None,
             pattern_origin: None,
             render_instance: None,
             boundary: std::sync::Arc::new(boundary),

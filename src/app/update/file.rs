@@ -685,15 +685,23 @@ fn plot_entity_layers(
     hatches: &[crate::scene::model::hatch_model::HatchModel],
     wipeouts: &[crate::scene::model::hatch_model::HatchModel],
 ) -> std::collections::HashMap<document::Handle, String> {
-    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
-        hatches
-            .iter()
-            .chain(wipeouts)
-            .map(|hatch| hatch.name.as_str()),
-    );
+    let names = wires.iter().map(|wire| wire.name.as_str());
     let mut layers = std::collections::HashMap::new();
     for name in names {
         let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if layers.contains_key(&handle) {
+            continue;
+        }
+        if let Some(entity) = scene.document.get_entity(handle) {
+            layers.insert(handle, entity.common().layer.clone());
+        }
+    }
+    // Hatch models carry the pattern name (not a handle) in `name`; their
+    // drawing layer comes from the entity the model plots for.
+    for hatch in hatches.iter().chain(wipeouts) {
+        let Some(handle) = hatch.entity else {
             continue;
         };
         if layers.contains_key(&handle) {
@@ -3956,7 +3964,10 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn on_save_finished(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
+    pub(super) fn on_save_finished(
+        &mut self,
+        mut outcome: crate::app::SaveOutcome,
+    ) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);
@@ -7394,6 +7405,9 @@ impl OpenCADStudio {
                     PlotFlag::TextAsOutlines if d.to_file && d.file_svg => {
                         d.text_as_outlines = !d.text_as_outlines;
                     }
+                    PlotFlag::LayerAttributes if d.to_file && d.file_svg => {
+                        d.layer_attributes = !d.layer_attributes;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -8123,6 +8137,7 @@ impl OpenCADStudio {
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             text_as_outlines: d.text_as_outlines,
             non_scaling_stroke: d.non_scaling_stroke,
+            layer_attributes: d.layer_attributes,
         }
     }
 
@@ -9952,7 +9967,6 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert!(!app.plot_dialog.center);
         assert_eq!(app.plot_dialog.offset_x, "12.0");
     }
-
 }
 
 #[cfg(test)]

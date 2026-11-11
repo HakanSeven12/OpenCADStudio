@@ -440,7 +440,8 @@ impl Scene {
                     Some(EntityType::Solid(s)) => Some(Self::solid_hatch_model(s, existing_color)),
                     _ => None,
                 };
-                if let Some(model) = new_model {
+                if let Some(mut model) = new_model {
+                    model.entity = Some(h);
                     self.hatches.insert(h, model);
                 }
             }
@@ -1434,7 +1435,8 @@ impl Scene {
                     }
                     _ => None,
                 };
-                if let Some(model) = new_model {
+                if let Some(mut model) = new_model {
+                    model.entity = Some(h);
                     self.hatches.insert(h, model);
                 }
                 // Images draw from a derived model, not the wire frame; without

@@ -505,6 +505,14 @@ fn append_pdf_page(
             .and_then(|handle| entity_layers.get(&handle))
             .map(String::as_str)
     };
+    // Hatch models name their fill pattern in `name`, not an entity handle;
+    // their drawing layer comes from the entity the model plots for.
+    let hatch_layer_of = |hatch: &crate::scene::model::hatch_model::HatchModel| {
+        hatch
+            .entity
+            .and_then(|handle| entity_layers.get(&handle))
+            .map(String::as_str)
+    };
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
     let (ox, oy) = (page.offset_x, page.offset_y);
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
@@ -725,7 +733,7 @@ fn append_pdf_page(
                 DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
                     layer_of(&wire.name)
                 }
-                DrawItem::Hatch(hatch) => layer_of(&hatch.name),
+                DrawItem::Hatch(hatch) => hatch_layer_of(hatch),
                 DrawItem::Image(_) => None,
             };
             if layer != open_layer {
@@ -1533,6 +1541,7 @@ fn emit_wire_fills(
                 }
                 boundary.push(boundary[0]);
                 let hatch = HatchModel {
+                    entity: None,
                     pattern_origin: None,
                     render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],

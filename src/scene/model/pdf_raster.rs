@@ -103,6 +103,15 @@ pub fn rasterize_page_display_at(path: &str, page: &str, dpi: f32) -> Option<Arc
 /// The DPI of the full-size display raster.
 pub const DISPLAY_DPI: f32 = RASTER_DPI;
 
+/// The DPI an underlay page is drawn at for a plot.
+pub const PRINT_DPI: f32 = 300.0;
+
+/// The underlay raster for a plot: the display raster's transparent page at
+/// [`PRINT_DPI`]. `None` for a page too large to draw at that DPI.
+pub fn rasterize_page_print(path: &str, page: &str) -> Option<Arc<PdfPage>> {
+    rasterize_cached(path, page, PRINT_DPI, true)
+}
+
 fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
     let key = (
         path.to_string(),

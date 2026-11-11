@@ -69,6 +69,12 @@ pub struct Camera {
     /// keeps near/far exactly as deep as the current view needs. `None` falls
     /// back to `depth_half_range`.
     pub model_bounds: Option<(DVec3, DVec3)>,
+
+    /// The last fitted box after the drawing changed, until the bounds are
+    /// refreshed. The unset depth range still covers it: the fallback alone
+    /// shrinks with the zoom, so geometry above or below the target slipped
+    /// out of a close-zoomed view on the first edit (#2812).
+    pub stale_bounds: Option<(DVec3, DVec3)>,
 }
 
 impl Default for Camera {
@@ -88,6 +94,7 @@ impl Default for Camera {
             pitch,
             depth_half_range: 0.0,
             model_bounds: None,
+            stale_bounds: None,
         }
     }
 }
@@ -259,7 +266,10 @@ impl Camera {
         } else if self.depth_half_range > 0.0 {
             self.depth_half_range.max(view_extent)
         } else {
-            (self.distance * 1000.0).max(view_extent).max(10.0)
+            let stale = self
+                .stale_bounds
+                .map_or(0.0, |(min, max)| self.depth_extent_in_view(min, max));
+            (self.distance * 1000.0).max(view_extent).max(10.0).max(stale)
         };
         (self.distance - r, self.distance + r)
     }
@@ -789,6 +799,7 @@ impl Camera {
         // `distance`) also holds depth-buffer precision constant across zoom, so
         // coincident solids / meshes / wires never flip draw order.
         self.model_bounds = Some((min, max));
+        self.stale_bounds = None;
         // Also seed the scalar fallback for the fitted orientation, in case a
         // later reader consults it before the next projection.
         self.depth_half_range = self.depth_extent_in_view(min, max);
@@ -799,7 +810,9 @@ impl Camera {
     /// next Zoom Extents. The unset projection uses its conservative fallback
     /// until the scene refreshes the current model bounds.
     pub(crate) fn invalidate_model_bounds(&mut self) {
-        self.model_bounds = None;
+        if let Some(bounds) = self.model_bounds.take() {
+            self.stale_bounds = Some(bounds);
+        }
         self.depth_half_range = 0.0;
     }
 
@@ -1235,6 +1248,21 @@ mod tests {
 
         assert!(cam.model_bounds.is_none());
         assert_eq!(cam.depth_half_range, 0.0);
+    }
+
+    /// #2812: zoomed in close and the drawing edited, the depth range still
+    /// reaches the geometry the last fit covered, far above the target.
+    #[test]
+    fn an_edit_while_zoomed_in_keeps_the_fitted_depth() {
+        let mut cam = Camera::default();
+        cam.fit_depth_to_bounds_f64(DVec3::new(0.0, 0.0, 0.0), DVec3::new(10.0, 10.0, 5000.0));
+        cam.distance = 0.05;
+        cam.invalidate_model_bounds();
+        let (near, far) = cam.ortho_depth_range();
+        assert!(far - near >= 2.0 * 5000.0, "{near}..{far}");
+        // A refit takes over again.
+        cam.fit_depth_to_bounds_f64(DVec3::ZERO, DVec3::ONE);
+        assert!(cam.stale_bounds.is_none());
     }
 }
 

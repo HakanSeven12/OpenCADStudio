@@ -10740,7 +10740,12 @@ impl Scene {
                 let Some(model) = self.images.get(&handle) else {
                     return;
                 };
-                let mut placed = model.clone();
+                // A plot draws a PDF underlay's page at print resolution, not
+                // at the resolution it is shown at (#2822).
+                let mut placed = plotting
+                    .then(|| self.print_underlay_image(entity))
+                    .flatten()
+                    .unwrap_or_else(|| model.clone());
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(

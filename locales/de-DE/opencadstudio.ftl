@@ -3651,6 +3651,16 @@ groups =
     .group-enter-group-name-name = GROUP Gruppenname eingeben [__ocs_arg_name__]:
     .ungroup-select-grouped-objects = UNGROUP Gruppierte Objekte auswählen:
     .ungroup = Gruppe auflösen
+    .groupedit-select-group-or-name = GROUPEDIT  Select group or [Name]:
+    .groupedit-enter-a-group-name = GROUPEDIT  Enter a group name:
+    .groupedit-group-enter-an-option = GROUPEDIT  Group "__ocs_arg_group__": Enter an option [Add objects/Remove objects/REName]:
+    .groupedit-select-objects-to-add = GROUPEDIT  Select objects to add:
+    .groupedit-select-objects-to-remove-done = GROUPEDIT  Select objects to remove <done>:
+    .groupedit-enter-a-new-name-for-group = GROUPEDIT  Enter a new name for group "__ocs_arg_group__":
+    .groupedit-that-object-is-not-in-a-group = GROUPEDIT: that object is not in a group.
+    .groupedit-a-group-name-has-no-spaces = GROUPEDIT: a group name has no spaces.
+    .add-objects = Add objects
+    .rename = REName
 
 layers =
     .n-layers = __ocs_arg_n__ Ebenen

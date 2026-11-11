@@ -1236,6 +1236,24 @@ impl OpenCADStudio {
                 }
             }
 
+            "GROUPEDIT" => {
+                use crate::modules::draw::groups::groupedit::GroupEditCommand;
+                let groups = self.tabs[i]
+                    .scene
+                    .groups()
+                    .map(|group| (group.name.clone(), group.entities.clone()))
+                    .collect();
+                let selected: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                let cmd = GroupEditCommand::for_selection(groups, &selected);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "UNGROUP" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene

@@ -157,6 +157,17 @@ fn marker_relative(
     return origin_relative + axial + planar * world_size;
 }
 
+// How far along a segment its end (clip w `w`, other end `other`) moves to
+// lie in front of the eye. An end behind it — a ray or xline in perspective —
+// would flip through w <= 0 and stretch the band over the screen (#2801).
+fn front_t(w: f32, other: f32) -> f32 {
+    let eps = max(max(w, other) * 1e-4, 1e-6);
+    if w >= eps || other <= w {
+        return 0.0;
+    }
+    return (eps - w) / (other - w);
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut {
     let corner = vertex_index % 6u;
@@ -229,8 +240,12 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
-        let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
-        let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+        let raw_a = u.view_rot * vec4<f32>(rel_a, 1.0);
+        let raw_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+        let t_a = front_t(raw_a.w, raw_b.w);
+        let t_b = front_t(raw_b.w, raw_a.w);
+        let clip_a = mix(raw_a, raw_b, t_a);
+        let clip_b = mix(raw_b, raw_a, t_b);
         let screen_a = clip_a.xy / clip_a.w * u.viewport_size * 0.5;
         let screen_b = clip_b.xy / clip_b.w * u.viewport_size * 0.5;
         let segment = screen_b - screen_a;
@@ -251,7 +266,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         clip_pos_out = apply_draw_order(clip_pos_out, in.depth.x);
 
         final_clip = clip_pos_out;
-        out_dist = mix(seg_distances.x, seg_distances.y, which_end)
+        out_dist = mix(seg_distances.x, seg_distances.y, mix(t_a, 1.0 - t_b, which_end))
             + extension * half_width * u.world_per_pixel;
         out_cap = vec2<f32>(which_end * segment_length + extension * half_width, half_width * side);
         out_cap_ends = vec3<f32>(segment_length, half_width, half_width);

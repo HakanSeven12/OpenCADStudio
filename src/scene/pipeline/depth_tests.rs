@@ -206,6 +206,68 @@ fn wipeout_respects_close_block_draw_order() {
     }
 }
 
+/// #2801: a ray or xline running past the eye in perspective stays a thin
+/// line. An end behind the eye used to flip through w <= 0 and spread the
+/// line's band over much of the view.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn perspective_line_through_the_eye_stays_thin() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    let bounds = Rectangle::with_size(Size::new(SIZE as f32, SIZE as f32));
+    for packed in [false, true] {
+        let mut limits = adapter.limits();
+        if packed {
+            limits.max_storage_buffers_per_shader_stage = 0;
+        }
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("GPU device");
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let camera = Camera {
+            distance: 100.0,
+            fov_y: 0.8,
+            rotation: glam::Quat::from_rotation_x(1.2),
+            target: glam::DVec3::ZERO,
+            projection: Projection::Perspective,
+            ..Camera::default()
+        };
+        // In the ground plane, running from the view out past the eye's
+        // back, as an xline under a tilted perspective view.
+        let ahead = (camera.target - camera.eye()).with_z(0.0).normalize();
+        let across = ahead.cross(glam::DVec3::Z) * 5.0;
+        let a = (camera.target + across - ahead * 500.0).as_vec3().to_array();
+        let b = (camera.target + across * 3.0 + ahead * 60.0).as_vec3().to_array();
+        let wires = vec![WireModel::solid("1".into(), vec![a, b], [1.; 4], false)];
+        let bytes = pixels(
+            &device,
+            &queue,
+            &mut pipeline,
+            &Uniforms::new(&camera, bounds, false),
+            &wires,
+            &[(1, [0., 0.])].into_iter().collect(),
+        );
+        if let Ok(path) = std::env::var("OCS_DEPTH_TEST_IMAGES") {
+            let path = std::path::Path::new(&path);
+            std::fs::create_dir_all(path).unwrap();
+            let name = format!("through-eye-{}.png", if packed { "packed" } else { "storage" });
+            image::save_buffer(path.join(name), &bytes, SIZE, SIZE, image::ColorType::Rgba8)
+                .unwrap();
+        }
+        // The line runs top to bottom: no row may hold more than a few lit
+        // pixels of it. Before, it widened towards the eye.
+        let rows: Vec<usize> = bytes
+            .chunks(SIZE as usize * 4)
+            .map(|row| row.chunks(4).filter(|p| p[..3] != [0, 0, 0]).count())
+            .collect();
+        assert!(rows.iter().sum::<usize>() > 0, "packed={packed}: the line is drawn");
+        let widest = rows.iter().max().copied().unwrap_or(0);
+        assert!(widest <= 3, "packed={packed}: {widest} pixels wide");
+    }
+}
+
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn perspective_draw_order_keeps_flat_lines_visible() {

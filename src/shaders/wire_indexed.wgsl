@@ -141,6 +141,17 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     return origin_relative + axial + planar * world_size;
 }
 
+// How far along a segment its end (clip w `w`, other end `other`) moves to
+// lie in front of the eye. An end behind it — a ray or xline in perspective —
+// would flip through w <= 0 and stretch the band over the screen (#2801).
+fn front_t(w: f32, other: f32) -> f32 {
+    let eps = max(max(w, other) * 1e-4, 1e-6);
+    if w >= eps || other <= w {
+        return 0.0;
+    }
+    return (eps - w) / (other - w);
+}
+
 @vertex fn vs_main(@builtin(vertex_index) vid: u32, in: InstanceIn) -> VertexOut {
     let c = wire_consts[in.wire_id];
 
@@ -207,8 +218,12 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
-        let clip_a = u.view_rot * vec4<f32>(rel_a, 1.0);
-        let clip_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+        let raw_a = u.view_rot * vec4<f32>(rel_a, 1.0);
+        let raw_b = u.view_rot * vec4<f32>(rel_b, 1.0);
+        let t_a = front_t(raw_a.w, raw_b.w);
+        let t_b = front_t(raw_b.w, raw_a.w);
+        let clip_a = mix(raw_a, raw_b, t_a);
+        let clip_b = mix(raw_b, raw_a, t_b);
 
         let ndc_a = clip_a.xy / clip_a.w;
         let ndc_b = clip_b.xy / clip_b.w;
@@ -236,7 +251,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         clip_pos_out = apply_draw_order(clip_pos_out, c.draw_depth);
 
         final_clip = clip_pos_out;
-        out_dist = mix(in.distance_a, in.distance_b, which_end) + ext * hw * u.world_per_pixel;
+        out_dist = mix(in.distance_a, in.distance_b, mix(t_a, 1.0 - t_b, which_end)) + ext * hw * u.world_per_pixel;
         out_cap = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
         out_cap_ends = vec3<f32>(seg_len, hw, hw);
     }

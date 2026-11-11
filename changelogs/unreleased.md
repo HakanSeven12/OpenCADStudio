@@ -16,9 +16,22 @@
 * **`-LINETYPE`:** The command-line form creates, renames and deletes linetypes as well as listing, loading and setting them, with quoted names for scripts.
 * **Linetype Files:** `-LINETYPE EXPORT` writes linetypes to a `.lin` file, including their text and shapes; `-LINETYPE SAVE` adds one to your own library; `-LINETYPE RELOAD` picks up new `.lin` files without a restart.
 * **Linetype Manager:** `LINETYPE` opens a manager in the style of the other style managers: create, copy, rename and delete linetypes, edit their dashes, gaps and dots against a live preview, and set the linetype scales and your library in one place.
+* **`GROUPEDIT`:** Picks a group by one of its members or by name, then adds objects to it, removes members picked one at a time, or renames it; each edit is one undo step.
+* **Group Selection Shortcut:** Ctrl+Shift+A turns group selection (`PICKSTYLE`) on and off and reports `<Groups on>` or `<Groups off>`.
+* **`FILLET` in Any Plane:** Two lines that share a plane out of plan, such as a vertical one, are filleted in that plane, the arc lying in it.
 
 ### 🐛 Bug Fixes
 
+* **Diameter Sign:** `%%c` gives the diameter sign U+2205 in the text editor, its Symbols menu and text search, the same sign drawings already showed.
+* **`DIMARC` Icon:** Arc Length has its own icon instead of the Angular one.
+* **TrueType Text Styles:** A style naming a TrueType family draws with that face even when an `.shx` file of the same name is in the support folder; the text editor's Style default font no longer writes a full path the editor then rejects.
+* **Viewport Snaps:** Endpoint and Midpoint snap to the corners and edge midpoints of a layout viewport's frame.
+* **DGN Import:** A V8 model whose first element streams are empty imports its elements instead of reporting nothing to import.
+* **Rays and Xlines in Perspective:** Thin lines that pass behind the eye stay one pixel wide instead of widening towards the viewer.
+* **Typed Distance Along Z:** A distance typed while tracking straight up or down goes along Z.
+* **Opening Text-Heavy Drawings:** A growing glyph atlas no longer forces a second layout of every text, which doubled the scene build time of large drawings.
+* **Edits While Zoomed In:** Deleting or moving an object while zoomed in close no longer clips the rest of the drawing out of view.
+* **PDF Underlays in Plots:** PDF underlays plot at 300 DPI instead of the screen's resolution.
 * **Big Font Code Page Detection:** Removed the heuristic that forced `ansi_936` (GBK) for big-font files containing `"china"` in their name. Big5 big-fonts like `china1.shx` and `chineset.shx` (which contain trail bytes `< 0xA1`) are now correctly identified as `ansi_950` (Big5) instead of producing mojibake in viewports and exports. Legacy shape-only `chinese.shx` files alias to `chineset.shx` when available.
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
 * **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.

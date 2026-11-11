@@ -294,6 +294,26 @@ impl ImageModel {
         background: [f32; 4],
         world_per_pixel: Option<f64>,
     ) -> Option<Self> {
+        Self::underlay(u, def, background, world_per_pixel, false)
+    }
+
+    /// [`Self::from_underlay`] for a plot: a PDF page at print resolution, not
+    /// the screen's (#2822), where it is not too large to draw at it.
+    pub fn from_underlay_for_print(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        background: [f32; 4],
+    ) -> Option<Self> {
+        Self::underlay(u, def, background, None, true)
+    }
+
+    fn underlay(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        background: [f32; 4],
+        world_per_pixel: Option<f64>,
+        print: bool,
+    ) -> Option<Self> {
         use super::pdf_raster;
         use document::entities::{UnderlayDisplayFlags, UnderlayType};
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
@@ -317,7 +337,11 @@ impl ImageModel {
                 // Hidden PDF layers come from the underlay's layer overrides.
                 let source = super::pdf_layers::underlay_source(u, &def.file_path);
                 let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
+                let print_raster = print
+                    .then(|| pdf_raster::rasterize_page_print(&source, page))
+                    .flatten();
                 let raster = match screen_side {
+                    _ if print_raster.is_some() => print_raster?,
                     Some(side)
                         if inches > 0.0 && side / inches < pdf_raster::DISPLAY_DPI as f64 =>
                     {
@@ -1549,6 +1573,27 @@ mod tests {
     /// The decode peak per layout: into_rgba8 is a MOVE for Rgba8 only —
     /// every other layout pays native + RGBA coexisting. GIF additionally
     /// carries the screen-sized output beside a (clamped) frame buffer.
+    /// #2822: a plot draws a PDF underlay's page at print resolution, the
+    /// screen keeps its display raster.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_pdf_underlay_plots_at_print_resolution() {
+        use printpdf::{Mm, PdfDocument, PdfPage, PdfSaveOptions};
+        let mut pdf = PdfDocument::new("print underlay");
+        pdf.pages.push(PdfPage::new(Mm(25.4), Mm(25.4), Vec::new()));
+        let bytes = pdf.save(&PdfSaveOptions::default(), &mut Vec::new());
+        let path = "memory://print-underlay-test.pdf";
+        super::super::pdf_raster::register_source(path, std::sync::Arc::new(bytes));
+        let def = document::objects::UnderlayDefinition::pdf(path, "1");
+        let underlay = document::entities::Underlay::pdf();
+        let shown = ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).expect("shown");
+        let printed =
+            ImageModel::from_underlay_for_print(&underlay, &def, [1.0; 4]).expect("printed");
+        assert_eq!(shown.width, 150);
+        assert_eq!(printed.width, 300);
+        assert_eq!(printed.corners, shown.corners, "the same place on the sheet");
+    }
+
     #[test]
     fn native_footprint_peaks_match_the_coexistence_math() {
         use image::ColorType;

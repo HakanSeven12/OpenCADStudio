@@ -562,7 +562,7 @@ pub(super) fn symbols() -> Vec<(&'static str, String)> {
     vec![
         ("°", label!("degree")),
         ("±", label!("plus-minus")),
-        ("⌀", label!("diameter")),
+        ("∅", label!("diameter")),
         ("≈", label!("approximately")),
         ("∠", label!("angle")),
         ("℄", label!("centerline")),

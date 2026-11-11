@@ -139,7 +139,7 @@ impl crate::app::OpenCADStudio {
                     let symbol = match text.as_str() {
                         "d" | "D" => Some("°"),
                         "p" | "P" => Some("±"),
-                        "c" | "C" => Some("Ø"),
+                        "c" | "C" => Some("∅"),
                         _ => None,
                     };
                     if let Some(symbol) = symbol {
@@ -719,7 +719,7 @@ mod tests {
         for ch in ["%", "%", "c"] {
             app.mtext_type(ch);
         }
-        assert_eq!(app.mtext_editor.as_ref().unwrap().doc.to_plain_text(), "xØ");
+        assert_eq!(app.mtext_editor.as_ref().unwrap().doc.to_plain_text(), "x∅");
     }
 
     /// D#2575: `\U+00B2` typed after `m` becomes m².

@@ -3517,7 +3517,9 @@ impl OpenCADStudio {
                 } else if lower == "reset" {
                     if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
                         let def = panel.def.clone();
+                        let owner = panel.owner_plugin_id.clone();
                         *panel = crate::ui::window::plugin_panel::PluginPanelState::from_def(def);
+                        panel.owner_plugin_id = owner;
                     }
                     crate::plugin::v4_support::publish_panel_action(
                         panel_id,

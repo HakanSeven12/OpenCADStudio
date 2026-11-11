@@ -786,6 +786,22 @@ seed, hex).
 Fits the entities into the view and selects them. Headless servers refuse
 with `code:"gui_required"`; REST clients get HTTP 409.
 
+### `action` — the UI toggles and the open dialogs
+
+```json
+{"op":"action","name":"grid","value":"on"}
+```
+
+UI toggles go by name. The open import dialogs are driven field-by-field: the
+DGN Import window answers `dgn_import_dialog` with
+`value="path=<file>"`, `"model=<index>"`, `"target=new|current"`,
+`"conflict=prefix|ignore"`, `"units=master|sub"`, `"explode=on|off"`,
+`"code_page=<windows page>"` (e.g. `1252` default, `1250` Central European,
+`932` Shift-JIS, `65001` UTF-8), `"references=translate|ignore|underlay"`,
+`"existing=prompt|overwrite|keep"`, `"mapping=layer|linetype|lineweight|color"`,
+then `"ok"` to import or `"cancel"`. The window must already be open — run
+`DGNIMPORT` (or open the Import File dialog and pick a DGN) first.
+
 ## Document, sheet and organization operations (protocol ops)
 
 Same envelope conventions as the entity operations: `protocol:1`,

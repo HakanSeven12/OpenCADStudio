@@ -3569,6 +3569,19 @@ impl OpenCADStudio {
                         _ => return Err(bad()),
                     }),
                     "explode" => I::DgnExplode(on(value)?),
+                    // V7 text code page given as its Windows number (1252 or
+                    // "default" = the plain 1252 default).
+                    "code_page" => {
+                        use crate::scene::model::underlay_vector::code_page_supported;
+                        let page = match value {
+                            "1252" | "default" | "off" | "none" => None,
+                            page => match page.parse::<u16>() {
+                                Ok(page) if page == 1250 || code_page_supported(page) => Some(page),
+                                _ => return Err(bad()),
+                            },
+                        };
+                        I::DgnCodePage(crate::modules::insert::dgn_import::code_page_label(page))
+                    }
                     "references" => I::DgnReferences(match value {
                         "translate" => crate::modules::insert::dgn_import::ReferenceMode::Translate,
                         "ignore" => crate::modules::insert::dgn_import::ReferenceMode::Ignore,

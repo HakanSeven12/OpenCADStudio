@@ -233,11 +233,87 @@ fn windows_1252(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Windows-1250: what MicroStation V7 wrote on Central European systems.
+/// Bytes the page leaves undefined (0x81, 0x83, 0x88, 0x90, 0x98) stand
+/// for themselves, as the 1252 table does.
+fn windows_1250(bytes: &[u8]) -> String {
+    const LOW: [u32; 32] = [
+        0x20AC, 0x81, 0x201A, 0x83, 0x201E, 0x2026, 0x2020, 0x2021, 0x88, 0x2030, 0x0160, 0x2039,
+        0x015A, 0x0164, 0x017D, 0x0179, 0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013,
+        0x2014, 0x98, 0x2122, 0x0161, 0x203A, 0x015B, 0x0165, 0x017E, 0x017A,
+    ];
+    const HIGH: [u32; 96] = [
+        0x00A0, 0x02C7, 0x02D8, 0x0141, 0x00A4, 0x0104, 0x00A6, 0x00A7, 0x00A8, 0x00A9, 0x015E,
+        0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x017B, 0x00B0, 0x00B1, 0x02DB, 0x0142, 0x00B4, 0x00B5,
+        0x00B6, 0x00B7, 0x00B8, 0x0105, 0x015F, 0x00BB, 0x013D, 0x02DD, 0x013E, 0x017C, 0x0154,
+        0x00C1, 0x00C2, 0x0102, 0x00C4, 0x0139, 0x0106, 0x00C7, 0x010C, 0x00C9, 0x0118, 0x00CB,
+        0x011A, 0x00CD, 0x00CE, 0x010E, 0x0110, 0x0143, 0x0147, 0x00D3, 0x00D4, 0x0150, 0x00D6,
+        0x00D7, 0x0158, 0x016E, 0x00DA, 0x0170, 0x00DC, 0x00DD, 0x0162, 0x00DF, 0x0155, 0x00E1,
+        0x00E2, 0x0103, 0x00E4, 0x013A, 0x0107, 0x00E7, 0x010D, 0x00E9, 0x0119, 0x00EB, 0x011B,
+        0x00ED, 0x00EE, 0x010F, 0x0111, 0x0144, 0x0148, 0x00F3, 0x00F4, 0x0151, 0x00F6, 0x00F7,
+        0x0159, 0x016F, 0x00FA, 0x0171, 0x00FC, 0x00FD, 0x0163, 0x02D9,
+    ];
+    bytes
+        .iter()
+        .map(|&b| match b {
+            0x80..=0x9F => char::from_u32(LOW[(b - 0x80) as usize]).unwrap_or(char::from(b)),
+            0xA0..=0xFF => char::from_u32(HIGH[(b - 0xA0) as usize]).unwrap_or(char::from(b)),
+            _ => char::from(b),
+        })
+        .collect()
+}
+
+/// A V7 file's single-byte text in a requested code page. V7 names no page,
+/// so `None` keeps the historical 1252 behaviour; known pages decode through
+/// `encoding_rs`, and unknown values fall back the same way rather than
+/// promising mappings they cannot honour.
+fn single_byte_text(bytes: &[u8], code_page: Option<u16>) -> String {
+    match code_page {
+        Some(1250) => windows_1250(bytes),
+        Some(page) => match code_page_encoding(page) {
+            Some(encoding) => {
+                let (text, _had_replacements) = encoding.decode_with_bom_removal(bytes);
+                text.into_owned()
+            }
+            None => windows_1252(bytes),
+        },
+        None => windows_1252(bytes),
+    }
+}
+
+/// The single-byte Windows code pages a V7 international MicroStation can
+/// have written. The decoder only lists what `encoding_rs` names; a chosen
+/// page outside this list keeps 1252.
+pub(super) fn code_page_encoding(code_page: u16) -> Option<&'static encoding_rs::Encoding> {
+    match code_page {
+        1251 => Some(encoding_rs::WINDOWS_1251),
+        1253 => Some(encoding_rs::WINDOWS_1253),
+        1254 => Some(encoding_rs::WINDOWS_1254),
+        1255 => Some(encoding_rs::WINDOWS_1255),
+        1256 => Some(encoding_rs::WINDOWS_1256),
+        1257 => Some(encoding_rs::WINDOWS_1257),
+        1258 => Some(encoding_rs::WINDOWS_1258),
+        874 => Some(encoding_rs::WINDOWS_874),
+        932 => Some(encoding_rs::SHIFT_JIS),
+        936 => Some(encoding_rs::GBK),
+        949 => Some(encoding_rs::EUC_KR),
+        950 => Some(encoding_rs::BIG5),
+        65001 => Some(encoding_rs::UTF_8),
+        _ => None,
+    }
+}
+
 /// Reads a run of elements into raw geometry: plain elements, complex
 /// chains and shapes (joined), B-splines, text, cells and shared cell
 /// instances. In a 3D file (`d3`) points have a z and planar elements their
 /// plane; the drawn geometry is their plan.
-fn read_run(run: &[&[u8]], colors: &[[u8; 3]], d3: bool, depth: usize) -> Raw {
+fn read_run(
+    run: &[&[u8]],
+    colors: &[[u8; 3]],
+    d3: bool,
+    depth: usize,
+    code_page: Option<u16>,
+) -> Raw {
     let mut raw = Raw::default();
     // An open B-spline curve: order, pole count, colour, closed, and the
     // header as the element it imports as.
@@ -375,7 +451,7 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]], d3: bool, depth: usize) -> Raw {
                 if depth >= MAX_CELL_DEPTH {
                     continue;
                 }
-                let inner = read_run(&run[start..index], colors, d3, depth + 1);
+                let inner = read_run(&run[start..index], colors, d3, depth + 1, code_page);
                 raw.paths.extend(inner.paths);
                 raw.texts.extend(inner.texts);
                 raw.instances.extend(inner.instances);
@@ -609,7 +685,9 @@ fn read_run(run: &[&[u8]], colors: &[[u8; 3]], d3: bool, depth: usize) -> Raw {
                 // rounded.
                 let (height, width) = (height as f64 * 6.0 / 1000.0, width as f64 * 6.0 / 1000.0);
                 let text = Text {
-                    text: windows_1252(chars).trim_end_matches('\0').to_string(),
+                    text: single_byte_text(chars, code_page)
+                        .trim_end_matches('\0')
+                        .to_string(),
                     origin,
                     height,
                     width_factor: if height > 0.0 { width / height } else { 1.0 },
@@ -850,7 +928,7 @@ fn level(e: &[u8]) -> u8 {
 /// each entry is a level number followed by its name.
 // ponytail: entries are found by that pattern rather than by the table's
 // record layout; read the layout if a file lists a level wrongly.
-fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
+fn level_names(all: &[&[u8]], code_page: Option<u16>) -> HashMap<u8, String> {
     let mut names = HashMap::new();
     for e in all.iter().filter(|e| e[1] & 0x7f == 66 && level(e) == 6) {
         // The named-levels table: a count at 40, then 104-byte entries of
@@ -864,7 +942,7 @@ fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
                 let n = u16::from_le_bytes([e[at], e[at + 1]]);
                 let field = &e[at + 2..at + 104];
                 let len = field.iter().position(|c| *c == 0).unwrap_or(field.len());
-                let name: String = field[..len].iter().map(|&c| char::from(c)).collect();
+                let name = single_byte_text(&field[..len], code_page);
                 if (1..=63).contains(&n) && !name.trim().is_empty() {
                     names
                         .entry(n as u8)
@@ -893,12 +971,12 @@ fn level_names(all: &[&[u8]]) -> HashMap<u8, String> {
 }
 
 /// The used levels' names (or numbers), for the underlay layers list.
-pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
+pub fn layer_names(bytes: &[u8], code_page: Option<u16>) -> Option<Vec<String>> {
     if !is_v7(bytes) {
         return None;
     }
     let all = elements(bytes);
-    let names = level_names(&all);
+    let names = level_names(&all, code_page);
     let mut used: Vec<u8> = all
         .iter()
         .filter(|e| !matches!(e[1] & 0x7f, 9 | 8 | 10 | 5 | 66 | 34) && level(e) > 0)
@@ -914,7 +992,7 @@ pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
 }
 
 /// The model's geometry, in master units, without the `hidden` levels.
-pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
+pub fn model(bytes: &[u8], hidden: &[String], code_page: Option<u16>) -> Option<Sheet> {
     if !is_v7(bytes) {
         return None;
     }
@@ -923,7 +1001,7 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
     let table = color_table(&all);
     let table_colors = table.is_some();
     let colors = table.unwrap_or_else(|| DGN_DEFAULT_COLORS.to_vec());
-    let names = level_names(&all);
+    let names = level_names(&all, code_page);
     let off = |e: &[u8]| {
         let l = level(e);
         let name = names.get(&l).cloned().unwrap_or_else(|| l.to_string());
@@ -951,14 +1029,17 @@ pub fn model(bytes: &[u8], hidden: &[String]) -> Option<Sheet> {
             while j < all.len() && all[j][0] & 0x80 != 0 {
                 j += 1;
             }
-            defs.insert(name, read_run(&all[i + 1..j], &colors, is_3d(bytes), 0));
+            defs.insert(
+                name,
+                read_run(&all[i + 1..j], &colors, is_3d(bytes), 0, code_page),
+            );
             i = j;
             continue;
         }
         top.push(e);
         i += 1;
     }
-    let raw = read_run(&top, &colors, is_3d(bytes), 0);
+    let raw = read_run(&top, &colors, is_3d(bytes), 0, code_page);
     let per_unit = u.uor_per_sub * u.sub_per_master;
     let m: Affine = [
         1.0 / per_unit,
@@ -1001,14 +1082,14 @@ fn unit_name(b: &[u8], at: usize) -> String {
 /// The model element by element (DGNIMPORT): in master units with the
 /// global origin at 0,0, shared cell definitions in their own units scaled
 /// to master units, and every level by number with its name.
-pub fn import(bytes: &[u8]) -> Option<DgnImport> {
+pub fn import(bytes: &[u8], code_page: Option<u16>) -> Option<DgnImport> {
     if !is_v7(bytes) {
         return None;
     }
     let u = units(bytes)?;
     let all = elements(bytes);
     let colors = color_table(&all).unwrap_or_else(|| DGN_DEFAULT_COLORS.to_vec());
-    let names = level_names(&all);
+    let names = level_names(&all, code_page);
     let per_unit = u.uor_per_sub * u.sub_per_master;
     let s = 1.0 / per_unit;
     let mut cells = Vec::new();
@@ -1030,7 +1111,7 @@ pub fn import(bytes: &[u8]) -> Option<DgnImport> {
             while j < all.len() && all[j][0] & 0x80 != 0 {
                 j += 1;
             }
-            let def = read_run(&all[i + 1..j], &colors, is_3d(bytes), 0).elements;
+            let def = read_run(&all[i + 1..j], &colors, is_3d(bytes), 0, code_page).elements;
             cells.push((name, scaled_elements(&def, s, [0.0; 3])));
             i = j;
             continue;
@@ -1038,7 +1119,7 @@ pub fn import(bytes: &[u8]) -> Option<DgnImport> {
         top.push(e);
         i += 1;
     }
-    let raw = read_run(&top, &colors, is_3d(bytes), 0);
+    let raw = read_run(&top, &colors, is_3d(bytes), 0, code_page);
     let levels = (0..64u32)
         .map(|l| {
             let name = names
@@ -1062,4 +1143,117 @@ pub fn import(bytes: &[u8]) -> Option<DgnImport> {
         construction_layers: uint16(bytes, 46).is_some_and(|flags| flags & 0x1000 == 0),
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod text_code_page_tests {
+    use super::*;
+
+    /// The report's own byte evidence: Czech level/text bytes written by
+    /// MicroStation V7 on a Windows-1250 system decode through the page, not
+    /// through 1252.
+    #[test]
+    fn windows_1250_decodes_czech_slovak_text() {
+        let cases: &[(&[u8], u16, &str)] = &[
+            (b"Zna\xE8ky", 1250, "Značky"),
+            (b"Defini\xE8n\xED bod k\xFA", 1250, "Definiční bod kú"),
+            (
+                b"V\xEccn\xE1 b\xF8emena k \xE8\xE1sti",
+                1250,
+                "Věcná břemena k části",
+            ),
+            // Bytes the page leaves undefined stand for themselves.
+            (
+                [0x81, 0x83, 0x88, 0x90, 0x98].as_slice(),
+                1250,
+                "\u{81}\u{83}\u{88}\u{90}\u{98}",
+            ),
+            // None keeps the historical 1252 decoding.
+            (b"Zna\xE8ky".as_slice(), 1252, "Znaèky"),
+            (b"Zna\xE8ky".as_slice(), 9999 as u16, "Znaèky"),
+        ];
+        for (bytes, page, text) in cases {
+            assert_eq!(single_byte_text(bytes, Some(*page)), *text, "page {page}");
+        }
+    }
+
+    /// The pages behind the import window's picker decode their typical
+    /// scripts through `encoding_rs`; the default stays 1252.
+    #[test]
+    fn chosen_windows_pages_decode_their_scripts() {
+        let cases: &[(&[u8], u16, &str)] = &[
+            // Cyrillic: Windows-1251.
+            ([0xCF, 0xF0, 0xE8].as_slice(), 1251, "При"),
+            // Greek: Windows-1253.
+            ([0xC1, 0xE2].as_slice(), 1253, "Αβ"),
+            // Turkish dotted capital I: Windows-1254.
+            ([0xDD].as_slice(), 1254, "İ"),
+            // Baltic: Windows-1257.
+            ([0xE0].as_slice(), 1257, "ą"),
+            // Undefined bytes decode through what the standard tables give;
+            // 1252 keeps its own historical table (0x98 is small tilde).
+            ([0x98].as_slice(), 1251, "\u{98}"),
+            ([0x98].as_slice(), 1252, "\u{2DC}"),
+        ];
+        for (bytes, page, text) in cases {
+            assert_eq!(single_byte_text(bytes, Some(*page)), *text, "page {page}");
+        }
+    }
+
+    /// A level-name entry of the type-66 table decodes with the page, too.
+    #[test]
+    fn level_table_names_decode_with_the_page() {
+        let entry = |name: &[u8]| {
+            let mut e = vec![0u8; 42 + 104];
+            // Level 6 element (type 66) carrying one named level.
+            e[0] = 6;
+            e[1] = 66;
+            e[40] = 1u8;
+            e[42] = 5u8;
+            e[44..44 + name.len()].copy_from_slice(name);
+            e
+        };
+        for (name, page, text) in [
+            (b"Zna\xE8ky budov".as_slice(), 1250, "Značky budov"),
+            (b"Vnit\xF8n\xED kresba".as_slice(), 1250, "Vnitřní kresba"),
+            (b"Zna\xE8ky budov".as_slice(), 1252, "Znaèky budov"),
+        ] {
+            let element = entry(name);
+            let names = level_names(&[&element], Some(page));
+            assert_eq!(names.get(&5).map(String::as_str), Some(text), "page {page}");
+        }
+    }
+
+    /// A kind-17 (2-D text) element decodes through `read_run` with the page.
+    #[test]
+    fn text_elements_decode_with_the_page() {
+        let element = |chars: &[u8]| {
+            let mut e = vec![0u8; 60 + chars.len() + 2];
+            // Level 6, kind 17, not a complex component.
+            e[0] = 6;
+            e[1] = 17;
+            // Height 1000 UORs, width factor 500/1000.
+            e[38] = 0x03;
+            e[39] = 0xE8;
+            e[42] = 0x01;
+            e[43] = 0xF4;
+            let n = chars.len() as u16;
+            e[58] = (n & 0xff) as u8;
+            e[59] = (n >> 8) as u8;
+            e[60..60 + chars.len()].copy_from_slice(chars);
+            e
+        };
+        for (chars, page, text) in [
+            (b"Zna\xE8ky".as_slice(), 1250, "Značky"),
+            (b"Zna\xE8ky".as_slice(), 1252, "Znaèky"),
+        ] {
+            let element = element(chars);
+            let raw = read_run(&[&element], &[[8, 8, 8]], false, 0, Some(page));
+            assert_eq!(
+                raw.texts.first().map(|t| t.text.as_str()),
+                Some(text),
+                "page {page}"
+            );
+        }
+    }
 }

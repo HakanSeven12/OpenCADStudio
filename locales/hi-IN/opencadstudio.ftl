@@ -6149,11 +6149,7 @@ styles =
     .value-0-variable = 0 = चर
     .aci-color-index = ACI रंग सूचकांक
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: कोई समस्या नहीं मिली।
     .audit-fix-any-errors-detected = AUDIT  पाई गई त्रुटियाँ ठीक करें? [हाँ / नहीं] <नहीं>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ त्रुटि(याँ), __ocs_fmt_1__ चेतावनी(याँ) मिलीं।
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ सुधार लागू हुए, __ocs_fmt_1__ समस्या(एँ) अनसुलझी रहीं।
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ ऑब्जेक्ट जाँचे गए।
     .above-text = पाठ के ऊपर
     .active-dim-style-set-to-name-arg = सक्रिय मंद शैली "__ocs_fmt_0__" के लिए सेट
     .add-leader = लीडर जोड़ें

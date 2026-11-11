@@ -6162,11 +6162,7 @@ styles =
     .value-0-variable = 0 = переменная
     .aci-color-index = Индекс цвета ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: не найдено никаких проблем.
     .audit-fix-any-errors-detected = AUDIT  Исправить обнаруженные ошибки? [Да / Нет] <Нет>:
-    .audit-error-s-warning-s-found = AUDIT: найдено ошибок: __ocs_fmt_0__, предупреждений: __ocs_fmt_1__.
-    .audit-repair-s-applied-issue-s-left = AUDIT: применено исправлений: __ocs_fmt_0__, не устранено проблем: __ocs_fmt_1__.
-    .audit-scanned-total-object-s = AUDIT: сканируемый объект (объекты) __ocs_fmt_0__.
     .above-text = Выше текста
     .active-dim-style-set-to-name-arg = Активным стилем размеров назначен «__ocs_fmt_0__»
     .add-leader = Добавить выноску

@@ -6612,7 +6612,10 @@ impl Scene {
                             l.plot_window_max_y,
                         );
                         let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
-                        let f = if window_plot && l.plot_scale_type == 0 {
+                        // Scale type 0 is "scaled to fit" only with the
+                        // standard-scale flag; a custom scale leaves it 0 too.
+                        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
+                        let f = if window_plot && fitted {
                             // Fitted to the paper: the plot scales the window
                             // to the sheet, so the sheet spans the window at
                             // that scale, not at the layout's stored one.

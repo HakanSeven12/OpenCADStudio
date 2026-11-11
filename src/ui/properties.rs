@@ -1255,6 +1255,7 @@ impl PropertiesPanel {
                 color,
                 self.bg_color_picker_open && self.picker_here(),
                 crate::ui::color_select::ColorExtras {
+                    none: true,
                     by_layer: true,
                     by_block: true,
                     ..Default::default()
@@ -2843,6 +2844,124 @@ mod tests {
             commits(&messages).is_empty(),
             "Enter must not pick a value the row does not hold"
         );
+    }
+
+    /// The lookup row's list opens on its cell, and an arrow key only moves
+    /// the highlight. Nothing is applied until Enter, so a Down press cannot
+    /// leave the value cell and the parameters the row drives out of step.
+    #[test]
+    fn a_block_choice_list_applies_nothing_until_enter() {
+        use iced::keyboard;
+
+        let down = (
+            keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+            keyboard::key::Code::ArrowDown,
+        );
+        let enter = (
+            keyboard::Key::Named(keyboard::key::Named::Enter),
+            keyboard::key::Code::Enter,
+        );
+        assert!(
+            block_choice_picks(&block_choice_row_messages(&[down.clone()])).is_empty(),
+            "the arrow moves the highlight without applying a row"
+        );
+        // The list opens with its first row highlighted, so one Down lands on
+        // the second row and Enter applies exactly that row.
+        assert_eq!(
+            block_choice_picks(&block_choice_row_messages(&[down, enter.clone()])),
+            vec![1],
+            "Enter applies the highlighted row"
+        );
+        assert_eq!(
+            block_choice_picks(&block_choice_row_messages(&[enter])),
+            vec![0],
+            "a bare Enter applies the row the open list highlights"
+        );
+    }
+
+    /// Drive a lookup row's open list with real key events and return the
+    /// messages it publishes. The row holds no value yet, which is the state a
+    /// reference is in before any row has been applied.
+    fn block_choice_row_messages(
+        keys: &[(iced::keyboard::Key, iced::keyboard::key::Code)],
+    ) -> Vec<crate::app::Message> {
+        use crate::scene::model::object::{
+            BlockParameterComponent, BlockParameterKey, PropValue, Property,
+        };
+        use iced::futures::executor::block_on;
+        use iced::keyboard;
+        use iced_test::core::{renderer::Headless, shell, window};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let _guard = crate::headless_ui_lock();
+        let mut renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("headless renderer");
+
+        let key = BlockParameterKey {
+            document: 1,
+            definition: document::Handle::from(1u64),
+            insert: document::Handle::from(2u64),
+            batch_generation: None,
+            editor_session: None,
+            parameter: document::Handle::from(3u64),
+            component: BlockParameterComponent::Distance,
+        };
+        let prop = Property {
+            label: "Lookup1".into(),
+            field: "dyn_lookup",
+            value: PropValue::BlockChoice {
+                key,
+                selected: usize::MAX,
+                options: vec!["90".into(), "180".into()],
+                description: String::new(),
+            },
+        };
+        let mut panel = super::PropertiesPanel::default();
+        panel.open_block_picker = Some((key, false));
+        let row = panel.render_prop_row(&prop, "Lookup1");
+        let mut ui = UserInterface::build(
+            row,
+            iced::Size::new(360.0, 320.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let events: Vec<iced::Event> = keys
+            .iter()
+            .map(|(key, code)| {
+                iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: key.clone(),
+                    modified_key: key.clone(),
+                    physical_key: keyboard::key::Physical::Code(*code),
+                    location: keyboard::Location::Standard,
+                    modifiers: keyboard::Modifiers::empty(),
+                    text: None,
+                    repeat: false,
+                })
+            })
+            .collect();
+        let mut messages = Vec::new();
+        let _ = ui.update(
+            &window::Headless,
+            &shell::Waker::noop(),
+            &events,
+            iced::mouse::Cursor::Unavailable,
+            &mut renderer,
+            &mut messages,
+        );
+        messages
+    }
+
+    fn block_choice_picks(messages: &[crate::app::Message]) -> Vec<usize> {
+        messages
+            .iter()
+            .filter_map(|msg| match msg {
+                crate::app::Message::PropBlockChoice { index, .. } => Some(*index),
+                _ => None,
+            })
+            .collect()
     }
 
     fn sample_sections() -> Vec<crate::scene::model::object::PropSection> {

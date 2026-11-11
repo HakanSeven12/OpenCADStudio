@@ -76,7 +76,8 @@ fn resolve_style(
         // A style names a font *file* — `GOST2304_TypeA_italic.ttf`,
         // `romans.shx`, sometimes with a directory; `true_type_font` carries the
         // same thing for the styles that set it.
-        let file = if !style.true_type_font.trim().is_empty() {
+        let from_true_type = !style.true_type_font.trim().is_empty();
+        let file = if from_true_type {
             style.true_type_font.trim()
         } else {
             style.font_file.trim()
@@ -92,7 +93,10 @@ fn resolve_style(
             let explicit_shx = lff::is_shx_name(file);
             let shx_file = if explicit_shx {
                 Some(file.to_string())
-            } else if std::path::Path::new(file).extension().is_none() {
+            } else if !from_true_type && std::path::Path::new(file).extension().is_none() {
+                // Only a font *file* name: a bare TrueType family
+                // (`NLCS-ISO`) is that face even when an .shx of the same
+                // name sits in the support folder.
                 Some(format!("{file}.shx"))
             } else {
                 None
@@ -103,10 +107,7 @@ fn resolve_style(
                     .as_deref()
                     .map(std::path::Path::new)
                     .and_then(|p| p.parent());
-                crate::io::resolve_image_file(&shx_file, base).or_else(|| {
-                    crate::io::font_repo::local_font_file(&shx_file)
-                        .map(|path| path.to_string_lossy().into_owned())
-                })
+                crate::io::font_repo::font_file_path(&shx_file, base)
             });
             if let Some(p) = shx_path {
                 p
@@ -177,12 +178,7 @@ fn resolve_style(
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.parent());
-        let resolve_big = |name: &str| {
-            crate::io::resolve_image_file(name, base).or_else(|| {
-                crate::io::font_repo::local_font_file(name)
-                    .map(|p| p.to_string_lossy().into_owned())
-            })
-        };
+        let resolve_big = |name: &str| crate::io::font_repo::font_file_path(name, base);
         let mut big_path = resolve_big(big);
         // If the referenced big font is not a valid big font (e.g. legacy Chinese
         // shape-only container `chinese.shx`), try the standard Big5 big font
@@ -1815,6 +1811,10 @@ pub struct MTextLayout {
     /// Y of the first sub-line's baseline relative to the insertion point
     /// (in the entity-local, pre-rotation frame).
     pub v_offset: f32,
+    /// Every sub-line's baseline relative to the insertion point, in the same
+    /// local frame. Unlike `v_offset - index * line_height`, these include
+    /// paragraph spacing and exact line-spacing adjustments.
+    pub line_baselines: Vec<f32>,
     /// One world-space AABB per visible character — only populated when
     /// `MTextRenderOpts::want_glyph_boxes` is set.
     pub glyph_boxes: Vec<GlyphBox>,
@@ -3344,6 +3344,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         line_count: sub_lines.len(),
         line_height: line_h,
         v_offset,
+        line_baselines: line_y_offset.iter().map(|y| y + v_offset).collect(),
         glyph_boxes,
         local_bounds,
     }
@@ -3370,6 +3371,31 @@ mod tests {
             .iter()
             .map(|s| s.strokes.iter().map(Vec::len).sum::<usize>() + s.fill_tris.len())
             .sum()
+    }
+
+    /// A style whose `.shx` file is not on disk is searched for in the font
+    /// folders once, not again for every text drawn in that style.
+    #[test]
+    fn a_missing_font_file_is_searched_for_once_for_many_texts() {
+        let mut doc = document::CadDocument::default();
+        let mut gone = document::tables::TextStyle::new("GONE");
+        gone.font_file = "ocs_no_such_font_for_lookup.shx".into();
+        doc.text_styles.add(gone).unwrap();
+        let doc: document::Document = doc.into();
+        let searches = || crate::io::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
+
+        let before = searches();
+        for _ in 0..50 {
+            assert_eq!(
+                resolve_text_style("GONE", &doc).font_name,
+                "ocs_no_such_font_for_lookup.shx"
+            );
+        }
+        assert_eq!(
+            searches() - before,
+            1,
+            "fifty texts in one style must share one search of the font folders"
+        );
     }
 
     /// AutoCAD 2025 places a bottom-attached MTEXT by the ink of its last
@@ -4371,5 +4397,29 @@ mod font_style_tests {
             "expected alias to chineset.shx, got {}",
             resolved.font_name
         );
+    }
+
+    /// A style's TrueType family draws with that face even when an .shx of
+    /// the same name sits next to the drawing; a bare font *file* name still
+    /// finds its .shx.
+    #[test]
+    fn a_truetype_family_is_not_looked_up_as_an_shx_file() {
+        let dir = std::env::temp_dir().join(format!("ocs-ttf-family-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("NLCS-ISO.shx"), b"AutoCAD-86 shapes 1.0\r\n\x1a").unwrap();
+        let mut doc = document::Document::new();
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        let mut ttf = document::tables::TextStyle::new("TTF");
+        ttf.true_type_font = "NLCS-ISO".into();
+        doc.text_styles.add(ttf).unwrap();
+        let mut shx = document::tables::TextStyle::new("SHX");
+        shx.font_file = "NLCS-ISO".into();
+        doc.text_styles.add(shx).unwrap();
+
+        let ttf = resolve_text_style("TTF", &doc).font_name;
+        assert!(!ttf.to_ascii_lowercase().ends_with(".shx"), "{ttf}");
+        let shx = resolve_text_style("SHX", &doc).font_name;
+        assert!(shx.ends_with("NLCS-ISO.shx"), "{shx}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -315,8 +315,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
     let default_col = document::types::Color::Index(7);
     let grad_c1 = g.colors.first().map(|e| e.color).unwrap_or(default_col);
     let grad_c2 = g.colors.get(1).map(|e| e.color).unwrap_or(default_col);
-    let bg_on = background_color(h).is_some();
-    let bg_col = background_color(h).unwrap_or(default_col);
 
     if g.enabled {
         // ── Gradient fill ──────────────────────────────────────────────────
@@ -425,30 +423,35 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
 
     // ── Hatch (pattern / solid) ────────────────────────────────────────────
     // Show only controls used by the selected fill type.
-    let type_row = if h.is_solid {
-        ro(t!("Type").as_ref(), "fill_kind", t!("Solid").into_owned())
+    // A solid fill is the predefined _SOLID pattern and lists its rows as a
+    // pattern does (measured): angle, scale and origin live, spacing, ISO
+    // pen width and double greyed.
+    let type_row = Property {
+        label: t!("Type").into_owned(),
+        field: "pattern_type_label",
+        value: PropValue::Choice {
+            selected: pattern_type.to_string(),
+            options: vec!["Predefined".into(), "User Defined".into(), "Custom".into()],
+        },
+    };
+    // A user-defined pattern's name is fixed (measured: greyed `_U`).
+    let user_defined = matches!(h.pattern_type, document::entities::HatchPatternType::UserDefined);
+    let pattern_name_row = if user_defined {
+        ro(t!("Pattern name").as_ref(), "pattern_name", h.pattern.name.clone())
     } else {
         Property {
-            label: t!("Type").into_owned(),
-            field: "pattern_type_label",
-            value: PropValue::Choice {
-                selected: pattern_type.to_string(),
-                options: vec!["Predefined".into(), "User Defined".into(), "Custom".into()],
-            },
+            label: t!("Pattern name").into_owned(),
+            field: "pattern_name",
+            value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
         }
-    };
-    let pattern_name_row = Property {
-        label: t!("Pattern name").into_owned(),
-        field: "pattern_name",
-        value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
     };
     let associative_row = associative_property(h);
     let double_row = Property {
         label: t!("Double").into_owned(),
         field: "double",
-        value: PropValue::BoolToggle {
-            field: "double",
-            value: h.is_double,
+        value: PropValue::Choice {
+            selected: if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
         },
     };
     let island_row = Property {
@@ -463,7 +466,31 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
 
     let mut pattern_props = vec![type_row, pattern_name_row];
     pattern_props.push(ro(t!("Annotative").as_ref(), "annotative", String::new()));
-    if !h.is_solid {
+    if h.is_solid {
+        pattern_props.push(edit_angle(
+            t!("Angle").as_ref(),
+            "pattern_angle",
+            h.pattern_angle.to_degrees(),
+        ));
+        pattern_props.push(edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale));
+        pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
+        pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
+        pattern_props.push(ro(
+            t!("Spacing").as_ref(),
+            "spacing",
+            crate::entities::common::format_length(h.pattern_scale),
+        ));
+        pattern_props.push(ro(
+            t!("ISO pen width").as_ref(),
+            "iso_pen_width",
+            format!("{:.2} mm", h.pattern_scale),
+        ));
+        pattern_props.push(ro(
+            t!("Double").as_ref(),
+            "double",
+            if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+        ));
+    } else {
         pattern_props.push(edit_angle(
             t!("Angle").as_ref(),
             "pattern_angle",
@@ -473,34 +500,63 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             h.pattern_type,
             document::entities::HatchPatternType::UserDefined
         ) {
+            // Measured order: the scale (the spacing, greyed) and origin
+            // sit between angle and spacing.
+            pattern_props.push(ro(
+                t!("Scale").as_ref(),
+                "pattern_scale",
+                crate::entities::common::format_decimal(h.pattern_scale),
+            ));
+            pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
+            pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
             pattern_props.push(spacing_row);
             pattern_props.push(double_row);
         } else {
+            // A predefined or custom pattern lists spacing, pen width and
+            // double greyed after its origin (measured); an ISO pattern's
+            // pen width stays editable.
             pattern_props.push(edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale));
             // Origin edits are relative offsets.
             pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
             pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
+            pattern_props.push(ro(
+                t!("Spacing").as_ref(),
+                "spacing",
+                crate::entities::common::format_length(h.pattern_scale),
+            ));
             if h.pattern.name.to_ascii_uppercase().starts_with("ISO") {
                 pattern_props.push(edit(
                     t!("ISO pen width").as_ref(),
                     "iso_pen_width",
                     h.pattern_scale,
                 ));
+            } else {
+                pattern_props.push(ro(
+                    t!("ISO pen width").as_ref(),
+                    "iso_pen_width",
+                    format!("{:.2} mm", h.pattern_scale),
+                ));
             }
+            pattern_props.push(ro(
+                t!("Double").as_ref(),
+                "double",
+                if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            ));
         }
     }
     pattern_props.push(associative_row);
     pattern_props.push(island_row);
-    pattern_props.push(Property {
-        label: t!("Background").into_owned(),
-        field: "bg_enabled",
-        value: PropValue::BoolToggle {
-            field: "bg_enabled",
-            value: bg_on,
-        },
-    });
+    // A solid fill has no background colour row; a pattern lists its
+    // background colour, None while it has none.
+    if !h.is_solid {
+        pattern_props.push(Property {
+            label: t!("Background color").into_owned(),
+            field: "background_color",
+            value: PropValue::ColorChoice(background_color(h).unwrap_or(document::types::Color::None)),
+        });
+    }
 
-    let mut sections = vec![
+    let sections = vec![
         PropSection {
             title: t!("Pattern").into_owned(),
             props: pattern_props,
@@ -522,15 +578,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             ],
         },
     ];
-    if bg_on {
-        if let Some(sec) = sections.first_mut() {
-            sec.props.push(Property {
-                label: t!("Background color").into_owned(),
-                field: "background_color",
-                value: PropValue::ColorChoice(bg_col),
-            });
-        }
-    }
     sections
 }
 
@@ -554,7 +601,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
             h.is_double = if value == "toggle" {
                 !h.is_double
             } else {
-                value == "true"
+                value == "true" || value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes")
             };
             return;
         }
@@ -698,6 +745,180 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
         }
         "elevation" => h.elevation = v,
         _ => {}
+    }
+}
+
+/// Transparency as the Hatch panel shows it: a percentage, `None` when the
+/// hatch follows its layer or block.
+fn transparency_percent(t: document::types::Transparency) -> Option<u8> {
+    match t {
+        document::types::Transparency::Explicit(alpha) => {
+            Some((f64::from(alpha) * 100.0 / 255.0).round() as u8)
+        }
+        _ => None,
+    }
+}
+
+/// The Hatch panel's settings for an existing hatch, as HATCHEDIT shows
+/// them. A user-defined hatch's spacing is its pattern scale, as in the
+/// Properties palette.
+pub(crate) fn panel_settings(
+    h: &Hatch,
+    annotative: bool,
+) -> crate::modules::draw::draw::hatch::HatchSettings {
+    use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings, GRADIENT_COLORS};
+    use crate::scene::model::hatch_model::GradientKind;
+    let fill = if h.gradient_color.enabled {
+        let (kind, invert) = GradientKind::from_name(&h.gradient_color.name);
+        HatchFill::Gradient(kind, invert)
+    } else if h.is_solid {
+        HatchFill::Solid
+    } else if matches!(
+        h.pattern_type,
+        document::entities::HatchPatternType::UserDefined
+    ) {
+        HatchFill::User {
+            spacing: h.pattern_scale,
+            double: h.is_double,
+        }
+    } else {
+        HatchFill::Pattern(h.pattern.name.clone())
+    };
+    let mut gradient_colors = GRADIENT_COLORS;
+    for (slot, entry) in gradient_colors.iter_mut().zip(&h.gradient_color.colors) {
+        *slot = entry.color;
+    }
+    let origin = h.pattern_origin();
+    HatchSettings {
+        fill,
+        angle_deg: if h.gradient_color.enabled {
+            h.gradient_color.angle
+        } else {
+            h.pattern_angle
+        }
+        .to_degrees(),
+        scale: h.pattern_scale,
+        origin: [origin.x, origin.y],
+        method: 0,
+        islands: h.style,
+        associative: h.is_associative,
+        separate: false,
+        keep_boundaries: false,
+        gap_tolerance: 0.0,
+        color: Some(h.common.color),
+        background: background_color(h),
+        layer: Some(h.common.layer.clone()),
+        transparency: transparency_percent(h.common.transparency),
+        gradient_colors,
+        draw_order: 0,
+        annotative,
+    }
+}
+
+/// Swap the hatch's lines for the predefined pattern `name`, kept at the
+/// hatch's scale, angle and origin.
+fn set_predefined_pattern(h: &mut Hatch, name: &str) {
+    if name.eq_ignore_ascii_case("SOLID") {
+        h.pattern = document::entities::HatchPattern::new("SOLID");
+        h.pattern_type = document::entities::HatchPatternType::Predefined;
+        h.is_solid = true;
+        h.gradient_color.enabled = false;
+        return;
+    }
+    let Some(entry) = crate::scene::model::hatch_patterns::find(name) else {
+        return;
+    };
+    let mut pattern = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+    scale_pattern_geometry(&mut pattern, h.pattern_scale.max(1.0e-6));
+    rotate_pattern_geometry(&mut pattern, h.pattern_angle);
+    let origin = h.pattern_origin();
+    translate_pattern_geometry(&mut pattern, origin.x, origin.y);
+    h.pattern = pattern;
+    h.pattern_type = document::entities::HatchPatternType::Predefined;
+    h.is_solid = false;
+    h.gradient_color.enabled = false;
+}
+
+/// Apply what changed on the Hatch panel between `before` and `after` to an
+/// existing hatch (HATCHEDIT's OK). Fields the panel did not change keep
+/// the hatch's own values; colour, layer and transparency are set by the
+/// caller, which owns the layer table.
+pub(crate) fn apply_panel_settings(
+    h: &mut Hatch,
+    before: &crate::modules::draw::draw::hatch::HatchSettings,
+    after: &crate::modules::draw::draw::hatch::HatchSettings,
+) {
+    use crate::modules::draw::draw::hatch::HatchFill;
+    use document::entities::HatchPatternType;
+    let number = |value: f64| value.to_string();
+    if after.fill != before.fill {
+        match &after.fill {
+            HatchFill::Solid => set_predefined_pattern(h, "SOLID"),
+            HatchFill::Pattern(name) => set_predefined_pattern(h, name),
+            HatchFill::User { spacing, double } => {
+                h.gradient_color.enabled = false;
+                if h.pattern_type != HatchPatternType::UserDefined {
+                    apply_geom_prop(h, "pattern_type_label", "User Defined");
+                }
+                h.is_solid = false;
+                apply_geom_prop(h, "spacing", &number(*spacing));
+                h.is_double = *double;
+            }
+            HatchFill::Gradient(kind, invert) => {
+                h.is_solid = true;
+                h.gradient_color.enabled = true;
+                h.gradient_color.name = kind.dxf_name(*invert).to_string();
+                h.gradient_color.angle = after.angle_deg.to_radians();
+                h.gradient_color.is_single_color = false;
+                h.gradient_color.colors = after
+                    .gradient_colors
+                    .iter()
+                    .enumerate()
+                    .map(|(n, color)| document::entities::hatch::GradientColorEntry {
+                        value: n as f64,
+                        color: *color,
+                        ..Default::default()
+                    })
+                    .collect();
+            }
+        }
+    } else if after.gradient_colors != before.gradient_colors && h.gradient_color.enabled {
+        for (entry, color) in h
+            .gradient_color
+            .colors
+            .iter_mut()
+            .zip(&after.gradient_colors)
+        {
+            entry.color = *color;
+        }
+    }
+    if after.angle_deg != before.angle_deg {
+        apply_geom_prop(h, "pattern_angle", &number(after.angle_deg));
+    }
+    if after.scale != before.scale && !matches!(after.fill, HatchFill::User { .. }) {
+        apply_geom_prop(h, "pattern_scale", &number(after.scale));
+    }
+    if after.origin != before.origin {
+        h.set_pattern_origin(document::types::Vector2::new(
+            after.origin[0],
+            after.origin[1],
+        ));
+    }
+    if after.islands != before.islands {
+        h.style = after.islands;
+    }
+    if after.associative != before.associative {
+        apply_geom_prop(
+            h,
+            "associative",
+            if after.associative { "true" } else { "false" },
+        );
+    }
+    if after.background != before.background {
+        match &after.background {
+            Some(color) => set_background_color(h, color),
+            None => clear_background_color(h),
+        }
     }
 }
 

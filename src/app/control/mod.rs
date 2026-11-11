@@ -1021,7 +1021,7 @@ impl OpenCADStudio {
                     if off_screen {
                         json!({"ok":true,"snap":null,"reason":"point_outside_viewport"})
                     } else {
-                        match self.snap_query(i, world, from) {
+                        match self.snap_query(i, world, from, None) {
                             Some(hit) => {
                                 json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]})
                             }
@@ -6212,6 +6212,126 @@ mod tests {
         );
     }
 
+    #[test]
+    fn plot_op_model_defaults_to_fit_when_scale_and_fit_are_omitted() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}));
+        // A previous non-fit preference must not leak into an API request whose
+        // documented default is fit when neither scale nor fit is supplied.
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1000:1".into();
+        let svg = std::env::temp_dir().join(format!("ocs-fit-default-{}.svg", std::process::id()));
+        let response = request(&mut app, json!({"op":"plot","path":svg.to_string_lossy()}));
+        assert_eq!(response["status"], "completed", "{response}");
+        let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+        let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let root = document.root_element();
+        let view_box = root
+            .attribute("viewBox")
+            .expect("viewBox")
+            .split_whitespace()
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect::<Vec<_>>();
+        let (width, height) = (view_box[2], view_box[3]);
+        let mut checked = 0;
+        for path in root
+            .descendants()
+            .filter(|node| node.tag_name().name() == "path")
+        {
+            let d = path.attribute("d").expect("path data");
+            let normalized = d.replace(['M', 'L', 'Z'], " ");
+            let coordinates = normalized
+                .split_whitespace()
+                .map(|v| v.parse::<f64>().expect("numeric path coordinate"))
+                .collect::<Vec<_>>();
+            for pair in coordinates.chunks_exact(2) {
+                assert!(
+                    pair[0] >= -0.01 && pair[0] <= width + 0.01,
+                    "x={} width={width}",
+                    pair[0]
+                );
+                assert!(
+                    pair[1] >= -0.01 && pair[1] <= height + 0.01,
+                    "y={} height={height}",
+                    pair[1]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+        let fitted_line = svg_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("fitted line")
+            .to_owned();
+        let _ = std::fs::remove_file(&svg);
+
+        // An explicit non-fit request must not be replaced by the default.
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.scale = "1000:1".into();
+        let explicit =
+            std::env::temp_dir().join(format!("ocs-fit-explicit-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":explicit.to_string_lossy(),"fit":false}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let explicit_text = std::fs::read_to_string(&explicit).expect("explicit SVG written");
+        let explicit_line = explicit_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("explicit non-fit line");
+        assert_ne!(explicit_line, fitted_line);
+        let _ = std::fs::remove_file(&explicit);
+    }
+
+    /// `area:"window"` on a named layout. The request's rect is explicit and
+    /// must survive the stored page setup load: a layout's own (older or lost)
+    /// window may not swallow a field request.
+    #[test]
+    fn a_window_plot_reaches_a_named_layout() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}))["status"],
+            "completed"
+        );
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+        let _ = app.run_command_line("MSPACE");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        let _ = app.run_command_line("PSPACE");
+
+        let svg =
+            std::env::temp_dir().join(format!("ocs-layout-window-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({
+                "op":"plot",
+                "layout":"Layout1",
+                "path":svg.to_string_lossy(),
+                "area":"window",
+                "window":[5,5,290,200]
+            }),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        assert_eq!(response["result"]["page_sizes"], json!([[297.0, 210.0]]));
+        let svg_text = std::fs::read_to_string(&svg).expect("window SVG");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let clip = svg_text
+            .lines()
+            .find(|line| line.contains("clipPath") || line.contains("clip-path"))
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| panic!("clip from the requested window: {svg_text}"));
+        assert!(clip.contains("width=\"285\""), "{clip}");
+        assert!(clip.contains("height=\"195\""), "{clip}");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        assert!(
+            svg_text.lines().any(|line| line.starts_with("<path")),
+            "the viewport reaches the model content: {svg_text}"
+        );
+        let _ = std::fs::remove_file(&svg);
+    }
     /// A BLOCK_RECORD whose stored `entity_handles` no longer resolve against
     /// the entity table (an import that renumbered handles after the lists
     /// were built) must not silently drop the layout's whole content: the

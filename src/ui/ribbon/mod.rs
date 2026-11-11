@@ -184,11 +184,27 @@ fn panel_measure_key(
     style_ctx: &StyleContext<'_>,
     visibility: Option<&crate::ui::window::block_visibility::RibbonContext>,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    crate::sys::ui_font::generation().hash(&mut hasher);
     // Panel titles and labels are measured translated, so a language switch
     // has to measure them again.
-    crate::i18n::language_generation().hash(&mut hasher);
+    panel_measure_key_at(
+        (crate::sys::ui_font::generation(), crate::i18n::language_generation()),
+        groups,
+        last_cmd,
+        style_ctx,
+        visibility,
+    )
+}
+
+/// [`panel_measure_key`] under the given font and language generations.
+fn panel_measure_key_at(
+    generations: (u32, u64),
+    groups: &[&RibbonGroup],
+    last_cmd: &HashMap<&'static str, &'static str>,
+    style_ctx: &StyleContext<'_>,
+    visibility: Option<&crate::ui::window::block_visibility::RibbonContext>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    generations.hash(&mut hasher);
     groups.len().hash(&mut hasher);
     for group in groups {
         group.title.hash(&mut hasher);
@@ -2723,7 +2739,7 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{panel_measure_key, CollapseMode, Ribbon, RibbonLayout, StyleContext};
+    use super::{panel_measure_key_at, CollapseMode, Ribbon, RibbonLayout, StyleContext};
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 
@@ -2789,6 +2805,16 @@ mod tests {
     }
 
     fn measurement_key(tool_id: &'static str, selected_command: &'static str) -> u64 {
+        // Fixed generations: other tests switch the UI font and language
+        // while this one runs.
+        measurement_key_at((0, 0), tool_id, selected_command)
+    }
+
+    fn measurement_key_at(
+        generations: (u32, u64),
+        tool_id: &'static str,
+        selected_command: &'static str,
+    ) -> u64 {
         let groups = [RibbonGroup {
             title: "Test",
             tools: vec![RibbonItem::LargeTool(ToolDef {
@@ -2817,7 +2843,7 @@ mod tests {
         let groups: Vec<_> = groups.iter().collect();
         let mut last_cmd = FxHashMap::default();
         last_cmd.insert("TEST_DROPDOWN", selected_command);
-        panel_measure_key(&groups, &last_cmd, &style_ctx, None)
+        panel_measure_key_at(generations, &groups, &last_cmd, &style_ctx, None)
     }
 
     #[test]
@@ -2879,12 +2905,21 @@ mod tests {
     /// language must not reuse the old measurements.
     #[test]
     fn panel_measure_fingerprint_changes_with_the_language() {
-        let before = measurement_key("TEST", "TEST");
+        let generations = || {
+            (
+                crate::sys::ui_font::generation(),
+                crate::i18n::language_generation(),
+            )
+        };
+        let before = generations();
         // Reloading English bumps the language generation like any switch,
         // without changing the locale other tests see.
         crate::i18n::set_language(crate::i18n::Language::EnUs)
             .expect("English locale must be available");
-        assert_ne!(before, measurement_key("TEST", "TEST"));
+        assert_ne!(
+            measurement_key_at(before, "TEST", "TEST"),
+            measurement_key_at(generations(), "TEST", "TEST")
+        );
     }
 
     #[test]

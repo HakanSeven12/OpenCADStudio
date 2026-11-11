@@ -1694,6 +1694,18 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+F12".to_string())
             .or_insert_with(|| "QUADTOGGLE".to_string());
+        // Before group selection had Ctrl+Shift+A, the base-key fallback
+        // read it as Ctrl+A and selected everything.
+        self.shortcut_bindings
+            .entry(
+                if cfg!(target_os = "macos") {
+                    "CMD+SHIFT+A"
+                } else {
+                    "CTRL+SHIFT+A"
+                }
+                .to_string(),
+            )
+            .or_insert_with(|| "TOGGLEGROUPS".to_string());
         self.shortcut_bindings
             .entry(
                 if cfg!(target_os = "macos") {
@@ -5810,6 +5822,15 @@ impl OpenCADStudio {
     fn refresh_current_plot_context(&mut self) {
         let i = self.active_tab;
         if self.tabs[i].scene.current_layout == "Model" {
+            self.plot_dialog.paper_space = false;
+            // Layout is a paper-only plot area. Its saved fixed scale can put
+            // every model object outside the sheet, making direct PREVIEW and
+            // SVG/PDF export look blank. Match the Plot dialog's existing
+            // normalization instead of carrying that state into Model.
+            if self.plot_dialog.area == "Layout" {
+                self.plot_dialog.area = "Extents".into();
+                self.normalize_common_plot_dialog();
+            }
             return;
         }
         self.plot_dialog.paper_space = true;
@@ -9770,6 +9791,75 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert_eq!((w, h), (1500.0, 609.6));
         assert_eq!(layout_rotation(&app), document::objects::PlotRotation::None);
     }
+
+    #[test]
+    fn direct_model_preview_normalizes_inherited_paper_layout_scale() {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let from = Vector3::new(10_000.0, 10_000.0, 0.0);
+        let to = Vector3::new(20_000.0, 20_000.0, 0.0);
+        app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(from, to)));
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+
+        // A saved paper setup uses the paper-only Layout area and a fixed 1:1
+        // scale. Direct PREVIEW inherits those fields after switching to Model.
+        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.paper_space = true;
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1:1".into();
+        app.plot_dialog.center = true;
+        app.plot_dialog.paper_width_mm = 210.0;
+        app.plot_dialog.paper_height_mm = 297.0;
+        let _ = app.update(Message::LayoutSwitch("Model".into()));
+
+        app.refresh_current_plot_context();
+        assert_eq!(app.plot_dialog.area, "Extents");
+        assert!(app.plot_dialog.fit_to_paper);
+        assert!(!app.plot_dialog.paper_space);
+
+        let page = app.direct_plot_page().expect("model line plots");
+        let map = |point: Vector3| {
+            (
+                (point.x + page.offset_x) * page.scale as f64,
+                (point.y + page.offset_y) * page.scale as f64,
+            )
+        };
+        for point in [from, to] {
+            let (x, y) = map(point);
+            assert!(
+                x >= 0.0 && x <= page.paper_w && y >= 0.0 && y <= page.paper_h,
+                "fitted model endpoint ({x}, {y}) is outside {} x {} at scale {}",
+                page.paper_w,
+                page.paper_h,
+                page.scale
+            );
+        }
+    }
+
+    #[test]
+    fn direct_model_preview_keeps_an_explicit_non_fit_extents_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.plot_dialog.area = "Extents".into();
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1:100".into();
+        app.plot_dialog.center = false;
+        app.plot_dialog.offset_x = "12.0".into();
+
+        app.refresh_current_plot_context();
+
+        assert!(!app.plot_dialog.fit_to_paper);
+        assert_eq!(app.plot_dialog.scale, "1:100");
+        assert!(!app.plot_dialog.center);
+        assert_eq!(app.plot_dialog.offset_x, "12.0");
+    }
+
 }
 
 #[cfg(test)]

@@ -408,7 +408,7 @@ fn columns_str(c: &document::entities::MTextColumnData) -> &'static str {
     match c.column_type {
         1 => "Static",
         2 => "Dynamic",
-        _ => "No columns",
+        _ => "None",
     }
 }
 
@@ -417,10 +417,15 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
     // by the line-spacing factor.
     let line_space_distance = t.height * 1.666_666_666_666_667 * t.line_spacing_factor;
     let text_frame_on = (t.background_fill_flags & 0x10) != 0;
-    // Defined width is reported by Properties but is not edited there. Defined
-    // height remains live for static columns or manual-height dynamic columns.
+    // Dynamic columns size the text themselves: their defined width stays
+    // read-only and their height too while it is automatic. Text without
+    // columns edits both (measured).
     let col_type = t.column_data.column_type;
-    let height_editable = col_type == 1 || (col_type == 2 && !t.column_data.auto_height);
+    let width_editable = col_type == 0;
+    // Dynamic columns grey the defined height whatever their height flag
+    // (measured: the default boxed text stores manual height 0 and still
+    // shows it read-only).
+    let height_editable = col_type != 2;
     vec![
         PropSection {
             title: t!("Text").into_owned(),
@@ -512,28 +517,26 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                             .collect(),
                     },
                 },
+                // Yes / No as the palette shows it; the colour and border
+                // offset stay in the text editor's Background menu.
                 Property {
                     label: t!("Background mask").into_owned(),
                     field: "background_mask",
                     value: PropValue::Choice {
-                        selected: if t.background_fill_flags & 0x01 != 0 {
-                            "Fill".into()
-                        } else if t.background_fill_flags & 0x02 != 0 {
-                            "Mask".into()
+                        selected: if t.background_fill_flags & 0x03 != 0 {
+                            t!("Yes")
                         } else {
-                            "Off".into()
-                        },
-                        options: ["Off", "Fill", "Mask"]
-                            .into_iter()
-                            .map(str::to_string)
-                            .collect(),
+                            t!("No")
+                        }
+                        .into_owned(),
+                        options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
                     },
                 },
                 num_row(
                     t!("Defined width").as_ref(),
                     "rect_w",
                     t.rectangle_width,
-                    false,
+                    width_editable,
                 ),
                 num_row(
                     t!("Defined height").as_ref(),
@@ -546,7 +549,7 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                     field: "columns",
                     value: PropValue::Choice {
                         selected: columns_str(&t.column_data).to_string(),
-                        options: ["No columns", "Static", "Dynamic"]
+                        options: ["None", "Static", "Dynamic"]
                             .into_iter()
                             .map(str::to_string)
                             .collect(),
@@ -590,13 +593,21 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
             return;
         }
         "background_mask" => {
-            // Clear both fill bits, then set the chosen one. 0x01 = use the
-            // background-fill colour, 0x02 = use the drawing-window colour (mask).
-            t.background_fill_flags &= !0x03;
-            match value {
-                "Fill" => t.background_fill_flags |= 0x01,
-                "Mask" => t.background_fill_flags |= 0x02,
-                _ => {}
+            let on = value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes");
+            if !on {
+                t.background_fill_flags &= !0x03;
+            } else if t.background_fill_flags & 0x03 == 0 {
+                // Measured: turning the mask on uses the drawing background
+                // colour (flags 3), a 1.5 border and the grey fill colour.
+                t.background_fill_flags |= 0x03;
+                if t.background_scale < 1.0 {
+                    t.background_scale = 1.5;
+                }
+                t.background_color = document::types::Color::Rgb {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                };
             }
             return;
         }
@@ -670,6 +681,7 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
         "ins_z" => t.insertion_point.z = v,
         "height" if v > 0.0 => t.height = v,
         "rect_h" if v >= 0.0 => t.rectangle_height = (v > 0.0).then_some(v),
+        "rect_w" if v >= 0.0 => t.rectangle_width = v,
         "rotation" => t.rotation = v.to_radians(),
         "line_spacing" if (0.25..=4.0).contains(&v) => t.line_spacing_factor = v,
         // Editing the absolute distance back-solves the line-spacing factor so

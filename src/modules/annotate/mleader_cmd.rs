@@ -428,6 +428,13 @@ impl CadCommand for MLeaderCommand {
         "MLEADER"
     }
 
+    /// The leader points refuse with "Invalid Input."; content first's text
+    /// corner is a plain keyword point prompt (measured).
+    fn point_rejection(&self) -> Option<String> {
+        let text_corner = self.order == CreationOrder::ContentFirst && self.verts.is_empty();
+        (!text_corner).then(|| crate::tr!("mleader-prompt", "invalid-input"))
+    }
+
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
     }

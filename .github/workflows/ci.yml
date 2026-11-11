@@ -25,7 +25,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-latest, macos-15]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # The same libraries the Linux release build needs (windowing, GL,
       # fonts); the packaging tools are left out.
@@ -37,9 +37,11 @@ jobs:
             libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
             libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # LC_ALL=C: a few tests compare English message text. The GPU-backed
       # tests are #[ignore]d and need an adapter, so they do not run here.
@@ -56,7 +58,7 @@ jobs:
     # these checks report in the log without failing the job: a job-level
     # continue-on-error still shows a red check on every pull request.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: System libraries
         run: |
@@ -65,11 +67,12 @@ jobs:
             libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
             libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: cargo fmt --check
         continue-on-error: true

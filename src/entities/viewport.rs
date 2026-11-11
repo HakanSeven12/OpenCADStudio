@@ -498,13 +498,29 @@ impl crate::entities::traits::FallbackTess for Viewport {
             [cx - hw, cy + hh, cz],
             [cx - hw, cy - hh, cz],
         ];
-        (pts, vec![], vec![], vec![])
+        // The corners as key vertices: Endpoint snaps to each corner and
+        // Midpoint to each edge, as on any closed polyline.
+        (pts.clone(), vec![], vec![], pts)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2821: a viewport's frame snaps at its corners and edge midpoints.
+    #[test]
+    fn viewport_frame_has_its_corners_as_key_vertices() {
+        use crate::entities::traits::FallbackTess;
+        let mut vp = Viewport::default();
+        vp.center = document::types::Vector3::new(5.0, 2.0, 0.0);
+        vp.width = 10.0;
+        vp.height = 4.0;
+        let (_, _, _, key) = vp.fallback_geometry();
+        assert_eq!(key.first(), Some(&[0.0, 0.0, 0.0]));
+        assert!(key.contains(&[10.0, 4.0, 0.0]));
+        assert_eq!(key.len(), 5, "closed: the last edge has a midpoint too");
+    }
 
     /// D#2542: a 10× viewport read "1:10:1" as its annotation scale.
     #[test]

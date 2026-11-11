@@ -816,6 +816,19 @@ pub fn tessellate_text_run(
         }
         let family = shaping_family.unwrap_or("");
         if let Some(run) = crate::scene::text::ttf_glyph::shape_run(family, seg) {
+            // The shaped run already knows the sizes of its output buffers.
+            // Reserve once per segment to avoid repeatedly growing them while
+            // emitting each glyph; `reserve` remains amortized for decorated
+            // text that flushes multiple segments into the same buffers.
+            let contour_count = run
+                .glyphs
+                .iter()
+                .flat_map(|glyph| &glyph.strokes)
+                .filter(|stroke| stroke.len() >= 2)
+                .count();
+            let triangle_points: usize = run.glyphs.iter().map(|glyph| glyph.fill_tris.len()).sum();
+            out.reserve(contour_count);
+            fill_tris.reserve(triangle_points);
             for g in &run.glyphs {
                 emit_glyph(out, &g.strokes, *cursor_x);
                 emit_fill(fill_tris, &g.fill_tris, *cursor_x);

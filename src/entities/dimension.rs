@@ -1895,9 +1895,9 @@ pub fn style_sections(
             label,
             field,
             if editable {
-                PropValue::EditText(format!("{value:.4}"))
+                PropValue::EditText(crate::entities::common::format_decimal(value))
             } else {
-                PropValue::ReadOnly(format!("{value:.4}"))
+                PropValue::ReadOnly(crate::entities::common::format_decimal(value))
             },
         )
     };
@@ -2280,30 +2280,29 @@ pub fn style_sections(
                     "dim_text_inside_align",
                     on(int(ov::DIMTIH, s.dimtih as i16) == 0),
                     &["On", "Off"],
-                    dimtix
-                        || matches!(
-                            dimension,
-                            Dimension::LargeRadial(_)
-                                | Dimension::Angular2Ln(_)
-                                | Dimension::Angular3Pt(_)
-                        ),
+                    // Editable whether or not text is forced inside
+                    // (measured on a linear dimension with Text inside Off).
+                    true,
                 ),
                 property(
                     t!("Text position X").as_ref(),
                     "text_x",
-                    PropValue::EditText(format!("{:.4}", dimension.base().text_middle_point.x)),
+                    PropValue::EditText(crate::entities::common::format_decimal(
+                        dimension.base().text_middle_point.x,
+                    )),
                 ),
                 property(
                     t!("Text position Y").as_ref(),
                     "text_y",
-                    PropValue::EditText(format!("{:.4}", dimension.base().text_middle_point.y)),
+                    PropValue::EditText(crate::entities::common::format_decimal(
+                        dimension.base().text_middle_point.y,
+                    )),
                 ),
                 property(
                     t!("Text rotation").as_ref(),
                     "text_rotation",
-                    PropValue::EditText(format!(
-                        "{:.4}",
-                        dimension.base().text_rotation.to_degrees()
+                    PropValue::EditText(crate::entities::common::format_decimal(
+                        dimension.base().text_rotation.to_degrees(),
                     )),
                 ),
                 choice(
@@ -2323,9 +2322,8 @@ pub fn style_sections(
                     // The value the dimension text reports (DIMLFAC applied,
                     // including viewport compensation) — not the raw paper
                     // distance, which would disagree with what is drawn.
-                    PropValue::ReadOnly(format!(
-                        "{:.4}",
-                        displayed_measurement(dimension, Some(s))
+                    PropValue::ReadOnly(crate::entities::common::format_decimal(
+                        displayed_measurement(dimension, Some(s)),
                     )),
                 ),
                 property(
@@ -2342,6 +2340,26 @@ pub fn style_sections(
         PropSection {
             title: t!("Fit").into_owned(),
             props: vec![
+                choice(
+                    t!("Dim line forced").as_ref(),
+                    "dim_line_forced",
+                    on(int(ov::DIMTOFL, s.dimtofl as i16) != 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                choice(
+                    t!("Dim line inside").as_ref(),
+                    "dim_line_inside",
+                    on(int(ov::DIMSOXD, s.dimsoxd as i16) == 0),
+                    &["On", "Off"],
+                    true,
+                ),
+                number(
+                    t!("Dim scale overall").as_ref(),
+                    "dim_scale_overall",
+                    real(ov::DIMSCALE, s.dimscale),
+                    !annotative,
+                ),
                 choice(
                     t!("Fit").as_ref(),
                     "dim_fit",
@@ -2365,26 +2383,6 @@ pub fn style_sections(
                         "Move text, add leader",
                         "Move text, no leader",
                     ],
-                    true,
-                ),
-                number(
-                    t!("Dim scale overall").as_ref(),
-                    "dim_scale_overall",
-                    real(ov::DIMSCALE, s.dimscale),
-                    !annotative,
-                ),
-                choice(
-                    t!("Dim line forced").as_ref(),
-                    "dim_line_forced",
-                    on(int(ov::DIMTOFL, s.dimtofl as i16) != 0),
-                    &["On", "Off"],
-                    true,
-                ),
-                choice(
-                    t!("Dim line inside").as_ref(),
-                    "dim_line_inside",
-                    on(int(ov::DIMSOXD, s.dimsoxd as i16) == 0),
-                    &["On", "Off"],
                     true,
                 ),
             ],
@@ -6892,9 +6890,9 @@ fn dimension_text_style_name(
         .unwrap_or_else(|| dim.base().style_name.clone())
 }
 
-/// A dimension's text box as drawn — its middle point, width and height —
-/// for markers placed beside the text (ANNOMONITOR).
-pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3, f64, f64)> {
+/// A dimension's text box as drawn — its middle point, width, height and
+/// reading angle — for markers placed beside the text (ANNOMONITOR).
+pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3, f64, f64, f64)> {
     let source = document
         .dim_styles
         .iter()
@@ -6907,7 +6905,9 @@ pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3,
     };
     let height = style.dimtxt * scale;
     let width = dimension_text_width(dim, Some(&style), height, Some(document));
-    Some((dim.base().text_middle_point, width, height))
+    // An automatic text point is not stored: use where the text draws.
+    let middle = stored_text_point(dim).or_else(|| automatic_text_position(document, dim))?;
+    Some((middle, width, height, dimension_text_rotation(dim, Some(&style))))
 }
 
 /// The width of a dimension's text as it draws: the extent of its ink in

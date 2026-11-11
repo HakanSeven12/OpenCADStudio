@@ -104,7 +104,6 @@ fn main() {
         }
     );
 
-    println!("cargo:rerun-if-env-changed=OCS_PATREON_TOKEN");
     write_command_summaries();
 
     write_icon_pairs();

@@ -6865,7 +6865,11 @@ impl Scene {
                 })
                 .filter(|&(p, d)| p > 0.0 && d > 0.0)
                 .unwrap_or((1.0, 1.0 / factor));
-            self.add_scale(label, paper, drawing / unit_factor);
+            // An enlarging scale ("2:1", "10:1") keeps its ratio as it is,
+            // as the reference's new drawing stores it; the reducing ones are
+            // converted to the drawing's unit.
+            let drawing = if paper > drawing { drawing } else { drawing / unit_factor };
+            self.add_scale(label, paper, drawing);
         }
         self.bump_scale_epoch();
     }
@@ -6880,21 +6884,66 @@ impl Scene {
     /// Reset to the metric list, the imperial one or both (the Edit
     /// Drawing Scales window asks which), keeping the names in `keep`.
     pub fn reset_scale_list_to(&mut self, keep: &[String], metric: bool, imperial: bool) {
+        // The drawing's unit scale stays with the scales in use.
+        let unit_scales = self.unit_scale_names();
         let names = self.scale_names_in_list_order();
         for name in names {
-            if !keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name)) {
+            let kept = keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name))
+                || unit_scales.iter().any(|unit| unit.eq_ignore_ascii_case(&name));
+            if !kept {
                 self.remove_scale(&name);
             }
         }
-        if metric {
-            self.add_metric_reset_scales();
+        // The unit scale follows the scales in use (measured).
+        for unit in &unit_scales {
+            while self.move_scale(unit, 1) {}
         }
-        if imperial {
-            for &(label, factor) in Self::DEFAULT_IMPERIAL_SCALES {
-                self.add_scale(label, 1.0, 1.0 / factor);
+        match (metric, imperial) {
+            (true, false) => self.add_metric_reset_scales(),
+            // Imperial alone: 1:1 and the architectural set, inches to
+            // twelve (a foot), as the reference's list stores them.
+            (false, true) => {
+                self.add_scale("1:1", 1.0, 1.0);
+                for &(label, factor) in Self::DEFAULT_IMPERIAL_SCALES {
+                    self.add_scale(label, factor * 12.0, 12.0);
+                }
             }
+            // Both: the civil (engineering) inch-to-feet set, then the metric
+            // ratios.
+            (true, true) => {
+                self.add_scale("1\" = 1\"", 1.0, 1.0 / 12.0);
+                for feet in Self::CIVIL_IMPERIAL_FEET {
+                    self.add_scale(&format!("1\" = {feet}'"), 1.0, f64::from(*feet));
+                }
+                for &(name, paper, drawing) in Self::STANDARD_METRIC_RATIOS {
+                    self.add_scale(name, paper, drawing);
+                }
+            }
+            (false, false) => {}
         }
         self.bump_scale_epoch();
+    }
+
+    /// The feet one inch of paper shows in the civil imperial scale list.
+    const CIVIL_IMPERIAL_FEET: &'static [u32] = &[
+        5, 10, 20, 30, 40, 50, 60, 70, 75, 80, 100, 150, 200, 250, 500, 1000, 2000, 5000,
+    ];
+
+    /// The drawing's unit scale: the 1 : 1 entry named by the millimetres one
+    /// drawing unit holds ("1:1000" in a metre drawing), as the metric list
+    /// adds it. Any 1 : 1 scale flags itself, so the flag alone cannot tell.
+    pub fn unit_scale_names(&self) -> Vec<String> {
+        let name = Self::unit_scale_name_for(self.default_scale_unit_factor());
+        self.scale_paper_drawing(&name)
+            .filter(|(paper, drawing)| (paper - drawing).abs() < 1.0e-9)
+            .map(|_| name)
+            .into_iter()
+            .collect()
+    }
+
+    fn unit_scale_name_for(unit: f64) -> String {
+        let text = format!("{unit:.6}");
+        format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
     }
 
     fn add_metric_reset_scales(&mut self) {
@@ -6902,11 +6951,7 @@ impl Scene {
         // named by the millimetres one drawing unit holds (1:1000 for
         // metres), then the standard ratios as they are; a name the list
         // keeps is not added again.
-        let unit = self.default_scale_unit_factor();
-        let unit_name = {
-            let text = format!("{unit:.6}");
-            format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
-        };
+        let unit_name = Self::unit_scale_name_for(self.default_scale_unit_factor());
         if self.add_scale(&unit_name, 1.0, 1.0) {
             if let Some(handle) = self.scale_object_handle(&unit_name) {
                 if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
@@ -7531,6 +7576,32 @@ impl Scene {
         Some(model_per_paper / ratio)
     }
 
+    /// For an annotative hatch, the model units per paper unit of the
+    /// representation it shows (the current scale's, else its default
+    /// one). Its Properties give the pattern scale on paper.
+    pub(crate) fn annotative_hatch_model_per_paper(&self, handle: Handle) -> Option<f64> {
+        let entity = self.document.get_entity(handle)?;
+        if !matches!(entity, EntityType::Hatch(_))
+            || !crate::scene::annotative::is_annotative(&self.document, entity)
+        {
+            return None;
+        }
+        let scale = crate::scene::annotative::active_object_context_for_scale(
+            &self.document,
+            handle,
+            self.displayed_annotation_scale_handle(),
+        )
+        .map(|context| context.scale)
+        .or_else(|| self.displayed_annotation_scale_handle())?;
+        match self.document.objects.get(&scale) {
+            Some(ObjectType::Scale(scale)) => {
+                let factor = self.effective_scale_factor(scale);
+                (factor > 1.0e-12).then(|| 1.0 / factor)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn displayed_annotation_scale_handle(&self) -> Option<Handle> {
         if self.current_layout == "Model" {
             return self.scale_object_handle(&self.document.header.current_annotation_scale);
@@ -7818,11 +7889,33 @@ impl Scene {
                             })
                     })
                     .collect();
+                let overridden = self
+                    .document
+                    .layers
+                    .iter()
+                    .filter(|layer| {
+                        [
+                            document::objects::KnownXRecordKind::LayerViewportColorOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+                            document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+                        ]
+                        .into_iter()
+                        .any(|kind| {
+                            self.document
+                                .layer_viewport_overrides(layer.handle, kind)
+                                .into_iter()
+                                .any(|(viewport, _)| viewport == handle)
+                        })
+                    })
+                    .map(|layer| layer.handle)
+                    .collect();
                 crate::ui::window::layers::ViewportLayers {
                     handle,
                     label,
                     frozen,
                     colors,
+                    overridden,
                 }
             })
             .collect()
@@ -9302,9 +9395,10 @@ impl Scene {
             1.0
         };
         let blk = self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
+        let blk_done = t_patch.elapsed();
         let empty_sel: HashSet<Handle> = HashSet::default();
         let mut new_runs: HashMap<Handle, Vec<WireModel>> = HashMap::default();
-        let mut memo_updates: Vec<(Handle, Arc<Vec<WireModel>>)> = Vec::new();
+        let mut memo_updates: Vec<(Handle, MemoRun)> = Vec::new();
         let mut visible_changed: HashSet<Handle> = HashSet::default();
         // Every geometry edit drops its handle's memo entry, so an entry that
         // survived its delta marks a visibility-only change: its wires come
@@ -9319,6 +9413,13 @@ impl Scene {
         // and the others as a stub of it. Longest runs first gives the full
         // run back to the reference whose slots held it; in the journal's
         // order another reference could get it and grow past its slots.
+        let mut from_memo = 0usize;
+        // What is tessellated afresh, in groups that run side by side. The
+        // references to one block share a group and keep their order in it,
+        // so the block's full run still goes to the one that held it; any
+        // other entity is a group of its own.
+        let mut groups: Vec<Vec<(Handle, &EntityType)>> = Vec::new();
+        let mut group_of_block: HashMap<&str, usize> = HashMap::default();
         let mut tess_order: Vec<(Handle, ChangeKind)> = deltas.clone();
         tess_order.sort_by_key(|(h, _)| {
             std::cmp::Reverse(
@@ -9364,37 +9465,84 @@ impl Scene {
             if let Some(mut faded) = memoized {
                 self.apply_refedit_fade(&mut faded, bg);
                 new_runs.insert(*h, faded);
+                from_memo += 1;
                 continue;
             }
-            let mut raw = tessellate_entity(
-                &self.document,
-                &empty_sel,
-                avp,
-                bg,
-                anno,
-                annotation_scale_handle,
-                e,
-                Some(&blk),
-                None,
-                None,
-                self.viewport_lt_for(anno_scale_override),
-                self.reference_only.handles(),
-            );
+            let group = match e {
+                EntityType::Insert(insert) => *group_of_block
+                    .entry(insert.block_name.as_str())
+                    .or_insert_with(|| {
+                        groups.push(Vec::new());
+                        groups.len() - 1
+                    }),
+                _ => {
+                    groups.push(Vec::new());
+                    groups.len() - 1
+                }
+            };
+            groups[group].push((*h, e));
+        }
+        // A layer switched off inside a block changes thousands of
+        // references at once: tessellate on all cores, as the full build does.
+        let tessellated: Vec<(Handle, Vec<WireModel>)> = {
+            use crate::par::prelude::*;
+            let document = &self.document;
+            let selection = &empty_sel;
+            let block_cache: &cache::block_cache::BlockCache = &blk;
+            let viewport_lt = self.viewport_lt_for(anno_scale_override);
+            let reference_only = self.reference_only.handles();
+            groups
+                .par_iter()
+                .flat_map_iter(move |group| {
+                    group.iter().map(move |&(h, e)| {
+                        let wires = tessellate_entity(
+                            document,
+                            selection,
+                            avp,
+                            bg,
+                            anno,
+                            annotation_scale_handle,
+                            e,
+                            Some(block_cache),
+                            None,
+                            None,
+                            viewport_lt,
+                            reference_only,
+                        );
+                        (h, wires)
+                    })
+                })
+                .collect()
+        };
+        for (h, mut raw) in tessellated {
             // Solid B-rep corners snap via the mesh edge list (their wire
             // path is an empty shell). Enrich before the memo/assembly split
             // so both share the same snap-bearing wires.
-            self.attach_solid_snaps(*h, &mut raw);
-            memo_updates.push((*h, Arc::new(raw.clone())));
+            self.attach_solid_snaps(h, &mut raw);
+            // A set the memo shares its runs with holds these wires as they
+            // are: the memo is bound to it below and needs no copy of its
+            // own. Should the patch decline first, a pending entry counts as
+            // a miss and the full build tessellates the entity again.
+            memo_updates.push((
+                h,
+                if shareable {
+                    MemoRun::Pending
+                } else {
+                    MemoRun::Owned(Arc::new(raw.clone()))
+                },
+            ));
             let mut faded = raw;
             self.apply_refedit_fade(&mut faded, bg);
-            new_runs.insert(*h, faded);
+            new_runs.insert(h, faded);
         }
+        let tessellated = memo_updates.len();
         {
             let mut memo = self.resident_tess_memo.borrow_mut();
-            for (h, a) in memo_updates {
-                memo.insert(h, MemoRun::Owned(a));
+            for (h, run) in memo_updates {
+                memo.insert(h, run);
             }
         }
+        let tess_done = t_patch.elapsed();
         // Capture whether any replaced/removed OLD run fed the Face3D/fill
         // pass before blanking its resident slots. Treating every removal as a
         // face change made deleting an ordinary line rescan/re-upload the whole
@@ -9456,6 +9604,15 @@ impl Scene {
         // blanks the old slots; same-shaped Undo/Redo restores them in place.
         // Only a true tail add/resize touches Vec length (and shifts the handful
         // of synthesized marker wires, never the drawing's entity runs).
+        // The GPU patch takes a copy of every changed run. With thousands of
+        // them, the copies are made side by side.
+        let mut gpu_copies: HashMap<Handle, Arc<Vec<WireModel>>> = {
+            use crate::par::prelude::*;
+            new_runs
+                .par_iter()
+                .map(|(handle, run)| (*handle, Arc::new(run.clone())))
+                .collect()
+        };
         let mut gpu_runs: HashMap<Handle, Arc<Vec<WireModel>>> = HashMap::default();
         let mut index_edits = Vec::new();
         for &(handle, kind) in &deltas {
@@ -9464,7 +9621,7 @@ impl Scene {
             } else {
                 new_runs.remove(&handle).unwrap_or_default()
             };
-            gpu_runs.insert(handle, Arc::new(new_run.clone()));
+            gpu_runs.insert(handle, gpu_copies.remove(&handle).unwrap_or_default());
             let new_len = new_run.len();
             let old_range = layout.ranges.remove(&handle);
 
@@ -9473,26 +9630,38 @@ impl Scene {
                     if start + old_len > layout.marker_start {
                         return declined("hide-outside-entity-runs");
                     }
-                    // A hidden entity's memo run lives in these slots: copy it
-                    // out before blanking them, for when it is shown again.
-                    if backed_here && !matches!(kind, ChangeKind::Removed) {
-                        let mut memo = self.resident_tess_memo.borrow_mut();
-                        if let Some(run) = memo.get_mut(&handle) {
-                            if matches!(run, MemoRun::InSet) {
-                                *run = MemoRun::Owned(Arc::new(
-                                    owned[start..start + old_len].to_vec(),
-                                ));
-                            }
-                        }
-                    }
-                    for slot in &mut owned[start..start + old_len] {
-                        *slot = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
-                        slot.aabb = [
+                    let blank = || {
+                        let mut wire = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
+                        wire.aabb = [
                             f32::INFINITY,
                             f32::INFINITY,
                             f32::NEG_INFINITY,
                             f32::NEG_INFINITY,
                         ];
+                        wire
+                    };
+                    // A hidden entity's memo run lives in these slots: it
+                    // moves out as they are blanked, for when it is shown
+                    // again.
+                    let mut moved_out = false;
+                    if backed_here && !matches!(kind, ChangeKind::Removed) {
+                        let mut memo = self.resident_tess_memo.borrow_mut();
+                        if let Some(run) = memo.get_mut(&handle) {
+                            if matches!(run, MemoRun::InSet) {
+                                *run = MemoRun::Owned(Arc::new(
+                                    owned[start..start + old_len]
+                                        .iter_mut()
+                                        .map(|slot| std::mem::replace(slot, blank()))
+                                        .collect(),
+                                ));
+                                moved_out = true;
+                            }
+                        }
+                    }
+                    if !moved_out {
+                        for slot in &mut owned[start..start + old_len] {
+                            *slot = blank();
+                        }
                     }
                     layout.vacant.insert(handle, (start, old_len));
                     layout.tombstoned_wires = layout.tombstoned_wires.saturating_add(old_len);
@@ -9634,6 +9803,7 @@ impl Scene {
                 .values()
                 .any(|run| run.iter().any(|wire| !wire.text_verts.is_empty()));
 
+        let place_done = t_patch.elapsed();
         let arc = Arc::new(reclaim.wires.take().unwrap_or_default());
         self.last_tess_wires.set(arc.len());
         self.resident_patch_hits
@@ -9681,9 +9851,11 @@ impl Scene {
                 }
             }
         }
+        let gpu_done = t_patch.elapsed();
         if shareable {
             self.bind_memo_to_set(&arc, &layout.ranges);
         }
+        let bind_done = t_patch.elapsed();
         let cur_epoch = self.geometry_epoch;
         // Same bound as the full build: this path used to rely on the epoch
         // prune alone, so weakening that without a cap here would let
@@ -9705,11 +9877,21 @@ impl Scene {
             },
         );
         if perf {
+            let ms = |from: std::time::Duration, to: std::time::Duration| {
+                to.saturating_sub(from).as_secs_f64() * 1000.0
+            };
             crate::perf_record!(
-                "[perf] resident-patch {:>7.1}ms wires={} changes={}",
+                "[perf] resident-patch {:>7.1}ms [blk_cache={:.1} tess={:.1} place={:.1} gpu_patch={:.1} memo_bind={:.1}] wires={} changes={} tessellated={} from_memo={}",
                 t_patch.elapsed().as_secs_f64() * 1000.0,
+                blk_done.as_secs_f64() * 1000.0,
+                ms(blk_done, tess_done),
+                ms(tess_done, place_done),
+                ms(place_done, gpu_done),
+                ms(gpu_done, bind_done),
                 arc.len(),
                 deltas.len(),
+                tessellated,
+                from_memo,
             );
         }
         Some(arc)
@@ -10647,7 +10829,12 @@ impl Scene {
                 let Some(model) = self.images.get(&handle) else {
                     return;
                 };
-                let mut placed = model.clone();
+                // A plot draws a PDF underlay's page at print resolution, not
+                // at the resolution it is shown at (#2822).
+                let mut placed = plotting
+                    .then(|| self.print_underlay_image(entity))
+                    .flatten()
+                    .unwrap_or_else(|| model.clone());
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(

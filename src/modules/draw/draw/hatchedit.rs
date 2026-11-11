@@ -52,6 +52,11 @@ pub struct HatcheditCommand {
     )>,
     association_paths: Vec<document::entities::BoundaryPath>,
     association_missed: bool,
+    /// The Hatch panel's settings as it opened on the hatch, and as edited.
+    panel: Option<(
+        crate::modules::draw::draw::hatch::HatchSettings,
+        crate::modules::draw::draw::hatch::HatchSettings,
+    )>,
 }
 
 impl Default for HatcheditCommand {
@@ -87,6 +92,7 @@ impl HatcheditCommand {
             association_sources: None,
             association_paths: Vec::new(),
             association_missed: false,
+            panel: None,
         }
     }
 
@@ -127,6 +133,7 @@ impl HatcheditCommand {
             association_sources: None,
             association_paths: Vec::new(),
             association_missed: false,
+            panel: None,
         }
     }
 
@@ -190,6 +197,8 @@ impl HatcheditCommand {
         current_transparency: document::types::Transparency,
     ) -> Self {
         if let Some(document::EntityType::Hatch(hatch)) = entity {
+            let settings = crate::entities::hatch::panel_settings(hatch, self.annotative_current);
+            self.panel = Some((settings.clone(), settings));
             self.style_current = hatch.style;
             self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
             self.origin_bounds = hatch
@@ -255,6 +264,35 @@ impl HatcheditCommand {
 impl CadCommand for HatcheditCommand {
     fn name(&self) -> &'static str {
         "HATCHEDIT"
+    }
+
+    /// The Hatch panel shows on the picked hatch while no option is being
+    /// answered at the prompt.
+    fn hatch_settings(&self) -> Option<crate::modules::draw::draw::hatch::HatchSettings> {
+        if !matches!(self.step, HatcheditStep::EditOptions { .. }) || self.input.is_some() {
+            return None;
+        }
+        self.panel.as_ref().map(|(_, now)| now.clone())
+    }
+
+    fn set_hatch_settings(&mut self, settings: crate::modules::draw::draw::hatch::HatchSettings) {
+        if let Some((_, now)) = self.panel.as_mut() {
+            *now = settings;
+        }
+    }
+
+    fn hatch_panel_edit(
+        &self,
+    ) -> Option<(
+        Handle,
+        crate::modules::draw::draw::hatch::HatchSettings,
+        crate::modules::draw::draw::hatch::HatchSettings,
+    )> {
+        let HatcheditStep::EditOptions { handle, .. } = &self.step else {
+            return None;
+        };
+        let (before, after) = self.panel.as_ref()?;
+        Some((*handle, before.clone(), after.clone()))
     }
 
     fn prompt(&self) -> String {

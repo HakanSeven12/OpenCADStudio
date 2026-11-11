@@ -1934,7 +1934,7 @@ pub enum CmdResult {
         options: crate::modules::block_editor::orientation_parameter::Options,
     },
     /// Place a native two-point parameter: Linear and Polar take a base, end and
-    /// label pick; XY takes its grip count and labels itself at the endpoint.
+    /// label pick; Linear and XY take their grip count before they are placed.
     PlaceBlockDistanceParameter {
         document_id: u64,
         definition: Handle,
@@ -1942,7 +1942,7 @@ pub enum CmdResult {
         base: DVec3,
         end: DVec3,
         label: DVec3,
-        /// XY parameter grip count chosen at authoring time, when asked.
+        /// Grips chosen at authoring time for the kinds that ask, when asked.
         grips: Option<usize>,
         /// Answers given to the base-point prompt's options; a missing answer
         /// keeps the parameter's own default.
@@ -2503,6 +2503,13 @@ pub enum CmdResult {
         freeze: Vec<String>,
         thaw: Vec<String>,
     },
+    /// Give a layer a per-viewport property override; command stays active.
+    VpLayerOverride {
+        vp_handle: Handle,
+        layer: String,
+        channel: VpOverrideChannel,
+        value: String,
+    },
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
     PasteClipboard {
         base_pt: DVec3,
@@ -3048,6 +3055,28 @@ impl CmdOption {
             keyword: String::new(),
         }
     }
+}
+
+/// The refusal a point prompt prints: the command's own message, else
+/// "Point or option keyword required." where it offers keywords and
+/// "Invalid point." where it does not.
+pub fn point_rejection_line(command: &dyn CadCommand) -> String {
+    command.point_rejection().unwrap_or_else(|| {
+        if command.options().is_empty() {
+            crate::t!("Invalid point.").into_owned()
+        } else {
+            crate::t!("Point or option keyword required.").into_owned()
+        }
+    })
+}
+
+/// The per-viewport layer override channel VPLAYER writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VpOverrideChannel {
+    Color,
+    Linetype,
+    Lineweight,
+    Alpha,
 }
 
 /// What kind of input the command's current step expects from the command line.
@@ -3651,6 +3680,14 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// The line this point prompt prints for input it cannot use: text it
+    /// cannot read, or a typed object snap that found nothing there (measured:
+    /// both print the prompt's own message). `None` is the plain point
+    /// prompt's message, see [`point_rejection_line`].
+    fn point_rejection(&self) -> Option<String> {
+        None
+    }
+
     /// Current drawing-persisted SKETCH settings.
     fn sketch_settings(&self) -> Option<(i16, f64, f64)> {
         None
@@ -3888,6 +3925,18 @@ pub trait CadCommand: Send {
     /// Settings edited in the Hatch panel.
     fn set_hatch_settings(&mut self, _settings: crate::modules::draw::draw::hatch::HatchSettings) {}
 
+    /// HATCHEDIT's panel edit: the hatch, the settings the panel opened
+    /// with, and the settings it shows now. Default `None`.
+    fn hatch_panel_edit(
+        &self,
+    ) -> Option<(
+        Handle,
+        crate::modules::draw::draw::hatch::HatchSettings,
+        crate::modules::draw::draw::hatch::HatchSettings,
+    )> {
+        None
+    }
+
     /// The step draws a window that selects objects rather than placing
     /// geometry: no coordinate boxes at the cursor. Default `false`.
     fn selects_by_window(&self) -> bool {
@@ -3932,6 +3981,16 @@ pub trait CadCommand: Send {
     /// the command now owns are placed through the same base-point convention
     /// as the render path. Default: no-op (no base point).
     fn attreq_set_block_base(&mut self, _base: document::types::Vector3) {}
+
+    /// The host answers this placement's attribute questions from a form, so
+    /// the verify pass is not asked a second time. Default: no-op.
+    fn attreq_from_dialog(&mut self) {}
+
+    /// A section line printed once above the command's current prompt, such as
+    /// the heading of a block placement's attribute pass. Default: none.
+    fn prompt_heading(&self) -> Option<String> {
+        None
+    }
 
     /// After the host commits an ATTREQ insert: keep the command running
     /// (repeated placement) instead of ending it.

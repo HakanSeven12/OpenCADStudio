@@ -113,6 +113,11 @@ impl CadCommand for AlignedDimensionCommand {
         "DIMALIGNED"
     }
 
+    /// A dimension's point prompts refuse unusable input this way (measured).
+    fn point_rejection(&self) -> Option<String> {
+        Some(t!("Invalid point input.").into_owned())
+    }
+
     fn prompt(&self) -> String {
         if self.awaiting_text {
             return if self.mtext_override {
@@ -130,7 +135,7 @@ impl CadCommand for AlignedDimensionCommand {
         }
         match self.step {
             Step::First => t!(
-                "DIMALIGNED  Specify first extension line origin or press Enter to select object:"
+                "DIMALIGNED  Specify first extension line origin or <select object>:"
             )
             .into_owned(),
             Step::Second(_) => t!("DIMALIGNED  Specify second extension line origin:").into_owned(),

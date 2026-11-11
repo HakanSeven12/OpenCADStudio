@@ -6609,6 +6609,55 @@ mod batch4_tests {
         );
     }
 
+    /// #2805: GROUPEDIT picks a group by a member, takes members out one
+    /// pick at a time, adds a selection and renames, each one undo step.
+    #[test]
+    fn groupedit_removes_adds_and_renames() {
+        use crate::app::Message;
+        use crate::command::StepInput;
+        use glam::DVec3;
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 10,5");
+        let _ = app.run_command_line("LINE 0,9 10,9");
+        let lines = model_lines(&app);
+        app.tabs[i]
+            .scene
+            .create_group("G".to_string(), vec![lines[0], lines[1]]);
+        let members = |app: &OpenCADStudio| {
+            app.tabs[i]
+                .scene
+                .groups()
+                .map(|g| (g.name.clone(), g.entities.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        let _ = app.dispatch_command("GROUPEDIT");
+        let _ = app.feed_command(StepInput::EntityPick(lines[1], DVec3::ZERO));
+        let _ = app.feed_command(StepInput::Text("R".into()));
+        let _ = app.feed_command(StepInput::EntityPick(lines[0], DVec3::ZERO));
+        let _ = app.feed_command(StepInput::Enter);
+        assert_eq!(members(&app), vec![("G".to_string(), vec![lines[1]])]);
+
+        let _ = app.dispatch_command("GROUPEDIT");
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        let _ = app.feed_command(StepInput::Text("G".into()));
+        let _ = app.feed_command(StepInput::Text("A".into()));
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![lines[2]]));
+        let _ = app.dispatch_command("GROUPEDIT");
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        let _ = app.feed_command(StepInput::Text("G".into()));
+        let _ = app.feed_command(StepInput::Text("REN".into()));
+        let _ = app.feed_command(StepInput::Text("H".into()));
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        assert_eq!(members(&app), vec![("H".to_string(), vec![lines[1], lines[2]])]);
+
+        let _ = app.update(Message::Undo);
+        assert_eq!(members(&app), vec![("G".to_string(), vec![lines[1], lines[2]])]);
+    }
+
     #[test]
     fn qselect_command_line_compares_negates_and_matches_wildcards() {
         let mut app = new_app();

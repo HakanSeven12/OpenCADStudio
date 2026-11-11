@@ -1193,6 +1193,7 @@ common =
     .distance-point-or-keyword = Richiesta distanza numerica, secondo punto o parola chiave di opzione.
     .radius-point-or-diameter = Richiesto raggio numerico, punto sulla circonferenza o "D".
     .invalid-2d-point = Punto 2D non valido.
+    .distance-two-points-or-keyword = Richiesta distanza numerica, due punti o parola chiave di opzione.
     .invalid-input = Input non valido.
     .solid-created = Solido creato.
     .source-object-not-found = Oggetto di origine non trovato.

@@ -1192,6 +1192,7 @@ common =
     .distance-point-or-keyword = Numerieke afstand, tweede punt of optietrefwoord vereist.
     .radius-point-or-diameter = Numerieke straal, punt op de omtrek of "D" vereist.
     .invalid-2d-point = Ongeldig 2D-punt.
+    .distance-two-points-or-keyword = Numerieke afstand, twee punten of optietrefwoord vereist.
     .invalid-input = Ongeldige invoer.
     .solid-created = Vast gemaakt.
     .source-object-not-found = Bronobject niet gevonden.

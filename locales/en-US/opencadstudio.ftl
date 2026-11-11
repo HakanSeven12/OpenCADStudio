@@ -1180,6 +1180,7 @@ common =
     .distance-point-or-keyword = Requires numeric distance, second point, or option keyword.
     .radius-point-or-diameter = Requires numeric radius, point on circumference, or "D".
     .invalid-2d-point = Invalid 2D point.
+    .distance-two-points-or-keyword = Requires numeric distance, two points, or option keyword.
     .invalid-input = Invalid Input.
     .solid-created = Solid created.
     .source-object-not-found = Source object not found.
@@ -3377,7 +3378,7 @@ draw =
     .offset-distance = OFFSET distance = __ocs_arg_d__
     .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
     .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
-    .offset-specify-second-reference-point = OFFSET  Specify second reference point:
+    .offset-specify-second-reference-point = OFFSET  Specify second point:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  Edit mesh vertex __ocs_arg_vertex__  Enter option:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  Specify new location for mesh vertex __ocs_arg_vertex__:
     .edit-vertex = Edit vertex

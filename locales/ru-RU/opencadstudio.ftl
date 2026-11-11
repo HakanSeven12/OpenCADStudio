@@ -1197,6 +1197,7 @@ common =
     .distance-point-or-keyword = Требуется числовое расстояние, вторая точка или ключевое слово параметра.
     .radius-point-or-diameter = Требуется числовой радиус, точка на окружности или "D".
     .invalid-2d-point = Недопустимая 2D-точка.
+    .distance-two-points-or-keyword = Требуется числовое расстояние, две точки или ключевое слово параметра.
     .invalid-input = Недопустимый ввод.
     .solid-created = Твердое создание.
     .source-object-not-found = Источник объекта не найден.

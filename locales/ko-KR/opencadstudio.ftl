@@ -1193,6 +1193,7 @@ common =
     .distance-point-or-keyword = 숫자 거리, 두 번째 점 또는 옵션 키워드가 필요합니다.
     .radius-point-or-diameter = 숫자 반지름, 원주 위의 점 또는 "D"가 필요합니다.
     .invalid-2d-point = 2D 점이 잘못되었습니다.
+    .distance-two-points-or-keyword = 숫자 거리, 두 점 또는 옵션 키워드가 필요합니다.
     .invalid-input = 입력이 잘못되었습니다.
     .solid-created = 솔리드가 생성되었습니다.
     .source-object-not-found = 소스 개체를 찾을 수 없습니다.

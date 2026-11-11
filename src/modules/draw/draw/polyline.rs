@@ -978,21 +978,28 @@ impl CadCommand for PlineCommand {
             return None;
         }
         let line = match self.sub {
-            Sub::None => t!("2D point or option keyword required."),
-            Sub::ArcCenter | Sub::ArcAngleCenter { .. } | Sub::ArcSecond => {
-                t!("Invalid 2D point.")
-            }
+            Sub::None
+            | Sub::ArcAngleEnd { .. }
+            | Sub::ArcCenterEnd { .. }
+            | Sub::ArcRadiusEnd { .. } => t!("2D point or option keyword required."),
+            Sub::ArcCenter
+            | Sub::ArcAngleCenter { .. }
+            | Sub::ArcSecond
+            | Sub::ArcSecondEnd { .. }
+            | Sub::ArcDirectionEnd { .. } => t!("Invalid 2D point."),
             Sub::ArcAngle
             | Sub::ArcCenterAngle { .. }
             | Sub::ArcRadiusAngle { .. }
-            | Sub::ArcDirection => t!("Requires valid numeric angle or second point."),
+            | Sub::ArcDirection
+            | Sub::ArcAngleRadiusDir { .. }
+            | Sub::ArcRadiusAngleDir { .. } => t!("Requires valid numeric angle or second point."),
             Sub::ArcRadius | Sub::ArcAngleRadius { .. } => {
                 t!("Requires numeric distance or two points.")
             }
-            Sub::Length | Sub::WidthStart { .. } | Sub::WidthEnd { .. } => {
-                t!("Requires numeric distance or second point.")
-            }
-            _ => return None,
+            Sub::Length
+            | Sub::WidthStart { .. }
+            | Sub::WidthEnd { .. }
+            | Sub::ArcCenterLength { .. } => t!("Requires numeric distance or second point."),
         };
         Some(line.into_owned())
     }

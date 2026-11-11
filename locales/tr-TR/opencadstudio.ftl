@@ -1170,6 +1170,7 @@ common =
     .distance-point-or-keyword = Sayısal mesafe, ikinci nokta veya seçenek anahtar sözcüğü gerekli.
     .radius-point-or-diameter = Sayısal yarıçap, çember üzerinde bir nokta veya "D" gerekli.
     .invalid-2d-point = Geçersiz 2B nokta.
+    .distance-two-points-or-keyword = Sayısal mesafe, iki nokta veya seçenek anahtar sözcüğü gerekli.
     .invalid-input = Geçersiz giriş.
     .solid-created = Katı oluşturuldu.
     .source-object-not-found = Kaynak nesne bulunamadı.
@@ -3358,7 +3359,7 @@ draw =
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
     .offset-current-settings = Geçerli ayarlar: Kaynağı sil=__ocs_arg_erase__  Katman=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
     .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Öteleme mesafesini belirtin veya [Through/Erase/Layer] <__ocs_arg_d__>:
-    .offset-specify-second-reference-point = OFFSET  İkinci referans noktasını belirtin:
+    .offset-specify-second-reference-point = OFFSET  İkinci noktayı belirtin:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
     .edit-vertex = { layers.edit } · { properties.vertex }

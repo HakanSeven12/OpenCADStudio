@@ -1198,6 +1198,7 @@ common =
     .distance-point-or-keyword = Je vyžadována číselná vzdálenost, druhý bod nebo klíčové slovo volby.
     .radius-point-or-diameter = Je vyžadován číselný poloměr, bod na obvodu nebo "D".
     .invalid-2d-point = Neplatný 2D bod.
+    .distance-two-points-or-keyword = Je vyžadována číselná vzdálenost, dva body nebo klíčové slovo volby.
     .invalid-input = Neplatné zadání.
     .solid-created = Těleso vytvořeno.
     .source-object-not-found = Zdrojový objekt nebyl nalezen.

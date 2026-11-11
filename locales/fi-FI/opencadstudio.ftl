@@ -1193,6 +1193,7 @@ common =
     .distance-point-or-keyword = Numeerinen etäisyys, toinen piste tai vaihtoehdon avainsana vaaditaan.
     .radius-point-or-diameter = Numeerinen säde, kehän piste tai "D" vaaditaan.
     .invalid-2d-point = Virheellinen 2D-piste.
+    .distance-two-points-or-keyword = Numeerinen etäisyys, kaksi pistettä tai vaihtoehdon avainsana vaaditaan.
     .invalid-input = Virheellinen syöte.
     .solid-created = Kiinteä luotu.
     .source-object-not-found = Lähdeobjektia ei löydy.

@@ -1184,6 +1184,7 @@ common =
     .distance-point-or-keyword = 距離の数値、2 点目、またはオプション キーワードが必要です。
     .radius-point-or-diameter = 半径の数値、円周上の点、または "D" が必要です。
     .invalid-2d-point = 2D 点が無効です。
+    .distance-two-points-or-keyword = 距離の数値、2 点、またはオプション キーワードが必要です。
     .invalid-input = 入力が無効です。
     .solid-created = ソリッドを作成しました。
     .source-object-not-found = 元オブジェクトが見つかりません。

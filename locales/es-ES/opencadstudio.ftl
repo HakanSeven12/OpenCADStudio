@@ -1194,6 +1194,7 @@ common =
     .distance-point-or-keyword = Se requiere una distancia numérica, un segundo punto o una palabra clave de opción.
     .radius-point-or-diameter = Se requiere un radio numérico, un punto en la circunferencia o "D".
     .invalid-2d-point = Punto 2D no válido.
+    .distance-two-points-or-keyword = Se requiere una distancia numérica, dos puntos o una palabra clave de opción.
     .invalid-input = Entrada no válida.
     .solid-created = Se creó el sólido.
     .source-object-not-found = No se encontró el objeto de origen.

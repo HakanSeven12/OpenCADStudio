@@ -1193,6 +1193,7 @@ common =
     .distance-point-or-keyword = Изисква се числово разстояние, втора точка или ключова дума на опция.
     .radius-point-or-diameter = Изисква се числов радиус, точка от окръжността или "D".
     .invalid-2d-point = Невалидна 2D точка.
+    .distance-two-points-or-keyword = Изисква се числово разстояние, две точки или ключова дума на опция.
     .invalid-input = Невалидно въвеждане.
     .solid-created = Тялото е създадено.
     .source-object-not-found = Изходният обект не е намерен.

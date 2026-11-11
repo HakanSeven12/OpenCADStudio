@@ -1193,6 +1193,7 @@ common =
     .distance-point-or-keyword = 需要數值距離、第二點或選項關鍵字。
     .radius-point-or-diameter = 需要數值半徑、圓周上的點或 "D"。
     .invalid-2d-point = 二維點無效。
+    .distance-two-points-or-keyword = 需要數值距離、兩點或選項關鍵字。
     .invalid-input = 輸入無效。
     .solid-created = 已建立實體。
     .source-object-not-found = 找不到來源物件。

@@ -1180,6 +1180,7 @@ common =
     .distance-point-or-keyword = Cần khoảng cách số, điểm thứ hai hoặc từ khóa tùy chọn.
     .radius-point-or-diameter = Cần bán kính số, điểm trên đường tròn hoặc "D".
     .invalid-2d-point = Điểm 2D không hợp lệ.
+    .distance-two-points-or-keyword = Cần khoảng cách số, hai điểm hoặc từ khóa tùy chọn.
     .invalid-input = Đầu vào không hợp lệ.
     .solid-created = Đã tạo khối rắn.
     .source-object-not-found = Đối tượng nguồn không được tìm thấy.

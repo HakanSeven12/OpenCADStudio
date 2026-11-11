@@ -1187,6 +1187,7 @@ common =
     .distance-point-or-keyword = ຕ້ອງການໄລຍະທາງເປັນຕົວເລກ, ຈຸດທີສອງ ຫຼື ຄຳສັບທາງເລືອກ.
     .radius-point-or-diameter = ຕ້ອງການລັດສະໝີເປັນຕົວເລກ, ຈຸດເທິງເສັ້ນຮອບວົງ ຫຼື "D".
     .invalid-2d-point = ຈຸດ 2D ບໍ່ຖືກຕ້ອງ.
+    .distance-two-points-or-keyword = ຕ້ອງການໄລຍະທາງເປັນຕົວເລກ, ສອງຈຸດ ຫຼື ຄຳສັບທາງເລືອກ.
     .invalid-input = ການປ້ອນຂໍ້ມູນບໍ່ຖືກຕ້ອງ.
     .solid-created = ສ້າງຮູບຊົງຕັນແລ້ວ.
     .source-object-not-found = ບໍ່ພົບວັດຖຸຕົ້ນສະບັບ.

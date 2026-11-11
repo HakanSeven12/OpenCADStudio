@@ -1206,6 +1206,7 @@ common =
     .distance-point-or-keyword = مطلوب مسافة رقمية أو نقطة ثانية أو كلمة أساسية لخيار.
     .radius-point-or-diameter = مطلوب نصف قطر رقمي أو نقطة على المحيط أو "D".
     .invalid-2d-point = نقطة ثنائية الأبعاد غير صالحة.
+    .distance-two-points-or-keyword = مطلوب مسافة رقمية أو نقطتان أو كلمة أساسية لخيار.
     .invalid-input = إدخال غير صالح.
     .solid-created = أُنشئ المجسم.
     .source-object-not-found = لم يُعثر على الكائن المصدر.

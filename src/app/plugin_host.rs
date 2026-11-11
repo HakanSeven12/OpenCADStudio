@@ -16424,7 +16424,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // The sink marks the plugin loaded+alive for the visibility predicate
         // (the register tests' idiom): with the removed synthesis this is
         // exactly the case that used to grow an auto tab.
-        crate::plugin::grip_points::install_in_process_sink("PLUGIN", |_host, _event| {
+        // An id of its own: the quad store is process-wide, and other tests
+        // register panels for "PLUGIN" while this one runs.
+        crate::plugin::grip_points::install_in_process_sink("PLUGIN_NO_QUAD", |_host, _event| {
             ocs_plugin_api::host::CustomGripResponse::default()
         });
         let feed = crate::app::plugin_host::plugin_quad_panels(&app.disabled_plugins);
@@ -16440,7 +16442,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             0,
             "no registration, no contribution: the feed stays empty"
         );
-        crate::plugin::grip_points::remove_in_process_sink("PLUGIN");
+        crate::plugin::grip_points::remove_in_process_sink("PLUGIN_NO_QUAD");
     }
 
     // ── API v14: plugin class objects ──────────────────────────────────────

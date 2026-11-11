@@ -81,7 +81,7 @@ mod options_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
-mod properties;
+pub(crate) mod properties;
 mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;

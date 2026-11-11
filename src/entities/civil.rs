@@ -586,6 +586,7 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
         CivilKind::Subassembly => {
             subassembly(data, handle, document, &mut out);
         }
+        CivilKind::Other if data.dxf_name == "AECC_PIPE" => pipe(data, document, &mut out)?,
         _ => return None,
     }
     Some(out)
@@ -861,6 +862,218 @@ fn arch_of(document: &document::Document, handle: u64, kind: CivilKind) -> Optio
         return None;
     };
     (data.civil_kind() == Some(kind)).then_some(data)
+}
+
+/// Millimetres in one unit a part definition field names.
+fn part_unit_mm(unit: &str) -> Option<f64> {
+    Some(match unit.trim().to_ascii_lowercase().as_str() {
+        "mm" => 1.0,
+        "cm" => 10.0,
+        "m" => 1000.0,
+        "inch" | "in" => 25.4,
+        "ft" | "foot" | "feet" => 304.8,
+        _ => return None,
+    })
+}
+
+/// Number fields of the part definition among `handles`, by context name,
+/// in drawing units where the field has a unit.
+fn part_size(document: &document::Document, handles: &[u64]) -> std::collections::HashMap<String, f64> {
+    let drawing_mm = crate::app::properties::insunits_to_mm(document.header.insertion_units);
+    handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .find(|o| o.dxf_name == "AECC_NETWORK_PART_DEF")
+        .map(|part| {
+            part.network_part_fields()
+                .into_iter()
+                .filter_map(|f| {
+                    let value = match (part_unit_mm(&f.unit), drawing_mm) {
+                        (Some(unit), Some(drawing)) => f.value * unit / drawing,
+                        (None, _) if f.unit.is_empty() => f.value,
+                        // ponytail: a unitless drawing keeps the part's own
+                        // numbers; set INSUNITS to scale them.
+                        _ => f.value,
+                    };
+                    Some((f.context, value))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Where a structure stands in plan, for cutting the pipes that enter it.
+#[derive(Clone, Copy)]
+enum Footprint {
+    /// A cylinder: insertion point and half its bounding diameter.
+    Circle(Vector2, f64),
+    /// Any other part: the extents its cached preview records.
+    // ponytail: extents are axis-aligned, so a rotated box structure cuts
+    // its pipes short of its walls; decode the part's rotation to fit them.
+    Box(Vector2, Vector2),
+}
+
+impl Footprint {
+    fn contains(&self, p: Vector2) -> bool {
+        match *self {
+            Footprint::Circle(c, r) => p.distance(&c) < r - 1e-9,
+            Footprint::Box(lo, hi) => p.x > lo.x + 1e-9 && p.x < hi.x - 1e-9 && p.y > lo.y + 1e-9 && p.y < hi.y - 1e-9,
+        }
+    }
+
+    /// Parameters along `a + t d` where the segment is inside, if any.
+    fn inside(&self, a: Vector2, d: Vector2) -> Option<(f64, f64)> {
+        match *self {
+            Footprint::Circle(c, r) => {
+                let len2 = d.x * d.x + d.y * d.y;
+                let f = a - c;
+                let bq = f.x * d.x + f.y * d.y;
+                let disc = bq * bq - len2 * (f.x * f.x + f.y * f.y - r * r);
+                (disc > 0.0).then(|| ((-bq - disc.sqrt()) / len2, (-bq + disc.sqrt()) / len2))
+            }
+            Footprint::Box(lo, hi) => {
+                let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+                for (p, dv, l, h) in [(a.x, d.x, lo.x, hi.x), (a.y, d.y, lo.y, hi.y)] {
+                    if dv.abs() < 1e-15 {
+                        if p <= l || p >= h {
+                            return None;
+                        }
+                    } else {
+                        let (u, v) = ((l - p) / dv, (h - p) / dv);
+                        t0 = t0.max(u.min(v));
+                        t1 = t1.min(u.max(v));
+                    }
+                }
+                (t1 > t0).then_some((t0, t1))
+            }
+        }
+    }
+}
+
+fn structure_footprint(document: &document::Document, handle: u64) -> Option<Footprint> {
+    let EntityType::Extended(entity) = document.get_entity(Handle::new(handle))? else {
+        return None;
+    };
+    let ExtendedEntityData::Arch(data) = &entity.data else {
+        return None;
+    };
+    let size = part_size(document, &data.decode().handles);
+    match size.get("StructDiameter") {
+        Some(&diameter) if diameter > 0.0 => {
+            let at = data.structure_position()?;
+            Some(Footprint::Circle(Vector2::new(at.x, at.y), diameter / 2.0))
+        }
+        _ => {
+            let mut lo = Vector2::new(f64::INFINITY, f64::INFINITY);
+            let mut hi = Vector2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+            for p in data.profiles.iter().flatten() {
+                lo = Vector2::new(lo.x.min(p.x), lo.y.min(p.y));
+                hi = Vector2::new(hi.x.max(p.x), hi.y.max(p.y));
+            }
+            (lo.x < hi.x && lo.y < hi.y).then_some(Footprint::Box(lo, hi))
+        }
+    }
+}
+
+/// Structures a pipe connects to: each of its connectors points at the
+/// structure's connector, which points at the structure. A connector's
+/// handles end with its partner and its owner (after one null in Civil 3D
+/// 2013 drawings, two from 2018).
+fn pipe_structures(document: &document::Document, handles: &[u64]) -> Vec<Footprint> {
+    let connector = |h: u64| {
+        let EntityType::Extended(entity) = document.get_entity(Handle::new(h))? else {
+            return None;
+        };
+        let ExtendedEntityData::Arch(data) = &entity.data else {
+            return None;
+        };
+        (data.dxf_name == "AECC_NETWORK_PART_CONNECTOR").then(|| data.decode().handles)
+    };
+    handles
+        .iter()
+        .filter_map(|h| connector(*h))
+        .filter_map(|own| {
+            let partner = *own.get(own.len().checked_sub(2)?)?;
+            (partner != 0).then_some(())?;
+            connector(partner)?.last().copied()
+        })
+        .filter_map(|structure| structure_footprint(document, structure))
+        .collect()
+}
+
+/// Parts of the segment `a`-`b` outside every footprint.
+fn outside_footprints(a: Vector2, b: Vector2, footprints: &[Footprint]) -> Vec<(Vector2, Vector2)> {
+    let d = b - a;
+    if d.x * d.x + d.y * d.y <= 0.0 {
+        return Vec::new();
+    }
+    let mut keep = vec![(0.0f64, 1.0f64)];
+    for footprint in footprints {
+        let Some((t0, t1)) = footprint.inside(a, d) else {
+            continue;
+        };
+        keep = keep
+            .into_iter()
+            .flat_map(|(s, e)| {
+                let mut parts = Vec::new();
+                if t0 > s {
+                    parts.push((s, t0.min(e)));
+                }
+                if t1 < e {
+                    parts.push((t1.max(s), e));
+                }
+                parts.into_iter().filter(|(s, e)| e - s > 1e-9)
+            })
+            .collect();
+    }
+    keep.into_iter().map(|(s, e)| (a + d * s, a + d * e)).collect()
+}
+
+/// Pipe style components in plan, in the order the style class lists them.
+const PIPE_CENTERLINE: usize = 0;
+const PIPE_INSIDE_WALLS: usize = 1;
+const PIPE_OUTSIDE_WALLS: usize = 2;
+const PIPE_END_LINE: usize = 3;
+
+/// A Civil 3D pipe in plan: centerline, inside and outside walls and end
+/// lines, each styled by its pipe style, cut back where the pipe enters a
+/// structure. `None` when its ends or size do not read.
+fn pipe(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let (a3, b3) = data.pipe_ends()?;
+    let (a, b) = (Vector2::new(a3.x, a3.y), Vector2::new(b3.x, b3.y));
+    let handles = data.decode().handles;
+    let size = part_size(document, &handles);
+    let inner = size.get("PipeInnerDiameter").or_else(|| size.get("BodyGeometry_Diameter")).copied()?;
+    let outer = inner + 2.0 * size.get("WallThickness").copied().unwrap_or(0.0);
+    let u = unit2(b - a)?;
+    let normal = Vector2::new(-u.y, u.x);
+    let components = style_components(document, &handles, "AECC_PIPE_STYLE");
+    let structures = pipe_structures(document, &handles);
+    let inside_any = |p: Vector2| structures.iter().any(|f| f.contains(p));
+    let mut draw = |index: usize, offsets: &[f64]| {
+        let style = component(document, components.as_deref(), index);
+        for &o in offsets {
+            for (p, q) in outside_footprints(a + normal * o, b + normal * o, &structures) {
+                styled(out, style, vec![[p.x, p.y, 0.0], [q.x, q.y, 0.0]]);
+            }
+        }
+    };
+    draw(PIPE_CENTERLINE, &[0.0]);
+    draw(PIPE_INSIDE_WALLS, &[inner / 2.0, -inner / 2.0]);
+    draw(PIPE_OUTSIDE_WALLS, &[outer / 2.0, -outer / 2.0]);
+    let style = component(document, components.as_deref(), PIPE_END_LINE);
+    for end in [a, b] {
+        if !inside_any(end) {
+            let (p, q) = (end + normal * (outer / 2.0), end - normal * (outer / 2.0));
+            styled(out, style, vec![[p.x, p.y, 0.0], [q.x, q.y, 0.0]]);
+        }
+    }
+    Some(())
+}
+
+fn unit2(v: Vector2) -> Option<Vector2> {
+    let l = v.x.hypot(v.y);
+    (l > 1e-12).then(|| Vector2::new(v.x / l, v.y / l))
 }
 
 /// Point and unit direction at `distance` along a polyline.
@@ -1457,4 +1670,27 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
         }
     }
     Some(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipe_walls_stop_at_structures() {
+        let v = |x: f64, y: f64| Vector2::new(x, y);
+        // A wall from x = 0 to 10 along y = 0.5, through a manhole of
+        // radius 1 at the start and a box structure around the end.
+        let footprints = [
+            Footprint::Circle(v(0.0, 0.0), 1.0),
+            Footprint::Box(v(9.0, -2.0), v(11.0, 2.0)),
+        ];
+        let kept = outside_footprints(v(0.0, 0.5), v(10.0, 0.5), &footprints);
+        assert_eq!(kept.len(), 1);
+        let (a, b) = kept[0];
+        assert!((a.x - 0.75f64.sqrt()).abs() < 1e-9 && (a.y - 0.5).abs() < 1e-9);
+        assert!((b.x - 9.0).abs() < 1e-9);
+        assert!(footprints[0].contains(v(0.2, 0.2)) && !footprints[1].contains(v(8.0, 0.0)));
+    }
 }

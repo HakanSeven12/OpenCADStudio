@@ -7768,4 +7768,106 @@ mod batch7_tests {
             .unwrap();
         assert_eq!(style.dimtxt, 2.5);
     }
+
+    fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> document::Handle {
+        use document::entities::Line;
+        use document::types::Vector3;
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+        let line = Line::from_points(Vector3::new(x1, y1, 0.0), Vector3::new(x2, y2, 0.0));
+        doc.add_entity(document::EntityType::Line(line)).unwrap()
+    }
+
+    fn reported_lines(app: &OpenCADStudio, before: usize) -> Vec<String> {
+        app.command_line.history[before..]
+            .iter()
+            .map(|entry| entry.text.trim().to_string())
+            .collect()
+    }
+
+    fn breakdown_sum(said: &[String]) -> usize {
+        said.iter()
+            .filter_map(|text| {
+                let mut parts = text.splitn(2, ' ');
+                let (n, rest) = (parts.next()?, parts.next()?);
+                n.parse::<usize>()
+                    .ok()
+                    .filter(|_| !rest.contains("constraint(s) applied"))
+            })
+            .sum()
+    }
+
+    #[test]
+    fn autoconstrain_reports_the_breakdown_for_a_rectangle() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let a = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let b = add_line(&mut app, 100.0, 0.0, 100.0, 50.0);
+        let c = add_line(&mut app, 100.0, 50.0, 0.0, 50.0);
+        let d = add_line(&mut app, 0.0, 50.0, 0.0, 0.0);
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{a:X}","{b:X}","{c:X}","{d:X}"]}}"#
+        ));
+        let before = app.command_line.history.len();
+        let inferred = app.automation_op(r#"{"op":"run","cmd":"AUTOCONSTRAIN"}"#);
+        assert_eq!(inferred["ok"], true, "{inferred}");
+        let said = reported_lines(&app, before);
+        let out = said.join("\n");
+        assert!(out.contains("constraint(s) applied"), "{out}");
+        let reported = said
+            .iter()
+            .find_map(|text| text.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()))
+            .expect("the total line prints");
+        assert_eq!(breakdown_sum(&said), reported, "{out}");
+        assert!(out.contains("Coincident"), "{out}");
+        assert!(out.contains("Horizontal"), "{out}");
+        assert!(out.contains("Vertical"), "{out}");
+    }
+
+    #[test]
+    fn autoconstrain_honours_the_enabled_kinds() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        app.auto_constrain_settings
+            .enabled
+            .retain(|kind| *kind != crate::app::settings::AutoConstraintKind::Coincident);
+        let a = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let b = add_line(&mut app, 100.0, 0.0, 100.0, 50.0);
+        let c = add_line(&mut app, 100.0, 50.0, 0.0, 50.0);
+        let d = add_line(&mut app, 0.0, 50.0, 0.0, 0.0);
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{a:X}","{b:X}","{c:X}","{d:X}"]}}"#
+        ));
+        let before = app.command_line.history.len();
+        let inferred = app.automation_op(r#"{"op":"run","cmd":"AUTOCONSTRAIN"}"#);
+        assert_eq!(inferred["ok"], true, "{inferred}");
+        let said = reported_lines(&app, before);
+        let out = said.join("\n");
+        assert!(out.contains("constraint(s) applied"), "{out}");
+        assert!(!out.contains("Coincident"), "{out}");
+        assert!(out.contains("Horizontal"), "{out}");
+        assert!(out.contains("Vertical"), "{out}");
+    }
+
+    #[test]
+    fn autoconstrain_honours_the_distance_tolerance() {
+        // Two lines whose endpoints are 0.02 apart: within the default
+        // tolerance they become coincident; with a 1e-6 tolerance they do not.
+        for (tolerance, expect_coincident) in [(0.05, true), (1e-6, false)] {
+            let mut app = new_app();
+            app.auto_constrain_settings.distance_tolerance = tolerance;
+            let i = app.active_tab;
+            let a = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+            let b = add_line(&mut app, 100.0, 0.02, 200.0, 0.0);
+            let _ = app.automation_op(&format!(
+                r#"{{"op":"select","handles":["{a:X}","{b:X}"]}}"#
+            ));
+            let before = app.command_line.history.len();
+            let inferred = app.automation_op(r#"{"op":"run","cmd":"AUTOCONSTRAIN"}"#);
+            assert_eq!(inferred["ok"], true, "{inferred}");
+            let said = reported_lines(&app, before);
+            let out = said.join("\n");
+            assert_eq!(out.contains("Coincident"), expect_coincident, "{out}");
+        }
+    }
 }

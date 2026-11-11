@@ -1635,6 +1635,31 @@ fn reference_properties(references: &[document::objects::ProxyObjectReference]) 
         .join("\n")
 }
 
+/// A Civil 3D alignment's start station, design speeds and station
+/// equations (raw station back, then the station ahead; a down arrow for
+/// stations that decrease after it).
+fn alignment_properties(data: &document::classes::arch::ArchEntityData) -> Vec<crate::scene::model::object::Property> {
+    let mut props = Vec::new();
+    if let Some(start) = data.alignment_start_station() {
+        props.push(ro_prop(t!("Start Station").as_ref(), "ext_civil_start_station", format!("{start:.3}")));
+    }
+    let speeds = data.alignment_design_speeds();
+    if !speeds.is_empty() {
+        let text = speeds.iter().map(|s| format!("{:.3}: {}", s.station, s.speed)).collect::<Vec<_>>().join("\n");
+        props.push(ro_prop(t!("Design Speeds").as_ref(), "ext_civil_design_speeds", text));
+    }
+    let equations = data.alignment_station_equations();
+    if !equations.is_empty() {
+        let text = equations
+            .iter()
+            .map(|e| format!("{:.3} → {:.3}{}", e.raw, e.ahead, if e.increasing { "" } else { " ↓" }))
+            .collect::<Vec<_>>()
+            .join("\n");
+        props.push(ro_prop(t!("Station Equations").as_ref(), "ext_civil_station_equations", text));
+    }
+    props
+}
+
 fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
     match &entity.data {
         ExtendedEntityData::Camera { view_handle } => vec![PropSection {
@@ -1646,9 +1671,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
             )],
         }],
         ExtendedEntityData::SectionObject(data) => section_properties(entity, data),
-        ExtendedEntityData::Arch(data) => vec![PropSection {
-            title: t!("Class").into_owned(),
-            props: vec![
+        ExtendedEntityData::Arch(data) => {
+            let mut props = vec![
                 ro_prop(
                     t!("Class").as_ref(),
                     "ext_arch_class",
@@ -1660,8 +1684,15 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
                     data.civil_kind()
                         .map_or_else(|| format!("{:?}", data.kind), |kind| format!("Civil 3D {kind:?}")),
                 ),
-            ],
-        }],
+            ];
+            if data.civil_kind() == Some(document::classes::civil::CivilKind::Alignment) {
+                props.extend(alignment_properties(data));
+            }
+            vec![PropSection {
+                title: t!("Class").into_owned(),
+                props,
+            }]
+        }
         ExtendedEntityData::ArcAlignedText(data) => arc_text_properties(data),
         ExtendedEntityData::RemoteText(data) => remote_text_properties(data),
         ExtendedEntityData::GeoPositionMarker(data) => geo_marker_properties(data),

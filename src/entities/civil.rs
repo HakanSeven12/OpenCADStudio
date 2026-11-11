@@ -6,7 +6,7 @@
 use document::classes::arch::ArchEntityData;
 use document::classes::arch::ArchObject;
 use document::classes::civil::{
-    parse_format, property, AlignmentPiece, AssemblyLayout, CivilKind, DisplayComponent, LabelPart, LabelText,
+    display_station, parse_format, property, AlignmentPiece, AssemblyLayout, CivilKind, DisplayComponent, LabelPart, LabelText,
     ProfilePiece, ProfileViewFrame, TinSurface,
 };
 use document::objects::ObjectType;
@@ -592,6 +592,18 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
     Some(out)
 }
 
+/// Stations as Civil 3D shows them along `alignment`: past a station
+/// equation they run on from its station ahead. Without an alignment, raw.
+fn shown_stations(alignment: Option<&ArchEntityData>) -> impl Fn(f64) -> f64 {
+    let equations = alignment.map(|a| a.alignment_station_equations()).unwrap_or_default();
+    move |raw| display_station(&equations, raw)
+}
+
+/// The alignment among `handles`.
+fn alignment_among<'a>(document: &'a document::Document, handles: &[u64]) -> Option<&'a ArchEntityData> {
+    handles.iter().find_map(|h| arch_of(document, *h, CivilKind::Alignment))
+}
+
 fn line(out: &mut Decoded, points: Vec<[f64; 3]>) {
     out.polylines.push(ProxyPolyline {
         points,
@@ -1126,6 +1138,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let run = runs.first()?;
             let scale = drawing_scale(document);
             let _ = major;
+            let shown = shown_stations(Some(alignment));
             for station in data.label_stations() {
                 let Some((at, d)) = point_at(run, station - start) else {
                     continue;
@@ -1138,7 +1151,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 }
                 if let Some(style) = &style {
                     let value = |property: u32, options: &[u32]| {
-                        (property == p::STATION).then(|| LabelPart::format_value(options, station))
+                        (property == p::STATION).then(|| LabelPart::format_value(options, shown(station)))
                     };
                     place(out, document, style, b, d.y.atan2(d.x), &value);
                 }
@@ -1152,6 +1165,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let run = runs.first()?;
             let scale = drawing_scale(document);
             let masks = alignment.alignment_masked_ranges();
+            let shown = shown_stations(Some(alignment));
             for point in alignment.alignment_geometry_points() {
                 if masked(start + point.distance, &masks) {
                     continue;
@@ -1177,7 +1191,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 let station = start + point.distance;
                 let value = |property: u32, options: &[u32]| match property {
                     p::GEOMETRY_POINT => Some(point.name.to_string()),
-                    p::STATION => Some(LabelPart::format_value(options, station)),
+                    p::STATION => Some(LabelPart::format_value(options, shown(station))),
                     _ => None,
                 };
                 place(out, document, &style, tip, frame, &value);
@@ -1189,12 +1203,13 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::SampleLineGroup))?;
             let style = style?;
             let template = group.sample_line_name_template().unwrap_or_default();
+            let shown = shown_stations(alignment_among(document, &group.decode().handles));
             for (station, left, right) in sample_lines(group, document)? {
                 let name: String = template
                     .iter()
                     .map(|part| match part {
                         LabelPart::Text(text) => text.clone(),
-                        LabelPart::Field { options, .. } => LabelPart::format_value(options, station),
+                        LabelPart::Field { options, .. } => LabelPart::format_value(options, shown(station)),
                         LabelPart::NewLine => String::new(),
                     })
                     .collect();
@@ -1206,20 +1221,21 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
         "AECC_STATION_ELEVATION_LABEL" => {
             let style = style?;
             let at = data.label_anchor()?;
-            let frame = document
+            let (frame, view) = document
                 .entities()
                 .filter_map(|e| match e {
                     EntityType::Extended(x) => match &x.data {
-                        ExtendedEntityData::Arch(view) => view.profile_view_frame(),
+                        ExtendedEntityData::Arch(view) => view.profile_view_frame().map(|f| (f, view)),
                         _ => None,
                     },
                     _ => None,
                 })
-                .find(|f| {
+                .find(|(f, _)| {
                     let top = f.to_drawing(f.station_max, f.elevation_max);
                     at.x >= f.origin.x && at.y >= f.origin.y && at.x <= top.x && at.y <= top.y
                 })?;
-            let station = frame.station_min + (at.x - frame.origin.x);
+            let shown = shown_stations(alignment_among(document, &view.decode().handles));
+            let station = shown(frame.station_min + (at.x - frame.origin.x));
             let elevation = frame.elevation_min + (at.y - frame.origin.y) / frame.vertical_scale;
             let value = |property: u32, options: &[u32]| match property {
                 p::STATION => Some(LabelPart::format_value(options, station)),
@@ -1267,11 +1283,12 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let top = frame.origin.y;
             let band_components = band.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
             let ticks = component(document, Some(&band_components), BAND_MAJOR_TICKS);
+            let shown = shown_stations(alignment_among(document, &view_handles));
             for station in data.label_stations() {
                 let x = frame.to_drawing(station, frame.elevation_min).x;
                 styled(out, ticks, vec![[x, top, 0.0], [x, top - height, 0.0]]);
                 let value = |property: u32, options: &[u32]| match property {
-                    p::STATION => Some(LabelPart::format_value(options, station)),
+                    p::STATION => Some(LabelPart::format_value(options, shown(station))),
                     EG_ELEVATION => elevation_at(&eg, station).map(|v| LabelPart::format_value(options, v)),
                     FG_ELEVATION => elevation_at(&fg, station).map(|v| LabelPart::format_value(options, v)),
                     _ => None,
@@ -1306,6 +1323,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
             let frame = view.profile_view_frame()?;
             let pvis = profile.profile_pvis();
+            let shown = shown_stations(alignment_among(document, &profile.decode().handles));
             let inside = |q: Vector2| q.x >= frame.station_min && q.x <= frame.station_max;
             let at = |q: Vector2| frame.to_drawing(q.x, q.y);
             let scale = drawing_scale(document);
@@ -1357,7 +1375,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let top = q + Vector2::new(angle.cos(), angle.sin()) * (length * scale);
                         styled(out, Some(label_line_style(style.layer)), vec![[q.x, q.y, 0.0], [top.x, top.y, 0.0]]);
                         let value = |property: u32, options: &[u32]| match property {
-                            p::PVI_STATION => Some(LabelPart::format_value(options, pvi.point.x)),
+                            p::PVI_STATION => Some(LabelPart::format_value(options, shown(pvi.point.x))),
                             p::PVI_ELEVATION => Some(LabelPart::format_value(options, pvi.point.y)),
                             _ => None,
                         };
@@ -1381,13 +1399,13 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let k = length / ((g1 - g0).abs() * 100.0);
                         let value = |property: u32, options: &[u32]| {
                             let v = match property {
-                                p::PVI_STATION => pvi.point.x,
+                                p::PVI_STATION => shown(pvi.point.x),
                                 p::PVI_ELEVATION => pvi.point.y,
-                                p::BVC_STATION => bvc.x,
+                                p::BVC_STATION => shown(bvc.x),
                                 p::BVC_ELEVATION => bvc.y,
-                                p::EVC_STATION => evc.x,
+                                p::EVC_STATION => shown(evc.x),
                                 p::EVC_ELEVATION => evc.y,
-                                p::HIGH_POINT_STATION | p::LOW_POINT_STATION => extreme.x,
+                                p::HIGH_POINT_STATION | p::LOW_POINT_STATION => shown(extreme.x),
                                 p::HIGH_POINT_ELEVATION | p::LOW_POINT_ELEVATION => extreme.y,
                                 p::K_VALUE => k,
                                 p::CURVE_LENGTH => length,
@@ -1555,6 +1573,7 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
         })
     };
     let station_options = field_options(property::STATION).unwrap_or_default();
+    let shown = shown_stations(alignment_among(document, &handles));
     let elevation_options = field_options(ELEVATION).unwrap_or_default();
     if let Some(axes) = view_style.and_then(|s| s.profile_view_axes()) {
         for elevation in multiples(e0, e1, axes.left.major_interval) {
@@ -1612,7 +1631,7 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
                             rotation: 0.0,
                             width_factor: 1.0,
                             oblique: 0.0,
-                            text: LabelPart::format_value(options, value),
+                            text: LabelPart::format_value(options, if along_stations { shown(value) } else { value }),
                             font: label_font(document),
                             style: text_style,
                             align,

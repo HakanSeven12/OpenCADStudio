@@ -407,10 +407,10 @@ pub static WBLOCK: OpDef = OpDef {
 
 pub static PLOT: OpDef = OpDef {
     name: "plot",
-    doc: "Plot layouts to a PDF file. scale (e.g. \"1:100\") overrides fit; fit defaults to true when scale is omitted.",
+    doc: "Plot layouts to a PDF or SVG file. scale (e.g. \"1:100\") overrides fit; fit defaults to true when scale is omitted.",
     batchable: true,
     params: &[
-        req("path", Ty::Str, "Output PDF file path (must end in .pdf)."),
+        req("path", Ty::Str, "Output PDF or SVG file path (selected by extension)."),
         opt("layout", Ty::Str, "Target layout name or 'all' (defaults to 'Model')."),
         opt("area", Ty::EnumCi(&["extents", "display", "limits", "layout", "window"]), "Plot area (defaults to extents)."),
         opt("window", Ty::Window, "World [x0, y0, x1, y1] rectangle; required when area=window."),
@@ -426,8 +426,9 @@ pub static PLOT: OpDef = OpDef {
         opt("transparency", Ty::Bool, "Honor transparency settings."),
         opt("lineweights", Ty::Bool, "Honor lineweight settings."),
         opt("merge_lines", Ty::Bool, "Merge overlapping lines."),
+        opt("text_as_outlines", Ty::Bool, "SVG only: emit font-independent glyph paths instead of text elements."),
         opt("stamp", Ty::Bool, "Print plot stamp."),
-        opt("per_page", Ty::Bool, "When layout='all', write one PDF per layout as <stem>-<Layout>.pdf."),
+        opt("per_page", Ty::Bool, "When layout='all', write one output file per layout as <stem>-<Layout>.<ext>."),
     ],
     rules: &[Rule::RequiredWhen { key: "area", equals: "window", then: &["window"] }],
     example: r#"{"op":"plot","path":"out.pdf","area":"extents","scale":"1:100"}"#,

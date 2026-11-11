@@ -6447,6 +6447,7 @@ plot =
     .name-drawing-layout = Rysunek - arkusz
     .raster-dpi = DPI rastra
     .vector-dpi = DPI wektora
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (bez konfiguracji strony)
     .none = <brak>

@@ -6447,6 +6447,7 @@ plot =
     .name-drawing-layout = 도면 - 배치
     .raster-dpi = 래스터 DPI
     .vector-dpi = 벡터 DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (페이지 설정 없음)
     .none = <없음>

@@ -6443,6 +6443,7 @@ plot =
     .name-drawing-layout = 圖面 - 配置
     .raster-dpi = 點陣 DPI
     .vector-dpi = 向量 DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = 完成後在檢視器中開啟
     .no-page-setups = （無頁面設定）
     .none = <無>

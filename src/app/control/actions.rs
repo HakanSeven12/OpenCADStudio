@@ -671,6 +671,9 @@ impl OpenCADStudio {
         if let Some(offset) = req["offset_y"].as_f64() {
             request.offset_y = offset.to_string();
         }
+        if let Some(outlines) = req["text_as_outlines"].as_bool() {
+            request.text_as_outlines = outlines;
+        }
         if req.get("upside_down").is_some() {
             request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
         }
@@ -812,6 +815,9 @@ impl OpenCADStudio {
                     }
                     if req["merge_lines"].is_boolean() {
                         page_dialog.merge_lines = request.merge_lines;
+                    }
+                    if req["text_as_outlines"].is_boolean() {
+                        page_dialog.text_as_outlines = request.text_as_outlines;
                     }
                     if req["stamp"].is_boolean() {
                         page_dialog.stamp = request.stamp;

@@ -19,6 +19,8 @@
 * **`GROUPEDIT`:** Picks a group by one of its members or by name, then adds objects to it, removes members picked one at a time, or renames it; each edit is one undo step.
 * **Group Selection Shortcut:** Ctrl+Shift+A turns group selection (`PICKSTYLE`) on and off and reports `<Groups on>` or `<Groups off>`.
 * **`FILLET` in Any Plane:** Two lines that share a plane out of plan, such as a vertical one, are filleted in that plane, the arc lying in it.
+* **SVG Text as Outlines:** The Plot dialog's SVG output offers Text as outlines, drawing the positioned glyph strokes and fills as vector paths so the viewer needs no installed fonts. The preference defaults off and retains searchable SVG text when disabled.
+
 
 ### 🐛 Bug Fixes
 

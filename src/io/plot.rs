@@ -77,6 +77,9 @@ pub struct PlotOptions {
     /// Vector resolution in DPI: path points snap to that grid on paper,
     /// trading precision for size. `None` keeps full precision.
     pub vector_dpi: Option<u32>,
+    /// SVG: emit positioned glyph geometry instead of visible `<text>` runs.
+    /// PDF has its own text pipeline and does not read this flag.
+    pub text_as_outlines: bool,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -128,6 +131,7 @@ impl Default for PlotOptions {
             quality: PlotQuality::Normal,
             raster_dpi: None,
             vector_dpi: None,
+            text_as_outlines: false,
         }
     }
 }

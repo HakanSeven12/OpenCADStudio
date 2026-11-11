@@ -6446,6 +6446,7 @@ plot =
     .name-drawing-layout = Tekening - layout
     .raster-dpi = Raster-DPI
     .vector-dpi = Vector-DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (geen pagina-instellingen)
     .none = <geen>

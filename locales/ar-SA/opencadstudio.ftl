@@ -6460,6 +6460,7 @@ plot =
     .name-drawing-layout = الرسم - التخطيط
     .raster-dpi = دقة النقطية DPI
     .vector-dpi = دقة المتجهات DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (لا توجد إعدادات صفحة)
     .none = <لا شيء>

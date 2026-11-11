@@ -88,7 +88,7 @@ impl fmt::Display for PlotChoice {
 
 #[cfg(test)]
 mod tests {
-    use super::{CustomPaperDraft, CustomPaperError, PlotChoice};
+    use super::{CustomPaperDraft, CustomPaperError, PlotChoice, PlotDialogState};
     use crate::io::paper_catalog::{resolve, Margins, PaperUnits};
 
     #[test]
@@ -145,6 +145,16 @@ mod tests {
     }
 
     #[test]
+    fn text_as_outlines_defaults_off_and_copies_with_plot_preferences() {
+        let mut source = PlotDialogState::default();
+        assert!(!source.text_as_outlines);
+        source.text_as_outlines = true;
+        let mut restored = PlotDialogState::default();
+        restored.copy_settings_from(&source);
+        assert!(restored.text_as_outlines);
+    }
+
+    #[test]
     fn named_view_display_preserves_the_saved_plot_area() {
         let name = "Plan: north";
         let choice = PlotChoice::localized(format!("View: {name}"));
@@ -173,6 +183,8 @@ pub enum PlotFlag {
     Transparency,
     PaperspaceLast,
     Stamp,
+    /// SVG only: emit glyph paths instead of visible font-dependent text.
+    TextAsOutlines,
     /// Hidden-line removal for paper-space objects (the page setup's
     /// "plot hidden" flag).
     HidePaperspace,
@@ -517,6 +529,9 @@ pub struct PlotDialogState {
     /// drawing's page setup, which only knows printers and PDF drivers.
     #[serde(default)]
     pub file_svg: bool,
+    /// SVG-only text representation; an app preference, not a page-setup field.
+    #[serde(default)]
+    pub text_as_outlines: bool,
     pub paper: String,
     #[serde(skip)]
     pub paper_width_mm: f64,
@@ -633,6 +648,7 @@ impl Default for PlotDialogState {
             raster_dpi: String::new(),
             vector_dpi: String::new(),
             file_svg: false,
+            text_as_outlines: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
             paper_width_mm: 297.0,
             paper_height_mm: 210.0,
@@ -690,6 +706,7 @@ impl PlotDialogState {
         self.printer = o.printer.clone();
         self.to_file = o.to_file;
         self.file_svg = o.file_svg;
+        self.text_as_outlines = o.text_as_outlines;
         self.paper = o.paper.clone();
         self.paper_width_mm = o.paper_width_mm;
         self.paper_height_mm = o.paper_height_mm;
@@ -1816,6 +1833,16 @@ pub fn view_window(
                 Space::new().height(0).into()
             }
         };
+    let svg_text_option: Element<'_, Message> =
+        if to_file && s.file_svg && cfg!(not(target_arch = "wasm32")) {
+            check(
+                crate::tr!("plot", "text-as-outlines").into(),
+                s.text_as_outlines,
+                PlotFlag::TextAsOutlines,
+            )
+        } else {
+            Space::new().height(0).into()
+        };
     let options_panel = panel(
         column![
             section_label(t!("Plot options")),
@@ -1851,6 +1878,7 @@ pub fn view_window(
                         s.merge_lines,
                         PlotFlag::MergeLines
                     ),
+                    svg_text_option,
                     check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
                     check(
                         t!("Save changes to layout"),
@@ -1951,6 +1979,40 @@ pub fn view_window(
 mod sidebar_layout_tests {
     use super::*;
     use iced::advanced::widget::{self, Operation};
+
+    #[test]
+    fn text_as_outlines_checkbox_is_visible_only_for_svg_file_output() {
+        let _lock = crate::headless_ui_lock();
+        let mut renderer = iced::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut visible = |state: &PlotDialogState| {
+            let mut ui = iced_test::runtime::user_interface::UserInterface::build(
+                view_window(state, false, crate::ui::modal::ModalSizing::FILL),
+                iced::Size::new(1100.0, 800.0),
+                iced_test::runtime::user_interface::Cache::default(),
+                &mut renderer,
+            );
+            let mut find = iced_test::Selector::find("Text as outlines");
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            matches!(
+                widget::Operation::finish(&find),
+                widget::operation::Outcome::Some(Some(target))
+                    if target.visible_bounds().is_some()
+            )
+        };
+
+        let mut state = PlotDialogState::default();
+        assert!(!visible(&state), "printer output hides the SVG option");
+        state.to_file = true;
+        assert!(!visible(&state), "PDF output hides the SVG option");
+        state.file_svg = true;
+        assert!(visible(&state), "SVG output shows the option");
+    }
 
     #[test]
     fn page_setup_scrollbar_viewport_fills_sidebar_width() {

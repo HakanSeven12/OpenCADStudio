@@ -6446,6 +6446,7 @@ plot =
     .name-drawing-layout = Zeichnung - Layout
     .raster-dpi = Raster-DPI
     .vector-dpi = Vektor-DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (keine Seiten-Setups)
     .none = <keine>

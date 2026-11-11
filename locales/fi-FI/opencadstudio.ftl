@@ -6447,6 +6447,7 @@ plot =
     .name-drawing-layout = Piirustus - asettelu
     .raster-dpi = Rasterin DPI
     .vector-dpi = Vektorin DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = (ei sivuasetuksia)
     .none = <ei mitään>

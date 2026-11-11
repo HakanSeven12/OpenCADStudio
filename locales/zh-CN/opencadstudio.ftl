@@ -6431,6 +6431,7 @@ plot =
     .name-drawing-layout = 图形 - 布局
     .raster-dpi = 光栅 DPI
     .vector-dpi = 矢量 DPI
+    .text-as-outlines = Text as outlines
     .open-when-done = Open in viewer when done
     .no-page-setups = （无页面设置）
     .none = <无>

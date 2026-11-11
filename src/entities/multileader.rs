@@ -2011,9 +2011,13 @@ pub(crate) fn block_content_insert(
     insert.rotation = ml.block_rotation;
     insert.normal = ml.context.block_content_normal;
     insert.common = ml.common.clone();
-    insert.common.color = ml.block_content_color;
-    insert.common.color_name = None;
-    insert.common.color_book_handle = None;
+    // ByBlock content takes the leader's own colour, as its ByBlock leader
+    // lines do.
+    if ml.block_content_color != document::types::Color::ByBlock {
+        insert.common.color = ml.block_content_color;
+        insert.common.color_name = None;
+        insert.common.color_book_handle = None;
+    }
     // Each attribute definition shows the value the leader stores for it,
     // matched by definition handle, else by position.
     let transform = crate::scene::render_graph::insert_transform(document, &insert);

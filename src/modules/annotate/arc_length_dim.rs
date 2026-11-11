@@ -15,7 +15,7 @@ use crate::scene::dimension_assoc::{
 };
 use crate::scene::model::wire_model::WireModel;
 
-pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_angular.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_arc.svg"));
 
 pub fn tool() -> ToolDef {
     ToolDef {

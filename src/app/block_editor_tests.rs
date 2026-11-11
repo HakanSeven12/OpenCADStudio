@@ -10929,6 +10929,137 @@ fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
 }
 
 #[test]
+fn a_linear_parameter_lists_and_writes_its_base_location() {
+    use crate::scene::model::object::PropValue;
+    use document::objects::{DynamicBlockData, ObjectType};
+    use std::io::Cursor;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "B");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter base location [Startpoint/Midpoint] <Startpoint>:"
+    );
+    feed(&mut app, "M");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let parameter =
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .find(|p| p.kind == crate::scene::block_distance_parameter::Kind::Linear)
+            .unwrap()
+            .handle;
+    let base_location = |doc: &document::Document| match &doc.objects[&parameter] {
+        ObjectType::DynamicBlock(object) => match &object.data {
+            DynamicBlockData::LinearParameter(p) => p.parameter.parameter_base_location,
+            _ => panic!(),
+        },
+        _ => panic!(),
+    };
+    assert_eq!(base_location(&app.tabs[i].scene.document), 1);
+    app.tabs[i].selected_authoring = Some(parameter);
+    app.refresh_properties();
+    let listed = app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|section| &section.props)
+        .find(|property| property.field == "authoring_base_location")
+        .expect("base location row");
+    assert_eq!(listed.label, "Base location");
+    assert_eq!(
+        listed.value,
+        PropValue::Choice {
+            selected: "Midpoint".into(),
+            options: vec!["Startpoint".into(), "Midpoint".into()],
+        }
+    );
+    let original = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field: "authoring_base_location",
+        value: "Startpoint".into(),
+    });
+    assert_eq!(base_location(&app.tabs[i].scene.document), 0);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    for (handle, object) in &original.objects {
+        if *handle != parameter {
+            assert_eq!(app.tabs[i].scene.document.objects.get(handle), Some(object));
+        }
+    }
+    app.undo_steps(1);
+    assert_eq!(base_location(&app.tabs[i].scene.document), 1);
+    app.redo_steps(1);
+    assert_eq!(base_location(&app.tabs[i].scene.document), 0);
+    app.tabs[i].selected_authoring = Some(parameter);
+    let unchanged = app.tabs[i].scene.document.clone();
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field: "authoring_base_location",
+        value: "Startpoint".into(),
+    });
+    app.command_line.last_error = None;
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field: "authoring_base_location",
+        value: "Diagonal".into(),
+    });
+    assert_eq!(app.tabs[i].scene.document, unchanged);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some("Choose Startpoint or Midpoint.")
+    );
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field: "authoring_base_location",
+        value: "Midpoint".into(),
+    });
+    let doc = &app.tabs[i].scene.document;
+    for saved in [
+        document::DwgReader::from_stream(Cursor::new(
+            document::DwgWriter::write_to_vec(doc).unwrap(),
+        ))
+        .read()
+        .unwrap(),
+        document::DxfReader::from_reader(Cursor::new(
+            document::DxfWriter::new(doc).write_to_vec().unwrap(),
+        ))
+        .unwrap()
+        .read()
+        .unwrap(),
+    ] {
+        let ObjectType::DynamicBlock(object) = &saved.objects[&parameter] else {
+            panic!()
+        };
+        let DynamicBlockData::LinearParameter(p) = &object.data else {
+            panic!()
+        };
+        assert_eq!(p.parameter.parameter_base_location, 1);
+    }
+    let before = app.tabs[i].scene.document.clone();
+    assert!(crate::scene::block_distance_parameter::set_base_location(
+        &mut app.tabs[i].scene.document,
+        Handle::NULL,
+        parameter,
+        false
+    )
+    .is_err());
+    assert_eq!(app.tabs[i].scene.document, before);
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    let before = app.tabs[i].scene.document.clone();
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field: "authoring_base_location",
+        value: "Startpoint".into(),
+    });
+    assert_eq!(app.tabs[i].scene.document, before);
+}
+
+#[test]
 fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
     use crate::scene::block_grips::config;
     use glam::DVec3;

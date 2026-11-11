@@ -124,6 +124,55 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    pub(super) fn set_authoring_base_location(&mut self, value: &str) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(definition) = self.tabs[i]
+            .active_block_edit_session()
+            .map(|session| session.br_handle)
+        else {
+            return Task::none();
+        };
+        let Some(parameter) = self.tabs[i].selected_authoring else {
+            return Task::none();
+        };
+        let midpoint =
+            if value.eq_ignore_ascii_case("Midpoint") || value == crate::t!("Midpoint").as_ref() {
+                true
+            } else if value.eq_ignore_ascii_case("Startpoint")
+                || value == crate::t!("Startpoint").as_ref()
+            {
+                false
+            } else {
+                self.command_line
+                    .push_error(crate::t!("Choose Startpoint or Midpoint.").as_ref());
+                return Task::none();
+            };
+        let mut staged = self.tabs[i].scene.document.clone();
+        match crate::scene::block_distance_parameter::set_base_location(
+            &mut staged,
+            definition,
+            parameter,
+            midpoint,
+        ) {
+            Ok(changed) => {
+                if changed {
+                    self.push_undo_snapshot(
+                        i,
+                        super::tab_document::HistoryLabel::Message("Base location"),
+                    );
+                    self.apply_action_document(i, staged);
+                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].dirty = true;
+                    self.finish_pending_history(i);
+                }
+                self.tabs[i].properties.edit_choice_open = None;
+                self.refresh_properties();
+            }
+            Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
+        }
+        Task::none()
+    }
+
     pub(super) fn commit_authoring_action_option(&mut self, field: &'static str) -> Task<Message> {
         if field.starts_with("authoring_action_base_") {
             return self.commit_authoring_action_base(field);

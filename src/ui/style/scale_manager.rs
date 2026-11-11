@@ -329,10 +329,17 @@ fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> E
             .on_input_maybe(on)
             .on_submit(Message::ScaleRenameCommit)
             .style(move |theme, status| {
+                let style = field_style_with_radius(theme, status, 4.0);
                 if locked {
-                    crate::ui::read_only::read_only_style(theme, status)
+                    // Greyed: the weak panel background and dimmed digits.
+                    let palette = theme.palette();
+                    text_input::Style {
+                        background: Background::Color(palette.background.weak.color),
+                        value: palette.background.base.text.scale_alpha(0.45),
+                        ..style
+                    }
                 } else {
-                    field_style_with_radius(theme, status, 4.0)
+                    style
                 }
             })
             .size(12)

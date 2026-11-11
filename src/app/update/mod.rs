@@ -7152,11 +7152,17 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerPaperBuf(s) => {
+                if self.scale_card_units_locked() {
+                    return Task::none();
+                }
                 self.scale_manager_paper_buf = s;
                 self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleManagerDrawingBuf(s) => {
+                if self.scale_card_units_locked() {
+                    return Task::none();
+                }
                 self.scale_manager_drawing_buf = s;
                 self.scale_edit_error = None;
                 Task::none()
@@ -15670,6 +15676,15 @@ impl OpenCADStudio {
     /// its name (renaming is done inline in the list). Staged, no commit — so
     /// the ratio edit survives Apply *and* switching to another row. Editing a
     /// built-in fallback scale materialises it as a real one.
+    /// The open edit card shows a scale whose units are locked.
+    fn scale_card_units_locked(&self) -> bool {
+        !self.scale_edit_adding
+            && self
+                .scale_rename
+                .as_deref()
+                .is_some_and(|old| self.scale_units_locked(self.active_tab, old))
+    }
+
     /// A scale in use, the current one and the drawing's unit scale keep
     /// their ratio: the card shows their units greyed (measured).
     pub(in crate::app) fn scale_units_locked(&self, i: usize, name: &str) -> bool {

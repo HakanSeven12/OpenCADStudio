@@ -2467,7 +2467,11 @@ fn misses_query(wire: &WireModel, query: [f64; 4]) -> bool {
     }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
     if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
-        return false;
+        // No stored box: the one the index measures from what the wire
+        // carries, if it can.
+        return finite_wire_aabb3(wire).is_some_and(|aabb| {
+            aabb[3] < query[0] || aabb[0] > query[2] || aabb[4] < query[1] || aabb[1] > query[3]
+        });
     }
     // The f32 slack the index gives the same box.
     let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
@@ -2509,19 +2513,35 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
         ]);
     }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+    let stored = min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite();
+    // A wire with no stored box is measured by what it carries below: an
+    // insert's marker by its insertion snap, so it is a candidate near that
+    // point and not in every query. A block copy or an analytic curve
+    // cannot be measured that way and keeps no box.
+    if !stored && (wire.stub.is_some() || !wire.tangent_geoms.is_empty()) {
         return None;
     }
-    let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
-    let pad = (mag * f32::EPSILON * 2.0) as f64;
-    let mut aabb = [
-        min_x as f64 - pad,
-        min_y as f64 - pad,
-        f64::INFINITY,
-        max_x as f64 + pad,
-        max_y as f64 + pad,
-        f64::NEG_INFINITY,
-    ];
+    let mut aabb = if stored {
+        let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+        let pad = (mag * f32::EPSILON * 2.0) as f64;
+        [
+            min_x as f64 - pad,
+            min_y as f64 - pad,
+            f64::INFINITY,
+            max_x as f64 + pad,
+            max_y as f64 + pad,
+            f64::NEG_INFINITY,
+        ]
+    } else {
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ]
+    };
     let mut include = |point: [f64; 3]| {
         if point.iter().all(|value| value.is_finite()) {
             aabb[0] = aabb[0].min(point[0]);
@@ -2561,6 +2581,10 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
                 aabb[5] = aabb[5].max(inner[5] + stub.delta[2]);
             }
         }
+    }
+    // Nothing measurable was carried.
+    if aabb[0] > aabb[3] || aabb[1] > aabb[4] {
+        return None;
     }
     if !aabb[2].is_finite() {
         aabb[2] = 0.0;
@@ -3173,13 +3197,20 @@ mod area_query_tests {
     /// The resident set leaves blank slots behind: where an entity is hidden
     /// (an empty box) and where a run got shorter (the default unbounded
     /// box). They hold nothing to pick or snap, so no query lists them. A
-    /// wire with no finite box that does hold something still reaches every
-    /// query.
+    /// wire with no box that holds what cannot be measured, a block copy
+    /// here, still reaches every query.
     #[test]
     fn blank_slots_are_not_candidates() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            WireModel::UNBOUNDED_AABB,
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        copy.name = "21".to_string();
         let mut wires = sample();
         wires.extend(blank_slots());
-        wires.push(marker("21"));
+        wires.push(copy);
         let index = InteractionIndex::build(&wires);
         let arc = Arc::new(wires);
 
@@ -3187,10 +3218,46 @@ mod area_query_tests {
         assert_eq!(
             names(&away),
             ["21"],
-            "away from every object only the marker is listed, not the blank slots"
+            "away from every object only the block copy is listed, not the blank slots"
         );
         let on_five = index.query_xy(Arc::clone(&arc), [-0.45, -0.45, -0.3, 0.1]);
         assert_eq!(names(&on_five), ["21", "5"]);
+    }
+
+    /// A wire with no stored box is measured by what it carries. An insert's
+    /// marker carries its insertion snap alone, so it is a candidate near
+    /// that point and not in every query of the drawing, indexed or not.
+    #[test]
+    fn a_wire_that_only_snaps_is_a_candidate_near_its_snap_point() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            [0.0, 0.0, 1.0, 1.0],
+            [200.0, 200.0, 0.0],
+            0.0,
+        );
+        copy.name = "30".to_string();
+        let mut wires = sample();
+        wires.extend([marker("21"), copy]);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+
+        let away = [50.0, 50.0, 51.0, 51.0];
+        let at_the_snap = [-0.05, -0.05, 0.05, 0.05];
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), away)),
+            [""; 0],
+            "the marker's snap point is at the origin, 50 units away"
+        );
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), at_the_snap)),
+            ["21", "5"]
+        );
+        // With no index yet, the fallback copies the same wires.
+        let unindexed = |query| {
+            names(&InteractionCandidates::all_near(Arc::clone(&arc), query).materialize_stubs())
+        };
+        assert_eq!(unindexed(away), [""; 0]);
+        assert_eq!(unindexed(at_the_snap), ["21", "5"]);
     }
 
     /// With no index yet, the fallback copies the wires the caller is about

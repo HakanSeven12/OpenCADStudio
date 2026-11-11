@@ -1694,6 +1694,18 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+F12".to_string())
             .or_insert_with(|| "QUADTOGGLE".to_string());
+        // Before group selection had Ctrl+Shift+A, the base-key fallback
+        // read it as Ctrl+A and selected everything.
+        self.shortcut_bindings
+            .entry(
+                if cfg!(target_os = "macos") {
+                    "CMD+SHIFT+A"
+                } else {
+                    "CTRL+SHIFT+A"
+                }
+                .to_string(),
+            )
+            .or_insert_with(|| "TOGGLEGROUPS".to_string());
         self.shortcut_bindings
             .entry(
                 if cfg!(target_os = "macos") {

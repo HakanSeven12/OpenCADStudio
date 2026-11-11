@@ -18,6 +18,7 @@
 * **Linetype Manager:** `LINETYPE` opens a manager in the style of the other style managers: create, copy, rename and delete linetypes, edit their dashes, gaps and dots against a live preview, and set the linetype scales and your library in one place.
 
 ### 🐛 Bug Fixes
+* **DGN Cell Deduplication:** Self-contained cell headers with their own objects and identical geometry become one block definition and one insert per placement. A GIS export that carries the same symbol cell thousands of times (each header its own copy of the symbol) used to define a new, renamed block per header - block palettes flooded with lookalikes and the import took the time of writing every one of them. Cells placed in different spots that drew the same objects around their origins now share one definition; cells with genuinely different objects keep their separate definitions.
 
 * **Big Font Code Page Detection:** Removed the heuristic that forced `ansi_936` (GBK) for big-font files containing `"china"` in their name. Big5 big-fonts like `china1.shx` and `chineset.shx` (which contain trail bytes `< 0xA1`) are now correctly identified as `ansi_950` (Big5) instead of producing mojibake in viewports and exports. Legacy shape-only `chinese.shx` files alias to `chineset.shx` when available.
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.

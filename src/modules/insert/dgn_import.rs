@@ -1187,6 +1187,12 @@ struct Converter<'a> {
     /// Converting a shared cell definition: the cells inside it are not
     /// blocks of their own, their objects are part of the definition.
     in_definition: bool,
+    /// Self-contained cell headers whose geometry matches an already
+    /// defined one, per (base name, copy kind) → the cell's
+    /// origin-normalized parts and the block they defined. A GIS export
+    /// can place the same symbol cell thousands of times as separate
+    /// headers; those become one block and many inserts.
+    shares: HashMap<(String, bool, bool), Vec<(Vec<DgnElement>, String)>>,
     /// The construction layer of each level, once one is made.
     construction: HashMap<u32, String>,
 }
@@ -1465,14 +1471,29 @@ impl<'a> Converter<'a> {
                 } else {
                     name.as_str()
                 };
-                let block = self.unique(&block_name(base));
-                let local = crate::scene::model::underlay_vector::scaled_elements(
+                // The definition's objects are relative to the cell's own
+                // origin, which makes repeats of one symbol comparable and
+                // placeable through the insert alone.
+                let normalized = crate::scene::model::underlay_vector::scaled_elements(
                     parts,
                     1.0,
                     origin.map(|c| -c),
                 );
-                let entities = self.elements(&local, false, copy, depth + 1);
+                let key = (base.to_ascii_uppercase(), copy.active, copy.color_by_block);
+                if let Some((_, shared)) = self
+                    .shares
+                    .get(&key)
+                    .and_then(|shares| shares.iter().find(|(seen, _)| *seen == normalized).cloned())
+                {
+                    return vec![insert_entity(shared, [1.0, 0.0, 0.0, 1.0], *origin, 1.0)];
+                }
+                let block = self.unique(&block_name(base));
+                let entities = self.elements(&normalized, false, copy, depth + 1);
                 self.out.blocks.push((block.clone(), entities));
+                self.shares
+                    .entry(key)
+                    .or_default()
+                    .push((normalized, block.clone()));
                 vec![insert_entity(block, [1.0, 0.0, 0.0, 1.0], *origin, 1.0)]
             }
             DgnGeom::Cell {
@@ -1663,6 +1684,7 @@ pub fn convert(import: &DgnImport, sub_units: bool, explode_text_nodes: bool) ->
             .collect(),
         next_number: HashMap::new(),
         in_definition: false,
+        shares: HashMap::new(),
         construction: HashMap::new(),
     };
     if !import.v7 {
@@ -2012,5 +2034,96 @@ impl CadCommand for DgnImportCommand {
             Step::Path => CmdResult::Cancel,
             _ => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
         }
+    }
+}
+
+#[cfg(test)]
+mod cell_sharing_tests {
+    use super::*;
+    use crate::scene::model::underlay_vector::{By, DgnColor, DgnElement, DgnGeom, DgnImport};
+
+    fn line(from: P3, to: P3) -> DgnElement {
+        DgnElement {
+            level: 1,
+            color: By::Own(DgnColor {
+                index: 3,
+                table: [8, 8, 8],
+                rgb: [8, 8, 8],
+            }),
+            weight: By::Own(1),
+            style: By::Own(0),
+            geom: DgnGeom::Line(from, to),
+            filled: false,
+            construction: false,
+        }
+    }
+
+    fn cell(name: &str, origin: P3, dx: f64) -> DgnElement {
+        let x = origin[0] + dx;
+        DgnElement {
+            level: 1,
+            color: By::Own(DgnColor {
+                index: 3,
+                table: [8, 8, 8],
+                rgb: [8, 8, 8],
+            }),
+            weight: By::Own(1),
+            style: By::Own(0),
+            geom: DgnGeom::CellGroup {
+                name: name.to_string(),
+                origin,
+                parts: vec![line([x + 10.0, origin[1], 0.0], [x + 40.0, origin[1], 0.0])],
+            },
+            filled: false,
+            construction: false,
+        }
+    }
+
+    fn import_with(elements: Vec<DgnElement>) -> DgnImport {
+        DgnImport {
+            elements,
+            cells: Vec::new(),
+            levels: [(1, ("Level 1".into(), None))].into(),
+            level_order: vec![1],
+            sub_per_master: 1.0,
+            unit_names: ("m".into(), "mm".into()),
+            v7: true,
+            references: Vec::new(),
+            text_styles: Vec::new(),
+            ..Default::default()
+        }
+    }
+
+    /// Repeats of one symbol cell become one block and one insert per
+    /// placement: a survey file that carries the same cell thousands of
+    /// times must not flood the palette with renamed definitions.
+    #[test]
+    fn identical_cells_share_one_definition() {
+        let import = import_with(vec![
+            cell("4.02", [10_000.0, 0.0, 0.0], 0.0),
+            cell("4.02", [20_000.0, 5_000.0, 0.0], 0.0),
+        ]);
+        let c = convert(&import, true, false);
+        assert_eq!(c.blocks.len(), 1, "{}", c.blocks.len());
+        assert_eq!(c.blocks[0].0, "4.02");
+        // Two inserts at the two placements, the second 10,000 units over.
+        let inserts = c.entities.iter().chain(c.blocks[0].1.iter()).count();
+        let _ = inserts;
+        assert_eq!(c.entities.len(), 2, "{}", c.entities.len());
+    }
+
+    /// Different objects under one name keep their own definitions (the
+    /// second one renamed), exactly as before.
+    #[test]
+    fn differently_shaped_same_named_cells_stay_separate() {
+        let import = import_with(vec![
+            cell("4.02", [10_000.0, 0.0, 0.0], 0.0),
+            cell("4.02", [10_000.0, 0.0, 0.0], 50.0),
+        ]);
+        let c = convert(&import, true, false);
+        assert_eq!(c.blocks.len(), 2, "{}", c.blocks.len());
+        assert_eq!(c.blocks[0].0, "4.02");
+        assert_eq!(c.blocks[1].0, "4.021");
+        assert_eq!(c.entities.len(), 2);
     }
 }

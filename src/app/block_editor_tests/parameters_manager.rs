@@ -147,14 +147,14 @@ fn the_expression_cell_edits_the_same_number_as_the_value_cell() {
 }
 
 #[test]
-fn a_parameter_name_is_not_an_expression_and_the_used_filter_lists_nothing() {
+fn a_typed_name_is_refused_and_the_used_filter_lists_nothing() {
     let (mut app, tab, definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
     let before = manager::rows(&app.tabs[tab].scene.document, definition);
     answer(&mut app, "Angle1", Cell::Expression, "Distance1");
     assert_eq!(
         app.command_line.last_error.as_deref(),
         Some("Specify a finite numeric parameter value."),
-        "another row's name is not a variable an expression cell can use"
+        "the cell keeps a number, so text is refused rather than stored"
     );
     assert_eq!(
         manager::rows(&app.tabs[tab].scene.document, definition),

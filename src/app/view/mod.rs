@@ -17,6 +17,8 @@ use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Tas
 use iced_aw::ContextMenu;
 
 #[cfg(test)]
+mod hatch_panel_widget_tests;
+#[cfg(test)]
 mod select_similar_clipboard_tests;
 #[cfg(test)]
 mod table_inplace_widget_tests;
@@ -3920,7 +3922,12 @@ impl OpenCADStudio {
         // host document without requiring a user-generated message.
         #[cfg(not(target_arch = "wasm32"))]
         let plugin_drain = if crate::plugin::external::with_manager(|mgr| !mgr.ids().is_empty()) {
-            iced::time::every(std::time::Duration::from_millis(100))
+            let interval = if self.plugin_dialog_state.is_some() {
+                std::time::Duration::from_millis(25)
+            } else {
+                std::time::Duration::from_millis(100)
+            };
+            iced::time::every(interval)
                 .map(|_| Message::DrainPluginRequests)
         } else {
             Subscription::none()

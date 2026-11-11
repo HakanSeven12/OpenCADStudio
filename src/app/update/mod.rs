@@ -3191,19 +3191,35 @@ impl OpenCADStudio {
             }
             Message::PluginDialogBoolToggle(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.bool_values.insert(id, val);
+                    state.bool_values.insert(id.clone(), val);
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "toggle".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Bool(val)),
+                    );
                 }
                 Task::none()
             }
             Message::PluginDialogChoiceSelect(id, idx) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.choice_values.insert(id, idx);
+                    state.choice_values.insert(id.clone(), idx);
+                    let opt_text = state.choice_option_text(&id, idx);
+                    let val = ocs_plugin_api::dialog::DialogValue::Choice {
+                        index: idx,
+                        text: opt_text,
+                    };
+                    return self.dispatch_plugin_dialog_action(id, "change".to_string(), Some(val));
                 }
                 Task::none()
             }
             Message::PluginDialogColorChange(id, rgb) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.color_values.insert(id, rgb);
+                    state.color_values.insert(id.clone(), rgb);
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Color(rgb)),
+                    );
                 }
                 Task::none()
             }
@@ -3225,6 +3241,7 @@ impl OpenCADStudio {
                     if let Some(rows) = state.table_values.get_mut(&id) {
                         rows.push(vec![String::new(); col_count]);
                     }
+                    return self.dispatch_plugin_dialog_action(id, "add_row".to_string(), None);
                 }
                 Task::none()
             }
@@ -3235,6 +3252,11 @@ impl OpenCADStudio {
                             rows.remove(row_idx);
                         }
                     }
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "remove_row".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Number(row_idx as f64)),
+                    );
                 }
                 Task::none()
             }
@@ -3308,104 +3330,166 @@ impl OpenCADStudio {
             }
             Message::PluginDialogFilePicked(id, path) => {
                 if let Some(p) = path {
+                    let path_str = p.to_string_lossy().to_string();
                     if let Some(state) = &mut self.plugin_dialog_state {
                         state
                             .file_values
-                            .insert(id, p.to_string_lossy().to_string());
+                            .insert(id.clone(), path_str.clone());
                     }
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::FilePath(path_str)),
+                    );
                 }
                 Task::none()
             }
-            Message::PluginDialogSubmit => {
-                let response = if let Some(state) = &self.plugin_dialog_state {
-                    state.collect_response()
-                } else {
-                    ocs_plugin_api::dialog::DialogResponse::Cancelled
-                };
-                self.close_active_modal();
-
-                let tab_idx = self.active_tab;
-                let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
-                    .tabs
-                    .get_mut(tab_idx)
-                    .and_then(|t| t.active_cmd.as_mut())
-                {
-                    let res = cmd.on_dialog_response(response);
-                    let next = if matches!(
-                        res,
-                        crate::command::CmdResult::CommitAndExit(_)
-                            | crate::command::CmdResult::CommitEntitiesAndExit(_)
-                            | crate::command::CmdResult::Cancel
-                    ) {
-                        None
+            Message::PluginDialogFileTextChange(id, val) => {
+                if let Some(state) = &mut self.plugin_dialog_state {
+                    state.file_values.insert(id.clone(), val.clone());
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::FilePath(val)),
+                    );
+                }
+                Task::none()
+            }
+            Message::PluginDialogButtonClick(id, action) => {
+                let tab_idx = self.dialog_target_tab_index();
+                let action_for_event = action.clone().unwrap_or_else(|| "click".to_string());
+                let (action_resp, panel_updates, dialog_meta) =
+                    if let Some(state) = &self.plugin_dialog_state {
+                        let current_values = state.collect_response_map();
+                        let dialog_title = state.def.title.clone();
+                        let owner_plugin_id = state.plugin_id.clone();
+                        let owner_command_id = state.command_id;
+                        let event = ocs_plugin_api::dialog::DialogEvent {
+                            control_id: id.clone(),
+                            action: action_for_event,
+                            value: None,
+                            current_values: current_values.clone(),
+                        };
+                        if let Some(cmd) = self
+                            .tabs
+                            .get_mut(tab_idx)
+                            .and_then(|t| t.active_cmd.as_mut())
+                        {
+                            let resp = cmd.on_dialog_action(event);
+                            let updates = cmd.take_pending_panel_updates();
+                            (
+                                Some(resp),
+                                updates,
+                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                            )
+                        } else {
+                            (
+                                None,
+                                Vec::new(),
+                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                            )
+                        }
                     } else {
-                        cmd.modal_dialog()
+                        (None, Vec::new(), None)
                     };
-                    let updates = cmd.take_pending_panel_updates();
-                    (Some(res), next, updates)
-                } else {
-                    (None, None, Vec::new())
-                };
 
-                for (panel_id, values) in panel_updates {
-                    if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                        panel.update_values(values);
+                let had_pending_updates = !panel_updates.is_empty();
+                self.apply_panel_or_dialog_updates(panel_updates);
+
+                match action_resp {
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::UpdateValues(values)) => {
+                        if let Some(state) = &mut self.plugin_dialog_state {
+                            state.update_values(values);
+                        }
+                        return Task::none();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::ReplaceDialog(new_def)) => {
+                        if let Some(state) = &mut self.plugin_dialog_state {
+                            let tab_id = state.tab_id;
+                            let plugin_id = state.plugin_id.clone();
+                            let command_id = state.command_id;
+                            *state =
+                                crate::ui::window::plugin_dialog::PluginDialogState::new(*new_def)
+                                    .with_owner(tab_id, plugin_id, command_id);
+                        }
+                        return Task::none();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::Submit) => {
+                        return self.on_plugin_dialog_submit();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::Close) => {
+                        return self.on_plugin_dialog_cancel();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::None) | None => {
+                        if had_pending_updates {
+                            return Task::none();
+                        }
                     }
                 }
 
-                if let Some(def) = next_dialog {
-                    self.open_plugin_dialog(def);
-                }
-
-                if let Some(res) = cmd_result {
-                    self.apply_cmd_result(res)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::PluginDialogCancel => {
-                self.close_active_modal();
-
-                let tab_idx = self.active_tab;
-                let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
-                    .tabs
-                    .get_mut(tab_idx)
-                    .and_then(|t| t.active_cmd.as_mut())
-                {
-                    let res =
-                        cmd.on_dialog_response(ocs_plugin_api::dialog::DialogResponse::Cancelled);
-                    let next = if matches!(
-                        res,
-                        crate::command::CmdResult::CommitAndExit(_)
-                            | crate::command::CmdResult::CommitEntitiesAndExit(_)
-                            | crate::command::CmdResult::Cancel
-                    ) {
-                        None
-                    } else {
-                        cmd.modal_dialog()
-                    };
-                    let updates = cmd.take_pending_panel_updates();
-                    (Some(res), next, updates)
-                } else {
-                    (None, None, Vec::new())
-                };
-
-                for (panel_id, values) in panel_updates {
-                    if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                        panel.update_values(values);
+                // Fall back to the panel button click path when on_dialog_action returns None.
+                let action_str = action.unwrap_or_default();
+                let lower = action_str.to_ascii_lowercase();
+                if lower == "close" || lower == "hide" {
+                    return self.on_plugin_dialog_cancel();
+                } else if lower == "clear" {
+                    if let Some(state) = &mut self.plugin_dialog_state {
+                        for rows in state.table_values.values_mut() {
+                            rows.clear();
+                        }
                     }
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                        crate::plugin::v4_support::publish_panel_action_to_plugin(
+                            owner_plugin_id.as_deref(),
+                            *owner_command_id,
+                            dialog_title.clone(),
+                            id,
+                            "clear".to_string(),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                        );
+                    }
+                    return Task::none();
+                } else if lower == "reset" {
+                    if let Some(state) = &mut self.plugin_dialog_state {
+                        state.reset_values();
+                    }
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                        crate::plugin::v4_support::publish_panel_action_to_plugin(
+                            owner_plugin_id.as_deref(),
+                            *owner_command_id,
+                            dialog_title.clone(),
+                            id,
+                            "reset".to_string(),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                        );
+                    }
+                    return Task::none();
                 }
 
-                if let Some(def) = next_dialog {
-                    self.open_plugin_dialog(def);
+                // A button whose action names a command runs it, as panel
+                // buttons do; a plain button is a click event for the plugin.
+                if !action_str.is_empty() {
+                    return self.dispatch_command(&action_str);
                 }
-
-                if let Some(res) = cmd_result {
-                    self.apply_cmd_result(res)
-                } else {
-                    Task::none()
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) =
+                    &dialog_meta
+                {
+                    crate::plugin::v4_support::publish_panel_action_to_plugin(
+                        owner_plugin_id.as_deref(),
+                        *owner_command_id,
+                        dialog_title.clone(),
+                        id,
+                        "click".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                    );
                 }
+                Task::none()
             }
+            Message::PluginDialogControlEvent(id, action, val) => {
+                self.dispatch_plugin_dialog_action(id, action, val)
+            }
+            Message::PluginDialogSubmit => self.on_plugin_dialog_submit(),
+            Message::PluginDialogCancel => self.on_plugin_dialog_cancel(),
 
             Message::PluginPanelButtonClick(panel_id, control_id, action) => {
                 let action_str = action.unwrap_or_default();
@@ -3433,7 +3517,9 @@ impl OpenCADStudio {
                 } else if lower == "reset" {
                     if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
                         let def = panel.def.clone();
+                        let owner = panel.owner_plugin_id.clone();
                         *panel = crate::ui::window::plugin_panel::PluginPanelState::from_def(def);
+                        panel.owner_plugin_id = owner;
                     }
                     crate::plugin::v4_support::publish_panel_action(
                         panel_id,
@@ -3488,44 +3574,7 @@ impl OpenCADStudio {
                 } else {
                     self.plugin_panels
                         .get(&panel_id)
-                        .and_then(|p| {
-                            fn find_choice(
-                                ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                                cid: &str,
-                                idx: usize,
-                            ) -> Option<String> {
-                                for c in ctrls {
-                                    match c {
-                                        ocs_plugin_api::dialog::DialogControl::Choice {
-                                            id,
-                                            options,
-                                            ..
-                                        } if id == cid => {
-                                            return options.get(idx).cloned();
-                                        }
-                                        ocs_plugin_api::dialog::DialogControl::Fields {
-                                            controls,
-                                            ..
-                                        }
-                                        | ocs_plugin_api::dialog::DialogControl::Row {
-                                            controls,
-                                            ..
-                                        }
-                                        | ocs_plugin_api::dialog::DialogControl::Column {
-                                            controls,
-                                            ..
-                                        } => {
-                                            if let Some(o) = find_choice(controls, cid, idx) {
-                                                return Some(o);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                None
-                            }
-                            find_choice(&p.def.controls, &control_id, index)
-                        })
+                        .map(|p| p.choice_option_text(&control_id, index))
                         .unwrap_or_default()
                 };
                 if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
@@ -3662,6 +3711,19 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::PluginPanelFileTextChange(panel_id, control_id, val) => {
+                if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
+                    panel.file_values.insert(control_id.clone(), val.clone());
+                }
+                crate::plugin::v4_support::publish_panel_action(
+                    panel_id,
+                    control_id,
+                    "change".to_string(),
+                    Some(ocs_plugin_api::dialog::DialogValue::FilePath(val)),
+                );
+                Task::none()
+            }
+
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
@@ -6841,6 +6903,8 @@ impl OpenCADStudio {
                 // without Apply.
                 self.scale_stage_begin();
                 self.scale_reset_asking = false;
+                self.scale_delete_asking = false;
+                self.scale_edit_adding = false;
                 // Fallback scales are virtual (no real objects), so they can't
                 // be edited or renamed. Materialise the standard set into real
                 // staged objects so the manager behaves like a drawing with its
@@ -6863,6 +6927,7 @@ impl OpenCADStudio {
                 {
                     self.load_scale_editor(&first);
                 }
+                self.scale_manager_multi = vec![self.scale_manager_selected.clone()];
                 self.active_modal = Some(crate::app::ModalKind::ScaleManager);
                 Task::none()
             }
@@ -6902,6 +6967,7 @@ impl OpenCADStudio {
                                 (*handle, names)
                             })
                             .collect(),
+                        order: self.tabs[i].scene.scale_names_in_list_order(),
                         ..Default::default()
                     };
                     self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
@@ -6910,10 +6976,17 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleCommon(common) => {
                 self.anno_object_scale.common_only = common;
+                // The shared list opens on its first scale when none of the
+                // selected ones is in it.
+                if common && self.anno_object_scale.selected_listed().is_empty() {
+                    self.anno_object_scale.selected =
+                        self.anno_object_scale.listed().into_iter().take(1).collect();
+                }
                 Task::none()
             }
             Message::AnnoObjectScaleSelect(name) => {
-                self.anno_object_scale.selected = Some(name);
+                let (ctrl, shift) = (self.ctrl_down, self.shift_down);
+                self.anno_object_scale.click(name, ctrl, shift);
                 Task::none()
             }
             Message::AnnoObjectScaleAdd => {
@@ -6953,11 +7026,7 @@ impl OpenCADStudio {
             }
             Message::AnnoObjectScaleDelete => {
                 if self.anno_object_scale.can_delete() {
-                    if let Some(name) = self.anno_object_scale.selected.take() {
-                        for (_, scales) in &mut self.anno_object_scale.staged {
-                            scales.retain(|s| !s.eq_ignore_ascii_case(&name));
-                        }
-                    }
+                    self.anno_object_scale.delete_picked();
                 }
                 Task::none()
             }
@@ -7115,32 +7184,81 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerSelect(name) => {
-                // Stage the current editor edits before switching so they aren't
-                // lost, then load the newly-selected scale.
-                self.scale_rename = None;
-                self.scale_apply_current();
+                // Ctrl toggles a row, Shift picks the run from the last
+                // clicked row, a plain click picks the row alone.
+                let i = self.active_tab;
+                let order = self.tabs[i].scene.scale_names_in_list_order();
+                let at = |n: &str| order.iter().position(|o| o.eq_ignore_ascii_case(n));
+                let anchor = self.scale_manager_selected.clone();
+                if self.shift_down && !anchor.is_empty() {
+                    if let (Some(a), Some(b)) = (at(&anchor), at(&name)) {
+                        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+                        self.scale_manager_multi = order[a..=b].to_vec();
+                    }
+                    return Task::none();
+                }
+                if self.ctrl_down {
+                    if let Some(pos) = self
+                        .scale_manager_multi
+                        .iter()
+                        .position(|s| s.eq_ignore_ascii_case(&name))
+                    {
+                        self.scale_manager_multi.remove(pos);
+                        // Edit and Move act on the selected row: the last
+                        // one still picked, not the one just dropped.
+                        if let Some(last) = self.scale_manager_multi.last().cloned() {
+                            self.load_scale_editor(&last);
+                        }
+                        return Task::none();
+                    }
+                    self.scale_manager_multi.push(name.clone());
+                } else {
+                    self.scale_manager_multi = vec![name.clone()];
+                }
                 self.load_scale_editor(&name);
                 Task::none()
             }
             Message::ScaleManagerPaperBuf(s) => {
+                if self.scale_card_units_locked() {
+                    return Task::none();
+                }
                 self.scale_manager_paper_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleManagerDrawingBuf(s) => {
+                if self.scale_card_units_locked() {
+                    return Task::none();
+                }
                 self.scale_manager_drawing_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleManagerNew => {
-                // Add a new scale to the list immediately (staged) and select it,
-                // like the style managers' New. The user edits its name / ratio;
-                // it's kept only if Apply is pressed before the window closes.
-                self.scale_apply_current();
-                let i = self.active_tab;
-                let name = self.unique_scale_name("New Scale");
-                if self.tabs[i].scene.add_scale(&name, 1.0, 1.0) {
-                    self.load_scale_editor(&name);
-                    self.scale_stage_mark();
+                // Add opens the card with a fresh name and 1 : 1; the scale
+                // joins the list's end only when the card is applied.
+                // The name starts empty as the reference's Add Scale does.
+                self.scale_edit_adding = true;
+                self.scale_edit_error = None;
+                self.scale_rename_buf = String::new();
+                self.scale_rename = Some(String::new());
+                self.scale_manager_paper_buf = "1".into();
+                self.scale_manager_drawing_buf = "1".into();
+                iced::widget::operation::focus(crate::ui::style::scale_manager::rename_input_id())
+            }
+            Message::ScaleManagerEdit => {
+                let name = self.scale_manager_selected.clone();
+                if name.is_empty() || self.scale_manager_multi.len() > 1 {
+                    return Task::none();
                 }
+                self.update(Message::ScaleRenameStart(name))
+            }
+            Message::ScaleManagerEditCancel => {
+                self.scale_rename = None;
+                self.scale_edit_error = None;
+                self.scale_edit_adding = false;
+                let selected = self.scale_manager_selected.clone();
+                self.load_scale_editor(&selected);
                 Task::none()
             }
             Message::ScaleManagerCopy => {
@@ -7162,18 +7280,84 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleRenameStart(name) => {
-                // Stage current editor edits, then rename this row inline.
-                self.scale_apply_current();
+                // Double-click or Edit...: the card edits this scale.
+                self.scale_edit_adding = false;
+                self.scale_edit_error = None;
+                self.scale_manager_multi = vec![name.clone()];
+                self.load_scale_editor(&name);
                 self.scale_rename_buf = name.clone();
                 self.scale_rename = Some(name);
                 iced::widget::operation::focus(crate::ui::style::scale_manager::rename_input_id())
             }
             Message::ScaleRenameEdit(s) => {
                 self.scale_rename_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleRenameCommit => {
                 let i = self.active_tab;
+                // Refusals as the reference words them: a missing name, a
+                // name another scale has, then a ratio that is not positive.
+                {
+                    let name = self.scale_rename_buf.trim().to_string();
+                    let old = self.scale_rename.clone().unwrap_or_default();
+                    let units_open = self.scale_edit_adding || !self.scale_units_locked(i, &old);
+                    let number = |text: &str| text.trim().parse::<f64>().ok().filter(|v| *v > 0.0);
+                    let refusal = if name.is_empty() {
+                        Some(
+                            crate::t!("No name specified for this scale.  Please enter a name.")
+                                .into_owned(),
+                        )
+                    } else if !name.eq_ignore_ascii_case(&old)
+                        && self.tabs[i].scene.scale_paper_drawing(&name).is_some()
+                    {
+                        Some(crate::tf!("{} already exists.", name).into_owned())
+                    } else if units_open
+                        && (number(&self.scale_manager_paper_buf).is_none()
+                            || number(&self.scale_manager_drawing_buf).is_none())
+                    {
+                        Some(crate::t!("Invalid scale number.").into_owned())
+                    } else {
+                        None
+                    };
+                    if refusal.is_some() {
+                        self.scale_edit_error = refusal;
+                        return Task::none();
+                    }
+                    self.scale_edit_error = None;
+                    if !units_open {
+                        // Locked units: the stored ratio stays.
+                        let selected = self.scale_manager_selected.clone();
+                        self.load_scale_editor(&selected);
+                        self.scale_rename_buf = name;
+                    }
+                }
+                if self.scale_edit_adding {
+                    // Add: a unique name and a positive ratio make the scale.
+                    let name = self.scale_rename_buf.trim().to_string();
+                    let paper = self.scale_manager_paper_buf.trim().parse::<f64>().ok();
+                    let drawing = self.scale_manager_drawing_buf.trim().parse::<f64>().ok();
+                    let (Some(paper), Some(drawing)) = (paper, drawing) else {
+                        return Task::none();
+                    };
+                    if name.is_empty()
+                        || paper <= 0.0
+                        || drawing <= 0.0
+                        || self.tabs[i].scene.scale_paper_drawing(&name).is_some()
+                    {
+                        return Task::none();
+                    }
+                    if self.tabs[i].scene.add_scale(&name, paper, drawing) {
+                        self.scale_stage_mark();
+                        self.scale_edit_adding = false;
+                        self.scale_rename = None;
+                        self.scale_manager_multi = vec![name.clone()];
+                        self.load_scale_editor(&name);
+                    }
+                    return Task::none();
+                }
+                // Edit: the ratio first, then the name.
+                self.scale_apply_current();
                 if let Some(old) = self.scale_rename.take() {
                     let new = self.scale_rename_buf.trim().to_string();
                     if !new.is_empty() && !new.eq_ignore_ascii_case(&old) {
@@ -7208,7 +7392,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerMove(step) => {
-                self.scale_apply_current();
+                if self.scale_manager_multi.len() > 1 {
+                    return Task::none();
+                }
                 let i = self.active_tab;
                 let selected = self.scale_manager_selected.clone();
                 if self.tabs[i].scene.move_scale(&selected, step) {
@@ -7226,7 +7412,6 @@ impl OpenCADStudio {
                     // Reset takes effect at once, as the reference's does:
                     // the scales in use stay, the rest go, the chosen default
                     // list is added after them.
-                    self.scale_apply_current();
                     let i = self.active_tab;
                     let keep: Vec<String> = self.tabs[i]
                         .scene
@@ -7245,13 +7430,13 @@ impl OpenCADStudio {
                         .into_iter()
                         .next();
                     if let Some(first) = first {
+                        self.scale_manager_multi = vec![first.clone()];
                         self.load_scale_editor(&first);
                     }
                 }
                 Task::none()
             }
             Message::ScaleManagerOk => {
-                self.scale_apply_current();
                 self.scale_stage_commit();
                 self.close_active_modal();
                 Task::none()
@@ -7265,21 +7450,35 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ScaleManagerDelete => {
-                // Staged: reverted on close unless a later Apply commits it.
+                // Staged: reverted on close unless OK commits it. A scale in
+                // use is never deleted; with some in use among the picked
+                // ones the window asks before dropping the rest.
                 let i = self.active_tab;
-                let sel = self.scale_manager_selected.clone();
-                let cur = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .current_annotation_scale
-                    .clone();
-                // A scale in use is never deleted.
-                if !sel.is_empty()
-                    && !sel.eq_ignore_ascii_case(&cur)
-                    && self.tabs[i].scene.scale_in_use_count(&sel) == 0
-                {
-                    if self.tabs[i].scene.remove_scale(&sel) {
+                let picked = self.scale_manager_multi.clone();
+                let used = picked.iter().filter(|name| self.anno_scale_referenced(i, name)).count();
+                if picked.is_empty() || used == picked.len() {
+                    return Task::none();
+                }
+                if used > 0 {
+                    self.scale_delete_asking = true;
+                    return Task::none();
+                }
+                self.update(Message::ScaleManagerDeleteChoice(true))
+            }
+            Message::ScaleManagerDeleteChoice(delete) => {
+                self.scale_delete_asking = false;
+                if delete {
+                    let i = self.active_tab;
+                    let picked = std::mem::take(&mut self.scale_manager_multi);
+                    let unused: Vec<String> = picked
+                        .into_iter()
+                        .filter(|name| !self.anno_scale_referenced(i, name))
+                        .collect();
+                    let mut removed = false;
+                    for name in &unused {
+                        removed |= self.tabs[i].scene.remove_scale(name);
+                    }
+                    if removed {
                         self.scale_manager_selected.clear();
                         self.scale_manager_paper_buf.clear();
                         self.scale_manager_drawing_buf.clear();
@@ -10388,6 +10587,12 @@ impl OpenCADStudio {
                 if !handles.is_empty() {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match app.tabs[i].scene.document.get_entity_mut(handle) {
+                            // None turns the background mask off.
+                            Some(document::EntityType::MText(m))
+                                if color == document::types::Color::None =>
+                            {
+                                m.background_fill_flags &= !0x03;
+                            }
                             Some(document::EntityType::MText(m)) => {
                                 m.background_color = color;
                                 // Picking a colour turns the background on in Fill
@@ -10395,7 +10600,11 @@ impl OpenCADStudio {
                                 m.background_fill_flags = (m.background_fill_flags & !0x02) | 0x01;
                             }
                             Some(document::EntityType::Hatch(h)) => {
-                                crate::entities::hatch::set_background_color(h, &color);
+                                if color == document::types::Color::None {
+                                    crate::entities::hatch::clear_background_color(h);
+                                } else {
+                                    crate::entities::hatch::set_background_color(h, &color);
+                                }
                             }
                             _ => {}
                         }
@@ -15540,6 +15749,27 @@ impl OpenCADStudio {
     /// its name (renaming is done inline in the list). Staged, no commit — so
     /// the ratio edit survives Apply *and* switching to another row. Editing a
     /// built-in fallback scale materialises it as a real one.
+    /// The open edit card shows a scale whose units are locked.
+    fn scale_card_units_locked(&self) -> bool {
+        !self.scale_edit_adding
+            && self
+                .scale_rename
+                .as_deref()
+                .is_some_and(|old| self.scale_units_locked(self.active_tab, old))
+    }
+
+    /// A scale in use, the current one and the drawing's unit scale keep
+    /// their ratio: the card shows their units greyed (measured).
+    pub(in crate::app) fn scale_units_locked(&self, i: usize, name: &str) -> bool {
+        !name.is_empty()
+            && (self.anno_scale_referenced(i, name)
+                || self.tabs[i]
+                    .scene
+                    .unit_scale_names()
+                    .iter()
+                    .any(|unit| unit.eq_ignore_ascii_case(name)))
+    }
+
     fn scale_apply_current(&mut self) {
         let i = self.active_tab;
         let sel = self.scale_manager_selected.clone();

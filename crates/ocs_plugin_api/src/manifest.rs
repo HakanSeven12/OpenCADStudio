@@ -145,7 +145,19 @@
 /// declares v16 and the older host refuses to load it. Custom grips now
 /// snap (object snap, tracking, ortho, polar) and settle click-move-click
 /// like native grips.
-pub const API_VERSION: u32 = 16;
+/// v17: reactive modal dialogs — `InteractiveCommand::on_dialog_action` (a new
+/// vtable slot, so the runner only calls it for v17 plugins), the
+/// `DialogValue::ChoiceOptions` / `Enabled` / `Visible` updates and the
+/// `DialogControl::Label` control, all appended to their enums. A v16 host
+/// cannot decode them, so a plugin that uses them declares v17.
+/// v18: complete dock-panel snapshots. An ordinary document-bound panel
+/// command synchronously reads typed values, exact text and validation errors
+/// through `HostApi::panel_snapshot`; the host authenticates panel ownership
+/// from the IPC transport and attaches the session's real tab. The appended
+/// request requires v18: a v17 host refuses the new plugin at load rather
+/// than accepting it and failing to decode the request. v17 plugins remain
+/// supported. Asynchronous `PanelAction` notifications remain read-only.
+pub const API_VERSION: u32 = 18;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

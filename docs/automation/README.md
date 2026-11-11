@@ -318,15 +318,15 @@ Either a handle list or a block name, never both. The open document is not modif
 
 The result reports `{"path":…, "entities":<count>}`. Referenced layer definitions travel with the entities; block definitions export flattened into model space.
 
-### `plot` — render to PDF
+### `plot` — render to PDF or SVG
 
-Plots the active document without any dialog. `layout` selects `"Model"` (default), one layout name, or `"all"`. `area` is `"extents"` (default), `"display"`, `"limits"`, `"window"` (needs `window:[x0,y0,x1,y1]`), or `"layout"` (the laid-out sheet, layouts only). `paper` names a catalog sheet, `orientation` is `"Portrait"`/`"Landscape"`, sizing is `"fit":true` (default) or `"scale":"1:100"`, plus `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB path or discovered name) and the output toggles `transparency`, `lineweights`, `merge_lines`, `stamp`:
+Plots the active document without any dialog. The `path` extension selects PDF or SVG. `layout` selects `"Model"` (default), one layout name, or `"all"`. `area` is `"extents"` (default), `"display"`, `"limits"`, `"window"` (needs `window:[x0,y0,x1,y1]`), or `"layout"` (the laid-out sheet, layouts only). `paper` names a catalog sheet, `orientation` is `"Portrait"`/`"Landscape"`, and `shade` selects the shaded-viewport plot mode. Sizing is `"fit":true` (default) or `"scale":"1:100"`, plus `center`, `offset_x/offset_y`, `upside_down`. `plot_style` accepts a CTB path or discovered name; `apply_plot_styles` can enable/disable the selected stored table. Output controls are `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, and `stamp`. SVG additionally offers `non_scaling_stroke` — constant stroke widths under downstream SVG transforms, useful for web-map layers; it defaults `false` and does not change the CAD plot scale. For SVG, `"text_as_outlines":true` replaces font-dependent text elements with glyph paths; the default retains searchable text. PDF ignores both SVG-only options:
 
 ```json
 {"protocol":1,"op":"plot","request_id":"plot-1","document_id":1,"path":"C:/out/pages.pdf","layout":"all","paper":"ISO_A4_(210.00_x_297.00_MM)","fit":true,"center":true}
 ```
 
-Explicitly supplied fields override a layout's stored page setup; unspecified fields keep it. The result reports `{"path":…, "pages":<n>, "page_sizes":[[w,h],…]}` in millimetres.
+Explicitly supplied fields override a layout's stored page setup; unspecified fields keep it. When `plot_style` is supplied, styling defaults to enabled; an explicit `apply_plot_styles:false` disables that table as well. The result reports `{"path":…, "pages":<n>, "page_sizes":[[w,h],…]}` in millimetres.
 
 ### `embed_image` — attach a picture
 
@@ -785,6 +785,22 @@ seed, hex).
 
 Fits the entities into the view and selects them. Headless servers refuse
 with `code:"gui_required"`; REST clients get HTTP 409.
+
+### `action` — the UI toggles and the open dialogs
+
+```json
+{"op":"action","name":"grid","value":"on"}
+```
+
+UI toggles go by name. The open import dialogs are driven field-by-field: the
+DGN Import window answers `dgn_import_dialog` with
+`value="path=<file>"`, `"model=<index>"`, `"target=new|current"`,
+`"conflict=prefix|ignore"`, `"units=master|sub"`, `"explode=on|off"`,
+`"code_page=<windows page>"` (e.g. `1252` default, `1250` Central European,
+`932` Shift-JIS, `65001` UTF-8), `"references=translate|ignore|underlay"`,
+`"existing=prompt|overwrite|keep"`, `"mapping=layer|linetype|lineweight|color"`,
+then `"ok"` to import or `"cancel"`. The window must already be open — run
+`DGNIMPORT` (or open the Import File dialog and pick a DGN) first.
 
 ## Document, sheet and organization operations (protocol ops)
 

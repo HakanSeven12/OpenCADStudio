@@ -2088,6 +2088,39 @@ mod stretch_preselection_tests {
     }
 
     #[test]
+    fn a_crossing_window_stretches_a_wipeout_frame() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let wipeout = document::EntityType::Wipeout(document::entities::Wipeout::rectangular(
+            Vector3::new(0.0, 0.0, 0.0),
+            4.0,
+            2.0,
+        ));
+        let handle = app.tabs[i].scene.document.add_entity(wipeout).unwrap();
+        app.tabs[i].scene.select_entities(&[handle]);
+        app.tabs[i].last_crossing_window = Some(([3.0, -1.0], [5.0, 3.0]));
+
+        let _ = app.dispatch_command("STRETCH");
+        for point in [DVec3::new(4.0, 0.0, 0.0), DVec3::new(6.0, 0.0, 0.0)] {
+            let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(point);
+            let _ = app.apply_cmd_result(res);
+        }
+
+        let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
+        let document::EntityType::Wipeout(w) = ent else {
+            panic!("expected wipeout");
+        };
+        let xs: Vec<f64> = w
+            .world_boundary_vertices()
+            .iter()
+            .map(|p| (p.x * 1e6).round() / 1e6)
+            .collect();
+        assert!(xs.contains(&0.0), "left side stays: {xs:?}");
+        assert!(xs.contains(&6.0), "right side moves to x = 6: {xs:?}");
+        assert!(!xs.contains(&4.0), "no corner left at x = 4: {xs:?}");
+    }
+
+    #[test]
     fn preselected_without_crossing_window_moves_rigidly() {
         let mut app = fresh();
         let i = app.active_tab;

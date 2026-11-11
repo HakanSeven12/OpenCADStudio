@@ -64,12 +64,23 @@ impl OpenCADStudio {
             })
     }
 
-    /// The active command is at a point prompt (keywords allowed) and not
-    /// picking an object: where MTP and typed snap overrides apply.
+    /// The active command takes a point (a point prompt, or a distance or
+    /// angle prompt a point answers too) and is not picking an object or
+    /// reading prose: where MTP and typed snap overrides apply (measured:
+    /// `_end` works at TEXT height, CIRCLE radius, ROTATE angle and OFFSET
+    /// distance as at a point prompt).
     pub(crate) fn point_modifier_step(&self, i: usize) -> bool {
         self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
-            (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
+            // A name prompt (block, layer, style) is not one: there `END`
+            // or `NODE` is the name typed.
+            (!c.input_kind().wants_text()
+                || c.point_step_accepts_keywords()
+                || matches!(
+                    c.dyn_field(),
+                    crate::command::DynField::Distance | crate::command::DynField::Angle
+                ))
                 && !c.needs_entity_pick()
+                && !c.is_selection_gathering()
         })
     }
 
@@ -100,6 +111,75 @@ impl OpenCADStudio {
                         .starts_with(&typed)
             });
         (!offered).then_some(kind)
+    }
+
+    /// A typed coordinate under a one-shot object snap override (`END` then
+    /// `40.5,0`) snaps the way a pick at that point would: the feature of the
+    /// override's kind nearest the point on the object under the aperture
+    /// there. `None` when no override is waiting; `Some(Err(()))` when none
+    /// is found — the point is refused and the prompt asks again, the
+    /// override spent.
+    pub(crate) fn typed_override_snap(
+        &mut self,
+        i: usize,
+        wcs: glam::DVec3,
+    ) -> Option<Result<Option<SnapResult>, ()>> {
+        let mode = self.snapper.pending_override()?;
+        let Some(mode) = mode else {
+            return Some(Ok(None));
+        };
+        let from = self.last_point;
+        if let Some(hit) = self.snap_query(i, wcs, from, None) {
+            return Some(Ok(Some(hit)));
+        }
+        // No feature inside the aperture: the object under it answers with
+        // its own nearest feature of that kind, however far along it lies.
+        let saved = std::mem::replace(
+            &mut self.snapper.enabled,
+            std::iter::once(crate::snap::SnapType::Nearest).collect(),
+        );
+        let under = self.snap_query(i, wcs, from, None);
+        self.snapper.enabled = saved;
+        let owner = under.and_then(|hit| hit.source).map(|source| source.handle);
+        if let Some(owner) = owner {
+            let wires: Vec<_> = self.tabs[i]
+                .scene
+                .hit_test_wires()
+                .iter()
+                .filter(|wire| {
+                    crate::scene::Scene::handle_from_wire_name(&wire.name) == Some(owner)
+                })
+                .cloned()
+                .collect();
+            let radius = self.snapper.osnap_radius_px;
+            self.snapper.osnap_radius_px = f32::MAX / 4.0;
+            let hit = self.snap_query(i, wcs, from, Some(&wires));
+            self.snapper.osnap_radius_px = radius;
+            if let Some(hit) = hit {
+                return Some(Ok(Some(hit)));
+            }
+        }
+        let label = crate::snap::ALL_SNAP_MODES
+            .iter()
+            .chain(crate::snap::ALL_3D_SNAP_MODES.iter())
+            .find(|(m, _, _)| *m == mode)
+            .map(|(_, _, l)| *l)
+            .unwrap_or("Snap");
+        self.command_line
+            .push_rejection(crate::tf!("No {label} found for specified point.").as_ref());
+        // The second line is the one the prompt prints for any input it
+        // cannot use (measured across point, angle, distance and dimension
+        // prompts).
+        let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        if let Some(command) = self.tabs[i].active_cmd.as_deref() {
+            let line = crate::command::point_rejection_line(command);
+            self.command_line.push_rejection(&line);
+        }
+        self.snapper.clear_override();
+        if let Some(prompt) = prompt {
+            self.command_line.push_info(&prompt);
+        }
+        Some(Err(()))
     }
 
     /// Keys while the snap override menu is open: a snap's letter (see

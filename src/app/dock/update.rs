@@ -612,6 +612,10 @@ impl OpenCADStudio {
                                 panel.visible = true;
                             }
                         }
+                        // Visibility alone does not place a newly registered
+                        // panel. Give it the same default dock as other
+                        // pallets so an explicit show is actually rendered.
+                        self.dock_open_at_default(id);
                     }
                 }
             }
@@ -788,6 +792,11 @@ impl OpenCADStudio {
                 PanelId::ParametersManager => self.clean_screen_parameters_manager,
                 PanelId::AuthoringPalettes => self.clean_screen_authoring_palettes,
                 PanelId::ToolPalettes => self.clean_screen_tool_palettes,
+                // A plugin panel explicitly opened after Clean Screen was
+                // entered must be visible just like a built-in reopened
+                // pallet. `dock_reveal` marks that explicit request; other
+                // plugin panels still stay hidden for the whole session.
+                PanelId::Plugin(_) if self.dock_peek == Some(id) => true,
                 _ => false,
             };
             if !reopened {

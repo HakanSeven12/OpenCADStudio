@@ -244,7 +244,17 @@ impl OpenCADStudio {
         self.grip_history_originals = handles
             .iter()
             .filter_map(|&handle| {
-                let objects = self.tabs[i].scene.solid_history_objects(handle);
+                let mut objects = self.tabs[i].scene.solid_history_objects(handle);
+                if let Some(entity @ document::EntityType::Insert(_)) =
+                    self.tabs[i].scene.document.get_entity(handle)
+                {
+                    objects.extend(
+                        crate::scene::annotative::annotation_context_objects_for_entity(
+                            &self.tabs[i].scene.document,
+                            entity,
+                        ),
+                    );
+                }
                 (!objects.is_empty()).then_some((handle, objects))
             })
             .collect();
@@ -935,16 +945,31 @@ impl OpenCADStudio {
         } else {
             input
         };
+        // A typed point after an object snap override snaps where it lands.
+        let mut snapped = None;
+        let input = match input {
+            StepInput::Point(point) if !default_start => match self.typed_override_snap(i, point) {
+                Some(Err(())) => return (Task::none(), true),
+                Some(Ok(Some(hit))) => {
+                    let world = hit.world;
+                    snapped = Some(hit);
+                    StepInput::Point(world)
+                }
+                _ => StepInput::Point(point),
+            },
+            other => other,
+        };
         if let StepInput::Point(point) = &input {
             if !self.command_point_allowed(i, *point) {
                 return (Task::none(), true);
             }
             self.angle_override = None;
-            // Typed / dynamic-input / headless points carry no snap, but the
-            // accepted-snap list must stay index-parallel with the points the
-            // command collects. Interactive picks record themselves in
-            // the click handler and never reach here.
-            if !self.record_accepted_snap(i, None, None, *point) {
+            // Typed / dynamic-input / headless points carry no snap (unless an
+            // override snapped them), but the accepted-snap list must stay
+            // index-parallel with the points the command collects.
+            // Interactive picks record themselves in the click handler and
+            // never reach here.
+            if !self.record_accepted_snap(i, snapped, None, *point) {
                 return (Task::none(), true);
             }
             self.snapper.clear_override();
@@ -1041,12 +1066,14 @@ impl OpenCADStudio {
         };
         let is_escape = matches!(&input, StepInput::Escape);
         let keyed = matches!(&input, StepInput::Text(_) | StepInput::Enter);
-        let (result, panel_updates): (Option<CmdResult>, Vec<_>) = {
+        let typed = matches!(&input, StepInput::Text(_));
+        let (result, panel_updates, moved_step): (Option<CmdResult>, Vec<_>, bool) = {
             let Some(cmd) = self.tabs[i].active_cmd.as_mut() else {
                 return (Task::none(), false);
             };
             cmd.set_ctrl(ctrl);
             cmd.set_shift(shift);
+            let before = typed.then(|| crate::command::step_signature(cmd.as_ref()));
             let res = match input {
                 StepInput::Point(p) => Some(cmd.on_point(p)),
                 StepInput::Text(s) => cmd.on_text_input(&s),
@@ -1059,13 +1086,14 @@ impl OpenCADStudio {
                 StepInput::Escape => Some(cmd.on_escape()),
             };
             let updates = cmd.take_pending_panel_updates();
-            (res, updates)
+            // Text a step took without a result (a count, a toggle) still
+            // moved the prompt on; read as unclaimed, it was fed again as a
+            // distance into the next step (#1571).
+            let moved_step = res.is_none()
+                && before.is_some_and(|b| b != crate::command::step_signature(cmd.as_ref()));
+            (res, updates, moved_step)
         };
-        for (panel_id, values) in panel_updates {
-            if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                panel.update_values(values);
-            }
-        }
+        self.apply_panel_or_dialog_updates(panel_updates);
         if let Some(handle) = picked_handle {
             self.record_dimension_entity_points(i, None, handle, Vec::new());
         }
@@ -1083,7 +1111,12 @@ impl OpenCADStudio {
                 }
                 (task, true)
             }
-            None => (Task::none(), false),
+            None => {
+                if moved_step && self.active_tab == i {
+                    self.refresh_active_cmd_preview(i);
+                }
+                (Task::none(), moved_step)
+            }
         }
     }
 

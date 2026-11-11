@@ -171,6 +171,8 @@ pub(super) const NAMES: &[&str] = &[
     "table_cell_warning",
     "table_cell_entry",
     "hyperlink_dialog",
+    "object_scale_dialog",
+    "scale_list_dialog",
     "spell_dialog",
     "table_cell_tab",
     "command_submit",
@@ -654,6 +656,7 @@ impl OpenCADStudio {
             };
         }
         let explicit_scale = req.get("scale").is_some();
+        let explicit_fit = req.get("fit").is_some();
         if let Some(scale) = req["scale"].as_str().filter(|s| !s.is_empty()) {
             request.scale = scale.to_owned();
             request.fit_to_paper = false;
@@ -668,28 +671,48 @@ impl OpenCADStudio {
         if let Some(offset) = req["offset_y"].as_f64() {
             request.offset_y = offset.to_string();
         }
+        if let Some(outlines) = req["text_as_outlines"].as_bool() {
+            request.text_as_outlines = outlines;
+        }
         if req.get("upside_down").is_some() {
             request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
+        }
+        if let Some(shade) = req["shade"].as_str() {
+            request.shade = crate::io::plot::SHADE_PLOT_MODES
+                .iter()
+                .find(|mode| mode.eq_ignore_ascii_case(shade))
+                .ok_or_else(|| failure("invalid_value", format!("Unknown shade mode '{shade}'")))?
+                .to_string();
         }
         for (key, field) in [
             ("transparency", 0),
             ("lineweights", 1),
             ("merge_lines", 2),
             ("stamp", 3),
+            ("non_scaling_stroke", 4),
+            ("scale_lineweights", 5),
+            ("paperspace_last", 6),
+            ("apply_plot_styles", 7),
         ] {
             if let Some(flag) = req[key].as_bool() {
                 match field {
                     0 => request.transparency = flag,
                     1 => request.lineweights = flag,
                     2 => request.merge_lines = flag,
-                    _ => request.stamp = flag,
+                    3 => request.stamp = flag,
+                    4 => request.non_scaling_stroke = flag,
+                    5 => request.scale_lw = flag,
+                    6 => request.paperspace_last = flag,
+                    _ => request.apply_plot_styles = flag,
                 }
             }
         }
         if let Some(table) = &loaded_style {
             self.active_plot_style = Some(table.clone());
             request.style_name = table.name.clone();
-            request.apply_plot_styles = true;
+            // Selecting a table enables it by default, but an explicit false
+            // still wins so callers can keep the table selected without using it.
+            request.apply_plot_styles = req["apply_plot_styles"].as_bool().unwrap_or(true);
             request.style_missing = false;
         }
         let area_explicit = req.get("area").is_some();
@@ -735,6 +758,9 @@ impl OpenCADStudio {
         let original_style = self.active_plot_style.clone();
         let original_camera = self.tabs[i].scene.camera.borrow().clone();
         let original_camera_generation = self.tabs[i].scene.camera_generation;
+        // A requested table is only a fallback when the request enables it.
+        // Otherwise `page.plot_style = None` would be undone at export time.
+        let export_style = loaded_style.as_ref().filter(|_| request.apply_plot_styles);
 
         let build = |app: &mut Self| -> Result<Vec<PdfPageInput>, String> {
             let mut pages = Vec::with_capacity(targets.len());
@@ -752,6 +778,13 @@ impl OpenCADStudio {
                     if page_dialog.area == "Layout" {
                         page_dialog.area = "Extents".into();
                     }
+                    // Model has no stored page-setup load below. Honor the
+                    // API's documented default rather than a persisted non-fit
+                    // dialog preference when neither scale nor fit was
+                    // requested.
+                    if !explicit_scale && !explicit_fit {
+                        page_dialog.fit_to_paper = true;
+                    }
                 } else if let Some(page_setup) = app.tabs[i].scene.plot_settings_for(name) {
                     // Stored page setup first, then the explicit request
                     // fields on top (a layout plot's behaviour).
@@ -760,8 +793,13 @@ impl OpenCADStudio {
                     app.load_plotsettings_into_dialog(&page_setup);
                     page_dialog = app.plot_dialog.clone();
                     page_dialog.paper_space = true;
+                    // An explicit area brings its window rect (the "Window"
+                    // plot branch reads `page_dialog.window`): a named
+                    // layout's stored setup must not swallow it. Without
+                    // `area` the request's rect is the dialog's leftover.
                     if area_explicit {
                         page_dialog.area = request.area.clone();
+                        page_dialog.window = request.window;
                     }
                     if request.paper_width_mm == 0.0 && !request.paper.is_empty() {
                         page_dialog.paper = request.paper.clone();
@@ -798,15 +836,34 @@ impl OpenCADStudio {
                     if req["merge_lines"].is_boolean() {
                         page_dialog.merge_lines = request.merge_lines;
                     }
+                    if req["text_as_outlines"].is_boolean() {
+                        page_dialog.text_as_outlines = request.text_as_outlines;
+                    }
                     if req["stamp"].is_boolean() {
                         page_dialog.stamp = request.stamp;
+                    }
+                    if req["non_scaling_stroke"].is_boolean() {
+                        page_dialog.non_scaling_stroke = request.non_scaling_stroke;
+                    }
+                    if req["scale_lineweights"].is_boolean() {
+                        page_dialog.scale_lw = request.scale_lw;
+                    }
+                    if req["paperspace_last"].is_boolean() {
+                        page_dialog.paperspace_last = request.paperspace_last;
+                    }
+                    if req["apply_plot_styles"].is_boolean() {
+                        page_dialog.apply_plot_styles = request.apply_plot_styles;
+                    }
+                    if req["shade"].is_string() {
+                        page_dialog.shade = request.shade.clone();
                     }
                     // The requested table wins over the layout's own, which
                     // the stored page setup just loaded (or failed to find).
                     if let Some(table) = &loaded_style {
                         app.active_plot_style = Some(table.clone());
                         page_dialog.style_name = table.name.clone();
-                        page_dialog.apply_plot_styles = true;
+                        page_dialog.apply_plot_styles =
+                            req["apply_plot_styles"].as_bool().unwrap_or(true);
                         page_dialog.style_missing = false;
                         page_dialog.style_error = None;
                     }
@@ -882,13 +939,13 @@ impl OpenCADStudio {
                     crate::io::svg_export::export_svg_pages(
                         std::slice::from_ref(page),
                         std::path::Path::new(&file),
-                        loaded_style.as_ref(),
+                        export_style,
                     )
                 } else {
                     crate::io::pdf_export::export_pdf_pages(
                         std::slice::from_ref(page),
                         std::path::Path::new(&file),
-                        loaded_style.as_ref(),
+                        export_style,
                     )
                 };
                 result.map_err(|e| failure("plot_failed", e))?;
@@ -904,13 +961,13 @@ impl OpenCADStudio {
             crate::io::svg_export::export_svg_pages(
                 &pages,
                 std::path::Path::new(path),
-                loaded_style.as_ref(),
+                export_style,
             )
         } else {
             crate::io::pdf_export::export_pdf_pages(
                 &pages,
                 std::path::Path::new(path),
-                loaded_style.as_ref(),
+                export_style,
             )
         };
         result.map_err(|e| failure("plot_failed", e))?;
@@ -1184,6 +1241,94 @@ impl OpenCADStudio {
         Ok(Task::batch(tasks))
     }
 
+    pub(super) fn panel_button_action(
+        controls: &[ocs_plugin_api::dialog::DialogControl],
+        control_id: &str,
+    ) -> Option<String> {
+        for control in controls {
+            match control {
+                ocs_plugin_api::dialog::DialogControl::Button { id, action, .. }
+                    if id == control_id =>
+                {
+                    return action.clone();
+                }
+                ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Fields { controls, .. } => {
+                    if let Some(action) = Self::panel_button_action(controls, control_id) {
+                        return Some(action);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Edit a native panel widget only. This does not touch document records,
+    /// entities, edit_revision or undo state; the normal PanelAction remains
+    /// a notification and never acquires HostApi.
+    pub(super) fn control_panel_input(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        if !self.plugin_panels.contains_key(panel_id) {
+            return Err(failure("panel_not_found", "The requested panel is not registered"));
+        }
+        let text = if let Some(text) = req["text"].as_str() {
+            text.to_string()
+        } else if let Some(value) = req["value"].as_f64().filter(|value| value.is_finite()) {
+            value.to_string()
+        } else {
+            return Err(failure(
+                "invalid_request",
+                "Supply exact text or a finite numeric value",
+            ));
+        };
+        Ok(self.update(Message::PluginPanelTextChange(
+            panel_id.to_string(),
+            control_id.to_string(),
+            text,
+        )))
+    }
+
+    /// Activate the declared action of a native panel button through the same
+    /// Message used by the actual widget. Only that declared command runs.
+    pub(super) fn control_panel_button(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        let panel = self
+            .plugin_panels
+            .get(panel_id)
+            .ok_or_else(|| failure("panel_not_found", "The requested panel is not registered"))?;
+        let action = if control_id == "reset" {
+            "reset".to_string()
+        } else {
+            Self::panel_button_action(&panel.def.controls, control_id).ok_or_else(|| {
+                failure(
+                    "panel_action_not_found",
+                    "The requested panel button has no declared action",
+                )
+            })?
+        };
+        Ok(self.update(Message::PluginPanelButtonClick(
+            panel_id.to_string(),
+            control_id.to_string(),
+            Some(action),
+        )))
+    }
+
     /// Replay pointer events on the drawing canvas in order, as the mouse
     /// sends them: moves (canvas pixels, or a world point projected through
     /// the editing camera), button presses and releases, and wheel steps.
@@ -1420,6 +1565,8 @@ impl OpenCADStudio {
     }
     pub(super) fn control_ui_action(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let name = string(req, "name")?;
+        // The scale windows set Ctrl/Shift for one click only.
+        let modifiers = (self.ctrl_down, self.shift_down);
         // Without a prompt there is no failed open to retry.
         if name == "recovery_accept" && !self.focus_dialog(crate::app::ModalKind::RecoveryPrompt) {
             return Ok(Task::none());
@@ -2058,12 +2205,7 @@ impl OpenCADStudio {
                             })?;
                         Message::WblockUnit(unit)
                     }
-                    _ => {
-                        return Err(failure(
-                            "invalid_value",
-                            "Unknown write block dialog field",
-                        ))
-                    }
+                    _ => return Err(failure("invalid_value", "Unknown write block dialog field")),
                 }
             }
             // One field of the open attribute definition dialog: `tag=…`,
@@ -2810,6 +2952,68 @@ impl OpenCADStudio {
                     })
                 }
             }
+            // The Annotation Object Scale window, one field per call:
+            // "select=<scale>", "ctrl=<scale>" (adds or drops it),
+            // "shift=<scale>" (the run from the last clicked one),
+            // "common=0|1", "add", "delete", "ok" or "cancel".
+            "object_scale_dialog" => {
+                if !self.focus_dialog(crate::app::ModalKind::AnnoObjectScale) {
+                    return Err(failure("no_dialog", "The Annotation Object Scale window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                self.ctrl_down = key == "ctrl";
+                self.shift_down = key == "shift";
+                match key {
+                    "select" | "ctrl" | "shift" => Message::AnnoObjectScaleSelect(value.to_string()),
+                    "common" => Message::AnnoObjectScaleCommon(value == "1"),
+                    "add" => Message::AnnoObjectScaleAdd,
+                    "delete" => Message::AnnoObjectScaleDelete,
+                    "ok" => Message::AnnoObjectScaleOk,
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", "Unknown Annotation Object Scale field")),
+                }
+            }
+            // The scale list window, one field per call: "select=<scale>",
+            // "ctrl=<scale>", "shift=<scale>", "add", "edit", "name=<text>",
+            // "paper=<n>", "drawing=<n>", "apply", "back" (closes the card),
+            // "delete", "delete_yes", "delete_no", "up", "down",
+            // "reset=metric|imperial|both|cancel", "ok" or "cancel".
+            "scale_list_dialog" => {
+                if !self.focus_dialog(crate::app::ModalKind::ScaleManager) {
+                    return Err(failure("no_dialog", "The scale list window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                self.ctrl_down = key == "ctrl";
+                self.shift_down = key == "shift";
+                match key {
+                    "select" | "ctrl" | "shift" => Message::ScaleManagerSelect(value.to_string()),
+                    "add" => Message::ScaleManagerNew,
+                    "edit" => Message::ScaleManagerEdit,
+                    "name" => Message::ScaleRenameEdit(value.to_string()),
+                    "paper" => Message::ScaleManagerPaperBuf(value.to_string()),
+                    "drawing" => Message::ScaleManagerDrawingBuf(value.to_string()),
+                    "apply" => Message::ScaleRenameCommit,
+                    "back" => Message::ScaleManagerEditCancel,
+                    "delete" => Message::ScaleManagerDelete,
+                    "delete_yes" => Message::ScaleManagerDeleteChoice(true),
+                    "delete_no" => Message::ScaleManagerDeleteChoice(false),
+                    "up" => Message::ScaleManagerMove(-1),
+                    "down" => Message::ScaleManagerMove(1),
+                    "reset" => match value {
+                        "" => Message::ScaleManagerReset,
+                        "metric" => Message::ScaleManagerResetChoice(0),
+                        "imperial" => Message::ScaleManagerResetChoice(1),
+                        "both" => Message::ScaleManagerResetChoice(2),
+                        "cancel" => Message::ScaleManagerResetChoice(3),
+                        _ => return Err(failure("invalid_value", spec)),
+                    },
+                    "ok" => Message::ScaleManagerOk,
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", "Unknown scale list field")),
+                }
+            }
             // The Insert / Edit Hyperlink window, one field per call:
             // "address=<file, web address or file#location>", "text=<text>",
             // "target=file|view", "view=<name>", "relative=0|1", "dwf=0|1",
@@ -3453,6 +3657,19 @@ impl OpenCADStudio {
                         _ => return Err(bad()),
                     }),
                     "explode" => I::DgnExplode(on(value)?),
+                    // V7 text code page given as its Windows number (1252 or
+                    // "default" = the plain 1252 default).
+                    "code_page" => {
+                        use crate::scene::model::underlay_vector::code_page_supported;
+                        let page = match value {
+                            "1252" | "default" | "off" | "none" => None,
+                            page => match page.parse::<u16>() {
+                                Ok(page) if code_page_supported(page) => Some(page),
+                                _ => return Err(bad()),
+                            },
+                        };
+                        I::DgnCodePage(crate::modules::insert::dgn_import::code_page_label(page))
+                    }
                     "references" => I::DgnReferences(match value {
                         "translate" => crate::modules::insert::dgn_import::ReferenceMode::Translate,
                         "ignore" => crate::modules::insert::dgn_import::ReferenceMode::Ignore,
@@ -3833,6 +4050,8 @@ impl OpenCADStudio {
                 ))
             }
         };
-        Ok(self.update(msg))
+        let task = self.update(msg);
+        (self.ctrl_down, self.shift_down) = modifiers;
+        Ok(task)
     }
 }

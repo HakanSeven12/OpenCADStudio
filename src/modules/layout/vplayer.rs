@@ -1,20 +1,26 @@
-// VPLAYER — per-viewport layer freeze/thaw command.
+// VPLAYER — per-viewport layer freeze/thaw/overrides command.
 //
 // Usage (command line):
 //   VPLAYER
-//   > F <layer_name>        → freeze layer in active viewport
-//   > T <layer_name>        → thaw layer in active viewport
-//   > F ALL <layer_name>    → freeze layer in ALL viewports
-//   > T ALL <layer_name>    → thaw layer in ALL viewports
-//   > Enter                 → exit
+//   > F <layer_name>           → freeze layer in active viewport
+//   > T <layer_name>           → thaw layer in active viewport
+//   > F ALL <layer_name>       → freeze layer in ALL viewports
+//   > T ALL <layer_name>       → thaw layer in ALL viewports
+//   > COLOR <layer> <color>    → per-viewport colour override
+//   > LINETYPE <layer> <name>  → per-viewport linetype override
+//   > LINEWEIGHT <layer> <mm>  → per-viewport lineweight override
+//   > TRANSPARENCY <layer> <n> → per-viewport alpha override (0-90, by %)
+//   > Enter                    → exit
 //
 // Layer names are case-insensitive. Multiple space-separated names are accepted.
+// Colour override values are accepted as names (ByLayer, ByBlock, Red, ...),
+// indices 1-255 or an R,G,B triple — the same syntax as CHPROP COLOR.
 
 use crate::t;
 use document::Handle;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult};
+use crate::command::{CadCommand, CmdResult, VpOverrideChannel};
 use crate::scene::model::wire_model::WireModel;
 
 pub struct VplayerCommand {
@@ -33,7 +39,7 @@ impl CadCommand for VplayerCommand {
     }
 
     fn prompt(&self) -> String {
-        t!("VPLAYER  F <layer> = Freeze  |  T <layer> = Thaw  |  Enter = Exit").into_owned()
+        t!("VPLAYER  F|T <layer>  |  COLOR|LINETYPE|LINEWEIGHT|ALPHA <layer> <value>  |  Enter = Exit").into_owned()
     }
 
     fn wants_text_input(&self) -> bool {
@@ -52,6 +58,44 @@ impl CadCommand for VplayerCommand {
         }
 
         let op = tokens[0].to_uppercase();
+        let channel = match op.as_str() {
+            "COLOR" | "COL" | "COLOUR" => Some(VpOverrideChannel::Color),
+            "LINETYPE" | "LT" | "LTYPE" => Some(VpOverrideChannel::Linetype),
+            "LINEWEIGHT" | "LW" | "LWEIGHT" => Some(VpOverrideChannel::Lineweight),
+            "TRANSPARENCY" | "ALPHA" | "A" => Some(VpOverrideChannel::Alpha),
+            _ => None,
+        };
+        if let Some(channel) = channel {
+            // Property override syntax: <COLOR|LINETYPE|LINEWEIGHT|ALPHA> [ALL] <layer> <value...>
+            let (all_viewports, layer_start) = if tokens
+                .get(1)
+                .map(|s| s.to_uppercase().as_str() == "ALL")
+                .unwrap_or(false)
+            {
+                (true, 2)
+            } else {
+                (false, 1)
+            };
+            let layer = tokens.get(layer_start)?.to_string();
+            let value = tokens
+                .get(layer_start + 1..)
+                .map(|tail| tail.join(" "))
+                .unwrap_or_default();
+            if value.trim().is_empty() {
+                return None;
+            }
+            let vp_handle = if all_viewports {
+                document::Handle::NULL
+            } else {
+                self.vp_handle
+            };
+            return Some(CmdResult::VpLayerOverride {
+                vp_handle,
+                layer,
+                channel,
+                value,
+            });
+        }
 
         // Check for ALL keyword: "F ALL layer1 layer2" or "T ALL layer1"
         let (all_viewports, layer_start) = if tokens

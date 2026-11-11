@@ -397,9 +397,9 @@ REST: `POST /blocks`, `DELETE /blocks/{name}` (add `?force=true` to erase the re
 |---|---|
 | `layout_create` | `name` — adds a layout with the default page setup and a sheet viewport; duplicates refused (`layout_exists`) |
 | `page_setup_set` | `layout` plus any of `paper` (catalog name), `orientation` (`portrait`/`landscape`), `fit:true` or `scale:"1:100"`, `center`, `window:[x0,y0,x1,y1]`, `plot_style`. Explicit fields win; the rest keeps the stored setup. The stored setup is what `plot` consumes by default. |
-| `plot` | `path`, `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `transparency`, `lineweights`, `merge_lines`, `stamp`, and `"per_page":true` (with `layout:"all"` writes **one PDF per layout**, returning `result.files`) |
+| `plot` | `path` (`.pdf` or `.svg`), `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `shade`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `apply_plot_styles`, `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, `stamp`, SVG-only `non_scaling_stroke` and `text_as_outlines` (both default `false`; outlines replace searchable text with glyph paths), and `"per_page":true` (with `layout:"all"` writes **one output file per layout**, returning `result.files`) |
 
-Plotting writes PDF only, synchronously, with no device dialogs; result
+Plotting writes PDF or SVG synchronously, with no device dialogs; result
 reports `{path, pages, page_sizes}` (millimetres).
 
 ### 6.7 Metadata and variables
@@ -483,7 +483,8 @@ dedicated op needed:
 | `history` | Command-line history (also the person's view of what clients did — see §6.12). |
 | `capture` | PNG snapshot of the viewport or full window (`scope`, `max_dimension`). |
 | `view_focus` | Zoom-to-fit + highlight the listed handles (GUI sessions; headless answers `gui_required`). |
-| `action` | The 20 UI toggles (grid, ortho, …) by name. |
+| `action` | UI toggles (grid, ortho, …) by name, and the open dialogs' fields: one `name` per call with `value="key=value"` (see the per-dialog notes). |
+| `action` + `dgn_import_dialog` | Drives the DGN Import window (it must be open — `DGNIMPORT` with the dialog, or the Import File window picking a DGN): `path=<file>`, `model=<index>`, `target=new\|current`, `conflict=prefix\|ignore`, `units=master\|sub`, `explode=on\|off`, `code_page=<n>` (the picker's page: `1252` or `default`, `1250`, `1251`, `1253`-`1258`, `874`, `932`, `936`, `949`, `950`, `65001`), `references=translate\|ignore\|underlay`, `existing=prompt\|overwrite\|keep`, `mapping=layer\|linetype\|lineweight\|color`, then `ok` (imports; returns `status`) or `cancel`. |
 
 ### 6.11 Complete REST endpoint table
 

@@ -1,7 +1,7 @@
 //! CPU-side complex linetype tessellation.
 //!
 //! Walks the entity path and applies LT elements (dashes, gaps, dots, shapes),
-//! returning one `WireModel` per continuous stroke.
+//! batching compatible strokes into `WireModel`s with explicit breaks.
 //!
 //! Coordinate convention: 2D entities live in the **XZ** plane (Y = elevation).
 //! Shape X → along the linetype direction; Shape Y → perpendicular in XZ.
@@ -15,7 +15,7 @@ use crate::scene::text::lff;
 
 /// Apply `lt` along `path_pts` (the entity's tessellated world-space strip).
 ///
-/// Returns one `WireModel` per continuous stroke. Pass the entity's `name`,
+/// Returns batched `WireModel`s. Pass the entity's `name`,
 /// `color`, `selected` flag, and `line_weight_px` so the WireModels inherit
 /// the entity's visual properties.
 /// Build the "A"-type segment list for one path: a solid begin/end dash of
@@ -242,7 +242,7 @@ fn apply_stretched(
 
     // Each stroke with its band width per point, empty for a hairline: only a
     // dash takes the band, a dot or a shape stays as thin as a glyph.
-    let mut strokes: Vec<(Vec<[f32; 3]>, Vec<f32>)> = Vec::new();
+    let mut strokes = StrokeBatches::default();
     let mut cur_stroke: Vec<[f32; 3]> = Vec::new();
     let mut cur_widths: Vec<f32> = Vec::new();
     // Embedded linetype text (LtSeg::Text) renders as SDF glyph quads collected
@@ -328,7 +328,7 @@ fn apply_stretched(
                 LtSeg::Dot => {
                     flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
                     let p = lerp(ps, pe, pos / seg_len);
-                    strokes.push((vec![p, p], Vec::new()));
+                    strokes.push(vec![p, p], Vec::new());
                     elem_idx += 1;
                     elem_consumed = 0.0;
                     if pos < 1e-6 {
@@ -364,7 +364,9 @@ fn apply_stretched(
                     let shape_strokes = emit_shape(
                         sh_name, shx_file, *number, insert, frame_fwd, frame_perp, *sh_scale, rot,
                     );
-                    strokes.extend(shape_strokes.into_iter().map(|stroke| (stroke, Vec::new())));
+                    for stroke in shape_strokes {
+                        strokes.push(stroke, Vec::new());
+                    }
 
                     elem_idx += 1;
                     elem_consumed = 0.0;
@@ -466,7 +468,7 @@ fn apply_stretched(
 
     flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
 
-    let mut out: Vec<WireModel> = strokes
+    let mut out: Vec<WireModel> = strokes.finish()
         .into_iter()
         .filter(|(pts, _)| pts.len() >= 2)
         .map(|(pts, widths)| {
@@ -642,13 +644,52 @@ fn scale_segments(segs: &[LtSegment], scale: f32) -> Vec<LtSeg> {
         .collect()
 }
 
+#[derive(Default)]
+struct StrokeBatches {
+    batches: Vec<(Vec<[f32; 3]>, Vec<f32>)>,
+    pending: Vec<[f32; 3]>,
+}
+
+impl StrokeBatches {
+    fn flush_pending(&mut self) {
+        if !self.pending.is_empty() {
+            self.batches.push((std::mem::take(&mut self.pending), Vec::new()));
+        }
+    }
+
+    fn push(&mut self, points: Vec<[f32; 3]>, widths: Vec<f32>) {
+        if points.len() < 2 {
+            return;
+        }
+        if !widths.is_empty() {
+            self.flush_pending();
+            self.batches.push((points, widths));
+            return;
+        }
+        // NaN keeps individual strokes disconnected in the shared buffer.
+        const MAX_BATCH_POINTS: usize = 16_384;
+        if !self.pending.is_empty() && self.pending.len() + points.len() + 1 > MAX_BATCH_POINTS {
+            self.flush_pending();
+        }
+        if !self.pending.is_empty() {
+            self.pending.push([f32::NAN; 3]);
+        }
+        self.pending.extend(points);
+    }
+
+    fn finish(mut self) -> Vec<(Vec<[f32; 3]>, Vec<f32>)> {
+        self.flush_pending();
+        self.batches
+    }
+}
+
 fn flush(
     cur: &mut Vec<[f32; 3]>,
     widths: &mut Vec<f32>,
-    strokes: &mut Vec<(Vec<[f32; 3]>, Vec<f32>)>,
+    strokes: &mut StrokeBatches,
 ) {
     if !cur.is_empty() {
-        strokes.push((std::mem::take(cur), std::mem::take(widths)));
+        strokes.push(std::mem::take(cur), std::mem::take(widths));
     }
 }
 

@@ -227,7 +227,13 @@ impl OpenCADStudio {
             .expect("a placed xy parameter carries its value sets");
         }
         if let Some(count) = grips
-            .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY)
+            .filter(|_| {
+                matches!(
+                    kind,
+                    crate::scene::block_distance_parameter::Kind::Linear
+                        | crate::scene::block_distance_parameter::Kind::XY
+                )
+            })
             .filter(|count| *count != 1)
         {
             crate::scene::block_grips::config::set(

@@ -151,6 +151,88 @@ fn run_v4(
             if notification_api_version(&notification) > api_version {
                 continue;
             }
+            if let HostNotification::PanelAction {
+                panel_id,
+                control_id,
+                action,
+                value,
+            } = &notification
+            {
+                let mut updates_to_send: Vec<(
+                    String,
+                    std::collections::HashMap<String, crate::dialog::DialogValue>,
+                )> = Vec::new();
+                if api_version >= 17 {
+                    let mut registry = interactive.borrow_mut();
+                    let target_ids: Vec<u64> = if let Some(cid) = command_id {
+                        vec![cid]
+                    } else {
+                        registry.keys().copied().collect()
+                    };
+                    let (event_val, current_vals) = match value {
+                        Some(crate::dialog::DialogValue::Fields(map)) => {
+                            let mut map = map.clone();
+                            let ev = map
+                                .remove("__event_value__")
+                                .or_else(|| map.get(control_id).cloned());
+                            (ev, map)
+                        }
+                        other => (other.clone(), std::collections::HashMap::new()),
+                    };
+                    for cid in target_ids {
+                        if let Some(cmd) = registry.get_mut(&cid) {
+                            let event = crate::dialog::DialogEvent {
+                                control_id: control_id.clone(),
+                                action: action.clone(),
+                                value: event_val.clone(),
+                                current_values: current_vals.clone(),
+                            };
+                            if let Ok(crate::dialog::DialogActionResponse::UpdateValues(vals)) =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    cmd.on_dialog_action(event)
+                                }))
+                            {
+                                updates_to_send.push((panel_id.clone(), vals));
+                            }
+                        }
+                    }
+                }
+                let panel_id_owned = panel_id.clone();
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    plugin.on_notification(command_id, notification)
+                }));
+                if api_version >= 7 {
+                    let mut registry = interactive.borrow_mut();
+                    let target_ids: Vec<u64> = if let Some(cid) = command_id {
+                        vec![cid]
+                    } else {
+                        registry.keys().copied().collect()
+                    };
+                    for cid in target_ids {
+                        if let Some(cmd) = registry.get_mut(&cid) {
+                            if let Ok(pending) =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    cmd.take_pending_panel_updates()
+                                }))
+                            {
+                                updates_to_send.extend(pending);
+                            }
+                        }
+                    }
+                }
+                if !updates_to_send.is_empty() {
+                    let mut proxy = client.plugin_host_api(0, interactive.clone());
+                    for (target_id, vals) in updates_to_send {
+                        let id_to_use = if target_id.is_empty() {
+                            panel_id_owned.as_str()
+                        } else {
+                            target_id.as_str()
+                        };
+                        let _ = crate::host::HostApi::update_panel(&mut proxy, id_to_use, vals);
+                    }
+                }
+                continue;
+            }
             // API v15: a quad panel pick routes to the dedicated callback —
             // the v11 custom-grip vtable gate applies (`BuiltinPlugin::
             // on_quad_action` has no slot in an older cdylib's vtable), so an

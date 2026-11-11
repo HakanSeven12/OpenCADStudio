@@ -1931,6 +1931,54 @@ impl OpenCADStudio {
             }
         }
 
+        // An annotative hatch gives its pattern scale (and the spacing and
+        // pen width that follow it) on paper, as the reference does.
+        if let Some(per_paper) = self.tabs[i]
+            .scene
+            .annotative_hatch_model_per_paper(entity.common().handle)
+        {
+            let shown = crate::scene::annotative::entity_for_annotation_context(
+                doc,
+                entity,
+                annotation_scale_handle,
+            );
+            if let document::EntityType::Hatch(hatch) = shown.as_ref() {
+                let paper = hatch.pattern_scale / per_paper;
+                for section in sections.iter_mut() {
+                    for row in section.props.iter_mut() {
+                        let read_only = matches!(
+                            row.value,
+                            crate::scene::model::object::PropValue::ReadOnly(_)
+                        );
+                        match row.field {
+                            "pattern_scale" | "spacing" => {
+                                *row = crate::entities::common::num_prop(
+                                    &row.label.clone(),
+                                    row.field,
+                                    paper,
+                                    !read_only,
+                                );
+                            }
+                            "iso_pen_width" if read_only => {
+                                row.value = crate::scene::model::object::PropValue::ReadOnly(
+                                    format!("{paper:.2} mm"),
+                                );
+                            }
+                            "iso_pen_width" => {
+                                *row = crate::entities::common::num_prop(
+                                    &row.label.clone(),
+                                    row.field,
+                                    paper,
+                                    true,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
         // Single-line text height rows depend on both the
         // justification and the active annotation scale. Aligned
         // text derives its paper height from the two endpoints,
@@ -2003,6 +2051,71 @@ impl OpenCADStudio {
                     crate::entities::common::format_length(stored * ratio),
                 ),
             );
+            // Annotative multiline text shows its defined box twice, as on
+            // paper (editable as the box is) and in the model (read-only).
+            // Line space distance is measured on the model height (measured:
+            // 16.6667 for 2.5 paper text at 1:4).
+            if let document::EntityType::MText(text) = entity {
+                for section in sections.iter_mut() {
+                    if let Some(row) = section
+                        .props
+                        .iter_mut()
+                        .find(|row| row.field == "line_space_distance")
+                    {
+                        *row = crate::entities::common::edit_prop(
+                            &row.label.clone(),
+                            "line_space_distance",
+                            stored * ratio * 1.666_666_666_666_667 * text.line_spacing_factor,
+                        );
+                    }
+                }
+            }
+            // The box is per representation: the shown scale's is the model
+            // size, its paper size that over the scale's model-per-paper.
+            let shown = crate::scene::annotative::entity_for_annotation_context(
+                doc,
+                entity,
+                annotation_scale_handle,
+            );
+            if let document::EntityType::MText(text) = shown.as_ref() {
+                let per_paper = (model_factor * ratio).max(1.0e-12);
+                let rows = [
+                    ("rect_w", "rect_w_model", text.rectangle_width, "Paper defined width", "Model defined width"),
+                    (
+                        "rect_h",
+                        "rect_h_model",
+                        text.rectangle_height.unwrap_or(0.0),
+                        "Paper defined height",
+                        "Model defined height",
+                    ),
+                ];
+                for (field, model_field, model, paper_label, model_label) in rows {
+                    for section in sections.iter_mut() {
+                        if let Some(row) = section.props.iter_mut().find(|row| row.field == field) {
+                            let editable = !matches!(
+                                row.value,
+                                crate::scene::model::object::PropValue::ReadOnly(_)
+                            );
+                            *row = crate::entities::common::num_prop(
+                                crate::t!(paper_label).as_ref(),
+                                field,
+                                model / per_paper,
+                                editable,
+                            );
+                        }
+                    }
+
+                    insert_row_after(
+                        &mut sections,
+                        field,
+                        crate::entities::common::ro_prop(
+                            crate::t!(model_label).as_ref(),
+                            model_field,
+                            crate::entities::common::format_length(model),
+                        ),
+                    );
+                }
+            }
             // Text and multiline text: Match orientation to layout, the
             // AcadAnnoPO flag (an attribute definition has no such row).
             if !matches!(entity, document::EntityType::AttributeDefinition(_)) {
@@ -3963,6 +4076,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 &self.tabs[i].scene.document,
                 insert,
                 self.tabs[i].scene.annotation_scale,
+                annotation_scale_handle,
             );
         }
         if crate::scene::model::solid_history::has_specialized_primitive_properties(
@@ -4970,32 +5084,16 @@ fn intersect_into(
     acc: &mut Vec<crate::scene::model::object::PropSection>,
     right: &[crate::scene::model::object::PropSection],
 ) {
-    use rustc_hash::FxHashMap;
-
-    // First match wins, exactly like `right.iter().find(...)`.
-    let mut right_sections: FxHashMap<&str, usize> = FxHashMap::default();
-    let mut right_fields: Vec<FxHashMap<&'static str, usize>> = Vec::with_capacity(right.len());
-    for (section_index, section) in right.iter().enumerate() {
-        let mut fields = FxHashMap::default();
-        for (prop_index, prop) in section.props.iter().enumerate() {
-            fields.entry(prop.field).or_insert(prop_index);
-        }
-        right_fields.push(fields);
-        right_sections
-            .entry(section.title.as_str())
-            .or_insert(section_index);
-    }
-
+    // Property sections are small. Avoid allocating hash maps for every one
+    // of thousands of selected entities while retaining first-match behavior.
     acc.retain_mut(|section| {
-        let Some(&section_index) = right_sections.get(section.title.as_str()) else {
+        let Some(other_section) = right.iter().find(|other| other.title == section.title) else {
             return false;
         };
-        let fields = &right_fields[section_index];
         section.props.retain_mut(|prop| {
-            let Some(&prop_index) = fields.get(prop.field) else {
+            let Some(other) = other_section.props.iter().find(|other| other.field == prop.field) else {
                 return false;
             };
-            let other = &right[section_index].props[prop_index];
             if prop.value != other.value {
                 prop.value = merge_prop_value(&prop.value, &other.value);
             }
@@ -5725,7 +5823,7 @@ pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
 }
 
 /// Convert INSUNITS (DXF group 70) to millimetres.
-pub(super) fn insunits_to_mm(code: i16) -> Option<f64> {
+pub(crate) fn insunits_to_mm(code: i16) -> Option<f64> {
     Some(match code {
         1 => 25.4,                       // Inches
         2 => 304.8,                      // Feet

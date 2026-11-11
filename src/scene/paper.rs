@@ -26,28 +26,36 @@ impl Scene {
                     !Self::is_sheet_viewport(&self.document, vp)
                 }
         };
-        let content = if let Some(block) = self
+        // The block record's owned list keeps the drawing's stored order on a
+        // healthy layout, but it is a hint, never the sole source: an import
+        // whose assigned handles no longer match the stored list (or one holding
+        // handles the entity table cannot resolve) must not silently drop the
+        // layout's whole content. Union the resolving list entries with the same
+        // ownership scan the empty-list path already used.
+        let record = self
             .document
             .block_records
             .iter()
-            .find(|block| block.handle == layout_block)
-            .filter(|block| !block.entity_handles.is_empty())
-        {
-            block
-                .entity_handles
-                .iter()
-                .copied()
-                .filter(|handle| is_content(*handle))
-                .collect()
-        } else {
-            self.document
-                .entities()
-                .filter_map(|entity| {
-                    let handle = entity.common().handle;
-                    is_content(handle).then_some(handle)
-                })
-                .collect()
-        };
+            .find(|block| block.handle == layout_block);
+        let record_list = record
+            .map(|block| block.entity_handles.as_slice())
+            .unwrap_or(&[]);
+        let record_unresolved = record_list
+            .iter()
+            .any(|handle| self.document.get_entity(*handle).is_none());
+        let mut content: Vec<Handle> = record_list
+            .iter()
+            .copied()
+            .filter(|handle| is_content(*handle))
+            .collect();
+        if record.is_none() || record_unresolved || content.is_empty() {
+            for entity in self.document.entities() {
+                let handle = entity.common().handle;
+                if is_content(handle) && !content.contains(&handle) {
+                    content.push(handle);
+                }
+            }
+        }
         let content = Arc::new(content);
         self.paper_viewport_cache.borrow_mut().insert(
             self.current_layout.clone(),
@@ -267,7 +275,7 @@ impl Scene {
                     && self.category_cache_valid(
                         cache.epoch,
                         super::CACHE_CATEGORY_IMAGE,
-                        |handle| self.images.contains_key(&handle),
+                        |handle| self.is_image_entity(handle),
                     )
                 {
                     Some((

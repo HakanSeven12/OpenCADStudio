@@ -1673,6 +1673,34 @@ pub fn collect_entries_with_prev(
         }
     }
 
+    // A drawing saved by AutoCAD also keeps its nested xrefs' block records,
+    // so a nested reference showed up twice: once at the top, once under its
+    // parent (#2838). A top-level row the host never inserts itself, whose
+    // file the walk found under a parent, is that nested row.
+    {
+        let nested_files: HashSet<String> = entries
+            .iter()
+            .filter(|e| e.parent_key.is_some())
+            .filter_map(|e| e.found_at.as_deref().map(normalize_lexical))
+            .collect();
+        let inserted: HashSet<String> = doc
+            .entities()
+            .filter_map(|e| match e {
+                document::EntityType::Insert(insert) => Some(insert.block_name.to_uppercase()),
+                _ => None,
+            })
+            .collect();
+        entries.retain(|e| {
+            e.parent_key.is_some()
+                || e.kind != RefKind::DwgXref
+                || inserted.contains(&e.name.to_uppercase())
+                || !e
+                    .found_at
+                    .as_deref()
+                    .is_some_and(|found| nested_files.contains(&normalize_lexical(found)))
+        });
+    }
+
     // Stale propagation (plan §3.1): a Loaded parent with a Stale descendant
     // shows Stale. Roots append before their children, so one reverse pass
     // carries staleness transitively up any depth: by the time the iteration

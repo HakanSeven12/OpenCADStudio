@@ -1067,11 +1067,14 @@ impl OpenCADStudio {
             // A point prompt that also takes keywords reads a typed
             // coordinate as the point: handing `300,50` to the step's text
             // reader would turn the comma into a decimal mark (300.5).
+            // A coordinate under a typed object snap is a point at any step
+            // that takes one, so the snap resolves it.
             let coordinate_at_point_step = parse_coord(&text).is_some()
-                && self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|c| c.point_step_accepts_keywords());
+                && (self.snapper.pending_override().is_some()
+                    || self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.point_step_accepts_keywords()));
             if !coordinate_at_point_step
                 && self.tabs[i]
                     .active_cmd
@@ -1085,13 +1088,8 @@ impl OpenCADStudio {
                 // to the Enter handling below, which ends the step the
                 // same way a bare Enter does: unchanged.
                 if !text.is_empty() {
-                    self.push_ucs_to_cmd(i);
-                    if let Some(result) = self.tabs[i]
-                        .active_cmd
-                        .as_mut()
-                        .and_then(|c| c.on_text_input(&text))
-                    {
-                        return self.apply_cmd_result(result);
+                    if let Some(task) = self.offer_typed_text(i, &text) {
+                        return task;
                     }
                 }
             }
@@ -1142,7 +1140,18 @@ impl OpenCADStudio {
                         }
                     }
                 };
+                // An object snap override typed before the point snaps it.
+                let (wcs_pt, snapped) = match self.typed_override_snap(i, wcs_pt) {
+                    Some(Err(())) => return self.focus_cmd_input(),
+                    Some(Ok(Some(hit))) => (hit.world, Some(hit)),
+                    Some(Ok(None)) | None => (wcs_pt, None),
+                };
                 if !self.command_point_allowed(i, wcs_pt) {
+                    return Task::none();
+                }
+                // The accepted-snap list stays index-parallel with the
+                // points the command collects, as on the feed path.
+                if !self.record_accepted_snap(i, snapped, None, wcs_pt) {
                     return Task::none();
                 }
                 self.last_point = Some(wcs_pt);
@@ -1168,13 +1177,8 @@ impl OpenCADStudio {
                 return Task::none();
             }
 
-            self.push_ucs_to_cmd(i);
-            if let Some(result) = self.tabs[i]
-                .active_cmd
-                .as_mut()
-                .and_then(|c| c.on_text_input(&text))
-            {
-                return self.apply_cmd_result(result);
+            if let Some(task) = self.offer_typed_text(i, &text) {
+                return task;
             }
 
             // Direct distance entry: if an anchor exists and a scalar distance was entered,
@@ -1186,18 +1190,10 @@ impl OpenCADStudio {
 
             // A point prompt refuses other text as the reference does, with
             // a plain line before asking again.
-            let has_options = self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .is_some_and(|command| !command.options().is_empty());
-            self.command_line.push_rejection(
-                if has_options {
-                    crate::t!("Point or option keyword required.")
-                } else {
-                    crate::t!("Invalid point.")
-                }
-                .as_ref(),
-            );
+            if let Some(command) = self.tabs[i].active_cmd.as_deref() {
+                let line = crate::command::point_rejection_line(command);
+                self.command_line.push_rejection(&line);
+            }
             return self.focus_cmd_input();
         }
         if let Some(cmd) = self.command_line.submit() {
@@ -1218,6 +1214,24 @@ impl OpenCADStudio {
             return self.dispatch_command(&cmd);
         }
         Task::none()
+    }
+
+    /// Hand typed command-line text to the active command's step. A step
+    /// that took it without a result (a count, a toggle) still moved its
+    /// prompt on: that is taken too, or the same text was read again by the
+    /// next step — ARRAYPOLAR's item count became its angle (#1571).
+    fn offer_typed_text(&mut self, i: usize, text: &str) -> Option<Task<Message>> {
+        self.push_ucs_to_cmd(i);
+        let command = self.tabs[i].active_cmd.as_mut()?;
+        let before = crate::command::step_signature(command.as_ref());
+        if let Some(result) = command.on_text_input(text) {
+            return Some(self.apply_cmd_result(result));
+        }
+        if crate::command::step_signature(command.as_ref()) == before {
+            return None;
+        }
+        self.refresh_active_cmd_preview(i);
+        Some(self.focus_cmd_input())
     }
 
     /// Attempt direct distance entry: if an active command is expecting a point,
@@ -1278,7 +1292,10 @@ impl OpenCADStudio {
             let d_ucs = xf.vec_to_ucs(w - anchor);
             let dx = d_ucs.x;
             let dy = d_ucs.y;
-            let dir_ucs = if (dx * dx + dy * dy) > 1e-12 {
+            // In the plane unless the cursor is tracked straight up or down
+            // (#2796), where what is left in the plane is only noise.
+            let in_plane = (dx * dx + dy * dy).sqrt();
+            let dir_ucs = if in_plane > 1e-6 && in_plane > d_ucs.z.abs() * 1e-6 {
                 glam::DVec3::new(dx, dy, 0.0).normalize()
             } else if d_ucs.length_squared() > 1e-12 {
                 d_ucs.normalize()
@@ -5607,6 +5624,13 @@ impl OpenCADStudio {
                         if self.tabs[i].scene.is_layer_locked(handle) {
                             continue;
                         }
+                        let insert_before = matches!(field, "ins_x" | "ins_y" | "ins_z")
+                            .then(|| self.tabs[i].scene.document.get_entity(handle))
+                            .flatten()
+                            .and_then(|entity| match entity {
+                                document::EntityType::Insert(insert) => Some(insert.clone()),
+                                _ => None,
+                            });
                         match field {
                             "tol_text_height" => {
                                 use crate::entities::dim_override as dov;
@@ -5654,17 +5678,83 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
-                            // Annotative text: the row holds the paper height.
-                            "height" | "att_h"
+                            // Annotative multiline text: the distance is on the
+                            // model height of the shown representation.
+                            "line_space_distance"
                                 if self.tabs[i]
                                     .scene
                                     .annotative_text_height_factor(handle)
                                     .is_some() =>
                             {
-                                let factor = self.tabs[i]
+                                let shown = self.tabs[i].scene.displayed_annotation_scale_handle();
+                                let ratio = crate::scene::annotative::text_context_ratio(
+                                    &self.tabs[i].scene.document,
+                                    handle,
+                                    shown,
+                                )
+                                .unwrap_or(1.0)
+                                .max(1.0e-12);
+                                if let (Ok(model), Some(entity)) = (
+                                    val.trim().parse::<f64>(),
+                                    self.tabs[i].scene.document.get_entity_mut(handle),
+                                ) {
+                                    crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                                        entity,
+                                        field,
+                                        &(model / ratio).to_string(),
+                                        plane,
+                                    );
+                                }
+                            }
+                            // An annotative hatch's scale rows are on paper.
+                            "pattern_scale" | "spacing" | "iso_pen_width"
+                                if self.tabs[i]
+                                    .scene
+                                    .annotative_hatch_model_per_paper(handle)
+                                    .is_some() =>
+                            {
+                                let per_paper = self.tabs[i]
+                                    .scene
+                                    .annotative_hatch_model_per_paper(handle)
+                                    .unwrap_or(1.0);
+                                if let (Ok(paper), Some(entity)) = (
+                                    val.trim().parse::<f64>(),
+                                    self.tabs[i].scene.document.get_entity_mut(handle),
+                                ) {
+                                    crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
+                                        entity,
+                                        field,
+                                        &(paper * per_paper).to_string(),
+                                        plane,
+                                    );
+                                }
+                                self.tabs[i].scene.sync_displayed_annotation_context(handle);
+                            }
+                            // Annotative text: the row holds the paper height
+                            // (and, for multiline text, the paper width and
+                            // height of its box).
+                            "height" | "att_h" | "rect_w" | "rect_h"
+                                if self.tabs[i]
+                                    .scene
+                                    .annotative_text_height_factor(handle)
+                                    .is_some() =>
+                            {
+                                let mut factor = self.tabs[i]
                                     .scene
                                     .annotative_text_height_factor(handle)
                                     .unwrap_or(1.0);
+                                // The box rows are the shown representation's:
+                                // its model size is the paper size times that
+                                // scale's model-per-paper.
+                                if matches!(field, "rect_w" | "rect_h") {
+                                    let shown = self.tabs[i].scene.displayed_annotation_scale_handle();
+                                    factor *= crate::scene::annotative::text_context_ratio(
+                                        &self.tabs[i].scene.document,
+                                        handle,
+                                        shown,
+                                    )
+                                    .unwrap_or(1.0);
+                                }
                                 if let (Ok(paper), Some(entity)) = (
                                     val.trim().parse::<f64>(),
                                     self.tabs[i].scene.document.get_entity_mut(handle),
@@ -5675,6 +5765,10 @@ impl OpenCADStudio {
                                         &(paper * factor).to_string(),
                                         plane,
                                     );
+                                }
+                                // The shown representation keeps the new box.
+                                if matches!(field, "rect_w" | "rect_h") {
+                                    self.tabs[i].scene.sync_displayed_annotation_context(handle);
                                 }
                             }
                             "hyperlink" => {
@@ -5799,6 +5893,13 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                        }
+                        if let Some(before) = insert_before {
+                            self.tabs[i]
+                                .scene
+                                .carry_insert_attribute_contexts_after_position_edit(
+                                    handle, &before,
+                                );
                         }
                     }
                 }

@@ -4,6 +4,7 @@
 //! widget trees with rows, columns, inputs, checkboxes, pick lists, and buttons,
 //! matching the OpenCADStudio design system and theme.
 
+use std::collections::{HashMap, HashSet};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, rule, scrollable, text, text_input, Space,
 };
@@ -11,7 +12,6 @@ use iced::{Element, Fill, Length, Theme};
 use ocs_plugin_api::dialog::{
     DialogControl, DialogDef, DialogResponse, DialogValue, HorizontalAlign, VerticalAlign,
 };
-use std::collections::{HashMap, HashSet};
 
 use crate::app::Message;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
@@ -20,6 +20,9 @@ use crate::ui::style::form::{button_style, dialog_button, field_style};
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginDialogState {
     pub def: DialogDef,
+    pub tab_id: Option<u64>,
+    pub plugin_id: Option<String>,
+    pub command_id: Option<u64>,
     pub text_values: HashMap<String, String>,
     pub bool_values: HashMap<String, bool>,
     pub choice_values: HashMap<String, usize>,
@@ -27,6 +30,9 @@ pub struct PluginDialogState {
     pub file_values: HashMap<String, String>,
     pub table_values: HashMap<String, Vec<Vec<String>>>,
     pub collapsed_sections: HashSet<String>,
+    pub disabled_controls: HashSet<String>,
+    pub hidden_controls: HashSet<String>,
+    pub dynamic_choice_options: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +45,110 @@ impl std::fmt::Display for ChoiceOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label)
     }
+}
+
+/// Shared helper to apply `DialogValue` updates to dialog or panel control state maps.
+pub fn apply_control_value_updates(
+    values: HashMap<String, DialogValue>,
+    text_values: &mut HashMap<String, String>,
+    bool_values: &mut HashMap<String, bool>,
+    choice_values: &mut HashMap<String, usize>,
+    color_values: &mut HashMap<String, [u8; 3]>,
+    file_values: &mut HashMap<String, String>,
+    table_values: &mut HashMap<String, Vec<Vec<String>>>,
+    disabled_controls: &mut HashSet<String>,
+    hidden_controls: &mut HashSet<String>,
+    dynamic_choice_options: &mut HashMap<String, Vec<String>>,
+) {
+    for (k, v) in values {
+        match v {
+            DialogValue::Text(s) => {
+                text_values.insert(k, s);
+            }
+            DialogValue::Number(n) => {
+                text_values.insert(k, n.to_string());
+            }
+            DialogValue::Bool(b) => {
+                if !b && table_values.contains_key(&k) {
+                    table_values.insert(k.clone(), Vec::new());
+                }
+                bool_values.insert(k, b);
+            }
+            DialogValue::Choice { index, .. } => {
+                choice_values.insert(k, index);
+            }
+            DialogValue::ChoiceOptions {
+                options,
+                selected_index,
+            } => {
+                choice_values.insert(k.clone(), selected_index);
+                dynamic_choice_options.insert(k, options);
+            }
+            DialogValue::Color(c) => {
+                color_values.insert(k, c);
+            }
+            DialogValue::FilePath(f) => {
+                file_values.insert(k, f);
+            }
+            DialogValue::Table(rows) => {
+                table_values.insert(k, rows);
+            }
+            DialogValue::Enabled(en) => {
+                let id = k.strip_suffix(":enabled").unwrap_or(&k);
+                if en {
+                    disabled_controls.remove(id);
+                } else {
+                    disabled_controls.insert(id.to_string());
+                }
+            }
+            DialogValue::Visible(vis) => {
+                let id = k.strip_suffix(":visible").unwrap_or(&k);
+                if vis {
+                    hidden_controls.remove(id);
+                } else {
+                    hidden_controls.insert(id.to_string());
+                }
+            }
+            DialogValue::Fields(map) => {
+                apply_control_value_updates(
+                    map,
+                    text_values,
+                    bool_values,
+                    choice_values,
+                    color_values,
+                    file_values,
+                    table_values,
+                    disabled_controls,
+                    hidden_controls,
+                    dynamic_choice_options,
+                );
+            }
+        }
+    }
+}
+
+/// Recursively look up a static choice option label by control ID and option index.
+pub fn find_choice_option_in_controls(
+    controls: &[DialogControl],
+    control_id: &str,
+    idx: usize,
+) -> Option<String> {
+    for c in controls {
+        match c {
+            DialogControl::Choice { id, options, .. } if id == control_id => {
+                return options.get(idx).cloned();
+            }
+            DialogControl::Row { controls: sub, .. }
+            | DialogControl::Column { controls: sub, .. }
+            | DialogControl::Fields { controls: sub, .. } => {
+                if let Some(found) = find_choice_option_in_controls(sub, control_id, idx) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 impl PluginDialogState {
@@ -66,7 +176,11 @@ impl PluginDialogState {
             collapsed_sections: &mut HashSet<String>,
         ) {
             match control {
-                DialogControl::InfoText { .. } | DialogControl::Button { .. } => {}
+                DialogControl::InfoText { .. } => {}
+                DialogControl::Label { id, text, .. } => {
+                    text_values.insert(id.clone(), text.clone());
+                }
+                DialogControl::Button { .. } => {}
                 DialogControl::Text { id, default, .. } => {
                     text_values.insert(id.clone(), default.clone());
                 }
@@ -148,6 +262,9 @@ impl PluginDialogState {
 
         Self {
             def,
+            tab_id: None,
+            plugin_id: None,
+            command_id: None,
             text_values,
             bool_values,
             choice_values,
@@ -155,11 +272,71 @@ impl PluginDialogState {
             file_values,
             table_values,
             collapsed_sections,
+            disabled_controls: HashSet::new(),
+            hidden_controls: HashSet::new(),
+            dynamic_choice_options: HashMap::new(),
+        }
+    }
+
+    pub fn with_owner(
+        mut self,
+        tab_id: Option<u64>,
+        plugin_id: Option<String>,
+        command_id: Option<u64>,
+    ) -> Self {
+        self.tab_id = tab_id;
+        self.plugin_id = plugin_id;
+        self.command_id = command_id;
+        self
+    }
+
+    pub fn reset_values(&mut self) {
+        let tab_id = self.tab_id;
+        let plugin_id = self.plugin_id.clone();
+        let command_id = self.command_id;
+        *self = Self::new(self.def.clone()).with_owner(tab_id, plugin_id, command_id);
+    }
+
+    pub fn choice_option_text(&self, control_id: &str, idx: usize) -> String {
+        if let Some(opts) = self.dynamic_choice_options.get(control_id) {
+            return opts.get(idx).cloned().unwrap_or_default();
+        }
+        for row in &self.def.rows {
+            if let Some(found) = find_choice_option_in_controls(&row.controls, control_id, idx) {
+                return found;
+            }
+        }
+        String::new()
+    }
+
+    pub fn update_values(&mut self, values: HashMap<String, DialogValue>) {
+        apply_control_value_updates(
+            values,
+            &mut self.text_values,
+            &mut self.bool_values,
+            &mut self.choice_values,
+            &mut self.color_values,
+            &mut self.file_values,
+            &mut self.table_values,
+            &mut self.disabled_controls,
+            &mut self.hidden_controls,
+            &mut self.dynamic_choice_options,
+        );
+    }
+
+    pub fn collect_response_map(&self) -> HashMap<String, DialogValue> {
+        match self.collect_response() {
+            DialogResponse::Submitted(map) => map,
+            DialogResponse::Cancelled => HashMap::new(),
         }
     }
 
     fn collect_control_value(&self, control: &DialogControl) -> Option<(String, DialogValue)> {
         match control {
+            DialogControl::Label { id, text, .. } => {
+                let val = self.text_values.get(id).unwrap_or(text).clone();
+                Some((id.clone(), DialogValue::Text(val)))
+            }
             DialogControl::InfoText { .. }
             | DialogControl::Button { .. }
             | DialogControl::Row { .. }
@@ -196,18 +373,10 @@ impl PluginDialogState {
                 let val = self.bool_values.get(id).copied().unwrap_or(*default);
                 Some((id.clone(), DialogValue::Bool(val)))
             }
-            DialogControl::Choice {
-                id,
-                options,
-                default_index,
-                ..
-            } => {
-                let idx = self
-                    .choice_values
-                    .get(id)
-                    .copied()
-                    .unwrap_or(*default_index);
-                let text = options.get(idx).cloned().unwrap_or_default();
+            DialogControl::Choice { id, options, default_index, .. } => {
+                let idx = self.choice_values.get(id).copied().unwrap_or(*default_index);
+                let effective_options = self.dynamic_choice_options.get(id).unwrap_or(options);
+                let text = effective_options.get(idx).cloned().unwrap_or_default();
                 Some((id.clone(), DialogValue::Choice { index: idx, text }))
             }
             DialogControl::Color { id, default, .. } => {
@@ -336,24 +505,29 @@ impl PluginDialogState {
                 }
             }
 
+            let mut any_visible = false;
             for control in &r.controls {
-                let control_element = self.view_control(control);
+                if control.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+                    continue;
+                }
+                any_visible = true;
+                let control_element = self.view_control_inner(control, false);
                 row_widget = row_widget.push(control_element);
+            }
+            if !any_visible && !r.controls.is_empty() {
+                continue;
             }
 
             let row_container: Element<'a, Message> = match r.align_h {
-                Some(HorizontalAlign::Left) => container(row_widget)
-                    .width(Fill)
-                    .align_x(iced::alignment::Horizontal::Left)
-                    .into(),
-                Some(HorizontalAlign::Center) => container(row_widget)
-                    .width(Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .into(),
-                Some(HorizontalAlign::Right) => container(row_widget)
-                    .width(Fill)
-                    .align_x(iced::alignment::Horizontal::Right)
-                    .into(),
+                Some(HorizontalAlign::Left) => {
+                    container(row_widget).width(Fill).align_x(iced::alignment::Horizontal::Left).into()
+                }
+                Some(HorizontalAlign::Center) => {
+                    container(row_widget).width(Fill).align_x(iced::alignment::Horizontal::Center).into()
+                }
+                Some(HorizontalAlign::Right) => {
+                    container(row_widget).width(Fill).align_x(iced::alignment::Horizontal::Right).into()
+                }
                 None => row_widget.into(),
             };
 
@@ -389,17 +563,31 @@ impl PluginDialogState {
             .into()
     }
 
-    fn view_field_item<'a>(&'a self, control: &'a DialogControl) -> Element<'a, Message> {
+    fn view_field_item<'a>(
+        &'a self,
+        control: &'a DialogControl,
+        parent_disabled: bool,
+    ) -> Element<'a, Message> {
+        if let Some(id) = control.id() {
+            if self.hidden_controls.contains(id) {
+                return Space::new().width(0).height(0).into();
+            }
+        }
+        let is_disabled =
+            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
         const LABEL_WIDTH: f32 = 110.0;
         match control {
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
-                let input = text_input("", current)
-                    .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val))
+                let mut input = text_input("", current)
                     .padding([3, 6])
                     .size(12)
                     .style(field_style);
+                if !is_disabled {
+                    input = input
+                        .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val));
+                }
 
                 row![
                     container(text(label).size(11)).width(Length::Fixed(LABEL_WIDTH)),
@@ -413,12 +601,14 @@ impl PluginDialogState {
             DialogControl::Checkbox { id, label, .. } => {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let id_clone = id.clone();
-                let cb = checkbox(current)
+                let mut cb = checkbox(current)
                     .label(label)
-                    .on_toggle(move |checked| {
-                        Message::PluginDialogBoolToggle(id_clone.clone(), checked)
-                    })
                     .size(14);
+                if !is_disabled {
+                    cb = cb.on_toggle(move |checked| {
+                        Message::PluginDialogBoolToggle(id_clone.clone(), checked)
+                    });
+                }
 
                 row![Space::new().width(Length::Fixed(LABEL_WIDTH)), cb]
                     .spacing(8)
@@ -430,7 +620,8 @@ impl PluginDialogState {
                 id, label, options, ..
             } => {
                 let current_idx = self.choice_values.get(id).copied().unwrap_or(0);
-                let choice_opts: Vec<ChoiceOption> = options
+                let effective_options = self.dynamic_choice_options.get(id).unwrap_or(options);
+                let choice_opts: Vec<ChoiceOption> = effective_options
                     .iter()
                     .enumerate()
                     .map(|(i, opt)| ChoiceOption {
@@ -441,12 +632,14 @@ impl PluginDialogState {
                 let selected = choice_opts.get(current_idx).cloned();
                 let id_clone = id.clone();
 
-                let picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
-                    .on_select(move |opt| {
-                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
-                    })
+                let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
                     .padding([3, 6])
                     .text_size(12);
+                if !is_disabled {
+                    picker = picker.on_select(move |opt| {
+                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                    });
+                }
 
                 row![
                     container(text(label).size(11)).width(Length::Fixed(LABEL_WIDTH)),
@@ -459,19 +652,15 @@ impl PluginDialogState {
             }
             DialogControl::Color { id, label, .. } => {
                 let rgb = self.color_values.get(id).copied().unwrap_or([255, 0, 0]);
-                let color_preview =
-                    container(Space::new().width(24).height(16)).style(move |theme: &Theme| {
-                        container::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb8(
-                                rgb[0], rgb[1], rgb[2],
-                            ))),
-                            border: iced::Border {
-                                color: theme.palette().background.neutral.color,
-                                width: 1.0,
-                                radius: 2.0.into(),
-                            },
-                            ..Default::default()
-                        }
+                let color_preview = container(Space::new().width(24).height(16))
+                    .style(move |theme: &Theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]))),
+                        border: iced::Border {
+                            color: theme.palette().background.neutral.color,
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
                     });
 
                 row![
@@ -493,21 +682,22 @@ impl PluginDialogState {
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
 
-                let input = text_input("", current)
-                    .on_input(move |val| {
-                        Message::PluginDialogFilePicked(
-                            id_clone.clone(),
-                            Some(std::path::PathBuf::from(val)),
-                        )
-                    })
+                let mut input = text_input("", current)
                     .padding([3, 6])
                     .size(12)
                     .style(field_style);
+                if !is_disabled {
+                    input = input.on_input(move |val| {
+                        Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                    });
+                }
 
-                let browse_btn = button(text("Browse...").size(11))
-                    .on_press(Message::PluginDialogFilePick(id_for_pick))
+                let mut browse_btn = button(text("Browse...").size(11))
                     .style(button_style(false))
                     .padding([3, 6]);
+                if !is_disabled {
+                    browse_btn = browse_btn.on_press(Message::PluginDialogFilePick(id_for_pick));
+                }
 
                 row![
                     container(text(label).size(11)).width(Length::Fixed(LABEL_WIDTH)),
@@ -520,14 +710,32 @@ impl PluginDialogState {
                 .width(Fill)
                 .into()
             }
-            _ => self.view_control(control),
+            _ => self.view_control_inner(control, parent_disabled),
         }
     }
 
-    fn view_control<'a>(&'a self, control: &'a DialogControl) -> Element<'a, Message> {
+    fn view_control_inner<'a>(
+        &'a self,
+        control: &'a DialogControl,
+        parent_disabled: bool,
+    ) -> Element<'a, Message> {
+        if let Some(id) = control.id() {
+            if self.hidden_controls.contains(id) {
+                return Space::new().width(0).height(0).into();
+            }
+        }
+        let is_disabled =
+            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
         match control {
-            DialogControl::InfoText { text: msg, align_h } => {
-                let mut t = text(msg).size(12).style(|theme: &Theme| text::Style {
+            DialogControl::InfoText { text: msg, align_h }
+            | DialogControl::Label {
+                text: msg, align_h, ..
+            } => {
+                let display_msg = control
+                    .id()
+                    .and_then(|id| self.text_values.get(id))
+                    .map_or(msg.as_str(), String::as_str);
+                let mut t = text(display_msg).size(12).style(|theme: &Theme| text::Style {
                     color: Some(crate::ui::style::readable::muted_text(theme)),
                 });
                 if let Some(h) = align_h {
@@ -568,21 +776,21 @@ impl PluginDialogState {
                     }
                 }
                 for c in controls {
-                    row_el = row_el.push(self.view_control(c));
+                    if c.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+                        continue;
+                    }
+                    row_el = row_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_h {
-                    Some(HorizontalAlign::Left) => container(row_el)
-                        .width(Fill)
-                        .align_x(iced::alignment::Horizontal::Left)
-                        .into(),
-                    Some(HorizontalAlign::Center) => container(row_el)
-                        .width(Fill)
-                        .align_x(iced::alignment::Horizontal::Center)
-                        .into(),
-                    Some(HorizontalAlign::Right) => container(row_el)
-                        .width(Fill)
-                        .align_x(iced::alignment::Horizontal::Right)
-                        .into(),
+                    Some(HorizontalAlign::Left) => {
+                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Left).into()
+                    }
+                    Some(HorizontalAlign::Center) => {
+                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Center).into()
+                    }
+                    Some(HorizontalAlign::Right) => {
+                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Right).into()
+                    }
                     None => row_el.width(Fill).into(),
                 }
             }
@@ -605,21 +813,21 @@ impl PluginDialogState {
                     None => {}
                 }
                 for c in controls {
-                    col_el = col_el.push(self.view_control(c));
+                    if c.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+                        continue;
+                    }
+                    col_el = col_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_v {
-                    Some(VerticalAlign::Top) => container(col_el)
-                        .height(Fill)
-                        .align_y(iced::alignment::Vertical::Top)
-                        .into(),
-                    Some(VerticalAlign::Middle) => container(col_el)
-                        .height(Fill)
-                        .align_y(iced::alignment::Vertical::Center)
-                        .into(),
-                    Some(VerticalAlign::Bottom) => container(col_el)
-                        .height(Fill)
-                        .align_y(iced::alignment::Vertical::Bottom)
-                        .into(),
+                    Some(VerticalAlign::Top) => {
+                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Top).into()
+                    }
+                    Some(VerticalAlign::Middle) => {
+                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Center).into()
+                    }
+                    Some(VerticalAlign::Bottom) => {
+                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Bottom).into()
+                    }
                     None => col_el.into(),
                 }
             }
@@ -647,36 +855,27 @@ impl PluginDialogState {
                     }
                 }
                 let mut btn = button(label_txt)
-                    .on_press(Message::PluginPanelButtonClick(String::new(), cid, act))
                     .style(button_style(false))
                     .padding([5, 10]);
+                if !is_disabled {
+                    btn = btn.on_press(Message::PluginDialogButtonClick(cid, act));
+                }
                 if let Some(w) = width {
                     btn = btn.width(Length::Fixed(*w));
                 }
                 btn.into()
             }
-            DialogControl::Text { id, label, .. } => {
+            DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
-                let input = text_input("", current)
-                    .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val))
+                let mut input = text_input("", current)
                     .padding(5)
                     .size(12)
                     .style(field_style);
-
-                column![text(label).size(11), input]
-                    .spacing(4)
-                    .width(Fill)
-                    .into()
-            }
-            DialogControl::Number { id, label, .. } => {
-                let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
-                let id_clone = id.clone();
-                let input = text_input("", current)
-                    .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val))
-                    .padding(5)
-                    .size(12)
-                    .style(field_style);
+                if !is_disabled {
+                    input = input
+                        .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val));
+                }
 
                 column![text(label).size(11), input]
                     .spacing(4)
@@ -686,19 +885,22 @@ impl PluginDialogState {
             DialogControl::Checkbox { id, label, .. } => {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let id_clone = id.clone();
-                checkbox(current)
+                let mut cb = checkbox(current)
                     .label(label)
-                    .on_toggle(move |checked| {
+                    .size(14);
+                if !is_disabled {
+                    cb = cb.on_toggle(move |checked| {
                         Message::PluginDialogBoolToggle(id_clone.clone(), checked)
-                    })
-                    .size(14)
-                    .into()
+                    });
+                }
+                cb.into()
             }
             DialogControl::Choice {
                 id, label, options, ..
             } => {
                 let current_idx = self.choice_values.get(id).copied().unwrap_or(0);
-                let choice_opts: Vec<ChoiceOption> = options
+                let effective_options = self.dynamic_choice_options.get(id).unwrap_or(options);
+                let choice_opts: Vec<ChoiceOption> = effective_options
                     .iter()
                     .enumerate()
                     .map(|(i, opt)| ChoiceOption {
@@ -709,12 +911,14 @@ impl PluginDialogState {
                 let selected = choice_opts.get(current_idx).cloned();
                 let id_clone = id.clone();
 
-                let picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
-                    .on_select(move |opt| {
-                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
-                    })
+                let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
                     .padding([3, 6])
                     .text_size(12);
+                if !is_disabled {
+                    picker = picker.on_select(move |opt| {
+                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                    });
+                }
 
                 column![text(label).size(11), picker]
                     .spacing(4)
@@ -723,19 +927,15 @@ impl PluginDialogState {
             }
             DialogControl::Color { id, label, .. } => {
                 let rgb = self.color_values.get(id).copied().unwrap_or([255, 0, 0]);
-                let color_preview =
-                    container(Space::new().width(24).height(18)).style(move |theme: &Theme| {
-                        container::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb8(
-                                rgb[0], rgb[1], rgb[2],
-                            ))),
-                            border: iced::Border {
-                                color: theme.palette().background.neutral.color,
-                                width: 1.0,
-                                radius: 2.0.into(),
-                            },
-                            ..Default::default()
-                        }
+                let color_preview = container(Space::new().width(24).height(18))
+                    .style(move |theme: &Theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]))),
+                        border: iced::Border {
+                            color: theme.palette().background.neutral.color,
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
                     });
 
                 column![
@@ -755,21 +955,22 @@ impl PluginDialogState {
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
 
-                let input = text_input("", current)
-                    .on_input(move |val| {
-                        Message::PluginDialogFilePicked(
-                            id_clone.clone(),
-                            Some(std::path::PathBuf::from(val)),
-                        )
-                    })
+                let mut input = text_input("", current)
                     .padding(5)
                     .size(12)
                     .style(field_style);
+                if !is_disabled {
+                    input = input.on_input(move |val| {
+                        Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                    });
+                }
 
-                let browse_btn = button(text("Browse...").size(11))
-                    .on_press(Message::PluginDialogFilePick(id_for_pick))
+                let mut browse_btn = button(text("Browse...").size(11))
                     .style(button_style(false))
                     .padding([4, 8]);
+                if !is_disabled {
+                    browse_btn = browse_btn.on_press(Message::PluginDialogFilePick(id_for_pick));
+                }
 
                 column![
                     text(label).size(11),
@@ -803,7 +1004,7 @@ impl PluginDialogState {
                             text(t).size(12),
                         ]
                         .spacing(6)
-                        .align_y(iced::Alignment::Center),
+                        .align_y(iced::Alignment::Center)
                     )
                     .on_press(Message::PluginDialogSectionToggle(id_for_toggle))
                     .style(button::text)
@@ -818,7 +1019,10 @@ impl PluginDialogState {
                 if !is_collapsed {
                     let mut inner_items = column![].spacing(6).width(Fill);
                     for c in controls {
-                        inner_items = inner_items.push(self.view_field_item(c));
+                        if c.id().is_some_and(|cid| self.hidden_controls.contains(cid)) {
+                            continue;
+                        }
+                        inner_items = inner_items.push(self.view_field_item(c, is_disabled));
                     }
                     group_col = group_col.push(inner_items);
                 }
@@ -880,7 +1084,7 @@ impl PluginDialogState {
                                     radius: 0.0.into(),
                                 },
                                 ..Default::default()
-                            }),
+                            })
                     );
                 }
                 if *allow_delete {
@@ -902,7 +1106,7 @@ impl PluginDialogState {
                                 ..Default::default()
                             }
                         })
-                        .width(Fill),
+                        .width(Fill)
                 );
 
                 // Table data rows
@@ -917,15 +1121,7 @@ impl PluginDialogState {
                             .width(Fill);
                         for (c_idx, cell_text) in row_cells.iter().enumerate() {
                             let id_clone = id.clone();
-                            let ti = text_input("", cell_text.as_str())
-                                .on_input(move |val| {
-                                    Message::PluginDialogTableCellChange(
-                                        id_clone.clone(),
-                                        r_idx,
-                                        c_idx,
-                                        val,
-                                    )
-                                })
+                            let mut ti = text_input("", cell_text.as_str())
                                 .style(|theme: &Theme, status| {
                                     let palette = theme.palette();
                                     match status {
@@ -982,6 +1178,11 @@ impl PluginDialogState {
                                 .padding([4, 6])
                                 .size(12)
                                 .width(Fill);
+                            if !is_disabled {
+                                ti = ti.on_input(move |val| {
+                                    Message::PluginDialogTableCellChange(id_clone.clone(), r_idx, c_idx, val)
+                                });
+                            }
 
                             let cell_container =
                                 container(ti)
@@ -1003,13 +1204,14 @@ impl PluginDialogState {
                         }
                         if *allow_delete {
                             let id_del = id.clone();
-                            let del_btn = button(crate::ui::icons::themed_secondary(
-                                crate::ui::icons::CLOSE,
-                                10.0,
-                            ))
-                            .on_press(Message::PluginDialogTableRemoveRow(id_del, r_idx))
+                            let mut del_btn = button(
+                                crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 10.0)
+                            )
                             .style(button::text)
                             .padding([3, 8]);
+                            if !is_disabled {
+                                del_btn = del_btn.on_press(Message::PluginDialogTableRemoveRow(id_del, r_idx));
+                            }
                             r_widget = r_widget.push(del_btn);
                         }
 
@@ -1066,11 +1268,15 @@ impl PluginDialogState {
 
                 if *allow_add {
                     let id_add = id.clone();
-                    let add_btn = button(text(crate::t!("Add row").into_owned()).size(11))
-                        .on_press(Message::PluginDialogTableAddRow(id_add))
+                    let mut add_btn = button(text(crate::t!("Add row").into_owned()).size(11))
                         .style(button_style(false))
                         .padding([4, 10]);
-                    table_col = table_col.push(row![Space::new().width(Fill), add_btn].width(Fill));
+                    if !is_disabled {
+                        add_btn = add_btn.on_press(Message::PluginDialogTableAddRow(id_add));
+                    }
+                    table_col = table_col.push(
+                        row![Space::new().width(Fill), add_btn].width(Fill)
+                    );
                 }
 
                 container(table_col)
@@ -1093,5 +1299,156 @@ impl PluginDialogState {
                     .into()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
+
+    #[test]
+    fn test_dialog_state_update_values_inplace() {
+        let def = DialogDef::new("Test Dialog")
+            .with_control(DialogControl::Text {
+                id: "status".to_string(),
+                label: "Status:".to_string(),
+                default: "Initial".to_string(),
+            })
+            .with_control(DialogControl::Table {
+                id: "scripts".to_string(),
+                label: Some("Startup Scripts".to_string()),
+                headers: vec!["Path".to_string()],
+                rows: vec![],
+                allow_add: true,
+                allow_delete: true,
+            })
+            .with_control(DialogControl::Choice {
+                id: "category".to_string(),
+                label: "Category:".to_string(),
+                options: vec!["Cat 1".to_string(), "Cat 2".to_string()],
+                default_index: 0,
+            })
+            .with_control(DialogControl::Fields {
+                id: "nested_group".to_string(),
+                title: Some("Group".to_string()),
+                controls: vec![DialogControl::Choice {
+                    id: "nested_choice".to_string(),
+                    label: "Nested:".to_string(),
+                    options: vec!["Static A".to_string(), "Static B".to_string()],
+                    default_index: 0,
+                }],
+                collapsed: false,
+            })
+            .with_control(DialogControl::Button {
+                id: "apply_btn".to_string(),
+                label: "Apply".to_string(),
+                action: Some("apply".to_string()),
+                align_h: None,
+                width: None,
+            });
+
+        let mut state = PluginDialogState::new(def);
+        assert_eq!(state.text_values.get("status").unwrap(), "Initial");
+        assert_eq!(state.table_values.get("scripts").unwrap().len(), 0);
+        assert_eq!(*state.choice_values.get("category").unwrap(), 0);
+        assert!(!state.disabled_controls.contains("apply_btn"));
+        assert_eq!(state.choice_option_text("category", 1), "Cat 2");
+        assert_eq!(state.choice_option_text("nested_choice", 1), "Static B");
+
+        let mut updates = HashMap::new();
+        updates.insert("status".to_string(), DialogValue::Text("Updated Status".to_string()));
+        updates.insert(
+            "scripts".to_string(),
+            DialogValue::Table(vec![vec!["C:/path/script1.lsp".to_string()]]),
+        );
+        updates.insert(
+            "category".to_string(),
+            DialogValue::ChoiceOptions {
+                options: vec!["Opt A".to_string(), "Opt B".to_string(), "Opt C".to_string()],
+                selected_index: 2,
+            },
+        );
+        updates.insert("apply_btn".to_string(), DialogValue::Enabled(false));
+        updates.insert("scripts:visible".to_string(), DialogValue::Visible(true));
+        updates.insert("advanced_section".to_string(), DialogValue::Visible(false));
+
+        state.update_values(updates);
+
+        assert_eq!(state.text_values.get("status").unwrap(), "Updated Status");
+        let table = state.table_values.get("scripts").unwrap();
+        assert_eq!(table.len(), 1);
+        assert_eq!(table[0][0], "C:/path/script1.lsp");
+        assert_eq!(*state.choice_values.get("category").unwrap(), 2);
+        assert_eq!(
+            state.dynamic_choice_options.get("category").unwrap(),
+            &vec!["Opt A".to_string(), "Opt B".to_string(), "Opt C".to_string()]
+        );
+        assert_eq!(state.choice_option_text("category", 2), "Opt C");
+        assert!(state.disabled_controls.contains("apply_btn"));
+        assert!(!state.hidden_controls.contains("scripts"));
+        assert!(state.hidden_controls.contains("advanced_section"));
+
+        let res_map = state.collect_response_map();
+        assert_eq!(
+            res_map.get("status"),
+            Some(&DialogValue::Text("Updated Status".to_string()))
+        );
+        assert_eq!(
+            res_map.get("category"),
+            Some(&DialogValue::Choice {
+                index: 2,
+                text: "Opt C".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_panel_state_shares_update_values_and_choice_lookup() {
+        use crate::ui::window::plugin_panel::PluginPanelState;
+        use ocs_plugin_api::dialog::PanelDef;
+
+        let def = PanelDef::new("my_panel", "My Panel")
+            .with_control(DialogControl::Fields {
+                id: "sec1".to_string(),
+                title: Some("Section".to_string()),
+                controls: vec![
+                    DialogControl::Choice {
+                        id: "p_choice".to_string(),
+                        label: "Choice".to_string(),
+                        options: vec!["One".to_string(), "Two".to_string()],
+                        default_index: 0,
+                    },
+                    DialogControl::Button {
+                        id: "p_btn".to_string(),
+                        label: "Click".to_string(),
+                        action: None,
+                        align_h: None,
+                        width: None,
+                    },
+                ],
+                collapsed: false,
+            });
+
+        let mut panel = PluginPanelState::from_def(def);
+        assert_eq!(panel.choice_option_text("p_choice", 1), "Two");
+        assert!(!panel.disabled_controls.contains("p_btn"));
+        assert!(!panel.hidden_controls.contains("p_choice"));
+
+        let mut updates = HashMap::new();
+        updates.insert(
+            "p_choice".to_string(),
+            DialogValue::ChoiceOptions {
+                options: vec!["Alpha".to_string(), "Beta".to_string()],
+                selected_index: 1,
+            },
+        );
+        updates.insert("p_btn:enabled".to_string(), DialogValue::Enabled(false));
+        updates.insert("p_choice:visible".to_string(), DialogValue::Visible(false));
+        panel.update_values(updates);
+
+        assert_eq!(panel.choice_option_text("p_choice", 1), "Beta");
+        assert!(panel.disabled_controls.contains("p_btn"));
+        assert!(panel.hidden_controls.contains("p_choice"));
     }
 }

@@ -397,6 +397,7 @@ fn is_dimension_text(s: &str) -> bool {
     if let Some(rest) = trimmed
         .strip_prefix('Ø')
         .or_else(|| trimmed.strip_prefix('⌀'))
+        .or_else(|| trimmed.strip_prefix('∅'))
         .or_else(|| trimmed.strip_prefix("ø"))
     {
         let rest = rest

@@ -314,14 +314,29 @@ fn line_pts(l: &LineEnt) -> Vec<[f32; 3]> {
 fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
     match e {
         EntityType::Line(l) => line_pts(l),
-        EntityType::Arc(a) => arc_pts(
-            a.center.x,
-            a.center.y,
-            a.radius,
-            a.start_angle,
-            a.end_angle,
-            a.center.z,
-        ),
+        EntityType::Arc(a) => {
+            let pts = arc_pts(
+                a.center.x,
+                a.center.y,
+                a.radius,
+                a.start_angle,
+                a.end_angle,
+                a.center.z,
+            );
+            // An arc out of plan (a fillet of lines in another plane) is in
+            // the object coordinates of its normal.
+            let normal = (a.normal.x, a.normal.y, a.normal.z);
+            if normal == (0.0, 0.0, 1.0) {
+                return pts;
+            }
+            pts.into_iter()
+                .map(|[x, y, z]| {
+                    let p = (x as f64, y as f64, z as f64);
+                    let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs(p, normal);
+                    [x as f32, y as f32, z as f32]
+                })
+                .collect()
+        }
         EntityType::LwPolyline(p) => lwpoly_pts(p),
         _ => vec![],
     }
@@ -1035,6 +1050,79 @@ impl FilletEntity {
     }
 }
 
+/// FILLET of two lines that leave the XY plane, in the plane they share:
+/// both are taken into that plane's frame, filleted there as in plan, and
+/// the trimmed lines and the arc (normal to the plane) taken back (#2796).
+///
+/// `None` when the plan fillet applies: not two lines, or two lines at one
+/// elevation. `Some(None)` when there is no fillet: the lines are parallel
+/// or do not lie in one plane.
+fn fillet_lines_in_their_plane(
+    e1: &FilletEntity,
+    click1: DVec3,
+    e2: &FilletEntity,
+    click2: DVec3,
+    radius: f64,
+) -> Option<Option<(EntityType, EntityType, Option<EntityType>)>> {
+    let (FilletEntity::Line(l1), FilletEntity::Line(l2)) = (e1, e2) else {
+        return None;
+    };
+    let w = |v: Vector3| DVec3::new(v.x, v.y, v.z);
+    let (a1, b1, a2, b2) = (w(l1.start), w(l1.end), w(l2.start), w(l2.end));
+    let size = [a1, b1, a2, b2]
+        .iter()
+        .fold(1.0_f64, |m, p| m.max(p.abs().max_element()));
+    let tol = size * 1e-9;
+    if [b1.z, a2.z, b2.z].iter().all(|z| (z - a1.z).abs() <= tol) {
+        return None;
+    }
+    let (d1, d2) = (b1 - a1, b2 - a2);
+    let n = d1.cross(d2);
+    if n.length() <= 1e-9 * d1.length() * d2.length() || (a2 - a1).dot(n.normalize()).abs() > tol
+    {
+        return Some(None);
+    }
+    let n = n.normalize();
+    let x = d1.normalize();
+    let y = n.cross(x);
+    let to_plane = |p: DVec3| Vector3::new((p - a1).dot(x), (p - a1).dot(y), 0.0);
+    let from_plane = |v: Vector3| a1 + x * v.x + y * v.y;
+    let flat = |l: &LineEnt| {
+        let mut l = l.clone();
+        l.start = to_plane(w(l.start));
+        l.end = to_plane(w(l.end));
+        FilletEntity::Line(l)
+    };
+    let c1 = to_plane(click1);
+    let c2 = to_plane(click2);
+    let back = |e: EntityType| match e {
+        EntityType::Line(mut l) => {
+            let (s, e) = (from_plane(l.start), from_plane(l.end));
+            l.start = Vector3::new(s.x, s.y, s.z);
+            l.end = Vector3::new(e.x, e.y, e.z);
+            EntityType::Line(l)
+        }
+        EntityType::Arc(mut a) => {
+            // The arc's centre and angles in the object coordinates of
+            // the plane's normal, whose X axis is turned `turn` from `x`.
+            let (ax, ay) = crate::scene::view::transform::ocs_axes((n.x, n.y, n.z));
+            let (ax, ay) = (DVec3::new(ax.0, ax.1, ax.2), DVec3::new(ay.0, ay.1, ay.2));
+            let turn = x.dot(ay).atan2(x.dot(ax));
+            let c = from_plane(a.center);
+            a.center = Vector3::new(c.dot(ax), c.dot(ay), c.dot(n));
+            a.start_angle = norm_angle(a.start_angle + turn);
+            a.end_angle = norm_angle(a.end_angle + turn);
+            a.normal = Vector3::new(n.x, n.y, n.z);
+            EntityType::Arc(a)
+        }
+        other => other,
+    };
+    Some(
+        compute_fillet_entities(&flat(l1), [c1.x, c1.y], &flat(l2), [c2.x, c2.y], radius)
+            .map(|(e1, e2, arc)| (back(e1), back(e2), arc.map(back))),
+    )
+}
+
 /// Compute FILLET between two entities (Line, Arc, or LwPolyline segment).
 /// Returns (trimmed_e1, trimmed_e2, optional_fillet_arc).
 /// For same-poly corner fillet the two returned entities are identical (the rebuilt poly).
@@ -1152,13 +1240,21 @@ fn compute_fillet_entities(
                     Some((a, b, Between::Corner))
                 } else if next(a) < seg_count && next(next(a)) == b && !straight(next(a)) {
                     Some((a, b, Between::Arc(next(a))))
-                } else if !closed && seg_count >= 2 && a == seg_count - 1 && b == 0 {
-                    Some((a, b, Between::OpenEnds))
                 } else {
                     None
                 }
             };
-            let (before_seg, after_seg, between) = order(*s1, *s2).or_else(|| order(*s2, *s1))?;
+            // The gap between the open ends only when the two segments share
+            // no vertex: the two segments of a V meet at both readings, and
+            // the corner they share is the one meant.
+            let open_ends = |a: usize, b: usize| {
+                (!closed && seg_count >= 2 && a == seg_count - 1 && b == 0)
+                    .then_some((a, b, Between::OpenEnds))
+            };
+            let (before_seg, after_seg, between) = order(*s1, *s2)
+                .or_else(|| order(*s2, *s1))
+                .or_else(|| open_ends(*s1, *s2))
+                .or_else(|| open_ends(*s2, *s1))?;
             if !straight(before_seg) || !straight(after_seg) {
                 return None;
             }
@@ -1310,6 +1406,49 @@ fn rebuild_poly_from_trimmed_line(
         None
     };
     lwpoly_shorten_seg(poly, seg_idx, new_start, new_end)
+}
+
+/// The single polyline a fillet of a polyline with another object leaves,
+/// and whether it takes the first pick's place: what the fillet commits and
+/// what its preview draws.
+fn joined_poly_fillet(
+    e1: &FilletEntity,
+    e2: &FilletEntity,
+    new_e1: &EntityType,
+    new_e2: &EntityType,
+    fillet: Option<&EntityType>,
+    same_entity: bool,
+) -> Option<(LwPolyline, bool)> {
+    if same_entity {
+        return None;
+    }
+    match (e1, e2, new_e1, new_e2) {
+        (
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            FilletEntity::Line(_) | FilletEntity::Arc(_),
+            EntityType::LwPolyline(moved),
+            other,
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, None, fillet).map(|p| (p, true)),
+        // Two polylines join into the first one.
+        (
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            FilletEntity::LwPoly {
+                poly: poly2,
+                seg_idx: seg2,
+                ..
+            },
+            EntityType::LwPolyline(moved),
+            other,
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, Some((poly2, *seg2)), fillet)
+            .map(|p| (p, true)),
+        (
+            FilletEntity::Line(_) | FilletEntity::Arc(_),
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            other,
+            EntityType::LwPolyline(moved),
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, None, fillet).map(|p| (p, false)),
+        _ => None,
+    }
 }
 
 /// Open (if needed) and cut a polyline at a fillet with a line or arc, then
@@ -1870,7 +2009,9 @@ enum FilletStep {
     Second {
         h1: Handle,
         e1: FilletEntity,
-        click1: [f64; 2],
+        /// The first pick, in world space: two lines out of the XY plane
+        /// fillet in the plane they share.
+        click1: DVec3,
     },
 }
 
@@ -1889,7 +2030,7 @@ pub struct FilletCommand {
     /// First-object pick to restore after a radius entry made mid-selection
     /// (i.e. "R" pressed after the first object was already picked), so the
     /// command resumes at the second pick instead of restarting selection.
-    resume_second: Option<(Handle, FilletEntity, [f64; 2])>,
+    resume_second: Option<(Handle, FilletEntity, DVec3)>,
     /// Multiple option: keep filleting until Enter / Esc.
     multiple: bool,
     /// Fillets applied by this command that Undo can still take back.
@@ -2247,7 +2388,7 @@ impl CadCommand for FilletCommand {
                     self.step = FilletStep::Second {
                         h1: handle,
                         e1: e,
-                        click1: click,
+                        click1: pt,
                     };
                     CmdResult::NeedPoint
                 } else {
@@ -2257,7 +2398,8 @@ impl CadCommand for FilletCommand {
             FilletStep::Second { h1, e1, click1 } => {
                 let h1 = *h1;
                 let e1 = e1.clone();
-                let click1 = *click1;
+                let click1_3d = *click1;
+                let click1 = [click1_3d.x, click1_3d.y];
                 let same_entity = handle == h1;
 
                 // For non-LwPoly entities, reject same-entity re-picks.
@@ -2276,7 +2418,11 @@ impl CadCommand for FilletCommand {
                     });
 
                 if let Some(e2) = e2 {
-                    match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
+                    let result = fillet_lines_in_their_plane(&e1, click1_3d, &e2, pt, self.radius)
+                        .unwrap_or_else(|| {
+                            compute_fillet_entities(&e1, click1, &e2, click, self.radius)
+                        });
+                    match result {
                         Some((new_e1, new_e2, maybe_arc)) => {
                             // No trim: the objects stay as they are; only the
                             // arc is added (#1558).
@@ -2295,71 +2441,23 @@ impl CadCommand for FilletCommand {
                             }
                             // A polyline filleted with a line or arc takes
                             // the fillet and the other object in.
-                            let joined = match (&e1, &e2, &new_e1, &new_e2) {
-                                (
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    FilletEntity::Line(_) | FilletEntity::Arc(_),
-                                    EntityType::LwPolyline(moved),
-                                    other,
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    None,
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (h1, vec![EntityType::LwPolyline(poly)]),
-                                        (handle, Vec::new()),
-                                    ]
-                                }),
-                                // Two polylines join into the first one.
-                                (
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    FilletEntity::LwPoly {
-                                        poly: poly2,
-                                        seg_idx: seg2,
-                                        ..
-                                    },
-                                    EntityType::LwPolyline(moved),
-                                    other,
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    Some((poly2, *seg2)),
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (h1, vec![EntityType::LwPolyline(poly)]),
-                                        (handle, Vec::new()),
-                                    ]
-                                }),
-                                (
-                                    FilletEntity::Line(_) | FilletEntity::Arc(_),
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    other,
-                                    EntityType::LwPolyline(moved),
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    None,
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (handle, vec![EntityType::LwPolyline(poly)]),
-                                        (h1, Vec::new()),
-                                    ]
-                                }),
-                                _ => None,
-                            };
+                            let joined = joined_poly_fillet(
+                                &e1,
+                                &e2,
+                                &new_e1,
+                                &new_e2,
+                                maybe_arc.as_ref(),
+                                same_entity,
+                            )
+                            .map(|(poly, into_first)| {
+                                let (keep, gone) = if into_first {
+                                    (h1, handle)
+                                } else {
+                                    (handle, h1)
+                                };
+                                let poly = EntityType::LwPolyline(poly);
+                                vec![(keep, vec![poly]), (gone, Vec::new())]
+                            });
                             let original1 = self.entity_index.get(&self.all_entities, h1).cloned();
                             let original2 =
                                 self.entity_index.get(&self.all_entities, handle).cloned();
@@ -2455,12 +2553,35 @@ impl CadCommand for FilletCommand {
                         }
                         other => FilletEntity::from_entity(other),
                     });
-                // For non-LwPoly, skip same-entity hover.
-                let _ = h1;
                 if let Some(e2) = e2 {
                     if let Some((new_e1, new_e2, maybe_arc)) =
-                        compute_fillet_entities(&e1, click1, &e2, click, self.radius)
+                        fillet_lines_in_their_plane(&e1, click1, &e2, pt, self.radius)
+                            .unwrap_or_else(|| {
+                                let click1 = [click1.x, click1.y];
+                                compute_fillet_entities(&e1, click1, &e2, click, self.radius)
+                            })
                     {
+                        // The polyline the commit joins, not its parts.
+                        let infinite = |h: Handle| {
+                            is_infinite(self.entity_index.get(&self.all_entities, h))
+                        };
+                        let joined = joined_poly_fillet(
+                            &e1,
+                            &e2,
+                            &new_e1,
+                            &new_e2,
+                            maybe_arc.as_ref(),
+                            handle == h1,
+                        )
+                        .filter(|_| self.trim && !infinite(h1) && !infinite(handle));
+                        if let Some((poly, _)) = joined {
+                            return vec![WireModel::solid(
+                                "fillet_joined".into(),
+                                lwpoly_pts(&poly),
+                                WireModel::CYAN,
+                                false,
+                            )];
+                        }
                         let mut out = Vec::new();
                         if self.trim {
                             out.push(WireModel::solid(
@@ -3321,6 +3442,64 @@ mod tests {
         let mut line = LineEnt::from_coords(x1, y1, 0.0, x2, y2, 0.0);
         line.common.handle = Handle::new(handle);
         EntityType::Line(line)
+    }
+
+    /// #2796: two lines in a vertical plane fillet in that plane, the arc
+    /// normal to it and meeting both trimmed lines.
+    #[test]
+    fn lines_out_of_plan_fillet_in_their_own_plane() {
+        let l1 = LineEnt::from_coords(0.0, 0.0, 0.0, 10.0, 0.0, 0.0);
+        let l2 = LineEnt::from_coords(0.0, 0.0, 10.0, 0.0, 0.0, 0.0);
+        let (e1, e2, arc) = fillet_lines_in_their_plane(
+            &FilletEntity::Line(l1),
+            DVec3::new(5.0, 0.0, 0.0),
+            &FilletEntity::Line(l2),
+            DVec3::new(0.0, 0.0, 5.0),
+            2.0,
+        )
+        .expect("lines out of plan")
+        .expect("a fillet");
+        let ends = |e: &EntityType| match e {
+            EntityType::Line(l) => [l.start, l.end].map(|v| DVec3::new(v.x, v.y, v.z)),
+            _ => panic!("a line"),
+        };
+        let near = |a: DVec3, b: DVec3| a.distance(b) < 1e-9;
+        assert!(ends(&e1).iter().any(|&p| near(p, DVec3::new(2.0, 0.0, 0.0))));
+        assert!(ends(&e1).iter().any(|&p| near(p, DVec3::new(10.0, 0.0, 0.0))));
+        assert!(ends(&e2).iter().any(|&p| near(p, DVec3::new(0.0, 0.0, 2.0))));
+        let Some(EntityType::Arc(arc)) = arc else {
+            panic!("an arc");
+        };
+        assert!((arc.normal.y.abs() - 1.0).abs() < 1e-12, "{:?}", arc.normal);
+        assert!((arc.radius - 2.0).abs() < 1e-12);
+        let normal = (arc.normal.x, arc.normal.y, arc.normal.z);
+        let at = |a: f64| {
+            let c = arc.center;
+            let p = (c.x + 2.0 * a.cos(), c.y + 2.0 * a.sin(), c.z);
+            let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs(p, normal);
+            DVec3::new(x, y, z)
+        };
+        let (s, e) = (at(arc.start_angle), at(arc.end_angle));
+        let tangents = [DVec3::new(2.0, 0.0, 0.0), DVec3::new(0.0, 0.0, 2.0)];
+        assert!(tangents.iter().any(|&t| near(s, t)), "{s}");
+        assert!(tangents.iter().any(|&t| near(e, t)), "{e}");
+        // The arc bulges towards the corner, through (2-√2, 0, 2-√2).
+        let mid = at(arc.start_angle + norm_angle(arc.end_angle - arc.start_angle) / 2.0);
+        let corner = 2.0 - 2.0_f64.sqrt();
+        assert!(near(mid, DVec3::new(corner, 0.0, corner)), "{mid}");
+
+        // At one elevation the plan fillet applies.
+        let flat = |x: f64, y: f64| {
+            FilletEntity::Line(LineEnt::from_coords(0.0, 0.0, 3.0, x, y, 3.0))
+        };
+        assert!(fillet_lines_in_their_plane(
+            &flat(1.0, 0.0),
+            DVec3::ZERO,
+            &flat(0.0, 1.0),
+            DVec3::ZERO,
+            1.0
+        )
+        .is_none());
     }
 
     fn keywords(cmd: &dyn CadCommand) -> Vec<String> {

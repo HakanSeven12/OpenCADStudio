@@ -28,14 +28,22 @@ pub use model::{
 use super::pdf_raster::{source_bytes, PdfPage};
 
 /// A DGN model element by element, for DGNIMPORT; `None` when the file is
-/// not a V7 or V8 design file.
-pub fn dgn_import(path: &str, item: &str) -> Option<DgnImport> {
+/// not a V7 or V8 design file. A V7 file names no text code page, so
+/// `code_page` supplies it (e.g. 1250 for Czech/Slovak files); `None` keeps
+/// the historical 1252 decoding.
+pub fn dgn_import(path: &str, item: &str, code_page: Option<u16>) -> Option<DgnImport> {
     let bytes = source_bytes(path)?;
     if dgn7::is_v7(&bytes) {
-        dgn7::import(&bytes)
+        dgn7::import(&bytes, code_page)
     } else {
         dgn8::import(&bytes, item)
     }
+}
+
+/// The pages the V7 decoder accepts as its `code_page` argument: every
+/// listed Windows page, the UTF-8 page and the auto-detect sentinel.
+pub fn code_page_supported(code_page: u16) -> bool {
+    dgn7::code_page_encoding(code_page).is_some() || code_page == 0
 }
 
 /// The models DGNIMPORT offers: a V7 file's one model, a V8 file's design
@@ -105,7 +113,7 @@ pub fn layer_names(kind: UnderlayType, path: &str) -> Vec<String> {
     match kind {
         // A plotted DWF carries no layers.
         UnderlayType::Dwf | UnderlayType::Pdf => None,
-        UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::layer_names(&bytes),
+        UnderlayType::Dgn if dgn7::is_v7(&bytes) => dgn7::layer_names(&bytes, None),
         UnderlayType::Dgn => dgn8::layer_names(&bytes),
     }
     .unwrap_or_default()
@@ -138,7 +146,7 @@ pub fn sheet_without(
         let mut sheet = match kind {
             UnderlayType::Dwf => dwf::sheet(&bytes, item)?,
             UnderlayType::Dgn if dgn7::is_v7(&bytes) => {
-                dgn7::model(&bytes, hidden).unwrap_or_default()
+                dgn7::model(&bytes, hidden, None).unwrap_or_default()
             }
             UnderlayType::Dgn => dgn8::model(&bytes, item, hidden).unwrap_or_default(),
             UnderlayType::Pdf => return None,

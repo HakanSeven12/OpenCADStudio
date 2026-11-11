@@ -128,6 +128,14 @@ pub enum DialogControl {
         #[serde(default)]
         align_v: Option<VerticalAlign>,
     },
+    /// Static text with an id, so a later `update_panel` / dialog update can
+    /// rewrite it in place (API v17). Plain `InfoText` stays id-less.
+    Label {
+        id: String,
+        text: String,
+        #[serde(default)]
+        align_h: Option<HorizontalAlign>,
+    },
 }
 
 fn default_true() -> bool {
@@ -138,7 +146,8 @@ impl DialogControl {
     pub fn id(&self) -> Option<&str> {
         match self {
             Self::InfoText { .. } | Self::Row { .. } | Self::Column { .. } => None,
-            Self::Text { id, .. }
+            Self::Label { id, .. }
+            | Self::Text { id, .. }
             | Self::Number { id, .. }
             | Self::Checkbox { id, .. }
             | Self::Choice { id, .. }
@@ -388,6 +397,9 @@ impl QuadPanelDef {
 }
 
 /// Value returned by an interactive control.
+///
+/// Compatibility rule: new variants MUST be appended at the end so existing
+/// plugins keep their bincode discriminant indices (`0..=7`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogValue {
     Text(String),
@@ -398,6 +410,96 @@ pub enum DialogValue {
     FilePath(String),
     Fields(HashMap<String, DialogValue>),
     Table(Vec<Vec<String>>),
+    /// Dynamically replaces the options list and selected index of a Choice control.
+    ChoiceOptions {
+        options: Vec<String>,
+        selected_index: usize,
+    },
+    /// Dynamically enables or disables a control in an open dialog or panel.
+    Enabled(bool),
+    /// Dynamically shows or hides a control in an open dialog or panel.
+    Visible(bool),
+}
+
+/// An interaction event emitted by a control inside an open dialog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DialogEvent {
+    /// Identifier of the control that triggered the event.
+    pub control_id: String,
+    /// Action verb: "click", "pick", "change", "toggle", "submit", "add_row", "remove_row".
+    pub action: String,
+    /// New or associated value, if any.
+    pub value: Option<DialogValue>,
+    /// Snapshot of all current dialog values at the moment the event occurred.
+    pub current_values: HashMap<String, DialogValue>,
+}
+
+/// The plugin's response to a [`DialogEvent`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DialogActionResponse {
+    /// Keep dialog open; update controls with new values in-place with zero flicker.
+    UpdateValues(HashMap<String, DialogValue>),
+    /// Keep dialog open; replace layout with a new DialogDef.
+    ReplaceDialog(Box<DialogDef>),
+    /// Close dialog and submit current values (as if user clicked OK).
+    Submit,
+    /// Close dialog without submitting (as if user clicked Cancel / Esc).
+    Close,
+    /// No changes to the dialog.
+    None,
+}
+
+/// Current UI form contents of a registered persistent panel (API v18, additive).
+///
+/// This is UI input only: it is neither document authority nor a document revision.
+/// In particular, it does not establish that a record or entity targeted by a later
+/// write still exists or is unchanged. The host attaches [`tab_id`](Self::tab_id) so
+/// the panel read remains bound to the document tab that served it.
+///
+/// Typed values have the same shapes as [`DialogResponse::Submitted`]:
+///
+/// - [`DialogControl::Text`] produces [`DialogValue::Text`].
+/// - [`DialogControl::Number`] produces [`DialogValue::Number`] when its current text
+///   is a valid number. Partial or otherwise malformed numeric text is retained in
+///   [`raw_text`](Self::raw_text) and reported in [`errors`](Self::errors), rather than
+///   being replaced by a default or a normalized value.
+/// - [`DialogControl::Checkbox`] produces [`DialogValue::Bool`].
+/// - [`DialogControl::Choice`] produces [`DialogValue::Choice`], carrying both the
+///   selected `index` and its current `text`.
+/// - [`DialogControl::Color`] produces [`DialogValue::Color`].
+/// - [`DialogControl::FilePicker`] produces [`DialogValue::FilePath`].
+/// - [`DialogControl::Table`] produces [`DialogValue::Table`] with every current row
+///   and cell string; table cells do not have separate `raw_text` entries.
+/// - [`DialogControl::Fields`] produces [`DialogValue::Fields`], whose map is built by
+///   recursively reading its child controls. [`DialogControl::Row`] and
+///   [`DialogControl::Column`] are transparent containers and are recursively read at
+///   their location without producing values of their own.
+/// - [`DialogControl::InfoText`] and [`DialogControl::Button`] have no form value.
+///   Button activation remains a panel action, not a snapshot entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelSnapshot {
+    /// Identifier of the registered panel that was read.
+    pub panel_id: String,
+    /// Host-authenticated identity of the plugin that registered this panel.
+    /// This is assigned by the host, never accepted from the form.
+    pub plugin_id: String,
+    /// Host-attached identifier of the document tab owning the panel session.
+    pub tab_id: u64,
+    /// Complete typed values for all readable value-bearing controls, keyed by the
+    /// declared control id. Nested `Fields` use nested maps as described above.
+    ///
+    /// An unreadable value is omitted only with a corresponding entry in `errors`;
+    /// the host never silently supplies the panel declaration's default instead.
+    pub values: HashMap<String, DialogValue>,
+    /// Exact current text of every `Text`, `Number`, and `FilePicker` control, keyed
+    /// by control id, including controls reached through nested containers. Number
+    /// text is preserved verbatim even when it is partial or malformed.
+    pub raw_text: HashMap<String, String>,
+    /// Read-back problems, including duplicate or missing fields, values whose shape
+    /// does not match the declared control, and malformed input. An empty vector is a
+    /// clean read. Plugins must reject a snapshot with any errors rather than write
+    /// from a partial or ambiguous form.
+    pub errors: Vec<String>,
 }
 
 /// Response returned to the plugin after dialog interaction.
@@ -510,6 +612,47 @@ mod tests {
     }
 
     #[test]
+    fn panel_snapshot_bincode_roundtrip_preserves_raw_text() {
+        let mut fields = HashMap::new();
+        fields.insert("name".to_string(), DialogValue::Text("Bracket".to_string()));
+
+        let mut values = HashMap::new();
+        values.insert("geometry".to_string(), DialogValue::Fields(fields));
+        values.insert(
+            "material".to_string(),
+            DialogValue::Choice {
+                index: 1,
+                text: "Steel".to_string(),
+            },
+        );
+        values.insert(
+            "rows".to_string(),
+            DialogValue::Table(vec![vec!["Bolt".to_string(), "8".to_string()]]),
+        );
+
+        let mut raw_text = HashMap::new();
+        raw_text.insert("name".to_string(), "Bracket".to_string());
+        raw_text.insert("quantity".to_string(), "-".to_string());
+
+        let snapshot = PanelSnapshot {
+            panel_id: "part_editor".to_string(),
+            plugin_id: "example.part_editor".to_string(),
+            tab_id: 42,
+            values,
+            raw_text,
+            errors: vec!["field 'quantity': malformed number".to_string()],
+        };
+        let bytes = bincode::serialize(&snapshot).expect("serialize panel snapshot");
+        let restored: PanelSnapshot =
+            bincode::deserialize(&bytes).expect("deserialize panel snapshot");
+        assert_eq!(snapshot, restored);
+        assert_eq!(
+            restored.raw_text.get("quantity").map(String::as_str),
+            Some("-")
+        );
+    }
+
+    #[test]
     fn fields_and_table_bincode_roundtrip() {
         let dialog = DialogDef::new("BOM Inspector")
             .width(600.0)
@@ -574,4 +717,100 @@ mod tests {
             bincode::deserialize(&resp_bytes).expect("deserialize response");
         assert_eq!(response, restored_resp);
     }
+
+    #[test]
+    fn dialog_event_and_action_response_bincode_roundtrip() {
+        let mut current_values = HashMap::new();
+        current_values.insert("count".to_string(), DialogValue::Number(42.0));
+        current_values.insert(
+            "category".to_string(),
+            DialogValue::ChoiceOptions {
+                options: vec!["A".to_string(), "B".to_string()],
+                selected_index: 1,
+            },
+        );
+        current_values.insert("btn".to_string(), DialogValue::Enabled(false));
+        current_values.insert("section".to_string(), DialogValue::Visible(true));
+
+        let event = DialogEvent {
+            control_id: "pick_file".to_string(),
+            action: "pick".to_string(),
+            value: Some(DialogValue::FilePath("C:/scripts/test.lsp".to_string())),
+            current_values: current_values.clone(),
+        };
+
+        let evt_bytes = bincode::serialize(&event).expect("serialize event");
+        let restored_evt: DialogEvent = bincode::deserialize(&evt_bytes).expect("deserialize event");
+        assert_eq!(event, restored_evt);
+
+        let mut update_values = HashMap::new();
+        update_values.insert(
+            "startup_scripts".to_string(),
+            DialogValue::Table(vec![vec!["C:/scripts/test.lsp".to_string()]]),
+        );
+        update_values.insert("status_label".to_string(), DialogValue::Text("Script added".to_string()));
+
+        let action_resp = DialogActionResponse::UpdateValues(update_values);
+        let resp_bytes = bincode::serialize(&action_resp).expect("serialize action response");
+        let restored_resp: DialogActionResponse =
+            bincode::deserialize(&resp_bytes).expect("deserialize action response");
+        assert_eq!(action_resp, restored_resp);
+    }
+
+    #[test]
+    fn dialog_value_and_info_text_bincode_wire_compatibility() {
+        let cases: Vec<(u32, DialogValue)> = vec![
+            (0, DialogValue::Text("hello".into())),
+            (1, DialogValue::Number(1.5)),
+            (2, DialogValue::Bool(true)),
+            (
+                3,
+                DialogValue::Choice {
+                    index: 0,
+                    text: "A".into(),
+                },
+            ),
+            (4, DialogValue::Color([255, 0, 128])),
+            (5, DialogValue::FilePath("a.lsp".into())),
+            (6, DialogValue::Fields(HashMap::new())),
+            (7, DialogValue::Table(vec![])),
+            (
+                8,
+                DialogValue::ChoiceOptions {
+                    options: vec!["X".into()],
+                    selected_index: 0,
+                },
+            ),
+            (9, DialogValue::Enabled(false)),
+            (10, DialogValue::Visible(true)),
+        ];
+
+        for (expected_discriminant, val) in cases {
+            let bytes = bincode::serialize(&val).expect("serialize DialogValue");
+            let disc = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            assert_eq!(
+                disc, expected_discriminant,
+                "DialogValue discriminant mismatch for {val:?}"
+            );
+        }
+
+        // Old plugin's InfoText layout: discriminant 0u32 + String + Option<HorizontalAlign>
+        let mut legacy_info_bytes = Vec::new();
+        legacy_info_bytes.extend_from_slice(&0u32.to_le_bytes());
+        legacy_info_bytes
+            .extend_from_slice(&bincode::serialize(&"Hello".to_string()).unwrap());
+        legacy_info_bytes
+            .extend_from_slice(&bincode::serialize(&Some(HorizontalAlign::Center)).unwrap());
+
+        let decoded: DialogControl =
+            bincode::deserialize(&legacy_info_bytes).expect("decode legacy InfoText");
+        assert_eq!(
+            decoded,
+            DialogControl::InfoText {
+                text: "Hello".to_string(),
+                align_h: Some(HorizontalAlign::Center),
+            }
+        );
+    }
 }
+

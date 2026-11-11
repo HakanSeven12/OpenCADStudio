@@ -127,11 +127,7 @@ impl OpenCADStudio {
             .as_mut()
             .map(|c| c.take_pending_panel_updates())
             .unwrap_or_default();
-        for (panel_id, values) in panel_updates {
-            if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                panel.update_values(values);
-            }
-        }
+        self.apply_panel_or_dialog_updates(panel_updates);
         if let CmdResult::ReturnPoint(pt) = result {
             self.tabs[i].scene.clear_preview_wire();
             if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {
@@ -1209,6 +1205,15 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::VpLayerOverride {
+                vp_handle,
+                layer,
+                channel,
+                value,
+            } => {
+                self.handle_vp_layer_override(vp_handle, &layer, channel, &value);
+            }
+
             CmdResult::VpLayerUpdate {
                 vp_handle,
                 freeze,
@@ -1486,6 +1491,13 @@ impl OpenCADStudio {
             self.command_line.set_step_options(Vec::new());
             self.open_attribute_editor(ins_handle);
             return Some(Task::none());
+        }
+        let heading = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|c| c.prompt_heading());
+        if let Some(h) = heading.filter(|_| !quiet) {
+            self.command_line.push_info(&h);
         }
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
         if let Some(p) = prompt.filter(|_| !quiet) {

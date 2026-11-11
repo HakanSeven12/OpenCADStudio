@@ -349,6 +349,11 @@ impl CadCommand for AngularDimensionCommand {
         "DIMANGULAR"
     }
 
+    /// A dimension's point prompts refuse unusable input this way (measured).
+    fn point_rejection(&self) -> Option<String> {
+        Some(t!("Invalid point input.").into_owned())
+    }
+
     fn prompt(&self) -> String {
         if self.awaiting_quadrant {
             return t!("DIMANGULAR  Specify quadrant:").into_owned();

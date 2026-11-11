@@ -1311,6 +1311,17 @@ impl HostApi for V4PluginHostApi {
         }
     }
 
+    fn panel_snapshot(&self, panel_id: &str) -> Result<crate::dialog::PanelSnapshot, String> {
+        match self.request(PluginRequest::PanelSnapshot {
+            panel_id: panel_id.to_string(),
+        }) {
+            Ok(PluginResponse::PanelSnapshot(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected PanelSnapshot response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     fn register_quad_panels(
         &mut self,
         _plugin_id: &str,

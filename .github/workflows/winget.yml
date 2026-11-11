@@ -47,7 +47,7 @@ jobs:
           echo "Target release tag: $TAG"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ steps.resolve-tag.outputs.tag }}
 
@@ -73,7 +73,7 @@ jobs:
 
       - name: Publish to WinGet with run-komac
         if: steps.check-token.outputs.configured == 'true' && steps.resolve-tag.outputs.skip != 'true'
-        uses: michidk/run-komac@v2
+        uses: michidk/run-komac@b5627eaf2c8b839aa3be7580be1e2e5b72c13f91 # v2
         with:
           args: >-
             update HakanSeven.OpenCADStudio

@@ -330,6 +330,9 @@ pub(crate) fn stretch_entity_except(
                 }
             }
         }
+        document::EntityType::Wipeout(w) => {
+            stretched = crate::entities::raster_image::stretch_wipeout(w, &in_win, delta);
+        }
         document::EntityType::Point(p) => {
             if in_win(p.location.x, p.location.y) {
                 p.location.x += dx;
@@ -1129,5 +1132,74 @@ mod shift_stretch_tests {
             cmd.prompt(),
             "STRETCH  Specify first corner of crossing window:"
         );
+    }
+}
+
+#[cfg(test)]
+mod wipeout_stretch_tests {
+    use super::*;
+    use document::entities::{Wipeout, WipeoutClipType};
+    use document::types::{Vector2, Vector3};
+
+    fn corners(w: &Wipeout) -> Vec<(f64, f64)> {
+        let mut points: Vec<(f64, f64)> = w
+            .world_boundary_vertices()
+            .iter()
+            .map(|p| ((p.x * 1e6).round() / 1e6, (p.y * 1e6).round() / 1e6))
+            .collect();
+        if points.len() > 3 && points.first() == points.last() {
+            points.pop();
+        }
+        points
+    }
+
+    fn stretched(w: &Wipeout, window: (DVec3, DVec3), delta: DVec3) -> Option<Wipeout> {
+        let mut entity = document::EntityType::Wipeout(w.clone());
+        if !stretch_entity(&mut entity, &[window], delta) {
+            return None;
+        }
+        match entity {
+            document::EntityType::Wipeout(w) => Some(w),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_crossing_window_over_one_side_stretches_a_rectangular_wipeout() {
+        let w = Wipeout::rectangular(Vector3::new(0.0, 0.0, 0.0), 4.0, 2.0);
+        let window = (DVec3::new(3.0, -1.0, 0.0), DVec3::new(5.0, 3.0, 0.0));
+        let w = stretched(&w, window, DVec3::new(2.0, 0.0, 0.0)).expect("the right side moves");
+        let mut got = corners(&w);
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(got, vec![(0.0, 0.0), (0.0, 2.0), (6.0, 0.0), (6.0, 2.0)]);
+    }
+
+    #[test]
+    fn one_corner_of_a_polygonal_wipeout_moves_alone() {
+        let mut w = Wipeout::rectangular(Vector3::new(0.0, 0.0, 0.0), 4.0, 4.0);
+        w.clip_type = WipeoutClipType::Polygonal;
+        // Triangle (0,0) (4,0) (0,4), closed by repeating the first corner.
+        w.clip_boundary_vertices = vec![
+            Vector2::new(-0.5, 0.5),
+            Vector2::new(0.5, 0.5),
+            Vector2::new(-0.5, -0.5),
+            Vector2::new(-0.5, 0.5),
+        ];
+        assert_eq!(corners(&w), vec![(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)]);
+        let window = (DVec3::new(3.0, -1.0, 0.0), DVec3::new(5.0, 1.0, 0.0));
+        let w = stretched(&w, window, DVec3::new(1.0, 1.0, 0.0)).expect("one corner moves");
+        assert_eq!(corners(&w), vec![(0.0, 0.0), (5.0, 1.0), (0.0, 4.0)]);
+        assert_eq!(w.clip_boundary_vertices.len(), 4, "still closed");
+    }
+
+    #[test]
+    fn a_wipeout_inside_the_window_moves_whole_and_one_outside_stays() {
+        let w = Wipeout::rectangular(Vector3::new(0.0, 0.0, 0.0), 4.0, 2.0);
+        let all = (DVec3::new(-1.0, -1.0, 0.0), DVec3::new(5.0, 3.0, 0.0));
+        let moved = stretched(&w, all, DVec3::new(1.0, 2.0, 0.0)).expect("moves whole");
+        assert_eq!(moved.insertion_point, Vector3::new(1.0, 2.0, 0.0));
+        assert_eq!(moved.clip_type, WipeoutClipType::Rectangular);
+        let away = (DVec3::new(10.0, 10.0, 0.0), DVec3::new(12.0, 12.0, 0.0));
+        assert!(stretched(&w, away, DVec3::new(1.0, 0.0, 0.0)).is_none());
     }
 }

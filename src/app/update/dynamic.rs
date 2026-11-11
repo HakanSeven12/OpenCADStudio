@@ -422,6 +422,7 @@ impl OpenCADStudio {
         let dy = d_ucs.y;
         let dz = d_ucs.z;
         let live_d = (dx * dx + dy * dy).sqrt();
+        let along_z = dz.abs() > 0.0 && live_d <= dz.abs() * 1e-6;
         let live_a = dy.atan2(dx); // radians, in the UCS plane
                                    // A typed angle is shown unsigned (0..180); give it the sign of the
                                    // cursor's current side so an entry made below the X axis sweeps
@@ -484,6 +485,16 @@ impl OpenCADStudio {
             [DynComponent::X, DynComponent::Y, DynComponent::Z] => Some(xf.to_wcs(
                 glam::DVec3::new(val(0, w_ucs.x), val(1, w_ucs.y), val(2, w_ucs.z)),
             )),
+            // Tracking straight up or down (#2796): the cursor has no
+            // direction in the plane, so a typed distance goes along Z.
+            [DynComponent::Distance, DynComponent::Angle]
+                if along_z && fields[1].buffer.is_none() =>
+            {
+                Some(rel(glam::DVec3::Z * val(0, dz.abs()).copysign(dz)))
+            }
+            [DynComponent::Distance] if along_z => {
+                Some(rel(glam::DVec3::Z * val(0, dz.abs()).copysign(dz)))
+            }
             [DynComponent::Distance, DynComponent::Angle] => {
                 let d = val(0, live_d);
                 let a = angle_rad(1);
@@ -989,6 +1000,26 @@ mod tests {
     use crate::entities::common::{set_unit_context, unit_context};
     use crate::scene::WireModel;
     use glam::DVec3;
+
+    /// #2796: tracking straight up, a typed distance goes along +Z, not
+    /// off into the plane in whatever direction the cursor's noise points.
+    #[test]
+    fn a_typed_distance_tracking_along_z_goes_along_z() {
+        use crate::app::tab_document::{DynComponent, DynFieldEntry};
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.last_point = Some(DVec3::new(1.0, 2.0, 3.0));
+        app.tabs[i].last_cursor_world = DVec3::new(1.0, 2.0, 13.0);
+        for comps in [
+            vec![DynComponent::Distance, DynComponent::Angle],
+            vec![DynComponent::Distance],
+        ] {
+            app.tabs[i].dyn_fields = comps.into_iter().map(DynFieldEntry::new).collect();
+            app.tabs[i].dyn_fields[0].buffer = Some("5".into());
+            assert_eq!(app.dyn_resolve_point(), Some(DVec3::new(1.0, 2.0, 8.0)));
+        }
+    }
 
     #[test]
     fn point_modifiers_keep_move_and_line_previews_at_the_incoming_cursor() {

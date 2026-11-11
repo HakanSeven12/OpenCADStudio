@@ -63,6 +63,18 @@ impl PlotQuality {
     }
 }
 
+/// The shaded-viewport plot modes, in dialog, listing and validation order.
+pub const SHADE_PLOT_MODES: &[&str] = &[
+    "As displayed",
+    "2D Wireframe",
+    "3D Wireframe",
+    "Hidden Line",
+    "Flat Shaded",
+    "Gouraud Shaded",
+    "Flat Shaded + Edges",
+    "Gouraud Shaded + Edges",
+];
+
 /// Output controls shared by preview, plot exports, and printer rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlotOptions {
@@ -77,6 +89,12 @@ pub struct PlotOptions {
     /// Vector resolution in DPI: path points snap to that grid on paper,
     /// trading precision for size. `None` keeps full precision.
     pub vector_dpi: Option<u32>,
+    /// SVG: emit positioned glyph geometry instead of visible `<text>` runs.
+    /// PDF has its own text pipeline and does not read this flag.
+    pub text_as_outlines: bool,
+    /// SVG: keep stroke widths constant under subsequent SVG transforms.
+    /// CAD plot scale is unchanged and PDF ignores this flag.
+    pub non_scaling_stroke: bool,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -128,6 +146,8 @@ impl Default for PlotOptions {
             quality: PlotQuality::Normal,
             raster_dpi: None,
             vector_dpi: None,
+            text_as_outlines: false,
+            non_scaling_stroke: false,
         }
     }
 }

@@ -436,6 +436,172 @@ impl OpenCADStudio {
         }
     }
 
+    pub(super) fn handle_vp_layer_override(
+        &mut self,
+        vp_handle: Handle,
+        layer: &str,
+        channel: crate::command::VpOverrideChannel,
+        value: &str,
+    ) {
+        use crate::command::VpOverrideChannel;
+        use document::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
+
+        let i = self.active_tab;
+        let Some(layer_handle) = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(layer))
+            .map(|l| l.handle)
+        else {
+            self.command_line.push_error(
+                crate::tf!("VPLAYER: no layer named \"{layer}\".").as_ref(),
+            );
+            return;
+        };
+
+        let target_handles: Vec<Handle> = if vp_handle == document::Handle::NULL {
+            let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+            self.tabs[i]
+                .scene
+                .document
+                .entities()
+                .filter(|e| {
+                    e.common().owner_handle == block_handle
+                        && matches!(e, document::EntityType::Viewport(_))
+                })
+                .map(|e| e.common().handle)
+                .collect()
+        } else {
+            vec![vp_handle]
+        };
+        if target_handles.is_empty() {
+            self.command_line.push_error(
+                crate::t!("VPLAYER: no viewport to apply the override to.").as_ref(),
+            );
+            return;
+        }
+
+        // Validate once before starting undo: all values must parse before
+        // anything is written.
+        let valid = match channel {
+            VpOverrideChannel::Color => parse_override_color(value)
+                .and_then(|color| crate::scene::view::render::pack_layer_override_color(&color))
+                .is_some(),
+            VpOverrideChannel::Linetype => self.tabs[i]
+                .scene
+                .document
+                .line_types
+                .iter()
+                .any(|lt| lt.name.eq_ignore_ascii_case(value)),
+            VpOverrideChannel::Alpha => value
+                .trim_end_matches('%')
+                .trim()
+                .parse::<f64>()
+                .map(|p| (0.0..=90.0).contains(&p))
+                .unwrap_or(false),
+            VpOverrideChannel::Lineweight => !value.trim().is_empty(),
+        };
+        if !valid {
+            self.command_line.push_error(
+                crate::tf!(
+                    "VPLAYER: \"{}\" is not valid — nothing was written.",
+                    value
+                )
+                .as_ref(),
+            );
+            return;
+        }
+
+        self.push_undo_snapshot(i, "VPLAYER");
+        let mut changed = 0;
+        for target_handle in &target_handles {
+            let ok = match channel {
+                VpOverrideChannel::Color => {
+                    let Some(color) = parse_override_color(value) else {
+                        continue;
+                    };
+                    let Some(packed) = crate::scene::view::render::pack_layer_override_color(&color)
+                    else {
+                        continue;
+                    };
+                    self.tabs[i].scene.document.set_layer_viewport_override(
+                        layer_handle,
+                        Kind::LayerViewportColorOverride,
+                        *target_handle,
+                        Value::Int32(packed),
+                    )
+                }
+                VpOverrideChannel::Linetype => {
+                    let Some(line_type) = self
+                        .tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .find(|lt| lt.name.eq_ignore_ascii_case(value))
+                        .map(|lt| lt.handle)
+                    else {
+                        continue;
+                    };
+                    self.tabs[i].scene.document.set_layer_viewport_override(
+                        layer_handle,
+                        Kind::LayerViewportLinetypeOverride,
+                        *target_handle,
+                        Value::Handle(line_type),
+                    )
+                }
+                VpOverrideChannel::Lineweight => {
+                    use document::types::LineWeight;
+                    let line_weight = match value.trim() {
+                        "ByLayer" => LineWeight::ByLayer,
+                        "ByBlock" => LineWeight::ByBlock,
+                        "Default" => LineWeight::Default,
+                        other => other
+                            .trim_end_matches("mm")
+                            .trim()
+                            .parse::<f64>()
+                            .map(|mm| LineWeight::Value((mm * 100.0).round() as i16))
+                            .unwrap_or(LineWeight::ByBlock),
+                    };
+                    self.tabs[i].scene.document.set_layer_viewport_override(
+                        layer_handle,
+                        Kind::LayerViewportLineweightOverride,
+                        *target_handle,
+                        Value::Int32(line_weight.value() as i32),
+                    )
+                }
+                VpOverrideChannel::Alpha => {
+                    let percent = value.trim_end_matches('%').trim().parse::<f64>().unwrap_or(0.0);
+                    let alpha = (percent * 2.55).round() as u32;
+                    let packed = 0x0200_0000u32 | (255 - alpha);
+                    self.tabs[i].scene.document.set_layer_viewport_override(
+                        layer_handle,
+                        Kind::LayerViewportAlphaOverride,
+                        *target_handle,
+                        Value::Int32(packed as i32),
+                    )
+                }
+            };
+            if ok {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.tabs[i].dirty = true;
+            self.tabs[i].scene.bump_geometry();
+            let doc_layers = self.tabs[i].scene.document.layers.clone();
+            let vp_info = self.tabs[i].scene.viewport_list();
+            self.tabs[i]
+                .layers
+                .sync_with_viewports(&doc_layers, vp_info);
+            self.command_line.push_info(
+                crate::tf!("VPLAYER: override written for {changed} viewport(s).").as_ref(),
+            );
+        }
+    }
+
     pub(in crate::app) fn handle_zoom_to_window(&mut self, p1: glam::DVec3, p2: glam::DVec3) {
         let i = self.active_tab;
         self.tabs[i].active_cmd = None;
@@ -550,6 +716,19 @@ impl OpenCADStudio {
         self.restore_pre_cmd_tangent();
         self.on_quick_print_handles(handles)
     }
+}
+
+/// Parse a colour argument for a VPLAYER override. Accepts the named
+/// palette ("Red", "ByLayer", …), a bare ACI index, "Color N" and an
+/// "R,G,B" triple, matching how the command line parses colours elsewhere.
+fn parse_override_color(text: &str) -> Option<document::types::Color> {
+    crate::entities::table::parse_cell_color(text).or_else(|| {
+        text.trim()
+            .parse::<u8>()
+            .ok()
+            .filter(|n| (1..=255).contains(n))
+            .map(document::types::Color::Index)
+    })
 }
 
 /// Paper-space extents of a viewport clip boundary: exact for lines, arcs

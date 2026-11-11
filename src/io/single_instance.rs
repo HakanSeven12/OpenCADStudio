@@ -21,9 +21,11 @@
 //! discard the user's unsaved drawing. We reuse that server's line-delimited
 //! JSON framing and nothing else.
 //!
-//! Upgrade path, if the squatted-port stall or the local-RPC surface ever
-//! proves real: an `AF_UNIX` socket under `$XDG_RUNTIME_DIR`. Everything above
-//! the transport survives that swap — build one or the other, never both.
+//! Loopback is reachable by every local process and account, so both ends
+//! prove themselves with a random secret the primary writes to a file only its
+//! own user can read ([`secret`]): the client sends one half, the editor
+//! answers with the other, and `open` is refused on a connection that has not
+//! proved the first half.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -38,7 +40,7 @@ use serde_json::{json, Value};
 /// Protocol tag. Bump the suffix on any wire-format change so a running older
 /// editor is recognised as a stranger and both processes degrade cleanly
 /// instead of misreading each other.
-const MAGIC: &str = "OpenCADStudio/si/2";
+const MAGIC: &str = "OpenCADStudio/si/3";
 
 /// Neither end blocks forever. Long enough to cover a busy primary's accept
 /// backlog, short enough that a wedged peer costs a visible pause and not a
@@ -50,6 +52,60 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 /// A static is unavoidable: [`iced::Subscription::run`] takes a plain
 /// `fn() -> S`, so the stream builder cannot capture anything.
 static LISTENER: Mutex<Option<TcpListener>> = Mutex::new(None);
+
+/// This editor's secret, created when it wins the port.
+static SECRET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn secret_path() -> Option<PathBuf> {
+    Some(
+        crate::config::config_dir()?
+            .join("single-instance")
+            .join(format!("{}.key", port_for_user())),
+    )
+}
+
+/// The primary's secret: 64 hex digits, written to a file only this user can
+/// read. The first half is the client's proof, the second the editor's.
+/// `None` when the file cannot be written; handoffs then fail and every launch
+/// boots its own window.
+fn secret() -> Option<&'static str> {
+    SECRET
+        .get_or_init(|| {
+            let mut bytes = [0u8; 32];
+            getrandom::fill(&mut bytes).ok()?;
+            let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let path = secret_path()?;
+            let dir = path.parent()?;
+            std::fs::create_dir_all(dir).ok()?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&path).ok()?;
+            // A file left by an older editor may predate the mode above.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                    .ok()?;
+            }
+            file.write_all(secret.as_bytes()).ok()?;
+            Some(secret)
+        })
+        .as_deref()
+}
+
+/// The running editor's secret as its file holds it, split into the client's
+/// and the editor's proof.
+fn read_secret() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(secret_path()?).ok()?;
+    let text = text.trim();
+    (text.len() == 64).then(|| (text[..32].to_string(), text[32..].to_string()))
+}
 
 /// Who we turned out to be.
 pub enum Claim {
@@ -128,6 +184,7 @@ pub fn claim() -> Claim {
     match TcpListener::bind(addr()) {
         Ok(l) => {
             *LISTENER.lock().unwrap_or_else(|e| e.into_inner()) = Some(l);
+            secret();
             Claim::Primary
         }
         Err(_) => match try_connect_existing() {
@@ -151,10 +208,14 @@ pub fn try_connect_existing() -> Option<TcpStream> {
 /// every double-clicked drawing to a single launch, and forwarding them
 /// together keeps them one unit rather than a race between connections.
 ///
-/// Pings first and only discloses the paths to a peer that answers with our own
-/// [`MAGIC`] and rendezvous key, so a stranger — or a hash collision — learns
-/// nothing about what the user is opening.
+/// Pings first with the client half of the editor's secret and only discloses
+/// the paths to a peer that answers with our own [`MAGIC`] and the editor half,
+/// so a stranger — or a hash collision — learns nothing about what the user is
+/// opening.
 pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
+    let Some((client_proof, editor_proof)) = read_secret() else {
+        return false;
+    };
     let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let Ok(write_half) = stream.try_clone() else {
@@ -163,7 +224,8 @@ pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
     let mut w = write_half;
     let mut r = BufReader::new(stream);
 
-    if writeln!(w, "{}", json!({ "op": "ping" })).is_err() || w.flush().is_err() {
+    let ping = json!({ "op": "ping", "proof": client_proof });
+    if writeln!(w, "{ping}").is_err() || w.flush().is_err() {
         return false;
     }
     let mut line = String::new();
@@ -174,8 +236,7 @@ pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    if ack["app"].as_str() != Some(MAGIC) || ack["key"].as_str() != Some(rendezvous_key().as_str())
-    {
+    if ack["app"].as_str() != Some(MAGIC) || ack["proof"].as_str() != Some(editor_proof.as_str()) {
         return false;
     }
 
@@ -258,8 +319,14 @@ async fn serve_claimed_port(out: PathSender) {
     std::future::pending::<()>().await;
 }
 
-/// One connection: a ping, then at most one open.
+/// One connection: a ping that proves the client half of the secret, then at
+/// most one open.
 fn serve_one(out: &mut PathSender, stream: TcpStream) {
+    let Some(secret) = secret() else {
+        return;
+    };
+    let (client_proof, editor_proof) = secret.split_at(32);
+    let mut proved = false;
     let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let Ok(write_half) = stream.try_clone() else {
@@ -278,17 +345,21 @@ fn serve_one(out: &mut PathSender, stream: TcpStream) {
         };
         match req["op"].as_str() {
             Some("ping") => {
+                if req["proof"].as_str() != Some(client_proof) {
+                    return;
+                }
+                proved = true;
                 let ack = json!({
                     "ok": true,
                     "app": MAGIC,
-                    "key": rendezvous_key(),
+                    "proof": editor_proof,
                     "pid": std::process::id(),
                 });
                 if writeln!(w, "{ack}").is_err() || w.flush().is_err() {
                     return;
                 }
             }
-            Some("open") => {
+            Some("open") if proved => {
                 // All-or-nothing: a partial send would silently drop drawings
                 // the user selected, which is the failure this whole path
                 // exists to avoid.
@@ -394,6 +465,39 @@ mod tests {
     }
 
     #[test]
+    fn the_editor_refuses_a_client_without_the_secret() {
+        let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        let port = listener.local_addr().unwrap().port();
+        let (tx, mut rx) = iced::futures::channel::mpsc::channel::<PathBuf>(8);
+        std::thread::spawn(move || {
+            let mut out = tx;
+            for stream in listener.incoming().flatten() {
+                serve_one(&mut out, stream);
+            }
+        });
+        for request in [
+            vec![json!({ "op": "open", "paths": ["/tmp/forced.dwg"] })],
+            vec![
+                json!({ "op": "ping", "proof": "0".repeat(32) }),
+                json!({ "op": "open", "paths": ["/tmp/forced.dwg"] }),
+            ],
+        ] {
+            let s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            let mut w = s.try_clone().unwrap();
+            for line in &request {
+                let _ = writeln!(w, "{line}");
+            }
+            let mut reply = String::new();
+            let _ = BufReader::new(s).read_line(&mut reply);
+            assert!(!reply.contains("proof"), "editor proof disclosed: {reply:?}");
+        }
+        assert!(rx.try_recv().is_err(), "a path was opened without the secret");
+    }
+
+    #[test]
     fn every_one_of_three_concurrent_handoffs_arrives() {
         // Selecting three drawings launches three processes at once (measured:
         // `%f` + 3 files = 3 spawns, one file each). All three must land.
@@ -403,6 +507,9 @@ mod tests {
         };
         let port = listener.local_addr().unwrap().port();
         let (tx, mut rx) = iced::futures::channel::mpsc::channel::<PathBuf>(8);
+        // The secret file exists before the first client reads it, as it
+        // does once `claim` has elected the editor.
+        assert!(secret().is_some());
         // The real accept loop, verbatim.
         std::thread::spawn(move || {
             let mut out = tx;

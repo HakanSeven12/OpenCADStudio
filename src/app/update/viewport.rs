@@ -1029,11 +1029,19 @@ impl OpenCADStudio {
         let edit_cam = edit_frame.map(|(cam, _)| cam);
         let local = |point: iced::Point| iced::Point::new(point.x - tile.x, point.y - tile.y);
         let bounds = iced::Rectangle::new(iced::Point::ORIGIN, tile.size());
-        let (mut handles, _) =
+        let started = crate::perf::enabled().then(Instant::now);
+        let (mut handles, timing) =
             self.box_selection_handles(i, &edit_cam, bounds, local(anchor), local(p), crossing);
         handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
         self.filter_handles_reject_locked(i, &mut handles);
         self.tabs[i].scene.set_box_hover_highlights(&handles);
+        let elapsed = crate::perf::elapsed_ms(started);
+        if elapsed >= 4.0 {
+            crate::perf_record!(
+                "[perf] box-preview total={elapsed:.1}ms candidates={:.1}ms handles={:.1}ms wires={:.1}ms hatch={:.1}ms hit={:.1}ms picked={}",
+                timing.candidates, timing.handles, timing.wires, timing.hatch, timing.hit, handles.len(),
+            );
+        }
     }
 
     /// The entities a selection box from `a` to `p` (tile pixels) catches,
@@ -1075,13 +1083,9 @@ impl OpenCADStudio {
         };
         let mut timing = BoxSelectTiming::default();
         let t_sel = crate::perf::enabled().then(Instant::now);
-        let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
-            all_wires,
-            world_aabb,
-            [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
-            view_rot,
-            eye,
-            bounds,
+        let rect = [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)];
+        let area_candidates = self.tabs[i].scene.interaction_box_candidates(
+            all_wires, world_aabb, rect, view_rot, eye, bounds,
         );
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);
@@ -2604,7 +2608,13 @@ impl OpenCADStudio {
                     && grip.targets.len() == 1
                     && !self.grip_text_verts.is_empty()
                     && snap.iter().all(|w| w.points.is_empty())
-                    && square_grip;
+                    && square_grip
+                    // An INSERT can contain several text attributes. A grip
+                    // moves only one of them, so its glyphs need live tessellation.
+                    && !self.grip_originals.iter().any(|(handle, entity)| {
+                        *handle == grip.handle
+                            && matches!(entity, document::EntityType::Insert(_))
+                    });
             }
             let setup_ms = grip_started.elapsed().as_secs_f64() * 1000.0;
             let snap_started = Instant::now();
@@ -5107,12 +5117,14 @@ impl OpenCADStudio {
 
     /// The object snap the cursor would get over `world` in the model view,
     /// through the same candidate gathering and snapper as a cursor move
-    /// (automation's `snap` query).
+    /// (automation's `snap` query). `wires` limits it to those wires (the
+    /// object under a typed point, say) instead of the drawing's candidates.
     pub(in crate::app) fn snap_query(
         &mut self,
         i: usize,
         world: glam::DVec3,
         from: Option<glam::DVec3>,
+        wires: Option<&Vec<crate::scene::model::wire_model::WireModel>>,
     ) -> Option<crate::snap::SnapResult> {
         let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
         if vw <= 1.0 || vh <= 1.0 {
@@ -5135,23 +5147,29 @@ impl OpenCADStudio {
         };
         let p = Point::new(px.x, px.y);
         let raw = self.cursor_model_point(i, &None, p, bounds);
-        let all_wires = self.tabs[i].scene.hit_test_wires();
-        let candidates = self.tabs[i].scene.interaction_candidates_near(
-            all_wires,
-            raw,
-            view_rot,
-            eye,
-            bounds,
-            self.snapper.osnap_radius_px,
-        );
         // Perpendicular and tangent measure from `from`, else the running
         // command's last point; the live cursor's base point is restored.
         let live_from = self.snapper.from_point;
         self.snapper.from_point = from.or(self.last_point);
         let (go, gr) = self.drafting_grid_basis(i);
-        let hit = self
-            .snapper
-            .snap(raw, p, &candidates, view_rot, eye, bounds, go, gr, None);
+        let hit = match wires {
+            Some(wires) => self
+                .snapper
+                .snap(raw, p, wires, view_rot, eye, bounds, go, gr, None),
+            None => {
+                let all_wires = self.tabs[i].scene.hit_test_wires();
+                let candidates = self.tabs[i].scene.interaction_candidates_near(
+                    all_wires,
+                    raw,
+                    view_rot,
+                    eye,
+                    bounds,
+                    self.snapper.osnap_radius_px,
+                );
+                self.snapper
+                    .snap(raw, p, &candidates, view_rot, eye, bounds, go, gr, None)
+            }
+        };
         self.snapper.from_point = live_from;
         hit
     }
@@ -6630,6 +6648,20 @@ impl OpenCADStudio {
                     }
                 };
                 let snap_cursor = raw;
+                let entity_pick = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .filter(|c| c.needs_entity_pick());
+                let needs_entity_click = entity_pick.is_some();
+                let entity_click_takes_points =
+                    entity_pick.is_some_and(|command| command.entity_pick_accepts_points());
+                let is_gathering = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.is_selection_gathering());
+                // An entity pick or a selection gather never snaps, so it
+                // skips the snap candidate query too.
+                let skips_snap = (needs_entity_click && !entity_click_takes_points) || is_gathering;
                 let click_source_started = crate::perf::enabled().then(Instant::now);
                 let all_wires =
                     if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
@@ -6642,14 +6674,18 @@ impl OpenCADStudio {
                 let click_source_ms = crate::perf::elapsed_ms(click_source_started);
                 let click_wire_count = all_wires.len();
                 let click_query_started = crate::perf::enabled().then(Instant::now);
-                let snap_candidates = self.tabs[i].scene.interaction_candidates_near(
-                    all_wires,
-                    snap_cursor,
-                    view_rot,
-                    eye,
-                    bounds,
-                    self.snapper.osnap_radius_px,
-                );
+                let snap_candidates = if skips_snap {
+                    scene::pick::interaction_index::InteractionCandidates::pending(all_wires)
+                } else {
+                    self.tabs[i].scene.interaction_candidates_near(
+                        all_wires,
+                        snap_cursor,
+                        view_rot,
+                        eye,
+                        bounds,
+                        self.snapper.osnap_radius_px,
+                    )
+                };
                 let click_query_ms = crate::perf::elapsed_ms(click_query_started);
                 let click_evaluate_started = crate::perf::enabled().then(Instant::now);
                 let needs_tan = self.tabs[i]
@@ -6657,21 +6693,6 @@ impl OpenCADStudio {
                     .as_ref()
                     .map(|c| c.needs_tangent_pick())
                     .unwrap_or(false);
-                let is_gathering = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.is_selection_gathering())
-                    .unwrap_or(false);
-                let needs_entity_click = self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .map(|c| c.needs_entity_pick())
-                    .unwrap_or(false);
-                let entity_click_takes_points = needs_entity_click
-                    && self.tabs[i]
-                        .active_cmd
-                        .as_ref()
-                        .is_some_and(|command| command.entity_pick_accepts_points());
                 // Probe the active OTRACK ray before snapping so its geometry
                 // intersection can be tested in the same candidate pass.
                 let tracking_probe = if !needs_entity_click && !needs_tan && !free_point {
@@ -6688,54 +6709,53 @@ impl OpenCADStudio {
                 } else {
                     None
                 };
-                let mut snap_hit =
-                    if (needs_entity_click && !entity_click_takes_points) || is_gathering {
+                let mut snap_hit = if skips_snap {
+                    None
+                } else if needs_tan {
+                    self.snapper.snap_tangent_only(
+                        snap_cursor.as_vec3(),
+                        p,
+                        &snap_candidates,
+                        view_rot,
+                        eye,
+                        bounds,
+                    )
+                } else {
+                    let (go, gr) = self.drafting_grid_basis(i);
+                    self.snapper.from_point = self.last_point;
+
+                    let construction_ray = if free_point {
                         None
-                    } else if needs_tan {
-                        self.snapper.snap_tangent_only(
-                            snap_cursor.as_vec3(),
-                            p,
-                            &snap_candidates,
-                            view_rot,
-                            eye,
-                            bounds,
-                        )
                     } else {
-                        let (go, gr) = self.drafting_grid_basis(i);
-                        self.snapper.from_point = self.last_point;
-
-                        let construction_ray = if free_point {
-                            None
-                        } else {
-                            self.last_point.and_then(|base| {
-                                self.active_construction_ray(
-                                    i,
-                                    p,
-                                    snap_cursor,
-                                    base,
-                                    view_rot,
-                                    eye,
-                                    bounds,
-                                )
-                            })
-                        };
-                        let additional_rays =
-                            tracking_probe.map(|track| [(track.base, track.base + track.dir)]);
-
-                        self.snapper.snap_with_additional_construction_rays_stable(
-                            snap_cursor,
-                            p,
-                            &snap_candidates,
-                            view_rot,
-                            eye,
-                            bounds,
-                            go,
-                            gr,
-                            construction_ray,
-                            additional_rays.as_ref().map_or(&[], |rays| rays.as_slice()),
-                            visible_before_click,
-                        )
+                        self.last_point.and_then(|base| {
+                            self.active_construction_ray(
+                                i,
+                                p,
+                                snap_cursor,
+                                base,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        })
                     };
+                    let additional_rays =
+                        tracking_probe.map(|track| [(track.base, track.base + track.dir)]);
+
+                    self.snapper.snap_with_additional_construction_rays_stable(
+                        snap_cursor,
+                        p,
+                        &snap_candidates,
+                        view_rot,
+                        eye,
+                        bounds,
+                        go,
+                        gr,
+                        construction_ray,
+                        additional_rays.as_ref().map_or(&[], |rays| rays.as_slice()),
+                        visible_before_click,
+                    )
+                };
                 // Paper-space snapping through layout viewports. Mirrors
                 // the cursor-move pass: the click recomputes snapping from
                 // scratch, so the viewport query has to run here too. The hit
@@ -7434,11 +7454,7 @@ impl OpenCADStudio {
                 .as_mut()
                 .map(|c| c.take_pending_panel_updates())
                 .unwrap_or_default();
-            for (panel_id, values) in panel_updates {
-                if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                    panel.update_values(values);
-                }
-            }
+            self.apply_panel_or_dialog_updates(panel_updates);
 
             self.sync_dimension_snaps(i);
             if let Some(r) = result {
@@ -10108,7 +10124,7 @@ properties={:.1}ms picked={}",
         let i = self.active_tab;
         let handles = std::mem::take(&mut self.grip_preview_handles);
         let originals = std::mem::take(&mut self.grip_originals);
-        let _ = std::mem::take(&mut self.grip_history_originals);
+        let context_originals = std::mem::take(&mut self.grip_history_originals);
         self.grip_dirty_before = None;
         self.grip_add_provisional = None;
         self.grip_reference_wires.clear();
@@ -10120,22 +10136,24 @@ properties={:.1}ms picked={}",
         self.tabs[i].scene.clear_preview_wire();
         if !originals.is_empty() {
             self.push_undo_snapshot(i, "GRIP");
+            // Copy while the moved placement and its annotation leaves are
+            // still live. The normal COPY path clones each attribute's own
+            // context dictionary onto fresh handles.
+            let source_handles: Vec<_> = originals.iter().map(|(handle, _)| *handle).collect();
+            self.tabs[i].scene.copy_entities(
+                &source_handles,
+                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+            );
+            for (_, objects) in context_originals {
+                for (handle, object) in objects {
+                    self.tabs[i].scene.document.objects.insert(handle, object);
+                }
+            }
             let mut restored = Vec::with_capacity(originals.len());
             for (handle, original) in &originals {
-                let Some(moved) = self.tabs[i].scene.document.get_entity(*handle).cloned() else {
-                    continue;
-                };
                 if self.tabs[i].scene.update_entity(original.clone()) {
                     restored.push((*handle, crate::scene::ChangeKind::Modified));
                 }
-                let copy = self.tabs[i].scene.add_entity_clone(moved);
-                // A copied associative array gets its own blocks and action.
-                crate::scene::assoc_array::clone_array_for_copy(
-                    &mut self.tabs[i].scene,
-                    *handle,
-                    copy,
-                    &Default::default(),
-                );
             }
             self.tabs[i]
                 .scene

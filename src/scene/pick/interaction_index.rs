@@ -580,6 +580,14 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
         self.xy.query_unordered(&self.entries, aabb)
     }
 
+    fn query_xy_selection(&self, aabb: [f64; 4], ordered: bool) -> Vec<T> {
+        if ordered {
+            self.query_xy(aabb)
+        } else {
+            self.query_xy_unordered(aabb)
+        }
+    }
+
     fn prepare_screen(&self) {
         self.xyz.get_or_init(|| SpatialBvh3::build(&self.entries));
     }
@@ -599,6 +607,9 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
 
 pub struct InteractionIndex {
     wires: SpatialSet<u32>,
+    box_entities: SpatialSet<u64>,
+    box_entity_wires: rustc_hash::FxHashMap<u64, Vec<u32>>,
+    box_anonymous_wires: SpatialSet<u32>,
     /// Stable entity handle for each source wire. Lets a stale-but-valid base
     /// index feed an incremental overlay after small edits without retaining
     /// the old heavyweight wire set or trusting shifted vector indices.
@@ -706,7 +717,9 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
             aabb,
             value: wire_idx,
         });
-    } else {
+    } else if !holds_nothing(wire) {
+        // Every query lists a wire with no finite box. A blank slot of the
+        // resident set has none either, and nothing to pick or snap.
         batch.unbounded_wires.push(wire_idx);
     }
     if wire.point_marker.is_some() {
@@ -958,6 +971,28 @@ impl InteractionIndex {
             screen_unbounded_wires.append(&mut batch.screen_unbounded_wires);
         }
 
+        // Window/crossing selection starts with one conservative box per CAD
+        // entity. Its wires remain grouped for exact boundary hit tests.
+        let mut box_bounds = rustc_hash::FxHashMap::<u64, [f64; 6]>::default();
+        let mut box_entity_wires = rustc_hash::FxHashMap::<u64, Vec<u32>>::default();
+        let mut box_anonymous = Vec::new();
+        for entry in &wire_entries {
+            let Some(handle) = wire_handles[entry.value as usize] else {
+                box_anonymous.push(*entry);
+                continue;
+            };
+            box_entity_wires.entry(handle).or_default().push(entry.value);
+            box_bounds.entry(handle).and_modify(|bounds| {
+                for axis in 0..3 {
+                    bounds[axis] = bounds[axis].min(entry.aabb[axis]);
+                    bounds[axis + 3] = bounds[axis + 3].max(entry.aabb[axis + 3]);
+                }
+            }).or_insert(entry.aabb);
+        }
+        let box_entities = SpatialSet::build(box_bounds.into_iter()
+            .map(|(value, aabb)| Entry3 { aabb, value }).collect());
+        let box_anonymous_wires = SpatialSet::build(box_anonymous);
+
         #[cfg(not(target_arch = "wasm32"))]
         let flatten_elapsed = flatten_started.elapsed();
         #[cfg(not(target_arch = "wasm32"))]
@@ -1035,6 +1070,9 @@ impl InteractionIndex {
 
         Self {
             wires,
+            box_entities,
+            box_entity_wires,
+            box_anonymous_wires,
             wire_handles,
             wire_ordinals,
             segments,
@@ -1146,6 +1184,10 @@ impl InteractionIndex {
 
     pub fn query_wire_keys_xy(&self, aabb: [f64; 4]) -> Vec<(u64, u32)> {
         self.queried_wire_keys(self.wires.query_xy(aabb), false)
+    }
+
+    pub(crate) fn query_pick_wire_keys_xy(&self, aabb: [f64; 4]) -> Vec<(u64, u32)> {
+        self.queried_wire_keys(self.wires.query_xy_unordered(aabb), true)
     }
 
     pub fn query_wire_keys_screen(
@@ -1457,6 +1499,7 @@ impl InteractionIndex {
         wires: Arc<SharedWireRuns>,
         slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
         aabb: [f64; 4],
+        include_point_markers: bool,
     ) -> InteractionCandidates {
         InteractionCandidates {
             wires: CandidateWires::Shared(wires),
@@ -1464,10 +1507,10 @@ impl InteractionIndex {
                 self.wires.query_xy_unordered(aabb),
                 slots,
                 true,
-                false,
+                include_point_markers,
             )),
             segments: Some(self.remap_refs(
-                self.segments.query_xy_unordered(aabb),
+                self.segments.query_xy_selection(aabb, include_point_markers),
                 slots,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
@@ -1476,19 +1519,19 @@ impl InteractionIndex {
             key_vertices: None,
             key_segments: None,
             fill_triangles: Some(self.remap_refs(
-                self.fill_triangles.query_xy_unordered(aabb),
+                self.fill_triangles.query_xy_selection(aabb, include_point_markers),
                 slots,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
             pick_triangles: Some(self.remap_refs(
-                self.pick_triangles.query_xy_unordered(aabb),
+                self.pick_triangles.query_xy_selection(aabb, include_point_markers),
                 slots,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
             glyphs: Some(self.remap_refs(
-                self.glyphs.query_xy_unordered(aabb),
+                self.glyphs.query_xy_selection(aabb, include_point_markers),
                 slots,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
@@ -1649,6 +1692,54 @@ impl InteractionIndex {
         wires: Arc<Vec<WireModel>>,
         aabb: [f64; 4],
     ) -> InteractionCandidates {
+        self.query_xy_selection(wires, aabb, false)
+    }
+
+    /// A box tests whole entity wires, so it does not need a materialized list
+    /// of every segment inside the box.
+    pub(crate) fn query_xy_box_wires(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+    ) -> InteractionCandidates {
+        let mut wire_indices = self.box_anonymous_wires.query_xy_unordered(aabb);
+        for handle in self.box_entities.query_xy_unordered(aabb) {
+            if let Some(group) = self.box_entity_wires.get(&handle) {
+                wire_indices.extend_from_slice(group);
+            }
+        }
+        wire_indices.extend_from_slice(&self.unbounded_wires);
+        for &wire in &self.unbounded_wires {
+            if let Some(handle) = self.wire_handles[wire as usize] {
+                if let Some(group) = self.box_entity_wires.get(&handle) {
+                    wire_indices.extend_from_slice(group);
+                }
+            }
+        }
+        wire_indices.sort_unstable();
+        wire_indices.dedup();
+        InteractionCandidates {
+            wires: CandidateWires::Snapshot(wires),
+            wire_indices: Some(wire_indices),
+            segments: None,
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: None,
+            pick_triangles: None,
+            glyphs: None,
+            query_aabb: Some(aabb),
+            screen_rect: None,
+            screen_view: None,
+        }
+    }
+
+    pub(crate) fn query_xy_selection(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        include_point_markers: bool,
+    ) -> InteractionCandidates {
         let ((wire_indices, segments), ((fill_triangles, pick_triangles), glyphs)) =
             crate::par::join(
                 || {
@@ -1656,22 +1747,31 @@ impl InteractionIndex {
                         || {
                             let mut indices = self.wires.query_xy_unordered(aabb);
                             indices.extend_from_slice(&self.unbounded_wires);
+                            if include_point_markers {
+                                indices.extend_from_slice(&self.screen_unbounded_wires);
+                            }
                             indices.sort_unstable();
                             indices.dedup();
                             indices
                         },
-                        || self.segments.query_xy_unordered(aabb),
+                        || self.segments.query_xy_selection(aabb, include_point_markers),
                     )
                 },
                 || {
                     crate::par::join(
                         || {
                             crate::par::join(
-                                || self.fill_triangles.query_xy_unordered(aabb),
-                                || self.pick_triangles.query_xy_unordered(aabb),
+                                || {
+                                    self.fill_triangles
+                                        .query_xy_selection(aabb, include_point_markers)
+                                },
+                                || {
+                                    self.pick_triangles
+                                        .query_xy_selection(aabb, include_point_markers)
+                                },
                             )
                         },
-                        || self.glyphs.query_xy_unordered(aabb),
+                        || self.glyphs.query_xy_selection(aabb, include_point_markers),
                     )
                 },
             );
@@ -1853,6 +1953,9 @@ pub trait WireSource {
     fn iter(&self) -> WireIter<'_>;
     fn len(&self) -> usize;
     fn get(&self, index: usize) -> Option<&WireModel>;
+    fn box_wires_only(&self) -> bool {
+        false
+    }
     fn segments(&self) -> Option<&[SegmentRef]> {
         None
     }
@@ -2045,16 +2148,73 @@ impl InteractionCandidates {
     }
 
     /// The candidates with every block-copy stub among them expanded into
-    /// the wires it stands for, so snapping and picking see each copy. Only
-    /// the copies' wires near an XY query are kept.
+    /// the wires it stands for, so snapping and picking see each copy. With
+    /// an XY query, only the wires near it are kept, the copies' and the
+    /// plain ones alike, and no blank slot.
     pub(crate) fn materialize_stubs(self) -> Self {
         if !self.iter().any(|wire| wire.stub.is_some()) {
             return self;
         }
         let started = crate::perf::enabled().then(iced::time::Instant::now);
         let source_candidates = self.len();
+        if let Some(indices) = &self.wire_indices {
+            // A single stub can share the aperture with thousands of plain
+            // wires. Expand the stub and keep the existing wire slots shared.
+            let mut runs = SharedWireRuns(Vec::with_capacity(indices.len()));
+            for &slot in indices {
+                let Some(wire) = self.wires.slot(slot) else {
+                    continue;
+                };
+                if wire.stub.is_some() {
+                    let mut expanded = Vec::new();
+                    crate::scene::model::instance_model::expand_stub_near_into(
+                        wire,
+                        self.query_aabb,
+                        &mut expanded,
+                    );
+                    let expanded = Arc::new(expanded);
+                    for index in 0..expanded.len() as u32 {
+                        runs.push(&expanded, index);
+                    }
+                } else {
+                    match &self.wires {
+                        CandidateWires::Snapshot(wires) => runs.push(wires, slot),
+                        CandidateWires::Shared(wires) => {
+                            let (run, index) = &wires.0[slot as usize];
+                            runs.push(run, *index);
+                        }
+                    }
+                }
+            }
+            let elapsed_ms = crate::perf::elapsed_ms(started);
+            if elapsed_ms >= 3.0 {
+                crate::perf_record!(
+                    "[perf] stub-materialize {:.2}ms candidates={} expanded={} shared=true",
+                    elapsed_ms,
+                    source_candidates,
+                    runs.len(),
+                );
+            }
+            return Self {
+                wires: CandidateWires::Shared(Arc::new(runs)),
+                query_aabb: self.query_aabb,
+                screen_rect: self.screen_rect,
+                screen_view: self.screen_view,
+                ..Self::all(Arc::new(Vec::new()))
+            };
+        }
         let mut wires = Vec::new();
         for wire in self.iter() {
+            // A blank slot holds nothing, and a plain wire whose box misses
+            // the query could not be hit there: neither is copied, like a
+            // block copy's leaf away from the query.
+            if wire.stub.is_none()
+                && self
+                    .query_aabb
+                    .is_some_and(|query| holds_nothing(wire) || misses_query(wire, query))
+            {
+                continue;
+            }
             crate::scene::model::instance_model::expand_stub_near_into(
                 wire,
                 self.query_aabb,
@@ -2157,6 +2317,9 @@ impl InteractionCandidates {
 }
 
 impl WireSource for InteractionCandidates {
+    fn box_wires_only(&self) -> bool {
+        self.wire_indices.is_some() && self.segments.is_none()
+    }
     fn iter(&self) -> WireIter<'_> {
         self.iter()
     }
@@ -2353,6 +2516,54 @@ impl<'a> Iterator for WireIter<'a> {
     }
 }
 
+/// Whether a wire holds nothing to pick or snap: a blank slot of the
+/// resident set, left by a hidden entity or by a run that got shorter.
+fn holds_nothing(wire: &WireModel) -> bool {
+    wire.points.is_empty()
+        && wire.snap_pts.is_empty()
+        && wire.key_vertices.is_empty()
+        && wire.tangent_geoms.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire.text_verts.is_empty()
+        && wire.searchable_text.is_empty()
+        && wire.point_marker.is_none()
+        && wire.stub.is_none()
+}
+
+/// Whether a wire's box lies outside `query` (world XY), together with
+/// every snap point and key vertex it has. A wire with no finite box, or
+/// drawn at a screen size, may reach anywhere.
+fn misses_query(wire: &WireModel, query: [f64; 4]) -> bool {
+    if wire.point_marker.is_some() {
+        return false;
+    }
+    let [min_x, min_y, max_x, max_y] = wire.aabb;
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        // No stored box: the one the index measures from what the wire
+        // carries, if it can.
+        return finite_wire_aabb3(wire).is_some_and(|aabb| {
+            aabb[3] < query[0] || aabb[0] > query[2] || aabb[4] < query[1] || aabb[1] > query[3]
+        });
+    }
+    // The f32 slack the index gives the same box.
+    let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+    let pad = (mag * f32::EPSILON * 2.0) as f64;
+    let outside = |x: f64, y: f64| x < query[0] || x > query[2] || y < query[1] || y > query[3];
+    (f64::from(max_x) + pad < query[0]
+        || f64::from(min_x) - pad > query[2]
+        || f64::from(max_y) + pad < query[1]
+        || f64::from(min_y) - pad > query[3])
+        && wire
+            .snap_pts
+            .iter()
+            .all(|(point, _)| outside(point.x, point.y))
+        && wire
+            .key_vertices
+            .iter()
+            .all(|point| outside(point[0], point[1]))
+}
+
 fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
     if let Some(marker) = wire.point_marker {
         if !marker.origin.is_finite() {
@@ -2375,19 +2586,35 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
         ]);
     }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+    let stored = min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite();
+    // A wire with no stored box is measured by what it carries below: an
+    // insert's marker by its insertion snap, so it is a candidate near that
+    // point and not in every query. A block copy or an analytic curve
+    // cannot be measured that way and keeps no box.
+    if !stored && (wire.stub.is_some() || !wire.tangent_geoms.is_empty()) {
         return None;
     }
-    let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
-    let pad = (mag * f32::EPSILON * 2.0) as f64;
-    let mut aabb = [
-        min_x as f64 - pad,
-        min_y as f64 - pad,
-        f64::INFINITY,
-        max_x as f64 + pad,
-        max_y as f64 + pad,
-        f64::NEG_INFINITY,
-    ];
+    let mut aabb = if stored {
+        let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+        let pad = (mag * f32::EPSILON * 2.0) as f64;
+        [
+            min_x as f64 - pad,
+            min_y as f64 - pad,
+            f64::INFINITY,
+            max_x as f64 + pad,
+            max_y as f64 + pad,
+            f64::NEG_INFINITY,
+        ]
+    } else {
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ]
+    };
     let mut include = |point: [f64; 3]| {
         if point.iter().all(|value| value.is_finite()) {
             aabb[0] = aabb[0].min(point[0]);
@@ -2427,6 +2654,10 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
                 aabb[5] = aabb[5].max(inner[5] + stub.delta[2]);
             }
         }
+    }
+    // Nothing measurable was carried.
+    if aabb[0] > aabb[3] || aabb[1] > aabb[4] {
+        return None;
     }
     if !aabb[2].is_finite() {
         aabb[2] = 0.0;
@@ -3004,6 +3235,150 @@ mod area_query_tests {
         assert!(
             local.iter().count() < full.iter().count(),
             "the far leaves must actually have been skipped, or this proves nothing"
+        );
+    }
+
+    /// A wire that only snaps and has no finite box, as an insert's marker.
+    fn marker(name: &str) -> WireModel {
+        use crate::scene::model::wire_model::SnapHint;
+        let mut marker = WireModel::solid(name.to_string(), Vec::new(), [1.0; 4], false);
+        marker.snap_pts = vec![(DVec3::ZERO, SnapHint::Insertion)];
+        marker
+    }
+
+    /// The two blank slots the resident set leaves: a hidden entity's, with
+    /// an empty box and no name, and the rest of a run that got shorter,
+    /// under its entity's name with the default unbounded box.
+    fn blank_slots() -> [WireModel; 2] {
+        let mut hidden = WireModel::solid(String::new(), Vec::new(), [0.0; 4], false);
+        hidden.aabb = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let spare = WireModel::solid("5".to_string(), Vec::new(), [0.0; 4], false);
+        [hidden, spare]
+    }
+
+    fn names(candidates: &InteractionCandidates) -> Vec<String> {
+        let mut names: Vec<String> = candidates.iter().map(|w| w.name.clone()).collect();
+        names.sort();
+        names
+    }
+
+    /// The resident set leaves blank slots behind: where an entity is hidden
+    /// (an empty box) and where a run got shorter (the default unbounded
+    /// box). They hold nothing to pick or snap, so no query lists them. A
+    /// wire with no box that holds what cannot be measured, a block copy
+    /// here, still reaches every query.
+    #[test]
+    fn blank_slots_are_not_candidates() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            WireModel::UNBOUNDED_AABB,
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        copy.name = "21".to_string();
+        let mut wires = sample();
+        wires.extend(blank_slots());
+        wires.push(copy);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+
+        let away = index.query_xy(Arc::clone(&arc), [50.0, 50.0, 51.0, 51.0]);
+        assert_eq!(
+            names(&away),
+            ["21"],
+            "away from every object only the block copy is listed, not the blank slots"
+        );
+        let on_five = index.query_xy(Arc::clone(&arc), [-0.45, -0.45, -0.3, 0.1]);
+        assert_eq!(names(&on_five), ["21", "5"]);
+    }
+
+    /// A wire with no stored box is measured by what it carries. An insert's
+    /// marker carries its insertion snap alone, so it is a candidate near
+    /// that point and not in every query of the drawing, indexed or not.
+    #[test]
+    fn a_wire_that_only_snaps_is_a_candidate_near_its_snap_point() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            [0.0, 0.0, 1.0, 1.0],
+            [200.0, 200.0, 0.0],
+            0.0,
+        );
+        copy.name = "30".to_string();
+        let mut wires = sample();
+        wires.extend([marker("21"), copy]);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+
+        let away = [50.0, 50.0, 51.0, 51.0];
+        let at_the_snap = [-0.05, -0.05, 0.05, 0.05];
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), away)),
+            [""; 0],
+            "the marker's snap point is at the origin, 50 units away"
+        );
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), at_the_snap)),
+            ["21", "5"]
+        );
+        // With no index yet, the fallback copies the same wires.
+        let unindexed = |query| {
+            names(&InteractionCandidates::all_near(Arc::clone(&arc), query).materialize_stubs())
+        };
+        assert_eq!(unindexed(away), [""; 0]);
+        assert_eq!(unindexed(at_the_snap), ["21", "5"]);
+    }
+
+    /// With no index yet, the fallback copies the wires the caller is about
+    /// to hit-test. A plain wire whose box misses the query is left out, as
+    /// a block copy's leaf is: it could not be hit there. So is a blank
+    /// slot. A far wire with a snap point in the query stays.
+    #[test]
+    fn a_local_expansion_leaves_out_plain_wires_away_from_the_aperture() {
+        let proto = vec![wire(
+            "leaf",
+            vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            [0.0, 0.0, 1.0, 1.0],
+        )];
+        let mut stub = crate::scene::model::instance_model::stub_wire(
+            Arc::new(proto),
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        stub.name = "30".to_string();
+        let far = wire(
+            "40",
+            vec![[300.0, 300.0, 0.0], [301.0, 301.0, 0.0]],
+            [300.0, 300.0, 301.0, 301.0],
+        );
+        let mut wires = sample();
+        // An arc 300 units away whose centre, a snap point, is at the origin.
+        let mut arc_far = wire(
+            "50",
+            vec![[300.0, -1.0, 0.0], [300.0, 1.0, 0.0]],
+            [300.0, -1.0, 300.0, 1.0],
+        );
+        arc_far.snap_pts = vec![(
+            DVec3::ZERO,
+            crate::scene::model::wire_model::SnapHint::Center,
+        )];
+        wires.extend([stub, far, arc_far, marker("21")]);
+        wires.extend(blank_slots());
+        let arc = Arc::new(wires);
+
+        let aperture = [-5.0, -5.0, 5.0, 5.0];
+        let local = InteractionCandidates::all_near(Arc::clone(&arc), aperture).materialize_stubs();
+        assert_eq!(
+            names(&local),
+            ["13", "21", "30", "5", "50", "9"],
+            "the wires near the aperture, the block copy (30), the marker and \
+             the arc centred there; not the plain wire 300 units away, nor \
+             the blank slots"
         );
     }
 

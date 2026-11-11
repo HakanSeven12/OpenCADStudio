@@ -1694,6 +1694,18 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+F12".to_string())
             .or_insert_with(|| "QUADTOGGLE".to_string());
+        // Before group selection had Ctrl+Shift+A, the base-key fallback
+        // read it as Ctrl+A and selected everything.
+        self.shortcut_bindings
+            .entry(
+                if cfg!(target_os = "macos") {
+                    "CMD+SHIFT+A"
+                } else {
+                    "CTRL+SHIFT+A"
+                }
+                .to_string(),
+            )
+            .or_insert_with(|| "TOGGLEGROUPS".to_string());
         self.shortcut_bindings
             .entry(
                 if cfg!(target_os = "macos") {
@@ -5810,6 +5822,15 @@ impl OpenCADStudio {
     fn refresh_current_plot_context(&mut self) {
         let i = self.active_tab;
         if self.tabs[i].scene.current_layout == "Model" {
+            self.plot_dialog.paper_space = false;
+            // Layout is a paper-only plot area. Its saved fixed scale can put
+            // every model object outside the sheet, making direct PREVIEW and
+            // SVG/PDF export look blank. Match the Plot dialog's existing
+            // normalization instead of carrying that state into Model.
+            if self.plot_dialog.area == "Layout" {
+                self.plot_dialog.area = "Extents".into();
+                self.normalize_common_plot_dialog();
+            }
             return;
         }
         self.plot_dialog.paper_space = true;
@@ -7362,9 +7383,17 @@ impl OpenCADStudio {
                         d.paperspace_last = !d.paperspace_last
                     }
                     PlotFlag::Stamp => d.stamp = !d.stamp,
+                    // SVG-only preference; hidden and inert for printer/PDF
+                    // output exactly like the SVG file-format gate checks.
+                    PlotFlag::NonScalingStroke if d.to_file && d.file_svg => {
+                        d.non_scaling_stroke = !d.non_scaling_stroke;
+                    }
                     PlotFlag::HidePaperspace => d.hide_paperspace = !d.hide_paperspace,
                     PlotFlag::SaveToLayout => d.save_to_layout = !d.save_to_layout,
                     PlotFlag::OpenWhenDone => d.open_when_done = !d.open_when_done,
+                    PlotFlag::TextAsOutlines if d.to_file && d.file_svg => {
+                        d.text_as_outlines = !d.text_as_outlines;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -8092,6 +8121,8 @@ impl OpenCADStudio {
             quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
             raster_dpi: d.raster_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
+            text_as_outlines: d.text_as_outlines,
+            non_scaling_stroke: d.non_scaling_stroke,
         }
     }
 
@@ -8425,6 +8456,28 @@ impl OpenCADStudio {
 mod plot_paper_tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::ui::window::plot::PlotDlgMsg;
+
+    #[test]
+    fn non_scaling_stroke_is_an_svg_only_plot_preference() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert!(!app.plot_dialog.non_scaling_stroke);
+        assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::NonScalingStroke,
+        ));
+        assert!(app.plot_dialog.non_scaling_stroke);
+        assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+
+        // PDF ignores the stored SVG preference, and its hidden checkbox cannot
+        // be toggled by a synthetic message.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::NonScalingStroke,
+        ));
+        assert!(app.plot_dialog.non_scaling_stroke);
+    }
 
     /// A Model plot resolves top-level fills against the white sheet, not the
     /// dark screen: colour 7 and ByBlock fills used to plot white, and a
@@ -9448,6 +9501,28 @@ mod plot_paper_tests {
     }
 
     #[test]
+    fn text_as_outlines_is_an_svg_only_plot_preference() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert!(!app.plot_dialog.text_as_outlines);
+        assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::TextAsOutlines,
+        ));
+        assert!(app.plot_dialog.text_as_outlines);
+        assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
+
+        // PDF ignores the stored SVG preference, and its hidden checkbox cannot
+        // be toggled by a synthetic message.
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+            crate::ui::window::plot::PlotFlag::TextAsOutlines,
+        ));
+        assert!(app.plot_dialog.text_as_outlines);
+    }
+
+    #[test]
     fn legacy_pdf_label_is_upgraded_on_save() {
         let mut app = app_with_printer_named_sheet();
         let i = app.active_tab;
@@ -9770,6 +9845,75 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert_eq!((w, h), (1500.0, 609.6));
         assert_eq!(layout_rotation(&app), document::objects::PlotRotation::None);
     }
+
+    #[test]
+    fn direct_model_preview_normalizes_inherited_paper_layout_scale() {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let from = Vector3::new(10_000.0, 10_000.0, 0.0);
+        let to = Vector3::new(20_000.0, 20_000.0, 0.0);
+        app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(from, to)));
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+
+        // A saved paper setup uses the paper-only Layout area and a fixed 1:1
+        // scale. Direct PREVIEW inherits those fields after switching to Model.
+        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.paper_space = true;
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1:1".into();
+        app.plot_dialog.center = true;
+        app.plot_dialog.paper_width_mm = 210.0;
+        app.plot_dialog.paper_height_mm = 297.0;
+        let _ = app.update(Message::LayoutSwitch("Model".into()));
+
+        app.refresh_current_plot_context();
+        assert_eq!(app.plot_dialog.area, "Extents");
+        assert!(app.plot_dialog.fit_to_paper);
+        assert!(!app.plot_dialog.paper_space);
+
+        let page = app.direct_plot_page().expect("model line plots");
+        let map = |point: Vector3| {
+            (
+                (point.x + page.offset_x) * page.scale as f64,
+                (point.y + page.offset_y) * page.scale as f64,
+            )
+        };
+        for point in [from, to] {
+            let (x, y) = map(point);
+            assert!(
+                x >= 0.0 && x <= page.paper_w && y >= 0.0 && y <= page.paper_h,
+                "fitted model endpoint ({x}, {y}) is outside {} x {} at scale {}",
+                page.paper_w,
+                page.paper_h,
+                page.scale
+            );
+        }
+    }
+
+    #[test]
+    fn direct_model_preview_keeps_an_explicit_non_fit_extents_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.plot_dialog.area = "Extents".into();
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1:100".into();
+        app.plot_dialog.center = false;
+        app.plot_dialog.offset_x = "12.0".into();
+
+        app.refresh_current_plot_context();
+
+        assert!(!app.plot_dialog.fit_to_paper);
+        assert_eq!(app.plot_dialog.scale, "1:100");
+        assert!(!app.plot_dialog.center);
+        assert_eq!(app.plot_dialog.offset_x, "12.0");
+    }
+
 }
 
 #[cfg(test)]

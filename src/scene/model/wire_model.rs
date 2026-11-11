@@ -606,7 +606,7 @@ pub fn clean_searchable_text(raw: &str) -> String {
             match c {
                 b'd' | b'D' => out.push('°'),
                 b'p' | b'P' => out.push('±'),
-                b'c' | b'C' => out.push('Ø'),
+                b'c' | b'C' => out.push('∅'),
                 b'%' => out.push('%'),
                 _ if c.is_ascii_digit()
                     && i + 4 < bytes.len()
@@ -1702,7 +1702,7 @@ mod tests {
         // DXF specials decode (incl. %%nnn codes).
         assert_eq!(clean_searchable_text("%%d"), "°");
         assert_eq!(clean_searchable_text("%%p"), "±");
-        assert_eq!(clean_searchable_text("%%c"), "Ø");
+        assert_eq!(clean_searchable_text("%%c"), "∅");
         assert_eq!(clean_searchable_text("%%065"), "A");
         // Stacking, unicode escapes and grouping braces.
         assert_eq!(clean_searchable_text("\\S1^2;"), "1/2");

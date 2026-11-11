@@ -18,8 +18,12 @@ use iced::{Background, Border, Element, Length, Theme};
 pub struct State {
     /// List only the scales every edited object has.
     pub common_only: bool,
-    /// The scale picked in the list.
-    pub selected: Option<String>,
+    /// The scales picked in the list (Ctrl adds, Shift extends).
+    pub selected: Vec<String>,
+    /// The scale a Shift click extends the selection from.
+    pub anchor: Option<String>,
+    /// The drawing's scale list order: the list shows the scales in it.
+    pub order: Vec<String>,
     /// Each edited object's scale names, as edited so far.
     pub staged: Vec<(Handle, Vec<String>)>,
     /// The Add list while it is open: the scales ticked in it.
@@ -27,7 +31,7 @@ pub struct State {
 }
 
 impl State {
-    /// The scales the list shows, in the order the objects carry them.
+    /// The scales the list shows, in the drawing's scale list order.
     pub fn listed(&self) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
         for (_, scales) in &self.staged {
@@ -44,23 +48,81 @@ impl State {
                     .all(|(_, scales)| scales.iter().any(|scale| scale.eq_ignore_ascii_case(name)))
             });
         }
+        // A scale missing from the list order keeps its place after the rest.
+        let rank = |name: &String| {
+            self.order
+                .iter()
+                .position(|known| known.eq_ignore_ascii_case(name))
+                .unwrap_or(usize::MAX)
+        };
+        names.sort_by_key(rank);
         names
     }
 
-    /// Delete is offered for a listed scale no object holds as its only one.
-    pub fn can_delete(&self) -> bool {
-        let Some(selected) = self.selected.as_deref() else {
-            return false;
-        };
+    /// The selected scales the list shows.
+    pub fn selected_listed(&self) -> Vec<String> {
         self.listed()
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case(selected))
-            && self.staged.iter().all(|(_, scales)| {
-                !scales
-                    .iter()
-                    .any(|scale| scale.eq_ignore_ascii_case(selected))
-                    || scales.len() > 1
-            })
+            .into_iter()
+            .filter(|name| self.selected.iter().any(|s| s.eq_ignore_ascii_case(name)))
+            .collect()
+    }
+
+    /// Delete is offered while some, but not every, listed scale is selected
+    /// (measured: picking the whole list greys it, even when a pick leaves
+    /// one object without a scale).
+    pub fn can_delete(&self) -> bool {
+        let picked = self.selected_listed().len();
+        picked > 0 && picked < self.listed().len()
+    }
+
+    /// Takes the picked scales off every object; an object they would leave
+    /// without a scale keeps its last one in the list order (measured: the
+    /// later list entry stays whichever was added first).
+    pub fn delete_picked(&mut self) {
+        let picked = self.selected_listed();
+        let order = self.order.clone();
+        for (_, scales) in &mut self.staged {
+            let mut kept: Vec<String> = scales
+                .iter()
+                .filter(|s| !picked.iter().any(|p| p.eq_ignore_ascii_case(s)))
+                .cloned()
+                .collect();
+            if kept.is_empty() {
+                let last = scales.iter().max_by_key(|s| {
+                    order
+                        .iter()
+                        .position(|o| o.eq_ignore_ascii_case(s))
+                        .unwrap_or(usize::MAX)
+                });
+                kept.extend(last.cloned());
+            }
+            *scales = kept;
+        }
+        self.selected.clear();
+    }
+
+    /// A click on `name`: Ctrl toggles it, Shift selects the run from the
+    /// last clicked scale, a plain click selects it alone.
+    pub fn click(&mut self, name: String, ctrl: bool, shift: bool) {
+        let listed = self.listed();
+        let at = |n: &str| listed.iter().position(|l| l.eq_ignore_ascii_case(n));
+        if shift {
+            if let (Some(from), Some(to)) = (self.anchor.as_deref().and_then(at), at(&name)) {
+                let (a, b) = if from <= to { (from, to) } else { (to, from) };
+                self.selected = listed[a..=b].to_vec();
+                return;
+            }
+        }
+        if ctrl {
+            if let Some(pos) = self.selected.iter().position(|s| s.eq_ignore_ascii_case(&name)) {
+                self.selected.remove(pos);
+            } else {
+                self.selected.push(name.clone());
+            }
+        } else {
+            self.selected = vec![name.clone()];
+        }
+        self.anchor = Some(name);
     }
 }
 
@@ -76,37 +138,30 @@ pub fn view_window(
         return add_view(state, ticked, scales, sizing);
     }
     let listed = state.listed();
-    let selected = state.selected.clone();
+    let picked = state.selected_listed();
     let rows: Vec<Element<'static, Message>> = listed
         .iter()
         .map(|name| {
-            let is_sel = selected
-                .as_deref()
-                .is_some_and(|s| s.eq_ignore_ascii_case(name));
-            list_row(
-                name.clone(),
-                is_sel,
-                Message::AnnoObjectScaleSelect(name.clone()),
-            )
+            let is_sel = picked.iter().any(|s| s.eq_ignore_ascii_case(name));
+            list_row(name.clone(), is_sel, Message::AnnoObjectScaleSelect(name.clone()))
         })
         .collect();
-    // The units line describes the selected scale, else the first listed.
-    let shown = selected
-        .clone()
-        .filter(|name| {
-            listed
-                .iter()
-                .any(|listed| listed.eq_ignore_ascii_case(name))
-        })
-        .or_else(|| listed.first().cloned());
-    let units = shown
-        .and_then(|name| {
-            scales
-                .iter()
-                .find(|(scale, _, _)| scale.eq_ignore_ascii_case(&name))
-                .map(|(_, paper, drawing)| units_line(*paper, *drawing))
-        })
-        .unwrap_or_default();
+    // The units line describes the selected scale, else the first listed;
+    // several selected scales vary.
+    let units = if picked.len() > 1 {
+        t!("Varies: multiple scales selected.").into_owned()
+    } else {
+        picked
+            .first()
+            .or_else(|| listed.first())
+            .and_then(|name| {
+                scales
+                    .iter()
+                    .find(|(scale, _, _)| scale.eq_ignore_ascii_case(name))
+                    .map(|(_, paper, drawing)| units_line(*paper, *drawing))
+            })
+            .unwrap_or_default()
+    };
 
     let buttons = column![
         tb_button(t!("Add..."), Message::AnnoObjectScaleAdd, false),
@@ -238,7 +293,7 @@ fn list_box(
     rows: Vec<Element<'static, Message>>,
     _sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'static, Message> {
-    container(scrollable(column(rows).spacing(1)).height(Length::Fill))
+    container(scrollable(column(rows).spacing(1)).spacing(4).height(Length::Fill))
         .style(|theme: &Theme| {
             let palette = theme.palette();
             container::Style {

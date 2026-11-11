@@ -615,6 +615,22 @@ impl OpenCADStudio {
             "hand_seed":format!("{:X}",tab.scene.document.header.handle_seed.max(tab.scene.document.next_handle())),
             "plugins":plugin_ids(),
             "documents":self.tabs.iter().map(|t|json!({"id":t.id,"title":t.tab_title,"path":t.current_path,"dirty":t.dirty,"revision":t.edit_revision,"start":t.is_start})).collect::<Vec<_>>(),
+            "clean_screen":self.clean_screen,
+            "dock":{
+                "left":self.dock.left.iter().enumerate().map(|(index,group)|json!({"index":index,"panels":group.panels.iter().map(|id|json!({"id":format!("{:?}",id),"visible":self.dock_panel_visible(*id)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "right":self.dock.right.iter().enumerate().map(|(index,group)|json!({"index":index,"panels":group.panels.iter().map(|id|json!({"id":format!("{:?}",id),"visible":self.dock_panel_visible(*id)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "auto_hide":[self.dock.auto_hide.0,self.dock.auto_hide.1],
+            },
+            "plugin_panels":self.plugin_panels.iter().map(|(id,panel)|{
+                let number = self.plugin_panel_by_num.iter().find_map(|(number,panel_id)| (panel_id == id).then_some(*number));
+                json!({"id":id,"dock_id":number,"owner":panel.owner_plugin_id,"title":panel.def.title,"visible":panel.visible,"on_screen":number.map(|number|self.dock_panel_on_screen(crate::ui::dock::PanelId::Plugin(number))),"location":number.and_then(|number|self.dock.location(crate::ui::dock::PanelId::Plugin(number))).map(|(side,group)|json!({"side":format!("{:?}",side),"group":group})),"auto_collapse":number.map(|number|self.dock.auto_collapse(crate::ui::dock::PanelId::Plugin(number))),"fields":panel.def.controls.iter().map(|control|match control {
+                    ocs_plugin_api::dialog::DialogControl::Text { id, label, default } => json!({"id":id,"kind":"Text","label":label,"value":panel.text_values.get(id).cloned().unwrap_or_else(||default.clone())}),
+                    ocs_plugin_api::dialog::DialogControl::Number { id, label, .. } => json!({"id":id,"kind":"Number","label":label,"value":panel.text_values.get(id)}),
+                    ocs_plugin_api::dialog::DialogControl::InfoText { text, .. } => json!({"kind":"InfoText","text":text}),
+                    ocs_plugin_api::dialog::DialogControl::Button { id, label, .. } => json!({"id":id,"kind":"Button","label":label}),
+                    other => json!({"kind":format!("{:?}",other)}),
+                }).collect::<Vec<_>>()})
+            }).collect::<Vec<_>>(),
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "selection_revision":self.control.selection_revision,
             "command":command,"command_owner_client_id":self.control.owner.as_ref().filter(|(owner_tab,_)|*owner_tab==tab.id).map(|(_,owner)|owner.clone()),"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
@@ -1021,7 +1037,7 @@ impl OpenCADStudio {
                     if off_screen {
                         json!({"ok":true,"snap":null,"reason":"point_outside_viewport"})
                     } else {
-                        match self.snap_query(i, world, from) {
+                        match self.snap_query(i, world, from, None) {
                             Some(hit) => {
                                 json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]})
                             }
@@ -1396,6 +1412,8 @@ impl OpenCADStudio {
             "pointer" => self.control_pointer(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
+            "panel_input" => self.control_panel_input(req)?,
+            "panel_button" => self.control_panel_button(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             #[cfg(not(target_arch = "wasm32"))]
@@ -5744,6 +5762,41 @@ mod tests {
     }
 
     #[test]
+    fn plot_op_svg_text_as_outlines_uses_vector_paths() {
+        let svg = std::env::temp_dir().join(format!("ocs-outline-{}.svg", std::process::id()));
+        let mut svg_text = String::new();
+        let mut stable = false;
+        for _ in 0..8 {
+            let mut app = OpenCADStudio::new_for_test();
+            request(&mut app, json!({"op":"new"}));
+            let generation = crate::scene::text::sdf_atlas::generation();
+            let text = document::entities::MText::with_value(
+                "OUTLINE",
+                document::types::Vector3::new(10.0, 10.0, 0.0),
+            );
+            app.tabs[app.active_tab]
+                .scene
+                .add_entity(document::EntityType::MText(Box::new(text)));
+            let response = request(
+                &mut app,
+                json!({"op":"plot","path":svg.to_string_lossy(),"text_as_outlines":true}),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            if crate::scene::text::sdf_atlas::generation() == generation {
+                stable = true;
+                break;
+            }
+        }
+        assert!(stable, "glyph atlas did not stabilize after eight attempts");
+        assert!(!svg_text.contains("<text"));
+        assert!(!svg_text.contains("font-family"));
+        assert!(svg_text.contains("<path"));
+        roxmltree::Document::parse(&svg_text).expect("well-formed outline SVG");
+        let _ = std::fs::remove_file(&svg);
+    }
+
+    #[test]
     fn plot_op_applies_ctb_colors_through_layer_aci() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
@@ -5849,6 +5902,158 @@ mod tests {
         );
         let _ = std::fs::remove_file(&pdf);
         let _ = std::fs::remove_file(&plain);
+    }
+
+    #[test]
+    fn plot_op_applies_svg_stroke_and_explicit_plot_overrides() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}));
+        let mut widths = Vec::new();
+        for scale_lineweights in [false, true] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-stroke-options-{}-{}.svg",
+                std::process::id(),
+                scale_lineweights
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "path":svg.to_string_lossy(),
+                    "scale":"10:1",
+                    "lineweights":true,
+                    "scale_lineweights":scale_lineweights,
+                    "non_scaling_stroke":true,
+                    "shade":"2d wireframe",
+                    "paperspace_last":true,
+                    "apply_plot_styles":false
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let path = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .expect("stroked line");
+            assert_eq!(path.attribute("vector-effect"), Some("non-scaling-stroke"));
+            widths.push(
+                path.attribute("stroke-width")
+                    .expect("stroke width")
+                    .parse::<f64>()
+                    .expect("numeric stroke width"),
+            );
+            let _ = std::fs::remove_file(&svg);
+        }
+        assert!(
+            (widths[1] / widths[0] - 10.0).abs() < 0.03,
+            "scale_lineweights must apply the explicit 10:1 scale: {widths:?}"
+        );
+
+        let rejected = request(
+            &mut app,
+            json!({"op":"plot","path":"/tmp/invalid-shade.svg","shade":"not-a-mode"}),
+        );
+        assert_eq!(rejected["status"], "failed");
+        assert_eq!(rejected["code"], "invalid_value");
+    }
+
+    #[test]
+    fn plot_op_explicitly_disabled_plot_style_wins_over_requested_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let mut line = document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        line.common.color = document::types::Color::Index(1);
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+
+        for (enabled, expected) in [(false, "#ff0000"), (true, "#000000")] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-plot-style-enabled-{}-{}.svg",
+                std::process::id(),
+                enabled
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "path":svg.to_string_lossy(),
+                    "plot_style":"monochrome.ctb",
+                    "apply_plot_styles":enabled
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let stroke = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .and_then(|node| node.attribute("stroke"))
+                .expect("stroked line");
+            assert_eq!(stroke, expected, "apply_plot_styles={enabled}");
+            let _ = std::fs::remove_file(&svg);
+        }
+
+        // Repeat on a named layout with a stored enabled table. The explicit
+        // false must survive both setup loading and the export-level fallback.
+        let scene = &mut app.tabs[app.active_tab].scene;
+        scene.set_current_layout("Layout1".into());
+        scene.load_current_layout_state();
+        let mut paper_line = document::entities::Line::from_points(
+            document::types::Vector3::new(10.0, 10.0, 0.0),
+            document::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        paper_line.common.color = document::types::Color::Index(1);
+        scene.add_entity(document::EntityType::Line(paper_line));
+        let mut setup = scene.plot_settings_for("Layout1").expect("Layout1 setup");
+        setup.current_style_sheet = "monochrome.ctb".into();
+        setup.flags.plot_plot_styles = true;
+        assert!(scene.set_layout_plot_settings("Layout1", &setup));
+        for include_requested_table in [false, true] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-layout-style-disabled-{}-{}.svg",
+                std::process::id(),
+                include_requested_table
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "layout":"Layout1",
+                    "path":svg.to_string_lossy(),
+                    "plot_style":if include_requested_table {
+                        json!("monochrome.ctb")
+                    } else {
+                        Value::Null
+                    },
+                    "apply_plot_styles":false
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let stroke = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .and_then(|node| node.attribute("stroke"))
+                .expect("stroked paper line");
+            assert_eq!(
+                stroke, "#ff0000",
+                "requested table={include_requested_table}"
+            );
+            let _ = std::fs::remove_file(&svg);
+        }
     }
 
     /// An unknown `entities_transform` action must come back as a clean
@@ -6210,5 +6415,294 @@ mod tests {
             placed_attributes(&app, i, "ATTDIA_SHRUG").is_empty(),
             "a declined form drops the placement"
         );
+    }
+
+    #[test]
+    fn plot_op_model_defaults_to_fit_when_scale_and_fit_are_omitted() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}));
+        // A previous non-fit preference must not leak into an API request whose
+        // documented default is fit when neither scale nor fit is supplied.
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1000:1".into();
+        let svg = std::env::temp_dir().join(format!("ocs-fit-default-{}.svg", std::process::id()));
+        let response = request(&mut app, json!({"op":"plot","path":svg.to_string_lossy()}));
+        assert_eq!(response["status"], "completed", "{response}");
+        let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+        let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let root = document.root_element();
+        let view_box = root
+            .attribute("viewBox")
+            .expect("viewBox")
+            .split_whitespace()
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect::<Vec<_>>();
+        let (width, height) = (view_box[2], view_box[3]);
+        let mut checked = 0;
+        for path in root
+            .descendants()
+            .filter(|node| node.tag_name().name() == "path")
+        {
+            let d = path.attribute("d").expect("path data");
+            let normalized = d.replace(['M', 'L', 'Z'], " ");
+            let coordinates = normalized
+                .split_whitespace()
+                .map(|v| v.parse::<f64>().expect("numeric path coordinate"))
+                .collect::<Vec<_>>();
+            for pair in coordinates.chunks_exact(2) {
+                assert!(
+                    pair[0] >= -0.01 && pair[0] <= width + 0.01,
+                    "x={} width={width}",
+                    pair[0]
+                );
+                assert!(
+                    pair[1] >= -0.01 && pair[1] <= height + 0.01,
+                    "y={} height={height}",
+                    pair[1]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+        let fitted_line = svg_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("fitted line")
+            .to_owned();
+        let _ = std::fs::remove_file(&svg);
+
+        // An explicit non-fit request must not be replaced by the default.
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.scale = "1000:1".into();
+        let explicit =
+            std::env::temp_dir().join(format!("ocs-fit-explicit-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":explicit.to_string_lossy(),"fit":false}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let explicit_text = std::fs::read_to_string(&explicit).expect("explicit SVG written");
+        let explicit_line = explicit_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("explicit non-fit line");
+        assert_ne!(explicit_line, fitted_line);
+        let _ = std::fs::remove_file(&explicit);
+    }
+
+    /// `area:"window"` on a named layout. The request's rect is explicit and
+    /// must survive the stored page setup load: a layout's own (older or lost)
+    /// window may not swallow a field request.
+    #[test]
+    fn a_window_plot_reaches_a_named_layout() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}))["status"],
+            "completed"
+        );
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+        let _ = app.run_command_line("MSPACE");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        let _ = app.run_command_line("PSPACE");
+
+        let svg =
+            std::env::temp_dir().join(format!("ocs-layout-window-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({
+                "op":"plot",
+                "layout":"Layout1",
+                "path":svg.to_string_lossy(),
+                "area":"window",
+                "window":[5,5,290,200]
+            }),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        assert_eq!(response["result"]["page_sizes"], json!([[297.0, 210.0]]));
+        let svg_text = std::fs::read_to_string(&svg).expect("window SVG");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let clip = svg_text
+            .lines()
+            .find(|line| line.contains("clipPath") || line.contains("clip-path"))
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| panic!("clip from the requested window: {svg_text}"));
+        assert!(clip.contains("width=\"285\""), "{clip}");
+        assert!(clip.contains("height=\"195\""), "{clip}");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        assert!(
+            svg_text.lines().any(|line| line.starts_with("<path")),
+            "the viewport reaches the model content: {svg_text}"
+        );
+        let _ = std::fs::remove_file(&svg);
+    }
+    /// A BLOCK_RECORD whose stored `entity_handles` no longer resolve against
+    /// the entity table (an import that renumbered handles after the lists
+    /// were built) must not silently drop the layout's whole content: the
+    /// stored list is a hint, and ownership keeps the real viewports.
+    #[test]
+    fn a_stale_block_record_list_still_plots_layout_content() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}))["status"],
+            "completed"
+        );
+        let i = app.active_tab;
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+        let _ = app.run_command_line("MSPACE");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        let _ = app.run_command_line("PSPACE");
+
+        // The healthy layout first: the model content lands in the viewport.
+        let healthy = std::env::temp_dir().join(format!(
+            "ocs-layout-record-healthy-{}.svg",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","layout":"Layout1","path":healthy.to_string_lossy(),"area":"layout"}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let healthy_text = std::fs::read_to_string(&healthy).expect("healthy SVG");
+        assert!(
+            healthy_text.lines().any(|line| line.starts_with("<path")),
+            "the healthy viewport must carry model content: {healthy_text}"
+        );
+        let _ = std::fs::remove_file(&healthy);
+        let healthy_paths = healthy_text
+            .lines()
+            .filter(|line| line.starts_with("<path"))
+            .collect::<Vec<_>>();
+
+        // Corrupt the stored list the way the renumbering report observed:
+        // non-empty, but resolvable nowhere in the entity table. A create +
+        // delete round-trip bumps the paper cache's epoch so the plot reads
+        // the corrupted list again; the document content itself is unchanged.
+        let scene = &mut app.tabs[i].scene;
+        let viewport_owner = scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Viewport(vp) => Some(vp.common.owner_handle),
+                _ => None,
+            })
+            .expect("Layout1 carries a content viewport");
+        let record = scene
+            .document
+            .block_records
+            .iter_mut()
+            .find(|record| record.handle == viewport_owner)
+            .expect("the owning block record");
+        record.entity_handles = vec![document::Handle::new(404)];
+        let bump = request(
+            &mut app,
+            json!({"op":"entities_create","entities":[{"type":"Point","location":[900,900]}]}),
+        );
+        assert_eq!(bump["ok"], true, "{bump}");
+        let scratch = bump["result"]["handles"][0].as_str().unwrap().to_string();
+        let erased = request(
+            &mut app,
+            json!({"op":"entities_delete","handles":[scratch]}),
+        );
+        assert_eq!(erased["ok"], true, "{erased}");
+
+        let stale = std::env::temp_dir().join(format!(
+            "ocs-layout-record-stale-{}.svg",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","layout":"Layout1","path":stale.to_string_lossy(),"area":"layout"}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let stale_text = std::fs::read_to_string(&stale).expect("stale SVG");
+        let mut stale_paths = stale_text
+            .lines()
+            .filter(|line| line.starts_with("<path"))
+            .collect::<Vec<_>>();
+        let mut healthy_paths = healthy_paths;
+        healthy_paths.sort();
+        stale_paths.sort();
+        assert_eq!(
+            healthy_paths, stale_paths,
+            "the stale record list must not drop the viewport content"
+        );
+        let _ = std::fs::remove_file(&stale);
+    }
+
+    #[test]
+    fn panel_ui_automation_edits_and_resets_only_the_form() {
+        use ocs_plugin_api::dialog::{DialogControl, PanelDef};
+
+        let mut app = OpenCADStudio::new_for_test();
+        let panel_id = "cvifc.ifc_h_properties";
+        let panel = PanelDef::new(panel_id, "IFC properties")
+            .with_control(DialogControl::Number {
+                id: "SegmentLength".into(),
+                label: "SegmentLength".into(),
+                default: 100.0,
+                min: None,
+                max: None,
+                step: None,
+            })
+            .with_control(DialogControl::Button {
+                id: "apply".into(),
+                label: "Apply".into(),
+                action: Some("CVI_IFC_PANEL_APPLY".into()),
+                align_h: None,
+                width: None,
+            });
+        let mut state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
+        state.owner_plugin_id = Some("opencad.civil_ifc".into());
+        app.plugin_panels.insert(panel_id.into(), state);
+        let before = app.tabs[0].scene.document.clone();
+        let before_undo = app.tabs[0].history.undo_stack.len();
+
+        let response = request(&mut app, json!({
+            "op": "panel_input",
+            "panel_id": panel_id,
+            "control_id": "SegmentLength",
+            "text": "101.5",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            Some("101.5"),
+        );
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
+
+        let response = request(&mut app, json!({
+            "op": "panel_button",
+            "panel_id": panel_id,
+            "control_id": "reset",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            Some("100"),
+        );
+        assert_eq!(
+            app.plugin_panels[panel_id].owner_plugin_id.as_deref(),
+            Some("opencad.civil_ifc"),
+        );
+        let declared_action = OpenCADStudio::panel_button_action(
+            &app.plugin_panels[panel_id].def.controls,
+            "apply",
+        );
+        assert_eq!(declared_action.as_deref(), Some("CVI_IFC_PANEL_APPLY"));
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
+
+        let response = request(&mut app, json!({
+            "op": "panel_button",
+            "panel_id": panel_id,
+            "control_id": "apply",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
     }
 }

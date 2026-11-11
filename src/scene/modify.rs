@@ -363,6 +363,31 @@ impl Scene {
             .collect();
         let mut refresh_solid_handles = Vec::new();
         for &h in handles {
+            if self.is_recording_undo() {
+                let context_objects = self
+                    .document
+                    .get_entity(h)
+                    .map(|entity| {
+                        crate::scene::annotative::annotation_context_objects_for_entity(
+                            &self.document,
+                            entity,
+                        )
+                    })
+                    .unwrap_or_default();
+                for (handle, object) in context_objects {
+                    self.record_undo_object_before(handle, Some(object));
+                }
+            }
+            let insert_attributes_before = self.document.get_entity(h).and_then(|entity| {
+                let EntityType::Insert(insert) = entity else {
+                    return None;
+                };
+                insert
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.common.xdictionary_handle.is_some())
+                    .then(|| insert.attributes.clone())
+            });
             // Delta-undo: capture the pre-transform image before mutating.
             if self.is_recording_undo() {
                 let before = self.document.get_entity_arc(h);
@@ -374,6 +399,13 @@ impl Scene {
                 if mirror_true {
                     mirror_true_text_flags(entity);
                 }
+            }
+            if let Some(attributes) = insert_attributes_before {
+                crate::scene::annotative::transform_insert_attribute_contexts(
+                    &mut self.document,
+                    &attributes,
+                    t,
+                );
             }
             // Only the reference goes: the old picture stays a block of its
             // own, which an undo points back to, and is not saved again.
@@ -437,11 +469,8 @@ impl Scene {
             }
         }
         for &h in handles {
-            let others =
-                crate::scene::annotative::transform_annotation_contexts(&mut self.document, h, t);
-            if self.sync_displayed_annotation_context(h) || others {
-                self.poison_undo_recording();
-            }
+            crate::scene::annotative::transform_annotation_contexts(&mut self.document, h, t);
+            self.sync_displayed_annotation_context(h);
         }
         // Move the baked dimension-block sub-entities too (collected above).
         // These are entities not named in the reported change set, so a delta
@@ -626,11 +655,38 @@ impl Scene {
                 let before = self.document.get_entity_arc(handle);
                 self.record_undo_before(handle, before);
             }
-            if let Some(EntityType::Insert(reference)) = self.document.get_entity_mut(handle) {
-                for attribute in &mut reference.attributes {
-                    document::Entity::apply_transform(attribute, &attribute_transform);
+            let attributes_before =
+                if let Some(EntityType::Insert(reference)) = self.document.get_entity_mut(handle) {
+                    let before = reference.attributes.clone();
+                    for attribute in &mut reference.attributes {
+                        document::Entity::apply_transform(attribute, &attribute_transform);
+                    }
+                    changed.push(handle);
+                    Some(before)
+                } else {
+                    None
+                };
+            if let Some(before) = attributes_before {
+                if self.is_recording_undo() {
+                    let context_objects = self
+                        .document
+                        .get_entity(handle)
+                        .map(|entity| {
+                            crate::scene::annotative::annotation_context_objects_for_entity(
+                                &self.document,
+                                entity,
+                            )
+                        })
+                        .unwrap_or_default();
+                    for (object_handle, object) in context_objects {
+                        self.record_undo_object_before(object_handle, Some(object));
+                    }
                 }
-                changed.push(handle);
+                crate::scene::annotative::transform_insert_attribute_contexts(
+                    &mut self.document,
+                    &before,
+                    &EntityTransform::Affine(attribute_transform),
+                );
             }
         }
 
@@ -1227,6 +1283,10 @@ impl Scene {
         let (cross, owner_of) = self.prepare_xdict_copies(&roots);
         let mut created_objects = Vec::new();
         for (src_handle, mut entity, annotation_scales, src_xdict) in clones {
+            let source_attributes = match &entity {
+                EntityType::Insert(insert) => insert.attributes.clone(),
+                _ => Vec::new(),
+            };
             let text_orient = if preserve_text_orientation {
                 capture_text_orient(&entity)
             } else {
@@ -1306,6 +1366,7 @@ impl Scene {
                         self.poison_undo_recording();
                     }
                 }
+                let mut copied_context_sources = Vec::new();
                 for (k, src_attribute, src_root) in attribute_xdicts {
                     let Some(new_attribute) = (match self.document.get_entity(h) {
                         Some(EntityType::Insert(ins)) => {
@@ -1329,7 +1390,19 @@ impl Scene {
                     if let Some(EntityType::Insert(ins)) = self.document.get_entity_mut(h) {
                         ins.attributes[k].common.xdictionary_handle = Some(new_root);
                     }
+                    if let Some(source) = source_attributes.get(k) {
+                        let mut source = source.clone();
+                        source.common.xdictionary_handle = Some(new_root);
+                        copied_context_sources.push(source);
+                    }
                     self.poison_undo_recording();
+                }
+                if !copied_context_sources.is_empty() {
+                    crate::scene::annotative::transform_insert_attribute_contexts(
+                        &mut self.document,
+                        &copied_context_sources,
+                        t,
+                    );
                 }
                 if !annotation_scales.is_empty() {
                     for scale_handle in annotation_scales {
@@ -2805,15 +2878,61 @@ impl Scene {
             }
             return;
         }
-        // An attribute grip sits on the displayed (annotation-scaled)
-        // attribute; the stored one is unscaled.
-        let apply = match self.document.get_entity(handle) {
-            Some(EntityType::Insert(insert)) => crate::entities::insert::unscale_attribute_grip(
-                insert,
-                self.annotation_scale,
-                grip_id,
-                apply,
-            ),
+        let whole_insert_before = (grip_id == 0)
+            .then(|| self.document.get_entity(handle))
+            .flatten()
+            .and_then(|entity| match entity {
+                EntityType::Insert(insert) => Some((
+                    document::types::Matrix3::arbitrary_axis(insert.normal) * insert.insert_point,
+                    insert.attributes.clone(),
+                )),
+                _ => None,
+            });
+        // An INSERT-owned attribute may be painted from an annotation context
+        // rather than from its base fields. Move both representations by the
+        // displayed grip's delta so the text follows during the live preview.
+        let context_move = self.document.get_entity(handle).and_then(|entity| {
+            let EntityType::Insert(insert) = entity else {
+                return None;
+            };
+            let attribute = insert.attributes.get(grip_id.checked_sub(1)?)?.clone();
+            if attribute.flags.constant
+                || attribute.lock_position
+                || attribute.flags.locked_position
+            {
+                return None;
+            }
+            let mut displayed = attribute.clone();
+            crate::scene::annotative::place_attribute_for_annotation_scale(
+                &self.document,
+                &mut displayed,
+                self.displayed_annotation_scale_handle(),
+            )
+            .then(|| {
+                let delta = match &apply {
+                    GripApply::Absolute(target) => {
+                        *target
+                            - glam::DVec3::new(
+                                displayed.insertion_point.x,
+                                displayed.insertion_point.y,
+                                displayed.insertion_point.z,
+                            )
+                    }
+                    GripApply::Translate(delta) => *delta,
+                };
+                (attribute, delta)
+            })
+        });
+        let apply = match (self.document.get_entity(handle), &context_move) {
+            (_, Some((_, delta))) => GripApply::Translate(*delta),
+            (Some(EntityType::Insert(insert)), None) => {
+                crate::entities::insert::unscale_attribute_grip(
+                    insert,
+                    self.annotation_scale,
+                    grip_id,
+                    apply,
+                )
+            }
             _ => apply,
         };
         if self.apply_solid_history_grip(handle, grip_id, apply.clone()) {
@@ -2850,6 +2969,28 @@ impl Scene {
         });
         if let Some(entity) = self.document.get_entity_mut(handle) {
             view::dispatch::apply_grip(entity, grip_id, apply);
+        }
+        if let Some((attribute, delta)) = context_move {
+            crate::scene::annotative::translate_insert_attribute_contexts(
+                &mut self.document,
+                &attribute,
+                delta,
+            );
+        }
+        if let (Some((old_world, attributes)), Some(EntityType::Insert(insert))) =
+            (whole_insert_before, self.document.get_entity(handle))
+        {
+            let new_world =
+                document::types::Matrix3::arbitrary_axis(insert.normal) * insert.insert_point;
+            let delta = new_world - old_world;
+            let delta = glam::DVec3::new(delta.x, delta.y, delta.z);
+            for attribute in &attributes {
+                crate::scene::annotative::translate_insert_attribute_contexts(
+                    &mut self.document,
+                    attribute,
+                    delta,
+                );
+            }
         }
         self.sync_diameter_association_angle(handle);
         if let Some((annotation_handle, old_landing)) = leader_landing_before {
@@ -2962,6 +3103,49 @@ impl Scene {
 
         if !hatch_changes.is_empty() {
             self.bump_entities(&hatch_changes);
+        }
+    }
+
+    /// A Properties edit of INSERT Position moves the inline ATTRIB fields in
+    /// `apply_geom_prop`; move their per-scale drawing positions by that same
+    /// world-space displacement before the resident wires are rebuilt.
+    pub(crate) fn carry_insert_attribute_contexts_after_position_edit(
+        &mut self,
+        handle: Handle,
+        before: &document::entities::Insert,
+    ) {
+        let Some(EntityType::Insert(after)) = self.document.get_entity(handle) else {
+            return;
+        };
+        let old_world =
+            document::types::Matrix3::arbitrary_axis(before.normal) * before.insert_point;
+        let new_world = document::types::Matrix3::arbitrary_axis(after.normal) * after.insert_point;
+        let movement = new_world - old_world;
+        let delta = glam::DVec3::new(movement.x, movement.y, movement.z);
+        if delta.length_squared() <= 1.0e-24 {
+            return;
+        }
+        if self.is_recording_undo() {
+            let context_objects = self
+                .document
+                .get_entity(handle)
+                .map(|entity| {
+                    crate::scene::annotative::annotation_context_objects_for_entity(
+                        &self.document,
+                        entity,
+                    )
+                })
+                .unwrap_or_default();
+            for (object_handle, object) in context_objects {
+                self.record_undo_object_before(object_handle, Some(object));
+            }
+        }
+        for attribute in &before.attributes {
+            crate::scene::annotative::translate_insert_attribute_contexts(
+                &mut self.document,
+                attribute,
+                delta,
+            );
         }
     }
 }

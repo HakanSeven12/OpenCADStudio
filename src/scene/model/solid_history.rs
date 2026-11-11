@@ -192,7 +192,7 @@ fn placed_operands(
             let mut placed = operation.clone();
             let base = placed.base_mut()?;
             base.transform = (frame * matrix(base.transform)?).to_cols_array();
-            Some((id, kernel::acis::rebuild_body(&placed).ok()?))
+            Some((id, ocs_acis::rebuild_body(&placed).ok()?))
         })
         .collect()
 }
@@ -492,7 +492,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         SolidHistoryOperation::Sphere(value) => world_point(value.base.transform, [0.0, 0.0, 0.0]),
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
-        SolidHistoryOperation::Sweep(value) => kernel::acis::sweep_history_reference_point(value)
+        SolidHistoryOperation::Sweep(value) => ocs_acis::sweep_history_reference_point(value)
             .ok()
             .map(glam::DVec3::from_array),
         SolidHistoryOperation::Extrusion(value) => world_point(
@@ -888,7 +888,7 @@ fn sweep_properties(
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
-    let length = kernel::acis::sweep_history_path_length(value)
+    let length = ocs_acis::sweep_history_path_length(value)
         .ok()
         .map(crate::entities::common::format_length)
         .unwrap_or_default();
@@ -3169,7 +3169,7 @@ fn apply_extrusion_profile_grip(
 }
 
 fn sweep_placement_matrices(value: &SolidHistorySweep) -> Option<(glam::DMat4, glam::DMat4)> {
-    let (profile, path) = kernel::acis::sweep_history_placements(value).ok()?;
+    let (profile, path) = ocs_acis::sweep_history_placements(value).ok()?;
     let matrix = |place: kernel::brep::Placement| {
         glam::DMat4::from_cols(
             glam::DVec3::from_array(place.x_axis).extend(0.0),
@@ -3540,11 +3540,11 @@ fn extrusion_draft_rebuilds(value: &SolidHistorySweep, angle: f64) -> bool {
         return false;
     };
     let Ok((_, _, closed)) =
-        kernel::acis::sweep_profile_geometry(profile, candidate.sweep_entity_transform)
+        ocs_acis::sweep_profile_geometry(profile, candidate.sweep_entity_transform)
     else {
         return false;
     };
-    kernel::acis::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
+    ocs_acis::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
 }
 
 fn grip(id: usize, world: glam::DVec3, shape: GripShape, axis: Option<glam::DVec3>) -> GripDef {
@@ -3612,7 +3612,7 @@ pub fn chamfer_distance_grips(
     let Some(source) = document
         .solid_history_tree(handle)
         .and_then(|tree| tree.find(value.base.node_id())?.operands.first().cloned())
-        .and_then(|operand| kernel::acis::rebuild_history_tree(&operand).ok())
+        .and_then(|operand| ocs_acis::rebuild_history_tree(&operand).ok())
     else {
         return Vec::new();
     };

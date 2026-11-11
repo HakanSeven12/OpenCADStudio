@@ -1242,6 +1242,12 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("-SETBYLAYER")
             // BLOCKREPLACE's picked pair arrives as one private apply line.
             || tokens[0].eq_ignore_ascii_case("_BLOCKREPLACE_APPLY")
+            // Bare LINETYPE opens the Linetype Manager, so probing the verb
+            // alone would open it before `LINETYPE SET X` runs.
+            || tokens[0].eq_ignore_ascii_case("LINETYPE")
+            || tokens[0].eq_ignore_ascii_case("LT")
+            // -LINETYPE takes its option and quoted names on one line.
+            || tokens[0].eq_ignore_ascii_case("-LINETYPE")
             // -DIMSTYLE takes its option list on one line (the write
             // form of VARIABLES), e.g. `-DIMSTYLE VARIABLES ISO-25 DIMTXT 3.0`.
             || tokens[0].eq_ignore_ascii_case("-DIMSTYLE")
@@ -2126,6 +2132,14 @@ impl OpenCADStudio {
                 return self.dispatch_command(&cmd);
             }
             return Task::none();
+        }
+
+        // A bare LINETYPE keeps its prompts in a script, as a window has no
+        // answers to read from the following lines.
+        if self.tabs[i].active_cmd.is_none()
+            && (trimmed.eq_ignore_ascii_case("LINETYPE") || trimmed.eq_ignore_ascii_case("LT"))
+        {
+            return self.dispatch_command("LINETYPE PROMPT");
         }
 
         // 3. A command is currently active: route to its prompt handlers.

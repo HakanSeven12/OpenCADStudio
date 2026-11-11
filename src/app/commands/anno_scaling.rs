@@ -45,13 +45,21 @@ pub(crate) fn is_anno_variable(name: &str) -> bool {
 enum Step {
     /// -OBJECTSCALE `[Add/Delete/?]`.
     ObjOption,
-    ObjAdd { first: bool },
-    ObjDelete { first: bool },
+    ObjAdd {
+        first: bool,
+    },
+    ObjDelete {
+        first: bool,
+    },
     /// -SCALELISTEDIT `[?/Add/Delete/Reset/Exit]`.
     ListOption,
     ListName,
-    ListRatio { name: String },
-    ListRedefine { name: String },
+    ListRatio {
+        name: String,
+    },
+    ListRedefine {
+        name: String,
+    },
     ListDelete,
     ListReset,
 }
@@ -96,7 +104,9 @@ impl CadCommand for AnswerCommand {
     }
 
     fn prompt(&self) -> String {
-        self.select_prompt.clone().unwrap_or_else(|| self.prompt.clone())
+        self.select_prompt
+            .clone()
+            .unwrap_or_else(|| self.prompt.clone())
     }
 
     fn options(&self) -> Vec<CmdOption> {
@@ -263,7 +273,9 @@ impl OpenCADStudio {
             return Some(self.anno_variable(i, &verb, arg));
         }
         match verb.as_str() {
-            "AIOBJECTSCALEADD" => Some(self.anno_select(i, "AIOBJECTSCALEADD", "_ANNOSCALEADD_APPLY", true)),
+            "AIOBJECTSCALEADD" => {
+                Some(self.anno_select(i, "AIOBJECTSCALEADD", "_ANNOSCALEADD_APPLY", true))
+            }
             "AIOBJECTSCALEREMOVE" => {
                 Some(self.anno_select(i, "AIOBJECTSCALEREMOVE", "_ANNOSCALEREMOVE_APPLY", true))
             }
@@ -298,7 +310,8 @@ impl OpenCADStudio {
             }
             "ANNOSCALEDLG_APPLY" => Some(Task::done(Message::AnnoObjectScaleOpen)),
             "ANNORESET" => {
-                self.command_line.push_output(&trs!("anno-scale-cmd", "reset-intro"));
+                self.command_line
+                    .push_output(&trs!("anno-scale-cmd", "reset-intro"));
                 Some(self.anno_select(i, "ANNORESET", "_ANNORESET_APPLY", false))
             }
             "ANNORESET_APPLY" => {
@@ -434,7 +447,12 @@ impl OpenCADStudio {
         let message = if targets.len() == 1 {
             trs!("anno-scale-cmd", "updated-one", scale = name)
         } else {
-            trs!("anno-scale-cmd", "updated-many", count = targets.len(), scale = name)
+            trs!(
+                "anno-scale-cmd",
+                "updated-many",
+                count = targets.len(),
+                scale = name
+            )
         };
         self.command_line.push_output(&message);
     }
@@ -505,12 +523,20 @@ impl OpenCADStudio {
                 self.command_line.push_output(&if unsupported == 1 {
                     trs!("anno-scale-cmd", "not-supported-one", scale = name)
                 } else {
-                    trs!("anno-scale-cmd", "not-supported-many", count = unsupported, scale = name)
+                    trs!(
+                        "anno-scale-cmd",
+                        "not-supported-many",
+                        count = unsupported,
+                        scale = name
+                    )
                 });
             }
             if cannot > 0 {
-                self.command_line
-                    .push_output(&trs!("anno-scale-cmd", "cannot-remove", count = cannot));
+                self.command_line.push_output(&trs!(
+                    "anno-scale-cmd",
+                    "cannot-remove",
+                    count = cannot
+                ));
             }
         }
     }
@@ -525,11 +551,17 @@ impl OpenCADStudio {
             if self.tabs[i].scene.is_layer_locked(handle) {
                 continue;
             }
-            let current =
-                crate::scene::annotative::object_scale_memberships(&self.tabs[i].scene.document, handle);
+            let current = crate::scene::annotative::object_scale_memberships(
+                &self.tabs[i].scene.document,
+                handle,
+            );
             let add: Vec<String> = names
                 .iter()
-                .filter(|name| !current.iter().any(|(have, _)| have.eq_ignore_ascii_case(name)))
+                .filter(|name| {
+                    !current
+                        .iter()
+                        .any(|(have, _)| have.eq_ignore_ascii_case(name))
+                })
                 .cloned()
                 .collect();
             let remove: Vec<Handle> = current
@@ -612,9 +644,18 @@ impl OpenCADStudio {
         let skipped = handles.len() - supported.len();
         if skipped > 0 {
             self.command_line.push_output(&if skipped == 1 {
-                trs!("anno-scale-cmd", "not-annotative-one", found = handles.len())
+                trs!(
+                    "anno-scale-cmd",
+                    "not-annotative-one",
+                    found = handles.len()
+                )
             } else {
-                trs!("anno-scale-cmd", "not-annotative-many", found = handles.len(), count = skipped)
+                trs!(
+                    "anno-scale-cmd",
+                    "not-annotative-many",
+                    found = handles.len(),
+                    count = skipped
+                )
             });
         }
         let reset: Vec<Handle> = supported
@@ -678,7 +719,12 @@ impl OpenCADStudio {
         self.command_line.push_output(&if changed.len() == 1 {
             trs!("anno-scale-cmd", "updated-found-one", found = handles.len())
         } else {
-            trs!("anno-scale-cmd", "updated-found-many", found = handles.len(), count = changed.len())
+            trs!(
+                "anno-scale-cmd",
+                "updated-found-many",
+                found = handles.len(),
+                count = changed.len()
+            )
         });
         Task::none()
     }
@@ -730,7 +776,11 @@ impl OpenCADStudio {
             Step::ObjAdd { first } => (
                 "-OBJECTSCALE",
                 if *first {
-                    trs!("anno-scale-cmd", "add-scale-default", scale = current.as_str())
+                    trs!(
+                        "anno-scale-cmd",
+                        "add-scale-default",
+                        scale = current.as_str()
+                    )
                 } else {
                     trs!("anno-scale-cmd", "add-scale")
                 },
@@ -739,7 +789,11 @@ impl OpenCADStudio {
             Step::ObjDelete { first } => (
                 "-OBJECTSCALE",
                 if *first {
-                    trs!("anno-scale-cmd", "delete-scale-default", scale = current.as_str())
+                    trs!(
+                        "anno-scale-cmd",
+                        "delete-scale-default",
+                        scale = current.as_str()
+                    )
                 } else {
                     trs!("anno-scale-cmd", "delete-scale")
                 },
@@ -856,9 +910,14 @@ impl OpenCADStudio {
                         })
                     };
                     match target {
-                        Some((name, scale)) if adding => {
-                            self.anno_add_scale(i, &objects, &name, scale, Some(&mut session), label)
-                        }
+                        Some((name, scale)) if adding => self.anno_add_scale(
+                            i,
+                            &objects,
+                            &name,
+                            scale,
+                            Some(&mut session),
+                            label,
+                        ),
                         Some((name, scale)) => self.anno_remove_scale(
                             i,
                             &objects,
@@ -945,14 +1004,17 @@ impl OpenCADStudio {
                         self.tabs[i].dirty = true;
                     }
                 } else if !text.is_empty() {
-                    let found = self.tabs[i].scene.scale_object_handle(text).and_then(|handle| {
-                        match self.tabs[i].scene.document.objects.get(&handle) {
-                            Some(document::objects::ObjectType::Scale(scale)) => {
-                                Some(scale.name.clone())
+                    let found = self.tabs[i]
+                        .scene
+                        .scale_object_handle(text)
+                        .and_then(|handle| {
+                            match self.tabs[i].scene.document.objects.get(&handle) {
+                                Some(document::objects::ObjectType::Scale(scale)) => {
+                                    Some(scale.name.clone())
+                                }
+                                _ => None,
                             }
-                            _ => None,
-                        }
-                    });
+                        });
                     match found {
                         None => self.command_line.push_output(&trs!(
                             "anno-scale-cmd",
@@ -1052,17 +1114,22 @@ impl OpenCADStudio {
         match name {
             "CANNOSCALEVALUE" => {
                 let current = self.tabs[i].scene.document.header.annotation_scale_value;
-                self.command_line.push_output(&crate::tf!(
-                    "CANNOSCALEVALUE = {current:.9} (read only)"
-                ));
+                self.command_line
+                    .push_output(&crate::tf!("CANNOSCALEVALUE = {current:.9} (read only)"));
             }
             "CANNOSCALE" => match value {
                 None => {
-                    let current = self.tabs[i].scene.document.header.current_annotation_scale.clone();
-                    self.command_line.push_output(&crate::ui::command_line::value_prompt(
-                        "CANNOSCALE",
-                        &format!("\"{current}\""),
-                    ));
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_annotation_scale
+                        .clone();
+                    self.command_line
+                        .push_output(&crate::ui::command_line::value_prompt(
+                            "CANNOSCALE",
+                            &format!("\"{current}\""),
+                        ));
                     self.pending_setvar = Some("CANNOSCALE".into());
                 }
                 Some(value) => {

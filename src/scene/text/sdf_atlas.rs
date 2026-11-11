@@ -43,7 +43,7 @@ pub fn text_atlas() -> &'static Mutex<GlyphAtlas> {
 }
 
 /// Bumped whenever already-baked entries' UVs stop addressing their tile:
-/// `grow_height` rescales every entry's V and `reset` rewinds the packer, but
+/// `reset` rewinds the packer, but
 /// glyph quads built earlier keep the UVs they were laid out with. Those stale
 /// quads sample the wrong tile on screen and miss the export table entirely
 /// (silently dropping text from the PDF — issue #385 all over again, under
@@ -127,7 +127,9 @@ const MAX_TILE_PX: u32 = 512;
 
 /// Largest atlas dimension the packer will grow the texture to, kept within the
 /// common wgpu `max_texture_dimension_2d` limit (8192). The atlas starts at
-/// 1024² and doubles its height on demand up to this bound.
+/// 1024² and doubles its height on demand up to this bound. Atlas V is
+/// normalized against it; `text.wgsl` and `block_text.wgsl` hold the same
+/// value as `ATLAS_V_EXTENT`.
 const MAX_ATLAS_PX: u32 = 8192;
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -245,7 +247,7 @@ impl GlyphAtlas {
             // Centre of the solid block, safely inside it under bilinear filtering.
             solid_uv: [
                 (solid as f32 * 0.5) / width as f32,
-                (solid as f32 * 0.5) / height as f32,
+                (solid as f32 * 0.5) / MAX_ATLAS_PX as f32,
             ],
             dirty: true,
         }
@@ -362,9 +364,8 @@ impl GlyphAtlas {
         out
     }
 
-    /// Grow the atlas taller (keeping the width, so packed X positions and their
-    /// normalized U stay valid) and rescale every cached entry's V for the new
-    /// height. Returns false once the height hits `MAX_ATLAS_PX` — text-heavy
+    /// Grow the atlas taller, keeping the width. Packed tiles keep their U and
+    /// V: V is normalized against `MAX_ATLAS_PX`, not the height. Returns false once the height hits `MAX_ATLAS_PX` — text-heavy
     /// drawings would otherwise silently drop glyphs once the single page filled
     /// (issue #347). Width is unchanged, so the row-major data just grows with
     /// zeroed rows appended at the bottom.
@@ -372,19 +373,13 @@ impl GlyphAtlas {
         if self.height >= MAX_ATLAS_PX {
             return false;
         }
-        let old_h = self.height;
         let new_h = (self.height * 2).min(MAX_ATLAS_PX);
         self.data.resize((self.width * new_h) as usize, 0);
-        let sy = old_h as f32 / new_h as f32;
-        for entry in self.entries.values_mut().flatten() {
-            entry.uv_min[1] *= sy;
-            entry.uv_max[1] *= sy;
-        }
-        self.solid_uv[1] *= sy;
         self.height = new_h;
         self.dirty = true;
-        // Every already-emitted quad's V now addresses the wrong tile.
-        bump_generation();
+        // V is baked against `MAX_ATLAS_PX` and the text shaders scale it by
+        // the texture's height, so quads already laid out stay valid: no
+        // generation bump, and no second layout of every text (#2761).
         true
     }
 
@@ -417,7 +412,8 @@ impl GlyphAtlas {
         self.shelf_h = self.shelf_h.max(tile.h);
         self.dirty = true;
 
-        let (fw, fh) = (self.width as f32, self.height as f32);
+        // V against the largest height, so growing never moves a tile.
+        let (fw, fh) = (self.width as f32, MAX_ATLAS_PX as f32);
         Some(AtlasEntry {
             // Sample the centers of the edge texels rather than the tile boundaries.
             // This prevents bilinear filtering from bleeding into neighbouring tiles.
@@ -666,6 +662,19 @@ mod tests {
         assert!(!(overlap_u && overlap_v), "tiles overlap in the atlas");
     }
 
+    /// The text shaders scale V by the texture height against the same
+    /// extent the packer normalizes V by.
+    #[test]
+    fn text_shaders_know_the_atlas_v_extent() {
+        let line = format!("const ATLAS_V_EXTENT: f32 = {MAX_ATLAS_PX}.0;");
+        for shader in [
+            include_str!("../../shaders/text.wgsl"),
+            include_str!("../../shaders/block_text.wgsl"),
+        ] {
+            assert!(shader.contains(&line));
+        }
+    }
+
     #[test]
     fn full_atlas_returns_none() {
         // A tiny atlas cannot fit even one padded tile (wider than the atlas —
@@ -684,16 +693,21 @@ mod tests {
         let mut atlas = GlyphAtlas::new(1024, 1024);
         let start_h = atlas.height();
         let mut packed = 0;
+        let mut first = None;
         for _ in 0..1000 {
             match atlas.pack(bake_glyph(&filled_square(), PEN_HALF_UNITS).unwrap()) {
                 Some(e) => {
-                    // UVs stay normalized after any growth-driven rescale.
                     assert!(e.uv_min[1] >= 0.0 && e.uv_max[1] <= 1.0);
+                    first.get_or_insert(e);
                     packed += 1;
                 }
                 None => break,
             }
         }
+        // V is in rows of the largest atlas: the first tile still addresses
+        // its rows after the growth, so its quads need no new layout (#2761).
+        let first = first.unwrap();
+        assert!(first.uv_max[1] * (MAX_ATLAS_PX as f32) < start_h as f32);
         assert_eq!(packed, 1000, "every tile must fit once the atlas grows");
         assert!(atlas.height() > start_h, "atlas should have grown taller");
         assert!(atlas.height() <= MAX_ATLAS_PX);

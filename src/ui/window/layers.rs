@@ -28,12 +28,15 @@ pub struct VpCol {
 }
 
 /// A layout viewport as the Layer Manager shows it: its frozen layers and
-/// its layer colour overrides.
+/// its layer overrides.
 pub struct ViewportLayers {
     pub handle: Handle,
     pub label: String,
     pub frozen: Vec<Handle>,
     pub colors: Vec<(Handle, AcadColor)>,
+    /// Layers carrying any property override on this viewport: colour,
+    /// linetype, lineweight or transparency. VP Freeze is separate.
+    pub overridden: Vec<Handle>,
 }
 
 /// Sortable column in the Layer Manager table. Clicking a header sorts by
@@ -371,6 +374,9 @@ pub struct Layer {
     pub vp_frozen: Vec<bool>,
     /// Colour override per-viewport, parallel to `vp_frozen`.
     pub vp_colors: Vec<Option<AcadColor>>,
+    /// Any per-viewport property override (colour, linetype, lineweight,
+    /// transparency — but not VP Freeze), parallel to `vp_frozen`.
+    pub vp_overridden: Vec<bool>,
 }
 
 impl Layer {
@@ -392,6 +398,7 @@ impl Layer {
             in_blocks: 0,
             vp_frozen: vec![],
             vp_colors: vec![],
+            vp_overridden: vec![],
         }
     }
 }
@@ -647,8 +654,7 @@ impl LayerPanel {
                 .split_once('|')
                 .is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(xref)),
             TreeNode::ViewportOverrides => {
-                layer.vp_frozen.iter().any(|frozen| *frozen)
-                    || layer.vp_colors.iter().any(Option::is_some)
+                layer.vp_overridden.iter().any(|overridden| *overridden)
             }
             TreeNode::Group(group) => self
                 .groups
@@ -1077,6 +1083,10 @@ impl LayerPanel {
                             .map(|(_, color)| *color)
                     })
                     .collect();
+                let vp_overridden = vp_info
+                    .iter()
+                    .map(|vp| vp.overridden.contains(&layer_handle))
+                    .collect();
                 Layer {
                     name: l.name.clone(),
                     visible: !l.flags.off,
@@ -1098,6 +1108,7 @@ impl LayerPanel {
                     in_blocks: 0,
                     vp_frozen,
                     vp_colors,
+                    vp_overridden,
                 }
             })
             .collect();

@@ -76,7 +76,8 @@ fn resolve_style(
         // A style names a font *file* — `GOST2304_TypeA_italic.ttf`,
         // `romans.shx`, sometimes with a directory; `true_type_font` carries the
         // same thing for the styles that set it.
-        let file = if !style.true_type_font.trim().is_empty() {
+        let from_true_type = !style.true_type_font.trim().is_empty();
+        let file = if from_true_type {
             style.true_type_font.trim()
         } else {
             style.font_file.trim()
@@ -92,7 +93,10 @@ fn resolve_style(
             let explicit_shx = lff::is_shx_name(file);
             let shx_file = if explicit_shx {
                 Some(file.to_string())
-            } else if std::path::Path::new(file).extension().is_none() {
+            } else if !from_true_type && std::path::Path::new(file).extension().is_none() {
+                // Only a font *file* name: a bare TrueType family
+                // (`NLCS-ISO`) is that face even when an .shx of the same
+                // name sits in the support folder.
                 Some(format!("{file}.shx"))
             } else {
                 None
@@ -177,9 +181,29 @@ fn resolve_style(
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.parent());
-        let big_path = crate::io::resolve_image_file(big, base).or_else(|| {
-            crate::io::font_repo::local_font_file(big).map(|p| p.to_string_lossy().into_owned())
-        });
+        let resolve_big = |name: &str| {
+            crate::io::resolve_image_file(name, base).or_else(|| {
+                crate::io::font_repo::local_font_file(name)
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+        };
+        let mut big_path = resolve_big(big);
+        // If the referenced big font is not a valid big font (e.g. legacy Chinese
+        // shape-only container `chinese.shx`), try the standard Big5 big font
+        // `chineset.shx`.
+        if big_path
+            .as_deref()
+            .map_or(true, |p| !crate::scene::text::shx::is_bigfont(p))
+        {
+            let stem = big.rsplit(['/', '\\']).next().unwrap_or(big);
+            if stem.eq_ignore_ascii_case("chinese.shx") {
+                if let Some(alt) = resolve_big("chineset.shx") {
+                    if crate::scene::text::shx::is_bigfont(&alt) {
+                        big_path = Some(alt);
+                    }
+                }
+            }
+        }
         if let Some(big_path) = big_path {
             font_name = Face::with_big_font(&font_name, &big_path);
         }
@@ -4323,5 +4347,57 @@ mod font_style_tests {
         style.handle = doc.allocate_handle();
         doc.text_styles.add(style).unwrap();
         assert_eq!(resolve_text_style("B", &doc).font_name, bold);
+    }
+
+    #[test]
+    fn chinese_shx_aliases_to_chineset_shx_when_chinese_is_not_a_bigfont() {
+        let dir = std::env::temp_dir().join(format!("ocs-bigfont-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A dummy non-bigfont chinese.shx (e.g. shapes container)
+        std::fs::write(dir.join("chinese.shx"), b"AutoCAD-86 shapes 1.0\r\n\x1a").unwrap();
+        // A valid synthetic bigfont chineset.shx
+        std::fs::write(
+            dir.join("chineset.shx"),
+            &crate::scene::text::shx::tests::synthetic_bigfont(),
+        )
+        .unwrap();
+
+        let mut doc = document::Document::new();
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        let mut style = document::tables::TextStyle::new("TOMO");
+        style.font_file = "txt.shx".into();
+        style.big_font_file = "chinese.shx".into();
+        doc.text_styles.add(style).unwrap();
+
+        let resolved = resolve_text_style("TOMO", &doc);
+        assert!(
+            resolved.font_name.contains("chineset.shx"),
+            "expected alias to chineset.shx, got {}",
+            resolved.font_name
+        );
+    }
+
+    /// A style's TrueType family draws with that face even when an .shx of
+    /// the same name sits next to the drawing; a bare font *file* name still
+    /// finds its .shx.
+    #[test]
+    fn a_truetype_family_is_not_looked_up_as_an_shx_file() {
+        let dir = std::env::temp_dir().join(format!("ocs-ttf-family-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("NLCS-ISO.shx"), b"AutoCAD-86 shapes 1.0\r\n\x1a").unwrap();
+        let mut doc = document::Document::new();
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        let mut ttf = document::tables::TextStyle::new("TTF");
+        ttf.true_type_font = "NLCS-ISO".into();
+        doc.text_styles.add(ttf).unwrap();
+        let mut shx = document::tables::TextStyle::new("SHX");
+        shx.font_file = "NLCS-ISO".into();
+        doc.text_styles.add(shx).unwrap();
+
+        let ttf = resolve_text_style("TTF", &doc).font_name;
+        assert!(!ttf.to_ascii_lowercase().ends_with(".shx"), "{ttf}");
+        let shx = resolve_text_style("SHX", &doc).font_name;
+        assert!(shx.ends_with("NLCS-ISO.shx"), "{shx}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

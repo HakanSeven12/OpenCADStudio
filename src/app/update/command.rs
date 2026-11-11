@@ -1281,7 +1281,10 @@ impl OpenCADStudio {
             let d_ucs = xf.vec_to_ucs(w - anchor);
             let dx = d_ucs.x;
             let dy = d_ucs.y;
-            let dir_ucs = if (dx * dx + dy * dy) > 1e-12 {
+            // In the plane unless the cursor is tracked straight up or down
+            // (#2796), where what is left in the plane is only noise.
+            let in_plane = (dx * dx + dy * dy).sqrt();
+            let dir_ucs = if in_plane > 1e-6 && in_plane > d_ucs.z.abs() * 1e-6 {
                 glam::DVec3::new(dx, dy, 0.0).normalize()
             } else if d_ucs.length_squared() > 1e-12 {
                 d_ucs.normalize()
@@ -2089,7 +2092,7 @@ impl OpenCADStudio {
             A::FilterObjects => {
                 let layers = self.tabs[i].layers.selected_names().join(",");
                 self.filter_open_for_layers(layers);
-                self.layers_dialog_to_front()
+                Task::none()
             }
             A::MergeHere => {
                 let sources: Vec<String> = merge_sources
@@ -2354,7 +2357,7 @@ impl OpenCADStudio {
             }
         };
         self.filter_open_layers(name, filter);
-        self.layers_dialog_to_front()
+        Task::none()
     }
 
     /// Save as filter: the search text as a property filter on the name,
@@ -2502,7 +2505,7 @@ impl OpenCADStudio {
                         *ticked = unused.iter().any(|u| u.eq_ignore_ascii_case(name));
                     }
                 }
-                return self.layers_dialog_to_front();
+                return Task::none();
             }
             (_, A::Edit | A::Delete | A::Rename | A::Purge) => return Task::none(),
             _ => {}

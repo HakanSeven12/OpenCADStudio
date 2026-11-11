@@ -1607,7 +1607,7 @@ impl AppHost<'_> {
 
     /// A primitive solid whose history keeps its sizes editable.
     fn primitive(&mut self, history: document::objects::SolidHistoryOperation) -> Value {
-        match kernel::acis::rebuild_body(&history) {
+        match ocs_acis::rebuild_body(&history) {
             Ok(body) => self.solid(body, history),
             Err(_) => Value::Null,
         }

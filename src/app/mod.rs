@@ -45,6 +45,7 @@ pub(crate) mod commands;
 #[cfg(test)]
 mod dim_constraint_value_tests;
 pub(crate) mod dim_viewport;
+mod dim_variables;
 #[cfg(test)]
 mod dimension_convert_tests;
 #[cfg(test)]
@@ -80,7 +81,7 @@ mod options_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
-mod properties;
+pub(crate) mod properties;
 mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
@@ -105,6 +106,8 @@ mod text_style_draft;
 mod text_style_font_picker_tests;
 #[cfg(test)]
 mod text_style_layout_tests;
+#[cfg(test)]
+mod linetype_manager_tests;
 #[cfg(test)]
 mod text_style_manager_tests;
 #[cfg(test)]
@@ -1510,6 +1513,8 @@ pub(super) struct OpenCADStudio {
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
+    /// Show the viewport controls in the drawing's corner (VPCONTROL).
+    show_viewport_controls: bool,
     /// Anchor the UCS icon to the projected UCS origin when it is on-screen,
     /// falling back to the corner otherwise (UCSICON ORigin / NOorigin).
     ucs_icon_at_origin: bool,
@@ -1601,11 +1606,18 @@ pub(super) struct OpenCADStudio {
     pub(crate) tool_focus: Option<ModalKind>,
     /// The tool dialog the keyboard goes to, as it went to a modal one.
     pub(crate) keyboard_tool: Option<ModalKind>,
+    /// Desktop: a dialog window opened again while open, to bring to the
+    /// front once the update settles.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) tool_window_to_raise: Option<iced::window::Id>,
     /// A tool dialog's frame being moved or resized.
     pub(crate) tool_drag: Option<tool_windows::ToolDrag>,
     /// Desktop: the windows of their own (tool dialogs and pallets).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) os_windows: Vec<tool_windows::OsWindow>,
+    /// Desktop: the window that has the focus, main or of its own.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) focused_window: Option<window::Id>,
     /// Pointer position over a floating title bar (bar-local), and where
     /// its open menu was asked for.
     pub(crate) dock_float_pointer: iced::Point,
@@ -1986,6 +1998,18 @@ pub(super) struct OpenCADStudio {
     pub(super) plotstyle_panel_baseline: Option<Option<crate::io::plot_style::PlotStyleTable>>,
 
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
+    linetype_selected: String,
+    linetype_tab: u8,
+    linetype_in_use_only: bool,
+    /// Up and Down step the list. Off once a field is typed in, so an arrow
+    /// there does not change the linetype; a press on a row turns it back on.
+    linetype_keys_active: bool,
+    /// `None` until the list reports a scroll position; a list that fits
+    /// never does.
+    linetype_list_view: Option<crate::ui::style::linetype::ListView>,
+    linetype_counts: rustc_hash::FxHashMap<String, usize>,
+    linetype_draft: crate::ui::style::linetype::LinetypeDraft,
+    linetype_library_status: String,
     mlstyle_selected: String,
     mlstyle_tab: u8,
     mlstyle_compare: String,
@@ -2073,6 +2097,7 @@ pub(super) struct OpenCADStudio {
     /// any list operation and on Apply.
     textstyle_draft: text_style_draft::TextStyleDraft,
     textstyle_font_picker: crate::ui::font_picker::FontPickerState,
+    textstyle_bigfont_picker: crate::ui::font_picker::FontPickerState,
     /// The texts of every text style (ASCII-lowercase name), for "Where
     /// used" and the summary before Apply. Texts do not change while the
     /// manager is open; Apply walks the drawing again.
@@ -2411,6 +2436,8 @@ pub(super) enum PendingClose {
 pub(super) enum SavePurpose {
     Manual,
     SaveAs,
+    /// Control Save As without permission to replace an existing destination.
+    SaveAsNew,
     Autosave,
 }
 
@@ -2548,6 +2575,7 @@ pub struct SaveOutcome {
     revision: u64,
     camera_generation: u64,
     path: PathBuf,
+    physical_path: Option<PathBuf>,
     version: document::DxfVersion,
     previous_autosave: Option<PathBuf>,
     set_current_path: bool,
@@ -3324,6 +3352,7 @@ pub enum ModalKind {
     MlStyle,
     MLeaderStyle,
     DimStyle,
+    LinetypeManager,
     StyleImport,
     Unsaved,
     BlockEditChanges,
@@ -5821,6 +5850,8 @@ pub enum Message {
     TextStyleApply,
     /// The font picker: open, search or pick a stroke or TrueType font.
     TextStyleFont(crate::ui::font_picker::FontPickerEvent),
+    /// The big font picker: open, search or pick a double-byte SHX font.
+    TextStyleBigFont(crate::ui::font_picker::FontPickerEvent),
     /// Pick the TrueType face: regular, bold, italic or both.
     TextStyleFaceStyle(crate::ui::font_picker::FaceStyle),
     /// Flip a boolean flag on the selected text style (backward / upside_down /
@@ -5882,6 +5913,7 @@ pub enum Message {
     /// Drop the style's starting table.
     TableStyleTemplateRemove,
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
+    Linetype(crate::ui::style::linetype::LinetypeMsg),
     MlStyleDialogOpen,
     #[allow(dead_code)]
     MlStyleDialogClose,
@@ -6535,6 +6567,7 @@ impl OpenCADStudio {
             transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
+            show_viewport_controls: true,
             ucs_icon_at_origin: true,
             show_viewcube: true,
             render_bar_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -6572,9 +6605,13 @@ impl OpenCADStudio {
             tool_windows: Vec::new(),
             tool_focus: None,
             keyboard_tool: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            tool_window_to_raise: None,
             tool_drag: None,
             #[cfg(not(target_arch = "wasm32"))]
             os_windows: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            focused_window: None,
             dock_float_pointer: iced::Point::ORIGIN,
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
@@ -6853,6 +6890,7 @@ impl OpenCADStudio {
             textstyle_compare: String::new(),
             textstyle_draft: Default::default(),
             textstyle_font_picker: Default::default(),
+            textstyle_bigfont_picker: Default::default(),
             textstyle_users: Default::default(),
             // TableStyle dialog
             tablestyle_selected: "Standard".to_string(),
@@ -6869,6 +6907,14 @@ impl OpenCADStudio {
             ts_edge_spacing: Default::default(),
             ts_color_open: None,
             // MLineStyle dialog
+            linetype_selected: String::new(),
+            linetype_tab: 0,
+            linetype_in_use_only: false,
+            linetype_keys_active: true,
+            linetype_list_view: None,
+            linetype_counts: Default::default(),
+            linetype_draft: Default::default(),
+            linetype_library_status: String::new(),
             mlstyle_selected: "Standard".to_string(),
             mlstyle_tab: 0,
             mlstyle_compare: String::new(),

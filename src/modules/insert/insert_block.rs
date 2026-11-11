@@ -83,6 +83,14 @@ enum Ask {
     RepeatRotate,
 }
 
+/// Which of the two attribute questions the placement is in: the values
+/// themselves, then a second pass over the definitions marked Verify.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum AttrPhase {
+    Enter,
+    Verify,
+}
+
 enum Step {
     Name,
     ListPattern,
@@ -101,6 +109,11 @@ enum Step {
         attdefs: Vec<AttributeDefinition>,
         idx: usize,
         values: Vec<(usize, String)>,
+        phase: AttrPhase,
+        /// An attribute form answered every value at once, so asking for the
+        /// verified ones again would repeat a question the operator just
+        /// settled.
+        skip_verify: bool,
     },
 }
 
@@ -543,12 +556,26 @@ impl CadCommand for InsertBlockCommand {
             Step::XyzZ => "Specify Z scale factor or <use X scale factor>:".to_string(),
             Step::Uniform => "Specify scale factor for XYZ axes <1>:".to_string(),
             Step::Rotation => "Specify rotation angle <0>:".to_string(),
-            Step::FillAttr { attdefs, idx, .. } => {
+            Step::FillAttr {
+                attdefs,
+                idx,
+                values,
+                phase,
+                ..
+            } => {
                 if let Some(ad) = attdefs.get(*idx) {
-                    let default_hint = if ad.default_value.is_empty() {
+                    let asked = match phase {
+                        AttrPhase::Enter => ad.default_value.clone(),
+                        AttrPhase::Verify => values
+                            .iter()
+                            .find(|(index, _)| index == idx)
+                            .map(|(_, value)| value.clone())
+                            .unwrap_or_else(|| ad.default_value.clone()),
+                    };
+                    let default_hint = if asked.is_empty() {
                         String::new()
                     } else {
-                        format!("  <{}>", ad.default_value)
+                        format!("  <{}>", asked)
                     };
                     let prompt_text = if ad.prompt.is_empty() {
                         ad.tag.as_str()
@@ -966,8 +993,36 @@ impl CadCommand for InsertBlockCommand {
             attdefs,
             idx: 0,
             values: vec![],
+            phase: AttrPhase::Enter,
+            skip_verify: false,
         };
         self.advance_automatic_attributes()
+    }
+
+    fn attreq_from_dialog(&mut self) {
+        if let Step::FillAttr { skip_verify, .. } = &mut self.step {
+            *skip_verify = true;
+        }
+    }
+
+    fn prompt_heading(&self) -> Option<String> {
+        let Step::FillAttr {
+            attdefs, idx, phase, ..
+        } = &self.step
+        else {
+            return None;
+        };
+        let (first, heading) = match phase {
+            AttrPhase::Enter => (
+                Self::ask_indices(attdefs, false).first().copied(),
+                "Enter attribute values",
+            ),
+            AttrPhase::Verify => (
+                Self::ask_indices(attdefs, true).first().copied(),
+                "Verify attribute values",
+            ),
+        };
+        (first == Some(*idx)).then(|| heading.to_string())
     }
 
     fn attreq_take_insert(&mut self) -> Option<document::EntityType> {
@@ -1031,13 +1086,47 @@ impl InsertBlockCommand {
         CmdResult::NeedPoint
     }
 
+    /// Indices of the definitions a placement asks, in order: every definition
+    /// the value pass prompts for, or — with `verify_only` — the ones marked
+    /// Verify. Constant and preset definitions carry their own value, so they
+    /// appear in neither list.
+    fn ask_indices(attdefs: &[AttributeDefinition], verify_only: bool) -> Vec<usize> {
+        attdefs
+            .iter()
+            .enumerate()
+            .filter(|(_, ad)| {
+                !ad.flags.constant && !ad.flags.preset && (!verify_only || ad.flags.verify)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn skip_verify_requested(&self) -> bool {
+        matches!(&self.step, Step::FillAttr { skip_verify: true, .. })
+    }
+
     fn accept_attr_value(&mut self, text: &str) -> CmdResult {
         let (attdef_idx, default) = match &self.step {
-            Step::FillAttr { attdefs, idx, .. } => {
+            Step::FillAttr {
+                attdefs,
+                idx,
+                values,
+                phase,
+                ..
+            } => {
                 let Some(ad) = attdefs.get(*idx) else {
                     return CmdResult::Cancel;
                 };
-                (*idx, ad.default_value.clone())
+                let default = match phase {
+                    AttrPhase::Enter => ad.default_value.clone(),
+                    // The verify pass offers the value the operator just gave.
+                    AttrPhase::Verify => values
+                        .iter()
+                        .find(|(index, _)| index == idx)
+                        .map(|(_, value)| value.clone())
+                        .unwrap_or_else(|| ad.default_value.clone()),
+                };
+                (*idx, default)
             }
             _ => return CmdResult::Cancel,
         };
@@ -1052,7 +1141,11 @@ impl InsertBlockCommand {
             ..
         } = self.step
         {
-            values.push((attdef_idx, value));
+            match values.iter_mut().find(|(index, _)| *index == attdef_idx) {
+                // A verify answer replaces the value it was shown.
+                Some(entry) => entry.1 = value,
+                None => values.push((attdef_idx, value)),
+            }
             *idx = attdef_idx + 1;
         }
         match self.advance_automatic_attributes() {
@@ -1067,10 +1160,33 @@ impl InsertBlockCommand {
 
     fn advance_automatic_attributes(&mut self) -> Option<EntityType> {
         loop {
+            let (phase, idx) = match &self.step {
+                Step::FillAttr { idx, phase, .. } => (*phase, *idx),
+                _ => return None,
+            };
+            if phase == AttrPhase::Verify {
+                let next = {
+                    let Step::FillAttr { attdefs, .. } = &self.step else {
+                        return None;
+                    };
+                    Self::ask_indices(attdefs, true)
+                        .into_iter()
+                        .find(|index| *index >= idx)
+                };
+                match next {
+                    Some(index) => {
+                        if let Step::FillAttr { idx, .. } = &mut self.step {
+                            *idx = index;
+                        }
+                        return None;
+                    }
+                    None => return self.finish_insert(),
+                }
+            }
             let next = match &self.step {
-                Step::FillAttr { attdefs, idx, .. } => attdefs.get(*idx).map(|ad| {
+                Step::FillAttr { attdefs, .. } => attdefs.get(idx).map(|ad| {
                     (
-                        *idx,
+                        idx,
                         ad.flags.constant,
                         ad.flags.preset,
                         ad.default_value.clone(),
@@ -1079,7 +1195,23 @@ impl InsertBlockCommand {
                 _ => return None,
             };
             let Some((attdef_idx, constant, preset, default)) = next else {
-                return self.finish_insert();
+                // The value pass is done: ask the verified definitions again,
+                // unless the answers came from an attribute form.
+                let verify_first = {
+                    let Step::FillAttr { attdefs, .. } = &self.step else {
+                        return None;
+                    };
+                    !self.skip_verify_requested()
+                        && Self::ask_indices(attdefs, true).first().is_some()
+                };
+                if !verify_first {
+                    return self.finish_insert();
+                }
+                if let Step::FillAttr { phase, idx, .. } = &mut self.step {
+                    *phase = AttrPhase::Verify;
+                    *idx = 0;
+                }
+                continue;
             };
             if !constant && !preset {
                 return None;
@@ -1088,7 +1220,7 @@ impl InsertBlockCommand {
             // question is not the same as skipping the attribute.
             if let Step::FillAttr { idx, values, .. } = &mut self.step {
                 values.push((attdef_idx, default));
-                *idx += 1;
+                *idx = attdef_idx + 1;
             }
         }
     }
@@ -1226,5 +1358,149 @@ mod cycling_tests {
         let mut paste = InsertBlockCommand::new_for_block("PASTE".into(), vec![], DVec3::ZERO);
         paste.set_insertion_points(Vector3::ZERO, vec![Vector3::UNIT_X]);
         assert!(!paste.cycle_insertion_point());
+    }
+}
+
+#[cfg(test)]
+mod attreq_verify_tests {
+    use super::*;
+
+    fn attdef(tag: &str, prompt: &str, default: &str, verify: bool) -> AttributeDefinition {
+        let mut definition =
+            AttributeDefinition::new(tag.to_string(), prompt.to_string(), default.to_string());
+        definition.flags.verify = verify;
+        definition
+    }
+
+    /// The placement is parked on its attribute step, the way the host leaves
+    /// it once it has resolved the block's definitions.
+    fn parked(attdefs: Vec<AttributeDefinition>) -> InsertBlockCommand {
+        let mut cmd =
+            InsertBlockCommand::classic_for_block("VERIFY_BLK".into(), Vec::new(), String::new());
+        let _ = cmd.on_point(DVec3::ZERO);
+        let _ = cmd.on_text_input("1");
+        let _ = cmd.on_text_input("1");
+        assert!(matches!(
+            cmd.on_text_input("0"),
+            Some(CmdResult::AttreqNeeded { .. })
+        ));
+        assert!(cmd.attreq_set_attdefs(attdefs).is_none());
+        cmd
+    }
+
+    fn committed(result: Option<CmdResult>) -> Vec<(String, String)> {
+        match result {
+            Some(CmdResult::CommitAndExit(EntityType::Insert(insert)))
+            | Some(CmdResult::CommitEntity(EntityType::Insert(insert))) => insert
+                .attributes
+                .iter()
+                .map(|attribute| (attribute.tag.clone(), attribute.value.clone()))
+                .collect(),
+            _ => panic!("the attribute pass should have committed an INSERT"),
+        }
+    }
+
+    #[test]
+    fn a_verifiable_attribute_is_asked_again_under_the_verify_heading() {
+        let mut cmd = parked(vec![attdef("TAG1", "Prompt one", "0", true)]);
+        assert_eq!(
+            cmd.prompt_heading().as_deref(),
+            Some("Enter attribute values"),
+            "the first value prompt opens the attribute section"
+        );
+        assert!(cmd.prompt().contains("Prompt one"));
+        assert!(matches!(
+            cmd.on_text_input("ABC"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            cmd.prompt_heading().as_deref(),
+            Some("Verify attribute values"),
+            "a verifiable attribute is asked a second time"
+        );
+        assert!(cmd.prompt().contains("Prompt one"));
+        assert!(
+            cmd.prompt().contains("<ABC>"),
+            "the second ask offers what was just entered, got {}",
+            cmd.prompt()
+        );
+        let values = committed(cmd.on_text_input("XYZ"));
+        assert_eq!(
+            values,
+            vec![("TAG1".to_string(), "XYZ".to_string())],
+            "a mismatched answer is kept without a complaint"
+        );
+    }
+
+    #[test]
+    fn an_attribute_without_verify_is_asked_once() {
+        let mut cmd = parked(vec![attdef("TAG1", "Prompt one", "0", false)]);
+        assert_eq!(
+            cmd.prompt_heading().as_deref(),
+            Some("Enter attribute values")
+        );
+        let values = committed(cmd.on_text_input("ABC"));
+        assert_eq!(values, vec![("TAG1".to_string(), "ABC".to_string())]);
+    }
+
+    #[test]
+    fn the_verify_pass_repeats_only_the_attributes_marked_verify() {
+        let mut cmd = parked(vec![
+            attdef("TAG1", "Prompt one", "0", false),
+            attdef("TAG2", "Prompt two", "0", true),
+        ]);
+        assert!(cmd.prompt().contains("Prompt one"));
+        assert!(matches!(cmd.on_text_input("A"), Some(CmdResult::NeedPoint)));
+        assert!(cmd.prompt().contains("Prompt two"));
+        assert_eq!(
+            cmd.prompt_heading(),
+            None,
+            "the heading is printed once per section"
+        );
+        assert!(matches!(cmd.on_text_input("B"), Some(CmdResult::NeedPoint)));
+        assert_eq!(
+            cmd.prompt_heading().as_deref(),
+            Some("Verify attribute values")
+        );
+        assert!(cmd.prompt().contains("Prompt two"));
+        assert!(cmd.prompt().contains("<B>"));
+        let values = committed(cmd.on_text_input("C"));
+        assert_eq!(
+            values,
+            vec![
+                ("TAG1".to_string(), "A".to_string()),
+                ("TAG2".to_string(), "C".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_preset_attribute_is_neither_asked_nor_verified() {
+        let mut cmd = parked(vec![
+            attdef("TAG1", "Prompt one", "SEVEN", true),
+            {
+                let mut preset = attdef("TAG2", "Prompt two", "NINE", true);
+                preset.flags.preset = true;
+                preset
+            },
+        ]);
+        assert!(cmd.prompt().contains("Prompt one"));
+        assert!(matches!(
+            cmd.on_text_input("A"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            cmd.prompt_heading().as_deref(),
+            Some("Verify attribute values")
+        );
+        assert!(cmd.prompt().contains("Prompt one"));
+        let values = committed(cmd.on_text_input("B"));
+        assert_eq!(
+            values,
+            vec![
+                ("TAG1".to_string(), "B".to_string()),
+                ("TAG2".to_string(), "NINE".to_string())
+            ]
+        );
     }
 }

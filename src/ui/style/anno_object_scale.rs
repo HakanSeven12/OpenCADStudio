@@ -39,9 +39,9 @@ impl State {
         }
         if self.common_only {
             names.retain(|name| {
-                self.staged.iter().all(|(_, scales)| {
-                    scales.iter().any(|scale| scale.eq_ignore_ascii_case(name))
-                })
+                self.staged
+                    .iter()
+                    .all(|(_, scales)| scales.iter().any(|scale| scale.eq_ignore_ascii_case(name)))
             });
         }
         names
@@ -52,9 +52,13 @@ impl State {
         let Some(selected) = self.selected.as_deref() else {
             return false;
         };
-        self.listed().iter().any(|name| name.eq_ignore_ascii_case(selected))
+        self.listed()
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(selected))
             && self.staged.iter().all(|(_, scales)| {
-                !scales.iter().any(|scale| scale.eq_ignore_ascii_case(selected))
+                !scales
+                    .iter()
+                    .any(|scale| scale.eq_ignore_ascii_case(selected))
                     || scales.len() > 1
             })
     }
@@ -76,14 +80,24 @@ pub fn view_window(
     let rows: Vec<Element<'static, Message>> = listed
         .iter()
         .map(|name| {
-            let is_sel = selected.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(name));
-            list_row(name.clone(), is_sel, Message::AnnoObjectScaleSelect(name.clone()))
+            let is_sel = selected
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case(name));
+            list_row(
+                name.clone(),
+                is_sel,
+                Message::AnnoObjectScaleSelect(name.clone()),
+            )
         })
         .collect();
     // The units line describes the selected scale, else the first listed.
     let shown = selected
         .clone()
-        .filter(|name| listed.iter().any(|listed| listed.eq_ignore_ascii_case(name)))
+        .filter(|name| {
+            listed
+                .iter()
+                .any(|listed| listed.eq_ignore_ascii_case(name))
+        })
         .or_else(|| listed.first().cloned());
     let units = shown
         .and_then(|name| {
@@ -181,7 +195,9 @@ fn add_view(
         })
         .collect();
     let body = column![
-        text(t!("Scales to add to the objects")).size(11).style(muted_text_style),
+        text(t!("Scales to add to the objects"))
+            .size(11)
+            .style(muted_text_style),
         list_box(rows, sizing),
     ]
     .spacing(8)
@@ -262,11 +278,16 @@ fn frame(
 
 /// `1 paper unit = 2 drawing units`, singular for one.
 pub fn units_line(paper: f64, drawing: f64) -> String {
-    let side = |value: f64, one: std::borrow::Cow<'static, str>, many: std::borrow::Cow<'static, str>| {
-        let number = number(value);
-        let word = if (value - 1.0).abs() < 1e-12 { one } else { many };
-        format!("{number} {word}")
-    };
+    let side =
+        |value: f64, one: std::borrow::Cow<'static, str>, many: std::borrow::Cow<'static, str>| {
+            let number = number(value);
+            let word = if (value - 1.0).abs() < 1e-12 {
+                one
+            } else {
+                many
+            };
+            format!("{number} {word}")
+        };
     format!(
         "{} = {}",
         side(paper, t!("paper unit"), t!("paper units")),

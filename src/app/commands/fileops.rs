@@ -547,6 +547,10 @@ impl OpenCADStudio {
             "LAYERS" => {
                 self.pallet_as_window(crate::ui::dock::PanelId::Layers);
                 self.open_layers_pallet();
+                // Already in a window of its own, perhaps behind the main one.
+                if let Some(raise) = self.raise_pallet_window(crate::ui::dock::PanelId::Layers) {
+                    return Some(Task::batch([raise, self.finish_dispatch(cmd)]));
+                }
             }
 
             // SCRIPT <path> — run a command script: each non-comment
@@ -845,7 +849,7 @@ impl OpenCADStudio {
                 path.set_extension(if dxf { "dxf" } else { "dwg" });
             }
             if self.main_window.is_none() {
-                match self.save_tab_synchronously_protected_as(i, path.clone(), version, true) {
+                match self.save_tab_synchronously_protected_as(i, path.clone(), version, true, false) {
                     Ok(()) => {
                         let filename = path.display().to_string();
                         self.command_line
@@ -898,7 +902,7 @@ impl OpenCADStudio {
             let version = self.tabs[i].scene.document.version;
             if self.main_window.is_none() {
                 if let Err(error) =
-                    self.save_tab_synchronously_protected_as(i, path, version, false)
+                    self.save_tab_synchronously_protected_as(i, path, version, false, false)
                 {
                     self.command_line.push_error(&error.to_string());
                     return Task::none();

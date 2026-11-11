@@ -141,8 +141,19 @@ fn plot_render_mode_override(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) fn native_paths_match(left: &std::path::Path, right: &std::path::Path) -> bool {
-    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
-        (Ok(left), Ok(right)) => left == right,
+    let resolve = |path: &std::path::Path| {
+        std::fs::canonicalize(path).ok().or_else(|| {
+            // Preserve directory-alias identity after the current drawing
+            // disappears. Its opening fingerprint must still guard a save.
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            Some(std::fs::canonicalize(parent).ok()?.join(path.file_name()?))
+        })
+    };
+    match (resolve(left), resolve(right)) {
+        (Some(left), Some(right)) => left == right,
         _ => left == right,
     }
 }
@@ -578,6 +589,7 @@ fn plot_scene_content(
                         }));
                 }
                 plot_owner_aci(scene, &mut wire);
+                wire.resample_plot_curve();
                 crate::io::pdf_export::PlotWire { wire, draw_depth }
             })
             .collect::<Vec<_>>()
@@ -828,6 +840,7 @@ impl OpenCADStudio {
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
+            show_viewport_controls: self.show_viewport_controls,
             ucs_icon_at_origin: self.ucs_icon_at_origin,
             selection_cycling: self.selection_cycling,
             osnap_z: self.osnap_z,
@@ -1043,6 +1056,10 @@ impl OpenCADStudio {
         // restarting brought it straight back.
         self.show_viewcube = s.show_viewcube;
         self.show_ucs_icon = s.show_ucs_icon;
+        self.show_viewport_controls = s.show_viewport_controls;
+        // The ribbon's toggles keep their own copy of both.
+        self.ribbon.set_viewcube(self.show_viewcube);
+        self.ribbon.set_ucs_icon(self.show_ucs_icon);
         self.ucs_icon_at_origin = s.ucs_icon_at_origin;
         self.selection_cycling = s.selection_cycling;
         self.osnap_z = s.osnap_z;
@@ -1677,6 +1694,18 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+F12".to_string())
             .or_insert_with(|| "QUADTOGGLE".to_string());
+        // Before group selection had Ctrl+Shift+A, the base-key fallback
+        // read it as Ctrl+A and selected everything.
+        self.shortcut_bindings
+            .entry(
+                if cfg!(target_os = "macos") {
+                    "CMD+SHIFT+A"
+                } else {
+                    "CTRL+SHIFT+A"
+                }
+                .to_string(),
+            )
+            .or_insert_with(|| "TOGGLEGROUPS".to_string());
         self.shortcut_bindings
             .entry(
                 if cfg!(target_os = "macos") {
@@ -2024,7 +2053,7 @@ impl OpenCADStudio {
         set_current_path: bool,
     ) -> Result<(), crate::io::SaveFailure> {
         let version = self.tabs[i].scene.document.version;
-        self.save_tab_synchronously_protected_as(i, path, version, set_current_path)
+        self.save_tab_synchronously_protected_as(i, path, version, set_current_path, false)
     }
 
     /// Synchronous protected save with an explicit output version. Automation
@@ -2037,6 +2066,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         version: document::DxfVersion,
         set_current_path: bool,
+        require_new_destination: bool,
     ) -> Result<(), crate::io::SaveFailure> {
         if self.tabs[i].block_test.is_some() {
             return Err(crate::io::SaveFailure::other(
@@ -2096,14 +2126,21 @@ impl OpenCADStudio {
 
         self.prepare_native_save(i);
         let snapshot = self.tabs[i].scene.document_for_save();
+        let write_path = if path_changed {
+            path.clone()
+        } else {
+            std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+        };
         crate::io::save_owned_as_version_atomic(
             snapshot,
-            &path,
+            &write_path,
             version,
             self.backup_on_save,
             expected_fingerprint,
             verify_reader,
             false,
+            require_new_destination,
+            (!path_changed).then_some(path.as_path()),
         )?;
 
         if set_current_path {
@@ -3591,7 +3628,7 @@ impl OpenCADStudio {
             return self.open_save_dialog_window(i);
         }
         if purpose != crate::app::SavePurpose::Autosave
-            && !set_current_path
+            && destination_is_current
             && self.tabs[i].edit_lock_conflict
         {
             let error = "Drawing edit lock is held by another editor.".to_string();
@@ -3702,7 +3739,10 @@ impl OpenCADStudio {
         }
         // Save-As across folders: rebase relative reference paths onto the
         // new base dir inside the snapshot only (live strings are untouched).
-        if purpose == crate::app::SavePurpose::SaveAs {
+        if matches!(
+            purpose,
+            crate::app::SavePurpose::SaveAs | crate::app::SavePurpose::SaveAsNew
+        ) {
             let old_base = self.tabs[i]
                 .current_path
                 .as_ref()
@@ -3732,10 +3772,10 @@ impl OpenCADStudio {
         let backup = purpose != crate::app::SavePurpose::Autosave && self.backup_on_save;
         let verification = if check_external_change && purpose != crate::app::SavePurpose::Autosave
         {
-            let expected = if set_current_path {
-                None
-            } else {
+            let expected = if destination_is_current {
                 self.tabs[i].disk_fingerprint.clone()
+            } else {
+                None
             };
             if self.pending_save_leases.contains_key(&tab_id) {
                 Self::native_save_verification(
@@ -3766,6 +3806,7 @@ impl OpenCADStudio {
                             revision,
                             camera_generation,
                             path,
+                            physical_path: None,
                             version,
                             previous_autosave,
                             set_current_path,
@@ -3779,7 +3820,13 @@ impl OpenCADStudio {
                 );
             }
         };
-        let worker_path = path.clone();
+        // Resolve only the writer's path. The logical path below remains the
+        // reference base and the path installed on successful completion.
+        let worker_path = if destination_is_current {
+            std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+        } else {
+            path.clone()
+        };
         let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
         let mut work = Some((
             snapshot,
@@ -3806,6 +3853,8 @@ impl OpenCADStudio {
                 .expect("save capture produced more than one result");
             Task::perform(
                 async move {
+                    let physical_path = destination_is_current.then(|| worker_path.clone());
+                    let logical_path = destination_is_current.then(|| path.clone());
                     let (result, refreshed_preview) = std::thread::spawn(move || {
                         let mut refreshed_preview = None;
                         if let Some(png) = thumbnail {
@@ -3833,6 +3882,8 @@ impl OpenCADStudio {
                             expected_fingerprint,
                             verify_reader,
                             allow_conversion_loss,
+                            purpose == crate::app::SavePurpose::SaveAsNew,
+                            logical_path.as_deref(),
                         );
                         (result, refreshed_preview)
                     })
@@ -3850,6 +3901,7 @@ impl OpenCADStudio {
                         revision,
                         camera_generation,
                         path,
+                        physical_path,
                         version,
                         previous_autosave,
                         set_current_path,
@@ -3904,7 +3956,7 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn on_save_finished(&mut self, outcome: crate::app::SaveOutcome) -> Task<Message> {
+    pub(super) fn on_save_finished(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);
@@ -3924,6 +3976,11 @@ impl OpenCADStudio {
             return Task::none();
         }
 
+        if outcome.result.is_ok() {
+            if let Some(physical) = outcome.physical_path.as_deref() {
+                outcome.result = crate::io::verify_save_destination(&outcome.path, physical);
+            }
+        }
         if let Err(error) = &outcome.result {
             if error.externally_modified && outcome.purpose != crate::app::SavePurpose::Autosave {
                 let file_name = outcome
@@ -4009,7 +4066,9 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::t!("Autosaved 1 drawing").as_ref());
             }
-            crate::app::SavePurpose::Manual | crate::app::SavePurpose::SaveAs => {
+            crate::app::SavePurpose::Manual
+            | crate::app::SavePurpose::SaveAs
+            | crate::app::SavePurpose::SaveAsNew => {
                 let path_changed = outcome.set_current_path
                     && self.tabs[i]
                         .current_path
@@ -4034,7 +4093,10 @@ impl OpenCADStudio {
                     }
                     self.tabs[i].current_path = Some(outcome.path.clone());
                     self.tabs[i].scene.document.version = outcome.version;
-                    if outcome.purpose == crate::app::SavePurpose::SaveAs {
+                    if matches!(
+                        outcome.purpose,
+                        crate::app::SavePurpose::SaveAs | crate::app::SavePurpose::SaveAsNew
+                    ) {
                         self.tabs[i].recovery_save_as_required = false;
                         // Save-As across folders: the save snapshot was rebased
                         // in `queue_native_save`; rebase the live document too
@@ -4192,7 +4254,13 @@ impl OpenCADStudio {
             i,
             conflict.path,
             conflict.version,
-            conflict.purpose,
+            // This dialog answer explicitly authorizes replacing the file
+            // that appeared while a create-only control save was running.
+            if conflict.purpose == crate::app::SavePurpose::SaveAsNew {
+                crate::app::SavePurpose::SaveAs
+            } else {
+                conflict.purpose
+            },
             conflict.continuation,
             conflict.set_current_path,
             false,

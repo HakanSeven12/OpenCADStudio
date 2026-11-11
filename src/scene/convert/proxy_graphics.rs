@@ -102,6 +102,9 @@ pub struct ProxyText {
     pub text: String,
     pub font: String,
     pub style: ProxyStyle,
+    /// Where `position` sits on the text, as fractions of its width and
+    /// height: `[0, 0]` is the baseline start, `[1, 0.5]` middle right.
+    pub align: [f64; 2],
 }
 
 /// Everything a preview decodes to.
@@ -491,7 +494,12 @@ fn arc_points(
         .normalize();
     let v = n.cross(u);
     let closed = sweep.abs() >= std::f64::consts::TAU - 1e-9;
-    let segs = ((sweep.abs() / std::f64::consts::TAU * 64.0).ceil() as usize).clamp(2, 512);
+    // Steps short enough that a chord strays at most a thousandth of a unit
+    // from the arc, between 64 and 512 steps a turn: a large-radius arc in a
+    // display cache (an alignment curve) otherwise shows its chords.
+    let tau = std::f64::consts::TAU;
+    let step = (2.0 * (1.0 - (1e-3 / radius).min(1.0)).acos()).clamp(tau / 512.0, tau / 64.0);
+    let segs = ((sweep.abs() / step).ceil() as usize).clamp(2, 512);
     // A full circle is closed by the caller; don't repeat its first point.
     let last = if closed { segs - 1 } else { segs };
     Some(
@@ -604,6 +612,7 @@ fn decode_text(d: &[u8], unicode: bool) -> Option<(ProxyText, DVec3)> {
             text,
             font: String::new(),
             style: ProxyStyle::default(),
+            align: [0.0, 0.0],
         },
         dir,
     ))
@@ -634,6 +643,7 @@ fn decode_text2(d: &[u8], unicode: bool) -> Option<(ProxyText, DVec3)> {
             text,
             font,
             style: ProxyStyle::default(),
+            align: [0.0, 0.0],
         },
         dir,
     ))
@@ -798,6 +808,23 @@ mod tests {
         assert!(arc3.points.iter().all(|q| q[1] >= -1e-9));
         assert_eq!(dec.fills.len(), 1);
         assert_eq!(dec.fills[0].tris.len(), 6);
+    }
+
+    /// A large-radius arc keeps its chords close to the curve.
+    #[test]
+    fn large_arcs_are_finely_divided() {
+        let mut arc = f64s(&[0., 0., 0., 1000., 0., 0., 1., 1., 0., 0., 0.25]);
+        arc.extend(0u32.to_le_bytes());
+        let dec = decode(&blob(&[(REC_ARC, arc)]));
+        let pts = &dec.polylines[0].points;
+        let worst = pts
+            .windows(2)
+            .map(|w| {
+                let (mx, my) = ((w[0][0] + w[1][0]) / 2.0, (w[0][1] + w[1][1]) / 2.0);
+                1000.0 - (mx * mx + my * my).sqrt()
+            })
+            .fold(0.0, f64::max);
+        assert!(worst < 0.02, "chord strays {worst}");
     }
 
     /// A styled unicode label: height comes from its own field, not the

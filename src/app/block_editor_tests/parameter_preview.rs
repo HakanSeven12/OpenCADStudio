@@ -1602,6 +1602,9 @@ fn block_move_point_targets_support_window_and_lasso_selection() {
                 let _ = app.update(Message::ViewportLeftRelease);
             } else if method == 2 {
                 let _ = app.update(Message::ViewportLeftPressAt(lo));
+                // A slow earlier pass (a loaded CI runner) must not withhold
+                // this move: the drag starts on it.
+                app.move_pass_due = None;
                 let _ = app.update(Message::ViewportMove(hi));
                 assert!(app.tabs[i].scene.selection.borrow().input.left_dragging);
                 let _ = app.update(Message::ViewportLeftRelease);

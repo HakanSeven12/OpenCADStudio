@@ -95,7 +95,7 @@ fn write_svg_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to write SVG data: {error}"));
     }
-    if let Err(error) = super::replace_save_file(&temp_path, path) {
+    if let Err(error) = super::replace_save_file(&temp_path, path, false) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace SVG file: {error}"));
     }

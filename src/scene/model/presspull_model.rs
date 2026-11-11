@@ -52,7 +52,7 @@ pub fn profile_geometry(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>, 
         _ => sweep_model::embedded_revolve_profile(entity),
     };
     if let Some((entity, transform)) = embedded {
-        if let Ok(geometry) = kernel::acis::sweep_profile_geometry(&entity, transform) {
+        if let Ok(geometry) = ocs_acis::sweep_profile_geometry(&entity, transform) {
             return Some(geometry);
         }
         // Exact modeler data is authoritative, not a hint to replace by chords.

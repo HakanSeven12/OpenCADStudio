@@ -1815,6 +1815,7 @@ impl OpenCADStudio {
             self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none();
         let started = Instant::now();
         let task = self.on_viewport_move_inner(p);
+        let index = self.command_interaction_index_task();
         let cost = started.elapsed();
         // Give the next pass as long to arrive as this one took to answer.
         // The moves that arrive meanwhile cost nothing, so the queue drains
@@ -1837,7 +1838,34 @@ impl OpenCADStudio {
             self.tabs[self.active_tab].snap_result = None;
             self.snap_dwell = None;
         }
-        task
+        Task::batch([task, index])
+    }
+
+    /// The hover dwell starts the interaction index build, but it does not
+    /// run while a command is active. A command's snaps and picks query the
+    /// same index, and without it each one scans every wire: after an edit
+    /// replaced the wire set (a LAYOFF pick on a large drawing), every move
+    /// and click of the command took a second or more. A move during a
+    /// command asks for the index here instead.
+    fn command_interaction_index_task(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        if i >= self.tabs.len() || self.tabs[i].active_cmd.is_none() {
+            return Task::none();
+        }
+        let canvas_sz = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: canvas_sz.0,
+            height: canvas_sz.1,
+        };
+        let edit_cam = self.tabs[i]
+            .scene
+            .viewport_edit_frame(canvas_sz)
+            .map(|(cam, _)| cam);
+        let (_, _, wires) = self.pick_view(i, &edit_cam, bounds);
+        self.prepare_interaction_index_task(i, wires, bounds.height)
+            .unwrap_or_else(Task::none)
     }
 
     fn on_viewport_move_inner(&mut self, p: Point) -> Task<Message> {
@@ -4601,15 +4629,7 @@ impl OpenCADStudio {
                     previews.push(guide);
                 }
             }
-            // A drawing command previews the new object in the colour it will
-            // get: the current colour, or the current layer's when ByLayer.
-            if let Some(color) = self.creation_preview_color(i) {
-                for wire in &mut previews {
-                    if wire.color == crate::scene::WireModel::CYAN {
-                        wire.color = color;
-                    }
-                }
-            }
+            self.tint_creation_preview(i, &mut previews);
             let preview_hidden = modifier_hidden.unwrap_or_else(|| {
                 self.tabs[i]
                     .active_cmd
@@ -4714,6 +4734,23 @@ impl OpenCADStudio {
             rgba,
             tab.scene.bg_color,
         ))
+    }
+
+    /// A drawing command previews the new object in the colour it will get:
+    /// the current colour, or the current layer's when ByLayer. Both passes
+    /// that rebuild a command preview call this: the full pointer-move pass
+    /// and `refresh_active_cmd_preview`, which the snap dwell tick runs on
+    /// the frames between full passes while the pointer moves. Without it on
+    /// either one, the preview would switch colour from frame to frame.
+    pub(super) fn tint_creation_preview(&self, i: usize, previews: &mut [crate::scene::WireModel]) {
+        let Some(color) = self.creation_preview_color(i) else {
+            return;
+        };
+        for wire in previews {
+            if wire.color == crate::scene::WireModel::CYAN {
+                wire.color = color;
+            }
+        }
     }
 
     /// The navigation style's action for `held` and the modifiers now down.
@@ -10739,6 +10776,94 @@ mod rapid_drawing_tests {
             assert!(app.snap_dwell.as_ref().unwrap().snap_resolved);
             assert_eq!(app.tabs[i].last_cursor_world, resolved_point);
         }
+    }
+
+    /// A drawing command's live preview keeps the colour of the object it
+    /// makes on both passes that redraw it while the pointer moves: the
+    /// per-frame refresh between moves must not put back the preview cyan
+    /// that the full pointer-move pass replaced, or the preview flickers.
+    #[test]
+    fn drawing_preview_keeps_the_new_object_colour_on_full_and_fast_passes() {
+        use crate::scene::WireModel;
+        for command in ["LINE", "PLINE", "ARC", "CIRCLE", "XLINE", "SPLINE"] {
+            let mut app = drawing_app(command);
+            let i = app.active_tab;
+            let want = app
+                .creation_preview_color(i)
+                .unwrap_or_else(|| panic!("{command} draws a new object"));
+            assert_ne!(want, WireModel::CYAN, "{command}");
+            let colours = |app: &OpenCADStudio| -> Vec<[f32; 4]> {
+                app.tabs[i]
+                    .scene
+                    .preview_wires
+                    .iter()
+                    .map(|wire| wire.color)
+                    .collect()
+            };
+            let at = screen(&app, glam::DVec3::new(40.0, 30.0, 0.0));
+            let _ = app.update(Message::ViewportLeftPressAt(at));
+            for (step, x) in [70.0, 75.0, 80.0, 85.0].into_iter().enumerate() {
+                let at = screen(&app, glam::DVec3::new(x, 50.0, 0.0));
+                let _ = app.update(Message::ViewportMove(at));
+                // The pointer is still moving: the frame tick rebuilds only
+                // the command preview.
+                let dwell = app.snap_dwell.as_mut().unwrap();
+                assert!(dwell.preview_dirty, "{command} step {step}");
+                dwell.last_move_at = Instant::now();
+                dwell.full_snap_due = Instant::now() + std::time::Duration::from_secs(60);
+                let _ = app.on_snap_dwell_tick();
+                let fast = colours(&app);
+                assert!(!fast.is_empty(), "{command} step {step}: fast pass");
+                assert!(
+                    fast.contains(&want) && !fast.contains(&WireModel::CYAN),
+                    "{command} step {step}: fast pass drew {fast:?}, want {want:?}"
+                );
+                // The pointer settles: the full pointer-move pass runs.
+                app.snap_dwell.as_mut().unwrap().last_move_at =
+                    Instant::now() - std::time::Duration::from_millis(100);
+                let _ = app.on_snap_dwell_tick();
+                let full = colours(&app);
+                assert!(!full.is_empty(), "{command} step {step}: full pass");
+                assert!(
+                    full.contains(&want) && !full.contains(&WireModel::CYAN),
+                    "{command} step {step}: full pass drew {full:?}, want {want:?}"
+                );
+            }
+        }
+    }
+
+    /// The interaction index is built from the hover dwell, which does not
+    /// run while a command is active. A command's snaps and picks query that
+    /// index too: once an edit (a LAYOFF pick) replaced the wire set, every
+    /// move and click of the command scanned the whole drawing until the
+    /// command ended. A move during a command asks for the index itself.
+    #[test]
+    fn a_move_during_a_command_asks_for_the_interaction_index() {
+        use crate::modules::draw::layers::layoff::LayerOffCommand;
+        use document::{entities::Line, types::Vector3, EntityType};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        // More wires than the index threshold, so the drawing wants one.
+        for k in 0..5_000 {
+            let y = k as f64 * 0.01;
+            app.tabs[i]
+                .scene
+                .add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, y, 0.0),
+                    Vector3::new(10.0, y, 0.0),
+                )));
+        }
+        app.tabs[i].active_cmd = Some(Box::new(LayerOffCommand::default()));
+        assert!(app.active_interaction_index.is_none());
+
+        let _ = app.on_viewport_move(iced::Point::new(400.0, 300.0));
+        assert!(
+            app.active_interaction_index.is_some(),
+            "a move during a command should start the interaction index build"
+        );
     }
 
     #[test]

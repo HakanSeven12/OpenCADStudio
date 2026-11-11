@@ -96,7 +96,11 @@ pub fn view_window<'a, 'b>(
                 list.can_delete.then_some(Message::ScaleManagerDelete),
                 false
             ),
-            tb_button_maybe(t!("Move Up"), list.can_up.then_some(Message::ScaleManagerMove(-1)), false),
+            tb_button_maybe(
+                t!("Move Up"),
+                list.can_up.then_some(Message::ScaleManagerMove(-1)),
+                false
+            ),
             tb_button_maybe(
                 t!("Move Down"),
                 list.can_down.then_some(Message::ScaleManagerMove(1)),
@@ -235,11 +239,18 @@ pub fn view_window<'a, 'b>(
     // Reset asks which default list to restore before it purges anything.
     let footer: Element<'a, Message> = if list.reset_asking {
         row![
-            text(t!("Restore which default list? Unreferenced scales are purged.")).size(11),
+            text(t!(
+                "Restore which default list? Unreferenced scales are purged."
+            ))
+            .size(11),
             Space::new().width(sizing.width),
             tb_button(t!("Metric"), Message::ScaleManagerResetChoice(0), false),
             tb_button(t!("Imperial"), Message::ScaleManagerResetChoice(1), false),
-            tb_button(t!("Metric and Imperial"), Message::ScaleManagerResetChoice(2), false),
+            tb_button(
+                t!("Metric and Imperial"),
+                Message::ScaleManagerResetChoice(2),
+                false
+            ),
             tb_button(t!("Cancel"), Message::ScaleManagerResetChoice(3), false),
         ]
         .spacing(4)
@@ -262,11 +273,11 @@ pub fn view_window<'a, 'b>(
         hdivider(sizing.width),
         container(footer).padding([6, 8]),
     ])
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            ..Default::default()
-        })
-        .width(sizing.width)
-        .height(sizing.height)
-        .into()
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        ..Default::default()
+    })
+    .width(sizing.width)
+    .height(sizing.height)
+    .into()
 }

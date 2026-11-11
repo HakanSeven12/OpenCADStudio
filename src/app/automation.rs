@@ -1313,7 +1313,7 @@ impl OpenCADStudio {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 let result =
-                    self.save_tab_synchronously_protected_as(i, path.clone(), version, true);
+                    self.save_tab_synchronously_protected_as(i, path.clone(), version, true, false);
                 #[cfg(target_arch = "wasm32")]
                 let result = crate::io::save(&self.tabs[i].scene.document, &path)
                     .map_err(crate::io::SaveFailure::other);
@@ -1366,7 +1366,11 @@ impl OpenCADStudio {
                 }
                 Some(iced_runtime::Action::Widget(_))
                 | Some(iced_runtime::Action::Tick)
-                | Some(iced_runtime::Action::Reload) => {}
+                | Some(iced_runtime::Action::Reload)
+                // Raising a window is for the person at the screen.
+                | Some(iced_runtime::Action::Window(
+                    iced_runtime::window::Action::GainFocus(_),
+                )) => {}
                 Some(action) => return Err(format!("GUI runtime required for {action:?}")),
                 None => {
                     streams.pop();
@@ -2523,7 +2527,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         let version = app.tabs[i].scene.document.version;
-        app.save_tab_synchronously_protected_as(i, path.clone(), version, true)
+        app.save_tab_synchronously_protected_as(i, path.clone(), version, true, false)
             .expect("initial protected save");
 
         let result = app
@@ -4975,6 +4979,58 @@ mod tests {
         assert!(app.opening.is_none(), "still no second load");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_missing_fonts_prompt_survives_a_second_drawing_opened_after_it() {
+        // Several drawings dropped at once open one after another. Each one
+        // that lacks fonts asks for them, and the second one's prompt used to
+        // close the first's and then itself: the prompt is a tool of its
+        // drawing, and leaving that drawing closed every open tool of its
+        // kind, the fresh one included.
+        use crate::app::Message;
+        let mut app = OpenCADStudio::new_for_test();
+        let dir = std::env::temp_dir();
+        let (a, b) = (dir.join("ocs_mf_a.dwg"), dir.join("ocs_mf_b.dwg"));
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::write(&b, b"x").unwrap();
+        let finish = |app: &mut OpenCADStudio, path: &std::path::Path| {
+            let id = app.opening.as_ref().map(|o| o.id).expect("an open in flight");
+            let mut doc = document::CadDocument::default();
+            let mut style = document::tables::TextStyle::new("GONE");
+            style.font_file = "ocs_no_such_font.shx".into();
+            doc.text_styles.add(style).unwrap();
+            doc.source_path = Some(path.to_string_lossy().into_owned());
+            let doc: document::Document = doc.into();
+            let caches = crate::scene::build_derived_caches_with_progress(&doc, &|_| {}, None);
+            app.update_root(Message::FileOpened(
+                id,
+                Ok(("x".into(), path.to_path_buf(), doc, caches)),
+            ))
+        };
+        let prompt_open = |app: &OpenCADStudio| {
+            app.active_modal == Some(crate::app::ModalKind::MissingFonts)
+                || app.tool_open(crate::app::ModalKind::MissingFonts)
+        };
+
+        let _ = app.update_root(Message::FileDropped(a.clone()));
+        let _ = app.update_root(Message::FileDropped(b.clone()));
+        assert_eq!(app.pending_opens.front(), Some(&b), "the second drop waits");
+
+        let _ = finish(&mut app, &a);
+        assert!(prompt_open(&app), "the first drawing asks for its fonts");
+
+        // The queue hands the second drawing over once the first is in.
+        let _ = app.update_root(Message::OpenExternal(b.clone()));
+        let _ = finish(&mut app, &b);
+        assert!(
+            prompt_open(&app),
+            "the second drawing's prompt must still be up"
+        );
+        assert!(app.missing_fonts.is_some());
+
+        let _ = std::fs::remove_file(&a);
+        let _ = std::fs::remove_file(&b);
     }
 
     #[test]

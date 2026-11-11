@@ -1100,6 +1100,7 @@ impl Scene {
             // fills it in from $EXTMIN/$EXTMAX right after, so the near/far tracks
             // the eye direction once the view is orbited.
             model_bounds: None,
+            stale_bounds: None,
         })
     }
 

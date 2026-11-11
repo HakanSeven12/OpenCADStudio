@@ -78,6 +78,8 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+X"), "CUTCLIP"),
         (format!("{ACCEL}+V"), "PASTECLIP"),
         (format!("{ACCEL}+SHIFT+V"), "PASTEBLOCK"),
+        // Group selection on and off (PICKSTYLE bit 1), as in AutoCAD.
+        (format!("{ACCEL}+SHIFT+A"), "TOGGLEGROUPS"),
         ("ENTER".to_string(), "FINALIZE"),
         ("SPACE".to_string(), "COMMANDSPACE"),
         ("ESCAPE".to_string(), "CANCEL"),
@@ -212,6 +214,7 @@ pub(super) const INPUT_ACTIONS: &[&str] = &[
     "OTRACK",
     "DYNINPUT",
     "TOGGLESELECTIONCYCLING",
+    "TOGGLEGROUPS",
     "NEXTVIEWPORT",
     "SELECTALL",
     "PASTECLIP",
@@ -429,6 +432,13 @@ impl OpenCADStudio {
             "OTRACK" => Message::ToggleOTrack,
             "DYNINPUT" => Message::ToggleDynInput,
             "TOGGLESELECTIONCYCLING" => Message::ToggleSelectionCycling,
+            "TOGGLEGROUPS" => {
+                let header = &mut self.tabs[self.active_tab].scene.document.header;
+                header.pick_style ^= 1;
+                let state = if header.pick_style & 1 != 0 { "on" } else { "off" };
+                self.command_line.push_info(&format!("<Groups {state}>"));
+                return Task::none();
+            }
             // Quad cursor menu master toggle (Shift+F12, Options window,
             // status-bar field): the pure on/off flip, quad panel updates
             // included, lives in the quad router (docs/quad-menu.md §3.6).
@@ -528,5 +538,24 @@ mod tests {
         app.shortcut_bindings.remove("CTRL+TAB");
         let _ = app.update(Message::ShortcutPressed("CTRL+TAB".into()));
         assert_eq!(app.active_tab, (start + 1) % count);
+    }
+
+    /// #2805: Ctrl+Shift+A turns group selection on and off.
+    #[test]
+    fn ctrl_shift_a_toggles_group_selection() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let style = |app: &OpenCADStudio| app.tabs[i].scene.document.header.pick_style;
+        let before = style(&app);
+        // Also from a configuration saved before the binding existed.
+        let mut cfg = crate::app::config::AppConfig::default();
+        cfg.shortcuts.bindings.remove(&format!("{ACCEL}+SHIFT+A"));
+        app.apply_config(cfg);
+        let key = format!("{ACCEL}+SHIFT+A");
+        let _ = app.update(Message::ShortcutPressed(key.clone()));
+        assert_eq!(style(&app), before ^ 1);
+        let _ = app.update(Message::ShortcutPressed(key));
+        assert_eq!(style(&app), before);
     }
 }

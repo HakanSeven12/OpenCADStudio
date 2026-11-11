@@ -92,7 +92,7 @@ fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to write PDF data: {error}"));
     }
-    if let Err(error) = super::replace_save_file(&temp_path, path) {
+    if let Err(error) = super::replace_save_file(&temp_path, path, false) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace PDF file: {error}"));
     }

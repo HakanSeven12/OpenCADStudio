@@ -24,6 +24,7 @@ pub(crate) mod block_parameters_manager;
 pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
+pub mod linetype_service;
 pub mod block_visibility;
 pub mod cache;
 pub mod compare;
@@ -55,10 +56,14 @@ mod annotation_visibility_tests;
 mod block_base_point_tests;
 #[cfg(test)]
 mod block_definition_handles_tests;
+#[cfg(test)]
+mod layer_visibility_block_cache_tests;
 mod boundary;
 mod camera_ops;
 #[cfg(test)]
 mod reference_only_tests;
+#[cfg(test)]
+mod resident_patch_shorter_runs_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
@@ -165,7 +170,7 @@ pub(crate) fn tessellate_entity(
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
                 if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
-                    kernel::acis::loft_section_geometry(&[
+                    ocs_acis::loft_section_geometry(&[
                         document::entities::EmbeddedEntity::Region(region.clone()),
                     ])
                 {
@@ -3794,6 +3799,7 @@ impl Scene {
             (stale, self.block_visibility_edits.as_ref())
         {
             if epoch == *from && *to == self.block_epoch {
+                let started = crate::perf::enabled().then(iced::time::Instant::now);
                 let solid_snaps: HashMap<Handle, _> = self
                     .block_meshes
                     .keys()
@@ -3813,6 +3819,13 @@ impl Scene {
                 );
                 if self.constraint_shading_active() {
                     built.disable_prototypes();
+                }
+                if started.is_some() {
+                    crate::perf_record!(
+                        "[perf] blk_cache-rebuild total={:.1}ms changed={}",
+                        crate::perf::elapsed_ms(started),
+                        names.len(),
+                    );
                 }
                 let arc = Arc::new(built);
                 self.block_defn_cache
@@ -6740,7 +6753,7 @@ impl Scene {
         let cannoscale_value = self
             .scale_object_handle(&self.document.header.current_annotation_scale)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => Some(self.effective_scale_factor(scale)),
+                Some(ObjectType::Scale(scale)) => Some(scale.factor()),
                 _ => None,
             })
             .unwrap_or(self.document.header.annotation_scale_value);
@@ -6777,6 +6790,10 @@ impl Scene {
     /// unit (1 paper = 0.2 drawing for a metre-based "1:200"). A custom
     /// scale, including "1:100 m", always keeps its own stored ratio.
     /// Normalize only exact standard names with exact legacy ratios.
+    ///
+    /// Viewport and plot scales only: the annotation multiplier is the
+    /// scale's own ratio whatever the drawing units (#2354), so a centimetre
+    /// drawing's 1:50 draws annotative text 50 times its paper height.
     fn effective_scale_factor(&self, scale: &document::objects::Scale) -> f64 {
         let stored = scale.factor();
         let legacy_standard = self.default_scales().iter().any(|&(name, base)| {
@@ -6972,7 +6989,10 @@ impl Scene {
             })
             .unwrap_or_default();
         if listed.is_empty() {
-            self.scale_list().into_iter().map(|(name, _, _)| name).collect()
+            self.scale_list()
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect()
         } else {
             listed
         }
@@ -7276,7 +7296,7 @@ impl Scene {
                 return None;
             };
 
-            let factor = self.effective_scale_factor(scale);
+            let factor = scale.factor();
             (scale.name.clone(), factor, 1.0 / factor)
         };
 
@@ -7502,7 +7522,7 @@ impl Scene {
         .or_else(|| self.displayed_annotation_scale_handle());
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => Some(1.0 / self.effective_scale_factor(scale)),
+                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -7798,11 +7818,33 @@ impl Scene {
                             })
                     })
                     .collect();
+                let overridden = self
+                    .document
+                    .layers
+                    .iter()
+                    .filter(|layer| {
+                        [
+                            document::objects::KnownXRecordKind::LayerViewportColorOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                            document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+                            document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+                        ]
+                        .into_iter()
+                        .any(|kind| {
+                            self.document
+                                .layer_viewport_overrides(layer.handle, kind)
+                                .into_iter()
+                                .any(|(viewport, _)| viewport == handle)
+                        })
+                    })
+                    .map(|layer| layer.handle)
+                    .collect();
                 crate::ui::window::layers::ViewportLayers {
                     handle,
                     label,
                     frozen,
                     colors,
+                    overridden,
                 }
             })
             .collect()
@@ -8255,7 +8297,7 @@ impl Scene {
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
                 Some(ObjectType::Scale(scale)) => {
-                    Some((1.0 / self.effective_scale_factor(scale)) as f32)
+                    Some(scale.inverse_factor() as f32)
                 }
                 _ => None,
             })
@@ -9294,7 +9336,22 @@ impl Scene {
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
             && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
             && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
-        for (h, kind) in &deltas {
+        // References to a block re-expanded after its definition changed
+        // share one prototype: the first one comes back with the full run
+        // and the others as a stub of it. Longest runs first gives the full
+        // run back to the reference whose slots held it; in the journal's
+        // order another reference could get it and grow past its slots.
+        let mut tess_order: Vec<(Handle, ChangeKind)> = deltas.clone();
+        tess_order.sort_by_key(|(h, _)| {
+            std::cmp::Reverse(
+                layout
+                    .ranges
+                    .get(h)
+                    .or_else(|| layout.vacant.get(h))
+                    .map_or(0, |&(_, len)| len),
+            )
+        });
+        for (h, kind) in &tess_order {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
             }
@@ -9501,17 +9558,31 @@ impl Scene {
                 if start + old_len > layout.marker_start || layout.marker_start > owned.len() {
                     return declined("run-outside-entity-runs");
                 }
-                if old_len == new_len {
+                // A shorter run that is not the last one keeps all its slots,
+                // so no later run moves and the handle index stays as it is:
+                // switching a layer off inside a block shortens every
+                // reference to that block, all through the set. The unused
+                // slots hold blank wires under the entity's name, with the
+                // default unbounded box: a window selection passes over such
+                // a wire, where an empty box would leave the entity out.
+                let mut new_run = new_run;
+                if new_len < old_len && start + old_len != layout.marker_start {
+                    let name = handle.value().to_string();
+                    new_run.resize_with(old_len, || {
+                        WireModel::solid(name.clone(), Vec::new(), [0.0; 4], false)
+                    });
+                }
+                if old_len == new_run.len() {
                     for (slot, wire) in owned[start..start + old_len].iter_mut().zip(new_run) {
                         *slot = wire;
                     }
-                    layout.ranges.insert(handle, (start, new_len));
+                    layout.ranges.insert(handle, (start, old_len));
                     continue;
                 }
-                // Shape-changing edits are relocation-free only for the
-                // terminal entity (the live-polyline case). A non-terminal
-                // resize takes the clean full-build fallback instead of
-                // shifting every following range.
+                // Any other shape change is relocation-free only for the
+                // terminal entity (the live-polyline case). A run that grows
+                // anywhere else takes the clean full-build fallback instead
+                // of shifting every following range.
                 if start + old_len != layout.marker_start {
                     return declined("resized-run-not-at-the-tail");
                 }
@@ -10598,7 +10669,12 @@ impl Scene {
                 let Some(model) = self.images.get(&handle) else {
                     return;
                 };
-                let mut placed = model.clone();
+                // A plot draws a PDF underlay's page at print resolution, not
+                // at the resolution it is shown at (#2822).
+                let mut placed = plotting
+                    .then(|| self.print_underlay_image(entity))
+                    .flatten()
+                    .unwrap_or_else(|| model.clone());
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(
@@ -15854,8 +15930,17 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 .filter_map(|entity| records.get(&entity.common().owner_handle))
                 .map(|name| name.to_string())
                 .collect();
+            // Switches made before the cache is rebuilt add up into one edit
+            // from the cache's epoch. Once a cache was rebuilt at `from`, the
+            // edit starts there: carrying the older base along made every
+            // later switch miss it and rebuild all the definitions.
+            let rebuilt_at_from = self
+                .block_defn_cache
+                .borrow()
+                .values()
+                .any(|(epoch, _)| *epoch == from);
             self.block_visibility_edits = match self.block_visibility_edits.take() {
-                Some((base, to, mut names)) if to == from => {
+                Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
                     names.extend(touched);
                     Some((base, self.block_epoch, names))
                 }
@@ -19258,10 +19343,11 @@ mod layout_cache_tests {
                     // and viewport apply the physically correct effective ratio.
                     let (paper, drawing) = scene.scale_ratio(name).unwrap();
                     assert!((paper / drawing - 1.0 / drawing_units).abs() < 1.0e-9);
+                    // The annotation multiplier is the scale's own ratio,
+                    // whatever the units: DIMTXT and text heights are in
+                    // drawing units (#2354).
                     assert!(scene.set_annotation_scale_named(name).is_some());
-                    assert!(
-                        ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
-                    );
+                    assert!(((scene.annotation_scale as f64) - drawing_units).abs() < 1.0e-5);
                 }
             }
         }

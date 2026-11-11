@@ -80,6 +80,8 @@ pub struct StatusBarLayoutState<'a> {
 
 /// Drafting modes and document settings represented by status bar controls.
 pub struct StatusBarModes {
+    pub grid: bool,
+    pub grid_snap: bool,
     pub ortho_mode: bool,
     pub polar_mode: bool,
     pub polar_increment_deg: f32,
@@ -182,6 +184,8 @@ impl StatusBar {
             geo_system,
         } = layout;
         let StatusBarModes {
+            grid,
+            grid_snap,
             ortho_mode,
             polar_mode,
             polar_increment_deg,
@@ -378,6 +382,18 @@ impl StatusBar {
                     t!("One or more parametric constraints conflict or are redundant\nClick to remove one and re-solve"),
                 ),
             );
+        }
+        if vis(StatusPill::Grid) {
+            pills.push(tip(
+                toggle_pill(crate::ui::icons::GRID, grid, Message::ToggleGrid),
+                t!("Toggle Grid"),
+            ));
+        }
+        if vis(StatusPill::Snap) {
+            pills.push(tip(
+                toggle_pill(crate::ui::icons::SNAP, grid_snap, Message::ToggleGridSnap),
+                t!("Toggle Grid Snap"),
+            ));
         }
         if vis(StatusPill::Ortho) {
             pills.push(tip(

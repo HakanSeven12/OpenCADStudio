@@ -1000,6 +1000,8 @@ pub struct UserSettings {
     pub show_viewcube: bool,
     /// Show the UCS icon (UCSICON).
     pub show_ucs_icon: bool,
+    /// Show the viewport controls in the drawing's corner (VPCONTROL).
+    pub show_viewport_controls: bool,
     /// Draw the UCS icon at the origin rather than in the corner
     /// (UCSICON ORigin / NOorigin).
     pub ucs_icon_at_origin: bool,
@@ -1484,6 +1486,7 @@ impl Default for UserSettings {
             options_tab: crate::ui::window::options::OptionsTab::General,
             show_viewcube: true,
             show_ucs_icon: true,
+            show_viewport_controls: true,
             ucs_icon_at_origin: true,
             selection_cycling: false,
             osnap_z: false,

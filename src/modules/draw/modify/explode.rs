@@ -1006,7 +1006,7 @@ fn explode_region(region: &document::entities::Region) -> Vec<EntityType> {
                 .flatten()
         });
         if let Some(sat) = sat {
-            let (bodies, _loss) = kernel::acis::lift(&sat);
+            let (bodies, _loss) = ocs_acis::lift(&sat);
             for body in &bodies {
                 for face in body.face_keys() {
                     if let Some(profile) = kernel::brep::planar_face_profile(body, face) {
@@ -1794,6 +1794,35 @@ struct DimMetrics {
 }
 
 /// Resolve style metrics used by saved dimension geometry.
+/// The size multiplier of an annotative dimension's picture: the model units
+/// per paper unit of the scale it is drawn at: the current annotation scale
+/// when the dimension has it or has no scales, else the first of its scales. The saved picture
+/// is what a reader shows for that scale, so it can't be drawn at 1:1.
+pub(crate) fn annotative_picture_scale(dim: &Dimension, doc: &Document) -> f64 {
+    let memberships =
+        crate::scene::annotative::object_scale_memberships(doc, dim.base().common.handle);
+    let current = &doc.header.current_annotation_scale;
+    let chosen = memberships
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(current))
+        .or_else(|| memberships.first());
+    let factor = |handle: &Handle| match doc.objects.get(handle) {
+        // The scale's own ratio, whatever the drawing units: annotation
+        // sizes are in drawing units (#2354).
+        Some(document::objects::ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
+        _ => None,
+    };
+    // Without scales of its own, a dimension annotative by its style draws at
+    // the current one.
+    let handle = chosen
+        .map(|(_, handle)| *handle)
+        .or_else(|| crate::scene::annotative::scale_handle_by_name(doc, current));
+    handle
+        .and_then(|handle| factor(&handle))
+        .filter(|f| f.is_finite() && *f > 0.0)
+        .unwrap_or(1.0)
+}
+
 fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
     let name = dim.base().style_name.as_str();
     let effective_style = doc
@@ -1806,7 +1835,13 @@ fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
         .map(|style| crate::entities::dimension::resolved_dimension_style(style, dim, doc));
     let style = effective_style.as_ref();
     let scale = style
-        .map(|s| if s.dimscale > 1e-6 { s.dimscale } else { 1.0 })
+        .map(|s| {
+            if s.dimscale > 1e-6 {
+                s.dimscale
+            } else {
+                annotative_picture_scale(dim, doc)
+            }
+        })
         .unwrap_or(1.0);
     use crate::scene::convert::tessellate::{arrow_from_block, ArrowKind};
     let dimasz = style
@@ -2549,7 +2584,11 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
     // position, height, rotation, alignment, text style, MText handling all
     // shared), so the baked block matches the on-screen dimension and the label
     // doesn't shift when the file is saved and reopened. `None` = suppressed.
-    for mut tent in crate::entities::dimension::baked_dimension_text_entities(dim, doc, 1.0) {
+    for mut tent in crate::entities::dimension::baked_dimension_text_entities(
+        dim,
+        doc,
+        annotative_picture_scale(dim, doc),
+    ) {
         // Apply the text colour / lineweight (DIMCLRT) onto the entity.
         let tc = dim_common(&base.common, met.dimclrt, -2);
         tent.common_mut().color = tc.color;
@@ -3039,6 +3078,72 @@ mod tests {
             before,
             "a dimension that already owns a block must not be re-baked"
         );
+    }
+
+    /// An annotative dimension's saved picture is drawn at its scale (text =
+    /// DIMTXT × 100 at 1:100, in any drawing units), and a picture saved at
+    /// 1:1 by an earlier version is not drawn: the dimension is rebuilt
+    /// (#2457, #2542).
+    #[test]
+    fn annotative_dimension_picture_follows_its_scale() {
+        let mut doc = Document::new();
+        doc.header.insertion_units = 6; // metres
+        let mut style = document::tables::DimStyle::new("ANNO");
+        style.annotative = true;
+        style.dimscale = 0.0;
+        style.dimtxt = 2.5;
+        doc.dim_styles.add(style).unwrap();
+        let scale = doc.allocate_handle();
+        let mut scale_object = document::objects::Scale::new("1:100", 1.0, 100.0);
+        scale_object.handle = scale;
+        doc.objects.insert(scale, document::objects::ObjectType::Scale(scale_object));
+        doc.header.current_annotation_scale = "1:100".into();
+
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.style_name = "ANNO".into();
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .unwrap();
+        crate::scene::annotative::set_entity_annotative(&mut doc, handle, true);
+        assert!(crate::scene::annotative::create_annotation_context(&mut doc, handle, scale));
+
+        bake_dimension_blocks(&mut doc);
+        let block = match doc.get_entity(handle) {
+            Some(EntityType::Dimension(d)) => d.base().block_name.clone(),
+            _ => panic!("dimension missing"),
+        };
+        let text_height = |doc: &Document| {
+            let record = doc.block_records.get(&block).unwrap();
+            record
+                .entity_handles
+                .iter()
+                .find_map(|h| match doc.get_entity(*h) {
+                    Some(EntityType::Text(t)) => Some(t.height),
+                    Some(EntityType::MText(t)) => Some(t.height),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert!((text_height(&doc) - 250.0).abs() < 1e-6, "picture text {}", text_height(&doc));
+        let entity = doc.get_entity(handle).unwrap().clone();
+        let drawn = |doc: &Document| {
+            crate::scene::render_graph::entity_render_block_uses(doc, &entity, 100.0)
+                .iter()
+                .any(|u| u.active)
+        };
+        assert!(drawn(&doc), "a picture at its scale is drawn");
+
+        // A picture saved at 1:1 (text 2.5) is rebuilt instead.
+        let record = doc.block_records.get(&block).unwrap().clone();
+        for h in &record.entity_handles {
+            match doc.get_entity_mut(*h) {
+                Some(EntityType::Text(t)) => t.height = 2.5,
+                Some(EntityType::MText(t)) => t.height = 2.5,
+                _ => {}
+            }
+        }
+        assert!(!drawn(&doc), "a picture at 1:1 is not drawn");
     }
 
     /// A dimension with a scale representation drawn by a block nothing else

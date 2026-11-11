@@ -1891,18 +1891,19 @@ impl OpenCADStudio {
                     );
                     // The scale the object is shown at: the current one when
                     // the object has it, else its default representation's.
-                    let assigned_scales = crate::scene::annotative::active_object_context_for_scale(
-                        doc,
-                        entity.common().handle,
-                        None,
-                    )
-                    .and_then(|context| {
-                        memberships
-                            .iter()
-                            .find(|(_, scale)| *scale == context.scale)
-                            .map(|(name, _)| name.clone())
-                    })
-                    .unwrap_or_else(|| doc.header.current_annotation_scale.clone());
+                    let assigned_scales =
+                        crate::scene::annotative::active_object_context_for_scale(
+                            doc,
+                            entity.common().handle,
+                            None,
+                        )
+                        .and_then(|context| {
+                            memberships
+                                .iter()
+                                .find(|(_, scale)| *scale == context.scale)
+                                .map(|(name, _)| name.clone())
+                        })
+                        .unwrap_or_else(|| doc.header.current_annotation_scale.clone());
                     insert_row_after(
                         &mut sections,
                         anno_field,
@@ -1956,7 +1957,9 @@ impl OpenCADStudio {
                     (stored, factor, aligned)
                 }
                 document::EntityType::MText(text) => (text.height, factor, false),
-                document::EntityType::AttributeDefinition(attribute) => (attribute.height, factor, false),
+                document::EntityType::AttributeDefinition(attribute) => {
+                    (attribute.height, factor, false)
+                }
                 _ => unreachable!("annotative_text_height_factor is text-only"),
             };
             let ratio = crate::scene::annotative::text_context_ratio(
@@ -1973,7 +1976,11 @@ impl OpenCADStudio {
                 "height"
             };
             for section in sections.iter_mut() {
-                if let Some(row) = section.props.iter_mut().find(|row| row.field == height_field) {
+                if let Some(row) = section
+                    .props
+                    .iter_mut()
+                    .find(|row| row.field == height_field)
+                {
                     let editable = !aligned
                         && !matches!(
                             row.value,
@@ -5718,7 +5725,7 @@ pub(in crate::app) fn format_unit_factor(factor: f64) -> String {
 }
 
 /// Convert INSUNITS (DXF group 70) to millimetres.
-pub(super) fn insunits_to_mm(code: i16) -> Option<f64> {
+pub(crate) fn insunits_to_mm(code: i16) -> Option<f64> {
     Some(match code {
         1 => 25.4,                       // Inches
         2 => 304.8,                      // Feet

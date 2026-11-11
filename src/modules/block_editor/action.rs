@@ -135,6 +135,44 @@ impl ActionCommand {
         self.selecting = !self.kind.is_some_and(actions::needs_frame);
         CmdResult::DeselectAndContinue
     }
+    fn finish_action(&self, point: DVec3) -> CmdResult {
+        if !point.is_finite() {
+            return CmdResult::ReportError(
+                crate::t!("Specify a finite action location.").into_owned(),
+            );
+        }
+        let array_offsets = if self.kind == Some(Kind::Array) {
+            let col = self.column_offset.unwrap_or(1.0);
+            let row = self.row_offset.unwrap_or(1.0);
+            Some((col, row))
+        } else {
+            None
+        };
+        CmdResult::PlaceBlockAction {
+            document: self.document,
+            definition: self.definition,
+            kind: self.kind.unwrap(),
+            parameter: self.parameter.unwrap(),
+            xy_key_point: self.xy_key_point,
+            point_choices: self.point_choices_snapshot(),
+            targets: {
+                let mut targets = self.targets.clone();
+                targets.extend(&self.rotate_only);
+                targets.sort();
+                targets.dedup();
+                targets
+            },
+            location: point,
+            frame: self.frame_done.then(|| self.frame.clone()),
+            array_offsets,
+            displacement_overrides: matches!(
+                self.kind,
+                Some(Kind::Move | Kind::Stretch | Kind::PolarStretch)
+            )
+            .then_some((self.multiplier, self.angle_offset)),
+            rotate_only: self.rotate_only.clone(),
+        }
+    }
 }
 impl CadCommand for ActionCommand {
     fn name(&self) -> &'static str {
@@ -270,7 +308,7 @@ impl CadCommand for ActionCommand {
                     )
                     .into_owned()
                 } else {
-                    crate::t!("BACTION  Specify distance between columns:").into_owned()
+                    crate::t!("BACTION  Enter the distance between columns (|||):").into_owned()
                 };
             }
             if is_xy && self.row_offset.is_none() {
@@ -469,11 +507,11 @@ impl CadCommand for ActionCommand {
             });
         }
         if self.kind == Some(Kind::Array) && !self.selecting {
-            let is_xy = self
+            let p = self
                 .candidates
                 .iter()
                 .find(|p| Some(p.handle) == self.parameter)
-                .is_some_and(|p| p.xy);
+                .unwrap();
             if self.column_offset.is_none() {
                 let Ok(dist) = s.trim().parse::<f64>() else {
                     return Some(CmdResult::ReportError(
@@ -487,9 +525,14 @@ impl CadCommand for ActionCommand {
                     ));
                 }
                 self.column_offset = Some(dist);
+                // An array has no location of its own: its last spacing answer
+                // records it at the parameter's end. Only XY asks a second distance.
+                if !p.xy {
+                    return Some(self.finish_action(p.end));
+                }
                 return Some(CmdResult::NeedPoint);
             }
-            if is_xy && self.row_offset.is_none() {
+            if p.xy && self.row_offset.is_none() {
                 let Ok(dist) = s.trim().parse::<f64>() else {
                     return Some(CmdResult::ReportError(
                         crate::t!("Specify a positive distance as a single value, not a point.")
@@ -502,7 +545,7 @@ impl CadCommand for ActionCommand {
                     ));
                 }
                 self.row_offset = Some(dist);
-                return Some(CmdResult::NeedPoint);
+                return Some(self.finish_action(p.end));
             }
         }
         None
@@ -601,6 +644,9 @@ impl CadCommand for ActionCommand {
                     );
                 }
                 self.column_offset = Some(dist);
+                if !p.xy {
+                    return self.finish_action(p.end);
+                }
                 return CmdResult::NeedPoint;
             }
             if p.xy && self.row_offset.is_none() {
@@ -611,48 +657,13 @@ impl CadCommand for ActionCommand {
                     );
                 }
                 self.row_offset = Some(dist);
-                return CmdResult::NeedPoint;
+                return self.finish_action(p.end);
             }
         }
         if self.selecting {
             return CmdResult::NeedPoint;
         }
-        if !point.is_finite() {
-            return CmdResult::ReportError(
-                crate::t!("Specify a finite action location.").into_owned(),
-            );
-        }
-        let array_offsets = if self.kind == Some(Kind::Array) {
-            let col = self.column_offset.unwrap_or(1.0);
-            let row = self.row_offset.unwrap_or(1.0);
-            Some((col, row))
-        } else {
-            None
-        };
-        CmdResult::PlaceBlockAction {
-            document: self.document,
-            definition: self.definition,
-            kind: self.kind.unwrap(),
-            parameter: self.parameter.unwrap(),
-            xy_key_point: self.xy_key_point,
-            point_choices: self.point_choices_snapshot(),
-            targets: {
-                let mut targets = self.targets.clone();
-                targets.extend(&self.rotate_only);
-                targets.sort();
-                targets.dedup();
-                targets
-            },
-            location: point,
-            frame: self.frame_done.then(|| self.frame.clone()),
-            array_offsets,
-            displacement_overrides: matches!(
-                self.kind,
-                Some(Kind::Move | Kind::Stretch | Kind::PolarStretch)
-            )
-            .then_some((self.multiplier, self.angle_offset)),
-            rotate_only: self.rotate_only.clone(),
-        }
+        self.finish_action(point)
     }
 
     fn on_preview_wires(&mut self, point: DVec3) -> Vec<crate::scene::WireModel> {

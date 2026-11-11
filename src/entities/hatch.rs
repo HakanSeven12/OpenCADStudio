@@ -434,18 +434,24 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             options: vec!["Predefined".into(), "User Defined".into(), "Custom".into()],
         },
     };
-    let pattern_name_row = Property {
-        label: t!("Pattern name").into_owned(),
-        field: "pattern_name",
-        value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
+    // A user-defined pattern's name is fixed (measured: greyed `_U`).
+    let user_defined = matches!(h.pattern_type, document::entities::HatchPatternType::UserDefined);
+    let pattern_name_row = if user_defined {
+        ro(t!("Pattern name").as_ref(), "pattern_name", h.pattern.name.clone())
+    } else {
+        Property {
+            label: t!("Pattern name").into_owned(),
+            field: "pattern_name",
+            value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
+        }
     };
     let associative_row = associative_property(h);
     let double_row = Property {
         label: t!("Double").into_owned(),
         field: "double",
-        value: PropValue::BoolToggle {
-            field: "double",
-            value: h.is_double,
+        value: PropValue::Choice {
+            selected: if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
         },
     };
     let island_row = Property {
@@ -494,6 +500,15 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             h.pattern_type,
             document::entities::HatchPatternType::UserDefined
         ) {
+            // Measured order: the scale (the spacing, greyed) and origin
+            // sit between angle and spacing.
+            pattern_props.push(ro(
+                t!("Scale").as_ref(),
+                "pattern_scale",
+                crate::entities::common::format_decimal(h.pattern_scale),
+            ));
+            pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
+            pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
             pattern_props.push(spacing_row);
             pattern_props.push(double_row);
         } else {
@@ -586,7 +601,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
             h.is_double = if value == "toggle" {
                 !h.is_double
             } else {
-                value == "true"
+                value == "true" || value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes")
             };
             return;
         }
@@ -619,7 +634,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 match requested {
                     HatchPatternType::UserDefined => {
                         // Rebuild user-defined geometry from its parameters.
-                        h.pattern = document::entities::HatchPattern::new("_USER");
+                        h.pattern = document::entities::HatchPattern::new("_U");
                     }
                     HatchPatternType::Predefined => {
                         if let Some(entry) = crate::scene::model::hatch_patterns::find("ANSI31") {
@@ -709,7 +724,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 document::entities::HatchPatternType::UserDefined
             ) {
                 h.pattern.lines.clear();
-                h.pattern.name = "_USER".to_string();
+                h.pattern.name = "_U".to_string();
             }
         }
         // Origin rows are relative offsets and return to zero after commit.

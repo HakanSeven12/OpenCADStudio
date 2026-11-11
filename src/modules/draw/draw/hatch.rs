@@ -434,7 +434,7 @@ pub fn fill_pattern(
             if *double {
                 families.push(family(90.0));
             }
-            ("_USER".into(), HatchPattern::Pattern(families))
+            ("_U".into(), HatchPattern::Pattern(families))
         }
         HatchFill::Gradient(kind, invert) => (
             kind.dxf_name(*invert).into(),

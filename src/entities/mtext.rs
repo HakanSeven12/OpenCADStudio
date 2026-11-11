@@ -422,7 +422,10 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
     // columns edits both (measured).
     let col_type = t.column_data.column_type;
     let width_editable = col_type == 0;
-    let height_editable = col_type != 2 || !t.column_data.auto_height;
+    // Dynamic columns grey the defined height whatever their height flag
+    // (measured: the default boxed text stores manual height 0 and still
+    // shows it read-only).
+    let height_editable = col_type != 2;
     vec![
         PropSection {
             title: t!("Text").into_owned(),

@@ -26,7 +26,7 @@ pub fn field<'a, Message: Clone + 'a>(
 /// Muted "disabled input box" look: the same bordered box geometry as the
 /// editable fields but with a quieter background and text so it reads as
 /// read-only. The selection highlight is kept so copy stays discoverable.
-fn read_only_style(theme: &Theme, _status: Status) -> text_input::Style {
+pub fn read_only_style(theme: &Theme, _status: Status) -> text_input::Style {
     let palette = theme.palette();
     text_input::Style {
         background: Background::Color(palette.background.weakest.color),

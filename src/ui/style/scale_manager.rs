@@ -324,10 +324,17 @@ fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> E
                  value: &str,
                  on: Option<fn(String) -> Message>,
                  id: Option<iced::widget::Id>| {
+        let locked = on.is_none();
         let mut input = text_input(ph.as_ref(), value)
             .on_input_maybe(on)
             .on_submit(Message::ScaleRenameCommit)
-            .style(|theme, status| field_style_with_radius(theme, status, 4.0))
+            .style(move |theme, status| {
+                if locked {
+                    crate::ui::read_only::read_only_style(theme, status)
+                } else {
+                    field_style_with_radius(theme, status, 4.0)
+                }
+            })
             .size(12)
             .padding([5, 8])
             .width(sizing.width);

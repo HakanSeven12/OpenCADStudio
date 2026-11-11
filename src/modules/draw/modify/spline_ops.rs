@@ -68,10 +68,22 @@ fn spline_to_nurbs_with(
     vector: impl Fn(&Vector3) -> [f64; 2],
 ) -> Option<NurbsCurve> {
     let degree = (spl.degree.max(1)) as usize;
-    let control_points: Vec<[f64; 2]> = spl.control_points.iter().map(&point).collect();
-    let weights = (!spl.weights.is_empty()).then(|| spl.weights.clone());
+    let (control_points, knots, weights) =
+        if let Some((points, knots, weights)) = crate::entities::spline::unwrapped_periodic(spl) {
+            let projected = points
+                .into_iter()
+                .map(|[x, y, z]| point(&Vector3::new(x, y, z)))
+                .collect();
+            (projected, knots, Some(weights))
+        } else {
+            (
+                spl.control_points.iter().map(&point).collect(),
+                spl.knots.clone(),
+                (!spl.weights.is_empty()).then(|| spl.weights.clone()),
+            )
+        };
 
-    if let Some(curve) = NurbsCurve::new(degree, control_points, spl.knots.clone(), weights) {
+    if let Some(curve) = NurbsCurve::new(degree, control_points, knots, weights) {
         return Some(curve);
     }
 
@@ -207,4 +219,38 @@ pub fn spline_pts_wire(spl: &Spline) -> Vec<[f32; 3]> {
         .iter()
         .map(|p| [p[0] as f32, p[1] as f32, elev])
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_periodic_spline_matches_explicit_basis() {
+        let mut compact = Spline::new();
+        compact.degree = 2;
+        compact.flags.closed = true;
+        compact.flags.periodic = true;
+        compact.flags.rational = true;
+        compact.control_points = vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(3.0, 1.0, 0.0),
+            Vector3::new(2.0, 4.0, 0.0),
+        ];
+        compact.weights = vec![1.0, 2.0, 0.5];
+        compact.knots = vec![0.0, 1.0, 3.0, 4.0];
+
+        let mut full = compact.clone();
+        full.control_points
+            .extend_from_slice(&compact.control_points[..2]);
+        full.weights.extend_from_slice(&compact.weights[..2]);
+        full.knots = vec![-3.0, -1.0, 0.0, 1.0, 3.0, 4.0, 5.0, 7.0];
+
+        let actual = spline_to_nurbs(&compact).unwrap();
+        let expected = spline_to_nurbs(&full).unwrap();
+        assert_eq!(actual.domain(), (0.0, 4.0));
+        for knot in [0.0, 0.5, 1.0, 2.0, 3.0, 3.5, 4.0] {
+            assert_eq!(actual.point_at_knot(knot), expected.point_at_knot(knot));
+        }
+    }
 }

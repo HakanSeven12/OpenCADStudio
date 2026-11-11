@@ -7711,3 +7711,61 @@ mod batch6_tests {
             .contains("SHEET_1_50"));
     }
 }
+
+/// Batch 7: remaining gaps found in the HEAD audit (evidence-only missions
+/// and the four WEAK ones), implemented on HEAD.
+#[cfg(test)]
+mod batch7_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    fn out_text(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn dimoverride_list_reports_the_override_and_clear_returns_the_style() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let dimension = app
+            .tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension.base().common.handle),
+                _ => None,
+            })
+            .expect("DIMLINEAR placed a dimension");
+        app.tabs[i].scene.select_entities(&[dimension]);
+
+        let _ = app.run_command_line("DIMOVERRIDE_APPLY DIMTXT=4");
+        let out = out_text(&app);
+        assert!(out.contains("DIMOVERRIDE: updated"), "{out}");
+
+        let _ = app.run_command_line("DIMOVERRIDELIST");
+        let out = out_text(&app);
+        assert!(out.contains("DIMTXT = 4"), "{out}");
+        assert!(out.contains("Dimension"), "{out}");
+
+        let _ = app.run_command_line("DIMOVERRIDE_APPLY CLEAR");
+        let _ = app.run_command_line("DIMOVERRIDELIST");
+        let out = out_text(&app);
+        assert!(out.contains("No overrides"), "{out}");
+        // The style itself never changed.
+        let style = app.tabs[i]
+            .scene
+            .document
+            .dim_styles
+            .get("ISO-25")
+            .unwrap();
+        assert_eq!(style.dimtxt, 2.5);
+    }
+}

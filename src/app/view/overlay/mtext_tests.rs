@@ -141,7 +141,7 @@ fn every_former_toolbar_command_is_in_a_menu() {
         (
             EditorMenu::Symbols,
             label!("diameter"),
-            |m| matches!(m, Message::MTextInsert(s) if s == "⌀"),
+            |m| matches!(m, Message::MTextInsert(s) if s == "∅"),
         ),
         (EditorMenu::Find, label!("find-next"), |m| {
             matches!(m, Message::MTextFindNext)

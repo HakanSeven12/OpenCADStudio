@@ -36,6 +36,16 @@ pub mod v4_support {
     ) {
     }
 
+    pub fn publish_panel_action_to_plugin(
+        _plugin_id: Option<&str>,
+        _command_id: Option<u64>,
+        _panel_id: String,
+        _control_id: String,
+        _action: String,
+        _value: Option<ocs_plugin_api::dialog::DialogValue>,
+    ) {
+    }
+
     pub fn publish_quad_action(
         _plugin_id: &str,
         _panel_id: &str,

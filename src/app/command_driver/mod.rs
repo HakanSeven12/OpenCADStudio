@@ -127,11 +127,7 @@ impl OpenCADStudio {
             .as_mut()
             .map(|c| c.take_pending_panel_updates())
             .unwrap_or_default();
-        for (panel_id, values) in panel_updates {
-            if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                panel.update_values(values);
-            }
-        }
+        self.apply_panel_or_dialog_updates(panel_updates);
         if let CmdResult::ReturnPoint(pt) = result {
             self.tabs[i].scene.clear_preview_wire();
             if let Some(mut suspended) = self.tabs[i].suspended_cmd.take() {

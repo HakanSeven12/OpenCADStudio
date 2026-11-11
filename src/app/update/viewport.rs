@@ -7434,11 +7434,7 @@ impl OpenCADStudio {
                 .as_mut()
                 .map(|c| c.take_pending_panel_updates())
                 .unwrap_or_default();
-            for (panel_id, values) in panel_updates {
-                if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                    panel.update_values(values);
-                }
-            }
+            self.apply_panel_or_dialog_updates(panel_updates);
 
             self.sync_dimension_snaps(i);
             if let Some(r) = result {

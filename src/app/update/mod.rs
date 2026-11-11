@@ -3191,19 +3191,35 @@ impl OpenCADStudio {
             }
             Message::PluginDialogBoolToggle(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.bool_values.insert(id, val);
+                    state.bool_values.insert(id.clone(), val);
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "toggle".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Bool(val)),
+                    );
                 }
                 Task::none()
             }
             Message::PluginDialogChoiceSelect(id, idx) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.choice_values.insert(id, idx);
+                    state.choice_values.insert(id.clone(), idx);
+                    let opt_text = state.choice_option_text(&id, idx);
+                    let val = ocs_plugin_api::dialog::DialogValue::Choice {
+                        index: idx,
+                        text: opt_text,
+                    };
+                    return self.dispatch_plugin_dialog_action(id, "change".to_string(), Some(val));
                 }
                 Task::none()
             }
             Message::PluginDialogColorChange(id, rgb) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
-                    state.color_values.insert(id, rgb);
+                    state.color_values.insert(id.clone(), rgb);
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Color(rgb)),
+                    );
                 }
                 Task::none()
             }
@@ -3225,6 +3241,7 @@ impl OpenCADStudio {
                     if let Some(rows) = state.table_values.get_mut(&id) {
                         rows.push(vec![String::new(); col_count]);
                     }
+                    return self.dispatch_plugin_dialog_action(id, "add_row".to_string(), None);
                 }
                 Task::none()
             }
@@ -3235,6 +3252,11 @@ impl OpenCADStudio {
                             rows.remove(row_idx);
                         }
                     }
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "remove_row".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::Number(row_idx as f64)),
+                    );
                 }
                 Task::none()
             }
@@ -3250,10 +3272,7 @@ impl OpenCADStudio {
             }
             Message::PluginDialogFilePick(id) => {
                 let (is_save, extensions) = if let Some(state) = &self.plugin_dialog_state {
-                    fn find_fp(
-                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                        target: &str,
-                    ) -> Option<(bool, Vec<String>)> {
+                    fn find_fp(ctrls: &[ocs_plugin_api::dialog::DialogControl], target: &str) -> Option<(bool, Vec<String>)> {
                         for c in ctrls {
                             match c {
                                 ocs_plugin_api::dialog::DialogControl::FilePicker {
@@ -3262,13 +3281,9 @@ impl OpenCADStudio {
                                     save,
                                     ..
                                 } if cid == target => return Some((*save, extensions.clone())),
-                                ocs_plugin_api::dialog::DialogControl::Fields {
-                                    controls, ..
-                                }
+                                ocs_plugin_api::dialog::DialogControl::Fields { controls, .. }
                                 | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column {
-                                    controls, ..
-                                } => {
+                                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. } => {
                                     if let Some(res) = find_fp(controls, target) {
                                         return Some(res);
                                     }
@@ -3308,104 +3323,164 @@ impl OpenCADStudio {
             }
             Message::PluginDialogFilePicked(id, path) => {
                 if let Some(p) = path {
+                    let path_str = p.to_string_lossy().to_string();
                     if let Some(state) = &mut self.plugin_dialog_state {
                         state
                             .file_values
-                            .insert(id, p.to_string_lossy().to_string());
+                            .insert(id.clone(), path_str.clone());
                     }
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "pick".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::FilePath(path_str)),
+                    );
                 }
                 Task::none()
             }
-            Message::PluginDialogSubmit => {
-                let response = if let Some(state) = &self.plugin_dialog_state {
-                    state.collect_response()
-                } else {
-                    ocs_plugin_api::dialog::DialogResponse::Cancelled
-                };
-                self.close_active_modal();
-
-                let tab_idx = self.active_tab;
-                let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
-                    .tabs
-                    .get_mut(tab_idx)
-                    .and_then(|t| t.active_cmd.as_mut())
-                {
-                    let res = cmd.on_dialog_response(response);
-                    let next = if matches!(
-                        res,
-                        crate::command::CmdResult::CommitAndExit(_)
-                            | crate::command::CmdResult::CommitEntitiesAndExit(_)
-                            | crate::command::CmdResult::Cancel
-                    ) {
-                        None
+            Message::PluginDialogFileTextChange(id, val) => {
+                if let Some(state) = &mut self.plugin_dialog_state {
+                    state.file_values.insert(id.clone(), val.clone());
+                    return self.dispatch_plugin_dialog_action(
+                        id,
+                        "change".to_string(),
+                        Some(ocs_plugin_api::dialog::DialogValue::FilePath(val)),
+                    );
+                }
+                Task::none()
+            }
+            Message::PluginDialogButtonClick(id, action) => {
+                let tab_idx = self.dialog_target_tab_index();
+                let action_for_event = action.clone().unwrap_or_else(|| "click".to_string());
+                let (action_resp, panel_updates, dialog_meta) =
+                    if let Some(state) = &self.plugin_dialog_state {
+                        let current_values = state.collect_response_map();
+                        let dialog_title = state.def.title.clone();
+                        let owner_plugin_id = state.plugin_id.clone();
+                        let owner_command_id = state.command_id;
+                        let event = ocs_plugin_api::dialog::DialogEvent {
+                            control_id: id.clone(),
+                            action: action_for_event,
+                            value: None,
+                            current_values: current_values.clone(),
+                        };
+                        if let Some(cmd) = self
+                            .tabs
+                            .get_mut(tab_idx)
+                            .and_then(|t| t.active_cmd.as_mut())
+                        {
+                            let resp = cmd.on_dialog_action(event);
+                            let updates = cmd.take_pending_panel_updates();
+                            (
+                                Some(resp),
+                                updates,
+                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                            )
+                        } else {
+                            (
+                                None,
+                                Vec::new(),
+                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                            )
+                        }
                     } else {
-                        cmd.modal_dialog()
+                        (None, Vec::new(), None)
                     };
-                    let updates = cmd.take_pending_panel_updates();
-                    (Some(res), next, updates)
-                } else {
-                    (None, None, Vec::new())
-                };
 
-                for (panel_id, values) in panel_updates {
-                    if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                        panel.update_values(values);
+                let had_pending_updates = !panel_updates.is_empty();
+                self.apply_panel_or_dialog_updates(panel_updates);
+
+                match action_resp {
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::UpdateValues(values)) => {
+                        if let Some(state) = &mut self.plugin_dialog_state {
+                            state.update_values(values);
+                        }
+                        return Task::none();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::ReplaceDialog(new_def)) => {
+                        if let Some(state) = &mut self.plugin_dialog_state {
+                            let tab_id = state.tab_id;
+                            let plugin_id = state.plugin_id.clone();
+                            let command_id = state.command_id;
+                            *state =
+                                crate::ui::window::plugin_dialog::PluginDialogState::new(*new_def)
+                                    .with_owner(tab_id, plugin_id, command_id);
+                        }
+                        return Task::none();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::Submit) => {
+                        return self.on_plugin_dialog_submit();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::Close) => {
+                        return self.on_plugin_dialog_cancel();
+                    }
+                    Some(ocs_plugin_api::dialog::DialogActionResponse::None) | None => {
+                        if had_pending_updates {
+                            return Task::none();
+                        }
                     }
                 }
 
-                if let Some(def) = next_dialog {
-                    self.open_plugin_dialog(def);
-                }
-
-                if let Some(res) = cmd_result {
-                    self.apply_cmd_result(res)
-                } else {
-                    Task::none()
-                }
-            }
-            Message::PluginDialogCancel => {
-                self.close_active_modal();
-
-                let tab_idx = self.active_tab;
-                let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
-                    .tabs
-                    .get_mut(tab_idx)
-                    .and_then(|t| t.active_cmd.as_mut())
-                {
-                    let res =
-                        cmd.on_dialog_response(ocs_plugin_api::dialog::DialogResponse::Cancelled);
-                    let next = if matches!(
-                        res,
-                        crate::command::CmdResult::CommitAndExit(_)
-                            | crate::command::CmdResult::CommitEntitiesAndExit(_)
-                            | crate::command::CmdResult::Cancel
-                    ) {
-                        None
-                    } else {
-                        cmd.modal_dialog()
-                    };
-                    let updates = cmd.take_pending_panel_updates();
-                    (Some(res), next, updates)
-                } else {
-                    (None, None, Vec::new())
-                };
-
-                for (panel_id, values) in panel_updates {
-                    if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                        panel.update_values(values);
+                // Fall back to the panel button click path when on_dialog_action returns None.
+                let action_str = action.unwrap_or_default();
+                let lower = action_str.to_ascii_lowercase();
+                if lower == "close" || lower == "hide" {
+                    return self.on_plugin_dialog_cancel();
+                } else if lower == "clear" {
+                    if let Some(state) = &mut self.plugin_dialog_state {
+                        for rows in state.table_values.values_mut() {
+                            rows.clear();
+                        }
                     }
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                        crate::plugin::v4_support::publish_panel_action_to_plugin(
+                            owner_plugin_id.as_deref(),
+                            *owner_command_id,
+                            dialog_title.clone(),
+                            id,
+                            "clear".to_string(),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                        );
+                    }
+                    return Task::none();
+                } else if lower == "reset" {
+                    if let Some(state) = &mut self.plugin_dialog_state {
+                        state.reset_values();
+                    }
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                        crate::plugin::v4_support::publish_panel_action_to_plugin(
+                            owner_plugin_id.as_deref(),
+                            *owner_command_id,
+                            dialog_title.clone(),
+                            id,
+                            "reset".to_string(),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                        );
+                    }
+                    return Task::none();
                 }
 
-                if let Some(def) = next_dialog {
-                    self.open_plugin_dialog(def);
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                    let act = if action_str.is_empty() {
+                        "click".to_string()
+                    } else {
+                        action_str
+                    };
+                    crate::plugin::v4_support::publish_panel_action_to_plugin(
+                        owner_plugin_id.as_deref(),
+                        *owner_command_id,
+                        dialog_title.clone(),
+                        id,
+                        act,
+                        Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                    );
                 }
-
-                if let Some(res) = cmd_result {
-                    self.apply_cmd_result(res)
-                } else {
-                    Task::none()
-                }
+                Task::none()
             }
+            Message::PluginDialogControlEvent(id, action, val) => {
+                self.dispatch_plugin_dialog_action(id, action, val)
+            }
+            Message::PluginDialogSubmit => self.on_plugin_dialog_submit(),
+            Message::PluginDialogCancel => self.on_plugin_dialog_cancel(),
 
             Message::PluginPanelButtonClick(panel_id, control_id, action) => {
                 let action_str = action.unwrap_or_default();
@@ -3488,44 +3563,7 @@ impl OpenCADStudio {
                 } else {
                     self.plugin_panels
                         .get(&panel_id)
-                        .and_then(|p| {
-                            fn find_choice(
-                                ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                                cid: &str,
-                                idx: usize,
-                            ) -> Option<String> {
-                                for c in ctrls {
-                                    match c {
-                                        ocs_plugin_api::dialog::DialogControl::Choice {
-                                            id,
-                                            options,
-                                            ..
-                                        } if id == cid => {
-                                            return options.get(idx).cloned();
-                                        }
-                                        ocs_plugin_api::dialog::DialogControl::Fields {
-                                            controls,
-                                            ..
-                                        }
-                                        | ocs_plugin_api::dialog::DialogControl::Row {
-                                            controls,
-                                            ..
-                                        }
-                                        | ocs_plugin_api::dialog::DialogControl::Column {
-                                            controls,
-                                            ..
-                                        } => {
-                                            if let Some(o) = find_choice(controls, cid, idx) {
-                                                return Some(o);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                None
-                            }
-                            find_choice(&p.def.controls, &control_id, index)
-                        })
+                        .map(|p| p.choice_option_text(&control_id, index))
                         .unwrap_or_default()
                 };
                 if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
@@ -3575,26 +3613,15 @@ impl OpenCADStudio {
             Message::PluginPanelTableAddRow(panel_id, table_id) => {
                 let mut current_rows = Vec::new();
                 if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                    fn find_table_cols(
-                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
-                        target: &str,
-                    ) -> Option<usize> {
+                    fn find_table_cols(ctrls: &[ocs_plugin_api::dialog::DialogControl], target: &str) -> Option<usize> {
                         for c in ctrls {
                             match c {
-                                ocs_plugin_api::dialog::DialogControl::Table {
-                                    id,
-                                    headers,
-                                    ..
-                                } if id == target => {
+                                ocs_plugin_api::dialog::DialogControl::Table { id, headers, .. } if id == target => {
                                     return Some(headers.len());
                                 }
-                                ocs_plugin_api::dialog::DialogControl::Fields {
-                                    controls, ..
-                                }
+                                ocs_plugin_api::dialog::DialogControl::Fields { controls, .. }
                                 | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column {
-                                    controls, ..
-                                } => {
+                                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. } => {
                                     if let Some(res) = find_table_cols(controls, target) {
                                         return Some(res);
                                     }
@@ -3662,6 +3689,19 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::PluginPanelFileTextChange(panel_id, control_id, val) => {
+                if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
+                    panel.file_values.insert(control_id.clone(), val.clone());
+                }
+                crate::plugin::v4_support::publish_panel_action(
+                    panel_id,
+                    control_id,
+                    "change".to_string(),
+                    Some(ocs_plugin_api::dialog::DialogValue::FilePath(val)),
+                );
+                Task::none()
+            }
+
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {

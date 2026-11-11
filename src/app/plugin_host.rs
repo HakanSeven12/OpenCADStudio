@@ -4481,7 +4481,7 @@ impl HostApi for HostSession<'_> {
         self.app.tabs[self.tab].active_cmd =
             Some(Box::new(PluginInteractiveAdapter { inner: command }));
         if let Some(def) = dialog {
-            self.app.open_plugin_dialog(def);
+            self.app.open_plugin_dialog_on_tab(self.tab, def, None);
         }
     }
     fn plugin_state_any(&self, plugin_id: &str) -> Option<&(dyn Any + Send + Sync)> {
@@ -4682,7 +4682,16 @@ impl HostApi for HostSession<'_> {
         &mut self,
         dialog: ocs_plugin_api::dialog::DialogDef,
     ) -> ocs_plugin_api::dialog::DialogResponse {
-        self.app.open_plugin_dialog(dialog);
+        self.app.open_plugin_dialog_on_tab(self.tab, dialog, None);
+        ocs_plugin_api::dialog::DialogResponse::Cancelled
+    }
+    fn show_dialog_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        dialog: ocs_plugin_api::dialog::DialogDef,
+    ) -> ocs_plugin_api::dialog::DialogResponse {
+        self.app
+            .open_plugin_dialog_on_tab(self.tab, dialog, Some(plugin_id.to_string()));
         ocs_plugin_api::dialog::DialogResponse::Cancelled
     }
     fn register_panel(&mut self, panel: ocs_plugin_api::dialog::PanelDef) -> bool {
@@ -4744,6 +4753,15 @@ impl HostApi for HostSession<'_> {
         {
             panel.update_values(values);
             return true;
+        }
+        if let Some(state) = &mut self.app.plugin_dialog_state {
+            if panel_id.is_empty()
+                || state.def.title == panel_id
+                || state.def.title.eq_ignore_ascii_case(panel_id)
+            {
+                state.update_values(values);
+                return true;
+            }
         }
         false
     }
@@ -5053,6 +5071,15 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
         .map(plugin_step_to_result)
         .unwrap_or(crate::command::CmdResult::Cancel)
     }
+    fn on_dialog_action(
+        &mut self,
+        event: ocs_plugin_api::dialog::DialogEvent,
+    ) -> ocs_plugin_api::dialog::DialogActionResponse {
+        crate::plugin::guard("InteractiveCommand::on_dialog_action", || {
+            self.inner.on_dialog_action(event)
+        })
+        .unwrap_or(ocs_plugin_api::dialog::DialogActionResponse::None)
+    }
     fn take_pending_panel_updates(
         &mut self,
     ) -> Vec<(
@@ -5299,6 +5326,12 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             self.refresh();
         }
         result
+    }
+    fn owner_plugin_id(&self) -> Option<&str> {
+        Some(self.process.id())
+    }
+    fn plugin_command_id(&self) -> Option<u64> {
+        Some(self.command_id)
     }
 }
 

@@ -244,7 +244,17 @@ impl OpenCADStudio {
         self.grip_history_originals = handles
             .iter()
             .filter_map(|&handle| {
-                let objects = self.tabs[i].scene.solid_history_objects(handle);
+                let mut objects = self.tabs[i].scene.solid_history_objects(handle);
+                if let Some(entity @ document::EntityType::Insert(_)) =
+                    self.tabs[i].scene.document.get_entity(handle)
+                {
+                    objects.extend(
+                        crate::scene::annotative::annotation_context_objects_for_entity(
+                            &self.tabs[i].scene.document,
+                            entity,
+                        ),
+                    );
+                }
                 (!objects.is_empty()).then_some((handle, objects))
             })
             .collect();

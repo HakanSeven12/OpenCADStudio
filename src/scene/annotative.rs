@@ -1145,6 +1145,144 @@ pub(crate) fn place_attribute_for_annotation_scale(
     true
 }
 
+/// Move the stored representations of an INSERT-owned ATTRIB with its grip.
+/// The ATTRIB is not a top-level document entity, so the normal entity
+/// context synchronization cannot reach these leaves.
+pub(crate) fn translate_insert_attribute_contexts(
+    doc: &mut Document,
+    attribute: &document::entities::AttributeEntity,
+    delta: glam::DVec3,
+) -> bool {
+    let mut changed = false;
+    for handle in insert_attribute_context_handles(doc, attribute) {
+        let Some(ObjectType::ObjectContextData(leaf)) = doc.objects.get_mut(&handle) else {
+            continue;
+        };
+        let ObjectContextKind::MTextAttribute(context) = &mut leaf.kind else {
+            continue;
+        };
+        context.insertion.x += delta.x;
+        context.insertion.y += delta.y;
+        context.alignment.x += delta.x;
+        context.alignment.y += delta.y;
+        if let Some(embedded) = context.context.as_mut() {
+            embedded.mtext.insertion.x += delta.x;
+            embedded.mtext.insertion.y += delta.y;
+            embedded.mtext.insertion.z += delta.z;
+        }
+        changed = true;
+    }
+    changed
+}
+
+/// Carry every annotation-scale representation of each INSERT-owned ATTRIB
+/// through the same MOVE/ROTATE/SCALE/MIRROR transform as the reference.
+/// These attributes are inline on the INSERT, so the top-level entity context
+/// walker cannot see their individual dictionaries.
+pub(crate) fn transform_insert_attribute_contexts(
+    doc: &mut Document,
+    attributes_before: &[document::entities::AttributeEntity],
+    transform: &crate::command::EntityTransform,
+) -> bool {
+    let mut changed = false;
+    for attribute in attributes_before {
+        for handle in insert_attribute_context_handles(doc, attribute) {
+            let scale = match doc.objects.get(&handle) {
+                Some(ObjectType::ObjectContextData(leaf)) => leaf.scale,
+                _ => continue,
+            };
+            let mut placed = attribute.clone();
+            if !place_attribute_for_annotation_scale(doc, &mut placed, Some(scale)) {
+                continue;
+            }
+            let mut entity = EntityType::AttributeEntity(placed);
+            crate::scene::view::dispatch::apply_transform(&mut entity, transform);
+            let EntityType::AttributeEntity(transformed) = entity else {
+                continue;
+            };
+            let Some(ObjectType::ObjectContextData(leaf)) = doc.objects.get_mut(&handle) else {
+                continue;
+            };
+            let ObjectContextKind::MTextAttribute(context) = &mut leaf.kind else {
+                continue;
+            };
+            context.horizontal_mode = transformed.horizontal_alignment.to_value();
+            context.rotation = transformed.rotation;
+            context.insertion =
+                Vector2::new(transformed.insertion_point.x, transformed.insertion_point.y);
+            context.alignment =
+                Vector2::new(transformed.alignment_point.x, transformed.alignment_point.y);
+            if let (Some(embedded), Some(mtext)) =
+                (&mut context.context, &transformed.embedded_mtext)
+            {
+                sync_mtext_context(&mut embedded.mtext, mtext);
+            }
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn insert_attribute_context_handles(
+    doc: &Document,
+    attribute: &document::entities::AttributeEntity,
+) -> Vec<Handle> {
+    if explicit_annotation_flag(doc, &attribute.common) == Some(false) {
+        return Vec::new();
+    }
+    attribute
+        .common
+        .xdictionary_handle
+        .and_then(|xdictionary| annotation_scales_in_xdictionary(doc, xdictionary))
+        .and_then(|collection| as_dict(doc, collection))
+        .map(|collection| {
+            collection
+                .entries
+                .iter()
+                .map(|(_, handle)| *handle)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Capture the context leaves changed by a transform or grip edit. INSERT
+/// attributes have their own dictionaries in addition to the INSERT's tree.
+pub(crate) fn annotation_context_objects_for_entity(
+    doc: &Document,
+    entity: &EntityType,
+) -> Vec<(Handle, ObjectType)> {
+    let mut seen = std::collections::HashSet::new();
+    let entity_handles: Vec<Handle> = annotation_scales_dict(doc, entity.common().handle)
+        .and_then(|collection| as_dict(doc, collection))
+        .map(|collection| {
+            collection
+                .entries
+                .iter()
+                .map(|(_, handle)| *handle)
+                .collect()
+        })
+        .unwrap_or_default();
+    let attribute_handles: Vec<Handle> = match entity {
+        EntityType::Insert(insert) => insert
+            .attributes
+            .iter()
+            .flat_map(|attribute| insert_attribute_context_handles(doc, attribute))
+            .collect(),
+        _ => Vec::new(),
+    };
+    attribute_handles
+        .into_iter()
+        .chain(entity_handles)
+        .filter(|handle| seen.insert(*handle))
+        .filter_map(|handle| {
+            doc.objects
+                .get(&handle)
+                .cloned()
+                .map(|object| (handle, object))
+        })
+        .collect()
+}
+
 fn apply_hatch_context(hatch: &mut document::entities::Hatch, context: &HatchScaleContext) {
     hatch.pattern.lines.clone_from(&context.pattern_lines);
     hatch.pattern_scale = context.pattern_scale;

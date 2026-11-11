@@ -140,12 +140,24 @@ fn move_attributes(document: &mut Document, name: &str, old: Vector3, new: Vecto
         })
         .collect::<Vec<_>>();
     for handle in handles {
-        if let Some(document::EntityType::Insert(insert)) = document.get_entity_mut(handle) {
-            let shift = insert.get_transform().apply_rotation(old - new);
-            let transform = Transform::from_translation(shift);
-            for attribute in &mut insert.attributes {
-                document::Entity::apply_transform(attribute, &transform);
-            }
+        let moved =
+            if let Some(document::EntityType::Insert(insert)) = document.get_entity_mut(handle) {
+                let before = insert.attributes.clone();
+                let shift = insert.get_transform().apply_rotation(old - new);
+                let transform = Transform::from_translation(shift);
+                for attribute in &mut insert.attributes {
+                    document::Entity::apply_transform(attribute, &transform);
+                }
+                Some((before, transform))
+            } else {
+                None
+            };
+        if let Some((before, transform)) = moved {
+            crate::scene::annotative::transform_insert_attribute_contexts(
+                document,
+                &before,
+                &crate::command::EntityTransform::Affine(transform),
+            );
         }
     }
 }

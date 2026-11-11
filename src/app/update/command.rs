@@ -5610,6 +5610,13 @@ impl OpenCADStudio {
                         if self.tabs[i].scene.is_layer_locked(handle) {
                             continue;
                         }
+                        let insert_before = matches!(field, "ins_x" | "ins_y" | "ins_z")
+                            .then(|| self.tabs[i].scene.document.get_entity(handle))
+                            .flatten()
+                            .and_then(|entity| match entity {
+                                document::EntityType::Insert(insert) => Some(insert.clone()),
+                                _ => None,
+                            });
                         match field {
                             "tol_text_height" => {
                                 use crate::entities::dim_override as dov;
@@ -5802,6 +5809,13 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                        }
+                        if let Some(before) = insert_before {
+                            self.tabs[i]
+                                .scene
+                                .carry_insert_attribute_contexts_after_position_edit(
+                                    handle, &before,
+                                );
                         }
                     }
                 }

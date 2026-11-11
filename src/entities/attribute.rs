@@ -1094,28 +1094,17 @@ impl Grippable for AttributeEntity {
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        if self.lock_position || self.flags.locked_position {
+        if grip_id != 0 || self.lock_position || self.flags.locked_position {
             return;
         }
-        if grip_id == 0 {
-            match apply {
-                GripApply::Translate(d) => {
-                    self.insertion_point.x += d.x;
-                    self.insertion_point.y += d.y;
-                    self.insertion_point.z += d.z;
-                    self.alignment_point.x += d.x;
-                    self.alignment_point.y += d.y;
-                    self.alignment_point.z += d.z;
-                }
-                GripApply::Absolute(p) => {
-                    self.insertion_point.x = p.x;
-                    self.insertion_point.y = p.y;
-                    self.insertion_point.z = p.z;
-                    self.alignment_point.x = p.x;
-                    self.alignment_point.y = p.y;
-                    self.alignment_point.z = p.z;
-                }
-            }
+        let delta = match apply {
+            GripApply::Translate(delta) => delta,
+            GripApply::Absolute(target) => target - dv(self.insertion_point),
+        };
+        shift(&mut self.insertion_point, delta);
+        shift(&mut self.alignment_point, delta);
+        if let Some(mtext) = self.embedded_mtext.as_mut() {
+            shift(&mut mtext.insertion_point, delta);
         }
     }
 }

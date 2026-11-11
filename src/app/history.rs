@@ -967,14 +967,21 @@ impl OpenCADStudio {
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
-    /// Dimension copies still need a full snapshot because they clone a fresh
-    /// anonymous `*D` block record. Complete group copies record their exact
-    /// Group/dictionary object entries and remain delta-safe.
+    /// Dimension copies clone a fresh anonymous `*D` block record. Copies
+    /// with extension dictionaries deep-clone object trees. Both need a
+    /// structure snapshot so undo can remove those new records.
     pub(super) fn delta_copy_safe(&self, i: usize, handles: &[Handle]) -> bool {
         let doc = &self.tabs[i].scene.document;
         !handles
             .iter()
-            .any(|h| matches!(doc.get_entity(*h), Some(EntityType::Dimension(_))))
+            .any(|h| match doc.get_entity(*h) {
+                Some(EntityType::Dimension(_)) => true,
+                Some(entity) => {
+                    entity.common().xdictionary_handle.is_some()
+                        || matches!(entity, EntityType::Insert(insert) if insert.attributes.iter().any(|attribute| attribute.common.xdictionary_handle.is_some()))
+                }
+                None => false,
+            })
     }
 
     /// Erase records any affected Group/object dictionary entries alongside the

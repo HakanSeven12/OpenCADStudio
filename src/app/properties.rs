@@ -3963,6 +3963,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 &self.tabs[i].scene.document,
                 insert,
                 self.tabs[i].scene.annotation_scale,
+                annotation_scale_handle,
             );
         }
         if crate::scene::model::solid_history::has_specialized_primitive_properties(

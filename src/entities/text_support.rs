@@ -1811,6 +1811,10 @@ pub struct MTextLayout {
     /// Y of the first sub-line's baseline relative to the insertion point
     /// (in the entity-local, pre-rotation frame).
     pub v_offset: f32,
+    /// Every sub-line's baseline relative to the insertion point, in the same
+    /// local frame. Unlike `v_offset - index * line_height`, these include
+    /// paragraph spacing and exact line-spacing adjustments.
+    pub line_baselines: Vec<f32>,
     /// One world-space AABB per visible character — only populated when
     /// `MTextRenderOpts::want_glyph_boxes` is set.
     pub glyph_boxes: Vec<GlyphBox>,
@@ -3340,6 +3344,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         line_count: sub_lines.len(),
         line_height: line_h,
         v_offset,
+        line_baselines: line_y_offset.iter().map(|y| y + v_offset).collect(),
         glyph_boxes,
         local_bounds,
     }

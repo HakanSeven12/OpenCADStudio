@@ -3731,6 +3731,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "drawing units" => Some(("anno-scale-dlg", "drawing-units")),
         "paper" => Some(("anno-scale-dlg", "paper")),
         "drawing" => Some(("anno-scale-dlg", "drawing")),
+        "No name specified for this scale.  Please enter a name." => Some(("anno-scale-dlg", "no-scale-name")),
+        "Invalid scale number." => Some(("anno-scale-dlg", "invalid-scale-number")),
         "Inch" => Some(("anno-scale-dlg", "inch")),
         "Foot" => Some(("anno-scale-dlg", "foot")),
         "Mile" => Some(("anno-scale-dlg", "mile")),

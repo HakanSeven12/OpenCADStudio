@@ -67,14 +67,17 @@ impl State {
             .collect()
     }
 
-    /// Delete is offered while a listed scale is selected (measured: also
-    /// when that would take every scale off an object).
+    /// Delete is offered while some, but not every, listed scale is selected
+    /// (measured: picking the whole list greys it, even when a pick leaves
+    /// one object without a scale).
     pub fn can_delete(&self) -> bool {
-        !self.selected_listed().is_empty()
+        let picked = self.selected_listed().len();
+        picked > 0 && picked < self.listed().len()
     }
 
     /// Takes the picked scales off every object; an object they would leave
-    /// without a scale keeps its first one in the list order.
+    /// without a scale keeps its last one in the list order (measured: the
+    /// later list entry stays whichever was added first).
     pub fn delete_picked(&mut self) {
         let picked = self.selected_listed();
         let order = self.order.clone();
@@ -85,13 +88,13 @@ impl State {
                 .cloned()
                 .collect();
             if kept.is_empty() {
-                let first = scales.iter().min_by_key(|s| {
+                let last = scales.iter().max_by_key(|s| {
                     order
                         .iter()
                         .position(|o| o.eq_ignore_ascii_case(s))
                         .unwrap_or(usize::MAX)
                 });
-                kept.extend(first.cloned());
+                kept.extend(last.cloned());
             }
             *scales = kept;
         }

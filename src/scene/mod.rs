@@ -6932,7 +6932,7 @@ impl Scene {
     /// The drawing's unit scale: the 1 : 1 entry named by the millimetres one
     /// drawing unit holds ("1:1000" in a metre drawing), as the metric list
     /// adds it. Any 1 : 1 scale flags itself, so the flag alone cannot tell.
-    fn unit_scale_names(&self) -> Vec<String> {
+    pub fn unit_scale_names(&self) -> Vec<String> {
         let name = Self::unit_scale_name_for(self.default_scale_unit_factor());
         self.scale_paper_drawing(&name)
             .filter(|(paper, drawing)| (paper - drawing).abs() < 1.0e-9)

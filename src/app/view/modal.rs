@@ -951,13 +951,17 @@ impl OpenCADStudio {
                             .into_owned(),
                     }
                 };
-                let edit = self.scale_rename.as_ref().map(|_| {
+                let edit = self.scale_rename.as_ref().map(|old| {
                     crate::ui::style::scale_manager::EditCard {
                         adding: self.scale_edit_adding,
                         name: &self.scale_rename_buf,
                         paper: &self.scale_manager_paper_buf,
                         drawing: &self.scale_manager_drawing_buf,
                         preview: preview.clone(),
+                        units_locked: !self.scale_edit_adding && self.scale_units_locked(i, old),
+                        paper_unit,
+                        drawing_unit: header.insertion_units,
+                        error: self.scale_edit_error.as_deref(),
                     }
                 });
                 sized_flow(ex, 660, 400, |flow| {

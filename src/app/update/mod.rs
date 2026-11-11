@@ -7153,17 +7153,21 @@ impl OpenCADStudio {
             }
             Message::ScaleManagerPaperBuf(s) => {
                 self.scale_manager_paper_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleManagerDrawingBuf(s) => {
                 self.scale_manager_drawing_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleManagerNew => {
                 // Add opens the card with a fresh name and 1 : 1; the scale
                 // joins the list's end only when the card is applied.
+                // The name starts empty as the reference's Add Scale does.
                 self.scale_edit_adding = true;
-                self.scale_rename_buf = self.unique_scale_name("New Scale");
+                self.scale_edit_error = None;
+                self.scale_rename_buf = String::new();
                 self.scale_rename = Some(String::new());
                 self.scale_manager_paper_buf = "1".into();
                 self.scale_manager_drawing_buf = "1".into();
@@ -7178,6 +7182,7 @@ impl OpenCADStudio {
             }
             Message::ScaleManagerEditCancel => {
                 self.scale_rename = None;
+                self.scale_edit_error = None;
                 self.scale_edit_adding = false;
                 let selected = self.scale_manager_selected.clone();
                 self.load_scale_editor(&selected);
@@ -7204,6 +7209,7 @@ impl OpenCADStudio {
             Message::ScaleRenameStart(name) => {
                 // Double-click or Edit...: the card edits this scale.
                 self.scale_edit_adding = false;
+                self.scale_edit_error = None;
                 self.scale_manager_multi = vec![name.clone()];
                 self.load_scale_editor(&name);
                 self.scale_rename_buf = name.clone();
@@ -7212,10 +7218,47 @@ impl OpenCADStudio {
             }
             Message::ScaleRenameEdit(s) => {
                 self.scale_rename_buf = s;
+                self.scale_edit_error = None;
                 Task::none()
             }
             Message::ScaleRenameCommit => {
                 let i = self.active_tab;
+                // Refusals as the reference words them: a missing name, a
+                // name another scale has, then a ratio that is not positive.
+                {
+                    let name = self.scale_rename_buf.trim().to_string();
+                    let old = self.scale_rename.clone().unwrap_or_default();
+                    let units_open = self.scale_edit_adding || !self.scale_units_locked(i, &old);
+                    let number = |text: &str| text.trim().parse::<f64>().ok().filter(|v| *v > 0.0);
+                    let refusal = if name.is_empty() {
+                        Some(
+                            crate::t!("No name specified for this scale.  Please enter a name.")
+                                .into_owned(),
+                        )
+                    } else if !name.eq_ignore_ascii_case(&old)
+                        && self.tabs[i].scene.scale_paper_drawing(&name).is_some()
+                    {
+                        Some(crate::tf!("{} already exists.", name).into_owned())
+                    } else if units_open
+                        && (number(&self.scale_manager_paper_buf).is_none()
+                            || number(&self.scale_manager_drawing_buf).is_none())
+                    {
+                        Some(crate::t!("Invalid scale number.").into_owned())
+                    } else {
+                        None
+                    };
+                    if refusal.is_some() {
+                        self.scale_edit_error = refusal;
+                        return Task::none();
+                    }
+                    self.scale_edit_error = None;
+                    if !units_open {
+                        // Locked units: the stored ratio stays.
+                        let selected = self.scale_manager_selected.clone();
+                        self.load_scale_editor(&selected);
+                        self.scale_rename_buf = name;
+                    }
+                }
                 if self.scale_edit_adding {
                     // Add: a unique name and a positive ratio make the scale.
                     let name = self.scale_rename_buf.trim().to_string();
@@ -10478,7 +10521,11 @@ impl OpenCADStudio {
                                 m.background_fill_flags = (m.background_fill_flags & !0x02) | 0x01;
                             }
                             Some(document::EntityType::Hatch(h)) => {
-                                crate::entities::hatch::set_background_color(h, &color);
+                                if color == document::types::Color::None {
+                                    crate::entities::hatch::clear_background_color(h);
+                                } else {
+                                    crate::entities::hatch::set_background_color(h, &color);
+                                }
                             }
                             _ => {}
                         }
@@ -15623,6 +15670,18 @@ impl OpenCADStudio {
     /// its name (renaming is done inline in the list). Staged, no commit — so
     /// the ratio edit survives Apply *and* switching to another row. Editing a
     /// built-in fallback scale materialises it as a real one.
+    /// A scale in use, the current one and the drawing's unit scale keep
+    /// their ratio: the card shows their units greyed (measured).
+    pub(in crate::app) fn scale_units_locked(&self, i: usize, name: &str) -> bool {
+        !name.is_empty()
+            && (self.anno_scale_referenced(i, name)
+                || self.tabs[i]
+                    .scene
+                    .unit_scale_names()
+                    .iter()
+                    .any(|unit| unit.eq_ignore_ascii_case(name)))
+    }
+
     fn scale_apply_current(&mut self) {
         let i = self.active_tab;
         let sel = self.scale_manager_selected.clone();

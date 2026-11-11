@@ -514,21 +514,19 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                             .collect(),
                     },
                 },
+                // Yes / No as the palette shows it; the colour and border
+                // offset stay in the text editor's Background menu.
                 Property {
                     label: t!("Background mask").into_owned(),
                     field: "background_mask",
                     value: PropValue::Choice {
-                        selected: if t.background_fill_flags & 0x01 != 0 {
-                            "Fill".into()
-                        } else if t.background_fill_flags & 0x02 != 0 {
-                            "Mask".into()
+                        selected: if t.background_fill_flags & 0x03 != 0 {
+                            t!("Yes")
                         } else {
-                            "Off".into()
-                        },
-                        options: ["Off", "Fill", "Mask"]
-                            .into_iter()
-                            .map(str::to_string)
-                            .collect(),
+                            t!("No")
+                        }
+                        .into_owned(),
+                        options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
                     },
                 },
                 num_row(
@@ -592,13 +590,21 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
             return;
         }
         "background_mask" => {
-            // Clear both fill bits, then set the chosen one. 0x01 = use the
-            // background-fill colour, 0x02 = use the drawing-window colour (mask).
-            t.background_fill_flags &= !0x03;
-            match value {
-                "Fill" => t.background_fill_flags |= 0x01,
-                "Mask" => t.background_fill_flags |= 0x02,
-                _ => {}
+            let on = value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes");
+            if !on {
+                t.background_fill_flags &= !0x03;
+            } else if t.background_fill_flags & 0x03 == 0 {
+                // Measured: turning the mask on uses the drawing background
+                // colour (flags 3), a 1.5 border and the grey fill colour.
+                t.background_fill_flags |= 0x03;
+                if t.background_scale < 1.0 {
+                    t.background_scale = 1.5;
+                }
+                t.background_color = document::types::Color::Rgb {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                };
             }
             return;
         }

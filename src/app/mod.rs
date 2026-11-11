@@ -2193,6 +2193,8 @@ pub(super) struct OpenCADStudio {
     scale_rename: Option<String>,
     scale_rename_buf: String,
     scale_edit_adding: bool,
+    /// The scale card's refusal (no name, a taken name, a bad ratio).
+    scale_edit_error: Option<String>,
     /// Every picked row of the scale list (Ctrl adds, Shift extends).
     scale_manager_multi: Vec<String>,
     /// Delete asks whether to drop the picked scales not in use.
@@ -6873,6 +6875,7 @@ impl OpenCADStudio {
             scale_manager_drawing_buf: String::new(),
             scale_rename: None,
             scale_edit_adding: false,
+            scale_edit_error: None,
             scale_manager_multi: Vec::new(),
             scale_delete_asking: false,
             anno_object_scale_target: None,

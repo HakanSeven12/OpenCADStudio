@@ -44,6 +44,13 @@ pub struct EditCard<'a> {
     pub paper: &'a str,
     pub drawing: &'a str,
     pub preview: String,
+    /// A scale in use, the current one or the unit scale keeps its ratio.
+    pub units_locked: bool,
+    /// Editing names the fields by unit ("Paper Millimeters").
+    pub paper_unit: i16,
+    pub drawing_unit: i16,
+    /// The last refusal, shown under the fields.
+    pub error: Option<&'a str>,
 }
 
 /// `1 paper Millimeter = 2 drawing Meters`: the paper unit of the drawing's
@@ -315,10 +322,10 @@ fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> E
     let field = |label: Cow<'static, str>,
                  ph: Cow<'static, str>,
                  value: &str,
-                 on: fn(String) -> Message,
+                 on: Option<fn(String) -> Message>,
                  id: Option<iced::widget::Id>| {
         let mut input = text_input(ph.as_ref(), value)
-            .on_input(on)
+            .on_input_maybe(on)
             .on_submit(Message::ScaleRenameCommit)
             .style(|theme, status| field_style_with_radius(theme, status, 4.0))
             .size(12)
@@ -332,6 +339,34 @@ fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> E
             .spacing(6)
     };
     let title = if card.adding { t!("Add Scale") } else { t!("Edit Scale") };
+    // Adding names the fields by role, editing by the units they hold.
+    let (paper_label, drawing_label): (Cow<'static, str>, Cow<'static, str>) = if card.adding {
+        (t!("Paper units"), t!("Drawing units"))
+    } else {
+        let capital = |word: Cow<'static, str>| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        };
+        (
+            Cow::Owned(format!("{} {}", capital(t!("paper")), unit_name(card.paper_unit, true))),
+            Cow::Owned(format!(
+                "{} {}",
+                capital(t!("drawing")),
+                unit_name(card.drawing_unit, true)
+            )),
+        )
+    };
+    let units_on = (!card.units_locked).then_some(());
+    let error: Element<'a, Message> = match card.error {
+        Some(line) => text(line.to_string())
+            .size(11)
+            .style(crate::ui::style::editor_table::danger_text_style)
+            .into(),
+        None => Space::new().height(0).into(),
+    };
     let ok_label = if card.adding { t!("Add") } else { t!("Apply") };
     let inner = container(
         column![
@@ -340,18 +375,25 @@ fn edit_card<'a>(card: EditCard<'a>, sizing: crate::ui::modal::ModalSizing) -> E
                 t!("Name"),
                 Cow::Borrowed("1:50"),
                 card.name,
-                Message::ScaleRenameEdit,
+                Some(Message::ScaleRenameEdit),
                 Some(rename_input_id())
             ),
-            field(t!("Paper units"), Cow::Borrowed("1"), card.paper, Message::ScaleManagerPaperBuf, None),
             field(
-                t!("Drawing units"),
+                paper_label,
+                Cow::Borrowed("1"),
+                card.paper,
+                units_on.map(|_| Message::ScaleManagerPaperBuf as fn(String) -> Message),
+                None
+            ),
+            field(
+                drawing_label,
                 Cow::Borrowed("50"),
                 card.drawing,
-                Message::ScaleManagerDrawingBuf,
+                units_on.map(|_| Message::ScaleManagerDrawingBuf as fn(String) -> Message),
                 None
             ),
             text(card.preview).size(11).style(muted_text_style),
+            error,
             row![
                 Space::new().width(sizing.width),
                 tb_button(t!("Cancel"), Message::ScaleManagerEditCancel, false),

@@ -315,8 +315,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
     let default_col = document::types::Color::Index(7);
     let grad_c1 = g.colors.first().map(|e| e.color).unwrap_or(default_col);
     let grad_c2 = g.colors.get(1).map(|e| e.color).unwrap_or(default_col);
-    let bg_on = background_color(h).is_some();
-    let bg_col = background_color(h).unwrap_or(default_col);
 
     if g.enabled {
         // ── Gradient fill ──────────────────────────────────────────────────
@@ -499,30 +497,47 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             pattern_props.push(spacing_row);
             pattern_props.push(double_row);
         } else {
+            // A predefined or custom pattern lists spacing, pen width and
+            // double greyed after its origin (measured); an ISO pattern's
+            // pen width stays editable.
             pattern_props.push(edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale));
             // Origin edits are relative offsets.
             pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
             pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
+            pattern_props.push(ro(
+                t!("Spacing").as_ref(),
+                "spacing",
+                crate::entities::common::format_length(h.pattern_scale),
+            ));
             if h.pattern.name.to_ascii_uppercase().starts_with("ISO") {
                 pattern_props.push(edit(
                     t!("ISO pen width").as_ref(),
                     "iso_pen_width",
                     h.pattern_scale,
                 ));
+            } else {
+                pattern_props.push(ro(
+                    t!("ISO pen width").as_ref(),
+                    "iso_pen_width",
+                    format!("{:.2} mm", h.pattern_scale),
+                ));
             }
+            pattern_props.push(ro(
+                t!("Double").as_ref(),
+                "double",
+                if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            ));
         }
     }
     pattern_props.push(associative_row);
     pattern_props.push(island_row);
-    // A solid fill has no background colour row.
+    // A solid fill has no background colour row; a pattern lists its
+    // background colour, None while it has none.
     if !h.is_solid {
         pattern_props.push(Property {
-            label: t!("Background").into_owned(),
-            field: "bg_enabled",
-            value: PropValue::BoolToggle {
-                field: "bg_enabled",
-                value: bg_on,
-            },
+            label: t!("Background color").into_owned(),
+            field: "background_color",
+            value: PropValue::ColorChoice(background_color(h).unwrap_or(document::types::Color::None)),
         });
     }
 
@@ -548,15 +563,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             ],
         },
     ];
-    if bg_on {
-        if let Some(sec) = sections.first_mut() {
-            sec.props.push(Property {
-                label: t!("Background color").into_owned(),
-                field: "background_color",
-                value: PropValue::ColorChoice(bg_col),
-            });
-        }
-    }
     sections
 }
 

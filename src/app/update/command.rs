@@ -1278,7 +1278,10 @@ impl OpenCADStudio {
             let d_ucs = xf.vec_to_ucs(w - anchor);
             let dx = d_ucs.x;
             let dy = d_ucs.y;
-            let dir_ucs = if (dx * dx + dy * dy) > 1e-12 {
+            // In the plane unless the cursor is tracked straight up or down
+            // (#2796), where what is left in the plane is only noise.
+            let in_plane = (dx * dx + dy * dy).sqrt();
+            let dir_ucs = if in_plane > 1e-6 && in_plane > d_ucs.z.abs() * 1e-6 {
                 glam::DVec3::new(dx, dy, 0.0).normalize()
             } else if d_ucs.length_squared() > 1e-12 {
                 d_ucs.normalize()

@@ -1487,7 +1487,9 @@ const AXIS_MINOR_TICKS: usize = 5;
 /// Profile style components in profile views: a leading record, then
 /// `ProfileDisplayStyleProfileType` in value order.
 const PROFILE_LINE: usize = 1;
+const PROFILE_CURVE: usize = 2;
 const PROFILE_SYMMETRICAL_PARABOLA: usize = 3;
+const PROFILE_ASYMMETRICAL_PARABOLA: usize = 4;
 const PROFILE_LINE_EXTENSIONS: usize = 6;
 /// Data band style: ticks at the band's major stations.
 const BAND_MAJOR_TICKS: usize = 3;
@@ -1642,7 +1644,9 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
         for (piece, run) in profile.profile_pieces() {
             let index = match piece {
                 ProfilePiece::Tangent => PROFILE_LINE,
+                ProfilePiece::Circular => PROFILE_CURVE,
                 ProfilePiece::Parabola => PROFILE_SYMMETRICAL_PARABOLA,
+                ProfilePiece::AsymmetricParabola => PROFILE_ASYMMETRICAL_PARABOLA,
             };
             let piece_style = component(document, profile_components.as_deref(), index);
             for clipped in clip_to_view(&frame, &run) {

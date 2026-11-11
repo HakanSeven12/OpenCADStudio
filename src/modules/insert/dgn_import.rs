@@ -47,6 +47,9 @@ pub struct DgnImportRequest {
     pub references: ReferenceMode,
     /// What an earlier translation of a reference already on disk gets.
     pub existing_reference: ExistingReference,
+    /// The text code page of a V7 file (e.g. 1250 for Czech/Slovak files).
+    /// V7 names no page; `None` keeps the historical 1252 decoding.
+    pub code_page: Option<u16>,
 }
 
 /// The External DGN references choice: translated into drawings attached
@@ -1809,6 +1812,8 @@ pub struct DgnImportSettings {
     pub explode_text_nodes: bool,
     pub references: ReferenceMode,
     pub existing_reference: ExistingReference,
+    /// The V7 text code page the imports keep using (None: 1252).
+    pub code_page: Option<u16>,
 }
 
 static SETTINGS: std::sync::Mutex<Option<DgnImportSettings>> = std::sync::Mutex::new(None);
@@ -1822,6 +1827,96 @@ pub fn set_settings(mut settings: DgnImportSettings) {
     if let Ok(mut s) = SETTINGS.lock() {
         *s = Some(settings);
     }
+}
+
+/// The code pages a V7 file's text can be read with, as picker labels (the
+/// encodings' own names, which conventionally stay untranslated) paired with
+/// the page the parser takes. 1252 is the default.
+/// The picker rows: the label and the page the parser takes. The auto
+/// sentinel (0) detects from the file's own text runs; 1252 is the plain
+/// default.
+const CODE_PAGE_TABLE: [(&str, u16); 14] = [
+    ("Windows-1252 (Western, default)", 1252),
+    ("Windows-1250 (Central European)", 1250),
+    ("Windows-1251 (Cyrillic)", 1251),
+    ("Windows-1253 (Greek)", 1253),
+    ("Windows-1254 (Turkish)", 1254),
+    ("Windows-1255 (Hebrew)", 1255),
+    ("Windows-1256 (Arabic)", 1256),
+    ("Windows-1257 (Baltic)", 1257),
+    ("Windows-1258 (Vietnamese)", 1258),
+    ("Windows-874 (Thai)", 874),
+    ("Shift-JIS (Japanese, 932)", 932),
+    ("GBK (Simplified Chinese, 936)", 936),
+    ("Korean Wansung (949)", 949),
+    ("Big5 (Traditional Chinese, 950)", 950),
+];
+
+/// The picker's labels in order.
+pub fn code_page_choices() -> Vec<String> {
+    CODE_PAGE_TABLE
+        .iter()
+        .map(|(label, _)| label.to_string())
+        .collect()
+}
+
+/// The picker label's page; 1252 decodes as the default.
+pub fn code_page_from_label(label: &str) -> Option<Option<u16>> {
+    match CODE_PAGE_TABLE
+        .iter()
+        .position(|(choice, _)| *choice == label)
+    {
+        Some(index) => {
+            let Some((_, page)) = CODE_PAGE_TABLE.get(index) else {
+                return None;
+            };
+            match page {
+                1252 => Some(None),
+                other => Some(Some(*other)),
+            }
+        }
+        None => None,
+    }
+}
+
+/// The label a stored page shows. `None` (no page) shows the 1252 default.
+pub fn code_page_label(code_page: Option<u16>) -> String {
+    let page = match code_page {
+        None => 1252,
+        Some(page) => page,
+    };
+    match CODE_PAGE_TABLE.iter().find(|(_, known)| *known == page) {
+        Some((label, _)) => label.to_string(),
+        None => format!("Windows-{page}"),
+    }
+}
+
+/// The mapping setup token, optionally suffixed with the V7 text code page
+/// the import keeps: `Standard;codepage=1250`. The keyword is
+/// case-insensitive, like the setup name itself.
+pub fn parse_mapping_token(text: &str) -> Result<(String, Option<u16>), String> {
+    let (mapping, page) = text
+        .split_once(';')
+        .map_or((text, ""), |(mapping, page)| (mapping, page));
+    let page = match page.trim().to_ascii_lowercase().as_str() {
+        "" => None,
+        rest => match rest.strip_prefix("codepage=").unwrap_or(rest) {
+            "1252" | "" => None,
+            page => match page
+                .parse::<u16>()
+                .ok()
+                .filter(|p| crate::scene::model::underlay_vector::code_page_supported(*p))
+            {
+                Some(page) => Some(page),
+                None => {
+                    return Err(format!(
+                        "Unknown code page {page}; use another Windows page or 65001."
+                    ));
+                }
+            },
+        },
+    };
+    Ok((mapping.trim().to_string(), page))
 }
 
 // ── Command line ───────────────────────────────────────────────────────────
@@ -1842,6 +1937,8 @@ pub struct DgnImportCommand {
     models: Vec<String>,
     model: String,
     sub_units: bool,
+    /// The V7 text code page (None: 1252), from the mapping token.
+    code_page: Option<u16>,
 }
 
 impl Default for DgnImportCommand {
@@ -1858,6 +1955,7 @@ impl DgnImportCommand {
             models: Vec::new(),
             model: String::new(),
             sub_units: false,
+            code_page: None,
         }
     }
 
@@ -1868,7 +1966,7 @@ impl DgnImportCommand {
         }
         let models = crate::scene::model::underlay_vector::dgn_import_models(&path).filter(|m| {
             !m.is_empty()
-                && crate::scene::model::underlay_vector::dgn_import(&path, &m[0]).is_some()
+                && crate::scene::model::underlay_vector::dgn_import(&path, &m[0], None).is_some()
         });
         let Some(models) = models else {
             return CmdResult::ReportError("Invalid or unsupported DGN file.".to_string());
@@ -1928,17 +2026,22 @@ impl DgnImportCommand {
     }
 
     fn accept_mapping(&mut self, text: &str) -> CmdResult {
-        let text = text.trim();
-        if text == "?" {
+        if text.trim() == "?" {
             self.step = Step::ListMappings;
             return CmdResult::NeedPoint;
         }
-        if !text.is_empty() && !text.eq_ignore_ascii_case("Standard") {
-            return CmdResult::ReportError(format!("{text} not found."));
+        let (mapping, code_page) = match parse_mapping_token(text) {
+            Ok(parsed) => parsed,
+            Err(error) => return CmdResult::ReportError(error),
+        };
+        if !mapping.is_empty() && !mapping.eq_ignore_ascii_case("Standard") {
+            return CmdResult::ReportError(format!("{mapping} not found."));
         }
         // The rest comes from DGNIMPORTMODE and the import settings the
         // window last kept.
+        self.code_page = code_page;
         let s = settings();
+        let code_page = code_page.or(s.code_page);
         CmdResult::DgnImport(DgnImportRequest {
             path: self.path.clone(),
             model: self.model.clone(),
@@ -1948,6 +2051,7 @@ impl DgnImportCommand {
             prefix_duplicates: s.mode == 2,
             references: s.references,
             existing_reference: s.existing_reference,
+            code_page,
         })
     }
 }
@@ -2011,6 +2115,40 @@ impl CadCommand for DgnImportCommand {
         match self.step {
             Step::Path => CmdResult::Cancel,
             _ => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
+        }
+    }
+}
+
+#[cfg(test)]
+mod mapping_token_tests {
+    use super::parse_mapping_token;
+
+    #[test]
+    fn mapping_token_splits_the_code_page() {
+        for (text, mapping, page) in [
+            ("Standard", "Standard", None),
+            ("", "", None),
+            ("standard;codepage=1250", "standard", Some(1250)),
+            ("Standard ; CODEPAGE=1252", "Standard", None),
+            ("Standard;codepage=1251", "Standard", Some(1251)),
+            ("Standard;codepage=1257", "Standard", Some(1257)),
+            ("Standard;codepage=65001", "Standard", Some(65001)),
+            ("Standard;codepage=932", "Standard", Some(932)),
+        ] {
+            assert_eq!(
+                parse_mapping_token(text).ok(),
+                Some((mapping.to_owned(), page)),
+                "{text}"
+            );
+        }
+        for bad in [
+            "Standard;codepage=9999",
+            "Standard;page=1250",
+            "Standard;codepage=1259",
+            "Standard;codepage=931",
+            "Standard;codepage=auto",
+        ] {
+            assert!(parse_mapping_token(bad).is_err(), "{bad}");
         }
     }
 }

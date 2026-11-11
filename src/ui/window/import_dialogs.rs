@@ -4,7 +4,9 @@
 //! Import (the objects of a .3ds file to bring in, their layers and what a
 //! mesh with several materials becomes).
 
-use iced::widget::{button, column, container, image, row, scrollable, text, text_input, Space};
+use iced::widget::{
+    button, column, container, image, pick_list, row, scrollable, text, text_input, Space,
+};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -34,6 +36,8 @@ pub enum ImportDialogMsg {
     DgnPrefix(bool),
     DgnSub(bool),
     DgnExplode(bool),
+    /// V7 text decode page chosen by label from the code-page picker.
+    DgnCodePage(String),
     DgnReferences(crate::modules::insert::dgn_import::ReferenceMode),
     DgnExisting(crate::modules::insert::dgn_import::ExistingReference),
     DgnMappingTab(usize),
@@ -174,6 +178,10 @@ pub struct DgnImportState {
     pub prefix_duplicates: bool,
     pub sub_units: bool,
     pub explode_text_nodes: bool,
+    /// V7 files only: the Windows code page the file's single-byte text
+    /// decodes from (e.g. 1250 for Czech/Slovak MicroStation). `None` is the
+    /// default Windows-1252.
+    pub code_page: Option<u16>,
     pub references: crate::modules::insert::dgn_import::ReferenceMode,
     pub existing_reference: crate::modules::insert::dgn_import::ExistingReference,
     /// Master and sub unit names.
@@ -1166,6 +1174,26 @@ pub fn view_dgn_import<'a>(
             format!(" · {}", t!(word.as_str()))
         }
     };
+    let code_page_card: Element<'_, Message> = if state.version == "V7" {
+        card(
+            t!("V7 text code page").into_owned(),
+            row![pick_list(
+                Some(crate::modules::insert::dgn_import::code_page_label(
+                    state.code_page
+                )),
+                crate::modules::insert::dgn_import::code_page_choices(),
+                |label: &String| label.clone(),
+            )
+            .on_select(|label| msg(ImportDialogMsg::DgnCodePage(label)))
+            .text_size(11)
+            .padding([4, 8])
+            .width(Fill),]
+            .spacing(8),
+        )
+        .into()
+    } else {
+        Space::new().height(0).into()
+    };
     let units = card(
         t!("Units").into_owned(),
         column![
@@ -1284,19 +1312,91 @@ pub fn view_dgn_import<'a>(
         ]
         .spacing(8),
     );
+    let intrinsic = sizing.width == crate::ui::modal::ModalSizing::INTRINSIC.width;
+    let body = row![
+        scrollable(column![model, target, units, code_page_card, references].spacing(10))
+            .width(Length::FillPortion(3)),
+        container(mapping).width(Length::FillPortion(2)),
+    ]
+    .spacing(10)
+    // The measurement pass takes the dialog's natural height; the laid-out
+    // pass then pins the footer and lets the cards scroll through whatever
+    // height the window leaves, so the Ok/Cancel labels are never clipped.
+    .height(if intrinsic {
+        Length::Fixed(540.0)
+    } else {
+        Length::Fill
+    });
     column![
         top,
-        row![
-            column![model, target, units, references]
-                .spacing(10)
-                .width(Length::FillPortion(3)),
-            container(mapping).width(Length::FillPortion(2)),
-        ]
-        .spacing(10),
+        body,
         footer("dgn", t!("Import"), Some(msg(ImportDialogMsg::DgnOk))),
     ]
     .spacing(10)
     .padding([10, 12])
     .width(sizing.width)
     .into()
+}
+
+#[cfg(test)]
+mod dgn_dialog_view_tests {
+    use super::*;
+    use iced::advanced::widget::{self, Operation};
+
+    /// A generated DGN Import dialog must keep its Ok/Cancel bar visible at
+    /// the dialog's capped height and at clamped window heights: the body
+    /// scrolls instead of cliping the footer, whatever the window leaves.
+    #[test]
+    fn ok_and_cancel_stay_visible_at_the_dialog_height_cap() {
+        let state = DgnImportState {
+            path: "/tmp/no-such-ocs-drawing.dgn".into(),
+            version: "V7",
+            models: vec![crate::ui::window::pdf_dialogs::PageThumb {
+                label: "Default".into(),
+                image: None,
+            }],
+            model: 0,
+            current_drawing: false,
+            prefix_duplicates: false,
+            sub_units: false,
+            explode_text_nodes: false,
+            code_page: Some(1250),
+            references: crate::modules::insert::dgn_import::ReferenceMode::Translate,
+            existing_reference: crate::modules::insert::dgn_import::ExistingReference::Prompt,
+            units: ("m".into(), "mm".into()),
+            mapping_tab: 0,
+            mapping: Default::default(),
+        };
+        let _lock = crate::headless_ui_lock();
+        let mut renderer = iced::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        // 680 is the dialog's cap; smaller heights are the window clamping
+        // the modal below it (the reported blank footer buttons).
+        for window_height in [680.0, 620.0, 580.0] {
+            let mut ui = iced_test::runtime::user_interface::UserInterface::build(
+                view_dgn_import(&state, crate::ui::modal::ModalSizing::FILL),
+                iced::Size::new(900.0, window_height),
+                iced_test::runtime::user_interface::Cache::default(),
+                &mut renderer,
+            );
+            for label in ["Import", "Cancel"] {
+                let mut find = iced_test::Selector::find(label);
+                ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+                let bounds = match widget::Operation::finish(&find) {
+                    widget::operation::Outcome::Some(Some(target)) => target.visible_bounds(),
+                    _ => panic!("{label} button is not in the rendered dialog"),
+                };
+                assert!(
+                    matches!(bounds, Some(iced::Rectangle { y, height, .. })
+                        if height >= 14.0 && y >= 0.0 && y + height <= window_height + 1.0),
+                    "at window height {window_height}: {label} button renders {bounds:?}"
+                );
+            }
+        }
+    }
 }

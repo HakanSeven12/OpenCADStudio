@@ -59,6 +59,7 @@ kurbo = "0.13"
 # DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
 zip = { version = "8", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"
+encoding_rs = "0.8"
 tiny-skia = "0.11"
 # PDF writer shared by desktop export and the web export/preview/print path.
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }

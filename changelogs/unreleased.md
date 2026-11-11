@@ -19,6 +19,7 @@
 
 ### 🐛 Bug Fixes
 
+* **DGN V7 Text Code Page:** DGNIMPORT reads a V7 file's single-byte text and level names through a chosen Windows code page: the command line accepts `Standard;codepage=1250` or another supported page (`1251`, `1253`-`1258`, `874`, the CJK encodings 932/936/949/950, or `65001` for UTF-8) on the mapping setup, and the import window picks from the same list in its own card - the choice becomes the stored setting and immediately re-decodes the preview.
 * **Big Font Code Page Detection:** Removed the heuristic that forced `ansi_936` (GBK) for big-font files containing `"china"` in their name. Big5 big-fonts like `china1.shx` and `chineset.shx` (which contain trail bytes `< 0xA1`) are now correctly identified as `ansi_950` (Big5) instead of producing mojibake in viewports and exports. Legacy shape-only `chinese.shx` files alias to `chineset.shx` when available.
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
 * **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.

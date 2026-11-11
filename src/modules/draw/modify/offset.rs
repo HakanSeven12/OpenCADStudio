@@ -674,10 +674,10 @@ impl CadCommand for OffsetCommand {
         "OFFSET"
     }
 
-    /// The second point of a picked distance refuses as a distance prompt
-    /// with keywords (measured).
+    /// The offset distance and the second point of a picked distance refuse
+    /// as a distance prompt with keywords (measured).
     fn point_rejection(&self) -> Option<String> {
-        matches!(self.step, Step::ReferenceSecond { .. }).then(|| {
+        matches!(self.step, Step::Distance | Step::ReferenceSecond { .. }).then(|| {
             t!("Requires numeric distance, two points, or option keyword.").into_owned()
         })
     }

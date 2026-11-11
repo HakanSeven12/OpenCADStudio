@@ -556,7 +556,7 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
         });
     }
 
-    let mut sections = vec![
+    let sections = vec![
         PropSection {
             title: t!("Pattern").into_owned(),
             props: pattern_props,
@@ -634,7 +634,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 match requested {
                     HatchPatternType::UserDefined => {
                         // Rebuild user-defined geometry from its parameters.
-                        h.pattern = document::entities::HatchPattern::new("_U");
+                        h.pattern = document::entities::HatchPattern::new("_USER");
                     }
                     HatchPatternType::Predefined => {
                         if let Some(entry) = crate::scene::model::hatch_patterns::find("ANSI31") {
@@ -724,7 +724,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 document::entities::HatchPatternType::UserDefined
             ) {
                 h.pattern.lines.clear();
-                h.pattern.name = "_U".to_string();
+                h.pattern.name = "_USER".to_string();
             }
         }
         // Origin rows are relative offsets and return to zero after commit.

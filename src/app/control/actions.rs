@@ -1422,6 +1422,8 @@ impl OpenCADStudio {
     }
     pub(super) fn control_ui_action(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let name = string(req, "name")?;
+        // The scale windows set Ctrl/Shift for one click only.
+        let modifiers = (self.ctrl_down, self.shift_down);
         // Without a prompt there is no failed open to retry.
         if name == "recovery_accept" && !self.focus_dialog(crate::app::ModalKind::RecoveryPrompt) {
             return Ok(Task::none());
@@ -3897,6 +3899,8 @@ impl OpenCADStudio {
                 ))
             }
         };
-        Ok(self.update(msg))
+        let task = self.update(msg);
+        (self.ctrl_down, self.shift_down) = modifiers;
+        Ok(task)
     }
 }

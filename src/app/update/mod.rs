@@ -7142,6 +7142,11 @@ impl OpenCADStudio {
                         .position(|s| s.eq_ignore_ascii_case(&name))
                     {
                         self.scale_manager_multi.remove(pos);
+                        // Edit and Move act on the selected row: the last
+                        // one still picked, not the one just dropped.
+                        if let Some(last) = self.scale_manager_multi.last().cloned() {
+                            self.load_scale_editor(&last);
+                        }
                         return Task::none();
                     }
                     self.scale_manager_multi.push(name.clone());
@@ -10520,6 +10525,12 @@ impl OpenCADStudio {
                 if !handles.is_empty() {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match app.tabs[i].scene.document.get_entity_mut(handle) {
+                            // None turns the background mask off.
+                            Some(document::EntityType::MText(m))
+                                if color == document::types::Color::None =>
+                            {
+                                m.background_fill_flags &= !0x03;
+                            }
                             Some(document::EntityType::MText(m)) => {
                                 m.background_color = color;
                                 // Picking a colour turns the background on in Fill

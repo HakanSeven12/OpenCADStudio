@@ -71,7 +71,16 @@ impl OpenCADStudio {
     /// distance as at a point prompt).
     pub(crate) fn point_modifier_step(&self, i: usize) -> bool {
         self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
-            !c.input_kind().is_free_text() && !c.needs_entity_pick() && !c.is_selection_gathering()
+            // A name prompt (block, layer, style) is not one: there `END`
+            // or `NODE` is the name typed.
+            (!c.input_kind().wants_text()
+                || c.point_step_accepts_keywords()
+                || matches!(
+                    c.dyn_field(),
+                    crate::command::DynField::Distance | crate::command::DynField::Angle
+                ))
+                && !c.needs_entity_pick()
+                && !c.is_selection_gathering()
         })
     }
 
@@ -120,7 +129,7 @@ impl OpenCADStudio {
             return Some(Ok(None));
         };
         let from = self.last_point;
-        if let Some(hit) = self.snap_query(i, wcs, from) {
+        if let Some(hit) = self.snap_query(i, wcs, from, None) {
             return Some(Ok(Some(hit)));
         }
         // No feature inside the aperture: the object under it answers with
@@ -129,7 +138,7 @@ impl OpenCADStudio {
             &mut self.snapper.enabled,
             std::iter::once(crate::snap::SnapType::Nearest).collect(),
         );
-        let under = self.snap_query(i, wcs, from);
+        let under = self.snap_query(i, wcs, from, None);
         self.snapper.enabled = saved;
         let owner = under.and_then(|hit| hit.source).map(|source| source.handle);
         if let Some(owner) = owner {
@@ -144,7 +153,7 @@ impl OpenCADStudio {
                 .collect();
             let radius = self.snapper.osnap_radius_px;
             self.snapper.osnap_radius_px = f32::MAX / 4.0;
-            let hit = self.snap_over_wires(i, wcs, from, &wires);
+            let hit = self.snap_query(i, wcs, from, Some(&wires));
             self.snapper.osnap_radius_px = radius;
             if let Some(hit) = hit {
                 return Some(Ok(Some(hit)));

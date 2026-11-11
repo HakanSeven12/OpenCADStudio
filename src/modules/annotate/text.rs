@@ -486,6 +486,14 @@ impl CadCommand for TextCommand {
         matches!(self.step, Step::Start)
     }
 
+    fn dyn_field(&self) -> crate::command::DynField {
+        match self.step {
+            Step::Height => crate::command::DynField::Distance,
+            Step::Rotation => crate::command::DynField::Angle,
+            _ => crate::command::DynField::Point,
+        }
+    }
+
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let token = text.trim();
         let upper = token.to_ascii_uppercase();

@@ -3926,8 +3926,6 @@ annotate =
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED  Adja meg a méretszöveget (üresen: mért érték):
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Adja meg a formázott méretszöveget (üres = mért érték):
     .dimaligned-select-object-to-dimension = DIMALIGNED Válassza ki a méretezendő objektumot:
-    .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Adja meg a méretvonal helyét [Mtext / Text (Szöveg) / Angle (Szög)]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját vagy <objektum kiválasztása>:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Adja meg a méretvonal helyét [Mtext/Text/Angle]:
     .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Adja meg a második segédvonal kezdőpontját:
@@ -4084,9 +4082,6 @@ annotate =
     .dimcontinue-specify-second-extension-line-origin-select-undo-select = DIMCONTINUE  Adja meg a második segédvonal kezdőpontját [Select/Undo] <Select>:
     .leader-specify-landing-point = LEADER  Adja meg a vállpontot:
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Adja meg a formázott méretszöveget (üres = mért érték):
-    .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
-    .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Adja meg az első segédvonal kezdőpontját vagy <objektum kiválasztása>:
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  Adja meg a méretvonal szögét (fok):
     .dimlinear-select-object-to-dimension = DIMLINEAR  Jelölje ki a méretezendő objektumot:
     .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:

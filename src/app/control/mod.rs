@@ -1021,7 +1021,7 @@ impl OpenCADStudio {
                     if off_screen {
                         json!({"ok":true,"snap":null,"reason":"point_outside_viewport"})
                     } else {
-                        match self.snap_query(i, world, from) {
+                        match self.snap_query(i, world, from, None) {
                             Some(hit) => {
                                 json!({"ok":true,"snap":format!("{:?}", hit.snap_type),"world":[hit.world.x,hit.world.y,hit.world.z]})
                             }

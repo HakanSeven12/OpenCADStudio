@@ -4722,6 +4722,7 @@ mod tests {
             text.aabb[2]
         );
         assert!(text.aabb[0] >= 0.0, "text starts at {}", text.aabb[0]);
+    }
 
     /// A file keeps where each cell's text sat when it was saved. That
     /// placement holds only while the table is as the file left it: once

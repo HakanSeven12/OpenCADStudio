@@ -958,3 +958,62 @@ mod modify_node_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod data_node_tests {
+    use serde_json::{json, Value};
+
+    /// Adds node `name` to the active tab's graph with `inputs` set, and
+    /// returns its id.
+    fn add(app: &mut crate::app::OpenCADStudio, name: &str, inputs: Value) -> super::NodeId {
+        let i = app.active_tab;
+        let spec = super::ops::resolve(name).expect("node type");
+        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        for (field, value) in inputs.as_object().unwrap() {
+            let port = super::Port { node: id, field: field.clone() };
+            let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+        }
+        id
+    }
+
+    fn output(app: &crate::app::OpenCADStudio, id: super::NodeId, field: &str) -> Value {
+        let graph = &app.tabs[app.active_tab].graph.engine;
+        graph.node(id).and_then(|node| node.outputs.get(field).cloned()).unwrap_or(Value::Null)
+    }
+
+    /// A CSV written by one node reads back through another, and a
+    /// non-CSV path is refused.
+    #[test]
+    fn csv_files_round_trip() {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let dir = std::env::temp_dir().join(format!("ocs-csv-node-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stations.csv");
+        let rows = json!([["station", "label"], [0, "start"], [20, "A, B"]]);
+        let writer = add(&mut app, "Write CSV", json!({"rows": rows, "path": path.to_string_lossy()}));
+        assert_eq!(output(&app, writer, "written"), json!(true));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "station,label\n0,start\n20,\"A, B\"\n");
+
+        let reader = add(&mut app, "Read CSV", json!({"path": path.to_string_lossy()}));
+        assert_eq!(output(&app, reader, "column 1"), json!([0.0, 20.0]));
+        assert_eq!(output(&app, reader, "column 2"), json!(["start", "A, B"]));
+        assert_eq!(output(&app, reader, "count"), json!(2.0));
+
+        let refused = add(&mut app, "Write CSV", json!({"rows": rows, "path": dir.join("x.exe").to_string_lossy()}));
+        assert_eq!(output(&app, refused, "written"), json!(false));
+        assert!(!dir.join("x.exe").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A list on a scalar input runs the node once per item.
+    #[test]
+    fn data_nodes_lace_over_lists() {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let label = add(&mut app, "Format Text", json!({"template": "P-{a:00}", "a": [1, 2, 10]}));
+        assert_eq!(output(&app, label, "result"), json!(["P-01", "P-02", "P-10"]));
+        let bigger = add(&mut app, "Expression", json!({"expression": "a > 1", "a": [0, 2]}));
+        assert_eq!(output(&app, bigger, "result"), json!([false, true]));
+    }
+}

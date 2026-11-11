@@ -1188,6 +1188,11 @@ common =
     .snap-override-label-next-pick-only = Modificación de referencia: __ocs_fmt_0__ (solo la siguiente designación).
     .no-snap-found-for-specified-point = No se ha encontrado __ocs_fmt_0__ en el punto especificado.
     .invalid-point-input = Entrada de punto no válida.
+    .point-2d-or-keyword = Se requiere un punto 2D o una palabra clave de opción.
+    .angle-point-or-keyword = Se requiere un ángulo numérico válido, un segundo punto o una palabra clave de opción.
+    .distance-point-or-keyword = Se requiere una distancia numérica, un segundo punto o una palabra clave de opción.
+    .radius-point-or-diameter = Se requiere un radio numérico, un punto en la circunferencia o "D".
+    .invalid-input = Entrada no válida.
     .solid-created = Se creó el sólido.
     .source-object-not-found = No se encontró el objeto de origen.
     .spacing = Espaciado
@@ -3912,7 +3917,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Introduzca el texto de cota con formato (vacío = valor medido):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Seleccione el objeto que desea acotar:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Especifique la ubicación de la línea de cota [Mtext/Texto/Ángulo]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique el origen de la primera línea de referencia o pulse Enter para seleccionar un objeto:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique el origen de la primera línea de referencia o <seleccionar objeto>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique el origen de la segunda línea de referencia:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Especifique el ángulo del texto (grados):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Introduzca el texto de cota (vacío = valor medido):
@@ -4073,7 +4078,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Introduzca el texto de cota con formato (vacío = valor medido):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Especifique el origen de la primera línea de referencia o pulse Enter para seleccionar un objeto:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Especifique el origen de la primera línea de referencia o <seleccionar objeto>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Especifique el origen de la segunda línea de referencia:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

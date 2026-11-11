@@ -94,6 +94,12 @@ impl CadCommand for ScaleCommand {
         "SCALE"
     }
 
+    fn point_rejection(&self) -> Option<String> {
+        matches!(self.step, Step::Factor { .. }).then(|| {
+            t!("Requires numeric distance, second point, or option keyword.").into_owned()
+        })
+    }
+
     fn prompt(&self) -> String {
         match &self.step {
             Step::Base => t!(

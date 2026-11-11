@@ -1186,6 +1186,11 @@ common =
     .snap-override-label-next-pick-only = Objectmagneet negeren: __ocs_fmt_0__ (alleen volgende selectie).
     .no-snap-found-for-specified-point = Geen __ocs_fmt_0__ gevonden voor het opgegeven punt.
     .invalid-point-input = Ongeldige puntinvoer.
+    .point-2d-or-keyword = 2D-punt of optietrefwoord vereist.
+    .angle-point-or-keyword = Geldige numerieke hoek, tweede punt of optietrefwoord vereist.
+    .distance-point-or-keyword = Numerieke afstand, tweede punt of optietrefwoord vereist.
+    .radius-point-or-diameter = Numerieke straal, punt op de omtrek of "D" vereist.
+    .invalid-input = Ongeldige invoer.
     .solid-created = Vast gemaakt.
     .source-object-not-found = Bronobject niet gevonden.
     .spacing = Afstand
@@ -3910,7 +3915,7 @@ annotate =
     .ddedit-select-text-entity = DDEDIT Selecteer een tekstobject:
     .dimaligned-enter-dimension-text-blank-measured = DIMALIGNED Voer maattekst in (leeg = gemeten waarde):
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Geef de positie van de maatlijn op [Tekst/Hoek]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Vermeld de oorsprong van de eerste extensieregel:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Geef de oorsprong van de eerste maathulplijn op of <object selecteren>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Vermeld de oorsprong van de tweede extensieregel [Tekst/hoek]:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Teksthoek (graden) specificeren:
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Voer maattekst in (leeg = gemeten waarde):
@@ -4064,7 +4069,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Voer opgemaakte maattekst in (leeg = gemeten waarde):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Vermeld de oorsprong van de eerste extensieregel:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Geef de oorsprong van de eerste maathulplijn op of <object selecteren>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Vermeld de oorsprong van de tweede extensieregel [Tekst/hoek]:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

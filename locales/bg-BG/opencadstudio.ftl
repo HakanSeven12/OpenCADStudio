@@ -1187,6 +1187,11 @@ common =
     .snap-override-label-next-pick-only = Прескачане на закачване: __ocs_fmt_0__ (само за следващото избиране).
     .no-snap-found-for-specified-point = Не е намерено __ocs_fmt_0__ за указаната точка.
     .invalid-point-input = Невалидно въвеждане на точка.
+    .point-2d-or-keyword = Изисква се 2D точка или ключова дума на опция.
+    .angle-point-or-keyword = Изисква се валиден числов ъгъл, втора точка или ключова дума на опция.
+    .distance-point-or-keyword = Изисква се числово разстояние, втора точка или ключова дума на опция.
+    .radius-point-or-diameter = Изисква се числов радиус, точка от окръжността или "D".
+    .invalid-input = Невалидно въвеждане.
     .solid-created = Тялото е създадено.
     .source-object-not-found = Изходният обект не е намерен.
     .spacing = Разстояние
@@ -3911,7 +3916,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Въведи форматиран текст на оразмеряване (празно = измерена стойност):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Избери обект за оразмеряване:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Посочи местоположение на линията за оразмеряване [Mtext/Текст/Ъгъл]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Посочи начало на първата удължителна линия или натисни Enter за избор на обект:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Посочи начало на първата удължителна линия или <избор на обект>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Посочи начало на втората удължителна линия:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Посочи ъгъл на текста (градуси):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Въведи текст на оразмеряване (празно = измерена стойност):
@@ -4072,7 +4077,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Въведи форматиран текст на оразмеряване (празно = измерена стойност):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Посочи начало на първата удължителна линия или натисни Enter за избор на обект:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Посочи начало на първата удължителна линия или <избор на обект>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Посочи начало на втората удължителна линия:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

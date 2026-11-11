@@ -1178,6 +1178,11 @@ common =
     .snap-override-label-next-pick-only = スナップ優先: __ocs_fmt_0__（次の選択のみ）。
     .no-snap-found-for-specified-point = 指定した点に __ocs_fmt_0__ が見つかりません。
     .invalid-point-input = 点の入力が無効です。
+    .point-2d-or-keyword = 2D 点またはオプション キーワードが必要です。
+    .angle-point-or-keyword = 有効な角度の数値、2 点目、またはオプション キーワードが必要です。
+    .distance-point-or-keyword = 距離の数値、2 点目、またはオプション キーワードが必要です。
+    .radius-point-or-diameter = 半径の数値、円周上の点、または "D" が必要です。
+    .invalid-input = 入力が無効です。
     .solid-created = ソリッドを作成しました。
     .source-object-not-found = 元オブジェクトが見つかりません。
     .spacing = 間隔
@@ -3902,7 +3907,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  書式付き寸法文字を入力（空白 = 計測値）:
     .dimaligned-select-object-to-dimension = DIMALIGNED  寸法を記入するオブジェクトを選択:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  寸法線の位置を指定 [Mtext/文字/角度]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  1 本目の寸法補助線の起点を指定、または Enter でオブジェクトを選択:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  1 本目の寸法補助線の起点を指定 または <オブジェクトを選択>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  2 本目の寸法補助線の起点を指定:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  文字角度を指定（度）:
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  寸法値を入力（空白 = 計測値）:
@@ -4063,7 +4068,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  書式付き寸法文字を入力（空白 = 計測値）:
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  1 本目の寸法補助線の起点を指定、または Enter でオブジェクトを選択:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  1 本目の寸法補助線の起点を指定 または <オブジェクトを選択>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  2 本目の寸法補助線の起点を指定:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

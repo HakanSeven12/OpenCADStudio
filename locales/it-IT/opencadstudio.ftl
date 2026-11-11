@@ -1187,6 +1187,11 @@ common =
     .snap-override-label-next-pick-only = Sostituzione dello snap: __ocs_fmt_0__ (solo scelta successiva).
     .no-snap-found-for-specified-point = Nessun __ocs_fmt_0__ trovato per il punto specificato.
     .invalid-point-input = Input di punto non valido.
+    .point-2d-or-keyword = Richiesto punto 2D o parola chiave di opzione.
+    .angle-point-or-keyword = Richiesto angolo numerico valido, secondo punto o parola chiave di opzione.
+    .distance-point-or-keyword = Richiesta distanza numerica, secondo punto o parola chiave di opzione.
+    .radius-point-or-diameter = Richiesto raggio numerico, punto sulla circonferenza o "D".
+    .invalid-input = Input non valido.
     .solid-created = Solido creato.
     .source-object-not-found = Oggetto di origine non trovato.
     .spacing = Distanziamento
@@ -3911,7 +3916,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Immettere il testo di quota formattato (vuoto = valore misurato):
     .dimaligned-select-object-to-dimension = DIMALIGNED Selezionare l'oggetto da quotare:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Specificare la posizione della linea di quota [Mtext/Testo/Angolo]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Specificare l'origine della prima linea di estensione o premere Invio per selezionare un oggetto:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Specificare l'origine della prima linea di estensione o <selezionare oggetto>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Specificare l'origine della seconda linea di estensione:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Specificare l'angolo del testo (gradi):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Immettere il testo di quota (vuoto = valore misurato):
@@ -4072,7 +4077,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Immettere il testo di quota formattato (vuoto = valore misurato):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Specificare l'origine della prima linea di estensione o premere Invio per selezionare un oggetto:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Specificare l'origine della prima linea di estensione o <selezionare oggetto>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Specificare l'origine della seconda linea di estensione:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

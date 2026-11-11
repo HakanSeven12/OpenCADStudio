@@ -969,6 +969,12 @@ impl CadCommand for PlineCommand {
         "PLINE"
     }
 
+    /// The next-point prompt asks for a 2D point or a keyword (measured).
+    fn point_rejection(&self) -> Option<String> {
+        (!self.vertices.is_empty() && matches!(self.sub, Sub::None))
+            .then(|| t!("2D point or option keyword required.").into_owned())
+    }
+
     fn prompt(&self) -> String {
         if self.vertices.is_empty() {
             return t!("PLINE  Specify start point:").into_owned();

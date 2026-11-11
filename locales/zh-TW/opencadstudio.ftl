@@ -1187,6 +1187,11 @@ common =
     .snap-override-label-next-pick-only = 鎖點覆寫：__ocs_fmt_0__（僅限下一個選取點）。
     .no-snap-found-for-specified-point = 在指定點找不到__ocs_fmt_0__。
     .invalid-point-input = 點輸入無效。
+    .point-2d-or-keyword = 需要二維點或選項關鍵字。
+    .angle-point-or-keyword = 需要有效的數值角度、第二點或選項關鍵字。
+    .distance-point-or-keyword = 需要數值距離、第二點或選項關鍵字。
+    .radius-point-or-diameter = 需要數值半徑、圓周上的點或 "D"。
+    .invalid-input = 輸入無效。
     .solid-created = 已建立實體。
     .source-object-not-found = 找不到來源物件。
     .spacing = 間距
@@ -3911,7 +3916,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  輸入帶格式的標註文字（空白 = 測量值）：
     .dimaligned-select-object-to-dimension = DIMALIGNED  選取要標註的物件：
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  指定尺寸線位置 [多行文字/文字/角度]：
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一條尺寸界線原點，或按 Enter 選取物件：
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一條尺寸界線原點或 <選取物件>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  指定第二條尺寸界線原點：
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  指定文字角度（度）：
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  輸入標註文字（空白 = 測量值）：
@@ -4072,7 +4077,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  輸入帶格式的標註文字（空白 = 測量值）：
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  指定第一條尺寸界線原點，或按 Enter 選取物件：
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  指定第一條尺寸界線原點或 <選取物件>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  指定第二條尺寸界線原點：
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

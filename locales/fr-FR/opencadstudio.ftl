@@ -1188,6 +1188,11 @@ common =
     .snap-override-label-next-pick-only = Accrochage temporaire : __ocs_fmt_0__ (prochaine sélection uniquement).
     .no-snap-found-for-specified-point = Aucun __ocs_fmt_0__ trouvé pour le point spécifié.
     .invalid-point-input = Entrée de point non valide.
+    .point-2d-or-keyword = Point 2D ou mot-clé d'option requis.
+    .angle-point-or-keyword = Angle numérique valide, deuxième point ou mot-clé d'option requis.
+    .distance-point-or-keyword = Distance numérique, deuxième point ou mot-clé d'option requis.
+    .radius-point-or-diameter = Rayon numérique, point sur la circonférence ou "D" requis.
+    .invalid-input = Entrée non valide.
     .solid-created = Solide créé.
     .source-object-not-found = Objet source introuvable.
     .spacing = Espacement
@@ -3912,7 +3917,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Saisissez le texte de cote formaté (vide = valeur mesurée) :
     .dimaligned-select-object-to-dimension = DIMALIGNED Sélectionnez l'objet à coter :
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Spécifiez la position de la ligne de cote [Mtext/Texte/Angle] :
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Spécifiez l'origine de la première ligne d'attache ou appuyez sur Entrée pour sélectionner un objet :
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Spécifiez l'origine de la première ligne d'attache ou <sélectionner un objet> :
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Spécifiez l'origine de la deuxième ligne d'attache :
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Spécifiez l'angle de texte (degrés):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Saisissez le texte de cote (vide = valeur mesurée) :
@@ -4073,7 +4078,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Saisissez le texte de cote formaté (vide = valeur mesurée) :
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Spécifiez l'origine de la première ligne d'attache ou appuyez sur Entrée pour sélectionner un objet :
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Spécifiez l'origine de la première ligne d'attache ou <sélectionner un objet> :
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Spécifiez l'origine de la deuxième ligne d'attache :
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

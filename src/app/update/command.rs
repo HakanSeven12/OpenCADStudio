@@ -1197,18 +1197,10 @@ impl OpenCADStudio {
 
             // A point prompt refuses other text as the reference does, with
             // a plain line before asking again.
-            let has_options = self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .is_some_and(|command| !command.options().is_empty());
-            self.command_line.push_rejection(
-                if has_options {
-                    crate::t!("Point or option keyword required.")
-                } else {
-                    crate::t!("Invalid point.")
-                }
-                .as_ref(),
-            );
+            if let Some(command) = self.tabs[i].active_cmd.as_deref() {
+                let line = crate::command::point_rejection_line(command);
+                self.command_line.push_rejection(&line);
+            }
             return self.focus_cmd_input();
         }
         if let Some(cmd) = self.command_line.submit() {

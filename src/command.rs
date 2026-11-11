@@ -3050,6 +3050,19 @@ impl CmdOption {
     }
 }
 
+/// The refusal a point prompt prints: the command's own message, else
+/// "Point or option keyword required." where it offers keywords and
+/// "Invalid point." where it does not.
+pub fn point_rejection_line(command: &dyn CadCommand) -> String {
+    command.point_rejection().unwrap_or_else(|| {
+        if command.options().is_empty() {
+            crate::t!("Invalid point.").into_owned()
+        } else {
+            crate::t!("Point or option keyword required.").into_owned()
+        }
+    })
+}
+
 /// What kind of input the command's current step expects from the command line.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum InputKind {
@@ -3649,6 +3662,14 @@ pub trait CadCommand: Send {
     /// dynamic-input distance/angle entirely. Default `false`.
     fn point_step_accepts_keywords(&self) -> bool {
         false
+    }
+
+    /// The line this point prompt prints for input it cannot use: text it
+    /// cannot read, or a typed object snap that found nothing there (measured:
+    /// both print the prompt's own message). `None` is the plain point
+    /// prompt's message, see [`point_rejection_line`].
+    fn point_rejection(&self) -> Option<String> {
+        None
     }
 
     /// Current drawing-persisted SKETCH settings.

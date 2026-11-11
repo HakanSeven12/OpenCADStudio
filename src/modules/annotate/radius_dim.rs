@@ -134,6 +134,11 @@ impl CadCommand for RadiusDimensionCommand {
         "DIMRADIUS"
     }
 
+    /// A dimension's point prompts refuse unusable input this way (measured).
+    fn point_rejection(&self) -> Option<String> {
+        Some(t!("Invalid point input.").into_owned())
+    }
+
     fn prompt(&self) -> String {
         if self.awaiting_text {
             return t!("DIMRADIUS  Enter dimension text (blank = measured value):").into_owned();

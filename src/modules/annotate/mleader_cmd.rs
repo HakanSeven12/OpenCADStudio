@@ -428,6 +428,10 @@ impl CadCommand for MLeaderCommand {
         "MLEADER"
     }
 
+    fn point_rejection(&self) -> Option<String> {
+        Some(crate::tr!("mleader-prompt", "invalid-input"))
+    }
+
     fn set_working_plane(&mut self, plane: WorkingPlane) {
         self.plane = plane;
     }

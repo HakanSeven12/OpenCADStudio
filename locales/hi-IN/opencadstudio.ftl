@@ -1176,6 +1176,11 @@ common =
     .snap-override-label-next-pick-only = स्नैप ओवरराइड: __ocs_fmt_0__ (अकेले केवल पिक)।
     .no-snap-found-for-specified-point = निर्दिष्ट बिंदु के लिए कोई __ocs_fmt_0__ नहीं मिला।
     .invalid-point-input = अमान्य बिंदु इनपुट।
+    .point-2d-or-keyword = 2D बिंदु या विकल्प कीवर्ड आवश्यक है।
+    .angle-point-or-keyword = मान्य संख्यात्मक कोण, दूसरा बिंदु या विकल्प कीवर्ड आवश्यक है।
+    .distance-point-or-keyword = संख्यात्मक दूरी, दूसरा बिंदु या विकल्प कीवर्ड आवश्यक है।
+    .radius-point-or-diameter = संख्यात्मक त्रिज्या, परिधि पर बिंदु या "D" आवश्यक है।
+    .invalid-input = अमान्य इनपुट।
     .solid-created = ठोस बनाया गया।
     .source-object-not-found = स्रोत ऑब्जेक्ट नहीं मिला।
     .spacing = रिक्ति
@@ -3900,7 +3905,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED स्वरूपित आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
     .dimaligned-select-object-to-dimension = DIMALIGNED आयाम देने के लिए ऑब्जेक्ट चुनें:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED आयाम रेखा का स्थान निर्दिष्ट करें [Mtext/टेक्स्ट/कोण]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या ऑब्जेक्ट चुनने के लिए Enter दबाएँ:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या <ऑब्जेक्ट चुनें>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED दूसरी एक्सटेंशन रेखा का मूल निर्दिष्ट करें:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
@@ -4061,7 +4066,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR स्वरूपित आयाम टेक्स्ट दर्ज करें (खाली = मापा मान):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या ऑब्जेक्ट चुनने के लिए Enter दबाएँ:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR पहली एक्सटेंशन रेखा का मूल निर्दिष्ट करें या <ऑब्जेक्ट चुनें>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR दूसरी एक्सटेंशन रेखा का मूल निर्दिष्ट करें:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

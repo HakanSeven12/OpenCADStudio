@@ -1192,6 +1192,11 @@ common =
     .snap-override-label-next-pick-only = Přepsání uchopení: __ocs_fmt_0__ (pouze pro další výběr).
     .no-snap-found-for-specified-point = Pro zadaný bod nebyl nalezen __ocs_fmt_0__.
     .invalid-point-input = Neplatné zadání bodu.
+    .point-2d-or-keyword = Je vyžadován 2D bod nebo klíčové slovo volby.
+    .angle-point-or-keyword = Je vyžadován platný číselný úhel, druhý bod nebo klíčové slovo volby.
+    .distance-point-or-keyword = Je vyžadována číselná vzdálenost, druhý bod nebo klíčové slovo volby.
+    .radius-point-or-diameter = Je vyžadován číselný poloměr, bod na obvodu nebo "D".
+    .invalid-input = Neplatné zadání.
     .solid-created = Těleso vytvořeno.
     .source-object-not-found = Zdrojový objekt nebyl nalezen.
     .spacing = Rozteč
@@ -3914,7 +3919,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Zadejte formátovaný text kóty (prázdné = naměřená hodnota):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Vyberte objekt ke kótování:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Určete polohu kótovací čáry [Mtext/Text/Úhel]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Určete počátek první vynášecí čáry nebo stiskněte Enter pro výběr objektu:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Určete počátek první vynášecí čáry nebo <vyberte objekt>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Určete počátek druhé vynášecí čáry:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Určete úhel textu (stupně):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Zadejte text kóty (prázdné = naměřená hodnota):
@@ -4075,7 +4080,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Zadejte formátovaný text kóty (prázdné = naměřená hodnota):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Určete počátek první vynášecí čáry nebo stiskněte Enter pro výběr objektu:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Určete počátek první vynášecí čáry nebo <vyberte objekt>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Určete počátek druhé vynášecí čáry:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

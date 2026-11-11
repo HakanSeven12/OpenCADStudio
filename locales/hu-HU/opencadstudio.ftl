@@ -1186,6 +1186,11 @@ common =
     .snap-override-label-next-pick-only = Ideiglenes tárgyraszter: __ocs_fmt_0__ (csak a következő pontnál).
     .no-snap-found-for-specified-point = A megadott ponthoz nem található __ocs_fmt_0__.
     .invalid-point-input = Érvénytelen pontmegadás.
+    .point-2d-or-keyword = 2D pont vagy opciókulcsszó szükséges.
+    .angle-point-or-keyword = Érvényes numerikus szög, második pont vagy opciókulcsszó szükséges.
+    .distance-point-or-keyword = Numerikus távolság, második pont vagy opciókulcsszó szükséges.
+    .radius-point-or-diameter = Numerikus sugár, kerületi pont vagy "D" szükséges.
+    .invalid-input = Érvénytelen bevitel.
     .solid-created = Test létrehozva.
     .source-object-not-found = A forrásobjektum nem található.
     .spacing = Térköz
@@ -3908,7 +3913,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Adja meg a formázott méretszöveget (üres = mért érték):
     .dimaligned-select-object-to-dimension = DIMALIGNED Válassza ki a méretezendő objektumot:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Adja meg a méretvonal helyét [Mtext / Text (Szöveg) / Angle (Szög)]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Adja meg az első segédvonal kezdőpontját vagy <objektum kiválasztása>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Adja meg a második segédvonal kezdőpontját:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Adja meg a szöveg szögét (fokban):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Adja meg a méretszöveget (üres = mért érték):
@@ -4065,7 +4070,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Adja meg a formázott méretszöveget (üres = mért érték):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Adja meg az első segédvonal kezdőpontját, vagy nyomja meg az Entert egy objektum kiválasztásához:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Adja meg az első segédvonal kezdőpontját vagy <objektum kiválasztása>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Adja meg a második segédvonal kezdőpontját:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [Mtext ({ common.mtext }) / Text ({ options.color-text }) / Angle ({ common.angle }) / Horizontal ({ common.horizontal }) / Vertical ({ common.vertical }) / Rotated ({ common.rotated })]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [Leader type ({ properties.leader-type }) / Landing ({ common.landing }) / Content type ({ style-manager.content-type }) / Max points ({ common.max-points }) / First angle ({ common.first-angle }) / Second angle ({ common.second-angle }) / Layer ({ common.layer }) / Exit ({ draw.sketch-exit })]:

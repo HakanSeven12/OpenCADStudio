@@ -1200,6 +1200,11 @@ common =
     .snap-override-label-next-pick-only = تجاوز الالتقاط: __ocs_fmt_0__ (للاختيار التالي فقط).
     .no-snap-found-for-specified-point = لم يتم العثور على __ocs_fmt_0__ عند النقطة المحددة.
     .invalid-point-input = إدخال نقطة غير صالح.
+    .point-2d-or-keyword = مطلوب نقطة ثنائية الأبعاد أو كلمة أساسية لخيار.
+    .angle-point-or-keyword = مطلوب زاوية رقمية صالحة أو نقطة ثانية أو كلمة أساسية لخيار.
+    .distance-point-or-keyword = مطلوب مسافة رقمية أو نقطة ثانية أو كلمة أساسية لخيار.
+    .radius-point-or-diameter = مطلوب نصف قطر رقمي أو نقطة على المحيط أو "D".
+    .invalid-input = إدخال غير صالح.
     .solid-created = أُنشئ المجسم.
     .source-object-not-found = لم يُعثر على الكائن المصدر.
     .spacing = التباعد
@@ -3924,7 +3929,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  أدخل نص البُعد المنسق (فارغ = القيمة المقاسة):
     .dimaligned-select-object-to-dimension = DIMALIGNED  حدد كائنًا لقياسه:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  حدد موقع خط البُعد [Mtext/نص/زاوية]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  حدد أصل خط الامتداد الأول أو اضغط Enter لتحديد كائن:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  حدد أصل خط الامتداد الأول أو <تحديد كائن>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  حدد أصل خط الامتداد الثاني:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  حدد زاوية النص (بالدرجات):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  أدخل نص البُعد (فارغ = القيمة المقاسة):
@@ -4085,7 +4090,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  أدخل نص البُعد المنسق (فارغ = القيمة المقاسة):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  حدد أصل خط الامتداد الأول أو اضغط Enter لتحديد كائن:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  حدد أصل خط الامتداد الأول أو <تحديد كائن>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  حدد أصل خط الامتداد الثاني:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

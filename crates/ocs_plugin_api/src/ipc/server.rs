@@ -158,13 +158,12 @@ pub fn handle_plugin_request(
                 // API v12: same grip-event refusal as execute_command — a
                 // nested run_command needs the iced loop; the plugin gets
                 // the honest Err, not a hang.
-                PluginResponse::CommandResult(Err(
+                PluginResponse::CommandResult(Err(format!(
                     "run_command refused during a custom-grip drag: the host message loop \
                      cannot pump nested commands from a grip delivery; apply the edits \
                      directly in the settle callback (push_undo + update/add entities), \
                      or replay commands at your own boundary"
-                        .to_string(),
-                ))
+                )))
             } else {
                 PluginResponse::CommandResult(host.run_command(request))
             }
@@ -250,17 +249,27 @@ pub fn handle_plugin_request(
             )
         }
         RegisterPluginClass { class } => {
-            PluginResponse::RegisterPluginClassResult(host.register_plugin_class(plugin_id, &class))
+            PluginResponse::RegisterPluginClassResult(host.register_plugin_class(
+                &plugin_id,
+                &class,
+            ))
         }
-        StagePluginClassInstance { instance } => PluginResponse::StagePluginClassInstanceResult(
-            host.stage_plugin_class_instance(plugin_id, &instance),
-        ),
+        StagePluginClassInstance { instance } => {
+            PluginResponse::StagePluginClassInstanceResult(host.stage_plugin_class_instance(
+                &plugin_id,
+                &instance,
+            ))
+        }
         PluginClassInstanceProperties { handle } => {
             PluginResponse::PluginClassInstancePropertiesResult(
                 host.plugin_class_instance_properties(handle),
             )
         }
-        ShowDialog(dialog) => PluginResponse::DialogResult(host.show_dialog(dialog)),
+        ShowDialog(dialog) => PluginResponse::DialogResult(if plugin_id.is_empty() {
+            host.show_dialog(dialog)
+        } else {
+            host.show_dialog_for_plugin(plugin_id, dialog)
+        }),
         RegisterPanel(panel) => PluginResponse::PanelRegistered(host.register_panel(panel)),
         UpdatePanel { panel_id, values } => {
             PluginResponse::PanelUpdated(host.update_panel(&panel_id, values))

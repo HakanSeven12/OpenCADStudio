@@ -3429,6 +3429,14 @@ pub trait CadCommand: Send {
         CmdResult::Cancel
     }
 
+    /// Called when an interactive control event occurs inside an open modal dialog.
+    fn on_dialog_action(
+        &mut self,
+        _event: ocs_plugin_api::dialog::DialogEvent,
+    ) -> ocs_plugin_api::dialog::DialogActionResponse {
+        ocs_plugin_api::dialog::DialogActionResponse::None
+    }
+
     /// Called when the user clicks and `needs_entity_pick()` is true.
     /// `handle` is the nearest wire's entity handle (Handle::NULL if nothing found).
     fn on_entity_pick(&mut self, _handle: Handle, _pt: DVec3) -> CmdResult {
@@ -4119,6 +4127,16 @@ pub trait CadCommand: Send {
         std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
     )> {
         Vec::new()
+    }
+
+    /// For out-of-process plugin commands, the owning plugin's manifest ID.
+    fn owner_plugin_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// For out-of-process plugin commands, the interactive command ID in the runner.
+    fn plugin_command_id(&self) -> Option<u64> {
+        None
     }
 }
 

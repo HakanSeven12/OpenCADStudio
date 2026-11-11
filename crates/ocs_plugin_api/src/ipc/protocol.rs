@@ -456,7 +456,9 @@ pub enum PluginResponse {
     StagePluginClassInstanceResult(Result<Vec<Handle>, String>),
     /// V14 (additive): a class instance's declared parameter rows (the
     /// read half of the session's properties pair).
-    PluginClassInstancePropertiesResult(Result<Vec<crate::host::PluginClassParameterRow>, String>),
+    PluginClassInstancePropertiesResult(
+        Result<Vec<crate::host::PluginClassParameterRow>, String>,
+    ),
     DialogResult(crate::dialog::DialogResponse),
     PanelRegistered(bool),
     PanelUpdated(bool),
@@ -527,5 +529,68 @@ impl OwnedPluginManifest {
         ApiVersion {
             major: self.api_version,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn discriminant_of<T: Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serialize");
+        u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+    }
+
+    #[test]
+    fn plugin_request_v14_to_v16_discriminants_are_preserved() {
+        assert_eq!(
+            discriminant_of(&PluginRequest::ShowDialog(crate::dialog::DialogDef::new("T"))),
+            50
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::RegisterPanel(
+                crate::dialog::PanelDef::new("id", "T")
+            )),
+            51
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::UpdatePanel {
+                panel_id: "id".into(),
+                values: Default::default(),
+            }),
+            52
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::TogglePanel {
+                panel_id: "id".into(),
+                show: None,
+            }),
+            53
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::BeginUndoGroup {
+                label: "group".into(),
+            }),
+            54
+        );
+        assert_eq!(discriminant_of(&PluginRequest::EndUndoGroup), 55);
+        assert_eq!(
+            discriminant_of(&PluginRequest::QueryEntities {
+                query: "{}".into(),
+            }),
+            56
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::RegisterQuadPanels { panels: vec![] }),
+            57
+        );
+        assert_eq!(
+            discriminant_of(&PluginRequest::UnregisterQuadPanels { panel_ids: vec![] }),
+            58
+        );
+        assert_eq!(
+            discriminant_of(&HostRequest::GetModalDialog { command_id: 1 }),
+            14
+        );
     }
 }

@@ -1086,11 +1086,7 @@ impl OpenCADStudio {
             let updates = cmd.take_pending_panel_updates();
             (res, updates)
         };
-        for (panel_id, values) in panel_updates {
-            if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                panel.update_values(values);
-            }
-        }
+        self.apply_panel_or_dialog_updates(panel_updates);
         if let Some(handle) = picked_handle {
             self.record_dimension_entity_points(i, None, handle, Vec::new());
         }

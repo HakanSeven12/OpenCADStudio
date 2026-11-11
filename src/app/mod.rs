@@ -4062,6 +4062,8 @@ pub enum Message {
     PluginDialogFilePick(String),
     /// File chosen from OS dialog for a file picker control.
     PluginDialogFilePicked(String, Option<std::path::PathBuf>),
+    /// Live text edit in a file picker text input in a plugin modal dialog.
+    PluginDialogFileTextChange(String, String),
     /// Table cell text change in a plugin modal dialog.
     PluginDialogTableCellChange(String, usize, usize, String),
     /// Add empty row to a table in a plugin modal dialog.
@@ -4074,6 +4076,8 @@ pub enum Message {
     PluginDialogSubmit,
     /// Cancel clicked in a plugin modal dialog.
     PluginDialogCancel,
+    PluginDialogButtonClick(String, Option<String>),
+    PluginDialogControlEvent(String, String, Option<ocs_plugin_api::dialog::DialogValue>),
     // ── Plugin dock panels ─────────────────────────────────────────────────
     PluginPanelButtonClick(String, String, Option<String>),
     PluginPanelTextChange(String, String, String),
@@ -4081,6 +4085,7 @@ pub enum Message {
     PluginPanelChoiceSelect(String, String, usize, String),
     PluginPanelFilePick(String, String),
     PluginPanelFilePicked(String, String, Option<std::path::PathBuf>),
+    PluginPanelFileTextChange(String, String, String),
     PluginPanelTableCellChange(String, String, usize, usize, String),
     PluginPanelTableAddRow(String, String),
     PluginPanelTableRemoveRow(String, String, usize),
@@ -7104,12 +7109,270 @@ impl OpenCADStudio {
         id
     }
 
-    /// Open a declarative plugin modal dialog.
+/// Open a declarative plugin modal dialog on the currently active tab.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open_plugin_dialog(&mut self, def: ocs_plugin_api::dialog::DialogDef) {
-        self.plugin_dialog_state = Some(crate::ui::window::plugin_dialog::PluginDialogState::new(
-            def,
-        ));
+        let tab = self.active_tab;
+        self.open_plugin_dialog_on_tab(tab, def, None);
+    }
+
+    /// Open a declarative plugin modal dialog associated with `tab` and an optional `explicit_plugin_id`.
+    pub(crate) fn open_plugin_dialog_on_tab(
+        &mut self,
+        tab: usize,
+        def: ocs_plugin_api::dialog::DialogDef,
+        explicit_plugin_id: Option<String>,
+    ) {
+        let (tab_id, plugin_id, command_id) = if let Some(t) = self.tabs.get(tab) {
+            let pid = explicit_plugin_id.or_else(|| {
+                t.active_cmd
+                    .as_ref()
+                    .and_then(|c| c.owner_plugin_id().map(str::to_string))
+            });
+            let cid = t.active_cmd.as_ref().and_then(|c| c.plugin_command_id());
+            (Some(t.id), pid, cid)
+        } else {
+            (None, explicit_plugin_id, None)
+        };
+        self.plugin_dialog_state = Some(
+            crate::ui::window::plugin_dialog::PluginDialogState::new(def)
+                .with_owner(tab_id, plugin_id, command_id),
+        );
         self.active_modal = Some(ModalKind::PluginDialog);
+    }
+
+    /// Resolve the tab index that owns the currently open plugin dialog, falling back to `active_tab`.
+    pub(crate) fn dialog_target_tab_index(&self) -> usize {
+        if let Some(tid) = self.plugin_dialog_state.as_ref().and_then(|s| s.tab_id) {
+            if let Some(idx) = self.tabs.iter().position(|t| t.id == tid) {
+                return idx;
+            }
+        }
+        self.active_tab
+    }
+
+    /// Apply queued `(panel_or_dialog_id, values)` updates from `take_pending_panel_updates`
+    /// to matching registered panels or the currently open modal dialog.
+    pub(crate) fn apply_panel_or_dialog_updates(
+        &mut self,
+        updates: Vec<(
+            String,
+            std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
+        )>,
+    ) {
+        for (target_id, values) in updates {
+            if let Some(panel) = self.plugin_panels.get_mut(&target_id) {
+                panel.update_values(values);
+                continue;
+            }
+            let lower = target_id.to_lowercase();
+            if let Some((_, panel)) = self
+                .plugin_panels
+                .iter_mut()
+                .find(|(k, _)| k.to_lowercase() == lower)
+            {
+                panel.update_values(values);
+                continue;
+            }
+            if let Some(state) = &mut self.plugin_dialog_state {
+                if target_id.is_empty()
+                    || state.def.title == target_id
+                    || state.def.title.eq_ignore_ascii_case(&target_id)
+                {
+                    state.update_values(values);
+                }
+            }
+        }
+    }
+
+    /// Update control values in an active modal dialog in-place.
+    #[allow(dead_code)]
+    pub fn update_dialog(
+        &mut self,
+        values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
+    ) -> bool {
+        if let Some(state) = &mut self.plugin_dialog_state {
+            state.update_values(values);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Dispatch a reactive action event from an open plugin modal dialog to the owning command/plugin.
+    pub(crate) fn dispatch_plugin_dialog_action(
+        &mut self,
+        control_id: String,
+        action: String,
+        value: Option<ocs_plugin_api::dialog::DialogValue>,
+    ) -> Task<Message> {
+        let tab_idx = self.dialog_target_tab_index();
+        let (action_resp, panel_updates, fallback_notify) =
+            if let Some(state) = &self.plugin_dialog_state {
+                let current_values = state.collect_response_map();
+                let dialog_title = state.def.title.clone();
+                let owner_plugin_id = state.plugin_id.clone();
+                let owner_command_id = state.command_id;
+                let event = ocs_plugin_api::dialog::DialogEvent {
+                    control_id: control_id.clone(),
+                    action: action.clone(),
+                    value: value.clone(),
+                    current_values: current_values.clone(),
+                };
+                if let Some(cmd) = self
+                    .tabs
+                    .get_mut(tab_idx)
+                    .and_then(|t| t.active_cmd.as_mut())
+                {
+                    let resp = cmd.on_dialog_action(event);
+                    let updates = cmd.take_pending_panel_updates();
+                    (
+                        Some(resp),
+                        updates,
+                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                    )
+                } else {
+                    (
+                        None,
+                        Vec::new(),
+                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                    )
+                }
+            } else {
+                (None, Vec::new(), None)
+            };
+
+        self.apply_panel_or_dialog_updates(panel_updates);
+
+        match action_resp {
+            Some(ocs_plugin_api::dialog::DialogActionResponse::UpdateValues(values)) => {
+                if let Some(state) = &mut self.plugin_dialog_state {
+                    state.update_values(values);
+                }
+            }
+            Some(ocs_plugin_api::dialog::DialogActionResponse::ReplaceDialog(new_def)) => {
+                if let Some(state) = &mut self.plugin_dialog_state {
+                    let tab_id = state.tab_id;
+                    let plugin_id = state.plugin_id.clone();
+                    let command_id = state.command_id;
+                    *state = crate::ui::window::plugin_dialog::PluginDialogState::new(*new_def)
+                        .with_owner(tab_id, plugin_id, command_id);
+                }
+            }
+            Some(ocs_plugin_api::dialog::DialogActionResponse::Submit) => {
+                return self.on_plugin_dialog_submit();
+            }
+            Some(ocs_plugin_api::dialog::DialogActionResponse::Close) => {
+                return self.on_plugin_dialog_cancel();
+            }
+            Some(ocs_plugin_api::dialog::DialogActionResponse::None) | None => {
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, mut current_vals)) = fallback_notify {
+                    if let Some(v) = value {
+                        current_vals.insert("__event_value__".to_string(), v);
+                    }
+                    crate::plugin::v4_support::publish_panel_action_to_plugin(
+                        owner_plugin_id.as_deref(),
+                        owner_command_id,
+                        dialog_title,
+                        control_id,
+                        action,
+                        Some(ocs_plugin_api::dialog::DialogValue::Fields(current_vals)),
+                    );
+                }
+            }
+        }
+        Task::none()
+    }
+
+    pub(crate) fn on_plugin_dialog_submit(&mut self) -> Task<Message> {
+        let tab_idx = self.dialog_target_tab_index();
+        let owner_plugin_id = self
+            .plugin_dialog_state
+            .as_ref()
+            .and_then(|s| s.plugin_id.clone());
+        let response = if let Some(state) = &self.plugin_dialog_state {
+            state.collect_response()
+        } else {
+            ocs_plugin_api::dialog::DialogResponse::Cancelled
+        };
+        self.close_active_modal();
+
+        let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
+            .tabs
+            .get_mut(tab_idx)
+            .and_then(|t| t.active_cmd.as_mut())
+        {
+            let res = cmd.on_dialog_response(response);
+            let next = if matches!(
+                res,
+                crate::command::CmdResult::CommitAndExit(_)
+                    | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                    | crate::command::CmdResult::Cancel
+            ) {
+                None
+            } else {
+                cmd.modal_dialog()
+            };
+            let updates = cmd.take_pending_panel_updates();
+            (Some(res), next, updates)
+        } else {
+            (None, None, Vec::new())
+        };
+
+        self.apply_panel_or_dialog_updates(panel_updates);
+
+        if let Some(def) = next_dialog {
+            self.open_plugin_dialog_on_tab(tab_idx, def, owner_plugin_id);
+        }
+
+        if let Some(res) = cmd_result {
+            self.apply_cmd_result(res)
+        } else {
+            Task::none()
+        }
+    }
+
+    pub(crate) fn on_plugin_dialog_cancel(&mut self) -> Task<Message> {
+        let tab_idx = self.dialog_target_tab_index();
+        let owner_plugin_id = self
+            .plugin_dialog_state
+            .as_ref()
+            .and_then(|s| s.plugin_id.clone());
+        self.close_active_modal();
+
+        let (cmd_result, next_dialog, panel_updates) = if let Some(cmd) = self
+            .tabs
+            .get_mut(tab_idx)
+            .and_then(|t| t.active_cmd.as_mut())
+        {
+            let res = cmd.on_dialog_response(ocs_plugin_api::dialog::DialogResponse::Cancelled);
+            let next = if matches!(
+                res,
+                crate::command::CmdResult::CommitAndExit(_)
+                    | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                    | crate::command::CmdResult::Cancel
+            ) {
+                None
+            } else {
+                cmd.modal_dialog()
+            };
+            let updates = cmd.take_pending_panel_updates();
+            (Some(res), next, updates)
+        } else {
+            (None, None, Vec::new())
+        };
+
+        self.apply_panel_or_dialog_updates(panel_updates);
+
+        if let Some(def) = next_dialog {
+            self.open_plugin_dialog_on_tab(tab_idx, def, owner_plugin_id);
+        }
+
+        if let Some(res) = cmd_result {
+            self.apply_cmd_result(res)
+        } else {
+            Task::none()
+        }
     }
 
     /// Install `cmd` as the active interactive command for tab `tab`.
@@ -7120,11 +7383,24 @@ impl OpenCADStudio {
         cmd: Box<dyn crate::command::CadCommand>,
     ) {
         let dialog = cmd.modal_dialog();
+        let owner_pid = cmd.owner_plugin_id().map(str::to_string);
+        let cmd_id = cmd.plugin_command_id();
+        let tab_id = self.tabs.get(tab).map(|t| t.id);
         if let Some(t) = self.tabs.get_mut(tab) {
             t.active_cmd = Some(cmd);
         }
         if let Some(dialog_def) = dialog {
-            self.open_plugin_dialog(dialog_def);
+            self.open_plugin_dialog_on_tab(tab, dialog_def, owner_pid);
+        } else if let Some(state) = &mut self.plugin_dialog_state {
+            if state.tab_id.is_none() {
+                state.tab_id = tab_id;
+            }
+            if state.plugin_id.is_none() {
+                state.plugin_id = owner_pid;
+            }
+            if state.command_id.is_none() {
+                state.command_id = cmd_id;
+            }
         }
     }
 

@@ -119,6 +119,38 @@ pub fn publish_panel_action(
     });
 }
 
+/// Deliver a panel or dialog control interaction to a specific owning plugin
+/// (when `plugin_id` is `Some`), or broadcast it to all plugins when `None`.
+pub fn publish_panel_action_to_plugin(
+    plugin_id: Option<&str>,
+    command_id: Option<u64>,
+    panel_id: String,
+    control_id: String,
+    action: String,
+    value: Option<ocs_plugin_api::dialog::DialogValue>,
+) {
+    match plugin_id {
+        Some(pid) => {
+            let notification = HostNotification::PanelAction {
+                panel_id,
+                control_id,
+                action,
+                value,
+            };
+            #[cfg(test)]
+            record_test_dispatch(&notification);
+            crate::plugin::external::with_manager(|mgr| {
+                if let Some((process, _api_version, alive)) = mgr.grip_endpoint(pid) {
+                    if alive {
+                        let _ = process.notify_plugin(command_id, notification);
+                    }
+                }
+            });
+        }
+        None => publish_panel_action(panel_id, control_id, action, value),
+    }
+}
+
 /// Deliver a quad cursor menu pick to the OWNING plugin only (API v15).
 ///
 /// The quad is not an active command: the pick path resolves the item's

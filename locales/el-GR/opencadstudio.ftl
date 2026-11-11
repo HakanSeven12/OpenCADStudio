@@ -1188,6 +1188,15 @@ common =
     .size = Μέγεθος
     .sketchy = Σκίτσο
     .snap-override-label-next-pick-only = Παράκαμψη έλξης: __ocs_fmt_0__ (μόνο για την επόμενη επιλογή).
+    .no-snap-found-for-specified-point = Δεν βρέθηκε __ocs_fmt_0__ για το καθορισμένο σημείο.
+    .invalid-point-input = Μη έγκυρη εισαγωγή σημείου.
+    .point-2d-or-keyword = Απαιτείται σημείο 2Δ ή λέξη-κλειδί επιλογής.
+    .angle-point-or-keyword = Απαιτείται έγκυρη αριθμητική γωνία, δεύτερο σημείο ή λέξη-κλειδί επιλογής.
+    .distance-point-or-keyword = Απαιτείται αριθμητική απόσταση, δεύτερο σημείο ή λέξη-κλειδί επιλογής.
+    .radius-point-or-diameter = Απαιτείται αριθμητική ακτίνα, σημείο στην περιφέρεια ή "D".
+    .invalid-2d-point = Μη έγκυρο σημείο 2Δ.
+    .distance-two-points-or-keyword = Απαιτείται αριθμητική απόσταση, δύο σημεία ή λέξη-κλειδί επιλογής.
+    .invalid-input = Μη έγκυρη εισαγωγή.
     .solid-created = Το στερεό δημιουργήθηκε.
     .source-object-not-found = Το αντικείμενο προέλευσης δεν βρέθηκε.
     .spacing = Απόσταση
@@ -3911,7 +3920,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Δώστε μορφοποιημένο κείμενο διάστασης (κενό = μετρημένη τιμή):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Επιλέξτε αντικείμενο προς διαστασιολόγηση:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Ορίστε θέση γραμμής διάστασης  [Mtext/Κείμενο/Γωνία]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Ορίστε αρχή της πρώτης γραμμής προέκτασης ή πατήστε Enter για επιλογή αντικειμένου:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Ορίστε αρχή της πρώτης γραμμής προέκτασης ή <επιλογή αντικειμένου>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Ορίστε αρχή της δεύτερης γραμμής προέκτασης:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Ορίστε γωνία κειμένου (μοίρες):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Δώστε κείμενο διάστασης (κενό = μετρημένη τιμή):
@@ -4083,7 +4092,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Δώστε μορφοποιημένο κείμενο διάστασης (κενό = μετρημένη τιμή):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Ορίστε αρχή της πρώτης γραμμής προέκτασης ή πατήστε Enter για επιλογή αντικειμένου:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Ορίστε αρχή της πρώτης γραμμής προέκτασης ή <επιλογή αντικειμένου>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Ορίστε αρχή της δεύτερης γραμμής προέκτασης:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

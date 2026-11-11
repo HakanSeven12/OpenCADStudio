@@ -197,6 +197,12 @@ impl CadCommand for RotateCommand {
         }
     }
 
+    fn point_rejection(&self) -> Option<String> {
+        matches!(self.step, Step::Angle { .. }).then(|| {
+            t!("Requires valid numeric angle, second point, or option keyword.").into_owned()
+        })
+    }
+
     fn prompt(&self) -> String {
         match &self.step {
             Step::Center if self.spatial => t!(

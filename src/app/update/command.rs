@@ -1067,11 +1067,14 @@ impl OpenCADStudio {
             // A point prompt that also takes keywords reads a typed
             // coordinate as the point: handing `300,50` to the step's text
             // reader would turn the comma into a decimal mark (300.5).
+            // A coordinate under a typed object snap is a point at any step
+            // that takes one, so the snap resolves it.
             let coordinate_at_point_step = parse_coord(&text).is_some()
-                && self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|c| c.point_step_accepts_keywords());
+                && (self.snapper.pending_override().is_some()
+                    || self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.point_step_accepts_keywords()));
             if !coordinate_at_point_step
                 && self.tabs[i]
                     .active_cmd
@@ -1142,7 +1145,18 @@ impl OpenCADStudio {
                         }
                     }
                 };
+                // An object snap override typed before the point snaps it.
+                let (wcs_pt, snapped) = match self.typed_override_snap(i, wcs_pt) {
+                    Some(Err(())) => return self.focus_cmd_input(),
+                    Some(Ok(Some(hit))) => (hit.world, Some(hit)),
+                    Some(Ok(None)) | None => (wcs_pt, None),
+                };
                 if !self.command_point_allowed(i, wcs_pt) {
+                    return Task::none();
+                }
+                // The accepted-snap list stays index-parallel with the
+                // points the command collects, as on the feed path.
+                if !self.record_accepted_snap(i, snapped, None, wcs_pt) {
                     return Task::none();
                 }
                 self.last_point = Some(wcs_pt);
@@ -1186,18 +1200,10 @@ impl OpenCADStudio {
 
             // A point prompt refuses other text as the reference does, with
             // a plain line before asking again.
-            let has_options = self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .is_some_and(|command| !command.options().is_empty());
-            self.command_line.push_rejection(
-                if has_options {
-                    crate::t!("Point or option keyword required.")
-                } else {
-                    crate::t!("Invalid point.")
-                }
-                .as_ref(),
-            );
+            if let Some(command) = self.tabs[i].active_cmd.as_deref() {
+                let line = crate::command::point_rejection_line(command);
+                self.command_line.push_rejection(&line);
+            }
             return self.focus_cmd_input();
         }
         if let Some(cmd) = self.command_line.submit() {

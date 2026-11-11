@@ -181,6 +181,11 @@ impl CadCommand for CircleCommand {
     fn name(&self) -> &'static str {
         "CIRCLE"
     }
+
+    fn point_rejection(&self) -> Option<String> {
+        matches!(self.step, StepCR::Radius(_))
+            .then(|| t!("Requires numeric radius, point on circumference, or \"D\".").into_owned())
+    }
     fn prompt(&self) -> String {
         match &self.step {
             StepCR::Center => t!("CIRCLE  Specify center point:").into_owned(),

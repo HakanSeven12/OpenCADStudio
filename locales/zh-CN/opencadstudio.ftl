@@ -1174,6 +1174,15 @@ common =
     .size = 大小
     .sketchy = 勾画
     .snap-override-label-next-pick-only = 抓取覆盖 : __ocs_fmt_0__ (仅选择下一步) 。
+    .no-snap-found-for-specified-point = 在指定点未找到__ocs_fmt_0__。
+    .invalid-point-input = 点输入无效。
+    .point-2d-or-keyword = 需要二维点或选项关键字。
+    .angle-point-or-keyword = 需要有效的数值角度、第二点或选项关键字。
+    .distance-point-or-keyword = 需要数值距离、第二点或选项关键字。
+    .radius-point-or-diameter = 需要数值半径、圆周上的点或 "D"。
+    .invalid-2d-point = 二维点无效。
+    .distance-two-points-or-keyword = 需要数值距离、两点或选项关键字。
+    .invalid-input = 输入无效。
     .solid-created = 实相所造.
     .source-object-not-found = 找不到源对象 。
     .spacing = 间距
@@ -3909,7 +3918,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  输入带格式的标注文字（空白 = 测量值）：
     .dimaligned-select-object-to-dimension = DIMALIGNED  选择要标注的对象：
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  指定尺寸线位置 [Mtext/文字/角度]：
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一条尺寸界线原点，或按 Enter 选择对象：
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  指定第一个尺寸界线原点或 <选择对象>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  指定第二条尺寸界线原点：
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  指定文字角度（度）：
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  输入标注文字（空白 = 测量值）：
@@ -4070,7 +4079,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  输入带格式的标注文字（空白 = 测量值）：
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  指定第一条尺寸界线原点，或按 Enter 选择对象：
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  指定第一个尺寸界线原点或 <选择对象>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  指定第二条尺寸界线原点：
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

@@ -1180,6 +1180,15 @@ common =
     .size = ຂະໜາດ
     .sketchy = ແບບຮ່າງ
     .snap-override-label-next-pick-only = ປ່ຽນຄ່າສະແນັບຊົ່ວຄາວ: __ocs_fmt_0__ (ສຳລັບການເລືອກຄັ້ງຕໍ່ໄປເທົ່ານັ້ນ).
+    .no-snap-found-for-specified-point = ບໍ່ພົບ __ocs_fmt_0__ ສຳລັບຈຸດທີ່ລະບຸ.
+    .invalid-point-input = ການປ້ອນຈຸດບໍ່ຖືກຕ້ອງ.
+    .point-2d-or-keyword = ຕ້ອງການຈຸດ 2D ຫຼື ຄຳສັບທາງເລືອກ.
+    .angle-point-or-keyword = ຕ້ອງການມຸມເປັນຕົວເລກທີ່ຖືກຕ້ອງ, ຈຸດທີສອງ ຫຼື ຄຳສັບທາງເລືອກ.
+    .distance-point-or-keyword = ຕ້ອງການໄລຍະທາງເປັນຕົວເລກ, ຈຸດທີສອງ ຫຼື ຄຳສັບທາງເລືອກ.
+    .radius-point-or-diameter = ຕ້ອງການລັດສະໝີເປັນຕົວເລກ, ຈຸດເທິງເສັ້ນຮອບວົງ ຫຼື "D".
+    .invalid-2d-point = ຈຸດ 2D ບໍ່ຖືກຕ້ອງ.
+    .distance-two-points-or-keyword = ຕ້ອງການໄລຍະທາງເປັນຕົວເລກ, ສອງຈຸດ ຫຼື ຄຳສັບທາງເລືອກ.
+    .invalid-input = ການປ້ອນຂໍ້ມູນບໍ່ຖືກຕ້ອງ.
     .solid-created = ສ້າງຮູບຊົງຕັນແລ້ວ.
     .source-object-not-found = ບໍ່ພົບວັດຖຸຕົ້ນສະບັບ.
     .spacing = ໄລຍະຫ່າງ
@@ -3912,7 +3921,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  ປ້ອນຂໍ້ຄວາມບອກຂະໜາດແບບຈັດຮູບແບບ (ຫວ່າງເປົ່າ = ຄ່າທີ່ວັດແທກໄດ້):
     .dimaligned-select-object-to-dimension = DIMALIGNED  ເລືອກວັດຖຸທີ່ຈະບອກຂະໜາດ:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  ກຳນົດຕຳແໜ່ງເສັ້ນບອກຂະໜາດ  [Mtext/Text/Angle]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທຳອິດ ຫຼື ກົດ Enter ເພື່ອເລືອກວັດຖຸ:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທຳອິດ ຫຼື <ເລືອກວັດຖຸ>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທີສອງ:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  ກຳນົດມຸມຂໍ້ຄວາມ (ອົງສາ):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  ປ້ອນຂໍ້ຄວາມບອກຂະໜາດ (ຫວ່າງເປົ່າ = ຄ່າທີ່ວັດແທກໄດ້):
@@ -4084,7 +4093,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  ປ້ອນຂໍ້ຄວາມບອກຂະໜາດແບບຈັດຮູບແບບ (ຫວ່າງເປົ່າ = ຄ່າທີ່ວັດແທກໄດ້):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  ກຳນົດມຸມເສັ້ນບອກຂະໜາດ (ອົງສາ):
     .dimlinear-select-object-to-dimension = DIMLINEAR  ເລືອກວັດຖຸທີ່ຈະບອກຂະໜາດ:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທຳອິດ ຫຼື ກົດ Enter ເພື່ອເລືອກວັດຖຸ:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທຳອິດ ຫຼື <ເລືອກວັດຖຸ>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍທີສອງ:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  ກຳນົດຕຳແໜ່ງເສັ້ນບອກຂະໜາດ  [Mtext/Text/Angle/Horizontal/Vertical/Rotated]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  ຕົວເລືອກ [Leader type/Landing/Content type/Max points/First angle/Second angle/Layer/Exit]:

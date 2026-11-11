@@ -1173,6 +1173,15 @@ common =
     .size = Size
     .sketchy = Sketchy
     .snap-override-label-next-pick-only = Snap override: __ocs_fmt_0__ (next pick only).
+    .no-snap-found-for-specified-point = No __ocs_fmt_0__ found for specified point.
+    .invalid-point-input = Invalid point input.
+    .point-2d-or-keyword = 2D point or option keyword required.
+    .angle-point-or-keyword = Requires valid numeric angle, second point, or option keyword.
+    .distance-point-or-keyword = Requires numeric distance, second point, or option keyword.
+    .radius-point-or-diameter = Requires numeric radius, point on circumference, or "D".
+    .invalid-2d-point = Invalid 2D point.
+    .distance-two-points-or-keyword = Requires numeric distance, two points, or option keyword.
+    .invalid-input = Invalid Input.
     .solid-created = Solid created.
     .source-object-not-found = Source object not found.
     .spacing = Spacing
@@ -3369,7 +3378,7 @@ draw =
     .offset-distance = OFFSET distance = __ocs_arg_d__
     .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
     .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
-    .offset-specify-second-reference-point = OFFSET  Specify second reference point:
+    .offset-specify-second-reference-point = OFFSET  Specify second point:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  Edit mesh vertex __ocs_arg_vertex__  Enter option:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  Specify new location for mesh vertex __ocs_arg_vertex__:
     .edit-vertex = Edit vertex
@@ -3990,7 +3999,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Enter formatted dimension text (blank = measured value):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Select object to dimension:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Specify dimension line location  [Mtext/Text/Angle]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Specify first extension line origin or press Enter to select object:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Specify first extension line origin or <select object>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Specify second extension line origin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Specify text angle (degrees):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Enter dimension text (blank = measured value):
@@ -4162,7 +4171,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Enter formatted dimension text (blank = measured value):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  Specify dimension line angle (degrees):
     .dimlinear-select-object-to-dimension = DIMLINEAR  Select object to dimension:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Specify first extension line origin or press Enter to select object:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Specify first extension line origin or <select object>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Specify second extension line origin:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  Specify dimension line location  [Mtext/Text/Angle/Horizontal/Vertical/Rotated]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  Options [Leader type/Landing/Content type/Max points/First angle/Second angle/Layer/Exit]:

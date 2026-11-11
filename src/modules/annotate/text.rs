@@ -396,6 +396,14 @@ impl CadCommand for TextCommand {
         "TEXT"
     }
 
+    fn point_rejection(&self) -> Option<String> {
+        match self.step {
+            Step::Height => Some(t!("Requires numeric distance or second point.").into_owned()),
+            Step::Rotation => Some(t!("Requires valid numeric angle or second point.").into_owned()),
+            _ => None,
+        }
+    }
+
     fn prompt(&self) -> String {
         let text = match self.step {
             Step::Start if self.justified => self.point_prompt(),

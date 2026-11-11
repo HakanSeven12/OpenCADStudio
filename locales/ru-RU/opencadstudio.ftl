@@ -1190,6 +1190,15 @@ common =
     .size = Размер
     .sketchy = Эскизный
     .snap-override-label-next-pick-only = Переопределение по щелчку: __ocs_fmt_0__ (только следующий выбор).
+    .no-snap-found-for-specified-point = Для указанной точки не найдено: __ocs_fmt_0__.
+    .invalid-point-input = Недопустимый ввод точки.
+    .point-2d-or-keyword = Требуется 2D-точка или ключевое слово параметра.
+    .angle-point-or-keyword = Требуется допустимый числовой угол, вторая точка или ключевое слово параметра.
+    .distance-point-or-keyword = Требуется числовое расстояние, вторая точка или ключевое слово параметра.
+    .radius-point-or-diameter = Требуется числовой радиус, точка на окружности или "D".
+    .invalid-2d-point = Недопустимая 2D-точка.
+    .distance-two-points-or-keyword = Требуется числовое расстояние, две точки или ключевое слово параметра.
+    .invalid-input = Недопустимый ввод.
     .solid-created = Твердое создание.
     .source-object-not-found = Источник объекта не найден.
     .spacing = Интервал
@@ -3923,7 +3932,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Введите форматированный текст размера (пусто = измеренное значение):
     .dimaligned-select-object-to-dimension = DIMALIGNED Выберите объект для нанесения размера:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Укажите положение размерной линии [Mtext/Текст/Угол]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Укажите начало первой выносной линии или нажмите Enter для выбора объекта:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Укажите начало первой выносной линии или <выбрать объект>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Укажите начало второй выносной линии:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Укажите угол текста (градусы):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Введите текст размера (пусто = измеренное значение):
@@ -4084,7 +4093,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Введите форматированный текст размера (пусто = измеренное значение):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Укажите начало первой выносной линии или нажмите Enter для выбора объекта:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Укажите начало первой выносной линии или <выбрать объект>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Укажите начало второй выносной линии:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

@@ -1186,6 +1186,15 @@ common =
     .size = Koko
     .sketchy = Luonnos
     .snap-override-label-next-pick-only = Snap-ohitus: __ocs_fmt_0__ (vain seuraava valinta).
+    .no-snap-found-for-specified-point = Määritetylle pisteelle ei löytynyt kohtaa __ocs_fmt_0__.
+    .invalid-point-input = Virheellinen pisteen syöte.
+    .point-2d-or-keyword = 2D-piste tai vaihtoehdon avainsana vaaditaan.
+    .angle-point-or-keyword = Kelvollinen numeerinen kulma, toinen piste tai vaihtoehdon avainsana vaaditaan.
+    .distance-point-or-keyword = Numeerinen etäisyys, toinen piste tai vaihtoehdon avainsana vaaditaan.
+    .radius-point-or-diameter = Numeerinen säde, kehän piste tai "D" vaaditaan.
+    .invalid-2d-point = Virheellinen 2D-piste.
+    .distance-two-points-or-keyword = Numeerinen etäisyys, kaksi pistettä tai vaihtoehdon avainsana vaaditaan.
+    .invalid-input = Virheellinen syöte.
     .solid-created = Kiinteä luotu.
     .source-object-not-found = Lähdeobjektia ei löydy.
     .spacing = Välit
@@ -3921,7 +3930,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Syötä muotoiltu mittateksti (tyhjä = mitattu arvo):
     .dimaligned-select-object-to-dimension = DIMALIGNED Valitse mitoitettava objekti:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Määritä mittaviivan sijainti [Mtext/Teksti/Kulma]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Määritä ensimmäisen apuviivan alkupiste tai valitse objekti painamalla Enter:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Määritä ensimmäisen apuviivan alkupiste tai <valitse objekti>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Määritä toisen apuviivan alkupiste:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Määritä tekstin kulma (asteita):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Syötä mittateksti (tyhjä = mitattu arvo):
@@ -4082,7 +4091,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Syötä muotoiltu mittateksti (tyhjä = mitattu arvo):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Määritä ensimmäisen apuviivan alkupiste tai valitse objekti painamalla Enter:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Määritä ensimmäisen apuviivan alkupiste tai <valitse objekti>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Määritä toisen apuviivan alkupiste:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

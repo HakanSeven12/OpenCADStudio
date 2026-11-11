@@ -1186,6 +1186,15 @@ common =
     .size = Rozmiar
     .sketchy = Szkicowy
     .snap-override-label-next-pick-only = Nadpisanie przyciągania: __ocs_fmt_0__ (tylko następny wybór).
+    .no-snap-found-for-specified-point = Nie znaleziono __ocs_fmt_0__ dla wskazanego punktu.
+    .invalid-point-input = Nieprawidłowe wprowadzenie punktu.
+    .point-2d-or-keyword = Wymagany punkt 2D lub słowo kluczowe opcji.
+    .angle-point-or-keyword = Wymagany prawidłowy kąt liczbowy, drugi punkt lub słowo kluczowe opcji.
+    .distance-point-or-keyword = Wymagana odległość liczbowa, drugi punkt lub słowo kluczowe opcji.
+    .radius-point-or-diameter = Wymagany promień liczbowy, punkt na okręgu lub "D".
+    .invalid-2d-point = Nieprawidłowy punkt 2D.
+    .distance-two-points-or-keyword = Wymagana odległość liczbowa, dwa punkty lub słowo kluczowe opcji.
+    .invalid-input = Nieprawidłowe dane wejściowe.
     .solid-created = Utworzono bryłę.
     .source-object-not-found = Nie znaleziono obiektu źródłowego.
     .spacing = Odstępy
@@ -3921,7 +3930,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED Wprowadź sformatowany tekst wymiaru (puste = zmierzona wartość):
     .dimaligned-select-object-to-dimension = DIMALIGNED Wybierz obiekt do zwymiarowania:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Określ położenie linii wymiarowej [Mtext/Tekst/Kąt]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Określ początek pierwszej linii pomocniczej lub naciśnij Enter, aby wybrać obiekt:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Określ początek pierwszej linii pomocniczej lub <wybierz obiekt>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Określ początek drugiej linii pomocniczej:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Określ kąt tekstu (w stopniach):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Wprowadź tekst wymiaru (puste = zmierzona wartość):
@@ -4082,7 +4091,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Wprowadź sformatowany tekst wymiaru (puste = zmierzona wartość):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Określ początek pierwszej linii pomocniczej lub naciśnij Enter, aby wybrać obiekt:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Określ początek pierwszej linii pomocniczej lub <wybierz obiekt>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Określ początek drugiej linii pomocniczej:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

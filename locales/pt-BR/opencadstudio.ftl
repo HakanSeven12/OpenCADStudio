@@ -1187,6 +1187,15 @@ common =
     .size = Tamanho
     .sketchy = Esboço
     .snap-override-label-next-pick-only = Substituição de snap: __ocs_fmt_0__ (somente a próxima escolha).
+    .no-snap-found-for-specified-point = Nenhum __ocs_fmt_0__ encontrado para o ponto especificado.
+    .invalid-point-input = Entrada de ponto inválida.
+    .point-2d-or-keyword = Ponto 2D ou palavra-chave de opção obrigatório.
+    .angle-point-or-keyword = Ângulo numérico válido, segundo ponto ou palavra-chave de opção obrigatório.
+    .distance-point-or-keyword = Distância numérica, segundo ponto ou palavra-chave de opção obrigatória.
+    .radius-point-or-diameter = Raio numérico, ponto na circunferência ou "D" obrigatório.
+    .invalid-2d-point = Ponto 2D inválido.
+    .distance-two-points-or-keyword = Distância numérica, dois pontos ou palavra-chave de opção obrigatória.
+    .invalid-input = Entrada inválida.
     .solid-created = Sólido criado.
     .source-object-not-found = Objeto de origem não encontrado.
     .spacing = Espaçamento
@@ -3922,7 +3931,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Insira o texto formatado da cota (vazio = valor medido):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Selecione o objeto a ser cotado:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Especifique a localização da linha de cota [Mtext/Texto/Ângulo]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique a origem da primeira linha de extensão ou pressione Enter para selecionar um objeto:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Especifique a origem da primeira linha de extensão ou <selecionar objeto>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  Especifique a origem da segunda linha de extensão:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Especifique o ângulo do texto (graus):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Insira o texto da cota (vazio = valor medido):
@@ -4083,7 +4092,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Insira o texto formatado da cota (vazio = valor medido):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Especifique a origem da primeira linha de extensão ou pressione Enter para selecionar um objeto:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Especifique a origem da primeira linha de extensão ou <selecionar objeto>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  Especifique a origem da segunda linha de extensão:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

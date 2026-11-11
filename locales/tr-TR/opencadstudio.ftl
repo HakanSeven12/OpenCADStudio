@@ -1163,6 +1163,15 @@ common =
     .size = Boyut
     .sketchy = Eskiz
     .snap-override-label-next-pick-only = Yakalama geçersiz kılma: __ocs_fmt_0__ (yalnızca sonraki seçim).
+    .no-snap-found-for-specified-point = Belirtilen nokta için __ocs_fmt_0__ bulunamadı.
+    .invalid-point-input = Geçersiz nokta girişi.
+    .point-2d-or-keyword = 2B nokta veya seçenek anahtar sözcüğü gerekli.
+    .angle-point-or-keyword = Geçerli bir sayısal açı, ikinci nokta veya seçenek anahtar sözcüğü gerekli.
+    .distance-point-or-keyword = Sayısal mesafe, ikinci nokta veya seçenek anahtar sözcüğü gerekli.
+    .radius-point-or-diameter = Sayısal yarıçap, çember üzerinde bir nokta veya "D" gerekli.
+    .invalid-2d-point = Geçersiz 2B nokta.
+    .distance-two-points-or-keyword = Sayısal mesafe, iki nokta veya seçenek anahtar sözcüğü gerekli.
+    .invalid-input = Geçersiz giriş.
     .solid-created = Katı oluşturuldu.
     .source-object-not-found = Kaynak nesne bulunamadı.
     .spacing = Aralık
@@ -3350,7 +3359,7 @@ draw =
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
     .offset-current-settings = Geçerli ayarlar: Kaynağı sil=__ocs_arg_erase__  Katman=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
     .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Öteleme mesafesini belirtin veya [Through/Erase/Layer] <__ocs_arg_d__>:
-    .offset-specify-second-reference-point = OFFSET  İkinci referans noktasını belirtin:
+    .offset-specify-second-reference-point = OFFSET  İkinci noktayı belirtin:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
     .edit-vertex = { layers.edit } · { properties.vertex }
@@ -3969,7 +3978,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Biçimlendirilmiş ölçü metnini girin (boş = ölçülen değer):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Ölçülendirilecek nesneyi seçin:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED  Ölçü çizgisinin konumunu belirtin [Mtext/Metin/Açı]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Birinci uzatma çizgisinin başlangıcını belirtin veya nesne seçmek için Enter'a basın:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED  Birinci uzatma çizgisinin başlangıcını belirtin veya <nesne seç>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED  İkinci uzatma çizgisinin başlangıcını belirtin:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED  Metin açısını belirtin (derece):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR  Ölçü metnini girin (boş = ölçülen değer):
@@ -4135,7 +4144,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR  Biçimlendirilmiş ölçü metnini girin (boş = ölçülen değer):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.angle } ({ common.degrees }):
     .dimlinear-select-object-to-dimension = DIMLINEAR  { draw.select }: { common.object-title-case } · { common.dimension }:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Birinci uzatma çizgisinin başlangıcını belirtin veya nesne seçmek için Enter'a basın:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR  Birinci uzatma çizgisinin başlangıcını belirtin veya <nesne seç>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR  İkinci uzatma çizgisinin başlangıcını belirtin:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR  { common.specify }: { styles.dimension-line } · { common.location } [{ common.mtext }/{ options.color-text }/{ common.angle }/{ common.horizontal }/{ common.vertical }/{ common.rotated }]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  { common.specify }: { action.options } [{ properties.leader-type }/{ common.landing }/{ style-manager.content-type }/{ common.max-points }/{ common.first-angle }/{ common.second-angle }/{ common.layer }/{ draw.sketch-exit }]:

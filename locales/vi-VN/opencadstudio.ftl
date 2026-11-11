@@ -1173,6 +1173,15 @@ common =
     .size = Kích thước
     .sketchy = Sơ sài
     .snap-override-label-next-pick-only = Ghi đè truy bắt: __ocs_fmt_0__ (chỉ lần chọn kế tiếp).
+    .no-snap-found-for-specified-point = Không tìm thấy __ocs_fmt_0__ cho điểm đã chỉ định.
+    .invalid-point-input = Nhập điểm không hợp lệ.
+    .point-2d-or-keyword = Cần điểm 2D hoặc từ khóa tùy chọn.
+    .angle-point-or-keyword = Cần góc số hợp lệ, điểm thứ hai hoặc từ khóa tùy chọn.
+    .distance-point-or-keyword = Cần khoảng cách số, điểm thứ hai hoặc từ khóa tùy chọn.
+    .radius-point-or-diameter = Cần bán kính số, điểm trên đường tròn hoặc "D".
+    .invalid-2d-point = Điểm 2D không hợp lệ.
+    .distance-two-points-or-keyword = Cần khoảng cách số, hai điểm hoặc từ khóa tùy chọn.
+    .invalid-input = Đầu vào không hợp lệ.
     .solid-created = Đã tạo khối rắn.
     .source-object-not-found = Đối tượng nguồn không được tìm thấy.
     .spacing = Khoảng cách
@@ -3918,7 +3927,7 @@ annotate =
     .dimaligned-enter-formatted-dimension-text-blank-measured = DIMALIGNED  Nhập chữ kích thước có định dạng (để trống = giá trị đo):
     .dimaligned-select-object-to-dimension = DIMALIGNED  Chọn đối tượng cần ghi kích thước:
     .dimaligned-specify-dimension-line-location-tex = DIMALIGNED Chỉ định vị trí đường kích thước [Mtext/Text/Angle]:
-    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Xác định gốc đường gióng đầu tiên hoặc nhấn Enter để chọn đối tượng:
+    .dimaligned-specify-first-extension-line-origin = DIMALIGNED Xác định gốc đường gióng đầu tiên hoặc <chọn đối tượng>:
     .dimaligned-specify-second-extension-line-origi = DIMALIGNED Chỉ định gốc đường gióng thứ hai:
     .dimaligned-specify-text-angle-degrees = DIMALIGNED Chỉ định góc văn bản (độ):
     .dimangular-enter-dimension-text-blank-measured = DIMANGULAR Nhập văn bản kích thước (trống = giá trị đo):
@@ -4090,7 +4099,7 @@ annotate =
     .dimlinear-enter-formatted-dimension-text-blank-measured-value = DIMLINEAR Nhập văn bản kích thước được định dạng (trống = giá trị đo được):
     .dimlinear-specify-dimension-line-angle-degrees = DIMLINEAR Xác định góc đường kích thước (độ):
     .dimlinear-select-object-to-dimension = DIMLINEAR Chọn đối tượng cần ghi kích thước:
-    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Xác định gốc đường gióng đầu tiên hoặc nhấn Enter để chọn đối tượng:
+    .dimlinear-specify-first-extension-line-origin-or-press-enter-to-select-object = DIMLINEAR Xác định gốc đường gióng đầu tiên hoặc <chọn đối tượng>:
     .dimlinear-specify-second-extension-line-origin-ce3c00 = DIMLINEAR Chỉ định gốc đường gióng thứ hai:
     .dimlinear-specify-dimension-line-location-mtext-text-angle-horizontal-vertical-rotate = DIMLINEAR Chỉ định vị trí đường kích thước [Mtext/Text/Góc/Ngang/Dọc/Xoay]:
     .mleader-options-leader-type-landing-content-type-max-points-first-angle-second-angle = MLEADER  Tùy chọn [Loại đường dẫn/Đoạn ngang/Loại nội dung/Số điểm tối đa/Góc thứ nhất/Góc thứ hai/Lớp/Thoát]:

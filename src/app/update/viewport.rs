@@ -1029,11 +1029,19 @@ impl OpenCADStudio {
         let edit_cam = edit_frame.map(|(cam, _)| cam);
         let local = |point: iced::Point| iced::Point::new(point.x - tile.x, point.y - tile.y);
         let bounds = iced::Rectangle::new(iced::Point::ORIGIN, tile.size());
-        let (mut handles, _) =
+        let started = crate::perf::enabled().then(Instant::now);
+        let (mut handles, timing) =
             self.box_selection_handles(i, &edit_cam, bounds, local(anchor), local(p), crossing);
         handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
         self.filter_handles_reject_locked(i, &mut handles);
         self.tabs[i].scene.set_box_hover_highlights(&handles);
+        let elapsed = crate::perf::elapsed_ms(started);
+        if elapsed >= 4.0 {
+            crate::perf_record!(
+                "[perf] box-preview total={elapsed:.1}ms candidates={:.1}ms handles={:.1}ms wires={:.1}ms hatch={:.1}ms hit={:.1}ms picked={}",
+                timing.candidates, timing.handles, timing.wires, timing.hatch, timing.hit, handles.len(),
+            );
+        }
     }
 
     /// The entities a selection box from `a` to `p` (tile pixels) catches,
@@ -1075,13 +1083,9 @@ impl OpenCADStudio {
         };
         let mut timing = BoxSelectTiming::default();
         let t_sel = crate::perf::enabled().then(Instant::now);
-        let area_candidates = self.tabs[i].scene.interaction_candidates_in_aabb(
-            all_wires,
-            world_aabb,
-            [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)],
-            view_rot,
-            eye,
-            bounds,
+        let rect = [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)];
+        let area_candidates = self.tabs[i].scene.interaction_box_candidates(
+            all_wires, world_aabb, rect, view_rot, eye, bounds,
         );
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);

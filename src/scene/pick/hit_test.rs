@@ -1867,6 +1867,59 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
     out
 }
 
+fn large_wire_screen_bounds(
+    wire: &WireModel,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<[f32; 4]> {
+    let aabb = wire.aabb;
+    let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+        && view_rot.z_axis.y.abs() < 1e-9
+        && view_rot.x_axis.w.abs() < 1e-9
+        && view_rot.y_axis.w.abs() < 1e-9
+        && view_rot.z_axis.w.abs() < 1e-9
+        && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+    if !flat_ortho || wire.points.len() < 8192 || wire.point_marker.is_some()
+        || wire.world_width != 0.0 || !wire.taper_widths.is_empty()
+        || !wire.text_verts.is_empty() || !wire.fill_tris.is_empty()
+        || !wire.pick_tris.is_empty() || aabb == WireModel::UNBOUNDED_AABB
+        || !aabb.iter().all(|v| v.is_finite())
+    {
+        return None;
+    }
+    let pad = aabb.iter().fold(1.0_f64, |m, v| m.max((*v as f64).abs()))
+        * f32::EPSILON as f64 * 2.0;
+    let corners = [
+        (aabb[0] as f64 - pad, aabb[1] as f64 - pad),
+        (aabb[2] as f64 + pad, aabb[1] as f64 - pad),
+        (aabb[2] as f64 + pad, aabb[3] as f64 + pad),
+        (aabb[0] as f64 - pad, aabb[3] as f64 + pad),
+    ];
+    let mut projected = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    for (x, y) in corners {
+        let p = projection::project_screen(view_rot, eye, bounds, glam::DVec3::new(x, y, eye.z))?;
+        projected[0] = projected[0].min(p.x);
+        projected[1] = projected[1].min(p.y);
+        projected[2] = projected[2].max(p.x);
+        projected[3] = projected[3].max(p.y);
+    }
+    Some(projected)
+}
+
+fn large_wire_inside_box(
+    wire: &WireModel,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    rect: [f32; 4],
+) -> bool {
+    large_wire_screen_bounds(wire, view_rot, eye, bounds).is_some_and(|b| {
+        b[0] > rect[0] + 1.0 && b[1] > rect[1] + 1.0
+            && b[2] < rect[2] - 1.0 && b[3] < rect[3] - 1.0
+    })
+}
+
 /// Return the names of wires selected by a completed rectangular selection box.
 ///
 /// - **Window mode** (`crossing = false`, left→right drag):
@@ -1915,7 +1968,18 @@ pub fn box_hit<W: WireSource + ?Sized>(
         let mut out = Vec::new();
         let mut seen = HashSet::default();
         for wire in wires.iter() {
-            if wire.snap_only || wire.reference_only {
+            if wire.snap_only || wire.reference_only || seen.contains(wire.name.as_str()) {
+                continue;
+            }
+            if large_wire_inside_box(wire, view_rot, eye, bounds, [min_x, min_y, max_x, max_y]) {
+                seen.insert(wire.name.as_str());
+                out.push(wire.name.as_str());
+                continue;
+            }
+            if large_wire_screen_bounds(wire, view_rot, eye, bounds).is_some_and(|b| {
+                b[2] < min_x - 1.0 || b[0] > max_x + 1.0
+                    || b[3] < min_y - 1.0 || b[1] > max_y + 1.0
+            }) {
                 continue;
             }
             // Fallback: when wire has no line geometry (e.g. greek text emits
@@ -1925,9 +1989,9 @@ pub fn box_hit<W: WireSource + ?Sized>(
             let empty_pts: [[f32; 3]; 0] = [];
             let pts: &[[f32; 3]] = if !wire.points.is_empty() {
                 &wire.points
-            } else if !wire.text_verts.is_empty() {
+            } else if !wire.text_verts.is_empty() || !wire.fill_tris.is_empty() || !wire.pick_tris.is_empty() {
                 &empty_pts
-            } else if wire.aabb != WireModel::UNBOUNDED_AABB {
+            } else if !wires.box_wires_only() && wire.aabb != WireModel::UNBOUNDED_AABB {
                 let [ax, ay, bx, by] = wire.aabb;
                 aabb_pts = vec![
                     [ax, ay, 0.0],
@@ -1977,7 +2041,16 @@ pub fn box_hit<W: WireSource + ?Sized>(
                     }
                 }
                 prev = Some(sp);
+                if hit {
+                    break;
+                }
             }
+
+            let triangle_hit = !hit && [(wire.fill_tris.len(), false), (wire.pick_tris.len(), true)]
+                .into_iter().any(|(len, pick_only)| (0..len).step_by(3).any(|start| {
+                    projected_wire_triangle(wire, start, pick_only, view_rot, eye, bounds)
+                        .is_some_and(|triangle| triangle_crosses_box(triangle, box_corners))
+                }));
 
             let mut glyph_crosses = false;
             for start in (0..wire.text_verts.len()).step_by(6) {
@@ -1995,7 +2068,7 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 }
             }
 
-            if (hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
+            if (hit || triangle_hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
                 out.push(wire.name.as_str());
             }
         }
@@ -2011,6 +2084,13 @@ pub fn box_hit<W: WireSource + ?Sized>(
             }
             let name = wire.name.as_str();
             if disqualified.contains(name) {
+                continue;
+            }
+
+            if large_wire_inside_box(wire, view_rot, eye, bounds, [min_x, min_y, max_x, max_y]) {
+                if seen.insert(name) {
+                    qualified.push(name);
+                }
                 continue;
             }
 

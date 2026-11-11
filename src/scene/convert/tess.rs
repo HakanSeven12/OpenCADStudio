@@ -1899,7 +1899,18 @@ fn tessellate_entity_inner(
                 band.as_deref(),
             ) {
                 for wire in &mut wires {
-                    set_wire_aabb(wire, aabb);
+                    // Each hairline batch has its own extent. The box index
+                    // groups these under the entity for whole-object selection.
+                    let box_hint = if !wire.points.is_empty()
+                        && wire.world_width == 0.0
+                        && wire.taper_widths.is_empty()
+                        && wire.text_verts.is_empty()
+                    {
+                        WireModel::UNBOUNDED_AABB
+                    } else {
+                        aabb
+                    };
+                    set_wire_aabb(wire, box_hint);
                 }
                 // Dashes and gaps don't change where a wide band picks.
                 if let (Some(first), Some(picks)) = (
@@ -1908,6 +1919,8 @@ fn tessellate_entity_inner(
                 ) {
                     first.pick_tris = picks.pick_tris.clone();
                     first.pick_tris_low = picks.pick_tris_low.clone();
+                    let box_hint = first.aabb;
+                    set_wire_aabb(first, box_hint);
                 }
                 return wires;
             }

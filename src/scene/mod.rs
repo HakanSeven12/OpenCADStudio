@@ -14047,6 +14047,37 @@ impl Scene {
     /// `interaction_candidate_handles`, none of which snap, so the flat-ortho
     /// path asks for the reduced category set. A caller that needs snapping
     /// belongs on `interaction_candidates_near` instead.
+    pub fn interaction_box_candidates(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        screen_rect: [f32; 4],
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+        if flat_ortho && self.interaction_source_is_resident(&wires, bounds.height)
+        {
+            if let Some(index) = self.cached_interaction_index(&wires) {
+                let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
+                let x = ((view_rot.x_axis.x * bounds.width * 0.5).powi(2)
+                    + (view_rot.x_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+                let y = ((view_rot.y_axis.x * bounds.width * 0.5).powi(2)
+                    + (view_rot.y_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+                let scale = x.min(y);
+                if scale > 1e-6 {
+                    let pad = pad_px as f64 / scale as f64;
+                    let padded = [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad];
+                    return self.materialize_stubs_cached(index.query_xy_box_wires(wires, padded));
+                }
+            }
+        }
+        self.interaction_candidates_in_aabb(wires, aabb, screen_rect, view_rot, eye, bounds)
+    }
+
     pub fn interaction_candidates_in_aabb(
         &self,
         wires: Arc<Vec<WireModel>>,

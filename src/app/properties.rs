@@ -5084,32 +5084,16 @@ fn intersect_into(
     acc: &mut Vec<crate::scene::model::object::PropSection>,
     right: &[crate::scene::model::object::PropSection],
 ) {
-    use rustc_hash::FxHashMap;
-
-    // First match wins, exactly like `right.iter().find(...)`.
-    let mut right_sections: FxHashMap<&str, usize> = FxHashMap::default();
-    let mut right_fields: Vec<FxHashMap<&'static str, usize>> = Vec::with_capacity(right.len());
-    for (section_index, section) in right.iter().enumerate() {
-        let mut fields = FxHashMap::default();
-        for (prop_index, prop) in section.props.iter().enumerate() {
-            fields.entry(prop.field).or_insert(prop_index);
-        }
-        right_fields.push(fields);
-        right_sections
-            .entry(section.title.as_str())
-            .or_insert(section_index);
-    }
-
+    // Property sections are small. Avoid allocating hash maps for every one
+    // of thousands of selected entities while retaining first-match behavior.
     acc.retain_mut(|section| {
-        let Some(&section_index) = right_sections.get(section.title.as_str()) else {
+        let Some(other_section) = right.iter().find(|other| other.title == section.title) else {
             return false;
         };
-        let fields = &right_fields[section_index];
         section.props.retain_mut(|prop| {
-            let Some(&prop_index) = fields.get(prop.field) else {
+            let Some(other) = other_section.props.iter().find(|other| other.field == prop.field) else {
                 return false;
             };
-            let other = &right[section_index].props[prop_index];
             if prop.value != other.value {
                 prop.value = merge_prop_value(&prop.value, &other.value);
             }

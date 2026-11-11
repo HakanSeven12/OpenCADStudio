@@ -1243,7 +1243,10 @@ impl OpenCADStudio {
                     .scene
                     .selected_entities()
                     .into_iter()
-                    .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .filter(|(handle, _)| {
+                        !self.tabs[i].scene.is_layer_locked(*handle)
+                            && !self.tabs[i].scene.native_edit_disabled(*handle)
+                    })
                     .collect();
                 if selected.is_empty() {
                     use crate::modules::draw::select::SelectObjectsCommand;
@@ -1944,7 +1947,10 @@ impl OpenCADStudio {
             .scene
             .selected_entities()
             .into_iter()
-            .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+            .filter(|(handle, _)| {
+                !self.tabs[i].scene.is_layer_locked(*handle)
+                    && !self.tabs[i].scene.native_edit_disabled(*handle)
+            })
             .collect();
         if selected.is_empty() {
             use crate::modules::draw::select::SelectObjectsCommand;

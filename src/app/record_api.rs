@@ -1712,6 +1712,12 @@ impl OpenCADStudio {
                         "entity is reference-only (plugin-owned display data)",
                     ));
                 }
+                if self.tabs[i].scene.native_edit_disabled(handle) {
+                    return Err(failure(
+                        "native_edit_disabled",
+                        "entity is selectable custom geometry; use its plugin write path",
+                    ));
+                }
                 let source = self.tabs[i]
                     .scene
                     .document
@@ -1982,6 +1988,40 @@ mod tests {
         mark(&mut app, handle, false);
         let records = app.record_query(&json!({"collection":"entities"}));
         assert_eq!(records["records"][0]["reference_only"], json!(false));
+    }
+
+    #[test]
+    fn selectable_custom_record_updates_are_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut entity = EntityType::Line(document::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        ));
+        let mut stamp = document::xdata::ExtendedDataRecord::new("CVIFC-CLASS:LINE");
+        stamp.add_value(document::xdata::XDataValue::Integer32(1));
+        stamp.add_value(document::xdata::XDataValue::String(String::new()));
+        stamp.add_value(document::xdata::XDataValue::Integer32(1));
+        entity.common_mut().extended_data.add_record(stamp);
+        let handle = app.tabs[i].scene.add_entity(entity);
+
+        let refused = execute(
+            &mut app,
+            json!({
+                "op":"set_properties",
+                "collection":"entities",
+                "handle": format!("{:X}", handle.value()),
+                "updates":[{"path":"/end/x","value":20.0}],
+            }),
+            "selectable-custom",
+        );
+        assert_eq!(refused["ok"], json!(false));
+        assert_eq!(refused["code"], json!("native_edit_disabled"));
+        let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity(handle) else {
+            panic!("the selectable custom line survives")
+        };
+        assert_eq!(line.end.x, 10.0);
     }
 
     #[test]

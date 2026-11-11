@@ -157,7 +157,11 @@
 /// request requires v18: a v17 host refuses the new plugin at load rather
 /// than accepting it and failing to decode the request. v17 plugins remain
 /// supported. Asynchronous `PanelAction` notifications remain read-only.
-pub const API_VERSION: u32 = 18;
+/// v19 adds `PluginClassInstance::selectable_custom`: flagged display entities
+/// stay selectable for plugin custom grips/panels, expose a class-only label,
+/// and refuse native geometry editing. Unflagged instances keep the legacy
+/// reference-only staging behavior.
+pub const API_VERSION: u32 = 19;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

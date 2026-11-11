@@ -546,6 +546,7 @@ mod tests {
             tolerance: 1e-3,
             layer: "PLUGIN_PROFILE".to_string(),
             design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            selectable_custom: true,
         };
         let bytes = bincode::serialize(&PluginRequest::StagePluginClassInstance {
             instance: instance.clone(),
@@ -555,6 +556,49 @@ mod tests {
             matches!(bincode::deserialize::<PluginRequest>(&bytes).unwrap(),
             PluginRequest::StagePluginClassInstance { instance: got } if got == instance)
         );
+
+        // v17 bytes end after design_record. The additive bool defaults to
+        // false; an explicitly unflagged v18 instance round-trips normally.
+        #[derive(serde::Serialize)]
+        struct V17PluginClassInstance {
+            class_id: String,
+            schema_version: u32,
+            design: crate::host::PluginDisplayDescriptor,
+            tolerance: f64,
+            layer: String,
+            design_record: String,
+        }
+        let legacy = V17PluginClassInstance {
+            class_id: instance.class_id.clone(),
+            schema_version: instance.schema_version,
+            design: instance.design.clone(),
+            tolerance: instance.tolerance,
+            layer: instance.layer.clone(),
+            design_record: instance.design_record.clone(),
+        };
+        let legacy_bytes = bincode::serialize(&legacy).unwrap();
+        let decoded: crate::host::PluginClassInstance =
+            bincode::deserialize(&legacy_bytes).unwrap();
+        assert!(!decoded.selectable_custom);
+        let mut unflagged = instance.clone();
+        unflagged.selectable_custom = false;
+        let unflagged_bytes = bincode::serialize(&unflagged).unwrap();
+        assert_eq!(unflagged_bytes.len(), legacy_bytes.len() + 1);
+        assert_eq!(
+            bincode::deserialize::<crate::host::PluginClassInstance>(&unflagged_bytes).unwrap(),
+            unflagged
+        );
+        let mut v17_request_bytes = bincode::serialize(&PluginRequest::StagePluginClassInstance {
+            instance: unflagged.clone(),
+        })
+        .unwrap();
+        assert_eq!(v17_request_bytes.pop(), Some(0));
+        assert!(matches!(
+            bincode::deserialize::<PluginRequest>(&v17_request_bytes).unwrap(),
+            PluginRequest::StagePluginClassInstance { instance: got }
+                if got == unflagged && !got.selectable_custom
+        ));
+
         let bytes = bincode::serialize(&PluginResponse::RegisterPluginClassResult(Ok(()))).unwrap();
         assert!(matches!(
             bincode::deserialize::<PluginResponse>(&bytes).unwrap(),

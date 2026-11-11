@@ -2371,6 +2371,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PROFILE".to_string(),
                 design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the crest instance stages");
@@ -2627,6 +2628,7 @@ fn descriptor_refusals_keep_the_streaming_path() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PLAN".to_string(),
                 design_record: "PLUGIN_ALIGN_PLAN".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the plan instance stages");
@@ -2748,6 +2750,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PROFILE".to_string(),
                 design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the crest stages");

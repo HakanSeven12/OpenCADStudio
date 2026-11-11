@@ -1267,7 +1267,8 @@ impl Scene {
             if respect_layer_locks && self.is_layer_locked(h) {
                 continue;
             }
-            if respect_reference_only && self.is_reference_only(h) {
+            if respect_reference_only && (self.is_reference_only(h) || self.native_edit_disabled(h))
+            {
                 continue;
             }
             let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {

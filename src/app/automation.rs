@@ -346,15 +346,15 @@ pub(crate) fn entity_type_matches(entity: &document::EntityType, requested: &str
 /// through a block definition so a reference reports what it draws rather than
 /// where it was placed.
 ///
-/// `custom_label` is the plugin-declared class label for the entity's XDATA
-/// class identity, if a live declaring plugin provides one; it surfaces as
-/// `display_type` ("`<Label>` (`<Native>`)"), while `type` stays the raw
-/// native name so existing scripts and filters keep working.
+/// `custom_label` is the plugin-declared class façade for the entity's XDATA
+/// identity, if a live declaring plugin provides one; it surfaces as
+/// `display_type`, while `type` stays the raw native name so existing scripts
+/// and filters keep working.
 pub(crate) fn entity_json(
     document: &document::Document,
     e: &document::EntityType,
     detail: &str,
-    custom_label: Option<String>,
+    custom_label: Option<crate::plugin::entity_labels::CustomEntityClassLabel>,
 ) -> Value {
     use document::EntityType as E;
     let c = e.common();
@@ -5790,7 +5790,10 @@ mod tests {
             &document::Document::new(),
             &entity,
             "summary",
-            Some("Survey Point".to_string()),
+            Some(crate::plugin::entity_labels::CustomEntityClassLabel {
+                label: "Survey Point".to_string(),
+                class_only: false,
+            }),
         );
         assert_eq!(json["type"], "Point");
         assert_eq!(json["display_type"], "Survey Point (Point)");

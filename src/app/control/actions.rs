@@ -654,6 +654,7 @@ impl OpenCADStudio {
             };
         }
         let explicit_scale = req.get("scale").is_some();
+        let explicit_fit = req.get("fit").is_some();
         if let Some(scale) = req["scale"].as_str().filter(|s| !s.is_empty()) {
             request.scale = scale.to_owned();
             request.fit_to_paper = false;
@@ -751,6 +752,13 @@ impl OpenCADStudio {
                 if is_model {
                     if page_dialog.area == "Layout" {
                         page_dialog.area = "Extents".into();
+                    }
+                    // Model has no stored page-setup load below. Honor the
+                    // API's documented default rather than a persisted non-fit
+                    // dialog preference when neither scale nor fit was
+                    // requested.
+                    if !explicit_scale && !explicit_fit {
+                        page_dialog.fit_to_paper = true;
                     }
                 } else if let Some(page_setup) = app.tabs[i].scene.plot_settings_for(name) {
                     // Stored page setup first, then the explicit request
@@ -2058,12 +2066,7 @@ impl OpenCADStudio {
                             })?;
                         Message::WblockUnit(unit)
                     }
-                    _ => {
-                        return Err(failure(
-                            "invalid_value",
-                            "Unknown write block dialog field",
-                        ))
-                    }
+                    _ => return Err(failure("invalid_value", "Unknown write block dialog field")),
                 }
             }
             // One field of the open attribute definition dialog: `tag=…`,

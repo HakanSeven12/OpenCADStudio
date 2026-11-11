@@ -23,6 +23,7 @@
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
 * **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.
 * **Attribute Definition Editor:** Card headings use the palettes' muted label colour and the pick buttons draw a dotted square over a crosshair.
+* **Automation Model Fit Default:** A Model plot request without `fit` or `scale` now uses the documented fitted Extents instead of inheriting a non-fit dialog preference. Stored paper-layout settings are unchanged.
 * **Linetypes in Use:** `PURGE` keeps a linetype that a multiline style, multileader, table border or saved layer state still uses, and plugin deletes also respect block attributes; renaming a linetype updates attributes, multiline styles and saved layer states; plugins can no longer create a linetype whose name has a comma or whose pattern starts with a gap.
 * **Complex Linetype Files:** A linetype with text or shapes and no description keeps them when its `.lin` file is loaded.
 * **`LINETYPE SET`:** The next object drawn takes the new current linetype, and the ribbon shows it straight away.

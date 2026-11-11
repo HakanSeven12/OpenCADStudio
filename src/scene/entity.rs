@@ -531,6 +531,18 @@ impl Scene {
                     record.flags.has_attributes = true;
                 }
             }
+            if !handle.is_null() {
+                let current = match self.visibility_states.get(&br) {
+                    Some(&index) => index,
+                    None => super::block_visibility::parameter(&self.document, br).map_or(
+                        0,
+                        |parameter| {
+                            super::block_visibility::shown_state(&self.document, parameter.handle)
+                        },
+                    ),
+                };
+                super::block_visibility::admit_member(&mut self.document, br, handle, current);
+            }
             handle
         } else if self.current_layout != "Model" && self.active_viewport.is_none() {
             let layout_name = self.current_layout.clone();

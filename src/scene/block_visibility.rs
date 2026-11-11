@@ -528,6 +528,43 @@ pub fn set_visible(
     }
 }
 
+/// An object drawn while state `index` is current joins that state: it is
+/// shown there and every other state hides it. Only an object the definition
+/// leaves on screen joins the set, and only when it is one of its members.
+pub(crate) fn admit_member(
+    document: &mut Document,
+    definition: Handle,
+    handle: Handle,
+    index: usize,
+) {
+    if !definition_members(document, definition)
+        .iter()
+        .any(|(member, _)| *member == handle)
+    {
+        return;
+    }
+    let Some(current) = parameter(document, definition).cloned() else {
+        return;
+    };
+    let shown = document.get_entity(handle).is_some_and(|entity| {
+        !entity.common().invisible && !super::block_construction::is_construction(entity.common())
+    });
+    if !shown || current.all_blocks.contains(&handle) {
+        return;
+    }
+    let index = if index < current.states.len() {
+        index
+    } else {
+        shown_state(document, current.handle)
+    };
+    edit(document, current.handle, |parameter| {
+        parameter.all_blocks.push(handle);
+        if let Some(state) = parameter.states.get_mut(index) {
+            state.visible_blocks.push(handle);
+        }
+    });
+}
+
 /// The block definition `parameter` belongs to (graph, dictionary, record).
 fn owner_definition(document: &Document, parameter: Handle) -> Option<Handle> {
     let graph = match document.objects.get(&parameter)? {
@@ -1024,6 +1061,57 @@ mod tests {
                 "{ext}: the member Open keeps is the line, not the circle"
             );
         }
+    }
+
+    /// An object drawn after the state set exists joins the state that was
+    /// current when it was drawn, and every other state hides it.
+    #[test]
+    fn a_member_drawn_after_the_set_exists_joins_the_current_state() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "shutter",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_coords(
+                0.0, 0.0, 0.0, 4.0, 0.0, 0.0,
+            ))],
+        );
+        let definition = scene.document.block_records.get("shutter").unwrap().handle;
+        let handle = create(&mut scene.document, definition, Vector3::ZERO).unwrap();
+        let second = add_state(&mut scene.document, handle, "Open", 0).unwrap();
+        scene.block_edit_block = Some(definition);
+        scene.visibility_states.insert(definition, second);
+        let drawn = scene.add_entity(EntityType::Circle(Circle::from_center_radius(
+            Vector3::new(1.0, 1.0, 0.0),
+            0.5,
+        )));
+        assert_eq!(
+            members(&scene.document, definition).last(),
+            Some(&drawn),
+            "the drawn object is a definition member"
+        );
+        let parameter = parameter(&scene.document, definition).unwrap();
+        assert!(
+            parameter.all_blocks.contains(&drawn),
+            "the drawn object joins the state set"
+        );
+        assert!(
+            parameter.states[second].visible_blocks.contains(&drawn),
+            "the state that was current when it was drawn shows it"
+        );
+        assert!(
+            !parameter.states[0].visible_blocks.contains(&drawn),
+            "no other state shows it"
+        );
+        apply_state(&mut scene.document, handle, 0);
+        assert!(
+            scene.document.get_entity(drawn).unwrap().common().invisible,
+            "switching to the other state hides it"
+        );
+        apply_state(&mut scene.document, handle, second);
+        assert!(
+            !scene.document.get_entity(drawn).unwrap().common().invisible,
+            "the creation state shows it again"
+        );
     }
 }
 

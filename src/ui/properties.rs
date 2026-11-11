@@ -1255,6 +1255,7 @@ impl PropertiesPanel {
                 color,
                 self.bg_color_picker_open && self.picker_here(),
                 crate::ui::color_select::ColorExtras {
+                    none: true,
                     by_layer: true,
                     by_block: true,
                     ..Default::default()

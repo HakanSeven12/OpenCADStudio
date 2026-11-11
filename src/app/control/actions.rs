@@ -171,6 +171,8 @@ pub(super) const NAMES: &[&str] = &[
     "table_cell_warning",
     "table_cell_entry",
     "hyperlink_dialog",
+    "object_scale_dialog",
+    "scale_list_dialog",
     "spell_dialog",
     "table_cell_tab",
     "command_submit",
@@ -2808,6 +2810,68 @@ impl OpenCADStudio {
                             ))
                         }
                     })
+                }
+            }
+            // The Annotation Object Scale window, one field per call:
+            // "select=<scale>", "ctrl=<scale>" (adds or drops it),
+            // "shift=<scale>" (the run from the last clicked one),
+            // "common=0|1", "add", "delete", "ok" or "cancel".
+            "object_scale_dialog" => {
+                if !self.focus_dialog(crate::app::ModalKind::AnnoObjectScale) {
+                    return Err(failure("no_dialog", "The Annotation Object Scale window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                self.ctrl_down = key == "ctrl";
+                self.shift_down = key == "shift";
+                match key {
+                    "select" | "ctrl" | "shift" => Message::AnnoObjectScaleSelect(value.to_string()),
+                    "common" => Message::AnnoObjectScaleCommon(value == "1"),
+                    "add" => Message::AnnoObjectScaleAdd,
+                    "delete" => Message::AnnoObjectScaleDelete,
+                    "ok" => Message::AnnoObjectScaleOk,
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", "Unknown Annotation Object Scale field")),
+                }
+            }
+            // The scale list window, one field per call: "select=<scale>",
+            // "ctrl=<scale>", "shift=<scale>", "add", "edit", "name=<text>",
+            // "paper=<n>", "drawing=<n>", "apply", "back" (closes the card),
+            // "delete", "delete_yes", "delete_no", "up", "down",
+            // "reset=metric|imperial|both|cancel", "ok" or "cancel".
+            "scale_list_dialog" => {
+                if !self.focus_dialog(crate::app::ModalKind::ScaleManager) {
+                    return Err(failure("no_dialog", "The scale list window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                self.ctrl_down = key == "ctrl";
+                self.shift_down = key == "shift";
+                match key {
+                    "select" | "ctrl" | "shift" => Message::ScaleManagerSelect(value.to_string()),
+                    "add" => Message::ScaleManagerNew,
+                    "edit" => Message::ScaleManagerEdit,
+                    "name" => Message::ScaleRenameEdit(value.to_string()),
+                    "paper" => Message::ScaleManagerPaperBuf(value.to_string()),
+                    "drawing" => Message::ScaleManagerDrawingBuf(value.to_string()),
+                    "apply" => Message::ScaleRenameCommit,
+                    "back" => Message::ScaleManagerEditCancel,
+                    "delete" => Message::ScaleManagerDelete,
+                    "delete_yes" => Message::ScaleManagerDeleteChoice(true),
+                    "delete_no" => Message::ScaleManagerDeleteChoice(false),
+                    "up" => Message::ScaleManagerMove(-1),
+                    "down" => Message::ScaleManagerMove(1),
+                    "reset" => match value {
+                        "" => Message::ScaleManagerReset,
+                        "metric" => Message::ScaleManagerResetChoice(0),
+                        "imperial" => Message::ScaleManagerResetChoice(1),
+                        "both" => Message::ScaleManagerResetChoice(2),
+                        "cancel" => Message::ScaleManagerResetChoice(3),
+                        _ => return Err(failure("invalid_value", spec)),
+                    },
+                    "ok" => Message::ScaleManagerOk,
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", "Unknown scale list field")),
                 }
             }
             // The Insert / Edit Hyperlink window, one field per call:

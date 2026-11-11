@@ -1069,6 +1069,17 @@ fn hexh(h: Option<document::Handle>) -> String {
     }
 }
 
+/// The height the leader's text draws at: its context's (an annotative
+/// leader's current scale), else the style height times the overall scale.
+/// Line space distance is measured on it.
+fn drawn_text_height(ml: &MultiLeader) -> f64 {
+    if ml.context.text_height > 0.0 {
+        ml.context.text_height
+    } else {
+        ml.text_height * ml.scale_factor
+    }
+}
+
 fn properties(ml: &MultiLeader) -> Vec<PropSection> {
     let ctx = &ml.context;
 
@@ -1077,10 +1088,11 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
         title: t!("Misc").into_owned(),
         props: vec![
             // Overall scale is grayed when annotative (annotation scale drives sizing).
+            // An annotative leader shows 0 there (measured).
             num_row(
                 t!("Overall scale").as_ref(),
                 "scale_factor",
-                ml.scale_factor,
+                if ml.enable_annotation_scale { 0.0 } else { ml.scale_factor },
                 !ml.enable_annotation_scale,
             ),
             // Style name is resolved from style_handle by the panel builder (needs doc).
@@ -1205,7 +1217,7 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             edit(
                 t!("Line space distance").as_ref(),
                 "line_space_distance",
-                ml.text_height * 1.666_666_666_666_667 * ctx.line_spacing_factor,
+                drawn_text_height(ml) * 1.666_666_666_666_667 * ctx.line_spacing_factor,
             ),
             choice(
                 t!("Line space style").as_ref(),
@@ -1646,7 +1658,7 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         }
         "line_space_distance" => {
             if let Some(v) = f64(value) {
-                let denom = ml.text_height * 1.666_666_666_666_667;
+                let denom = drawn_text_height(ml) * 1.666_666_666_666_667;
                 if v > 0.0 && denom > 0.0 {
                     ml.context.line_spacing_factor = v / denom;
                 }

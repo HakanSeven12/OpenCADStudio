@@ -6865,7 +6865,11 @@ impl Scene {
                 })
                 .filter(|&(p, d)| p > 0.0 && d > 0.0)
                 .unwrap_or((1.0, 1.0 / factor));
-            self.add_scale(label, paper, drawing / unit_factor);
+            // An enlarging scale ("2:1", "10:1") keeps its ratio as it is,
+            // as the reference's new drawing stores it; the reducing ones are
+            // converted to the drawing's unit.
+            let drawing = if paper > drawing { drawing } else { drawing / unit_factor };
+            self.add_scale(label, paper, drawing);
         }
         self.bump_scale_epoch();
     }
@@ -6880,21 +6884,66 @@ impl Scene {
     /// Reset to the metric list, the imperial one or both (the Edit
     /// Drawing Scales window asks which), keeping the names in `keep`.
     pub fn reset_scale_list_to(&mut self, keep: &[String], metric: bool, imperial: bool) {
+        // The drawing's unit scale stays with the scales in use.
+        let unit_scales = self.unit_scale_names();
         let names = self.scale_names_in_list_order();
         for name in names {
-            if !keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name)) {
+            let kept = keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name))
+                || unit_scales.iter().any(|unit| unit.eq_ignore_ascii_case(&name));
+            if !kept {
                 self.remove_scale(&name);
             }
         }
-        if metric {
-            self.add_metric_reset_scales();
+        // The unit scale follows the scales in use (measured).
+        for unit in &unit_scales {
+            while self.move_scale(unit, 1) {}
         }
-        if imperial {
-            for &(label, factor) in Self::DEFAULT_IMPERIAL_SCALES {
-                self.add_scale(label, 1.0, 1.0 / factor);
+        match (metric, imperial) {
+            (true, false) => self.add_metric_reset_scales(),
+            // Imperial alone: 1:1 and the architectural set, inches to
+            // twelve (a foot), as the reference's list stores them.
+            (false, true) => {
+                self.add_scale("1:1", 1.0, 1.0);
+                for &(label, factor) in Self::DEFAULT_IMPERIAL_SCALES {
+                    self.add_scale(label, factor * 12.0, 12.0);
+                }
             }
+            // Both: the civil (engineering) inch-to-feet set, then the metric
+            // ratios.
+            (true, true) => {
+                self.add_scale("1\" = 1\"", 1.0, 1.0 / 12.0);
+                for feet in Self::CIVIL_IMPERIAL_FEET {
+                    self.add_scale(&format!("1\" = {feet}'"), 1.0, f64::from(*feet));
+                }
+                for &(name, paper, drawing) in Self::STANDARD_METRIC_RATIOS {
+                    self.add_scale(name, paper, drawing);
+                }
+            }
+            (false, false) => {}
         }
         self.bump_scale_epoch();
+    }
+
+    /// The feet one inch of paper shows in the civil imperial scale list.
+    const CIVIL_IMPERIAL_FEET: &'static [u32] = &[
+        5, 10, 20, 30, 40, 50, 60, 70, 75, 80, 100, 150, 200, 250, 500, 1000, 2000, 5000,
+    ];
+
+    /// The drawing's unit scale: the 1 : 1 entry named by the millimetres one
+    /// drawing unit holds ("1:1000" in a metre drawing), as the metric list
+    /// adds it. Any 1 : 1 scale flags itself, so the flag alone cannot tell.
+    pub fn unit_scale_names(&self) -> Vec<String> {
+        let name = Self::unit_scale_name_for(self.default_scale_unit_factor());
+        self.scale_paper_drawing(&name)
+            .filter(|(paper, drawing)| (paper - drawing).abs() < 1.0e-9)
+            .map(|_| name)
+            .into_iter()
+            .collect()
+    }
+
+    fn unit_scale_name_for(unit: f64) -> String {
+        let text = format!("{unit:.6}");
+        format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
     }
 
     fn add_metric_reset_scales(&mut self) {
@@ -6902,11 +6951,7 @@ impl Scene {
         // named by the millimetres one drawing unit holds (1:1000 for
         // metres), then the standard ratios as they are; a name the list
         // keeps is not added again.
-        let unit = self.default_scale_unit_factor();
-        let unit_name = {
-            let text = format!("{unit:.6}");
-            format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
-        };
+        let unit_name = Self::unit_scale_name_for(self.default_scale_unit_factor());
         if self.add_scale(&unit_name, 1.0, 1.0) {
             if let Some(handle) = self.scale_object_handle(&unit_name) {
                 if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
@@ -7529,6 +7574,32 @@ impl Scene {
         let ratio = crate::scene::annotative::text_context_ratio(&self.document, handle, scale)
             .unwrap_or(1.0);
         Some(model_per_paper / ratio)
+    }
+
+    /// For an annotative hatch, the model units per paper unit of the
+    /// representation it shows (the current scale's, else its default
+    /// one). Its Properties give the pattern scale on paper.
+    pub(crate) fn annotative_hatch_model_per_paper(&self, handle: Handle) -> Option<f64> {
+        let entity = self.document.get_entity(handle)?;
+        if !matches!(entity, EntityType::Hatch(_))
+            || !crate::scene::annotative::is_annotative(&self.document, entity)
+        {
+            return None;
+        }
+        let scale = crate::scene::annotative::active_object_context_for_scale(
+            &self.document,
+            handle,
+            self.displayed_annotation_scale_handle(),
+        )
+        .map(|context| context.scale)
+        .or_else(|| self.displayed_annotation_scale_handle())?;
+        match self.document.objects.get(&scale) {
+            Some(ObjectType::Scale(scale)) => {
+                let factor = self.effective_scale_factor(scale);
+                (factor > 1.0e-12).then(|| 1.0 / factor)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn displayed_annotation_scale_handle(&self) -> Option<Handle> {

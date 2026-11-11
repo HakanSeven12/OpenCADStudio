@@ -767,8 +767,9 @@ impl Scene {
 
     /// ANNOMONITOR 1: a yellow alert badge with an exclamation bar beside
     /// the text of every dimension whose association no longer resolves
-    /// (measured: 17 x 11 px, 5 px right of the text, a quarter of the text
-    /// height above its middle; nothing at 0, -1 or -2). Screen size.
+    /// (measured: 17 x 11 px, upright, its middle 13 px right of and 14 px
+    /// above the end the text reads to, whatever the text's angle; nothing
+    /// at 0, -1 or -2). Screen size.
     pub(super) fn anno_monitor_overlay(&self, pixel: f64) -> Vec<HatchModel> {
         if crate::scene::annotative::anno_monitor() != 1 {
             return Vec::new();
@@ -808,13 +809,15 @@ impl Scene {
             if !broken {
                 continue;
             }
-            let Some((middle, width, height)) = crate::entities::dimension::as_dimension(entity)
+            let Some((middle, width, _, angle)) = crate::entities::dimension::as_dimension(entity)
                 .and_then(|dim| crate::entities::dimension::text_box(dim, &self.document))
             else {
                 continue;
             };
-            let left = middle.x + width * 0.5 + 5.0 * pixel;
-            let centre = middle.y + 0.25 * height;
+            let end_x = middle.x + angle.cos() * width * 0.5;
+            let end_y = middle.y + angle.sin() * width * 0.5;
+            let left = end_x + 4.5 * pixel;
+            let centre = end_y + 14.0 * pixel;
             let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
                 let z = middle.z as f32;
                 [
@@ -824,23 +827,27 @@ impl Scene {
                     glam::Vec3::new(x0 as f32, y1 as f32, z),
                 ]
             };
-            let badge = rect(
-                left,
-                centre - 5.5 * pixel,
-                left + 17.0 * pixel,
-                centre + 5.5 * pixel,
-            );
+            let badge = rect(left, centre - 5.5 * pixel, left + 17.0 * pixel, centre + 5.5 * pixel);
+            // An exclamation mark: a bar over a dot.
             let bar = rect(
                 left + 7.0 * pixel,
-                centre - 2.5 * pixel,
+                centre - 0.5 * pixel,
                 left + 10.0 * pixel,
                 centre + 4.5 * pixel,
+            );
+            let dot = rect(
+                left + 7.0 * pixel,
+                centre - 3.5 * pixel,
+                left + 10.0 * pixel,
+                centre - 1.5 * pixel,
             );
             if let Some(model) = Self::indicator_box(&badge, [0.996, 0.851, 0.004, 1.0]) {
                 out.push(model);
             }
-            if let Some(model) = Self::indicator_box(&bar, [0.08, 0.08, 0.08, 1.0]) {
-                out.push(model);
+            for mark in [bar, dot] {
+                if let Some(model) = Self::indicator_box(&mark, [0.08, 0.08, 0.08, 1.0]) {
+                    out.push(model);
+                }
             }
         }
         out

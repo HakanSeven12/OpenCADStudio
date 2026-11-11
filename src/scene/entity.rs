@@ -3197,7 +3197,7 @@ impl Scene {
             ) {
                 // User-defined hatch: parallel lines at `pattern_angle`, spaced
                 // `pattern_scale` apart, plus a perpendicular set when
-                // `is_double`. Its name ("_USER") is not a catalog pattern.
+                // `is_double`. Its name ("_U") is not a catalog pattern.
                 // Build BASE families (angle 0, and 90 for the cross set) with
                 // unit perpendicular spacing; the HatchModel's angle_offset
                 // (= pattern_angle) and scale (= pattern_scale) below rotate and

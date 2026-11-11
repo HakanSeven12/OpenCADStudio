@@ -315,8 +315,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
     let default_col = document::types::Color::Index(7);
     let grad_c1 = g.colors.first().map(|e| e.color).unwrap_or(default_col);
     let grad_c2 = g.colors.get(1).map(|e| e.color).unwrap_or(default_col);
-    let bg_on = background_color(h).is_some();
-    let bg_col = background_color(h).unwrap_or(default_col);
 
     if g.enabled {
         // ── Gradient fill ──────────────────────────────────────────────────
@@ -425,30 +423,35 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
 
     // ── Hatch (pattern / solid) ────────────────────────────────────────────
     // Show only controls used by the selected fill type.
-    let type_row = if h.is_solid {
-        ro(t!("Type").as_ref(), "fill_kind", t!("Solid").into_owned())
+    // A solid fill is the predefined _SOLID pattern and lists its rows as a
+    // pattern does (measured): angle, scale and origin live, spacing, ISO
+    // pen width and double greyed.
+    let type_row = Property {
+        label: t!("Type").into_owned(),
+        field: "pattern_type_label",
+        value: PropValue::Choice {
+            selected: pattern_type.to_string(),
+            options: vec!["Predefined".into(), "User Defined".into(), "Custom".into()],
+        },
+    };
+    // A user-defined pattern's name is fixed (measured: greyed `_U`).
+    let user_defined = matches!(h.pattern_type, document::entities::HatchPatternType::UserDefined);
+    let pattern_name_row = if user_defined {
+        ro(t!("Pattern name").as_ref(), "pattern_name", h.pattern.name.clone())
     } else {
         Property {
-            label: t!("Type").into_owned(),
-            field: "pattern_type_label",
-            value: PropValue::Choice {
-                selected: pattern_type.to_string(),
-                options: vec!["Predefined".into(), "User Defined".into(), "Custom".into()],
-            },
+            label: t!("Pattern name").into_owned(),
+            field: "pattern_name",
+            value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
         }
-    };
-    let pattern_name_row = Property {
-        label: t!("Pattern name").into_owned(),
-        field: "pattern_name",
-        value: PropValue::HatchPatternChoice(h.pattern.name.clone()),
     };
     let associative_row = associative_property(h);
     let double_row = Property {
         label: t!("Double").into_owned(),
         field: "double",
-        value: PropValue::BoolToggle {
-            field: "double",
-            value: h.is_double,
+        value: PropValue::Choice {
+            selected: if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            options: vec![t!("Yes").into_owned(), t!("No").into_owned()],
         },
     };
     let island_row = Property {
@@ -463,7 +466,31 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
 
     let mut pattern_props = vec![type_row, pattern_name_row];
     pattern_props.push(ro(t!("Annotative").as_ref(), "annotative", String::new()));
-    if !h.is_solid {
+    if h.is_solid {
+        pattern_props.push(edit_angle(
+            t!("Angle").as_ref(),
+            "pattern_angle",
+            h.pattern_angle.to_degrees(),
+        ));
+        pattern_props.push(edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale));
+        pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
+        pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
+        pattern_props.push(ro(
+            t!("Spacing").as_ref(),
+            "spacing",
+            crate::entities::common::format_length(h.pattern_scale),
+        ));
+        pattern_props.push(ro(
+            t!("ISO pen width").as_ref(),
+            "iso_pen_width",
+            format!("{:.2} mm", h.pattern_scale),
+        ));
+        pattern_props.push(ro(
+            t!("Double").as_ref(),
+            "double",
+            if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+        ));
+    } else {
         pattern_props.push(edit_angle(
             t!("Angle").as_ref(),
             "pattern_angle",
@@ -473,32 +500,61 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             h.pattern_type,
             document::entities::HatchPatternType::UserDefined
         ) {
+            // Measured order: the scale (the spacing, greyed) and origin
+            // sit between angle and spacing.
+            pattern_props.push(ro(
+                t!("Scale").as_ref(),
+                "pattern_scale",
+                crate::entities::common::format_decimal(h.pattern_scale),
+            ));
+            pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
+            pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
             pattern_props.push(spacing_row);
             pattern_props.push(double_row);
         } else {
+            // A predefined or custom pattern lists spacing, pen width and
+            // double greyed after its origin (measured); an ISO pattern's
+            // pen width stays editable.
             pattern_props.push(edit(t!("Scale").as_ref(), "pattern_scale", h.pattern_scale));
             // Origin edits are relative offsets.
             pattern_props.push(edit(t!("Origin X").as_ref(), "origin_x", 0.0));
             pattern_props.push(edit(t!("Origin Y").as_ref(), "origin_y", 0.0));
+            pattern_props.push(ro(
+                t!("Spacing").as_ref(),
+                "spacing",
+                crate::entities::common::format_length(h.pattern_scale),
+            ));
             if h.pattern.name.to_ascii_uppercase().starts_with("ISO") {
                 pattern_props.push(edit(
                     t!("ISO pen width").as_ref(),
                     "iso_pen_width",
                     h.pattern_scale,
                 ));
+            } else {
+                pattern_props.push(ro(
+                    t!("ISO pen width").as_ref(),
+                    "iso_pen_width",
+                    format!("{:.2} mm", h.pattern_scale),
+                ));
             }
+            pattern_props.push(ro(
+                t!("Double").as_ref(),
+                "double",
+                if h.is_double { t!("Yes") } else { t!("No") }.into_owned(),
+            ));
         }
     }
     pattern_props.push(associative_row);
     pattern_props.push(island_row);
-    pattern_props.push(Property {
-        label: t!("Background").into_owned(),
-        field: "bg_enabled",
-        value: PropValue::BoolToggle {
-            field: "bg_enabled",
-            value: bg_on,
-        },
-    });
+    // A solid fill has no background colour row; a pattern lists its
+    // background colour, None while it has none.
+    if !h.is_solid {
+        pattern_props.push(Property {
+            label: t!("Background color").into_owned(),
+            field: "background_color",
+            value: PropValue::ColorChoice(background_color(h).unwrap_or(document::types::Color::None)),
+        });
+    }
 
     let mut sections = vec![
         PropSection {
@@ -522,15 +578,6 @@ fn properties(h: &Hatch) -> Vec<PropSection> {
             ],
         },
     ];
-    if bg_on {
-        if let Some(sec) = sections.first_mut() {
-            sec.props.push(Property {
-                label: t!("Background color").into_owned(),
-                field: "background_color",
-                value: PropValue::ColorChoice(bg_col),
-            });
-        }
-    }
     sections
 }
 
@@ -554,7 +601,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
             h.is_double = if value == "toggle" {
                 !h.is_double
             } else {
-                value == "true"
+                value == "true" || value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes")
             };
             return;
         }
@@ -587,7 +634,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 match requested {
                     HatchPatternType::UserDefined => {
                         // Rebuild user-defined geometry from its parameters.
-                        h.pattern = document::entities::HatchPattern::new("_USER");
+                        h.pattern = document::entities::HatchPattern::new("_U");
                     }
                     HatchPatternType::Predefined => {
                         if let Some(entry) = crate::scene::model::hatch_patterns::find("ANSI31") {
@@ -677,7 +724,7 @@ fn apply_geom_prop(h: &mut Hatch, field: &str, value: &str) {
                 document::entities::HatchPatternType::UserDefined
             ) {
                 h.pattern.lines.clear();
-                h.pattern.name = "_USER".to_string();
+                h.pattern.name = "_U".to_string();
             }
         }
         // Origin rows are relative offsets and return to zero after commit.

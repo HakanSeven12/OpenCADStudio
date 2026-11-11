@@ -2188,9 +2188,17 @@ pub(super) struct OpenCADStudio {
     scale_manager_selected: String,
     scale_manager_paper_buf: String,
     scale_manager_drawing_buf: String,
-    /// The scale row being renamed inline (double-click), + its edit buffer.
+    /// The scale the Edit card edits (double-click or Edit...), + the name
+    /// buffer; the card adds a new scale when `scale_edit_adding`.
     scale_rename: Option<String>,
     scale_rename_buf: String,
+    scale_edit_adding: bool,
+    /// The scale card's refusal (no name, a taken name, a bad ratio).
+    scale_edit_error: Option<String>,
+    /// Every picked row of the scale list (Ctrl adds, Shift extends).
+    scale_manager_multi: Vec<String>,
+    /// Delete asks whether to drop the picked scales not in use.
+    scale_delete_asking: bool,
     /// The entity the Annotation Object Scale dialog is editing (its per-object
     /// annotation-scale membership).
     anno_object_scale_target: Option<document::types::Handle>,
@@ -4782,6 +4790,12 @@ pub enum Message {
     ScaleRenameCommit,
     /// Delete the selected scale.
     ScaleManagerDelete,
+    /// The delete question: drop the picked scales not in use, or not.
+    ScaleManagerDeleteChoice(bool),
+    /// Opens the Edit card on the picked scale.
+    ScaleManagerEdit,
+    /// Closes the Edit / Add card without a change.
+    ScaleManagerEditCancel,
     /// Set the selected scale as the current annotation scale.
     ScaleManagerSetCurrent,
     /// Apply the editor fields to the selected scale (rename / re-ratio).
@@ -6860,6 +6874,10 @@ impl OpenCADStudio {
             scale_manager_paper_buf: String::new(),
             scale_manager_drawing_buf: String::new(),
             scale_rename: None,
+            scale_edit_adding: false,
+            scale_edit_error: None,
+            scale_manager_multi: Vec::new(),
+            scale_delete_asking: false,
             anno_object_scale_target: None,
             anno_object_scale_extra: Vec::new(),
             anno_object_scale: Default::default(),

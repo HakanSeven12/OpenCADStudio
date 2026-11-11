@@ -7769,6 +7769,68 @@ mod batch7_tests {
         assert_eq!(style.dimtxt, 2.5);
     }
 
+    #[test]
+    fn mleader_edit_adds_then_removes_a_leader_and_reports_both_vertex_lists() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let mut leader = document::entities::MultiLeader::with_text(
+            "office note",
+            document::types::Vector3::new(20.0, 0.0, 0.0),
+            vec![
+                document::types::Vector3::ZERO,
+                document::types::Vector3::new(5.0, 5.0, 0.0),
+            ],
+        );
+        leader.text_height = 0.18;
+        leader.context.text_height = 0.18;
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::MultiLeader(Box::new(leader)));
+
+        // The initial note: one leader, two vertices.
+        let q = app.automation_op(&format!(
+            r#"{{"op":"query","handle":"{handle:X}","detail":"full"}}"#
+        ));
+        assert_eq!(q["entities"][0]["leader_count"], 1, "{q}");
+        let leaders = q["entities"][0]["leaders"].as_array().unwrap();
+        assert_eq!(leaders[0]["points"].as_array().unwrap().len(), 2, "{q}");
+
+        // Add a second leader through the edit command.
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{handle:X}"]}}"#
+        ));
+        let _ = app.run_command_line("MLEADEREDIT");
+        assert!(app.tabs[i].active_cmd.is_some());
+        let _ = app.feed_active_cmd("40,10");
+        let _ = app.feed_active_cmd("");
+        let q = app.automation_op(&format!(
+            r#"{{"op":"query","handle":"{handle:X}","detail":"full"}}"#
+        ));
+        assert_eq!(q["entities"][0]["leader_count"], 2, "{q}");
+        let leaders = q["entities"][0]["leaders"].as_array().unwrap();
+        assert_eq!(leaders.len(), 2, "{q}");
+        let lists: Vec<&Vec<serde_json::Value>> = leaders
+            .iter()
+            .map(|leader| leader["points"].as_array().unwrap())
+            .collect();
+        assert_eq!(lists[0].len(), 2, "{q}");
+        assert_eq!(lists[1].len(), 1, "{q}");
+        assert_ne!(lists[0], lists[1], "{q}");
+
+        // Remove the first leader — one leader remains.
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{handle:X}"]}}"#
+        ));
+        let _ = app.run_command_line("MLEADEREDIT");
+        let _ = app.feed_active_cmd("R");
+        let _ = app.feed_active_cmd("0,0");
+        let _ = app.feed_active_cmd("");
+        let q = app.automation_op(&format!(
+            r#"{{"op":"query","handle":"{handle:X}","detail":"full"}}"#
+        ));
+        assert_eq!(q["entities"][0]["leader_count"], 1, "{q}");
+    }
+
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> document::Handle {
         use document::entities::Line;
         use document::types::Vector3;

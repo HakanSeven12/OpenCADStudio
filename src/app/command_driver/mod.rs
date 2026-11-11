@@ -2310,6 +2310,24 @@ fn entity_at_typed_point(
                         .max(0.0);
                     dx.hypot(dy)
                 }
+                // An insert answers by the box of its expanded definition, the
+                // way a click on its box picks it.
+                None if matches!(entity, document::EntityType::Insert(_)) => {
+                    let document::EntityType::Insert(insert) = entity else {
+                        continue;
+                    };
+                    let Some(world) = crate::app::helpers::insert_world_bounds(document, insert)
+                    else {
+                        continue;
+                    };
+                    let dx = (world.min.x - point.x)
+                        .max(point.x - world.max.x)
+                        .max(0.0);
+                    let dy = (world.min.y - point.y)
+                        .max(point.y - world.max.y)
+                        .max(0.0);
+                    dx.hypot(dy)
+                }
                 None => continue,
             };
         if nearest.is_none_or(|(best, _)| distance < best) {

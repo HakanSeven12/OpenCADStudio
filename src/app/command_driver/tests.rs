@@ -7932,4 +7932,146 @@ mod batch7_tests {
             assert_eq!(out.contains("Coincident"), expect_coincident, "{out}");
         }
     }
+
+    fn temp_named(stem: &str, extension: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ocs-{stem}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join(format!("{stem}.{extension}"))
+    }
+
+    /// A fresh tab as a host drawing referencing `source`; returns the tab
+    /// index and the reference's block-record handle.
+    fn host_with_xref(
+        app: &mut OpenCADStudio,
+        source: &std::path::Path,
+    ) -> (usize, document::Handle) {
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(
+                app.tabs.len(),
+            ));
+        let idx = app.tabs.len() - 1;
+        app.active_tab = idx;
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("-XREF");
+        let _ = app.feed_active_cmd("ATTACH");
+        let _ = app.feed_active_cmd(&source.display().to_string());
+        let _ = app.feed_active_cmd("0,0");
+        let _ = app.feed_active_cmd("1");
+        let _ = app.feed_active_cmd("");
+        let _ = app.feed_active_cmd("");
+        let record = app.tabs[idx]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+            .map(|br| br.handle)
+            .expect("the host carries the reference");
+        (idx, record)
+    }
+
+    fn referenced_entity_count(
+        app: &OpenCADStudio,
+        tab: usize,
+        record: document::Handle,
+    ) -> usize {
+        app.tabs[tab]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| entity.common().owner_handle == record)
+            .count()
+    }
+
+    #[test]
+    fn saving_the_source_reloads_the_host_reference() {
+        let source = temp_named("m071-src", "dwg");
+        let mut app = new_app();
+
+        // Backslashes would escape out of the JSON string; the resolver
+        // normalises forward slashes.
+        let source_fwd = source.display().to_string().replace('\\', "/");
+        // Tab 0: the source drawing with one line.
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{source_fwd}"}}"#));
+
+        let (host, record) = host_with_xref(&mut app, &source);
+        assert_eq!(referenced_entity_count(&app, host, record), 1);
+
+        // A second tab opens the source, gains a line and saves — the
+        // host must reload the reference from disk.
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(9));
+        let source_tab = app.tabs.len() - 1;
+        app.active_tab = source_tab;
+        let _ = app.automation_op(&format!(r#"{{"op":"open","path":"{source_fwd}"}}"#));
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 20,0"}"#);
+        let _ = app.automation_op(r#"{"op":"save"}"#);
+
+        assert_eq!(
+            referenced_entity_count(&app, host, record),
+            2,
+            "the host reloaded the saved source"
+        );
+    }
+
+    #[test]
+    fn xopen_asks_to_pick_a_reference_and_resolves_it_under_the_point() {
+        let source = temp_named("m071-pick", "dwg");
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let source_fwd = source.display().to_string().replace('\\', "/");
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{source_fwd}"}}"#));
+
+        let (host, _record) = host_with_xref(&mut app, &source);
+        // No selection: XOPEN asks for a pick.
+        let _ = app.run_command_line("XOPEN");
+        assert!(
+            app.tabs[host].active_cmd.is_some(),
+            "the pick command starts"
+        );
+        let out = out_text(&app);
+        assert!(out.contains("Select an external reference"), "{out}");
+        // A pick on the reference under the point resolves to its source.
+        let _ = app.feed_active_cmd("2.5,0");
+        let out = out_text(&app);
+        assert!(out.contains("XOPEN: opening"), "{out}");
+        assert!(out.contains(&source.display().to_string()), "{out}");
+    }
+
+    #[test]
+    fn xopen_reports_a_missing_source_and_leaves_the_host_alone() {
+        let source = temp_named("m071-missing", "dwg");
+        let mut app = new_app();
+
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let source_fwd = source.display().to_string().replace('\\', "/");
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{source_fwd}"}}"#));
+
+        let (host, record) = host_with_xref(&mut app, &source);
+        std::fs::remove_file(&source).expect("the source is removed for the test");
+
+        let insert = app.tabs[host]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert.common.handle),
+                _ => None,
+            })
+            .expect("the host carries the reference insert");
+        let _ = app.automation_op(&format!(r#"{{"op":"select","handles":["{insert:X}"]}}"#));
+        let before = referenced_entity_count(&app, host, record);
+        let _ = app.run_command_line("XOPEN");
+        let out = out_text(&app);
+        assert!(out.contains("cannot find"), "{out}");
+        assert_eq!(
+            referenced_entity_count(&app, host, record),
+            before,
+            "the missing-file refusal leaves the reference alone"
+        );
+    }
 }

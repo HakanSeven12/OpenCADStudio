@@ -2051,6 +2051,84 @@ impl OpenCADStudio {
             None => self.install_native_edit_guard(i, path, None),
         }
         self.tabs[i].disk_fingerprint = crate::io::edit_lock::FileFingerprint::capture(path).ok();
+        #[cfg(not(target_arch = "wasm32"))]
+        // Any other open drawing that references `path` re-reads it, the
+        // same as an external reload: a source edited and saved in this
+        // session is not allowed to go stale in its hosts.
+        self.reload_xrefs_pointing_at(i, path);
+    }
+
+    /// Reload, in every other tab that references `path`, the definitions
+    /// the save refreshed. `resolve_xrefs_for_keys` does the merge; this
+    /// finds the matching records, refreshes the stat cache and marks the
+    /// host dirty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn reload_xrefs_pointing_at(
+        &mut self,
+        saved: usize,
+        path: &std::path::Path,
+    ) {
+        let mut matches: Vec<(usize, rustc_hash::FxHashSet<document::Handle>)> = Vec::new();
+        for (j, tab) in self.tabs.iter().enumerate() {
+            if j == saved || tab.block_test.is_some() {
+                continue;
+            }
+            let base_dir = tab
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let keys: rustc_hash::FxHashSet<document::Handle> = tab
+                .scene
+                .document
+                .block_records
+                .iter()
+                .filter(|br| {
+                    (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty()
+                })
+                .filter_map(|br| {
+                    crate::io::xref::resolve_path(&br.xref_path, &base_dir)
+                        .filter(|resolved| native_paths_match(resolved, path))
+                        .map(|_| br.handle)
+                })
+                .collect();
+            if !keys.is_empty() {
+                matches.push((j, keys));
+            }
+        }
+        for (j, keys) in matches {
+            let base_dir = self.tabs[j]
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                &mut self.tabs[j].scene.document,
+                &base_dir,
+                &keys,
+            );
+            if infos.is_empty() {
+                continue;
+            }
+            // The stat cache reports the saved file as current again.
+            let fresh = crate::io::xref::collect_entries_with_prev(
+                &self.tabs[j].scene.document,
+                &base_dir,
+                self.tabs[j].xref_unloaded.as_set(),
+                &self.tabs[j].xref_stat_cache.0,
+            );
+            for entry in &fresh {
+                if let Some(modified) = entry.modified {
+                    self.tabs[j].xref_stat_cache.insert(entry.key, modified);
+                }
+            }
+            self.tabs[j].dirty = true;
+            self.tabs[j].scene.bump_geometry_no_blocks();
+            self.post_ref_op(j);
+            self.command_line.push_info(
+                crate::tf!("XREF: references to the saved source were reloaded.").as_ref(),
+            );
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

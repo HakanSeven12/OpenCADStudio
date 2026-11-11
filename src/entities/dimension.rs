@@ -2280,13 +2280,9 @@ pub fn style_sections(
                     "dim_text_inside_align",
                     on(int(ov::DIMTIH, s.dimtih as i16) == 0),
                     &["On", "Off"],
-                    dimtix
-                        || matches!(
-                            dimension,
-                            Dimension::LargeRadial(_)
-                                | Dimension::Angular2Ln(_)
-                                | Dimension::Angular3Pt(_)
-                        ),
+                    // Editable whether or not text is forced inside
+                    // (measured on a linear dimension with Text inside Off).
+                    true,
                 ),
                 property(
                     t!("Text position X").as_ref(),

@@ -103,7 +103,7 @@ impl Face {
         // A resolvable on-disk .SHX font renders its real stroke glyphs; the
         // LFF substitutes only cover names we can't load.
         if font_name.to_ascii_lowercase().ends_with(".shx")
-            && std::path::Path::new(font_name).is_file()
+            && shx::file_on_disk(font_name)
             && shx::font_metrics(font_name).is_some()
         {
             let word = shx::font_glyph(font_name, ' ' as u16)

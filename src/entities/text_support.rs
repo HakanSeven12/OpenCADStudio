@@ -107,10 +107,7 @@ fn resolve_style(
                     .as_deref()
                     .map(std::path::Path::new)
                     .and_then(|p| p.parent());
-                crate::io::resolve_image_file(&shx_file, base).or_else(|| {
-                    crate::io::font_repo::local_font_file(&shx_file)
-                        .map(|path| path.to_string_lossy().into_owned())
-                })
+                crate::io::font_repo::font_file_path(&shx_file, base)
             });
             if let Some(p) = shx_path {
                 p
@@ -181,12 +178,7 @@ fn resolve_style(
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.parent());
-        let resolve_big = |name: &str| {
-            crate::io::resolve_image_file(name, base).or_else(|| {
-                crate::io::font_repo::local_font_file(name)
-                    .map(|p| p.to_string_lossy().into_owned())
-            })
-        };
+        let resolve_big = |name: &str| crate::io::font_repo::font_file_path(name, base);
         let mut big_path = resolve_big(big);
         // If the referenced big font is not a valid big font (e.g. legacy Chinese
         // shape-only container `chinese.shx`), try the standard Big5 big font
@@ -3374,6 +3366,31 @@ mod tests {
             .iter()
             .map(|s| s.strokes.iter().map(Vec::len).sum::<usize>() + s.fill_tris.len())
             .sum()
+    }
+
+    /// A style whose `.shx` file is not on disk is searched for in the font
+    /// folders once, not again for every text drawn in that style.
+    #[test]
+    fn a_missing_font_file_is_searched_for_once_for_many_texts() {
+        let mut doc = document::CadDocument::default();
+        let mut gone = document::tables::TextStyle::new("GONE");
+        gone.font_file = "ocs_no_such_font_for_lookup.shx".into();
+        doc.text_styles.add(gone).unwrap();
+        let doc: document::Document = doc.into();
+        let searches = || crate::io::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
+
+        let before = searches();
+        for _ in 0..50 {
+            assert_eq!(
+                resolve_text_style("GONE", &doc).font_name,
+                "ocs_no_such_font_for_lookup.shx"
+            );
+        }
+        assert_eq!(
+            searches() - before,
+            1,
+            "fifty texts in one style must share one search of the font folders"
+        );
     }
 
     /// AutoCAD 2025 places a bottom-attached MTEXT by the ink of its last

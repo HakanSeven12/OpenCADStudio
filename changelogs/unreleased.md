@@ -24,6 +24,7 @@
 * **SVG Web-Map Strokes and Automation Options:** SVG Plot offers Non-scaling strokes for constant-width linework under downstream viewer transforms such as web-map layers; the preference defaults off and PDF output never sees it. Automation plot requests expose non-scaling strokes, scaled lineweights, shade mode, paperspace ordering, and explicit plot-style enable/disable.
 
 ### 🐛 Bug Fixes
+* **DGN Cell Deduplication:** Self-contained cell headers with their own objects and identical geometry become one block definition and one insert per placement. A GIS export that carries the same symbol cell thousands of times (each header its own copy of the symbol) used to define a new, renamed block per header - block palettes flooded with lookalikes and the import took the time of writing every one of them. Cells placed in different spots that drew the same objects around their origins now share one definition; cells with genuinely different objects keep their separate definitions.
 
 * **Diameter Sign:** `%%c` gives the diameter sign U+2205 in the text editor, its Symbols menu and text search, the same sign drawings already showed.
 * **`DIMARC` Icon:** Arc Length has its own icon instead of the Angular one.

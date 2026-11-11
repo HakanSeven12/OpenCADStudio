@@ -71,10 +71,11 @@ pub fn textfill() -> bool {
 
 /// Set TEXTFILL and drop the cached glyphs so they re-bake filled / hollow.
 /// Callers must re-tessellate text (`bump_geometry`) so quads pick up the
-/// re-baked tiles.
+/// re-baked tiles. Setting the value it already has keeps the atlas.
 pub fn set_textfill(on: bool) {
-    TEXTFILL.store(on, std::sync::atomic::Ordering::Relaxed);
-    reset_font_entries();
+    if TEXTFILL.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+        reset_font_entries();
+    }
 }
 
 pub fn reset_font_entries() {

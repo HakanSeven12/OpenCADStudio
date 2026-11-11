@@ -770,13 +770,12 @@ impl OpenCADStudio {
                     app.load_plotsettings_into_dialog(&page_setup);
                     page_dialog = app.plot_dialog.clone();
                     page_dialog.paper_space = true;
+                    // An explicit area brings its window rect (the "Window"
+                    // plot branch reads `page_dialog.window`): a named
+                    // layout's stored setup must not swallow it. Without
+                    // `area` the request's rect is the dialog's leftover.
                     if area_explicit {
                         page_dialog.area = request.area.clone();
-                    }
-                    // The window rect belongs to the explicit request (and the
-                    // "Window" plot branch reads `page_dialog.window`): a named
-                    // layout's stored setup must not swallow it.
-                    if req.get("window").is_some() {
                         page_dialog.window = request.window;
                     }
                     if request.paper_width_mm == 0.0 && !request.paper.is_empty() {

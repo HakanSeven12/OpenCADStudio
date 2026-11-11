@@ -2789,8 +2789,13 @@ impl MultiLeaderFrameTess for MultiLeader {
                             + (root.direction.y / dir_len) * along_y;
                         if d_along.abs() > 0.5 {
                             let gap = ctx.landing_gap.max(0.0) * context_scale_correction as f64;
-                            let landing =
-                                root.landing_distance.max(0.0) * context_scale_correction as f64;
+                            // Only a drawn landing (as `landing_endpoints`
+                            // draws it) pushes the text out.
+                            let landing = if ml.enable_landing && ml.enable_dogleg {
+                                root.landing_distance.max(0.0) * context_scale_correction as f64
+                            } else {
+                                0.0
+                            };
                             let target = d_along * (landing + gap);
                             // The edge that faces the leader: upstream when the
                             // landing advances with the reading direction,

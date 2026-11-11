@@ -145,7 +145,12 @@
 /// declares v16 and the older host refuses to load it. Custom grips now
 /// snap (object snap, tracking, ortho, polar) and settle click-move-click
 /// like native grips.
-pub const API_VERSION: u32 = 16;
+/// v17: reactive modal dialogs — `InteractiveCommand::on_dialog_action` (a new
+/// vtable slot, so the runner only calls it for v17 plugins), the
+/// `DialogValue::ChoiceOptions` / `Enabled` / `Visible` updates and the
+/// `DialogControl::Label` control, all appended to their enums. A v16 host
+/// cannot decode them, so a plugin that uses them declares v17.
+pub const API_VERSION: u32 = 17;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

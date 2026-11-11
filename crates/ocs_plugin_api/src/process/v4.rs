@@ -20,11 +20,6 @@ use crate::process::{request_kind, request_timeout, PluginError};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
-#[inline]
-fn request_tab_matches(request_tab: Option<u64>, host_tab: u64) -> bool {
-    request_tab.is_none_or(|rt| rt == host_tab || rt == 0 || host_tab == 0)
-}
-
 pub(crate) struct V4Connection {
     shared: Arc<V4HostShared>,
     incoming: Mutex<mpsc::Receiver<HostIncoming>>,
@@ -208,7 +203,9 @@ impl V4Connection {
                     deadline = Instant::now() + timeout;
                     let current_tab_id = host.tab_id();
                     if matches!(*payload, PluginRequest::GetTabId)
-                        || request_tab_matches(tab_id, current_tab_id)
+                        || tab_id.is_none_or(|request_tab| {
+                            request_tab == current_tab_id || current_tab_id == 0
+                        })
                     {
                         self.respond_to_plugin_request(host, rid, payload, on_start_interactive)?;
                     } else {
@@ -285,7 +282,7 @@ impl V4Connection {
             let mut deferred = self.deferred.lock().unwrap_or_else(|e| e.into_inner());
             let mut waiting = VecDeque::new();
             while let Some((id, tab_id, payload)) = deferred.pop_front() {
-                if request_tab_matches(tab_id, current_tab_id) {
+                if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                     ready.push_back((id, payload));
                 } else {
                     waiting.push_back((id, tab_id, payload));
@@ -305,7 +302,7 @@ impl V4Connection {
                     tab_id,
                     payload,
                 }) => {
-                    if request_tab_matches(tab_id, current_tab_id) {
+                    if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                         self.respond_to_plugin_request(host, id, payload, on_start_interactive)?;
                     } else {
                         self.deferred
@@ -464,7 +461,7 @@ impl V4Connection {
                     tab_id,
                     payload,
                 }) => {
-                    if request_tab_matches(tab_id, host.tab_id()) {
+                    if tab_id.is_none_or(|request_tab| request_tab == host.tab_id()) {
                         self.respond_to_plugin_request_in_context(
                             host,
                             rid,
@@ -980,13 +977,11 @@ mod tests {
                                 "missing requested tab: {message}"
                             );
                             assert!(
-                                message.contains("dispatches to tab 2"),
+                                message.contains("while the host dispatches to tab 2"),
                                 "missing current tab: {message}"
                             );
                             assert!(
-                                message.contains(
-                                    "cannot be served inline while the host dispatches to tab"
-                                ),
+                                message.contains("cannot be served inline"),
                                 "missing inline-dispatch refusal: {message}"
                             );
                         }
@@ -1637,39 +1632,5 @@ mod tests {
         runner.join().expect("runner thread finished");
         std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS");
         restore_test_env();
-    }
-
-    #[test]
-    fn v4_connection_drain_requests_services_tab_0_on_any_host_tab() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (mut runner_stream, host_stream) = connect_pair();
-        let conn = V4Connection::new(host_stream, Arc::new(|_, _| {})).unwrap();
-
-        send(
-            &mut runner_stream,
-            &PluginToHostV4::Request {
-                id: 123,
-                tab_id: Some(0),
-                payload: PluginRequest::UpdatePanel {
-                    panel_id: "test_panel".to_string(),
-                    values: std::collections::HashMap::new(),
-                },
-            },
-        )
-        .unwrap();
-
-        std::thread::sleep(Duration::from_millis(50));
-
-        let mut host = DummyHost::with_tab_id(2);
-        conn.drain_requests(&mut host, &mut |_| {}).unwrap();
-
-        let resp = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
-        match resp {
-            HostToPluginV4::Response { id, payload } => {
-                assert_eq!(id, 123);
-                assert!(matches!(payload, PluginResponse::PanelUpdated(_)));
-            }
-            other => panic!("expected response, got {other:?}"),
-        }
     }
 }

@@ -3272,7 +3272,10 @@ impl OpenCADStudio {
             }
             Message::PluginDialogFilePick(id) => {
                 let (is_save, extensions) = if let Some(state) = &self.plugin_dialog_state {
-                    fn find_fp(ctrls: &[ocs_plugin_api::dialog::DialogControl], target: &str) -> Option<(bool, Vec<String>)> {
+                    fn find_fp(
+                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
+                        target: &str,
+                    ) -> Option<(bool, Vec<String>)> {
                         for c in ctrls {
                             match c {
                                 ocs_plugin_api::dialog::DialogControl::FilePicker {
@@ -3281,9 +3284,13 @@ impl OpenCADStudio {
                                     save,
                                     ..
                                 } if cid == target => return Some((*save, extensions.clone())),
-                                ocs_plugin_api::dialog::DialogControl::Fields { controls, .. }
+                                ocs_plugin_api::dialog::DialogControl::Fields {
+                                    controls, ..
+                                }
                                 | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. } => {
+                                | ocs_plugin_api::dialog::DialogControl::Column {
+                                    controls, ..
+                                } => {
                                     if let Some(res) = find_fp(controls, target) {
                                         return Some(res);
                                     }
@@ -3459,18 +3466,20 @@ impl OpenCADStudio {
                     return Task::none();
                 }
 
-                if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
-                    let act = if action_str.is_empty() {
-                        "click".to_string()
-                    } else {
-                        action_str
-                    };
+                // A button whose action names a command runs it, as panel
+                // buttons do; a plain button is a click event for the plugin.
+                if !action_str.is_empty() {
+                    return self.dispatch_command(&action_str);
+                }
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) =
+                    &dialog_meta
+                {
                     crate::plugin::v4_support::publish_panel_action_to_plugin(
                         owner_plugin_id.as_deref(),
                         *owner_command_id,
                         dialog_title.clone(),
                         id,
-                        act,
+                        "click".to_string(),
                         Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
                     );
                 }
@@ -3613,15 +3622,26 @@ impl OpenCADStudio {
             Message::PluginPanelTableAddRow(panel_id, table_id) => {
                 let mut current_rows = Vec::new();
                 if let Some(panel) = self.plugin_panels.get_mut(&panel_id) {
-                    fn find_table_cols(ctrls: &[ocs_plugin_api::dialog::DialogControl], target: &str) -> Option<usize> {
+                    fn find_table_cols(
+                        ctrls: &[ocs_plugin_api::dialog::DialogControl],
+                        target: &str,
+                    ) -> Option<usize> {
                         for c in ctrls {
                             match c {
-                                ocs_plugin_api::dialog::DialogControl::Table { id, headers, .. } if id == target => {
+                                ocs_plugin_api::dialog::DialogControl::Table {
+                                    id,
+                                    headers,
+                                    ..
+                                } if id == target => {
                                     return Some(headers.len());
                                 }
-                                ocs_plugin_api::dialog::DialogControl::Fields { controls, .. }
+                                ocs_plugin_api::dialog::DialogControl::Fields {
+                                    controls, ..
+                                }
                                 | ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
-                                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. } => {
+                                | ocs_plugin_api::dialog::DialogControl::Column {
+                                    controls, ..
+                                } => {
                                     if let Some(res) = find_table_cols(controls, target) {
                                         return Some(res);
                                     }

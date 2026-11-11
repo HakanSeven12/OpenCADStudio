@@ -128,6 +128,14 @@ pub enum DialogControl {
         #[serde(default)]
         align_v: Option<VerticalAlign>,
     },
+    /// Static text with an id, so a later `update_panel` / dialog update can
+    /// rewrite it in place (API v17). Plain `InfoText` stays id-less.
+    Label {
+        id: String,
+        text: String,
+        #[serde(default)]
+        align_h: Option<HorizontalAlign>,
+    },
 }
 
 fn default_true() -> bool {
@@ -137,16 +145,9 @@ fn default_true() -> bool {
 impl DialogControl {
     pub fn id(&self) -> Option<&str> {
         match self {
-            Self::Row { .. } | Self::Column { .. } => None,
-            Self::InfoText { text, .. } => {
-                if let Some((id, _)) = text.split_once("::") {
-                    if !id.is_empty() && !id.contains(' ') && !id.contains('\n') {
-                        return Some(id);
-                    }
-                }
-                None
-            }
-            Self::Text { id, .. }
+            Self::InfoText { .. } | Self::Row { .. } | Self::Column { .. } => None,
+            Self::Label { id, .. }
+            | Self::Text { id, .. }
             | Self::Number { id, .. }
             | Self::Checkbox { id, .. }
             | Self::Choice { id, .. }
@@ -487,7 +488,11 @@ mod tests {
             .with_control(DialogControl::Choice {
                 id: "material".to_string(),
                 label: "Material:".to_string(),
-                options: vec!["Concrete".to_string(), "Steel".to_string(), "Timber".to_string()],
+                options: vec![
+                    "Concrete".to_string(),
+                    "Steel".to_string(),
+                    "Timber".to_string(),
+                ],
                 default_index: 0,
             })
             .with_control(DialogControl::Checkbox {
@@ -530,7 +535,10 @@ mod tests {
         // API v15: the quad wire shape (owned strings, OwnedIconKind icon)
         // rides the same serializable-data discipline as PanelDef above.
         let panel = QuadPanelDef::new("align_tools", "Align")
-            .with_applies_to(vec!["LWPOLYLINE".to_string(), "PLUGIN_ALIGN_DISPLAY".to_string()])
+            .with_applies_to(vec![
+                "LWPOLYLINE".to_string(),
+                "PLUGIN_ALIGN_DISPLAY".to_string(),
+            ])
             .with_item(QuadItemDef {
                 control_id: "flip".to_string(),
                 label: "Flip".to_string(),
@@ -577,7 +585,11 @@ mod tests {
             .with_control(DialogControl::Table {
                 id: "bom".to_string(),
                 label: Some("Bill of Materials".to_string()),
-                headers: vec!["Item".to_string(), "Qty".to_string(), "Material".to_string()],
+                headers: vec![
+                    "Item".to_string(),
+                    "Qty".to_string(),
+                    "Material".to_string(),
+                ],
                 rows: vec![
                     vec!["Bolt M6".to_string(), "8".to_string(), "Steel".to_string()],
                     vec!["Nut M6".to_string(), "8".to_string(), "Steel".to_string()],
@@ -596,9 +608,14 @@ mod tests {
 
         let mut values = HashMap::new();
         values.insert("geom".to_string(), DialogValue::Fields(field_map));
-        values.insert("bom".to_string(), DialogValue::Table(vec![
-            vec!["Bolt M6".to_string(), "10".to_string(), "Steel".to_string()],
-        ]));
+        values.insert(
+            "bom".to_string(),
+            DialogValue::Table(vec![vec![
+                "Bolt M6".to_string(),
+                "10".to_string(),
+                "Steel".to_string(),
+            ]]),
+        );
         let response = DialogResponse::Submitted(values);
 
         let resp_bytes = bincode::serialize(&response).expect("serialize response");

@@ -2335,8 +2335,9 @@ mod tests {
         }));
 
         let def = DialogDef::new("AutoLISP Reactive Dialog Test")
-            .with_control(DialogControl::InfoText {
-                text: "lbl_status::Ready - Pick a file or click buttons to test reactivity".to_string(),
+            .with_control(DialogControl::Label {
+                id: "lbl_status".to_string(),
+                text: "Ready - Pick a file or click buttons to test reactivity".to_string(),
                 align_h: None,
             })
             .with_control(DialogControl::FilePicker {

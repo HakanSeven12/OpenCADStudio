@@ -456,9 +456,7 @@ pub enum PluginResponse {
     StagePluginClassInstanceResult(Result<Vec<Handle>, String>),
     /// V14 (additive): a class instance's declared parameter rows (the
     /// read half of the session's properties pair).
-    PluginClassInstancePropertiesResult(
-        Result<Vec<crate::host::PluginClassParameterRow>, String>,
-    ),
+    PluginClassInstancePropertiesResult(Result<Vec<crate::host::PluginClassParameterRow>, String>),
     DialogResult(crate::dialog::DialogResponse),
     PanelRegistered(bool),
     PanelUpdated(bool),

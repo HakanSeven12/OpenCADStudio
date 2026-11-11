@@ -3542,6 +3542,32 @@ impl Scene {
         }
     }
 
+    /// A PDF underlay's image for a plot, drawn at print resolution; `None`
+    /// for anything else, which plots as it is shown.
+    pub(super) fn print_underlay_image(
+        &self,
+        entity: &document::entities::EntityType,
+    ) -> Option<ImageModel> {
+        let EntityType::Underlay(u) = entity else {
+            return None;
+        };
+        let Some(document::objects::ObjectType::UnderlayDefinition(def)) =
+            self.document.objects.get(&u.definition_handle)
+        else {
+            return None;
+        };
+        if def.underlay_type != document::entities::UnderlayType::Pdf {
+            return None;
+        }
+        let owner = u.common.owner_handle;
+        let background = if owner.is_null() || owner == self.model_space_block_handle() {
+            self.bg_color
+        } else {
+            self.paper_bg_color
+        };
+        ImageModel::from_underlay_for_print(u, def, background)
+    }
+
     pub fn populate_meshes_from_document(&mut self) {
         self.populate_meshes_impl(false, true);
     }

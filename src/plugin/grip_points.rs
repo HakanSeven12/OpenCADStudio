@@ -56,6 +56,7 @@ pub(crate) struct CustomGrip {
     pub point: DVec3,
     /// Hard drag constraint direction (normalized), when declared.
     pub axis: Option<DVec3>,
+    pub xy_plane: bool,
     pub shape: GripShape,
 }
 
@@ -88,6 +89,7 @@ impl CustomGrip {
             anchor: declared.anchor,
             point,
             axis,
+            xy_plane: declared.xy_plane,
             shape,
         })
     }
@@ -349,6 +351,7 @@ impl PluginGripStore {
                 anchor: g.anchor,
                 point: g.point,
                 axis: g.axis,
+                xy_plane: g.xy_plane,
                 shape: g.shape,
             })
     }
@@ -368,6 +371,7 @@ impl PluginGripStore {
                     anchor: grip.anchor,
                     point: grip.point,
                     axis: grip.axis,
+                    xy_plane: grip.xy_plane,
                     shape: grip.shape,
                 });
             }
@@ -754,12 +758,44 @@ fn take_in_process_sink(
 mod tests {
     use super::*;
 
+    #[test]
+    fn xy_plane_holds_the_original_z_and_the_default_preserves_free_z() {
+        let active = ActivePluginGrip {
+            tab: 0,
+            plugin: "test".to_string(),
+            grip_id: 1,
+            anchor: None,
+            origin_world: DVec3::new(2.0, 3.0, 7.0),
+            axis: None,
+            xy_plane: true,
+            last_world: DVec3::new(2.0, 3.0, 7.0),
+            moved: false,
+        };
+        assert_eq!(
+            active
+                .event(CustomGripPhase::Settle, DVec3::new(10.0, 20.0, 99.0))
+                .point,
+            [10.0, 20.0, 7.0]
+        );
+        let legacy = ActivePluginGrip {
+            xy_plane: false,
+            ..active
+        };
+        assert_eq!(
+            legacy
+                .event(CustomGripPhase::Settle, DVec3::new(10.0, 20.0, 99.0))
+                .point,
+            [10.0, 20.0, 99.0]
+        );
+    }
+
     fn declared(id: u64, point: [f64; 3]) -> PluginGrip {
         PluginGrip {
             grip_id: id,
             anchor: None,
             point,
             axis: None,
+            xy_plane: false,
             shape: PluginGripShape::default(),
         }
     }

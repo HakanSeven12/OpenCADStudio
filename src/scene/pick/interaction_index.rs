@@ -1694,8 +1694,14 @@ impl InteractionIndex {
                     crate::par::join(
                         || {
                             crate::par::join(
-                                || self.fill_triangles.query_xy_selection(aabb, include_point_markers),
-                                || self.pick_triangles.query_xy_selection(aabb, include_point_markers),
+                                || {
+                                    self.fill_triangles
+                                        .query_xy_selection(aabb, include_point_markers)
+                                },
+                                || {
+                                    self.pick_triangles
+                                        .query_xy_selection(aabb, include_point_markers)
+                                },
                             )
                         },
                         || self.glyphs.query_xy_selection(aabb, include_point_markers),

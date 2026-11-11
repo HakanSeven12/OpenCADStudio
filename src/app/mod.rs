@@ -188,18 +188,6 @@ pub struct HoverDwell {
     pub tab: usize,
 }
 
-#[derive(PartialEq)]
-struct LayoffWirePick {
-    epoch: u64,
-    cursor: iced::Point,
-    world: glam::DVec3,
-    projection: glam::Mat4,
-    eye: glam::DVec3,
-    bounds: iced::Rectangle,
-    aperture: f32,
-    lineweights: bool,
-}
-
 /// What the last executed settled-rollover pick saw, so a re-armed tick can
 /// tell that a repeat would run identically and skip the O(N) sweep
 /// (docs/quad-menu.md §3.4). `point` is tile-local like [`HoverDwell::point`];
@@ -1453,12 +1441,6 @@ pub(super) struct OpenCADStudio {
     /// `HOVER_DWELL_MS`. Skipping the pick mid-stroke avoids the per-frame
     /// O(N) wire+hatch+mesh sweep that froze the cursor on large drawings.
     hover_dwell: Option<HoverDwell>,
-    /// Exact wire hit from the last LAYOFF rollover, reusable by mouse-down.
-    layoff_wire_hit: Option<(
-        LayoffWirePick,
-        std::sync::Weak<Vec<crate::scene::WireModel>>,
-        document::Handle,
-    )>,
     /// The pointer position a coalesced move withheld, with its tab.
     ///
     /// Nothing used to drop a pointer move: every position the mouse reported
@@ -6584,7 +6566,6 @@ impl OpenCADStudio {
             grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
-            layoff_wire_hit: None,
             move_owed: None,
             move_pass_due: None,
             move_withheld: 0,

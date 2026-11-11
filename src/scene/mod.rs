@@ -4515,7 +4515,8 @@ impl Scene {
             return;
         }
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
+            *self.dependency_index_cache.borrow_mut() =
+                Some(Arc::new(self.rebuild_dependency_index()));
         }
         // One pass over the drawing for all hosts: which block definition
         // holds an entity, which INSERT draws an attribute, which tables
@@ -13456,7 +13457,10 @@ impl Scene {
                 }
                 _ if area_only || pick_only => {
                     let mut result = base.query_remapped_xy_area(
-                        Arc::clone(&local), &base_slots, aabb, pick_only,
+                        Arc::clone(&local),
+                        &base_slots,
+                        aabb,
+                        pick_only,
                     );
                     let replacements = changed_index.query_remapped_xy_area(
                         local,
@@ -14010,7 +14014,12 @@ impl Scene {
             cursor.y + radius,
         ];
         self.indexed_interaction_candidates_xy(
-            wires, query, allow_pending_empty, false, snap.is_none(), snap,
+            wires,
+            query,
+            allow_pending_empty,
+            false,
+            snap.is_none(),
+            snap,
         )
     }
 
@@ -16102,7 +16111,8 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
 
     fn dependency_targets(&self, kind: DependencyKind, names: &[String]) -> DependencyTargets {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
+            *self.dependency_index_cache.borrow_mut() =
+                Some(Arc::new(self.rebuild_dependency_index()));
         }
         let cache = self.dependency_index_cache.borrow();
         let index = cache.as_ref().unwrap();
@@ -16278,7 +16288,8 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
 
     pub fn invalidate_object_style_dependencies(&mut self, handles: &[Handle]) {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
+            *self.dependency_index_cache.borrow_mut() =
+                Some(Arc::new(self.rebuild_dependency_index()));
         }
         let mut combined = DependencyTargets::default();
         if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
@@ -16303,7 +16314,8 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         select: impl FnOnce(&SceneDependencyIndex) -> &DependencyTargets,
     ) {
         if self.dependency_index_cache.borrow().is_none() {
-            *self.dependency_index_cache.borrow_mut() = Some(Arc::new(self.rebuild_dependency_index()));
+            *self.dependency_index_cache.borrow_mut() =
+                Some(Arc::new(self.rebuild_dependency_index()));
         }
         let targets = self
             .dependency_index_cache

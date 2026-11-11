@@ -800,7 +800,12 @@ impl Scene {
             let broken = self
                 .dimension_association_status(handle)
                 .iter()
-                .any(|(_, status)| !matches!(status, crate::scene::dimension_assoc::ReferenceStatus::Resolved));
+                .any(|(_, status)| {
+                    !matches!(
+                        status,
+                        crate::scene::dimension_assoc::ReferenceStatus::Resolved
+                    )
+                });
             if !broken {
                 continue;
             }

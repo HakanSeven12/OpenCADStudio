@@ -23,11 +23,11 @@ pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
 
 pub fn is_section(entity: &EntityType) -> bool {
     embedded_section(entity)
-        .is_some_and(|entity| kernel::acis::loft_section_geometry(&[entity]).is_ok())
+        .is_some_and(|entity| ocs_acis::loft_section_geometry(&[entity]).is_ok())
 }
 
 pub fn is_guide_or_path(entity: &EntityType) -> bool {
-    embedded_path(entity).is_some_and(|entity| kernel::acis::loft_path_geometry(&entity).is_ok())
+    embedded_path(entity).is_some_and(|entity| ocs_acis::loft_path_geometry(&entity).is_ok())
 }
 
 pub fn record(
@@ -65,7 +65,7 @@ pub fn record(
                 .collect::<Result<Vec<_>, _>>()?,
         };
         if let kernel::brep::LoftSection::Profile { closed, .. } =
-            kernel::acis::loft_section_geometry(&members)?
+            ocs_acis::loft_section_geometry(&members)?
         {
             surface |= !closed;
         }
@@ -117,7 +117,7 @@ pub fn build_body(
     mode: ExtrudeMode,
     options: LoftOptions,
 ) -> Result<Body, String> {
-    kernel::acis::rebuild_loft_with_options(&record(
+    ocs_acis::rebuild_loft_with_options(&record(
         sections, guides, path, available, mode, options,
     )?)
 }

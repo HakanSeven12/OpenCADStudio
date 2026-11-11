@@ -958,6 +958,7 @@ impl OpenCADStudio {
                 }
             }
         }
+        self.tint_creation_preview(i, &mut previews);
         let preview_count = previews.len();
         let compute_ms = crate::perf::elapsed_ms(compute_started);
         let preview_hidden = parameter_hidden.unwrap_or_else(|| {

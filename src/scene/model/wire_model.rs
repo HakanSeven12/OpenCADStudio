@@ -1188,6 +1188,96 @@ impl WireModel {
             .sum()
     }
 
+    /// Plot output: a lone circle, arc or ellipse drawn as one unbroken run
+    /// takes its points again from its geometry, fine enough that a large
+    /// radius stays round on paper. The display set keeps few points for such
+    /// curves, since the GPU draws them analytically.
+    // ponytail: relative chord tolerance (2e-5 of the radius), a paper-space
+    // tolerance needs the plot scale here.
+    pub(crate) fn resample_plot_curve(&mut self) {
+        use glam::DVec3;
+        const STEP: f64 = 0.0126; // 2·acos(1 − 2e-5): sagitta ≤ 2e-5·r
+        const MAX_POINTS: usize = 16384;
+        if self.tangent_geoms.len() != 1
+            || self.points.len() < 2
+            || self.world_width > 0.0
+            || self.point_marker.is_some()
+            || !self.pattern_stations.is_empty()
+            || !self.taper_widths.is_empty()
+            || self.points.iter().flatten().any(|v| !v.is_finite())
+        {
+            return;
+        }
+        let v = |a: [f64; 3]| DVec3::from_array(a);
+        // (centre, x axis, y axis, start, end), each axis carrying its radius.
+        let (c, ax, ay, t0, t1) = match self.tangent_geoms[0] {
+            TangentGeom::Circle { center, radius } => (
+                DVec3::new(center[0] as f64, center[1] as f64, center[2] as f64),
+                DVec3::X * radius as f64,
+                DVec3::Y * radius as f64,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+            TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => (
+                v(center),
+                v(axis_x).normalize_or_zero() * radius,
+                v(axis_y).normalize_or_zero() * radius,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+            TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => (
+                v(center),
+                v(axis_x).normalize_or_zero() * radius,
+                v(axis_y).normalize_or_zero() * radius,
+                start_angle,
+                if end_angle < start_angle { end_angle + std::f64::consts::TAU } else { end_angle },
+            ),
+            TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
+                let major = v(major_axis);
+                let minor = v(normal).cross(major).normalize_or_zero() * major.length() * minor_axis_ratio;
+                (
+                    v(center),
+                    major,
+                    minor,
+                    start_param,
+                    if end_param < start_param { end_param + std::f64::consts::TAU } else { end_param },
+                )
+            }
+            TangentGeom::Line { .. } => return,
+        };
+        let size = ax.length().max(ay.length());
+        if !(size.is_finite() && size > 0.0 && (t1 - t0).is_finite()) {
+            return;
+        }
+        let at = |t: f64| c + ax * t.cos() + ay * t.sin();
+        let last = self.points.len() - 1;
+        let (first_pt, last_pt) = (self.point_world(0, 1.0), self.point_world(last, 1.0));
+        let close = |a: DVec3, b: DVec3| a.distance(b) <= size * 1e-4 + 1e-9;
+        // The run must be this curve, in either direction.
+        let reversed = if close(first_pt, at(t0)) && close(last_pt, at(t1)) {
+            false
+        } else if close(first_pt, at(t1)) && close(last_pt, at(t0)) {
+            true
+        } else {
+            return;
+        };
+        let n = (((t1 - t0) / STEP).ceil() as usize).min(MAX_POINTS);
+        if n <= last {
+            return;
+        }
+        let mut points = Vec::with_capacity(n + 1);
+        let mut low = Vec::with_capacity(n + 1);
+        for k in 0..=n {
+            let k = if reversed { n - k } else { k };
+            let p = at(t0 + (t1 - t0) * k as f64 / n as f64);
+            let high = p.as_vec3();
+            points.push(high.to_array());
+            low.push((p - high.as_dvec3()).as_vec3().to_array());
+        }
+        self.points = points;
+        self.points_low = low;
+    }
+
     pub fn point_world(&self, index: usize, view_height: f64) -> glam::DVec3 {
         let high = self.points[index];
         let low = self.points_low.get(index).copied().unwrap_or([0.0; 3]);

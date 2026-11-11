@@ -68,6 +68,7 @@ pub struct DistanceParameterCommand {
     kind: Kind,
     base: Option<DVec3>,
     end: Option<DVec3>,
+    label: Option<DVec3>,
     grips: Option<usize>,
     asking: Option<Asking>,
     options: Options,
@@ -90,6 +91,7 @@ impl DistanceParameterCommand {
             kind,
             base: None,
             end: None,
+            label: None,
             grips: None,
             asking: None,
             options: Options::default(),
@@ -509,8 +511,14 @@ impl DistanceParameterCommand {
         self.asking = None;
         CmdResult::NeedPoint
     }
+    /// A Linear parameter asks for its native grip count once its label is
+    /// placed; an XY parameter asks after its endpoint, before its label.
     fn asking_grips(&self) -> bool {
-        self.kind == Kind::XY && self.end.is_some() && self.grips.is_none()
+        match self.kind {
+            Kind::Linear => self.label.is_some() && self.grips.is_none(),
+            Kind::XY => self.end.is_some() && self.grips.is_none(),
+            _ => false,
+        }
     }
     /// The question the open option asks, carrying the defaults it offers.
     fn question(&self, asking: Asking) -> String {
@@ -604,8 +612,11 @@ impl DistanceParameterCommand {
         }
     }
     fn commit_grips(&self, grips: usize) -> CmdResult {
-        let end = self.end.unwrap();
-        self.finish(end, Some(grips))
+        let label = match self.kind {
+            Kind::Linear => self.label.unwrap(),
+            _ => self.end.unwrap(),
+        };
+        self.finish(label, Some(grips))
     }
 }
 
@@ -628,7 +639,11 @@ impl CadCommand for DistanceParameterCommand {
         } else if self.end.is_none() {
             "Specify parameter endpoint:"
         } else if self.asking_grips() {
-            "Specify number of grips [0/1/2/4] <1>:"
+            if self.kind == Kind::Linear {
+                "Enter number of grips [0/1] <1>:"
+            } else {
+                "Specify number of grips [0/1/2/4] <1>:"
+            }
         } else {
             "Specify parameter label location:"
         };
@@ -661,6 +676,7 @@ impl CadCommand for DistanceParameterCommand {
                 | Asking::VerticalValueSetList,
             ) => InputKind::FreeText,
             Some(_) => InputKind::SingleToken,
+            None if self.asking_grips() => InputKind::SingleToken,
             None => InputKind::Point,
         }
     }
@@ -694,6 +710,10 @@ impl CadCommand for DistanceParameterCommand {
         }
         if self.end.is_none() {
             self.end = Some(point);
+            return CmdResult::NeedPoint;
+        }
+        if self.kind == Kind::Linear && self.label.is_none() {
+            self.label = Some(point);
             return CmdResult::NeedPoint;
         }
         self.finish(point, None)
@@ -765,6 +785,20 @@ impl CadCommand for DistanceParameterCommand {
             return None;
         }
         let answer = text.trim();
+        if self.kind == Kind::Linear {
+            let grips = match answer {
+                "" => 1,
+                "0" => 0,
+                "1" => 1,
+                _ => {
+                    return Some(CmdResult::ReportError(
+                        crate::t!("Enter the number of grips: 0 or 1.").into_owned(),
+                    ))
+                }
+            };
+            self.grips = Some(grips);
+            return Some(self.commit_grips(grips));
+        }
         let grips = match answer {
             "" => 1,
             "0" => 0,

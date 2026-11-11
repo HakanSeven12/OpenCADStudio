@@ -1042,9 +1042,9 @@ fn collect_records(
         if !allowed_names.contains(&name) {
             continue;
         }
-        let values = catalog::properties(entity)
+        let values = catalog::properties(entity, doc)
             .into_iter()
-            .map(|property| (property.key, catalog::value(entity, property.key, &facts)))
+            .map(|property| (property.key, catalog::value(entity, property.key, &facts, doc)))
             .collect();
         out.push(ExtractionRecord { name, values });
     }
@@ -1135,7 +1135,7 @@ fn collect_object_catalog(
         let (name, block) = crate::app::extraction_catalog::object_name(entity);
         let entry = catalog.entry(name).or_insert((block, 0, Vec::new()));
         entry.1 += 1;
-        for property in crate::app::extraction_catalog::properties(entity) {
+        for property in crate::app::extraction_catalog::properties(entity, doc) {
             if !entry.2.iter().any(|known| known.key == property.key) {
                 entry.2.push(property);
             }
@@ -3354,6 +3354,174 @@ mod tests {
         register_extraction_document(&key, Document::new());
         assert!(extraction_document(&key.to_ascii_uppercase()).is_some());
         assert!(extraction_document("ocs-doc-other.dwg").is_none());
+    }
+
+    #[test]
+    fn block_record_attributes_are_listed_and_read() {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+
+        let mut record = document::tables::BlockRecord::new("VALVE");
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = Line::new();
+        line.start = Vector3::ZERO;
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(EntityType::Line(line)).unwrap();
+
+        let mut definition =
+            AttributeDefinition::new("TAG1".into(), "Tag?".into(), "DEFAULT".into());
+        definition.insertion_point = Vector3::new(15.0, 0.0, 0.0);
+        definition.alignment_point = definition.insertion_point;
+        definition.flags.constant = false;
+        definition.common.owner_handle = owner;
+        let definition_handle = doc
+            .add_entity(EntityType::AttributeDefinition(definition.clone()))
+            .unwrap();
+        // A constant tag that no instance sets: one placed instance still
+        // resolves the default.
+        let mut constant =
+            AttributeDefinition::new("SIZE".into(), "Size?".into(), "2in".into());
+        constant.insertion_point = Vector3::new(30.0, 0.0, 0.0);
+        constant.alignment_point = constant.insertion_point;
+        constant.flags.constant = true;
+        constant.common.owner_handle = owner;
+        let constant_handle = doc
+            .add_entity(EntityType::AttributeDefinition(constant.clone()))
+            .unwrap();
+        doc.block_records
+            .get_mut("VALVE")
+            .unwrap()
+            .entity_handles = vec![line_handle, definition_handle, constant_handle];
+
+        let mut insert = Insert::new("VALVE", Vector3::new(100.0, 50.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::from_definition(&definition, Some("A-101".into())));
+        let insert_handle = doc.add_entity(EntityType::Insert(insert)).unwrap();
+
+        let mut records = Vec::new();
+        collect_records(
+            doc,
+            None,
+            None,
+            &std::collections::BTreeSet::from(["VALVE".to_string()]),
+            &mut records,
+        );
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "VALVE");
+        let tag = records[0].values.get("Attribute.TAG1").unwrap().clone();
+        let size = records[0].values.get("Attribute.SIZE").unwrap().clone();
+        assert_eq!(tag, "A-101");
+        assert_eq!(size, "2in", "constant definitions resolve to their default");
+
+        // And the catalog exposes both tags as their own categories.
+        let catalog = crate::app::extraction_catalog::properties(
+            match doc.get_entity(insert_handle) {
+                Some(EntityType::Insert(_)) => doc.get_entity(insert_handle).unwrap(),
+                _ => panic!("the reference is there"),
+            },
+            doc,
+        );
+        assert!(
+            catalog
+                .iter()
+                .any(|property| property.key == "Attribute.TAG1" && property.category == "Attributes"),
+            "{catalog:?}"
+        );
+        assert!(
+            catalog
+                .iter()
+                .any(|property| property.key == "Attribute.SIZE" && property.category == "Attributes"),
+            "{catalog:?}"
+        );
+    }
+
+    #[test]
+    fn dynamic_block_parameters_are_listed_as_columns() {
+        use super::*;
+        use crate::scene::block_actions as actions;
+        use crate::scene::block_distance_parameter as distance;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+        use glam::DVec3;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let reference;
+        {
+            let doc = &mut app.tabs[i].scene.document;
+            let mut record = document::tables::BlockRecord::new("FLAG");
+            record.handle = doc.allocate_handle();
+            let owner = record.handle;
+            doc.block_records.add(record).unwrap();
+            let mut line = Line::new();
+            line.start = Vector3::ZERO;
+            line.end = Vector3::new(10.0, 0.0, 0.0);
+            line.common.owner_handle = owner;
+            let line_handle = doc.add_entity(EntityType::Line(line)).unwrap();
+            doc.block_records.get_mut("FLAG").unwrap().entity_handles = vec![line_handle];
+
+            let insert = Insert::new("FLAG", Vector3::new(100.0, 50.0, 0.0));
+            reference = doc.add_entity(EntityType::Insert(insert)).unwrap();
+        }
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+
+        let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        // Build a distance parameter with a move action so the reference
+        // really is dynamic.
+        let source = &app.tabs[i].scene.document;
+        let member = source.block_records.get("FLAG").unwrap().entity_handles[0];
+        let parameter = distance::create(
+            &mut app.tabs[i].scene.document,
+            def,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let _ = actions::create(&mut app.tabs[i].scene.document, def, actions::Kind::Move, parameter, &[member], DVec3::ZERO).unwrap();
+        let p = actions::all_parameters(&app.tabs[i].scene.document, def)
+            .into_iter()
+            .find(|p| p.handle == parameter)
+            .unwrap();
+        let name = p.name.clone();
+
+        let _ = app.dispatch_command("BSAVE");
+        let _ = app.dispatch_command("BCLOSE");
+
+        let doc = &app.tabs[i].scene.document;
+        let mut records = Vec::new();
+        collect_records(
+            doc,
+            None,
+            None,
+            &std::collections::BTreeSet::from(["FLAG".to_string()]),
+            &mut records,
+        );
+        assert_eq!(records.len(), 1);
+        let dyn_value = records[0]
+            .values
+            .iter()
+            .find(|(key, _)| key.starts_with("Parameter."))
+            .map(|(_, value)| value.clone());
+        assert_eq!(
+            dyn_value,
+            Some("10".to_string()),
+            "the extraction reports the parameter value (name: {name})"
+        );
+        assert!(records[0].values.keys().any(|key| key.starts_with("Parameter.")));
+        let _ = reference;
     }
 
     #[test]

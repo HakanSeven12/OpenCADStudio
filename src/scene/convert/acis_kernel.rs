@@ -9,7 +9,7 @@
 //! Lift and tessellation failures are reported as an incomplete result.
 
 use document::entities::acis::SatDocument;
-use kernel::acis::lift;
+use ocs_acis::lift;
 use kernel::brep;
 
 use crate::scene::convert::solid3d_tess::{body_transform, finalize_mesh};

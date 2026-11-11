@@ -199,6 +199,7 @@ pub enum MenuAction {
     Favorite,
     Unfavorite,
     Edit,
+    Rename,
     Remove,
 }
 
@@ -862,6 +863,11 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
             entry(
                 crate::t!("Edit Block").into_owned(),
                 MenuAction::Edit,
+                in_drawing
+            ),
+            entry(
+                crate::t!("Rename Block").into_owned(),
+                MenuAction::Rename,
                 in_drawing
             ),
             entry(

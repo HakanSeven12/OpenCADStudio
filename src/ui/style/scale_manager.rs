@@ -255,11 +255,18 @@ pub fn view_window<'a, 'b>(
     let footer: Element<'a, Message> = if list.reset_asking {
         // Reset asks which default list to restore before it purges anything.
         row![
-            text(t!("Restore which default list? Unreferenced scales are purged.")).size(11),
+            text(t!(
+                "Restore which default list? Unreferenced scales are purged."
+            ))
+            .size(11),
             Space::new().width(sizing.width),
             tb_button(t!("Metric"), Message::ScaleManagerResetChoice(0), false),
             tb_button(t!("Imperial"), Message::ScaleManagerResetChoice(1), false),
-            tb_button(t!("Metric and Imperial"), Message::ScaleManagerResetChoice(2), false),
+            tb_button(
+                t!("Metric and Imperial"),
+                Message::ScaleManagerResetChoice(2),
+                false
+            ),
             tb_button(t!("Cancel"), Message::ScaleManagerResetChoice(3), false),
         ]
         .spacing(4)

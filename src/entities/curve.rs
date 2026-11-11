@@ -924,7 +924,7 @@ mod tests {
         assert!(solid.validate().is_empty());
         assert_eq!(solid.euler_characteristic(), 2);
         let document = document::entities::acis::types::SatDocument::new();
-        let (bodies, loss) = kernel::acis::lift(&document);
+        let (bodies, loss) = ocs_acis::lift(&document);
         assert!(
             bodies.is_empty() && loss.is_empty(),
             "an empty document lifts to nothing"

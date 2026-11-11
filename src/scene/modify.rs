@@ -1686,15 +1686,15 @@ impl Scene {
 
         match (self.document.get_entity(handle)?, operation) {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
-                kernel::acis::rebuild_extrusion_with_mode(value, true).ok()
+                ocs_acis::rebuild_extrusion_with_mode(value, true).ok()
             }
             (EntityType::Surface(_), SolidHistoryOperation::Loft(_)) => {
-                kernel::acis::rebuild_body(operation).ok()
+                ocs_acis::rebuild_body(operation).ok()
             }
             (EntityType::Solid3D(_), _) => {
                 let mut tree = self.document.solid_history_tree(handle)?;
                 tree.find_mut(operation.base()?.node_id())?.operation = operation.clone();
-                kernel::acis::rebuild_history_tree(&tree).ok()
+                ocs_acis::rebuild_history_tree(&tree).ok()
             }
             _ => None,
         }
@@ -1767,7 +1767,7 @@ impl Scene {
             if !changed {
                 continue;
             }
-            let Ok(body) = kernel::acis::rebuild_sweep_with_mode(&record, true) else {
+            let Ok(body) = ocs_acis::rebuild_sweep_with_mode(&record, true) else {
                 continue;
             };
             let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
@@ -2699,7 +2699,7 @@ impl Scene {
         let document::objects::SolidHistoryOperation::Sweep(record) = &operation else {
             return None;
         };
-        kernel::acis::sweep_history_refusal(record)
+        ocs_acis::sweep_history_refusal(record)
             .map(crate::scene::model::sweep_model::sweep_refusal_code)
     }
 

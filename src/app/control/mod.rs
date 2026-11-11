@@ -1439,6 +1439,25 @@ impl OpenCADStudio {
                     .map(std::path::PathBuf::from)
                     .or_else(|| self.tabs[i].current_path.clone())
                     .ok_or_else(|| failure("path_required", "Supply a save path"))?;
+                let destination_is_current = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .is_some_and(|current| super::update::native_paths_match(current, &path));
+                // Keep the document's logical reference base for a current
+                // file reached through another spelling. The writer resolves
+                // its physical destination without moving the document.
+                let path = match self.tabs[i].current_path.as_ref() {
+                    Some(current) if destination_is_current => current.clone(),
+                    _ => path,
+                };
+                let require_new_destination =
+                    !destination_is_current && req["overwrite"].as_bool() != Some(true);
+                if require_new_destination && path.exists() {
+                    return Err(failure(
+                        "destination_exists",
+                        "Destination exists; set overwrite=true to replace a different file",
+                    ));
+                }
                 let default_is_dxf = crate::io::source_is_dxf(
                     self.tabs[i].current_path.as_deref(),
                     &self.tabs[i].scene.document,
@@ -1466,7 +1485,13 @@ impl OpenCADStudio {
                     "mtext_losses":losses.mtext_json(),
                 }));
                 if self.main_window.is_none() {
-                    self.save_tab_synchronously_protected_as(i, path, version, true)
+                    self.save_tab_synchronously_protected_as(
+                        i,
+                        path,
+                        version,
+                        true,
+                        require_new_destination,
+                    )
                         .map_err(|e| failure("save_failed", e))?;
                     Task::none()
                 } else {
@@ -1484,7 +1509,11 @@ impl OpenCADStudio {
                         i,
                         path,
                         version,
-                        super::SavePurpose::SaveAs,
+                        if require_new_destination {
+                            super::SavePurpose::SaveAsNew
+                        } else {
+                            super::SavePurpose::SaveAs
+                        },
                         super::SaveContinuation::None,
                         true,
                         true,
@@ -2200,6 +2229,8 @@ pub(crate) mod text_ops;
 
 #[cfg(test)]
 mod p1_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod save_tests;
 pub(super) fn action_names() -> &'static [&'static str] {
     actions::NAMES
 }
@@ -2214,7 +2245,7 @@ pub(super) fn controlled_open_pending(app: &OpenCADStudio) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn request(app: &mut OpenCADStudio, mut req: Value) -> Value {
+    pub(super) fn request(app: &mut OpenCADStudio, mut req: Value) -> Value {
         let state = app.control_state();
         req["protocol"] = json!(1);
         req["document_id"] = state["document_id"].clone();

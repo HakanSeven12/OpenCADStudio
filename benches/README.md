@@ -72,6 +72,104 @@ Run the benchmark's process-lifecycle and report tests without opening a GUI:
 python -m unittest discover -s benches -p 'test_drawing_startup.py'
 ```
 
+## Drawing-open Rust allocation probe
+
+This native, cross-platform probe runs the drawing-open parser, linetype and
+external-reference preparation, derived-cache construction, and model-space
+geometry preparation without starting the GUI. It uses a counting wrapper over
+the system allocator to report live and peak *requested Rust allocation bytes*
+at each stage, plus the capacities of selected wire and text buffers. It also
+reports entity counts and the drawing's SHA-256 so the same work can be checked
+between runs. The input is supplied locally; no drawing is added to the repo.
+
+```sh
+cargo bench --locked --bench drawing_open_memory -- --input PATH_TO_DRAWING --expected-texts 10000
+```
+
+Use `--output PATH` to additionally write JSON to a **new** file. The optional
+`--expected-texts` check fails if the fixture no longer has the specified
+number of TEXT entities. Run a fresh process per sample; the probe waits two
+seconds after geometry preparation for background index work, then reports the
+state after dropping its document and geometry. Process-wide caches and worker
+threads may remain live. A final diagnostic stage clears the shaping and
+fallback caches in the probe process only; their hash-table capacity and other
+process-wide caches may remain allocated. The report also includes CPU text
+atlas bytes. Test the counting allocator itself with:
+
+```sh
+cargo bench --locked --bench drawing_open_memory -- --self-test
+```
+
+These numbers are not RSS: they exclude allocator bookkeeping and unused heap
+pages, allocations bypassing Rust's global allocator, GUI and GPU resources,
+and child processes. Peak is a process-wide high-water mark, not a per-phase
+peak, and allocation totals exclude reallocation sizes. The instrumentation
+also adds runtime overhead, so its timings must not be compared with an
+uninstrumented GUI benchmark. The probe disables `PERF` logging in its own
+process and records whether resident memoization is enabled. Keep the input
+hash, external references, fonts, memoization setting, build profile and
+machine constant when comparing reports.
+
+## Text shaping and geometry
+
+This benchmark generates a deterministic synthetic text workload; it does not
+read the original drawing or require an external drawing. It reproduces the
+source drawing's 10,000 TEXT entities, 3,758 distinct strings, frequency of
+each repetition count, text-length and character-pattern distributions, and
+three frequently repeated values (2,017, 1,981 and 1,980 occurrences). The
+values are synthetic. Text height is 1.0, width factor is 0.87, obliquing is
+zero, and rotations and positions are generated within the original ranges.
+Their individual values and entity order do not match the source. The fixture
+does not model alignment, styles beyond one TrueType family, DXF parsing,
+document caches or drawing-open behavior.
+
+The benchmark calls the production TrueType shaping and text tessellation
+paths for the first 256 distinct synthetic strings. Its cold-shape sample clears the process-wide
+shaping and fallback caches before timing; font discovery and the font system
+are already initialized. It then times the same strings as shape-cache hits
+and verifies that every hit returns the cached run. Finally it primes and times
+text tessellation with fixed placement, rotation, width and obliquing. Shape
+digests include glyph outlines, triangles, advances and character cells;
+geometry digests include every output point. Each sample must match. It also
+clears the cache and times tessellation of all 10,000 synthetic text values,
+including cache misses and hits, using their generated positions and rotations.
+
+```sh
+cargo bench --locked --bench text_shaping_geometry -- --font Arial --output NEW_REPORT.json
+```
+
+`--font` selects an installed TrueType family; otherwise the first available family is selected.
+Without any installed TrueType family, the default invocation reports a skip.
+Use `--samples N` to choose the sample count (default 7). Output is JSON and
+the optional report path must be new. The report records the ordered synthetic
+fixture and font hashes and face index. Keep these, the executable version,
+machine, font environment and sample count consistent when comparing runs.
+
+Cold shaping includes text layout, outline flattening, and triangulation; it
+does not split their costs. Warm tessellation includes tokenization, cache
+lookups, output allocation, and point transforms; it is not a transform-only
+microbenchmark. Both exclude digest calculations. Repeated samples do not
+model a fresh process or cold operating-system caches. This benchmark does not
+measure memory, GPU rendering, or drawing-open latency; use the drawing-open
+allocation probe and GUI startup benchmark for those metrics.
+
+For Rust allocation counts and live/peak requested bytes on the same full
+synthetic workload, run a fresh process with:
+
+```sh
+cargo bench --locked --bench text_shaping_memory -- --font Arial
+cargo bench --locked --bench text_shaping_memory -- --self-test
+```
+
+The allocation probe uses a counting global allocator, initializes fonts and
+the fixture before its baseline, clears text caches, and records memory while
+geometry is alive, after dropping it, and after clearing text caches. It emits
+the same fixture, font, and geometry hashes as the timing benchmark. It counts
+Rust System allocator requested bytes, excluding allocator overhead, foreign
+allocations, GUI, GPU and child processes; allocation byte totals exclude
+reallocation sizes. Counting allocations adds overhead, so the probe is kept
+separate from the timing benchmark.
+
 ---
 
 ## Benchmark Suite Catalog (31 Metrics)

@@ -122,6 +122,29 @@ fn a_pick_in_the_manager_writes_the_file_and_closes_the_list() {
 }
 
 #[test]
+fn a_bigfont_pick_in_the_manager_writes_the_file_and_closes_the_list() {
+    let mut s = style("Notes", "txt.shx", "");
+    s.big_font_file = "chineset.shx".to_string();
+    let mut app = app_with_styles(vec![s]);
+    open_on(&mut app, "Notes");
+    assert!(app.textstyle_draft.big_font_on);
+    let _ = app.update(Message::TextStyleBigFont(FontPickerEvent::Toggle));
+    assert!(app.textstyle_bigfont_picker.open);
+
+    let _ = app.update(Message::TextStyleBigFont(FontPickerEvent::Pick(
+        FontChoice::Stroke("china1.shx".to_string()),
+    )));
+    assert!(!app.textstyle_bigfont_picker.open);
+    assert_eq!(app.textstyle_draft.style.big_font_file, "china1.shx");
+    let _ = app.update(Message::TextStyleApply);
+    let doc = &app.tabs[app.active_tab].scene.document;
+    assert_eq!(
+        doc.text_styles.get("Notes").unwrap().big_font_file,
+        "china1.shx"
+    );
+}
+
+#[test]
 fn the_face_style_sets_bold_and_italic_and_keeps_the_other_bits() {
     const CHARSET_PITCH: i32 = 34;
     let mut notes = style("Notes", "arial.ttf", "Arial");

@@ -701,7 +701,9 @@ fn promote_default_context(doc: &mut Document, entity: Handle, coll_h: Handle, o
         _ => None,
     };
     let ratio = match (inverse(doc, new_scale), inverse(doc, old_scale)) {
-        (Some(new), Some(old)) if old.abs() > 1e-12 && (new / old).is_finite() && new / old > 0.0 => {
+        (Some(new), Some(old))
+            if old.abs() > 1e-12 && (new / old).is_finite() && new / old > 0.0 =>
+        {
             new / old
         }
         _ => 1.0,

@@ -43,6 +43,10 @@ impl OpenCADStudio {
         // active one by the time an answer comes back.
         let i = self.active_tab;
         let mut last = None;
+        if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+            // The form answered every attribute, verified ones included.
+            cmd.attreq_from_dialog();
+        }
         for row in &dialog.rows {
             if let Some(result) = self.tabs[i]
                 .active_cmd

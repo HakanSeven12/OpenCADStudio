@@ -2086,7 +2086,7 @@ impl OpenCADStudio {
             A::FilterObjects => {
                 let layers = self.tabs[i].layers.selected_names().join(",");
                 self.filter_open_for_layers(layers);
-                self.layers_dialog_to_front()
+                Task::none()
             }
             A::MergeHere => {
                 let sources: Vec<String> = merge_sources
@@ -2351,7 +2351,7 @@ impl OpenCADStudio {
             }
         };
         self.filter_open_layers(name, filter);
-        self.layers_dialog_to_front()
+        Task::none()
     }
 
     /// Save as filter: the search text as a property filter on the name,
@@ -2499,7 +2499,7 @@ impl OpenCADStudio {
                         *ticked = unused.iter().any(|u| u.eq_ignore_ascii_case(name));
                     }
                 }
-                return self.layers_dialog_to_front();
+                return Task::none();
             }
             (_, A::Edit | A::Delete | A::Rename | A::Purge) => return Task::none(),
             _ => {}

@@ -6900,7 +6900,11 @@ pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3,
         .iter()
         .find(|style| style.name.eq_ignore_ascii_case(&dim.base().style_name))?;
     let style = resolved_dimension_style(source, dim, document);
-    let scale = if style.dimscale > 1e-9 { style.dimscale } else { 1.0 };
+    let scale = if style.dimscale > 1e-9 {
+        style.dimscale
+    } else {
+        1.0
+    };
     let height = style.dimtxt * scale;
     let width = dimension_text_width(dim, Some(&style), height, Some(document));
     // An automatic text point is not stored: use where the text draws.

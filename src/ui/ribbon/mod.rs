@@ -184,8 +184,27 @@ fn panel_measure_key(
     style_ctx: &StyleContext<'_>,
     visibility: Option<&crate::ui::window::block_visibility::RibbonContext>,
 ) -> u64 {
+    // Panel titles and labels are measured translated, so a language switch
+    // has to measure them again.
+    panel_measure_key_at(
+        (crate::sys::ui_font::generation(), crate::i18n::language_generation()),
+        groups,
+        last_cmd,
+        style_ctx,
+        visibility,
+    )
+}
+
+/// [`panel_measure_key`] under the given font and language generations.
+fn panel_measure_key_at(
+    generations: (u32, u64),
+    groups: &[&RibbonGroup],
+    last_cmd: &HashMap<&'static str, &'static str>,
+    style_ctx: &StyleContext<'_>,
+    visibility: Option<&crate::ui::window::block_visibility::RibbonContext>,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
-    crate::sys::ui_font::generation().hash(&mut hasher);
+    generations.hash(&mut hasher);
     groups.len().hash(&mut hasher);
     for group in groups {
         group.title.hash(&mut hasher);
@@ -2694,7 +2713,9 @@ pub(super) fn collapsed_button<'a>(
         // Narrow: as wide as the title's longest word.
         face.into()
     } else {
-        automatic_large_button(localized_title, face.into())
+        // The title is drawn on one line, so the button is as wide as that
+        // line; measured as a wrapping label it overlapped its neighbour.
+        automatic_one_line_button(localized_title, face.into())
     };
     let face = mouse_area(face)
         .on_enter(Message::RibbonMinimize(minimize::MinimizeMsg::EnterOpener(
@@ -2718,7 +2739,7 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{panel_measure_key, CollapseMode, Ribbon, RibbonLayout, StyleContext};
+    use super::{panel_measure_key_at, CollapseMode, Ribbon, RibbonLayout, StyleContext};
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 
@@ -2784,6 +2805,16 @@ mod tests {
     }
 
     fn measurement_key(tool_id: &'static str, selected_command: &'static str) -> u64 {
+        // Fixed generations: other tests switch the UI font and language
+        // while this one runs.
+        measurement_key_at((0, 0), tool_id, selected_command)
+    }
+
+    fn measurement_key_at(
+        generations: (u32, u64),
+        tool_id: &'static str,
+        selected_command: &'static str,
+    ) -> u64 {
         let groups = [RibbonGroup {
             title: "Test",
             tools: vec![RibbonItem::LargeTool(ToolDef {
@@ -2812,7 +2843,7 @@ mod tests {
         let groups: Vec<_> = groups.iter().collect();
         let mut last_cmd = FxHashMap::default();
         last_cmd.insert("TEST_DROPDOWN", selected_command);
-        panel_measure_key(&groups, &last_cmd, &style_ctx, None)
+        panel_measure_key_at(generations, &groups, &last_cmd, &style_ctx, None)
     }
 
     #[test]
@@ -2828,6 +2859,66 @@ mod tests {
         assert_ne!(
             measurement_key("TEST", "TEST"),
             measurement_key("TEST", "OTHER")
+        );
+    }
+
+    /// A collapsed panel draws its title on one line, so its button has to
+    /// be at least as wide as that line or the title runs over the next one.
+    #[test]
+    fn collapsed_panel_button_is_as_wide_as_its_one_line_title() {
+        use iced::advanced::{layout::Limits, widget::Tree};
+        let _one = crate::headless_ui_lock();
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let width = |mut element: iced::Element<'static, crate::app::Message>| {
+            let mut tree = Tree::new(element.as_widget());
+            element.as_widget_mut().diff(&mut tree);
+            element
+                .as_widget_mut()
+                .layout(
+                    &mut tree,
+                    &renderer,
+                    &Limits::new(iced::Size::ZERO, iced::Size::new(f32::INFINITY, f32::INFINITY)),
+                )
+                .size()
+                .width
+        };
+        let title = "Linking & Extraction";
+        let line = width(
+            iced::widget::text(title)
+                .size(super::PANEL_TITLE_SIZE)
+                .wrapping(iced::advanced::text::Wrapping::None)
+                .into(),
+        );
+        let button = width(super::collapsed_button(
+            title, None, true, false, false, false,
+        ));
+        assert!(button >= line, "button {button} < title line {line}");
+    }
+
+    /// Panel widths are measured with translated labels, so switching the
+    /// language must not reuse the old measurements.
+    #[test]
+    fn panel_measure_fingerprint_changes_with_the_language() {
+        let generations = || {
+            (
+                crate::sys::ui_font::generation(),
+                crate::i18n::language_generation(),
+            )
+        };
+        let before = generations();
+        // Reloading English bumps the language generation like any switch,
+        // without changing the locale other tests see.
+        crate::i18n::set_language(crate::i18n::Language::EnUs)
+            .expect("English locale must be available");
+        assert_ne!(
+            measurement_key_at(before, "TEST", "TEST"),
+            measurement_key_at(generations(), "TEST", "TEST")
         );
     }
 

@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 pub enum StatusPill {
     SpaceMouse,
     Coords,
+    Grid,
+    Snap,
     Ortho,
     Lwt,
     Polar,
@@ -44,6 +46,8 @@ impl StatusPill {
     pub const ALL: &'static [StatusPill] = &[
         StatusPill::SpaceMouse,
         StatusPill::Coords,
+        StatusPill::Grid,
+        StatusPill::Snap,
         StatusPill::Ortho,
         StatusPill::Lwt,
         StatusPill::Polar,
@@ -74,6 +78,8 @@ impl StatusPill {
         match self {
             StatusPill::SpaceMouse => "spacemouse",
             StatusPill::Coords => "coords",
+            StatusPill::Grid => "grid",
+            StatusPill::Snap => "snap",
             StatusPill::Ortho => "ortho",
             StatusPill::Lwt => "lwt",
             StatusPill::Polar => "polar",
@@ -105,6 +111,8 @@ impl StatusPill {
         match self {
             StatusPill::SpaceMouse => "SpaceMouse",
             StatusPill::Coords => "Coordinates",
+            StatusPill::Grid => "Grid",
+            StatusPill::Snap => "Snap",
             StatusPill::Ortho => "Ortho Mode",
             StatusPill::Lwt => "Show Lineweight",
             StatusPill::Polar => "Polar Tracking",

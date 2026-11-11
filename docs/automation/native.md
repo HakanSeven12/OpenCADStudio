@@ -41,6 +41,31 @@ or `start` while a command is still active is refused with `command_busy`:
 continue it with `input` or drop it with `cancel`. A legacy `run` line ends the
 waiting command and starts the new one.
 
+### Protocol-1 `save` destinations
+
+Saving to the current drawing path keeps the fingerprint recorded when the
+drawing was opened and respects a known edit-lock conflict. Supplying that
+same path explicitly does not waive either check. Directory aliases are
+compared using the native path-matching rules.
+For a current-file symlink, the save replaces its resolved drawing target
+and preserves the symlink and logical document path. Relative references
+keep that logical path as their base. Directory aliases retain the
+current-file check even if the drawing was deleted externally.
+An alias with a different physical file extension is refused, so the
+writer cannot silently switch formats. The logical alias must still name
+the captured destination before placement and when a GUI save completes.
+
+A different existing destination is refused with `destination_exists` unless
+the native control request includes `"overwrite":true`. A new destination
+needs no overwrite acknowledgement. After a native Save As from A to B,
+a later control request naming A therefore needs explicit acknowledgement.
+The requirement to create a new file survives queued saves and is enforced
+atomically when the finished file is placed. If another application creates
+the destination first, the save fails and preserves that application's file.
+On Unix this uses a hard link beside the destination; a filesystem without
+hard-link support refuses the save rather than replacing an existing file.
+The MCP save schema and REST `/save` route do not yet expose `overwrite`.
+
 ### The legacy `run` line
 
 `{"op":"run","cmd":"LINE 0,0 10,10"}` feeds the tokens after the command name

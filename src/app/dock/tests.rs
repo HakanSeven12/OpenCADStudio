@@ -1385,11 +1385,15 @@ fn distance_parameter_batch_starts_from_actual_palette_rows() {
                 let _ = app.update(Message::CommandSubmit);
                 assert_eq!(app.tabs[i].scene.document, before);
             }
-            // XY asks for its grip count and labels itself; Linear and Polar
-            // take the label point.
+            // XY asks for its grip count and labels itself; Polar takes the
+            // label point; Linear takes the label point and then its grip count.
             let last = if name == "xy" { "1" } else { "0.3,0.2" };
             let _ = app.update(Message::CommandInput(last.into()));
             let _ = app.update(Message::CommandSubmit);
+            if name == "linear" {
+                let _ = app.update(Message::CommandInput(String::new()));
+                let _ = app.update(Message::CommandSubmit);
+            }
             let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
             let found = crate::scene::block_distance_parameter::parameters(
                 &app.tabs[i].scene.document,

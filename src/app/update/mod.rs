@@ -130,6 +130,7 @@ mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
+pub(in crate::app) mod linetype_manager;
 mod file;
 mod graphic_attributes;
 mod keytips;
@@ -257,7 +258,7 @@ impl OpenCADStudio {
         }
         if matches!(
             self.active_modal,
-            Some(TextStyle | DimStyle | TableStyle | MLeaderStyle | MlStyle)
+            Some(TextStyle | DimStyle | TableStyle | MLeaderStyle | MlStyle | LinetypeManager)
         ) {
             self.style_stage_discard();
         }
@@ -796,6 +797,26 @@ impl OpenCADStudio {
         // closes it and every other keystroke-derived message is swallowed;
         // the modal's own text fields keep working because they emit their own
         // (non-blocked) messages. (#126)
+        if self.active_modal == Some(super::ModalKind::LinetypeManager) {
+            let step = match &msg {
+                Message::ShortcutPressed(key) if key == "ARROWUP" => Some(false),
+                Message::ShortcutPressed(key) if key == "ARROWDOWN" => Some(true),
+                Message::ArrowKeyPressed {
+                    direction: ArrowKey::Up,
+                    extend_selection: false,
+                    ..
+                } => Some(false),
+                Message::ArrowKeyPressed {
+                    direction: ArrowKey::Down,
+                    extend_selection: false,
+                    ..
+                } => Some(true),
+                _ => None,
+            };
+            if let Some(down) = step {
+                return self.linetype_list_step(down);
+            }
+        }
         if self.active_modal.is_some() {
             if matches!(msg, Message::CommandEscape)
                 || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ESCAPE"))
@@ -1199,6 +1220,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::SpaceMouseFocus(id, focused) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if focused {
+                    self.focused_window = Some(id);
+                } else if self.focused_window == Some(id) {
+                    self.focused_window = None;
+                }
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
                 }
@@ -4548,6 +4575,12 @@ impl OpenCADStudio {
 
             Message::ToggleLayers => {
                 if self.show_layers {
+                    // In a window of its own it may be behind the main one,
+                    // the only place this can be pressed from: bring it up.
+                    if let Some(raise) = self.raise_pallet_window(crate::ui::dock::PanelId::Layers)
+                    {
+                        return raise;
+                    }
                     return self.on_dock(crate::ui::dock::DockMsg::Close(
                         crate::ui::dock::PanelId::Layers,
                     ));
@@ -7062,7 +7095,10 @@ impl OpenCADStudio {
                     let all = targets.iter().all(|handle| has(doc, *handle));
                     for handle in &targets {
                         if all {
-                            if crate::scene::annotative::object_scale_memberships(doc, *handle).len() > 1 {
+                            if crate::scene::annotative::object_scale_memberships(doc, *handle)
+                                .len()
+                                > 1
+                            {
                                 crate::scene::annotative::remove_annotation_context_for_scale(
                                     doc, *handle, sh,
                                 );
@@ -7272,7 +7308,11 @@ impl OpenCADStudio {
                         .reset_scale_list_to(&keep, choice != 1, choice != 0);
                     self.scale_stage_mark();
                     self.scale_stage_commit();
-                    let first = self.tabs[i].scene.scale_names_in_list_order().into_iter().next();
+                    let first = self.tabs[i]
+                        .scene
+                        .scale_names_in_list_order()
+                        .into_iter()
+                        .next();
                     if let Some(first) = first {
                         self.scale_manager_multi = vec![first.clone()];
                         self.load_scale_editor(&first);
@@ -12131,12 +12171,14 @@ impl OpenCADStudio {
 
             Message::ShowViewCubeChanged(show) => {
                 self.show_viewcube = show;
+                self.ribbon.set_viewcube(show);
                 self.persist_settings_if_changed();
                 Task::none()
             }
 
             Message::ShowUcsIconChanged(show) => {
                 self.show_ucs_icon = show;
+                self.ribbon.set_ucs_icon(show);
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -12895,8 +12937,7 @@ impl OpenCADStudio {
             Message::LayerMoreRun(msg) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.more_menu = false;
-                let task = self.update(*msg);
-                Task::batch([task, self.layers_dialog_to_front()])
+                self.update(*msg)
             }
             Message::LayerSearchOpen(open) => {
                 let i = self.active_tab;
@@ -14292,13 +14333,20 @@ impl OpenCADStudio {
             // ── Plot Style Table ──────────────────────────────────────────────
             Message::LinetypeLoaded(Some((lin_dir, source))) => {
                 let i = self.active_tab;
-                self.push_undo_snapshot(i, "LINETYPE");
+                // In the open Linetype Manager a load is staged like its
+                // other changes: Apply keeps it, Close drops it.
+                let staged = self.linetypes_are_staged();
+                if !staged {
+                    self.push_undo_snapshot(i, "LINETYPE");
+                }
                 let added = crate::io::linetypes::populate_document_from_source(
                     &mut self.tabs[i].scene.document,
                     &source,
                     lin_dir.as_deref(),
                 );
-                if added > 0 {
+                if staged {
+                    self.load_linetype_bufs(i);
+                } else if added > 0 {
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
                 }
@@ -14695,6 +14743,7 @@ impl OpenCADStudio {
                 if self.selected_textstyle_is_read_only() {
                     return Task::none();
                 }
+                self.textstyle_bigfont_picker.open = false;
                 let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 match self.textstyle_font_picker.update(event, doc, false) {
@@ -14707,6 +14756,25 @@ impl OpenCADStudio {
                     Some(FontChoice::StyleDefault) | None => {}
                 }
                 if is_toggle && self.textstyle_font_picker.open {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
+                }
+                Task::none()
+            }
+            Message::TextStyleBigFont(event) => {
+                if self.selected_textstyle_is_read_only() || !self.textstyle_draft.big_font_on {
+                    return Task::none();
+                }
+                self.textstyle_font_picker.open = false;
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
+                let doc = &self.tabs[self.active_tab].scene.document;
+                if let Some(picked) = self.textstyle_bigfont_picker.update_bigfont(event, doc) {
+                    if let FontChoice::Stroke(file) = picked {
+                        self.textstyle_draft.style.big_font_file = file;
+                    }
+                }
+                if is_toggle && self.textstyle_bigfont_picker.open {
                     return iced::widget::operation::focus(iced::widget::Id::new(
                         crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
                     ));
@@ -14880,6 +14948,7 @@ impl OpenCADStudio {
             }
 
             // ── MLineStyle Dialog ─────────────────────────────────────────────
+            Message::Linetype(message) => self.on_linetype_message(message),
             Message::MlStyleDialogOpen => self.on_ml_style_dialog_open(),
             Message::MlStyleDialogClose => {
                 self.close_active_modal();

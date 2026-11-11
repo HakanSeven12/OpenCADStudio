@@ -2613,6 +2613,9 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
         ] {
             let _ = app.feed_command(StepInput::Point(point));
         }
+        if label.starts_with("Linear") {
+            let _ = app.feed_command(StepInput::Enter);
+        }
         for (side, expected) in [
             (0, ["BaseXDelta", "BaseYDelta"]),
             (1, ["EndXDelta", "EndYDelta"]),
@@ -2691,6 +2694,9 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
         ] {
             let _ = app.feed_command(StepInput::Point(point));
         }
+        if label.starts_with("Linear") {
+            let _ = app.feed_command(StepInput::Enter);
+        }
         assert!(app.tabs[i].pending_action_pair.is_some());
         let _ = app.dispatch_command("LINE");
         assert!(app.tabs[i].pending_action_pair.is_none());
@@ -2724,6 +2730,9 @@ fn cancelling_a_parameter_set_takes_the_parameter_with_it() {
             let _ = app.feed_command(StepInput::Enter);
         }
         let _ = app.feed_command(StepInput::Point(glam::DVec3::new(5., 2., 0.)));
+        if label.starts_with("Linear") {
+            let _ = app.feed_command(StepInput::Enter);
+        }
         assert!(
             !distance::parameters(&app.tabs[i].scene.document, definition).is_empty(),
             "{label}: the parameter is placed before the action step"
@@ -3941,6 +3950,7 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
     feed(&mut app, "0,0");
     feed(&mut app, "10,0");
     feed(&mut app, "5,2");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
 
     let doc = &app.tabs[i].scene.document;
@@ -4318,6 +4328,7 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     feed(&mut app, "0,0");
     feed(&mut app, "10,0");
     feed(&mut app, "5,2");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
 
     let doc = &app.tabs[i].scene.document;
@@ -4690,6 +4701,7 @@ fn a_linear_takes_its_base_location_and_value_set() {
     feed(&mut app, "0,0");
     feed(&mut app, "10,0");
     feed(&mut app, "5,2");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
 
     let doc = &app.tabs[i].scene.document;
@@ -4726,6 +4738,7 @@ fn a_linear_takes_its_base_location_and_value_set() {
     feed(&mut app, "20,0");
     feed(&mut app, "30,0");
     feed(&mut app, "25,2");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
 
     let doc = &app.tabs[i].scene.document;
@@ -4749,6 +4762,76 @@ fn a_linear_takes_its_base_location_and_value_set() {
 }
 
 #[test]
+fn a_linear_asks_for_its_grip_count_after_the_label() {
+    use crate::scene::block_grips::config;
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let placed = |app: &OpenCADStudio| {
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|parameter| parameter.handle)
+            .collect::<Vec<_>>()
+    };
+    let prompt = |app: &OpenCADStudio| {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("command active")
+            .prompt()
+            .to_string()
+    };
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    assert_eq!(
+        prompt(&app),
+        "BPARAMETER Linear  Enter number of grips [0/1] <1>:",
+        "the label pick is followed by the grip count"
+    );
+    assert!(
+        placed(&app).is_empty(),
+        "the parameter waits for the grip count"
+    );
+    let before = app.tabs[i].scene.document.clone();
+    for invalid in ["2", "-1", "four"] {
+        app.command_line.last_error = None;
+        feed(&mut app, invalid);
+        assert_eq!(app.tabs[i].scene.document, before, "{invalid}");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Enter the number of grips: 0 or 1."),
+            "{invalid}"
+        );
+        assert!(app.tabs[i].active_cmd.is_some(), "{invalid}");
+    }
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let first = placed(&app)[0];
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, first),
+        Some(1),
+        "Enter keeps the one grip a new linear starts with"
+    );
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "20,0");
+    feed(&mut app, "30,0");
+    feed(&mut app, "25,2");
+    feed(&mut app, "0");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let second = placed(&app)[1];
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, second),
+        Some(0),
+        "zero removes the linear's grip"
+    );
+}
+
+#[test]
 fn a_distance_keeps_the_defaults_shown_at_each_question() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -4769,6 +4852,7 @@ fn a_distance_keeps_the_defaults_shown_at_each_question() {
     feed(&mut app, "0,0");
     feed(&mut app, "10,0");
     feed(&mut app, "5,2");
+    feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
 
     let doc = &app.tabs[i].scene.document;
@@ -5369,6 +5453,9 @@ fn distance_parameter_batch_three_picks_local_undo_redo_and_saved_parent_undo() 
         } else {
             feed(&mut app, "1,8");
         }
+        if *kind == "LINEAR" {
+            feed(&mut app, "");
+        }
         assert_eq!(distance_parameter_count(&app), index + 1);
         assert_eq!(app.tabs[i].history.undo_stack.len(), index + 1);
         assert!(app.tabs[i].scene.preview_wires.is_empty());
@@ -5595,6 +5682,9 @@ fn distance_parameter_cancel_chooser_invalid_endpoint_and_discard_are_safe() {
             feed(&mut app, "1");
         } else {
             feed(&mut app, "1,8");
+        }
+        if kind == "Linear" {
+            feed(&mut app, "");
         }
         assert_eq!(distance_parameter_count(&app), 1);
         app.undo_steps(1);

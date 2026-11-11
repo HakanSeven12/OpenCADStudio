@@ -625,6 +625,8 @@ impl OpenCADStudio {
         if let Some(s) = doc.text_styles.get(&self.textstyle_selected) {
             self.textstyle_draft = crate::app::text_style_draft::TextStyleDraft::load(s);
         }
+        self.textstyle_font_picker.open = false;
+        self.textstyle_bigfont_picker.open = false;
         self.textstyle_users = users;
     }
 
@@ -689,6 +691,9 @@ impl OpenCADStudio {
         self.textstyle_font_picker.open = false;
         self.textstyle_font_picker
             .refresh(&self.tabs[i].scene.document, false);
+        self.textstyle_bigfont_picker.open = false;
+        self.textstyle_bigfont_picker
+            .refresh_bigfont(&self.tabs[i].scene.document);
         self.active_modal = Some(crate::app::ModalKind::TextStyle);
         self.style_stage_begin();
         Task::none()

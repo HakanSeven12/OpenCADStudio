@@ -1,0 +1,13 @@
+[package]
+name = "ocs_acis"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Conversion between the drawing's ACIS records (SAT/SAB, solid history) and
+# kernel B-rep topology. It lives here, between the two, so the kernel needs no
+# file format and the drawing model needs no geometry kernel.
+
+[dependencies]
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "8e3a600" }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "802f751", features = ["brep"] }

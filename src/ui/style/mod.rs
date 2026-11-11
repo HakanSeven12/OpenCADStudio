@@ -4,6 +4,7 @@ pub mod common;
 pub mod dimstyle;
 pub(crate) mod editor_table;
 pub mod form;
+pub mod linetype;
 pub mod fusion_theme;
 pub mod mleaderstyle;
 pub mod mlstyle;

@@ -981,7 +981,7 @@ impl Scene {
                 let tree = self.document.solid_history_tree(handle);
                 let rebuilt = || {
                     tree.as_ref()
-                        .and_then(|tree| kernel::acis::rebuild_history_tree(tree).ok())
+                        .and_then(|tree| ocs_acis::rebuild_history_tree(tree).ok())
                 };
                 let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
@@ -3032,7 +3032,17 @@ impl Scene {
             return None;
         }
 
-        let depths = kernel::geom2d::ring_nesting_depths(&rings);
+        // A single loop cannot nest inside anything, and nothing nests inside
+        // it: its depth is definitionally zero, `Outer` and `Ignore` keep it
+        // and `Normal` keeps it. Asking the kernel still runs the full
+        // simplify pass, which turned a cadastral parcel boundary carrying
+        // hundreds of thousands of folded-back segments into minutes per
+        // hatch while opening.
+        let depths = if rings.len() > 1 {
+            kernel::geom2d::ring_nesting_depths(&rings)
+        } else {
+            vec![0]
+        };
         // The island style picks loops by their path flags: Normal keeps the
         // loops flagged external (bit 0), derived (bit 2) or outermost
         // (bit 4), and any loop one level in — a selected island of island
@@ -4678,5 +4688,76 @@ mod attribute_identity_tests {
             copy_text.common.owner_handle, child.common.handle,
             "and its attribute owns it"
         );
+    }
+}
+
+// A single-loop boundary has nesting depth zero by definition; `Outer` and
+// `Ignore` styles keep it, and `Normal` keeps it. The shortcut in
+// `hatch_model_from_dxf` relies on exactly that, so pin it here.
+#[cfg(test)]
+mod hatch_single_loop_depth_tests {
+    use super::*;
+    use document::entities::{BoundaryEdge, BoundaryPath, HatchStyleType, PolylineEdge};
+    use document::types::Vector2;
+
+    fn single_loop_hatch(style: HatchStyleType, flags: bool) -> Box<document::entities::Hatch> {
+        let mut hatch = Box::new(document::entities::Hatch::new());
+        hatch.style = style;
+        let mut path = BoundaryPath::new();
+        path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            vec![
+                Vector2::new(0.0, 0.0),
+                Vector2::new(10.0, 0.0),
+                Vector2::new(10.0, 10.0),
+                Vector2::new(0.0, 10.0),
+            ],
+            true,
+        )));
+        if flags {
+            path.flags.set_external(true);
+        }
+        hatch.paths.push(path);
+        hatch
+    }
+
+    #[test]
+    fn an_unflagged_single_loop_is_kept_in_every_style() {
+        // No flag decides: the depth is the only remaining caller here, and it
+        // is zero. The model must build for all three styles.
+        for style in [
+            HatchStyleType::Normal,
+            HatchStyleType::Outer,
+            HatchStyleType::Ignore,
+        ] {
+            let hatch = single_loop_hatch(style, false);
+            let model = Scene::hatch_model_from_dxf(&hatch, [1.0, 1.0, 1.0, 1.0])
+                .unwrap_or_else(|| panic!("{style:?}: single boundary loop must render"));
+            let exterior = model
+                .boundary_exterior
+                .as_ref()
+                .expect("loop exterior flags stored");
+            assert_eq!(
+                exterior.as_ref(),
+                &[true],
+                "{style:?}: sole loop is exterior"
+            );
+            let (_, fill_mesh) = model.fill_mesh();
+            assert!(!fill_mesh.is_empty(), "{style:?}: fill mesh is built");
+        }
+    }
+
+    #[test]
+    fn a_flagged_single_loop_is_kept_in_every_style() {
+        for style in [
+            HatchStyleType::Normal,
+            HatchStyleType::Outer,
+            HatchStyleType::Ignore,
+        ] {
+            let hatch = single_loop_hatch(style, true);
+            let model = Scene::hatch_model_from_dxf(&hatch, [1.0, 1.0, 1.0, 1.0])
+                .unwrap_or_else(|| panic!("{style:?}: flagged sole loop must render"));
+            let (_, fill_mesh) = model.fill_mesh();
+            assert!(!fill_mesh.is_empty(), "{style:?}: fill mesh is built");
+        }
     }
 }

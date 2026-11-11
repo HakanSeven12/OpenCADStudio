@@ -7831,6 +7831,188 @@ mod batch7_tests {
         assert_eq!(q["entities"][0]["leader_count"], 1, "{q}");
     }
 
+    #[test]
+    fn sheet_set_with_a_custom_property_and_a_field() {
+        use document::objects::{Dictionary, ObjectType};
+        use serde_json::json;
+
+        fn request(app: &mut OpenCADStudio, mut req: serde_json::Value) -> serde_json::Value {
+            let state = app.control_state();
+            req["protocol"] = json!(1);
+            req["document_id"] = state["document_id"].clone();
+            req["revision"] = state["revision"].clone();
+            req["client_id"] = json!("test");
+            if req.get("request_id").is_none() {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                req["request_id"] = json!(format!(
+                    "req-{}",
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                ));
+            }
+            let (r, task) = app.control_request(req.clone());
+            app.drive_headless_task(task).unwrap();
+            if matches!(r["status"].as_str(), Some("accepted" | "running")) {
+                app.control_request(json!({"op":"operation","request_id":req["request_id"]}))
+                    .0
+            } else {
+                r
+            }
+        }
+        let sheet = |app: &mut OpenCADStudio, value: &str| {
+            request(app, json!({"op":"action","name":"sheet_set","value":value}))
+        };
+
+        let dir = std::env::temp_dir().join(format!("ocs-ss-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+
+        let mut app = new_app();
+
+        // Create the set through the wizard.
+        let _ = sheet(&mut app, "new");
+        let _ = sheet(&mut app, "existing=0");
+        let _ = sheet(&mut app, "name=PROJECTSET");
+        let _ = sheet(&mut app, &format!("folder={}", dir.display()));
+        let _ = sheet(&mut app, "ok");
+
+        // Two subsets.
+        let _ = sheet(&mut app, "menu=new_subset:set");
+        let _ = sheet(&mut app, "title=Architectural");
+        let _ = sheet(&mut app, "ok");
+        let _ = sheet(&mut app, "menu=new_subset:set");
+        let _ = sheet(&mut app, "title=Structural");
+        let _ = sheet(&mut app, "ok");
+
+        // Three sheets.
+        for (subset, number, title) in [
+            ("Architectural", "A-101", "Plans"),
+            ("Architectural", "A-102", "Sections"),
+            ("Structural", "S-201", "Framing"),
+        ] {
+            let _ = sheet(&mut app, &format!("menu=new_sheet:{subset}"));
+            let _ = sheet(&mut app, &format!("number={number}"));
+            let _ = sheet(&mut app, &format!("title={title}"));
+            let _ = sheet(&mut app, &format!("folder={}", dir.display()));
+            let _ = sheet(&mut app, "ok");
+        }
+
+        // A custom property on the set.
+        let _ = sheet(&mut app, "menu=properties:set");
+        let _ = sheet(&mut app, "add_custom");
+        let _ = sheet(&mut app, "custom_name=PROJECT");
+        let _ = sheet(&mut app, "custom_owner=0");
+        let _ = sheet(&mut app, "add_custom_ok");
+        let _ = sheet(&mut app, "custom=0:The Aragorn Project");
+        let _ = sheet(&mut app, "ok");
+
+        // The set round-trips from disk with both subsets, the three sheets
+        // and the custom property.
+        let dst = dir.join("PROJECTSET.dst");
+        assert!(dst.is_file(), "the wizard wrote {}", dst.display());
+        let db = crate::app::commands::sheet_set::read_set(&dst.to_string_lossy())
+            .expect("the set round-trips from disk");
+        let subset_count = db
+            .sheet_set()
+            .children
+            .iter()
+            .filter(|child| child.name == "AcSmSubset")
+            .count();
+        let sheet_count = db
+            .sheet_set()
+            .children
+            .iter()
+            .filter(|child| child.name == "AcSmSubset")
+            .map(|subset| {
+                subset
+                    .children
+                    .iter()
+                    .filter(|child| child.name == "AcSmSheet")
+                    .count()
+            })
+            .sum::<usize>();
+        assert_eq!(subset_count, 2, "two subsets");
+        assert_eq!(sheet_count, 3, "three sheets across the subsets");
+        let custom = document::sheet_set::custom_properties(db.sheet_set());
+        assert!(
+            custom
+                .iter()
+                .any(|(name, value, _)| name == "PROJECT" && value == "The Aragorn Project"),
+            "{custom:?}"
+        );
+
+        // A field on the first sheet's layout reads the custom property.
+        let sheet_path = dir.join("A-101 Plans.dwg");
+        assert!(sheet_path.is_file());
+        let mut doc = crate::io::load_file(&sheet_path).expect("the sheet drawing loads");
+        let host = doc
+            .add_entity_to_layout(
+                document::EntityType::Point(document::entities::Point::new()),
+                "A-101 Plans",
+            )
+            .expect("the layout accepts a point");
+        let root_h = doc.allocate_handle();
+        let fields_h = doc.allocate_handle();
+        let text_h = doc.allocate_handle();
+        let child_h = doc.allocate_handle();
+        let mut root = Dictionary::new();
+        root.handle = root_h;
+        root.owner = host;
+        root.add_entry("ACAD_FIELD", fields_h);
+        let mut fields = Dictionary::new();
+        fields.handle = fields_h;
+        fields.owner = root_h;
+        fields.add_entry("TEXT", text_h);
+        doc.objects.insert(root_h, ObjectType::Dictionary(root));
+        doc.objects.insert(fields_h, ObjectType::Dictionary(fields));
+        doc.fields.insert(
+            text_h,
+            document::document::FieldDef {
+                handle: text_h,
+                owner: fields_h,
+                evaluator: "_text".to_string(),
+                code: r"%<\_FldIdx 0>%".to_string(),
+                objects: vec![],
+            },
+        );
+        doc.fields.insert(
+            child_h,
+            document::document::FieldDef {
+                handle: child_h,
+                owner: text_h,
+                evaluator: "AcSm".to_string(),
+                code: r"\AcSm SheetSet.PROJECT".to_string(),
+                objects: vec![],
+            },
+        );
+
+        // The custom property field reads the set through the open sheet.
+        let resolved = crate::entities::field::resolve(&doc, host);
+        assert_eq!(
+            resolved.as_deref(),
+            Some("The Aragorn Project"),
+            "the field reads the set's custom property on the sheet's layout"
+        );
+
+        // And the other sheet's own field shows its sheet number instead.
+        doc.fields.insert(
+            child_h,
+            document::document::FieldDef {
+                handle: child_h,
+                owner: text_h,
+                evaluator: "AcSm".to_string(),
+                code: r"\AcSm Sheet.Number".to_string(),
+                objects: vec![],
+            },
+        );
+        let resolved = crate::entities::field::resolve(&doc, host);
+        assert_eq!(
+            resolved.as_deref(),
+            Some("A-101"),
+            "the sheet field reads the sheet number"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> document::Handle {
         use document::entities::Line;
         use document::types::Vector3;

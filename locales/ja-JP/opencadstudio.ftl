@@ -2962,10 +2962,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  分割するオブジェクトを選択:
     .deselected = 選択を解除しました。
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__°
+        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__
           デルタ X = __ocs_arg_dx__、デルタ Y = __ocs_arg_dy__、デルタ Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__°、XY 平面からの角度 = __ocs_arg_angle_z__°
+        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__、XY 平面からの角度 = __ocs_arg_angle_z__
           デルタ X = __ocs_arg_dx__、デルタ Y = __ocs_arg_dy__、デルタ Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = 検索/置換: "__ocs_fmt_1__" の __ocs_fmt_0__ 件を "__ocs_fmt_2__" に置換しました。
     .find-not-found = 検索: "__ocs_fmt_0__" が見つかりません。

@@ -2972,10 +2972,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Sélectionnez l'objet à diviser :
     .deselected = Délecté.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Distance = __ocs_arg_dist__, Angle dans XY Plane = __ocs_arg_angle_xy__°
+        Distance = __ocs_arg_dist__, Angle dans XY Plane = __ocs_arg_angle_xy__
         Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Distance = __ocs_arg_dist__, Angle dans XY Plane = __ocs_arg_angle_xy__°, Angle de XY Plane = __ocs_arg_angle_z__°
+        Distance = __ocs_arg_dist__, Angle dans XY Plane = __ocs_arg_angle_xy__, Angle de XY Plane = __ocs_arg_angle_z__
         Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE : remplacé par __ocs_fmt_0__ événement(s) de "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: "__ocs_fmt_0__" non trouvé.

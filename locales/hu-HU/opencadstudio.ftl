@@ -2965,10 +2965,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Jelölje ki a felosztandó objektumot:
     .deselected = Kijelölés megszüntetve.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__°
+        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__°, szög az XY síktól = __ocs_arg_angle_z__°
+        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__, szög az XY síktól = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: „__ocs_fmt_1__” → „__ocs_fmt_2__”: __ocs_fmt_0__ előfordulás lecserélve.
     .find-not-found = FIND: "__ocs_fmt_0__" nem található.

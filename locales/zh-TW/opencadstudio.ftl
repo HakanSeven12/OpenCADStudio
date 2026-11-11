@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE 選擇要定數等分的物件：
     .deselected = 取消選取。
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        距離 = __ocs_arg_dist__，XY 平面內的角度 = __ocs_arg_angle_xy__°
+        距離 = __ocs_arg_dist__，XY 平面內的角度 = __ocs_arg_angle_xy__
           ΔX = __ocs_arg_dx__，ΔY = __ocs_arg_dy__，ΔZ = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        距離 = __ocs_arg_dist__，XY 平面內的角度 = __ocs_arg_angle_xy__°，與 XY 平面的夾角 = __ocs_arg_angle_z__°
+        距離 = __ocs_arg_dist__，XY 平面內的角度 = __ocs_arg_angle_xy__，與 XY 平面的夾角 = __ocs_arg_angle_z__
           ΔX = __ocs_arg_dx__，ΔY = __ocs_arg_dy__，ΔZ = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE：已將 "__ocs_fmt_1__" 的 __ocs_fmt_0__ 處替換為 "__ocs_fmt_2__"。
     .find-not-found = FIND：找不到 "__ocs_fmt_0__"。

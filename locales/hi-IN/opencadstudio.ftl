@@ -2960,10 +2960,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE विभाजित करने के लिए ऑब्जेक्ट चुनें:
     .deselected = अचयनित
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        दूरी = __ocs_arg_dist__, XY प्लेन = __ocs_arg_angle_xy__ °C में कोण
+        दूरी = __ocs_arg_dist__, XY प्लेन = __ocs_arg_angle_xy__ में कोण
         डेल्टा एक्स = __ocs_arg_dx__, डेल्टा वाई = __ocs_arg_dy__, डेल्टा जेड = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        दूरी = __ocs_arg_dist__, XY प्लेन = __ocs_arg_angle_xy__ °, XY प्लेन = __ocs_arg_angle_z__ ° से कोण
+        दूरी = __ocs_arg_dist__, XY प्लेन = __ocs_arg_angle_xy__, XY प्लेन = __ocs_arg_angle_z__ से कोण
         डेल्टा एक्स = __ocs_arg_dx__, डेल्टा वाई = __ocs_arg_dy__, डेल्टा जेड = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: "__ocs_fmt_1__" की __ocs_fmt_0__ आवृत्ति को "__ocs_fmt_2__" से बदला गया।
     .find-not-found = FIND: "__ocs_fmt_0__" नहीं मिला।

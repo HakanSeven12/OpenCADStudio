@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Избери обект за разделяне:
     .deselected = Изборът е премахнат.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Разстояние = __ocs_arg_dist__,  Ъгъл в равнина XY = __ocs_arg_angle_xy__°
+        Разстояние = __ocs_arg_dist__,  Ъгъл в равнина XY = __ocs_arg_angle_xy__
           Делта X = __ocs_arg_dx__,  Делта Y = __ocs_arg_dy__,  Делта Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Разстояние = __ocs_arg_dist__,  Ъгъл в равнина XY = __ocs_arg_angle_xy__°,  Ъгъл от равнина XY = __ocs_arg_angle_z__°
+        Разстояние = __ocs_arg_dist__,  Ъгъл в равнина XY = __ocs_arg_angle_xy__,  Ъгъл от равнина XY = __ocs_arg_angle_z__
           Делта X = __ocs_arg_dx__,  Делта Y = __ocs_arg_dy__,  Делта Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = НАМЕРИ/ЗАМЕНИ: заменени __ocs_fmt_0__ съвпадение(я) на "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = НАМЕРИ: "__ocs_fmt_0__" не е намерено.

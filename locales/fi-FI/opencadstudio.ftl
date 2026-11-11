@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Valitse jaettava kohde:
     .deselected = Poistettu.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Etäisyys = __ocs_arg_dist__, kulma XY tasossa = __ocs_arg_angle_xy__°
+        Etäisyys = __ocs_arg_dist__, kulma XY tasossa = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Etäisyys = __ocs_arg_dist__, kulma XY tasossa = __ocs_arg_angle_xy__°, kulma XY tasosta = __ocs_arg_angle_z__°
+        Etäisyys = __ocs_arg_dist__, kulma XY tasossa = __ocs_arg_angle_xy__, kulma XY tasosta = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: korvattu __ocs_fmt_0__ -esiintymät "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: "__ocs_fmt_0__" ei löydy.

@@ -2984,10 +2984,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  حدد الكائن المراد تقسيمه:
     .deselected = أُلغي التحديد.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        المسافة = __ocs_arg_dist__، الزاوية في مستوى XY = __ocs_arg_angle_xy__°
+        المسافة = __ocs_arg_dist__، الزاوية في مستوى XY = __ocs_arg_angle_xy__
           دلتا X = __ocs_arg_dx__، دلتا Y = __ocs_arg_dy__، دلتا Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        المسافة = __ocs_arg_dist__، الزاوية في مستوى XY = __ocs_arg_angle_xy__°، الزاوية من مستوى XY = __ocs_arg_angle_z__°
+        المسافة = __ocs_arg_dist__، الزاوية في مستوى XY = __ocs_arg_angle_xy__، الزاوية من مستوى XY = __ocs_arg_angle_z__
           دلتا X = __ocs_arg_dx__، دلتا Y = __ocs_arg_dy__، دلتا Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: استُبدل __ocs_fmt_0__ تكرار لـ "__ocs_fmt_1__" ← "__ocs_fmt_2__".
     .find-not-found = FIND: لم يُعثر على "__ocs_fmt_0__".

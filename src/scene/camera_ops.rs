@@ -728,7 +728,11 @@ impl Scene {
             return;
         }
         let aspect = self.active_camera_aspect();
-        self.camera.borrow_mut().fit_to_bounds(min, max, aspect);
+        let mut camera = self.camera.borrow_mut();
+        let known = camera.known_depth_bounds();
+        camera.fit_to_bounds(min, max, aspect);
+        camera.keep_depth_bounds(known);
+        drop(camera);
         self.projection_bounds_epoch.set(self.geometry_epoch);
         self.camera_generation += 1;
     }
@@ -779,9 +783,11 @@ impl Scene {
         }
         let aspect = self.active_camera_aspect();
         let pixels = self.active_camera_pixels();
-        self.camera
-            .borrow_mut()
-            .fit_to_bounds_bordered_f32(min, max, aspect, pixels);
+        let mut camera = self.camera.borrow_mut();
+        let known = camera.known_depth_bounds();
+        camera.fit_to_bounds_bordered_f32(min, max, aspect, pixels);
+        camera.keep_depth_bounds(known);
+        drop(camera);
         self.projection_bounds_epoch.set(self.geometry_epoch);
         self.camera_generation += 1;
         true

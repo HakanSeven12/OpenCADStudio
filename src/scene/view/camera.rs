@@ -816,6 +816,22 @@ impl Camera {
         self.depth_half_range = 0.0;
     }
 
+    /// The drawing's depth box this camera knows: the fitted one, or the
+    /// last one an edit dropped.
+    pub(crate) fn known_depth_bounds(&self) -> Option<(DVec3, DVec3)> {
+        self.model_bounds.or(self.stale_bounds)
+    }
+
+    /// After framing part of the drawing (a window, some objects), keep the
+    /// rest of it in the depth range. The frame's own box is flat or holds
+    /// only what was framed, so a surface at elevation 5600 was clipped once
+    /// a window narrower than that was zoomed into.
+    pub(crate) fn keep_depth_bounds(&mut self, known: Option<(DVec3, DVec3)>) {
+        if let (Some((lo, hi)), Some((min, max))) = (known, self.model_bounds) {
+            self.fit_depth_to_bounds_f64(lo.min(min), hi.max(max));
+        }
+    }
+
     pub(crate) fn fitted_model_bounds(&self) -> Option<(DVec3, DVec3)> {
         self.model_bounds
     }
@@ -1248,6 +1264,21 @@ mod tests {
 
         assert!(cam.model_bounds.is_none());
         assert_eq!(cam.depth_half_range, 0.0);
+    }
+
+    /// A window zoomed into keeps the drawing's elevated geometry, at
+    /// 5600 above a flat window, inside the depth range.
+    #[test]
+    fn a_window_zoom_keeps_the_drawing_depth() {
+        let mut cam = Camera::default();
+        let drawing = (DVec3::new(0.0, 0.0, 0.0), DVec3::new(9000.0, 4000.0, 5650.0));
+        cam.fit_depth_to_bounds_f64(drawing.0, drawing.1);
+        let known = cam.known_depth_bounds();
+        cam.fit_to_bounds(Vec3::new(4000.0, 2000.0, 0.0), Vec3::new(4300.0, 2150.0, 0.0), 2.0);
+        cam.keep_depth_bounds(known);
+        let (near, far) = cam.ortho_depth_range();
+        let reach = (cam.distance - near).min(far - cam.distance);
+        assert!(reach >= 5650.0, "{near}..{far} around {}", cam.distance);
     }
 
     /// #2812: zoomed in close and the drawing edited, the depth range still

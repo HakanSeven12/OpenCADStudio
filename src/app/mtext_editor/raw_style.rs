@@ -106,11 +106,8 @@ impl ObjectStyle {
     pub(super) fn of(doc: &document::Document, name: &str) -> Self {
         use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
         let style = text_style(doc, name);
-        let font = crate::entities::text_support::resolve_text_style(name, doc).font_name;
         Self {
-            face: crate::scene::text::sysfont::split_style(&font)
-                .0
-                .to_string(),
+            face: style_face(doc, name),
             font: style.and_then(crate::ui::font_picker::style_font),
             width: style
                 .map(|s| s.width_factor)
@@ -133,6 +130,15 @@ impl ObjectStyle {
             read_only: style.is_some_and(|s| s.xref_dependent || s.name.contains('|')),
         }
     }
+}
+
+/// The family `style` draws with, as a `\f`/`\F` code names it. A stroke
+/// font found in a folder resolves to its full path; the code takes only the
+/// file name, since a path's backslashes cannot go into MTEXT (#2802).
+pub(in crate::app) fn style_face(doc: &document::Document, style: &str) -> String {
+    let font = crate::entities::text_support::resolve_text_style(style, doc).font_name;
+    let file = font.rsplit(['/', '\\']).next().unwrap_or(&font);
+    crate::scene::text::sysfont::split_style(file).0.to_string()
 }
 
 /// The width the text draws with: the style's width times the object `\W`.
@@ -679,6 +685,34 @@ mod tests {
     }
     fn ed(app: &OpenCADStudio) -> &crate::app::mtext_editor::MTextEditorState {
         app.mtext_editor.as_ref().unwrap()
+    }
+
+    /// A style whose stroke font is found in a folder resolves to the file's
+    /// full path; picking "[Style default]" for a selection writes only the
+    /// file name, not the path's backslashes (#2802).
+    #[test]
+    fn the_style_default_font_of_a_folder_shx_is_its_file_name() {
+        let dir = std::env::temp_dir().join(format!("ocs-2802-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shx = dir.join("Probe.shx");
+        std::fs::write(&shx, b"AutoCAD-86 shapes 1.0\r\n\x1a").unwrap();
+        let mut app = app("abc");
+        let doc = &mut app.tabs[1].scene.document;
+        let mut style = document::tables::TextStyle::new("Folder");
+        style.handle = doc.allocate_handle();
+        style.font_file = shx.to_string_lossy().into_owned();
+        doc.text_styles.add(style).unwrap();
+        assert_eq!(super::style_face(doc, "Folder"), "Probe.shx");
+        let object_style = super::ObjectStyle::of(doc, "Folder");
+        let ed = app.mtext_editor.as_mut().unwrap();
+        ed.style = "Folder".into();
+        ed.object_style = object_style;
+        ed.sel = Some((0, 3));
+        ed.sel_anchor = 0;
+        ed.caret = 3;
+        app.mtext_apply_font("[Style default]");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(raw(&app), r"{\FProbe.shx;abc}");
     }
 
     #[test]

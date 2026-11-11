@@ -1063,11 +1063,7 @@ impl super::OpenCADStudio {
                     ed.font.clone()
                 } else {
                     // The family, not the style's bold / italic face of it.
-                    let font =
-                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
-                    crate::scene::text::sysfont::split_style(&font)
-                        .0
-                        .to_string()
+                    raw_style::style_face(doc, &ed.style)
                 }
             })
             .unwrap_or_default()
@@ -1174,13 +1170,7 @@ impl super::OpenCADStudio {
             let doc = &self.tabs[self.active_tab].scene.document;
             self.mtext_editor
                 .as_ref()
-                .map(|ed| {
-                    let font =
-                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
-                    crate::scene::text::sysfont::split_style(&font)
-                        .0
-                        .to_string()
-                })
+                .map(|ed| raw_style::style_face(doc, &ed.style))
                 .unwrap_or_default()
         } else {
             font.to_string()

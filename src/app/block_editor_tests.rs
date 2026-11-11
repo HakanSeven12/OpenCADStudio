@@ -3506,12 +3506,20 @@ fn action_type_list_offers_lookup_and_routes_the_chosen_parameter_to_its_table()
 
     let _ = app.dispatch_command("BACTIONTOOL");
     let prompt = app.command_line.history.last().unwrap().text.clone();
-    assert!(prompt.contains("Lookup"), "{prompt}");
+    assert!(prompt.contains("BACTION  Select parameter:"), "{prompt}");
     assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "BACTION");
 
-    feed(&mut app, "Lookup");
-    assert!(app.active_modal.is_none(), "the parameter comes first");
     feed(&mut app, "Lookup2");
+    assert!(
+        app.active_modal.is_none(),
+        "the action type comes after the parameter"
+    );
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BACTION  Enter action type [Lookup]:",
+        "a chosen lookup parameter offers its one action type"
+    );
+    feed(&mut app, "Lookup");
     assert_eq!(app.active_modal, Some(ModalKind::BlockLookup));
     let state = app.block_lookup.as_ref().unwrap();
     let draft = &state.drafts[state.selected];
@@ -3569,9 +3577,18 @@ fn action_type_list_appears_when_only_a_lookup_parameter_is_placed() {
     let _ = app.run_command_line("BPARAMETER LOOKUP 1,1");
     let _ = app.dispatch_command("BACTIONTOOL");
     let prompt = app.command_line.history.last().unwrap().text.clone();
-    assert!(prompt.contains("Lookup"), "{prompt}");
-    feed(&mut app, "Lookup");
+    assert!(prompt.contains("BACTION  Select parameter:"), "{prompt}");
     feed(&mut app, "Lookup1");
+    assert!(app.active_modal.is_none(), "the parameter comes first");
+    assert_eq!(
+        app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .prompt(),
+        "BACTION  Enter action type [Lookup]:"
+    );
+    feed(&mut app, "Lookup");
     assert_eq!(app.active_modal, Some(ModalKind::BlockLookup));
     assert_eq!(
         app.block_lookup.as_ref().unwrap().drafts[0]
@@ -12186,6 +12203,7 @@ mod alignment_insertion;
 
 mod parameter_preview;
 
+mod action_parameter_first;
 mod array_spacing_prompts;
 mod lookup_expressions;
 mod lookup_set_row;

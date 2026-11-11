@@ -796,12 +796,6 @@ impl OpenCADStudio {
             result @ CmdResult::PlaceBlockSingleParameter { .. } => {
                 return self.handle_place_block_single_parameter(result);
             }
-            CmdResult::StartBlockLookupAction {
-                document,
-                definition,
-            } => {
-                return self.start_block_lookup_action(document, definition);
-            }
             CmdResult::OpenBlockLookupTable {
                 document,
                 definition,

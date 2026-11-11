@@ -47,3 +47,5 @@
 * **Attribute Manager:** The live toggle reads Auto preview changes; Constant shows as a disabled mode pill and the second tab reads Text Options; the properties tab lists a read-only Plot style row reporting the default.
 * **Parameters Manager:** The pane opens with Expression, Value, Show and Order shown and Type and Description hidden, keeps a column chosen through its header menu across closing and reopening, and the Description column takes the width left over so its header stays whole.
 * **Text Backgrounds in Plot:** MTEXT and MLEADER masks that use the drawing-window colour retain that meaning through viewport projection, so SVG/PDF output paints them paper-white instead of leaving a black rectangle behind the text. Explicitly coloured text backgrounds are unchanged.
+
+* **Model Preview:** Direct PREVIEW and SVG/PDF export no longer carry a paper layout's fixed scale into Model when its paper-only Layout area is still selected; the inherited state now switches to centered, fitted Extents instead of placing every model object off the sheet.

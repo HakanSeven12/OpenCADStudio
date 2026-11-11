@@ -1063,11 +1063,7 @@ impl super::OpenCADStudio {
                     ed.font.clone()
                 } else {
                     // The family, not the style's bold / italic face of it.
-                    let font =
-                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
-                    crate::scene::text::sysfont::split_style(&font)
-                        .0
-                        .to_string()
+                    style_font_family(&ed.style, doc)
                 }
             })
             .unwrap_or_default()
@@ -1175,11 +1171,7 @@ impl super::OpenCADStudio {
             self.mtext_editor
                 .as_ref()
                 .map(|ed| {
-                    let font =
-                        crate::entities::text_support::resolve_text_style(&ed.style, doc).font_name;
-                    crate::scene::text::sysfont::split_style(&font)
-                        .0
-                        .to_string()
+                    style_font_family(&ed.style, doc)
                 })
                 .unwrap_or_default()
         } else {
@@ -1413,4 +1405,17 @@ mod cell_tests {
         assert_eq!(f.name, "Arial");
         assert!(f.bold);
     }
+}
+
+/// The font family of text style `style`, as a `\f` code names it. A
+/// resolved .shx font is a full path: only its file name goes in, since a
+/// path's separators are not allowed there.
+fn style_font_family(style: &str, doc: &document::Document) -> String {
+    let font = crate::entities::text_support::resolve_text_style(style, doc).font_name;
+    let family = crate::scene::text::sysfont::split_style(&font).0;
+    family
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(family)
+        .to_string()
 }

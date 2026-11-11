@@ -1,6 +1,7 @@
 pub mod complex_lt;
 pub mod font_face;
 pub mod glyph_quads;
+pub mod glyph_to_world;
 pub mod lff;
 pub mod sdf_atlas;
 pub mod shx;

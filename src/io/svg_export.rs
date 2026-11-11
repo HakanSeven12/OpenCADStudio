@@ -21,8 +21,8 @@ use std::path::Path;
 use crate::io::pdf_export::adapt_to_paper;
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::WireModel;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 
 /// Screen pixels (96 dpi) to millimetres.
 const PX_TO_MM: f64 = 25.4 / 96.0;
@@ -115,23 +115,17 @@ pub fn build_svg(
         scale: page.scale.max(1e-6) as f64,
         rotation_deg: page.rotation_deg,
     };
-    // Snapshot page glyphs before laying out the stamp. Stamp insertion can
-    // grow/rescale the atlas, but the page quads still carry their original UVs
-    // and must keep using this pre-stamp geometry snapshot.
-    let glyphs = if page.options.text_as_outlines {
-        glyph_snapshot()
-    } else {
-        None
-    };
     let stamp = page.options.stamp.then(plot_stamp_label);
+    // Lay the stamp out before snapshotting: the atlas keeps its UVs across
+    // growth (tiles persist), so one snapshot taken after the stamp's layout
+    // serves both the page quads and the stamp — no pre-stamp geometry to
+    // keep alive.
     let stamp_wire = if page.options.text_as_outlines {
         stamp.as_deref().and_then(stamp_outline_wire)
     } else {
         None
     };
-    // The stamp uses the post-layout UVs. Keep this separate even when the
-    // atlas did not grow so the ordering above remains explicit and tested.
-    let stamp_glyphs = if stamp_wire.is_some() {
+    let glyphs = if page.options.text_as_outlines {
         glyph_snapshot()
     } else {
         None
@@ -206,7 +200,7 @@ pub fn build_svg(
 
     out.push_str("</g>\n");
     if let Some(label) = stamp {
-        let outlined = match (stamp_wire.as_ref(), stamp_glyphs.as_ref()) {
+        let outlined = match (stamp_wire.as_ref(), glyphs.as_ref()) {
             (Some(wire), Some(glyphs)) => {
                 out.push_str("<g stroke-linecap=\"round\" stroke-linejoin=\"round\">\n");
                 let outlined = emit_text_outlines(
@@ -716,23 +710,15 @@ fn emit_hatch(
 
 // ── Optional text as vector outlines ───────────────────────────────────────
 
-struct GlyphSnapshot {
-    table: std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
-    solid_key: u64,
-}
+use crate::scene::text::glyph_to_world;
 
-impl GlyphSnapshot {
-    fn from_atlas(atlas: &crate::scene::text::sdf_atlas::GlyphAtlas) -> Self {
-        Self {
-            table: atlas.export_table(),
-            solid_key: crate::scene::text::sdf_atlas::uv_key(atlas.solid_uv()),
-        }
-    }
-}
+/// The atlas' export snapshot, shared with the PDF text path — the quad
+/// maths (uv key, plane mapping, glyph units, nominal pen) lives in
+/// [`crate::scene::text::glyph_to_world`].
+type GlyphSnapshot = glyph_to_world::GlyphSnapshot;
 
 fn glyph_snapshot() -> Option<GlyphSnapshot> {
-    let atlas = crate::scene::text::sdf_atlas::text_atlas().lock().ok()?;
-    Some(GlyphSnapshot::from_atlas(&atlas))
+    GlyphSnapshot::snapshot()
 }
 
 /// `None` rejects a non-finite alpha; `Some(false)` is intentionally invisible.
@@ -761,13 +747,13 @@ struct OutlineContext<'a> {
 /// whole wire before anything is appended, so one malformed glyph cannot leave
 /// a partial label or suppress the searchable fallback.
 fn outline_quad_is_valid(
-    quad: &[crate::scene::pipeline::text_gpu::TextVertex],
+    quad: &[crate::scene::pipeline::text_gpu::TextVertex; 6],
     glyphs: &GlyphSnapshot,
     ox: f64,
     oy: f64,
     map: &PageMap,
 ) -> bool {
-    use crate::scene::text::sdf_atlas;
+    use crate::scene::text::glyph_to_world::QuadBasis;
 
     let vertex_xy = |vertex: &crate::scene::pipeline::text_gpu::TextVertex| {
         [
@@ -792,33 +778,29 @@ fn outline_quad_is_valid(
         return false;
     }
 
-    let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
+    let key = glyph_to_world::quad_uv_key(quad);
     if key == glyphs.solid_key {
         return true;
     }
-    let Some(glyph) = glyphs.table.get(&key) else {
+    let Some(glyph) = glyphs.glyph(key) else {
         return false;
     };
-    let (pmin, pmax) = (glyph.plane_min, glyph.plane_max);
-    let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
-    if !pmin.iter().chain(pmax.iter()).all(|v| v.is_finite()) || sx.abs() < 1e-9 || sy.abs() < 1e-9
+    if !glyph
+        .plane_min
+        .iter()
+        .chain(glyph.plane_max.iter())
+        .all(|v| v.is_finite())
     {
         return false;
     }
-    let bl = corners[0];
-    let br = corners[1];
-    let tl = corners[3];
+    let Some(basis) = QuadBasis::of(quad, glyph) else {
+        return false;
+    };
     let valid_glyph_point = |point: &[f32; 2]| {
         if !point.iter().all(|coordinate| coordinate.is_finite()) {
             return false;
         }
-        let u = ((point[0] - pmin[0]) / sx) as f64;
-        let v = ((point[1] - pmin[1]) / sy) as f64;
-        let world = [
-            bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]),
-            bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]),
-        ];
-        let (x, y) = page_point(world);
+        let (x, y) = page_point(basis.world(point));
         x.is_finite() && y.is_finite()
     };
     if !glyph.fill_tris.is_empty() {
@@ -844,10 +826,7 @@ fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContex
     if verts.is_empty() || verts.len() % 6 != 0 {
         return false;
     }
-    let key_of = |quad: &[crate::scene::pipeline::text_gpu::TextVertex]| {
-        sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]])
-    };
-    for quad in verts.chunks_exact(6) {
+    for quad in glyph_to_world::wire_quads(wire) {
         match outline_visibility(quad[0].color[3]) {
             None => return false,
             Some(false) => continue,
@@ -872,17 +851,11 @@ fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContex
     }
     let options = context.options;
     let map_page = context.map;
-    let vertex_xy = |v: &crate::scene::pipeline::text_gpu::TextVertex| {
-        [
-            v.pos[0] as f64 + v.pos_low[0] as f64,
-            v.pos[1] as f64 + v.pos_low[1] as f64,
-        ]
-    };
     // Coalesce only adjacent equal styles. Global grouping would reorder
     // overlapping glyphs when inline colors change within one text run.
     let mut paths = Vec::<(String, String)>::new();
 
-    for quad in verts.chunks_exact(6) {
+    for quad in glyph_to_world::wire_quads(wire) {
         let a = quad[0].color[3];
         match outline_visibility(a) {
             None => return false,
@@ -904,24 +877,15 @@ fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContex
 
         // Quad corners are [bl, br, tr, bl, tr, tl]. Work in f64 until the
         // final page mapping so UTM-scale text keeps its local glyph detail.
-        let bl = vertex_xy(&quad[0]);
-        let br = vertex_xy(&quad[1]);
-        let tr = vertex_xy(&quad[2]);
-        let tl = vertex_xy(&quad[5]);
         let page_point =
             |point: [f64; 2]| map_page.apply(point[0] + context.ox, point[1] + context.oy);
-        let key = key_of(quad);
-        if let Some(glyph) = context.glyphs.table.get(&key) {
-            let (pmin, pmax) = (glyph.plane_min, glyph.plane_max);
-            let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
-            let glyph_point = |point: [f32; 2]| {
-                let u = ((point[0] - pmin[0]) / sx) as f64;
-                let v = ((point[1] - pmin[1]) / sy) as f64;
-                [
-                    bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]),
-                    bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]),
-                ]
+        let key = glyph_to_world::quad_uv_key(quad);
+        if let Some(glyph) = context.glyphs.glyph(key) {
+            let Some(basis) = glyph_to_world::QuadBasis::of(quad, glyph) else {
+                // Defensive only: preflight rejects this before any output.
+                return false;
             };
+            let glyph_point = |point: [f32; 2]| basis.world(&point);
             if !glyph.fill_tris.is_empty() {
                 let d = outline_path(&mut paths, fill_style());
                 for triangle in glyph.fill_tris.chunks_exact(3) {
@@ -948,9 +912,7 @@ fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContex
                         mm
                     }
                 } else {
-                    let glyph_unit = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2)).sqrt()
-                        / sy.abs() as f64) as f32;
-                    (2.0 * sdf_atlas::stroke_pen_half_units(glyph.bold) * glyph_unit) as f64
+                    glyph_to_world::nominal_pen_world_mm(glyph.bold, basis.glyph_unit_mm() as f32)
                         * map_page.scale
                 }
                 .max(0.1 * PT_TO_MM);
@@ -982,7 +944,14 @@ fn emit_text_outlines(out: &mut String, wire: &WireModel, context: OutlineContex
             }
         } else if key == context.glyphs.solid_key {
             // Atlas solid tile: underline, overline, and strike decorations.
-            let points = [bl, br, tr, tl].map(page_point);
+            let corner = |index: usize| {
+                let v = &quad[index];
+                [
+                    v.pos[0] as f64 + v.pos_low[0] as f64,
+                    v.pos[1] as f64 + v.pos_low[1] as f64,
+                ]
+            };
+            let points = [corner(0), corner(1), corner(2), corner(5)].map(page_point);
             outline_path(&mut paths, fill_style()).push_str(&format!(
                 "M {} {} L {} {} L {} {} L {} {} Z ",
                 fmt(points[0].0),
@@ -1284,28 +1253,18 @@ fn stamp_wire_from_atlas(
     atlas: &mut crate::scene::text::sdf_atlas::GlyphAtlas,
     label: &str,
 ) -> Option<WireModel> {
-    use crate::scene::text::sdf_atlas;
-
-    // Growing the atlas midway through the stamp rescales earlier stamp quads
-    // too. Re-layout until the complete stamp belongs to one generation.
-    for _ in 0..8 {
-        let generation = sdf_atlas::generation();
-        let quads = stamp_glyph_quads(atlas, label);
-        if sdf_atlas::generation() != generation {
-            continue;
-        }
-        let mut wire = WireModel::default();
-        crate::scene::pipeline::text_gpu::push_glyph_vertices(
-            &mut wire.text_verts,
-            &quads,
-            [4.0, 3.0, 0.0],
-            1.0,
-            [0.25, 0.25, 0.25, 1.0],
-            0.0,
-        );
-        return Some(wire);
-    }
-    None
+    // The atlas keeps its UVs when it grows, so one layout pass is enough.
+    let quads = stamp_glyph_quads(atlas, label);
+    let mut wire = WireModel::default();
+    crate::scene::pipeline::text_gpu::push_glyph_vertices(
+        &mut wire.text_verts,
+        &quads,
+        [4.0, 3.0, 0.0],
+        1.0,
+        [0.25, 0.25, 0.25, 1.0],
+        0.0,
+    );
+    Some(wire)
 }
 
 fn stamp_outline_wire(label: &str) -> Option<WireModel> {
@@ -1541,8 +1500,7 @@ mod tests {
             let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
             assert!(
                 svg.lines().any(|line| {
-                    line.starts_with("<path")
-                        && line.contains(&format!("fill=\"{expected_fill}\""))
+                    line.starts_with("<path") && line.contains(&format!("fill=\"{expected_fill}\""))
                 }),
                 "flags={flags:#x}: wrong mask color in {svg}"
             );
@@ -1572,7 +1530,6 @@ mod tests {
                 [0.0; 8],
                 1.0,
                 1.0,
-                None,
                 None,
                 None,
                 [1.0; 4],
@@ -1855,7 +1812,10 @@ mod tests {
         let (emitted, page_paths) = emit(&drawing, &glyphs);
         assert!(emitted && !page_paths.is_empty(), "page text: {page_paths}");
         let (emitted, stamp_paths) = emit(&stamp, &glyphs);
-        assert!(emitted && !stamp_paths.is_empty(), "stamp text: {stamp_paths}");
+        assert!(
+            emitted && !stamp_paths.is_empty(),
+            "stamp text: {stamp_paths}"
+        );
     }
 
     #[test]

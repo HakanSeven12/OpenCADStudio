@@ -9,10 +9,10 @@
 // drawing origin at the paper origin.
 
 use crate::io::plot_style::{PlotStyleTable, PlotStyleTableExt};
+use crate::scene::WireModel;
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::model::wire_model::SearchableTextRun;
-use crate::scene::WireModel;
 use printpdf::{
     BlendMode, BuiltinFont, Codepoint, Color, ExtendedGraphicsState, ExtendedGraphicsStateId,
     FontId, Line, LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode,
@@ -274,15 +274,16 @@ fn emit_image(
     for clip in &plot.clips {
         image_clip(
             ops,
-            vec![clip
-                .iter()
-                .map(|p| {
-                    [
-                        ((p[0] + ox) * MM_TO_PT as f64) as f32,
-                        ((p[1] + oy) * MM_TO_PT as f64) as f32,
-                    ]
-                })
-                .collect()],
+            vec![
+                clip.iter()
+                    .map(|p| {
+                        [
+                            ((p[0] + ox) * MM_TO_PT as f64) as f32,
+                            ((p[1] + oy) * MM_TO_PT as f64) as f32,
+                        ]
+                    })
+                    .collect(),
+            ],
         );
     }
     let draw = |ops: &mut Vec<Op>, matrix: [f32; 6]| {
@@ -1915,11 +1916,7 @@ pub(crate) fn adapt_to_paper([r, g, b]: [f32; 3]) -> [f32; 3] {
         && g > 0.80
         && b > 0.80
         && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
-    if is_light {
-        [0.0, 0.0, 0.0]
-    } else {
-        [r, g, b]
-    }
+    if is_light { [0.0, 0.0, 0.0] } else { [r, g, b] }
 }
 
 /// Invisible searchable text layer for laid-out runs (`Tr 3`).
@@ -2336,7 +2333,7 @@ fn emit_text(
     plot_style: Option<&PlotStyleTable>,
     options: PdfPlotOptions,
 ) -> bool {
-    use crate::scene::text::sdf_atlas;
+    use crate::scene::text::glyph_to_world;
 
     if wires.iter().all(|w| w.text_verts.is_empty()) {
         return false;
@@ -2345,7 +2342,7 @@ fn emit_text(
     let Some(snapshot) = fonts.glyph_table() else {
         return false;
     };
-    let (table, solid_key) = (&snapshot.0, snapshot.1);
+    let (table, solid_key) = (&snapshot.table, snapshot.solid_key);
 
     // `Op::SetLineDashPattern` is persistent graphics state and the wire pass
     // above only re-emits it on change, so whatever the last wire needed is
@@ -2407,32 +2404,27 @@ fn emit_text(
             });
             let [r, g, b] = plotted_color(rgb, a, screening, options);
 
-            // Quad corners in world XY: verts run [bl, br, tr, bl, tr, tl].
-            let bl = glyph_world_xy(&quad[0]);
-            let br = glyph_world_xy(&quad[1]);
-            let tr = glyph_world_xy(&quad[2]);
-            let tl = glyph_world_xy(&quad[5]);
-            // `tl` carries uv = (uv_min.x, uv_min.y) — the atlas tile key.
-            let key = sdf_atlas::uv_key([quad[5].uv[0], quad[5].uv[1]]);
+            // Quad corners in world XY; `tl` carries uv = (uv_min.x, uv_min.y)
+            // — the atlas tile key.
+            let key = glyph_to_world::quad_uv_key(quad.try_into().expect("six verts"));
 
             // Cancel the offset in f64, then narrow: the sheet-mm result is a
             // small number even when the world coordinate is UTM-scale.
             let point = |wx: f64, wy: f64| Point::new(Mm((wx + ox) as f32), Mm((wy + oy) as f32));
 
             if let Some(ge) = table.get(&key) {
-                // Affine basis of the quad: plane_min → bl, +x → br, +y → tl.
-                // The glyph-space maths is small and stays f32; only the lift into
-                // world coordinates needs f64.
-                let (pmin, pmax) = (ge.plane_min, ge.plane_max);
-                let (sx, sy) = (pmax[0] - pmin[0], pmax[1] - pmin[1]);
-                if sx.abs() < 1e-9 || sy.abs() < 1e-9 {
+                // Affine basis of the quad: plane_min → bl, +x → br, +y → tl,
+                // shared with the SVG outline path. `None` on a degenerate
+                // plane measure, which draws nothing.
+                let Some(basis) =
+                    glyph_to_world::QuadBasis::of(quad.try_into().expect("six verts"), ge)
+                else {
                     continue;
-                }
+                };
+                let (bl, br, tl) = (basis.bl, basis.br, basis.tl);
+                let (pmin, plane) = (basis.plane_min, basis.plane_size());
                 let map = |p: [f32; 2]| -> Point {
-                    let u = ((p[0] - pmin[0]) / sx) as f64;
-                    let v = ((p[1] - pmin[1]) / sy) as f64;
-                    let wx = bl[0] + u * (br[0] - bl[0]) + v * (tl[0] - bl[0]);
-                    let wy = bl[1] + u * (br[1] - bl[1]) + v * (tl[1] - bl[1]);
+                    let [wx, wy] = basis.world(&p);
                     point(wx, wy)
                 };
 
@@ -2451,8 +2443,7 @@ fn emit_text(
                     // export at hundreds of MB and crawl in viewers.
                     if let Some(source) = ge.source.as_ref().filter(|_| embed) {
                         if let Some(font) = fonts.font_for(source, ge.ch) {
-                            let matrix =
-                                glyph_text_matrix(source, pmin, [sx, sy], bl, br, tl, ox, oy);
+                            let matrix = glyph_text_matrix(source, pmin, plane, bl, br, tl, ox, oy);
                             push_glyph_text(ops, font, source.gid, ge.ch, matrix);
                             continue;
                         }
@@ -2491,18 +2482,13 @@ fn emit_text(
                         }),
                     });
                     let pen = if let Some(ctb_pen) = lw_override {
-                        if ge.bold {
-                            ctb_pen * 1.7
-                        } else {
-                            ctb_pen
-                        }
+                        if ge.bold { ctb_pen * 1.7 } else { ctb_pen }
                     } else {
-                        let glyph_unit_mm = (((tl[0] - bl[0]).powi(2) + (tl[1] - bl[1]).powi(2))
-                            .sqrt()
-                            / sy.abs() as f64) as f32;
                         // The pen is in page user space (under the plot CTM),
                         // so the 0.1 pt physical floor is divided by the scale.
-                        (2.0 * sdf_atlas::stroke_pen_half_units(ge.bold) * glyph_unit_mm * MM_TO_PT)
+                        (glyph_to_world::nominal_pen_world_mm(ge.bold, basis.glyph_unit_mm() as f32)
+                            as f32
+                            * MM_TO_PT)
                             .max(0.1 / scale.max(1e-6))
                     };
                     ops.push(Op::SetOutlineThickness { pt: Pt(pen) });
@@ -2527,6 +2513,7 @@ fn emit_text(
             } else if key == solid_key {
                 // Decoration bar (underline / overline / strike): the quad is a
                 // solid-texel rectangle — fill it directly from its corners.
+                let corner = |index: usize| glyph_world_xy(&quad[index]);
                 ops.push(Op::SetFillColor {
                     col: Color::Rgb(Rgb {
                         r,
@@ -2538,7 +2525,7 @@ fn emit_text(
                 ops.push(Op::DrawPolygon {
                     polygon: Polygon {
                         rings: vec![PolygonRing {
-                            points: [bl, br, tr, tl]
+                            points: [corner(0), corner(1), corner(2), corner(5)]
                                 .iter()
                                 .map(|&c| LinePoint {
                                     p: point(c[0], c[1]),
@@ -2558,11 +2545,10 @@ fn emit_text(
 
 // ── Embedded TrueType text ─────────────────────────────────────────────────
 
-/// The atlas export table plus its solid-tile key.
-type GlyphTable = std::sync::Arc<(
-    std::collections::HashMap<u64, crate::scene::text::sdf_atlas::GlyphExport>,
-    u64,
-)>;
+/// The atlas export snapshot, shared with the SVG outline path — the quad
+/// maths (uv key, plane mapping, glyph units, nominal pen) lives in
+/// [`crate::scene::text::glyph_to_world`].
+type GlyphTable = std::sync::Arc<crate::scene::text::glyph_to_world::GlyphSnapshot>;
 
 /// The TrueType faces a PDF export draws text with, and the glyphs each uses.
 ///
@@ -2594,13 +2580,10 @@ struct EmbeddedFont {
 impl TextFonts {
     /// The atlas' glyph export table (and solid-tile key), built on first use.
     fn glyph_table(&mut self) -> Option<GlyphTable> {
-        use crate::scene::text::sdf_atlas;
+        use crate::scene::text::glyph_to_world::GlyphSnapshot;
         if self.glyphs.is_none() {
-            let atlas = sdf_atlas::text_atlas().lock().ok()?;
-            self.glyphs = Some(std::sync::Arc::new((
-                atlas.export_table(),
-                sdf_atlas::uv_key(atlas.solid_uv()),
-            )));
+            let atlas = crate::scene::text::sdf_atlas::text_atlas().lock().ok()?;
+            self.glyphs = Some(std::sync::Arc::new(GlyphSnapshot::from_atlas(&atlas)));
         }
         self.glyphs.clone()
     }
@@ -2718,7 +2701,7 @@ impl TextFonts {
 fn subset_font(blob: &crate::scene::text::ttf_glyph::FontBlob, gids: &[u16]) -> Option<Vec<u8>> {
     use allsorts::binary::read::ReadScope;
     use allsorts::font_data::FontData;
-    use allsorts::subset::{subset, CmapTarget, SubsetProfile};
+    use allsorts::subset::{CmapTarget, SubsetProfile, subset};
 
     let font = ReadScope::new(&blob.data).read::<FontData<'_>>().ok()?;
     let provider = font.table_provider(blob.index as usize).ok()?;
@@ -2772,7 +2755,7 @@ fn renumber_glyphs(
 fn glyph_text_matrix(
     source: &crate::scene::text::ttf_glyph::GlyphSource,
     pmin: [f32; 2],
-    size: [f32; 2],
+    size: [f64; 2],
     bl: [f64; 2],
     br: [f64; 2],
     tl: [f64; 2],

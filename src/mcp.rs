@@ -4,9 +4,9 @@
 //! to the authenticated GUI control bridge; this module contains no geometry.
 
 use crate::mcp_ops::{batch_bindings, validate_execute_request};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 #[cfg(any(windows, target_os = "macos"))]
 use std::collections::HashSet;
@@ -53,7 +53,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// dialog is driveable from a script: `wblock_dialog` fields cover source,
 /// block, base point, unit, object mode and path, and `dialog_ok` applies it.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "89edb2a3daa7cd0b5be43b409ac98d53fb70fe56e16fe169eef7c31789f1fc7a";
+const TOOL_SCHEMA_DIGEST: &str = "e20f56a512fc0c9a9becceb39544f0ebd2ee12609dd69ad084eb84ef78e248ea";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -3255,15 +3255,19 @@ mod tests {
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
-            assert!(tool["inputSchema"]["properties"]
-                .get("session_id")
-                .is_none());
+            assert!(
+                tool["inputSchema"]["properties"]
+                    .get("session_id")
+                    .is_none()
+            );
         }
         for tool in [&tools[2], &tools[3]] {
-            assert!(tool["inputSchema"]["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("ocs_session_id")));
+            assert!(
+                tool["inputSchema"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("ocs_session_id"))
+            );
         }
         let read_schema = &tools[1]["inputSchema"];
         for op in ["guide", "entity_schema", "validate"] {
@@ -3325,8 +3329,8 @@ mod tests {
         let save_var = find_variant("save_verified");
         assert_eq!(save_var["properties"]["target_version"]["enum"][0], "R14");
         assert_eq!(
-            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]
-                ["properties"]["op"]["enum"],
+            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]["properties"]
+                ["op"]["enum"],
             json!([
                 "eq",
                 "ne",
@@ -3368,10 +3372,12 @@ mod tests {
             initialized["result"]["capabilities"]["resources"]["subscribe"],
             false
         );
-        assert!(initialized["result"]["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("geometry kernel"));
+        assert!(
+            initialized["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("geometry kernel")
+        );
 
         let listed = handle_message(
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
@@ -3406,9 +3412,10 @@ mod tests {
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
         assert!(discovered["result"]["capabilities"]["resources"].is_object());
-        assert!(discovered["result"]["capabilities"]["extensions"]
-            ["io.modelcontextprotocol/tasks"]
-            .is_object());
+        assert!(
+            discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
+                .is_object()
+        );
         assert_eq!(
             discovered["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             "OpenCADStudio"
@@ -3861,12 +3868,16 @@ mod tests {
             )
             .unwrap();
             let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
-            assert!(templates
-                .iter()
-                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{level}")));
-            assert!(templates
-                .iter()
-                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{hash}")));
+            assert!(
+                templates
+                    .iter()
+                    .any(|t| t["uriTemplate"].as_str().unwrap().contains("{level}"))
+            );
+            assert!(
+                templates
+                    .iter()
+                    .any(|t| t["uriTemplate"].as_str().unwrap().contains("{hash}"))
+            );
             assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
             assert_eq!(listed["result"]["cacheScope"], "public");
         }
@@ -4021,10 +4032,12 @@ mod tests {
             .unwrap();
         let prop = &capture["inputSchema"]["properties"]["request_id"];
         assert_eq!(prop["type"], "string");
-        assert!(!capture["inputSchema"]["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("request_id")));
+        assert!(
+            !capture["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("request_id"))
+        );
     }
 
     #[test]
@@ -4121,10 +4134,12 @@ mod tests {
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
         assert!(called["result"].get("structuredContent").is_none());
-        assert!(called["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("request_id"));
+        assert!(
+            called["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("request_id")
+        );
     }
 
     #[test]
@@ -4173,9 +4188,11 @@ mod tests {
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
         assert!(res_arr.iter().any(|r| r["uri"] == uri));
-        assert!(res_arr
-            .iter()
-            .any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
+        assert!(
+            res_arr
+                .iter()
+                .any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png")
+        );
 
         // Test resources/read with png
         let read_png = handle_message(
@@ -4260,10 +4277,12 @@ mod tests {
         );
         let content = res_res["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("cad://session/s1/snapshot/hash123.png"));
+        assert!(
+            content[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cad://session/s1/snapshot/hash123.png")
+        );
         assert_eq!(content[1]["type"], "resource_link");
         assert_eq!(content[1]["name"], "Captured viewport");
         assert_eq!(content[1]["mimeType"], "image/png");
@@ -4332,11 +4351,13 @@ mod tests {
             }));
             assert_eq!(result["isError"], false);
             assert_eq!(result["structuredContent"], metadata);
-            assert!(result["content"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|block| block["type"] == "image" && block["data"] == "capture-png"));
+            assert!(
+                result["content"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|block| block["type"] == "image" && block["data"] == "capture-png")
+            );
         }
     }
 
@@ -4417,10 +4438,12 @@ mod tests {
         .unwrap();
         let man_contents = read_man["result"]["contents"].as_array().unwrap();
         assert_eq!(man_contents[0]["mimeType"], "application/json");
-        assert!(man_contents[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("cad://session/sess1/tile/{level}/{x}/{y}.png"));
+        assert!(
+            man_contents[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cad://session/sess1/tile/{level}/{x}/{y}.png")
+        );
 
         // 5. Test resources/read with tile png
         let read_tile = handle_message(
@@ -4480,9 +4503,11 @@ mod tests {
             "request_id":"draw",
             "steps":[{"op":"run","request_id":"nested","cmd":"LINE 0,0 10,0"}]
         });
-        assert!(validate_execute_request(&invalid, "batch")
-            .unwrap_err()
-            .contains("omit request_id"));
+        assert!(
+            validate_execute_request(&invalid, "batch")
+                .unwrap_err()
+                .contains("omit request_id")
+        );
 
         let compact = compact_state(&json!({
             "session_id":"s","document_id":3,"revision":4,"geometry_revision":5,
@@ -4590,10 +4615,12 @@ mod tests {
         }));
         assert_eq!(result["isError"], true);
         assert!(result.get("structuredContent").is_none());
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("stale_state"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("stale_state")
+        );
     }
 
     #[test]
@@ -4650,8 +4677,10 @@ mod tests {
         });
         let batch_res = validate_execute_request(&batch, "batch").expect("batch passes");
         assert_eq!(batch_res.warnings.len(), 1);
-        assert!(batch_res.warnings[0]
-            .contains("batch step 0: unknown parameter 'stray' ignored for op 'run'"));
+        assert!(
+            batch_res.warnings[0]
+                .contains("batch step 0: unknown parameter 'stray' ignored for op 'run'")
+        );
     }
 
     #[test]
@@ -4735,15 +4764,19 @@ mod tests {
         // Reconstruct the old duplicated layout using the same operation
         // definitions, so the size comparison stays meaningful as ops evolve.
         let mut old = standalone.clone();
-        old["anyOf"] = json!(crate::mcp_ops::OPS
-            .iter()
-            .map(|op| crate::mcp_ops::op_schema(op))
-            .collect::<Vec<_>>());
-        old["$defs"]["batch_step"]["anyOf"] = json!(crate::mcp_ops::OPS
-            .iter()
-            .filter(|op| op.batchable)
-            .map(|op| crate::mcp_ops::op_schema(op))
-            .collect::<Vec<_>>());
+        old["anyOf"] = json!(
+            crate::mcp_ops::OPS
+                .iter()
+                .map(|op| crate::mcp_ops::op_schema(op))
+                .collect::<Vec<_>>()
+        );
+        old["$defs"]["batch_step"]["anyOf"] = json!(
+            crate::mcp_ops::OPS
+                .iter()
+                .filter(|op| op.batchable)
+                .map(|op| crate::mcp_ops::op_schema(op))
+                .collect::<Vec<_>>()
+        );
         old["$defs"]
             .as_object_mut()
             .unwrap()
@@ -4788,10 +4821,12 @@ mod tests {
             json!({"request":{"op":"entities_create","entities":[{"type":"Circle","center":["bad",0],"radius":2}]}}),
         );
         assert_eq!(invalid["valid"], false);
-        assert!(invalid["error"]
-            .as_str()
-            .unwrap()
-            .contains("/entities/0/center/0"));
+        assert!(
+            invalid["error"]
+                .as_str()
+                .unwrap()
+                .contains("/entities/0/center/0")
+        );
         assert!(clients.is_empty());
         assert!(resources.latest.is_empty());
         let rejected = call_tool(
@@ -4857,11 +4892,13 @@ mod tests {
         assert_eq!(tool_list["guides"].as_array().unwrap().len(), GUIDES.len());
         for (name, _, text) in GUIDES {
             let uri = format!("cad://guides/{name}");
-            assert!(listed["result"]["resources"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|r| r["uri"] == uri));
+            assert!(
+                listed["result"]["resources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["uri"] == uri)
+            );
             let resource = read_resource(
                 &uri,
                 &mut clients,
@@ -4884,14 +4921,16 @@ mod tests {
             assert_eq!(tool["ok"], true);
             assert_eq!(tool_list["ok"], true);
         }
-        assert!(read_resource(
-            "cad://guides/missing",
-            &mut clients,
-            &mut resources,
-            &mut detached_pump(),
-            None
-        )
-        .is_err());
+        assert!(
+            read_resource(
+                "cad://guides/missing",
+                &mut clients,
+                &mut resources,
+                &mut detached_pump(),
+                None
+            )
+            .is_err()
+        );
         assert!(clients.is_empty());
     }
 
@@ -4899,20 +4938,24 @@ mod tests {
     fn batch_bindings_validate_and_preserve_types() {
         let step = json!({"op":"group_create","name":"walls","bindings":{"handles":{"step":0,"path":"/result/a~1b~0c"}}});
         let request = json!({"op":"batch","steps":[{"op":"run","cmd":"LINE 0,0 1,1"},step]});
-        assert!(validate_execute_request(&request, "batch")
-            .unwrap()
-            .warnings
-            .is_empty());
+        assert!(
+            validate_execute_request(&request, "batch")
+                .unwrap()
+                .warnings
+                .is_empty()
+        );
         let results = vec![json!({"ok":true,"status":"completed","result":{"a/b~c":["A","B"]}})];
         let resolved = resolve_batch_step(&step, 1, &results).unwrap();
         assert_eq!(resolved["handles"], json!(["A", "B"]));
         assert!(resolved.get("bindings").is_none());
-        assert!(resolve_batch_step(
-            &step,
-            1,
-            &[json!({"status":"completed","result":{"a/b~c":42}})]
-        )
-        .is_err());
+        assert!(
+            resolve_batch_step(
+                &step,
+                1,
+                &[json!({"status":"completed","result":{"a/b~c":42}})]
+            )
+            .is_err()
+        );
         assert!(resolve_batch_step(&step, 1, &[json!({"status":"running"})]).is_err());
         assert!(resolve_batch_step(&step, 1, &[json!({"status":"completed"})]).is_err());
         for binding in [

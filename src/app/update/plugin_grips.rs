@@ -158,6 +158,7 @@ impl OpenCADStudio {
             anchor: candidate.anchor,
             origin_world: candidate.point,
             axis: candidate.axis,
+            xy_plane: candidate.xy_plane,
             last_world: candidate.point,
             moved: false,
         };

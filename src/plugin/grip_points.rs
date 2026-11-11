@@ -101,6 +101,7 @@ pub(crate) struct GripCandidate {
     pub anchor: Option<Handle>,
     pub point: DVec3,
     pub axis: Option<DVec3>,
+    pub xy_plane: bool,
     pub shape: GripShape,
 }
 
@@ -322,6 +323,7 @@ impl PluginGripStore {
                 anchor: grip.anchor,
                 point: grip.point,
                 axis: grip.axis,
+                xy_plane: grip.xy_plane,
                 shape: grip.shape,
             });
         }
@@ -513,6 +515,8 @@ pub(crate) struct ActivePluginGrip {
     pub origin_world: DVec3,
     /// Hard-constraint direction (normalized), when declared.
     pub axis: Option<DVec3>,
+    /// Keep every delivered point at the grip's original world Z (XY plane).
+    pub xy_plane: bool,
     /// Latest (constrained) drag point.
     pub last_world: DVec3,
     /// Whether any move was delivered (a bare press-release settles without
@@ -526,7 +530,11 @@ impl ActivePluginGrip {
         CustomGripEvent {
             grip_id: self.grip_id,
             phase,
-            point: point.to_array(),
+            point: [
+                point.x,
+                point.y,
+                if self.xy_plane { self.origin_world.z } else { point.z },
+            ],
             anchor: self.anchor,
         }
     }

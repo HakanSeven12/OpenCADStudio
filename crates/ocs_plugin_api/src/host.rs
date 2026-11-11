@@ -1168,6 +1168,10 @@ pub struct PluginGrip {
     pub point: [f64; 3],
     #[serde(default)]
     pub axis: Option<[f64; 3]>,
+    /// API v20: constrain every custom-grip event to the original world-XY
+    /// plane. `false` preserves the legacy camera-target-plane behavior.
+    #[serde(default)]
+    pub xy_plane: bool,
     #[serde(default)]
     pub shape: PluginGripShape,
 }

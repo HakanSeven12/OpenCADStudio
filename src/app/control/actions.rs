@@ -3576,7 +3576,7 @@ impl OpenCADStudio {
                         let page = match value {
                             "1252" | "default" | "off" | "none" => None,
                             page => match page.parse::<u16>() {
-                                Ok(page) if page == 1250 || code_page_supported(page) => Some(page),
+                                Ok(page) if code_page_supported(page) => Some(page),
                                 _ => return Err(bad()),
                             },
                         };

@@ -43,7 +43,7 @@ pub fn dgn_import(path: &str, item: &str, code_page: Option<u16>) -> Option<DgnI
 /// The pages the V7 decoder accepts as its `code_page` argument: every
 /// listed Windows page, the UTF-8 page and the auto-detect sentinel.
 pub fn code_page_supported(code_page: u16) -> bool {
-    dgn7::code_page_encoding(code_page).is_some() || code_page == 1250 || code_page == 0
+    dgn7::code_page_encoding(code_page).is_some() || code_page == 0
 }
 
 /// The models DGNIMPORT offers: a V7 file's one model, a V8 file's design

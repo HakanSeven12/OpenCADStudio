@@ -1884,33 +1884,18 @@ pub fn code_page_choices() -> Vec<String> {
 
 /// The picker label's page; 1252 decodes as the default.
 pub fn code_page_from_label(label: &str) -> Option<Option<u16>> {
-    match CODE_PAGE_TABLE
+    CODE_PAGE_TABLE
         .iter()
-        .position(|(choice, _)| *choice == label)
-    {
-        Some(index) => {
-            let Some((_, page)) = CODE_PAGE_TABLE.get(index) else {
-                return None;
-            };
-            match page {
-                1252 => Some(None),
-                other => Some(Some(*other)),
-            }
-        }
-        None => None,
-    }
+        .find(|(choice, _)| *choice == label)
+        .map(|&(_, page)| (page != 1252).then_some(page))
 }
 
-/// The label a stored page shows. `None` (no page) shows the 1252 default.
 pub fn code_page_label(code_page: Option<u16>) -> String {
-    let page = match code_page {
-        None => 1252,
-        Some(page) => page,
-    };
-    match CODE_PAGE_TABLE.iter().find(|(_, known)| *known == page) {
-        Some((label, _)) => label.to_string(),
-        None => format!("Windows-{page}"),
-    }
+    let page = code_page.unwrap_or(1252);
+    CODE_PAGE_TABLE
+        .iter()
+        .find(|(_, known)| *known == page)
+        .map_or_else(|| format!("Windows-{page}"), |(label, _)| label.to_string())
 }
 
 /// The mapping setup token, optionally suffixed with the V7 text code page

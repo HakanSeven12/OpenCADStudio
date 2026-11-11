@@ -920,6 +920,9 @@ fn fmt(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// Escape markup and replace code points that XML 1.0 forbids outright.
+/// Character references do not help for those code points: even `&#x2;` is
+/// invalid XML, so the replacement character is the only representable marker.
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -929,6 +932,13 @@ fn xml_escape(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            // XML 1.0 Char permits tab/LF/CR, U+20–D7FF, E000–FFFD, and
+            // U+10000–10FFFF. Rust strings cannot contain surrogate code
+            // points, so only these ranges need rejecting here.
+            '\u{0}'..='\u{8}'
+            | '\u{b}'..='\u{c}'
+            | '\u{e}'..='\u{1f}'
+            | '\u{fffe}'..='\u{ffff}' => out.push('\u{fffd}'),
             c => out.push(c),
         }
     }
@@ -1123,6 +1133,45 @@ mod tests {
                 "flags={flags:#x}: wrong mask color in {svg}"
             );
         }
+    }
+
+    #[test]
+    fn xml_escape_replaces_every_codepoint_forbidden_by_xml_10() {
+        assert_eq!(
+            xml_escape("A\u{0}\u{2}\u{b}\u{c}\u{1f}B"),
+            "A\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}B"
+        );
+        assert_eq!(xml_escape("\u{fffe}\u{ffff}"), "\u{fffd}\u{fffd}");
+        assert_eq!(xml_escape("tab\tline\ncarriage\r"), "tab\tline\ncarriage\r");
+        assert_eq!(
+            xml_escape("C1:\u{80}; Unicode:č😀"),
+            "C1:\u{80}; Unicode:č😀"
+        );
+    }
+
+    #[test]
+    fn forbidden_xml_control_in_text_does_not_invalidate_the_document() {
+        let mut wire = WireModel::default();
+        wire.searchable_text = vec![crate::scene::model::wire_model::SearchableTextRun {
+            text: "before\u{2}after".to_string(),
+            origin: [10.0, 20.0, 0.0],
+            height: 2.0,
+            rotation: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            bold: false,
+            font: "Arial".to_string(),
+            adv_width: 10.0,
+        }];
+        let content = crate::io::plot::PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire,
+                draw_depth: 0.5,
+            }]),
+            ..Default::default()
+        };
+        let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
+        assert!(svg.contains("before\u{fffd}after"), "{svg}");
+        roxmltree::Document::parse(&svg).expect("the exported SVG is well-formed XML");
     }
 
     #[test]

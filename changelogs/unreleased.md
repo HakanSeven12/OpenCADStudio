@@ -49,3 +49,5 @@
 * **Text Backgrounds in Plot:** MTEXT and MLEADER masks that use the drawing-window colour retain that meaning through viewport projection, so SVG/PDF output paints them paper-white instead of leaving a black rectangle behind the text. Explicitly coloured text backgrounds are unchanged.
 
 * **Model Preview:** Direct PREVIEW and SVG/PDF export no longer carry a paper layout's fixed scale into Model when its paper-only Layout area is still selected; the inherited state now switches to centered, fitted Extents instead of placing every model object off the sheet.
+
+* **SVG Export:** Text and font names containing code points forbidden by XML 1.0 are written with replacement characters instead of making Chrome reject the whole drawing as malformed XML.

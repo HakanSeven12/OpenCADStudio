@@ -6605,17 +6605,30 @@ impl Scene {
                         // it. An inch-based paper space would otherwise get a
                         // 25.4× oversized sheet, shrinking the content into the
                         // corner.
-                        let f = Self::layout_unit_factor(l);
-                        let (pw, ph) = (pw * f, ph * f);
                         let (wx0, wy0, wx1, wy1) = (
                             l.plot_window_min_x,
                             l.plot_window_min_y,
                             l.plot_window_max_x,
                             l.plot_window_max_y,
                         );
+                        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
+                        let f = if window_plot && l.plot_scale_type == 0 {
+                            // Fitted to the paper: the plot scales the window
+                            // to the sheet, so the sheet spans the window at
+                            // that scale, not at the layout's stored one.
+                            let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                                (wx1 - wx0, wy1 - wy0),
+                                (pw, ph),
+                                crate::io::paper_catalog::PlotScale::Fit,
+                            );
+                            1.0 / mm_per_unit.max(1e-9)
+                        } else {
+                            Self::layout_unit_factor(l)
+                        };
+                        let (pw, ph) = (pw * f, ph * f);
                         // A window plot maps that window onto the sheet, so the
                         // sheet sits around it rather than at the origin.
-                        let (ox, oy) = if l.plot_type == 4 && wx1 > wx0 && wy1 > wy0 {
+                        let (ox, oy) = if window_plot {
                             if l.plot_flags.plot_centered {
                                 ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
                             } else {

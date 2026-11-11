@@ -290,7 +290,7 @@ fn emit_page_content(
     let options = page.options;
 
     // The drawing layer of each plotted entity, for the `data-layer` groups
-    // the map client toggles. Same resolution the PDF export uses. Hatch
+    // an SVG consumer toggles. Same resolution the PDF export uses. Hatch
     // models name their fill pattern, not a handle, so they resolve through
     // their plotted entity.
     let layer_of = |name: &str| -> Option<&str> {
@@ -357,6 +357,7 @@ fn emit_page_content(
                 .then_with(|| a.1.cmp(&b.1))
                 .then_with(|| a.2.cmp(&b.2))
         });
+        let mut open_layer: Option<&str> = None;
         for (_, _, _, item) in items {
             let layer = if options.layer_attributes {
                 match &item {
@@ -370,8 +371,8 @@ fn emit_page_content(
                 None
             };
 
-            // Emit into a scratch string so the whole item can be wrapped in
-            // its drawing layer: the map client toggles `data-layer` groups.
+            // Emit into a scratch string so the item can go into its drawing
+            // layer's group; items in a row on one layer share a group.
             let mut rendered = String::new();
             match item {
                 DrawItem::WireFill(wire) => {
@@ -413,14 +414,19 @@ fn emit_page_content(
                 DrawItem::Image(image) => emit_image(&mut rendered, image, ox, oy, options, map)?,
             };
 
-            match layer {
-                Some(layer) => {
-                    out.push_str(&format!("<g data-layer=\"{}\">\n", xml_attr(layer)));
-                    out.push_str(&rendered);
+            if layer != open_layer {
+                if open_layer.is_some() {
                     out.push_str("</g>\n");
                 }
-                None => out.push_str(&rendered),
+                if let Some(layer) = layer {
+                    out.push_str(&format!("<g data-layer=\"{}\">\n", xml_attr(layer)));
+                }
+                open_layer = layer;
             }
+            out.push_str(&rendered);
+        }
+        if open_layer.is_some() {
+            out.push_str("</g>\n");
         }
     }
     Ok(())

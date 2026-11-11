@@ -21,8 +21,8 @@ use std::path::Path;
 use crate::io::pdf_export::adapt_to_paper;
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::WireModel;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
+use crate::scene::WireModel;
 
 /// Screen pixels (96 dpi) to millimetres.
 const PX_TO_MM: f64 = 25.4 / 96.0;
@@ -126,7 +126,7 @@ pub fn build_svg(
         None
     };
     let glyphs = if page.options.text_as_outlines {
-        glyph_snapshot()
+        GlyphSnapshot::snapshot()
     } else {
         None
     };
@@ -716,10 +716,6 @@ use crate::scene::text::glyph_to_world;
 /// maths (uv key, plane mapping, glyph units, nominal pen) lives in
 /// [`crate::scene::text::glyph_to_world`].
 type GlyphSnapshot = glyph_to_world::GlyphSnapshot;
-
-fn glyph_snapshot() -> Option<GlyphSnapshot> {
-    GlyphSnapshot::snapshot()
-}
 
 /// `None` rejects a non-finite alpha; `Some(false)` is intentionally invisible.
 /// Both the preflight and emission passes use this exact classification.
@@ -1816,6 +1812,45 @@ mod tests {
             emitted && !stamp_paths.is_empty(),
             "stamp text: {stamp_paths}"
         );
+    }
+
+    #[test]
+    fn xml_escape_replaces_every_codepoint_forbidden_by_xml_10() {
+        assert_eq!(
+            xml_escape("A\u{0}\u{2}\u{b}\u{c}\u{1f}B"),
+            "A\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}B"
+        );
+        assert_eq!(xml_escape("\u{fffe}\u{ffff}"), "\u{fffd}\u{fffd}");
+        assert_eq!(xml_escape("tab\tline\ncarriage\r"), "tab\tline\ncarriage\r");
+        assert_eq!(
+            xml_escape("C1:\u{80}; Unicode:č😀"),
+            "C1:\u{80}; Unicode:č😀"
+        );
+    }
+
+    #[test]
+    fn forbidden_xml_control_in_text_does_not_invalidate_the_document() {
+        let mut wire = WireModel::default();
+        wire.searchable_text = vec![crate::scene::model::wire_model::SearchableTextRun {
+            text: "before\u{2}after".to_string(),
+            origin: [10.0, 20.0, 0.0],
+            height: 2.0,
+            rotation: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            bold: false,
+            font: "Arial".to_string(),
+            adv_width: 10.0,
+        }];
+        let content = crate::io::plot::PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire,
+                draw_depth: 0.5,
+            }]),
+            ..Default::default()
+        };
+        let svg = build_svg(&page_with(content, 210.0, 297.0), None).expect("builds");
+        assert!(svg.contains("before\u{fffd}after"), "{svg}");
+        roxmltree::Document::parse(&svg).expect("the exported SVG is well-formed XML");
     }
 
     #[test]

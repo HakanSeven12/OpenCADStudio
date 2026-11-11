@@ -9,10 +9,10 @@
 // drawing origin at the paper origin.
 
 use crate::io::plot_style::{PlotStyleTable, PlotStyleTableExt};
-use crate::scene::WireModel;
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::model::wire_model::SearchableTextRun;
+use crate::scene::WireModel;
 use printpdf::{
     BlendMode, BuiltinFont, Codepoint, Color, ExtendedGraphicsState, ExtendedGraphicsStateId,
     FontId, Line, LineCapStyle, LineDashPattern, LineJoinStyle, LinePoint, Mm, Op, PaintMode,
@@ -274,16 +274,15 @@ fn emit_image(
     for clip in &plot.clips {
         image_clip(
             ops,
-            vec![
-                clip.iter()
-                    .map(|p| {
-                        [
-                            ((p[0] + ox) * MM_TO_PT as f64) as f32,
-                            ((p[1] + oy) * MM_TO_PT as f64) as f32,
-                        ]
-                    })
-                    .collect(),
-            ],
+            vec![clip
+                .iter()
+                .map(|p| {
+                    [
+                        ((p[0] + ox) * MM_TO_PT as f64) as f32,
+                        ((p[1] + oy) * MM_TO_PT as f64) as f32,
+                    ]
+                })
+                .collect()],
         );
     }
     let draw = |ops: &mut Vec<Op>, matrix: [f32; 6]| {
@@ -1916,7 +1915,11 @@ pub(crate) fn adapt_to_paper([r, g, b]: [f32; 3]) -> [f32; 3] {
         && g > 0.80
         && b > 0.80
         && !crate::scene::convert::tess_util::is_authored_white([r, g, b]);
-    if is_light { [0.0, 0.0, 0.0] } else { [r, g, b] }
+    if is_light {
+        [0.0, 0.0, 0.0]
+    } else {
+        [r, g, b]
+    }
 }
 
 /// Invisible searchable text layer for laid-out runs (`Tr 3`).
@@ -2482,7 +2485,11 @@ fn emit_text(
                         }),
                     });
                     let pen = if let Some(ctb_pen) = lw_override {
-                        if ge.bold { ctb_pen * 1.7 } else { ctb_pen }
+                        if ge.bold {
+                            ctb_pen * 1.7
+                        } else {
+                            ctb_pen
+                        }
                     } else {
                         // The pen is in page user space (under the plot CTM),
                         // so the 0.1 pt physical floor is divided by the scale.
@@ -2701,7 +2708,7 @@ impl TextFonts {
 fn subset_font(blob: &crate::scene::text::ttf_glyph::FontBlob, gids: &[u16]) -> Option<Vec<u8>> {
     use allsorts::binary::read::ReadScope;
     use allsorts::font_data::FontData;
-    use allsorts::subset::{CmapTarget, SubsetProfile, subset};
+    use allsorts::subset::{subset, CmapTarget, SubsetProfile};
 
     let font = ReadScope::new(&blob.data).read::<FontData<'_>>().ok()?;
     let provider = font.table_provider(blob.index as usize).ok()?;

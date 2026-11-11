@@ -8256,4 +8256,98 @@ mod batch7_tests {
             "the missing-file refusal leaves the reference alone"
         );
     }
+
+    use crate::command::CmdResult;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    /// M098: a constrained pair draws its constraint bar. The horizontal and
+    /// coincident glyphs of the pair are placed and listed, so showing the bar
+    /// surfaces what constrains the geometry.
+    #[test]
+    fn constraint_bar_lists_the_glyphs_of_a_constrained_pair() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let first = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let second = add_line(&mut app, 40.0, 0.0, 60.0, 0.0);
+        let scope = ParametricScope::ModelSpace;
+        let set = app.tabs[i].scene.parametric_constraint_set_mut(scope);
+        let horizontal = set.add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(first), ParametricRef::whole(second)],
+            None,
+        );
+        let coincident = set.add(
+            ConstraintKind::Coincident,
+            vec![ParametricRef::whole(first), ParametricRef::whole(second)],
+            None,
+        );
+        app.tabs[i].scene.note_parametric_constraint_applied(scope, horizontal, 3);
+        app.tabs[i].scene.note_parametric_constraint_applied(scope, coincident, 3);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+
+        let placements = app.tabs[i].scene.constraint_glyph_placements_screen(
+            scope,
+            (800.0, 600.0),
+            true,
+            3,
+            4095,
+        );
+        let labels: Vec<&str> = placements.iter().map(|p| p.3.as_str()).collect();
+        assert!(!placements.is_empty(), "a constrained pair draws a bar");
+        assert!(labels.iter().any(|label| *label == "—"), "{labels:?}");
+        assert!(labels.iter().any(|label| *label == "≡"), "{labels:?}");
+    }
+
+    /// M098: hiding the bar removes its glyphs, and deleting the constraint
+    /// the bar named frees it again — the bar's own remove path.
+    #[test]
+    fn constraint_bar_hide_removes_the_glyphs_and_delete_frees_the_constraint() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let first = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
+        let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+            kind: ConstraintKind::Horizontal,
+            refs: vec![ParametricRef::whole(first)],
+            driving_param: None,
+            label: "Horizontal constraint",
+        });
+        let scope = ParametricScope::ModelSpace;
+        let id = app.tabs[i]
+            .scene
+            .parametric_constraint_set(scope)
+            .unwrap()
+            .constraints[0]
+            .id;
+
+        let hidden = app.tabs[i].scene.set_parametric_constraint_visibility(
+            scope,
+            None,
+            false,
+            false,
+        );
+        assert_eq!(hidden, 1);
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        assert!(app.tabs[i]
+            .scene
+            .constraint_glyph_placements_screen(scope, (800.0, 600.0), true, 3, 4095)
+            .is_empty());
+
+        app.delete_parametric_constraint(id);
+        assert!(app.tabs[i]
+            .scene
+            .parametric_constraint_set(scope)
+            .unwrap()
+            .constraints
+            .is_empty());
+        app.undo_steps(1);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .parametric_constraint_set(scope)
+                .unwrap()
+                .constraints
+                .len(),
+            1
+        );
+    }
 }

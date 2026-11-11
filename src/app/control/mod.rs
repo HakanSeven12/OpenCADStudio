@@ -6211,4 +6211,78 @@ mod tests {
             "a declined form drops the placement"
         );
     }
+
+    #[test]
+    fn plot_op_model_defaults_to_fit_when_scale_and_fit_are_omitted() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}));
+        // A previous non-fit preference must not leak into an API request whose
+        // documented default is fit when neither scale nor fit is supplied.
+        app.plot_dialog.fit_to_paper = false;
+        app.plot_dialog.scale = "1000:1".into();
+        let svg = std::env::temp_dir().join(format!("ocs-fit-default-{}.svg", std::process::id()));
+        let response = request(&mut app, json!({"op":"plot","path":svg.to_string_lossy()}));
+        assert_eq!(response["status"], "completed", "{response}");
+        let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+        let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let root = document.root_element();
+        let view_box = root
+            .attribute("viewBox")
+            .expect("viewBox")
+            .split_whitespace()
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect::<Vec<_>>();
+        let (width, height) = (view_box[2], view_box[3]);
+        let mut checked = 0;
+        for path in root
+            .descendants()
+            .filter(|node| node.tag_name().name() == "path")
+        {
+            let d = path.attribute("d").expect("path data");
+            let normalized = d.replace(['M', 'L', 'Z'], " ");
+            let coordinates = normalized
+                .split_whitespace()
+                .map(|v| v.parse::<f64>().expect("numeric path coordinate"))
+                .collect::<Vec<_>>();
+            for pair in coordinates.chunks_exact(2) {
+                assert!(
+                    pair[0] >= -0.01 && pair[0] <= width + 0.01,
+                    "x={} width={width}",
+                    pair[0]
+                );
+                assert!(
+                    pair[1] >= -0.01 && pair[1] <= height + 0.01,
+                    "y={} height={height}",
+                    pair[1]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+        let fitted_line = svg_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("fitted line")
+            .to_owned();
+        let _ = std::fs::remove_file(&svg);
+
+        // An explicit non-fit request must not be replaced by the default.
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.scale = "1000:1".into();
+        let explicit =
+            std::env::temp_dir().join(format!("ocs-fit-explicit-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":explicit.to_string_lossy(),"fit":false}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let explicit_text = std::fs::read_to_string(&explicit).expect("explicit SVG written");
+        let explicit_line = explicit_text
+            .lines()
+            .find(|line| line.starts_with("<path"))
+            .expect("explicit non-fit line");
+        assert_ne!(explicit_line, fitted_line);
+        let _ = std::fs::remove_file(&explicit);
+    }
 }

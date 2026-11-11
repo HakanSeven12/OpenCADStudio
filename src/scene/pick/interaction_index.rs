@@ -2390,7 +2390,11 @@ fn misses_query(wire: &WireModel, query: [f64; 4]) -> bool {
     }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
     if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
-        return false;
+        // No stored box: the one the index measures from what the wire
+        // carries, if it can.
+        return finite_wire_aabb3(wire).is_some_and(|aabb| {
+            aabb[3] < query[0] || aabb[0] > query[2] || aabb[4] < query[1] || aabb[1] > query[3]
+        });
     }
     // The f32 slack the index gives the same box.
     let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
@@ -2432,19 +2436,35 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
         ]);
     }
     let [min_x, min_y, max_x, max_y] = wire.aabb;
-    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+    let stored = min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite();
+    // A wire with no stored box is measured by what it carries below: an
+    // insert's marker by its insertion snap, so it is a candidate near that
+    // point and not in every query. A block copy or an analytic curve
+    // cannot be measured that way and keeps no box.
+    if !stored && (wire.stub.is_some() || !wire.tangent_geoms.is_empty()) {
         return None;
     }
-    let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
-    let pad = (mag * f32::EPSILON * 2.0) as f64;
-    let mut aabb = [
-        min_x as f64 - pad,
-        min_y as f64 - pad,
-        f64::INFINITY,
-        max_x as f64 + pad,
-        max_y as f64 + pad,
-        f64::NEG_INFINITY,
-    ];
+    let mut aabb = if stored {
+        let mag = wire.aabb.iter().fold(0.0f32, |m, c| m.max(c.abs()));
+        let pad = (mag * f32::EPSILON * 2.0) as f64;
+        [
+            min_x as f64 - pad,
+            min_y as f64 - pad,
+            f64::INFINITY,
+            max_x as f64 + pad,
+            max_y as f64 + pad,
+            f64::NEG_INFINITY,
+        ]
+    } else {
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ]
+    };
     let mut include = |point: [f64; 3]| {
         if point.iter().all(|value| value.is_finite()) {
             aabb[0] = aabb[0].min(point[0]);
@@ -2484,6 +2504,10 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
                 aabb[5] = aabb[5].max(inner[5] + stub.delta[2]);
             }
         }
+    }
+    // Nothing measurable was carried.
+    if aabb[0] > aabb[3] || aabb[1] > aabb[4] {
+        return None;
     }
     if !aabb[2].is_finite() {
         aabb[2] = 0.0;

@@ -1179,6 +1179,7 @@ common =
     .angle-point-or-keyword = Requires valid numeric angle, second point, or option keyword.
     .distance-point-or-keyword = Requires numeric distance, second point, or option keyword.
     .radius-point-or-diameter = Requires numeric radius, point on circumference, or "D".
+    .invalid-2d-point = Invalid 2D point.
     .invalid-input = Invalid Input.
     .solid-created = Solid created.
     .source-object-not-found = Source object not found.

@@ -1181,6 +1181,7 @@ common =
     .angle-point-or-keyword = मान्य संख्यात्मक कोण, दूसरा बिंदु या विकल्प कीवर्ड आवश्यक है।
     .distance-point-or-keyword = संख्यात्मक दूरी, दूसरा बिंदु या विकल्प कीवर्ड आवश्यक है।
     .radius-point-or-diameter = संख्यात्मक त्रिज्या, परिधि पर बिंदु या "D" आवश्यक है।
+    .invalid-2d-point = अमान्य 2D बिंदु।
     .invalid-input = अमान्य इनपुट।
     .solid-created = ठोस बनाया गया।
     .source-object-not-found = स्रोत ऑब्जेक्ट नहीं मिला।

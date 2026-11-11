@@ -969,10 +969,32 @@ impl CadCommand for PlineCommand {
         "PLINE"
     }
 
-    /// The next-point prompt asks for a 2D point or a keyword (measured).
+    /// Each prompt's own refusal (measured): the next point and arc endpoint
+    /// ask for a 2D point or keyword, the arc's center and second point for a
+    /// 2D point, its angle and tangent direction for an angle, its radius for
+    /// a distance or two points, a line length and a width for a distance.
     fn point_rejection(&self) -> Option<String> {
-        (!self.vertices.is_empty() && matches!(self.sub, Sub::None))
-            .then(|| t!("2D point or option keyword required.").into_owned())
+        if self.vertices.is_empty() {
+            return None;
+        }
+        let line = match self.sub {
+            Sub::None => t!("2D point or option keyword required."),
+            Sub::ArcCenter | Sub::ArcAngleCenter { .. } | Sub::ArcSecond => {
+                t!("Invalid 2D point.")
+            }
+            Sub::ArcAngle
+            | Sub::ArcCenterAngle { .. }
+            | Sub::ArcRadiusAngle { .. }
+            | Sub::ArcDirection => t!("Requires valid numeric angle or second point."),
+            Sub::ArcRadius | Sub::ArcAngleRadius { .. } => {
+                t!("Requires numeric distance or two points.")
+            }
+            Sub::Length | Sub::WidthStart { .. } | Sub::WidthEnd { .. } => {
+                t!("Requires numeric distance or second point.")
+            }
+            _ => return None,
+        };
+        Some(line.into_owned())
     }
 
     fn prompt(&self) -> String {

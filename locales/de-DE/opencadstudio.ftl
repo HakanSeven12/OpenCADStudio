@@ -1193,6 +1193,7 @@ common =
     .angle-point-or-keyword = Gültiger numerischer Winkel, zweiter Punkt oder Optionsschlüsselwort erforderlich.
     .distance-point-or-keyword = Numerischer Abstand, zweiter Punkt oder Optionsschlüsselwort erforderlich.
     .radius-point-or-diameter = Numerischer Radius, Punkt auf dem Umfang oder "D" erforderlich.
+    .invalid-2d-point = Ungültiger 2D-Punkt.
     .invalid-input = Ungültige Eingabe.
     .solid-created = Volumenkörper erstellt.
     .source-object-not-found = Quellobjekt nicht gefunden.

@@ -1192,6 +1192,7 @@ common =
     .angle-point-or-keyword = Kelvollinen numeerinen kulma, toinen piste tai vaihtoehdon avainsana vaaditaan.
     .distance-point-or-keyword = Numeerinen etäisyys, toinen piste tai vaihtoehdon avainsana vaaditaan.
     .radius-point-or-diameter = Numeerinen säde, kehän piste tai "D" vaaditaan.
+    .invalid-2d-point = Virheellinen 2D-piste.
     .invalid-input = Virheellinen syöte.
     .solid-created = Kiinteä luotu.
     .source-object-not-found = Lähdeobjektia ei löydy.

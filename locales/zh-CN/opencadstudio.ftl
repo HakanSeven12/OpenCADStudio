@@ -1180,6 +1180,7 @@ common =
     .angle-point-or-keyword = 需要有效的数值角度、第二点或选项关键字。
     .distance-point-or-keyword = 需要数值距离、第二点或选项关键字。
     .radius-point-or-diameter = 需要数值半径、圆周上的点或 "D"。
+    .invalid-2d-point = 二维点无效。
     .invalid-input = 输入无效。
     .solid-created = 实相所造.
     .source-object-not-found = 找不到源对象 。

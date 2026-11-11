@@ -1191,6 +1191,7 @@ common =
     .angle-point-or-keyword = Érvényes numerikus szög, második pont vagy opciókulcsszó szükséges.
     .distance-point-or-keyword = Numerikus távolság, második pont vagy opciókulcsszó szükséges.
     .radius-point-or-diameter = Numerikus sugár, kerületi pont vagy "D" szükséges.
+    .invalid-2d-point = Érvénytelen 2D pont.
     .invalid-input = Érvénytelen bevitel.
     .solid-created = Test létrehozva.
     .source-object-not-found = A forrásobjektum nem található.

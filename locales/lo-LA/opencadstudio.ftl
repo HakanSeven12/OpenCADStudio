@@ -1186,6 +1186,7 @@ common =
     .angle-point-or-keyword = ຕ້ອງການມຸມເປັນຕົວເລກທີ່ຖືກຕ້ອງ, ຈຸດທີສອງ ຫຼື ຄຳສັບທາງເລືອກ.
     .distance-point-or-keyword = ຕ້ອງການໄລຍະທາງເປັນຕົວເລກ, ຈຸດທີສອງ ຫຼື ຄຳສັບທາງເລືອກ.
     .radius-point-or-diameter = ຕ້ອງການລັດສະໝີເປັນຕົວເລກ, ຈຸດເທິງເສັ້ນຮອບວົງ ຫຼື "D".
+    .invalid-2d-point = ຈຸດ 2D ບໍ່ຖືກຕ້ອງ.
     .invalid-input = ການປ້ອນຂໍ້ມູນບໍ່ຖືກຕ້ອງ.
     .solid-created = ສ້າງຮູບຊົງຕັນແລ້ວ.
     .source-object-not-found = ບໍ່ພົບວັດຖຸຕົ້ນສະບັບ.

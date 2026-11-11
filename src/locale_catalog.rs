@@ -3845,6 +3845,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Requires valid numeric angle, second point, or option keyword." => Some(("common", "angle-point-or-keyword")),
         "Requires numeric distance, second point, or option keyword." => Some(("common", "distance-point-or-keyword")),
         "Requires numeric radius, point on circumference, or \"D\"." => Some(("common", "radius-point-or-diameter")),
+        "Invalid 2D point." => Some(("common", "invalid-2d-point")),
         "Invalid Input." => Some(("common", "invalid-input")),
         "Snap to\nUnderlays" => Some(("insert", "snap-to-underlays")),
         "Softness" => Some(("properties", "softness")),

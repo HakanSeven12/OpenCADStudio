@@ -1169,6 +1169,7 @@ common =
     .angle-point-or-keyword = Geçerli bir sayısal açı, ikinci nokta veya seçenek anahtar sözcüğü gerekli.
     .distance-point-or-keyword = Sayısal mesafe, ikinci nokta veya seçenek anahtar sözcüğü gerekli.
     .radius-point-or-diameter = Sayısal yarıçap, çember üzerinde bir nokta veya "D" gerekli.
+    .invalid-2d-point = Geçersiz 2B nokta.
     .invalid-input = Geçersiz giriş.
     .solid-created = Katı oluşturuldu.
     .source-object-not-found = Kaynak nesne bulunamadı.

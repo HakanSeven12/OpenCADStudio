@@ -1067,11 +1067,14 @@ impl OpenCADStudio {
             // A point prompt that also takes keywords reads a typed
             // coordinate as the point: handing `300,50` to the step's text
             // reader would turn the comma into a decimal mark (300.5).
+            // A coordinate under a typed object snap is a point at any step
+            // that takes one, so the snap resolves it.
             let coordinate_at_point_step = parse_coord(&text).is_some()
-                && self.tabs[i]
-                    .active_cmd
-                    .as_ref()
-                    .is_some_and(|c| c.point_step_accepts_keywords());
+                && (self.snapper.pending_override().is_some()
+                    || self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.point_step_accepts_keywords()));
             if !coordinate_at_point_step
                 && self.tabs[i]
                     .active_cmd

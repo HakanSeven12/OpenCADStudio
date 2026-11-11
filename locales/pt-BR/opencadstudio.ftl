@@ -1193,6 +1193,7 @@ common =
     .angle-point-or-keyword = Ângulo numérico válido, segundo ponto ou palavra-chave de opção obrigatório.
     .distance-point-or-keyword = Distância numérica, segundo ponto ou palavra-chave de opção obrigatória.
     .radius-point-or-diameter = Raio numérico, ponto na circunferência ou "D" obrigatório.
+    .invalid-2d-point = Ponto 2D inválido.
     .invalid-input = Entrada inválida.
     .solid-created = Sólido criado.
     .source-object-not-found = Objeto de origem não encontrado.

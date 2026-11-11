@@ -1192,6 +1192,7 @@ common =
     .angle-point-or-keyword = Wymagany prawidłowy kąt liczbowy, drugi punkt lub słowo kluczowe opcji.
     .distance-point-or-keyword = Wymagana odległość liczbowa, drugi punkt lub słowo kluczowe opcji.
     .radius-point-or-diameter = Wymagany promień liczbowy, punkt na okręgu lub "D".
+    .invalid-2d-point = Nieprawidłowy punkt 2D.
     .invalid-input = Nieprawidłowe dane wejściowe.
     .solid-created = Utworzono bryłę.
     .source-object-not-found = Nie znaleziono obiektu źródłowego.

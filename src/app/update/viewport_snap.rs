@@ -64,12 +64,14 @@ impl OpenCADStudio {
             })
     }
 
-    /// The active command is at a point prompt (keywords allowed) and not
-    /// picking an object: where MTP and typed snap overrides apply.
+    /// The active command takes a point (a point prompt, or a distance or
+    /// angle prompt a point answers too) and is not picking an object or
+    /// reading prose: where MTP and typed snap overrides apply (measured:
+    /// `_end` works at TEXT height, CIRCLE radius, ROTATE angle and OFFSET
+    /// distance as at a point prompt).
     pub(crate) fn point_modifier_step(&self, i: usize) -> bool {
         self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
-            (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
-                && !c.needs_entity_pick()
+            !c.input_kind().is_free_text() && !c.needs_entity_pick() && !c.is_selection_gathering()
         })
     }
 

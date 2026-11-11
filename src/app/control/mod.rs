@@ -6211,4 +6211,99 @@ mod tests {
             "a declined form drops the placement"
         );
     }
+
+    /// A BLOCK_RECORD whose stored `entity_handles` no longer resolve against
+    /// the entity table (an import that renumbered handles after the lists
+    /// were built) must not silently drop the layout's whole content: the
+    /// stored list is a hint, and ownership keeps the real viewports.
+    #[test]
+    fn a_stale_block_record_list_still_plots_layout_content() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}))["status"],
+            "completed"
+        );
+        let i = app.active_tab;
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+        let _ = app.run_command_line("MSPACE");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        let _ = app.run_command_line("PSPACE");
+
+        // The healthy layout first: the model content lands in the viewport.
+        let healthy = std::env::temp_dir().join(format!(
+            "ocs-layout-record-healthy-{}.svg",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","layout":"Layout1","path":healthy.to_string_lossy(),"area":"layout"}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let healthy_text = std::fs::read_to_string(&healthy).expect("healthy SVG");
+        assert!(
+            healthy_text.lines().any(|line| line.starts_with("<path")),
+            "the healthy viewport must carry model content: {healthy_text}"
+        );
+        let _ = std::fs::remove_file(&healthy);
+        let healthy_paths = healthy_text
+            .lines()
+            .filter(|line| line.starts_with("<path"))
+            .collect::<Vec<_>>();
+
+        // Corrupt the stored list the way the renumbering report observed:
+        // non-empty, but resolvable nowhere in the entity table. A create +
+        // delete round-trip bumps the paper cache's epoch so the plot reads
+        // the corrupted list again; the document content itself is unchanged.
+        let scene = &mut app.tabs[i].scene;
+        let viewport_owner = scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Viewport(vp) => Some(vp.common.owner_handle),
+                _ => None,
+            })
+            .expect("Layout1 carries a content viewport");
+        let record = scene
+            .document
+            .block_records
+            .iter_mut()
+            .find(|record| record.handle == viewport_owner)
+            .expect("the owning block record");
+        record.entity_handles = vec![document::Handle::new(404)];
+        let bump = request(
+            &mut app,
+            json!({"op":"entities_create","entities":[{"type":"Point","location":[900,900]}]}),
+        );
+        assert_eq!(bump["ok"], true, "{bump}");
+        let scratch = bump["result"]["handles"][0].as_str().unwrap().to_string();
+        let erased = request(
+            &mut app,
+            json!({"op":"entities_delete","handles":[scratch]}),
+        );
+        assert_eq!(erased["ok"], true, "{erased}");
+
+        let stale = std::env::temp_dir().join(format!(
+            "ocs-layout-record-stale-{}.svg",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","layout":"Layout1","path":stale.to_string_lossy(),"area":"layout"}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        let stale_text = std::fs::read_to_string(&stale).expect("stale SVG");
+        let mut stale_paths = stale_text
+            .lines()
+            .filter(|line| line.starts_with("<path"))
+            .collect::<Vec<_>>();
+        let mut healthy_paths = healthy_paths;
+        healthy_paths.sort();
+        stale_paths.sort();
+        assert_eq!(
+            healthy_paths, stale_paths,
+            "the stale record list must not drop the viewport content"
+        );
+        let _ = std::fs::remove_file(&stale);
+    }
 }

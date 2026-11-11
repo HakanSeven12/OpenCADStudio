@@ -26,28 +26,83 @@ impl Scene {
                     !Self::is_sheet_viewport(&self.document, vp)
                 }
         };
-        let content = if let Some(block) = self
+        // The block record's owned list keeps the drawing's stored order on a
+        // healthy layout, but it is a hint, never the sole source: an import
+        // whose assigned handles no longer match the stored list (or one holding
+        // handles the entity table cannot resolve) must not silently drop the
+        // layout's whole content. Union the resolving list entries with the same
+        // ownership scan the empty-list path already used.
+        let record = self
             .document
             .block_records
             .iter()
-            .find(|block| block.handle == layout_block)
-            .filter(|block| !block.entity_handles.is_empty())
-        {
-            block
-                .entity_handles
-                .iter()
-                .copied()
-                .filter(|handle| is_content(*handle))
-                .collect()
-        } else {
-            self.document
-                .entities()
-                .filter_map(|entity| {
-                    let handle = entity.common().handle;
-                    is_content(handle).then_some(handle)
+            .find(|block| block.handle == layout_block);
+        let record_list = record
+            .map(|block| block.entity_handles.as_slice())
+            .unwrap_or(&[]);
+        let record_unresolved = record_list
+            .iter()
+            .any(|handle| self.document.get_entity(*handle).is_none());
+        let mut content: Vec<Handle> = record_list
+            .iter()
+            .copied()
+            .filter(|handle| is_content(*handle))
+            .collect();
+        if record.is_none() || record_unresolved || content.is_empty() {
+            for entity in self.document.entities() {
+                let handle = entity.common().handle;
+                if is_content(handle) && !content.contains(&handle) {
+                    content.push(handle);
+                }
+            }
+        }
+        if content.is_empty() {
+            // DWG keeps no viewport ids, so an import can leave the layout's
+            // only real model-space window numbered as the overall sheet. Every
+            // structural signal — the block-record list, ownership and the
+            // Layout object's links — then legitimately points at that one
+            // viewport while the sheet classification excludes it. Reaching an
+            // empty content plot silently throws the whole window away, so the
+            // last resort re-includes the stored viewport links themselves
+            // (and any viewports the block still owns): plotting them again
+            // beats plotting an empty sheet.
+            let mut candidates: Vec<Handle> = record_list.to_vec();
+            if let Some(document::objects::ObjectType::Layout(layout)) =
+                self.document.objects.values().find(|object| {
+                    matches!(
+                        object,
+                        document::objects::ObjectType::Layout(object)
+                            if object.name == self.current_layout
+                    )
                 })
-                .collect()
-        };
+            {
+                if layout.viewport.is_valid() && !candidates.contains(&layout.viewport) {
+                    candidates.push(layout.viewport);
+                }
+                candidates.extend(layout.viewports.iter().copied());
+            }
+            for entity in self.document.entities() {
+                if matches!(entity, EntityType::Viewport(_))
+                    && entity.common().owner_handle == layout_block
+                    && !candidates.contains(&entity.common().handle)
+                {
+                    candidates.push(entity.common().handle);
+                }
+            }
+            let mut linked: Vec<Handle> = Vec::new();
+            for handle in candidates {
+                if matches!(
+                    self.document.get_entity(handle),
+                    Some(EntityType::Viewport(_))
+                ) && !linked.contains(&handle)
+                {
+                    linked.push(handle);
+                }
+            }
+            if !linked.is_empty() {
+                content = linked;
+            }
+        }
         let content = Arc::new(content);
         self.paper_viewport_cache.borrow_mut().insert(
             self.current_layout.clone(),
@@ -934,5 +989,77 @@ impl Scene {
         screen_height_px: f32,
     ) -> Arc<Vec<WireModel>> {
         self.model_wires_for_viewport(vp_handle, screen_height_px)
+    }
+}
+
+#[cfg(test)]
+mod paper_content_tests {
+    use super::*;
+
+    /// A renumbered import can leave the layout's only real model-space window
+    /// numbered as the overall sheet: the block-record list, ownership and the
+    /// Layout object's links all point at the same viewport that the sheet
+    /// classification excludes. The content resolution must still keep it.
+    #[test]
+    fn a_sheet_numbered_import_keeps_its_only_viewport() {
+        let mut scene = Scene::new();
+        let _ = scene.add_layout("PLAN");
+        scene.set_current_layout("PLAN".into());
+
+        let (layout_object, block) = scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                document::objects::ObjectType::Layout(object) if object.name == "PLAN" => {
+                    Some((object.viewport, object.block_record))
+                }
+                _ => None,
+            })
+            .expect("a created layout carries its Layout object");
+        // The fresh scene gives a layout an overall sheet to open with; an
+        // imported layout need not carry one, and the imported file did not.
+        let auto_sheet = scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Viewport(vp) if vp.common.owner_handle == block => {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for handle in auto_sheet {
+            let _ = scene.document.remove_entity(handle);
+        }
+
+        // The stored list resolves nowhere, as in the field report.
+        scene
+            .document
+            .block_records
+            .iter_mut()
+            .find(|record| record.handle == block)
+            .expect("block record")
+            .entity_handles = vec![Handle::new(404)];
+
+        // The reader's post-load numbering gave the imported MVIEW id 1 and
+        // the Layout object's links point at it.
+        let mut window = document::entities::Viewport::model_space();
+        window.common.owner_handle = block;
+        let window_handle = scene.add_entity(document::EntityType::Viewport(Box::new(window)));
+        if let Some(document::objects::ObjectType::Layout(object)) =
+            scene.document.objects.get_mut(&layout_object)
+        {
+            object.viewport = window_handle;
+        }
+
+        let (layout_block, sheet, content) = scene.paper_viewport_handles();
+        assert_eq!(layout_block, block);
+        assert_eq!(sheet, window_handle, "every structural tier points at it");
+        assert_eq!(
+            content.as_ref(),
+            &[window_handle],
+            "the only model window must still be content"
+        );
     }
 }

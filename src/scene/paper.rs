@@ -618,6 +618,7 @@ impl Scene {
                 }
                 _ => model.clone(),
             };
+            hatch.entity = Some(handle);
             // Resolve against the sheet, like the block-child fills below, not
             // the screen: in Model the screen is dark, so colour 7 / ByBlock
             // fills stayed white and vanished on the white page.
@@ -640,6 +641,7 @@ impl Scene {
                 if let Some(mut backdrop) = self.hatch_backdrop(dxf, &hatch, fill_style, None) {
                     backdrop.color = view::render::adapt_to_bg(backdrop.color, self.paper_bg_color);
                     backdrop.name = hatch.name.clone();
+                    backdrop.entity = Some(handle);
                     models.push(backdrop);
                 }
                 if let model::hatch_model::HatchPattern::Pattern(_) = &hatch.pattern {

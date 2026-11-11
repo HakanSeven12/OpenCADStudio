@@ -209,6 +209,10 @@ pub struct FillPlane {
 /// A hatched region defined by a closed polygon boundary.
 #[derive(Clone, Debug)]
 pub struct HatchModel {
+    /// The hatch entity this model plots for. Hatch models carry the pattern
+    /// catalog name (not an entity handle) in `name`, so plot exports resolve
+    /// the fill's drawing layer through this handle.
+    pub entity: Option<document::Handle>,
     /// Recorded hatch origin in its fill plane, independent of intrinsic PAT line bases.
     pub pattern_origin: Option<[f64; 2]>,
     pub render_instance: Option<super::instance_model::RenderInstance>,

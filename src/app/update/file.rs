@@ -685,15 +685,23 @@ fn plot_entity_layers(
     hatches: &[crate::scene::model::hatch_model::HatchModel],
     wipeouts: &[crate::scene::model::hatch_model::HatchModel],
 ) -> std::collections::HashMap<document::Handle, String> {
-    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
-        hatches
-            .iter()
-            .chain(wipeouts)
-            .map(|hatch| hatch.name.as_str()),
-    );
+    let names = wires.iter().map(|wire| wire.name.as_str());
     let mut layers = std::collections::HashMap::new();
     for name in names {
         let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if layers.contains_key(&handle) {
+            continue;
+        }
+        if let Some(entity) = scene.document.get_entity(handle) {
+            layers.insert(handle, entity.common().layer.clone());
+        }
+    }
+    // Hatch models carry the pattern name (not a handle) in `name`; their
+    // drawing layer comes from the entity the model plots for.
+    for hatch in hatches.iter().chain(wipeouts) {
+        let Some(handle) = hatch.entity else {
             continue;
         };
         if layers.contains_key(&handle) {

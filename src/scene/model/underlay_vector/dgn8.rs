@@ -236,6 +236,16 @@ fn inflate_at_most(data: &[u8], limit: u64) -> Vec<u8> {
     data.to_vec()
 }
 
+/// An element stream inflated. One holding no elements is its 16-byte header
+/// alone, with no zlib data after it: it adds nothing, rather than its header
+/// bytes in front of the elements of the streams after it (#2820).
+fn element_stream(data: &[u8]) -> Vec<u8> {
+    if data.len() <= 16 {
+        return Vec::new();
+    }
+    inflate(data)
+}
+
 // ── Elements ────────────────────────────────────────────────────────────────
 
 /// Element records of an element stream (after its 4-byte count).
@@ -1547,7 +1557,7 @@ fn models(cfb: &Cfb) -> Vec<(String, Vec<u8>, Vec<u8>)> {
             if total.saturating_add(graphics.len()) >= total_limit {
                 break;
             }
-            graphics.extend(inflate(&cfb.stream(entry)));
+            graphics.extend(element_stream(&cfb.stream(entry)));
         }
         let header = get("Dgn~Mh");
         total = total
@@ -1784,7 +1794,11 @@ fn control_stream(cfb: &Cfb, k: usize, used: usize) -> Vec<u8> {
         if left == 0 {
             break;
         }
-        let part = inflate_at_most(&cfb.stream(entry), left.min(STREAM_LIMIT));
+        let data = cfb.stream(entry);
+        if data.len() <= 16 {
+            continue; // an empty stream: its header alone (#2820)
+        }
+        let part = inflate_at_most(&data, left.min(STREAM_LIMIT));
         left = left.saturating_sub(part.len() as u64);
         out.extend(part);
     }
@@ -2246,4 +2260,14 @@ mod mesh_tests {
             )]
         );
     }
+
+    /// #2820: an empty element stream is its header alone and adds nothing.
+    #[test]
+    fn a_header_only_element_stream_adds_nothing() {
+        let mut header = [0u8; 16];
+        header[4] = 1;
+        assert!(super::element_stream(&header).is_empty());
+        assert!(super::element_stream(&[]).is_empty());
+    }
+
 }

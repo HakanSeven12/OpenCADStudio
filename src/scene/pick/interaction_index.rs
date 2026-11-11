@@ -3096,13 +3096,20 @@ mod area_query_tests {
     /// The resident set leaves blank slots behind: where an entity is hidden
     /// (an empty box) and where a run got shorter (the default unbounded
     /// box). They hold nothing to pick or snap, so no query lists them. A
-    /// wire with no finite box that does hold something still reaches every
-    /// query.
+    /// wire with no box that holds what cannot be measured, a block copy
+    /// here, still reaches every query.
     #[test]
     fn blank_slots_are_not_candidates() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            WireModel::UNBOUNDED_AABB,
+            [0.0, 0.0, 0.0],
+            0.0,
+        );
+        copy.name = "21".to_string();
         let mut wires = sample();
         wires.extend(blank_slots());
-        wires.push(marker("21"));
+        wires.push(copy);
         let index = InteractionIndex::build(&wires);
         let arc = Arc::new(wires);
 
@@ -3110,10 +3117,46 @@ mod area_query_tests {
         assert_eq!(
             names(&away),
             ["21"],
-            "away from every object only the marker is listed, not the blank slots"
+            "away from every object only the block copy is listed, not the blank slots"
         );
         let on_five = index.query_xy(Arc::clone(&arc), [-0.45, -0.45, -0.3, 0.1]);
         assert_eq!(names(&on_five), ["21", "5"]);
+    }
+
+    /// A wire with no stored box is measured by what it carries. An insert's
+    /// marker carries its insertion snap alone, so it is a candidate near
+    /// that point and not in every query of the drawing, indexed or not.
+    #[test]
+    fn a_wire_that_only_snaps_is_a_candidate_near_its_snap_point() {
+        let mut copy = crate::scene::model::instance_model::stub_wire(
+            Arc::new(sample()),
+            [0.0, 0.0, 1.0, 1.0],
+            [200.0, 200.0, 0.0],
+            0.0,
+        );
+        copy.name = "30".to_string();
+        let mut wires = sample();
+        wires.extend([marker("21"), copy]);
+        let index = InteractionIndex::build(&wires);
+        let arc = Arc::new(wires);
+
+        let away = [50.0, 50.0, 51.0, 51.0];
+        let at_the_snap = [-0.05, -0.05, 0.05, 0.05];
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), away)),
+            [""; 0],
+            "the marker's snap point is at the origin, 50 units away"
+        );
+        assert_eq!(
+            names(&index.query_xy(Arc::clone(&arc), at_the_snap)),
+            ["21", "5"]
+        );
+        // With no index yet, the fallback copies the same wires.
+        let unindexed = |query| {
+            names(&InteractionCandidates::all_near(Arc::clone(&arc), query).materialize_stubs())
+        };
+        assert_eq!(unindexed(away), [""; 0]);
+        assert_eq!(unindexed(at_the_snap), ["21", "5"]);
     }
 
     /// With no index yet, the fallback copies the wires the caller is about

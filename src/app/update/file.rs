@@ -9261,6 +9261,45 @@ mod plot_paper_tests {
         assert!((before.0 - after.0).abs() < 1e-9 && (before.1 - after.1).abs() < 1e-9);
     }
 
+    /// The sheet a window plot leaves on the layout is the page that plot
+    /// makes: page (0, 0) and (width, height) taken back to paper space.
+    fn page_of_window_plot(app: &OpenCADStudio) -> ((f64, f64), (f64, f64)) {
+        let job = app.window_plot_job().expect("a window plot job");
+        let scale = f64::from(job.scale);
+        (
+            (-job.offset_x, -job.offset_y),
+            (
+                job.paper_w / scale - job.offset_x,
+                job.paper_h / scale - job.offset_y,
+            ),
+        )
+    }
+
+    #[test]
+    fn a_fitted_window_plot_leaves_the_sheet_it_plotted() {
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Window".into()));
+        // A window away from the sheet's centre, smaller than the sheet.
+        app.plot_window = Some((20.0, 120.0, 170.0, 200.0));
+        app.plot_dialog.window = app.plot_window;
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.center = true;
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        assert_eq!(
+            layout_settings(&app).scale_type,
+            document::objects::ScaledType::ScaleToFit
+        );
+        let ((px0, py0), (px1, py1)) = page_of_window_plot(&app);
+        let ((sx0, sy0), (sx1, sy1)) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            near(sx0, px0) && near(sy0, py0) && near(sx1, px1) && near(sy1, py1),
+            "the sheet ({sx0:.2}, {sy0:.2})-({sx1:.2}, {sy1:.2}) must be the page the \
+             plot made ({px0:.2}, {py0:.2})-({px1:.2}, {py1:.2})"
+        );
+    }
+
     #[test]
     fn custom_scale_fields_follow_and_drive_the_picker() {
         use crate::ui::window::plot::PlotFlag;

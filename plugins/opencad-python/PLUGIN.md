@@ -70,11 +70,11 @@ expression, not statements). Phases 1.2 (read), 1.3 (2D write) and part of
 | `ocs.selection()` | List of the selected entities' handles (`int`), as of the last selection change — see note below. |
 | `ocs.get_entity_color(handle)` | Color of one top-level entity in the records-schema shape: `None` if the handle is absent, else `{"kind": "ByLayer"}`, `{"kind": "Index", "value": n}` or `{"kind": "Rgb", "value": {"r","g","b"}}`. |
 | `ocs.entity_kind(handle)` | The entity's variant name (`"Hatch"`, `"Solid"`, `"Line"`, …; `"Other"` for rarer kinds), or `None` if absent. The subset is documented in the source; `record_schema` is the exhaustive catalogue. |
-| `ocs.entities_on_layer(layer)` | Handles of the top-level entities currently on that layer. |
+| `ocs.entities_on_layer(layer)` | Handles of the top-level entities currently on that layer (layer names compare case-insensitively). |
 | `ocs.get_entity_layer(handle)` | The carrying layer name of one top-level entity, or `None` if absent. |
 | `ocs.set_entity_color(handle, color)` | Rewrite one top-level entity's color. `color` is an `int` ACI index (1..=255), an `(r, g, b)` triple, or `"ByLayer"`. Raises when the entity does not exist. |
 | `ocs.set_entity_colors(updates, label)` | Batched: `[{"handle": …, "color": …}, …]` in **one undo step and one transaction**. Raises on the first missing handle. Reads happen against the dispatch snapshot — filter no-ops yourself before batching. |
-| `ocs.set_entity_layers(updates, label)` | Batched layer moves — the `set_entity_colors` twin for `/common/layer`. Same shape/one-undo-step contract. |
+| `ocs.set_entity_layers(updates, label)` | Batched layer moves — the `set_entity_colors` twin for `/common/layer`. Same shape/one-undo-step contract; raises on a layer the drawing does not carry. |
 | `ocs.ensure_layer(name, color)` | Create the layer record when missing (with `color`), or rewrite its color. Idempotent. |
 | `ocs.freeze_layer(name, frozen)` | Set one layer record's freeze flag alone (missing layers stay absent). |
 | `ocs.thaw_layer(name)` | Un-freeze and un-lock one layer record alone. |

@@ -4698,7 +4698,7 @@ mod ocs {
     // Generic primitives over the existing HostApi calls: colors are read
     // from the in-process document snapshot, written through `update_entity`
     // (one entity) and `update_entities_transaction` (batches, one undo step
-    // per call). Local prototype of the draco cadastral cleanup's needs.
+    // per call).
 
     /// The codec color for a Python value: an int is an ACI index (1..=255),
     /// a three-number sequence is `(r, g, b)`, and the strings "ByLayer",
@@ -4830,9 +4830,12 @@ mod ocs {
     #[pyfunction]
     fn entities_on_layer(layer: String, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
         let handles = host_ctx::with_host(|host| {
-            host.document()
+            let document = host.document();
+            let top = top_level_blocks(document);
+            document
                 .entities()
-                .filter(|entity| entity.common().layer == layer)
+                .filter(|entity| top.contains(&entity.common().owner_handle))
+                .filter(|entity| entity.common().layer.eq_ignore_ascii_case(&layer))
                 .map(|entity| {
                     vm.new_pyobj(i64::try_from(entity.common().handle.value()).unwrap_or(0))
                 })
@@ -4859,6 +4862,7 @@ mod ocs {
         let entities = host_ctx::with_host(|host| -> PyResult<Vec<EntityType>> {
             use rustpython_vm::builtins::PyDictRef;
             let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+            let top = top_level_blocks(host.document());
             let mut entities = Vec::new();
             for update in updates {
                 let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
@@ -4870,7 +4874,18 @@ mod ocs {
                         "ocs.set_entity_layers: update for {handle} misses \"layer\""
                     )));
                 };
-                let Some(mut entity) = host.document().get_entity(Handle::new(handle)).cloned()
+                // A layer the drawing does not carry would leave the entity
+                // pointing at no LAYER record.
+                if host.document().layers.get(&layer).is_none() {
+                    return Err(vm.new_value_error(format!(
+                        "ocs.set_entity_layers: layer {layer:?} not found"
+                    )));
+                }
+                let Some(mut entity) = host
+                    .document()
+                    .get_entity(Handle::new(handle))
+                    .filter(|entity| top.contains(&entity.common().owner_handle))
+                    .cloned()
                 else {
                     return Err(vm.new_value_error(format!(
                         "ocs.set_entity_layers: top-level entity {handle} not found"
@@ -4920,7 +4935,12 @@ mod ocs {
     fn set_entity_color(handle: u64, color: PyObjectRef, vm: &VirtualMachine) -> PyResult<()> {
         let color = py_entity_color(color, vm)?;
         let changed = host_ctx::with_host(|host| {
-            let Some(mut entity) = host.document().get_entity(Handle::new(handle)).cloned() else {
+            let document = host.document();
+            let Some(mut entity) = document
+                .get_entity(Handle::new(handle))
+                .filter(|entity| top_level_blocks(document).contains(&entity.common().owner_handle))
+                .cloned()
+            else {
                 return false;
             };
             if matches!(&entity.common().color, existing if *existing == color) {
@@ -4956,6 +4976,7 @@ mod ocs {
         let entities = host_ctx::with_host(|host| -> PyResult<Vec<EntityType>> {
             use rustpython_vm::builtins::PyDictRef;
             let updates = pairs.try_into_value::<Vec<PyDictRef>>(vm)?;
+            let top = top_level_blocks(host.document());
             let mut entities = Vec::new();
             for update in updates {
                 let handle = update.get_item("handle", vm)?.try_into_value::<u64>(vm)?;
@@ -4971,7 +4992,11 @@ mod ocs {
                 // (writes invalidate the dispatch snapshot) plus one IPC
                 // frame — chunk size balances both against the 64 MiB IPC
                 // cap.
-                let Some(mut entity) = host.document().get_entity(Handle::new(handle)).cloned()
+                let Some(mut entity) = host
+                    .document()
+                    .get_entity(Handle::new(handle))
+                    .filter(|entity| top.contains(&entity.common().owner_handle))
+                    .cloned()
                 else {
                     return Err(vm.new_value_error(format!(
                         "ocs.set_entity_colors: top-level entity {handle} not found"
@@ -5003,13 +5028,16 @@ mod ocs {
         let color = py_entity_color(color, vm)?;
         host_ctx::with_host(|host| {
             let refused = format!("ocs.ensure_layer: rewriting {name} was refused");
+            host_ctx::ensure_undo_started(host);
             if host.document().layers.get(&name).is_none() {
-                host.add_layer(ocs_plugin_api::host::LayerConfig {
+                let created = host.add_layer(ocs_plugin_api::host::LayerConfig {
                     name,
                     color: Some(color),
                     ..Default::default()
                 });
-                Ok(())
+                created
+                    .map(|_| ())
+                    .ok_or_else(|| vm.new_value_error("ocs.ensure_layer: a layer needs a name".to_owned()))
             } else {
                 let changed = host.modify_layer(ocs_plugin_api::host::LayerConfig {
                     name,
@@ -5034,6 +5062,7 @@ mod ocs {
             if host.document().layers.get(&name).is_none() {
                 return Ok(());
             }
+            host_ctx::ensure_undo_started(host);
             let changed = host.modify_layer(ocs_plugin_api::host::LayerConfig {
                 name,
                 frozen: Some(frozen),
@@ -5052,11 +5081,11 @@ mod ocs {
     #[pyfunction]
     fn thaw_layer(name: String, vm: &VirtualMachine) -> PyResult<()> {
         host_ctx::with_host(|host| {
-            host.push_undo("thaw layer");
             let refused = format!("ocs.thaw_layer: unlocking {name} was refused");
             if host.document().layers.get(&name).is_none() {
                 return Ok(());
             }
+            host_ctx::ensure_undo_started(host);
             let changed = host.modify_layer(ocs_plugin_api::host::LayerConfig {
                 name,
                 frozen: Some(false),
@@ -6690,11 +6719,8 @@ mod tests {
 
     #[test]
     fn entity_color_batch_arguments_shape_check_first() {
-        // Color parsing happens inside the host context, so without one the
-        // NO_HOST error wins; the missing `color` key is caught by the
-        // argument shape of the batch entry first? Not so: parsing order is
-        // gate first — the malformed entry only reaches Python against a
-        // live host. The gate ordering is what the offline test pins.
+        // Batch entries are read inside the host context, so without a host
+        // the NO_HOST error comes first, even for a malformed entry.
         let empty_batch = eval(r#"ocs.set_entity_colors([], "label")"#);
         assert_eq!(empty_batch, Err(NO_HOST.to_string()));
         let malformed = eval(r#"ocs.set_entity_colors([{"handle": 7}], "label")"#);

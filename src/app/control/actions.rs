@@ -677,25 +677,42 @@ impl OpenCADStudio {
         if req.get("upside_down").is_some() {
             request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
         }
+        if let Some(shade) = req["shade"].as_str() {
+            request.shade = crate::io::plot::SHADE_PLOT_MODES
+                .iter()
+                .find(|mode| mode.eq_ignore_ascii_case(shade))
+                .ok_or_else(|| failure("invalid_value", format!("Unknown shade mode '{shade}'")))?
+                .to_string();
+        }
         for (key, field) in [
             ("transparency", 0),
             ("lineweights", 1),
             ("merge_lines", 2),
             ("stamp", 3),
+            ("non_scaling_stroke", 4),
+            ("scale_lineweights", 5),
+            ("paperspace_last", 6),
+            ("apply_plot_styles", 7),
         ] {
             if let Some(flag) = req[key].as_bool() {
                 match field {
                     0 => request.transparency = flag,
                     1 => request.lineweights = flag,
                     2 => request.merge_lines = flag,
-                    _ => request.stamp = flag,
+                    3 => request.stamp = flag,
+                    4 => request.non_scaling_stroke = flag,
+                    5 => request.scale_lw = flag,
+                    6 => request.paperspace_last = flag,
+                    _ => request.apply_plot_styles = flag,
                 }
             }
         }
         if let Some(table) = &loaded_style {
             self.active_plot_style = Some(table.clone());
             request.style_name = table.name.clone();
-            request.apply_plot_styles = true;
+            // Selecting a table enables it by default, but an explicit false
+            // still wins so callers can keep the table selected without using it.
+            request.apply_plot_styles = req["apply_plot_styles"].as_bool().unwrap_or(true);
             request.style_missing = false;
         }
         let area_explicit = req.get("area").is_some();
@@ -741,6 +758,9 @@ impl OpenCADStudio {
         let original_style = self.active_plot_style.clone();
         let original_camera = self.tabs[i].scene.camera.borrow().clone();
         let original_camera_generation = self.tabs[i].scene.camera_generation;
+        // A requested table is only a fallback when the request enables it.
+        // Otherwise `page.plot_style = None` would be undone at export time.
+        let export_style = loaded_style.as_ref().filter(|_| request.apply_plot_styles);
 
         let build = |app: &mut Self| -> Result<Vec<PdfPageInput>, String> {
             let mut pages = Vec::with_capacity(targets.len());
@@ -822,12 +842,28 @@ impl OpenCADStudio {
                     if req["stamp"].is_boolean() {
                         page_dialog.stamp = request.stamp;
                     }
+                    if req["non_scaling_stroke"].is_boolean() {
+                        page_dialog.non_scaling_stroke = request.non_scaling_stroke;
+                    }
+                    if req["scale_lineweights"].is_boolean() {
+                        page_dialog.scale_lw = request.scale_lw;
+                    }
+                    if req["paperspace_last"].is_boolean() {
+                        page_dialog.paperspace_last = request.paperspace_last;
+                    }
+                    if req["apply_plot_styles"].is_boolean() {
+                        page_dialog.apply_plot_styles = request.apply_plot_styles;
+                    }
+                    if req["shade"].is_string() {
+                        page_dialog.shade = request.shade.clone();
+                    }
                     // The requested table wins over the layout's own, which
                     // the stored page setup just loaded (or failed to find).
                     if let Some(table) = &loaded_style {
                         app.active_plot_style = Some(table.clone());
                         page_dialog.style_name = table.name.clone();
-                        page_dialog.apply_plot_styles = true;
+                        page_dialog.apply_plot_styles =
+                            req["apply_plot_styles"].as_bool().unwrap_or(true);
                         page_dialog.style_missing = false;
                         page_dialog.style_error = None;
                     }
@@ -903,13 +939,13 @@ impl OpenCADStudio {
                     crate::io::svg_export::export_svg_pages(
                         std::slice::from_ref(page),
                         std::path::Path::new(&file),
-                        loaded_style.as_ref(),
+                        export_style,
                     )
                 } else {
                     crate::io::pdf_export::export_pdf_pages(
                         std::slice::from_ref(page),
                         std::path::Path::new(&file),
-                        loaded_style.as_ref(),
+                        export_style,
                     )
                 };
                 result.map_err(|e| failure("plot_failed", e))?;
@@ -925,13 +961,13 @@ impl OpenCADStudio {
             crate::io::svg_export::export_svg_pages(
                 &pages,
                 std::path::Path::new(path),
-                loaded_style.as_ref(),
+                export_style,
             )
         } else {
             crate::io::pdf_export::export_pdf_pages(
                 &pages,
                 std::path::Path::new(path),
-                loaded_style.as_ref(),
+                export_style,
             )
         };
         result.map_err(|e| failure("plot_failed", e))?;

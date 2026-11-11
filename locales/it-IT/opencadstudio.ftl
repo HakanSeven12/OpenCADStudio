@@ -6448,6 +6448,7 @@ plot =
     .raster-dpi = DPI raster
     .vector-dpi = DPI vettoriale
     .text-as-outlines = Text as outlines
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (nessuna impostazione di pagina)
     .none = <nessuno>

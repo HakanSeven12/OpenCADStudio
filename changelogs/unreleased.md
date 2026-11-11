@@ -21,6 +21,7 @@
 * **`FILLET` in Any Plane:** Two lines that share a plane out of plan, such as a vertical one, are filleted in that plane, the arc lying in it.
 * **SVG Text as Outlines:** The Plot dialog's SVG output offers Text as outlines, drawing the positioned glyph strokes and fills as vector paths so the viewer needs no installed fonts. The preference defaults off and retains searchable SVG text when disabled.
 
+* **SVG Web-Map Strokes and Automation Options:** SVG Plot offers Non-scaling strokes for constant-width linework under downstream viewer transforms such as web-map layers; the preference defaults off and PDF output never sees it. Automation plot requests expose non-scaling strokes, scaled lineweights, shade mode, paperspace ordering, and explicit plot-style enable/disable.
 
 ### 🐛 Bug Fixes
 

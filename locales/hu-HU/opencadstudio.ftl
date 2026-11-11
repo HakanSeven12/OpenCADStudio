@@ -6432,6 +6432,7 @@ plot =
     .raster-dpi = Raszter DPI
     .vector-dpi = Vektor DPI
     .text-as-outlines = Text as outlines
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Megnyitás megjelenítőben, ha kész
     .no-page-setups = (nincs oldalbeállítás)
     .none = <nincs>

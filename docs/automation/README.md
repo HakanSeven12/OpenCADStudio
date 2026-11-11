@@ -320,13 +320,13 @@ The result reports `{"path":…, "entities":<count>}`. Referenced layer definiti
 
 ### `plot` — render to PDF or SVG
 
-Plots the active document without any dialog. The `path` extension selects PDF or SVG. `layout` selects `"Model"` (default), one layout name, or `"all"`. `area` is `"extents"` (default), `"display"`, `"limits"`, `"window"` (needs `window:[x0,y0,x1,y1]`), or `"layout"` (the laid-out sheet, layouts only). `paper` names a catalog sheet, `orientation` is `"Portrait"`/`"Landscape"`, sizing is `"fit":true` (default) or `"scale":"1:100"`, plus `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB path or discovered name) and the output toggles `transparency`, `lineweights`, `merge_lines`, `stamp`. For SVG, optional `"text_as_outlines":true` replaces font-dependent text elements with glyph paths; the default retains searchable text. PDF ignores this SVG-only option:
+Plots the active document without any dialog. The `path` extension selects PDF or SVG. `layout` selects `"Model"` (default), one layout name, or `"all"`. `area` is `"extents"` (default), `"display"`, `"limits"`, `"window"` (needs `window:[x0,y0,x1,y1]`), or `"layout"` (the laid-out sheet, layouts only). `paper` names a catalog sheet, `orientation` is `"Portrait"`/`"Landscape"`, and `shade` selects the shaded-viewport plot mode. Sizing is `"fit":true` (default) or `"scale":"1:100"`, plus `center`, `offset_x/offset_y`, `upside_down`. `plot_style` accepts a CTB path or discovered name; `apply_plot_styles` can enable/disable the selected stored table. Output controls are `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, and `stamp`. SVG additionally offers `non_scaling_stroke` — constant stroke widths under downstream SVG transforms, useful for web-map layers; it defaults `false` and does not change the CAD plot scale. For SVG, `"text_as_outlines":true` replaces font-dependent text elements with glyph paths; the default retains searchable text. PDF ignores both SVG-only options:
 
 ```json
 {"protocol":1,"op":"plot","request_id":"plot-1","document_id":1,"path":"C:/out/pages.pdf","layout":"all","paper":"ISO_A4_(210.00_x_297.00_MM)","fit":true,"center":true}
 ```
 
-Explicitly supplied fields override a layout's stored page setup; unspecified fields keep it. The result reports `{"path":…, "pages":<n>, "page_sizes":[[w,h],…]}` in millimetres.
+Explicitly supplied fields override a layout's stored page setup; unspecified fields keep it. When `plot_style` is supplied, styling defaults to enabled; an explicit `apply_plot_styles:false` disables that table as well. The result reports `{"path":…, "pages":<n>, "page_sizes":[[w,h],…]}` in millimetres.
 
 ### `embed_image` — attach a picture
 

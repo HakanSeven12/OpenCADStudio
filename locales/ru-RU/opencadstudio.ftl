@@ -6450,6 +6450,7 @@ plot =
     .raster-dpi = DPI растра
     .vector-dpi = DPI вектора
     .text-as-outlines = Text as outlines
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (без настройки страниц)
     .none = <нет>

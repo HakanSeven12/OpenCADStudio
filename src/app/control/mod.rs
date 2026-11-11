@@ -5886,6 +5886,158 @@ mod tests {
         let _ = std::fs::remove_file(&plain);
     }
 
+    #[test]
+    fn plot_op_applies_svg_stroke_and_explicit_plot_overrides() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}));
+        let mut widths = Vec::new();
+        for scale_lineweights in [false, true] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-stroke-options-{}-{}.svg",
+                std::process::id(),
+                scale_lineweights
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "path":svg.to_string_lossy(),
+                    "scale":"10:1",
+                    "lineweights":true,
+                    "scale_lineweights":scale_lineweights,
+                    "non_scaling_stroke":true,
+                    "shade":"2d wireframe",
+                    "paperspace_last":true,
+                    "apply_plot_styles":false
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let path = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .expect("stroked line");
+            assert_eq!(path.attribute("vector-effect"), Some("non-scaling-stroke"));
+            widths.push(
+                path.attribute("stroke-width")
+                    .expect("stroke width")
+                    .parse::<f64>()
+                    .expect("numeric stroke width"),
+            );
+            let _ = std::fs::remove_file(&svg);
+        }
+        assert!(
+            (widths[1] / widths[0] - 10.0).abs() < 0.03,
+            "scale_lineweights must apply the explicit 10:1 scale: {widths:?}"
+        );
+
+        let rejected = request(
+            &mut app,
+            json!({"op":"plot","path":"/tmp/invalid-shade.svg","shade":"not-a-mode"}),
+        );
+        assert_eq!(rejected["status"], "failed");
+        assert_eq!(rejected["code"], "invalid_value");
+    }
+
+    #[test]
+    fn plot_op_explicitly_disabled_plot_style_wins_over_requested_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let mut line = document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        line.common.color = document::types::Color::Index(1);
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+
+        for (enabled, expected) in [(false, "#ff0000"), (true, "#000000")] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-plot-style-enabled-{}-{}.svg",
+                std::process::id(),
+                enabled
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "path":svg.to_string_lossy(),
+                    "plot_style":"monochrome.ctb",
+                    "apply_plot_styles":enabled
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let stroke = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .and_then(|node| node.attribute("stroke"))
+                .expect("stroked line");
+            assert_eq!(stroke, expected, "apply_plot_styles={enabled}");
+            let _ = std::fs::remove_file(&svg);
+        }
+
+        // Repeat on a named layout with a stored enabled table. The explicit
+        // false must survive both setup loading and the export-level fallback.
+        let scene = &mut app.tabs[app.active_tab].scene;
+        scene.set_current_layout("Layout1".into());
+        scene.load_current_layout_state();
+        let mut paper_line = document::entities::Line::from_points(
+            document::types::Vector3::new(10.0, 10.0, 0.0),
+            document::types::Vector3::new(100.0, 100.0, 0.0),
+        );
+        paper_line.common.color = document::types::Color::Index(1);
+        scene.add_entity(document::EntityType::Line(paper_line));
+        let mut setup = scene.plot_settings_for("Layout1").expect("Layout1 setup");
+        setup.current_style_sheet = "monochrome.ctb".into();
+        setup.flags.plot_plot_styles = true;
+        assert!(scene.set_layout_plot_settings("Layout1", &setup));
+        for include_requested_table in [false, true] {
+            let svg = std::env::temp_dir().join(format!(
+                "ocs-layout-style-disabled-{}-{}.svg",
+                std::process::id(),
+                include_requested_table
+            ));
+            let response = request(
+                &mut app,
+                json!({
+                    "op":"plot",
+                    "layout":"Layout1",
+                    "path":svg.to_string_lossy(),
+                    "plot_style":if include_requested_table {
+                        json!("monochrome.ctb")
+                    } else {
+                        Value::Null
+                    },
+                    "apply_plot_styles":false
+                }),
+            );
+            assert_eq!(response["status"], "completed", "{response}");
+            let svg_text = std::fs::read_to_string(&svg).expect("SVG written");
+            let document = roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+            let stroke = document
+                .descendants()
+                .find(|node| {
+                    node.tag_name().name() == "path" && node.attribute("stroke") != Some("none")
+                })
+                .and_then(|node| node.attribute("stroke"))
+                .expect("stroked paper line");
+            assert_eq!(
+                stroke, "#ff0000",
+                "requested table={include_requested_table}"
+            );
+            let _ = std::fs::remove_file(&svg);
+        }
+    }
+
     /// An unknown `entities_transform` action must come back as a clean
     /// validation error. Pre-fix it reached
     /// `unreachable!("validated by transform()")` (entities.rs:476) and

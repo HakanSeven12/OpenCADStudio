@@ -6437,6 +6437,7 @@ plot =
     .raster-dpi = ラスター DPI
     .vector-dpi = ベクトル DPI
     .text-as-outlines = Text as outlines
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = （ページ設定なし）
     .none = <なし>

@@ -26,7 +26,7 @@ web: The web app has no system printers; it always saves the plot as a PDF file,
 | **Plot options** | **Plot in background**, **Object lineweights**, **Plot transparency**, **Plot with plot styles**, **Paper space last**, **Hide paperspace objects**, **Plot stamp**, **Plot upside-down**, **Merge overlapping lines**, and **Save changes to layout**. |
 | **Copies** | How many copies to print. |
 
-For PDF and SVG output, you also choose how the file is named, which folder it goes to, and whether to open it when done. SVG output additionally offers **Text as outlines** under **Plot options**: off by default to retain searchable text, or on to draw font-independent glyph paths.
+For PDF and SVG output, you also choose how the file is named, which folder it goes to, and whether to open it when done. SVG output additionally offers **Non-scaling strokes** under **Plot options**: off by default, or on to keep stroke widths constant under downstream SVG transforms, which is useful for web-map layers and does not change the CAD plot scale. SVG also offers **Text as outlines**: off by default to retain searchable text, or on to draw font-independent glyph paths. PDF never sees either flag.
 
 ## Command-line form
 `-PLOT` asks for the plot settings on the command line instead of opening the dialog, so it suits scripts:

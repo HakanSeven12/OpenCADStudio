@@ -6456,6 +6456,7 @@ plot =
     .raster-dpi = DPI raster
     .vector-dpi = DPI vector
     .text-as-outlines = Text as outlines
+    .non-scaling-strokes = Non-scaling strokes
     .open-when-done = Open in viewer when done
     .no-page-setups = (không có thiết lập trang)
     .none = <không có>

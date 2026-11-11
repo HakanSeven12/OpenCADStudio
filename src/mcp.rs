@@ -53,7 +53,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// dialog is driveable from a script: `wblock_dialog` fields cover source,
 /// block, base point, unit, object mode and path, and `dialog_ok` applies it.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "a4b433ca8aa02513a9e6c91a4b2df0f53495ebb7f942398b57e59765363073b6";
+const TOOL_SCHEMA_DIGEST: &str = "6796bab0c337f661abc8c35017b0fcfd19b6b5cfad2d408a7a816592af2cd236";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

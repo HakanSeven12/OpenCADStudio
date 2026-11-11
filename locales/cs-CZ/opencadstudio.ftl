@@ -6452,6 +6452,7 @@ plot =
     .vector-dpi = DPI vektoru
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Atributy kreslicích vrstev
     .open-when-done = Po dokončení otevřít v prohlížeči
     .no-page-setups = (žádná nastavení stránky)
     .none = <žádné>

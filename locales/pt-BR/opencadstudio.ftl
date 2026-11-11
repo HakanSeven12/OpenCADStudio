@@ -6450,6 +6450,7 @@ plot =
     .vector-dpi = DPI vetorial
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Atributos de dados de camadas
     .open-when-done = Open in viewer when done
     .no-page-setups = (sem configurações de página)
     .none = <nenhum>

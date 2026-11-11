@@ -21,8 +21,8 @@ use std::path::Path;
 use crate::io::pdf_export::adapt_to_paper;
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::WireModel;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 
 /// Screen pixels (96 dpi) to millimetres.
 const PX_TO_MM: f64 = 25.4 / 96.0;
@@ -289,6 +289,14 @@ fn emit_page_content(
     let (ox, oy) = (page.offset_x, page.offset_y);
     let options = page.options;
 
+    // The drawing layer of each plotted entity, for the `data-layer` groups
+    // the map client toggles. Same resolution the PDF export uses.
+    let layer_of = |name: &str| -> Option<&str> {
+        crate::scene::Scene::handle_from_wire_name(name)
+            .and_then(|handle| content.entity_layers.get(&handle))
+            .map(String::as_str)
+    };
+
     let (first_wires, second_wires) = content
         .wires
         .split_at(content.group_splits.wires.min(content.wires.len()));
@@ -342,15 +350,32 @@ fn emit_page_content(
                 .then_with(|| a.2.cmp(&b.2))
         });
         for (_, _, _, item) in items {
+            let layer = if options.layer_attributes {
+                match &item {
+                    DrawItem::WireFill(w) | DrawItem::Wire(w) | DrawItem::Text(w) => {
+                        layer_of(&w.wire.name)
+                    }
+                    DrawItem::Hatch(h) => layer_of(&h.name),
+                    DrawItem::Image(_) => None,
+                }
+            } else {
+                None
+            };
+
+            // Emit into a scratch string so the whole item can be wrapped in
+            // its drawing layer: the map client toggles `data-layer` groups.
+            let mut rendered = String::new();
             match item {
                 DrawItem::WireFill(wire) => {
-                    emit_wire_fills(out, &wire.wire, ox, oy, plot_style, options, map)
+                    emit_wire_fills(&mut rendered, &wire.wire, ox, oy, plot_style, options, map);
                 }
-                DrawItem::Hatch(hatch) => emit_hatch(out, hatch, ox, oy, plot_style, options, map),
+                DrawItem::Hatch(hatch) => {
+                    emit_hatch(&mut rendered, hatch, ox, oy, plot_style, options, map)
+                }
                 DrawItem::Text(wire) => {
                     let outlined = glyphs.is_some_and(|glyphs| {
                         emit_text_outlines(
-                            out,
+                            &mut rendered,
                             &wire.wire,
                             OutlineContext {
                                 ox,
@@ -363,20 +388,46 @@ fn emit_page_content(
                         )
                     });
                     if !outlined {
-                        emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map);
+                        emit_searchable_text(
+                            &mut rendered,
+                            &wire.wire,
+                            ox,
+                            oy,
+                            plot_style,
+                            options,
+                            map,
+                        );
                     }
                 }
                 DrawItem::Wire(wire) => {
-                    emit_wire(out, &wire.wire, ox, oy, plot_style, options, map)
+                    emit_wire(&mut rendered, &wire.wire, ox, oy, plot_style, options, map)
                 }
-                DrawItem::Image(image) => emit_image(out, image, ox, oy, options, map)?,
+                DrawItem::Image(image) => emit_image(&mut rendered, image, ox, oy, options, map)?,
+            };
+
+            match layer {
+                Some(layer) => {
+                    out.push_str(&format!("<g data-layer=\"{}\">\n", xml_attr(layer)));
+                    out.push_str(&rendered);
+                    out.push_str("</g>\n");
+                }
+                None => out.push_str(&rendered),
             }
         }
     }
     Ok(())
 }
 
-// ── Wires ──────────────────────────────────────────────────────────────────
+// ── Wires ────────────────────────────────────────────────────────────────────
+
+/// Escapes a value for use inside an XML attribute (layer names are free-form
+/// drawing text).
+fn xml_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('"', "&quot;")
+}
 
 #[allow(clippy::too_many_arguments)]
 fn emit_wire(
@@ -1329,6 +1380,7 @@ fn xml_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::plot::PlotContent;
 
     fn page_with(content: crate::io::plot::PlotContent, w: f64, h: f64) -> PlotPage {
         PlotPage {
@@ -1367,6 +1419,77 @@ mod tests {
         };
         assert_eq!(map.apply(10.0, 0.0), (10.0, 297.0));
         assert_eq!(map.apply(0.0, 297.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn wires_land_in_data_layer_groups_when_the_option_is_on() {
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire: WireModel::solid(
+                    "126".to_string(),
+                    vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.5,
+            }]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+                "Parcels".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        // Default: no layer groups, output unchanged.
+        let mut page = page_with(Default::default(), 210.0, 297.0);
+        page.content = content;
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            !svg.contains("data-layer"),
+            "default output must carry no layer markup: {svg}"
+        );
+
+        // Opt-in: every drawn item sits in its drawing-layer group.
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"Parcels\">"),
+            "the wire must sit in its layer group: {svg}"
+        );
+    }
+
+    #[test]
+    fn data_layer_groups_escape_the_layer_name() {
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire: WireModel::solid(
+                    "127".to_string(),
+                    vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.5,
+            }]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("127").expect("handle parses"),
+                "a\"b<&c".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let mut page = page_with(Default::default(), 210.0, 297.0);
+        page.content = content;
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"a&quot;b&lt;&amp;c\">"),
+            "attribute escaping: {svg}"
+        );
     }
 
     #[test]

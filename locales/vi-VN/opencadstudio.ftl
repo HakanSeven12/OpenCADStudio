@@ -6457,6 +6457,7 @@ plot =
     .vector-dpi = DPI vector
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Thuộc tính dữ liệu lớp
     .open-when-done = Open in viewer when done
     .no-page-setups = (không có thiết lập trang)
     .none = <không có>

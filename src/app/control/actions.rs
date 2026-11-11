@@ -674,6 +674,9 @@ impl OpenCADStudio {
         if let Some(outlines) = req["text_as_outlines"].as_bool() {
             request.text_as_outlines = outlines;
         }
+        if let Some(layer_attrs) = req["layer_attributes"].as_bool() {
+            request.layer_attributes = layer_attrs;
+        }
         if req.get("upside_down").is_some() {
             request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
         }
@@ -844,6 +847,9 @@ impl OpenCADStudio {
                     }
                     if req["non_scaling_stroke"].is_boolean() {
                         page_dialog.non_scaling_stroke = request.non_scaling_stroke;
+                    }
+                    if req["layer_attributes"].is_boolean() {
+                        page_dialog.layer_attributes = request.layer_attributes;
                     }
                     if req["scale_lineweights"].is_boolean() {
                         page_dialog.scale_lw = request.scale_lw;
@@ -2870,20 +2876,30 @@ impl OpenCADStudio {
             // "common=0|1", "add", "delete", "ok" or "cancel".
             "object_scale_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::AnnoObjectScale) {
-                    return Err(failure("no_dialog", "The Annotation Object Scale window is not open"));
+                    return Err(failure(
+                        "no_dialog",
+                        "The Annotation Object Scale window is not open",
+                    ));
                 }
                 let spec = string(req, "value")?;
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 self.ctrl_down = key == "ctrl";
                 self.shift_down = key == "shift";
                 match key {
-                    "select" | "ctrl" | "shift" => Message::AnnoObjectScaleSelect(value.to_string()),
+                    "select" | "ctrl" | "shift" => {
+                        Message::AnnoObjectScaleSelect(value.to_string())
+                    }
                     "common" => Message::AnnoObjectScaleCommon(value == "1"),
                     "add" => Message::AnnoObjectScaleAdd,
                     "delete" => Message::AnnoObjectScaleDelete,
                     "ok" => Message::AnnoObjectScaleOk,
                     "cancel" => Message::CloseModal,
-                    _ => return Err(failure("invalid_value", "Unknown Annotation Object Scale field")),
+                    _ => {
+                        return Err(failure(
+                            "invalid_value",
+                            "Unknown Annotation Object Scale field",
+                        ))
+                    }
                 }
             }
             // The scale list window, one field per call: "select=<scale>",

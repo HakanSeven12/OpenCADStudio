@@ -6438,6 +6438,7 @@ plot =
     .vector-dpi = वेक्टर DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = लेयर डेटा विशेषताएँ
     .open-when-done = Open in viewer when done
     .no-page-setups = (कोई पृष्ठ सेटअप नहीं)
     .none = <कोई नहीं>

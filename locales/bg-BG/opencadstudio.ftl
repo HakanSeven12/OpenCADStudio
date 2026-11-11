@@ -6450,6 +6450,7 @@ plot =
     .vector-dpi = Векторно DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Атрибути на слоя
     .open-when-done = Open in viewer when done
     .no-page-setups = (няма настройки на страница)
     .none = <няма>

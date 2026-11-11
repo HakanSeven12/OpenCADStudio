@@ -6211,4 +6211,51 @@ mod tests {
             "a declined form drops the placement"
         );
     }
+
+    /// `area:"window"` on a named layout. The request's rect is explicit and
+    /// must survive the stored page setup load: a layout's own (older or lost)
+    /// window may not swallow a field request.
+    #[test]
+    fn a_window_plot_reaches_a_named_layout() {
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        assert_eq!(
+            request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,100"}))["status"],
+            "completed"
+        );
+        let _ = app.update(Message::LayoutSwitch("Layout1".into()));
+        let _ = app.run_command_line("MSPACE");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        let _ = app.run_command_line("PSPACE");
+
+        let svg =
+            std::env::temp_dir().join(format!("ocs-layout-window-{}.svg", std::process::id()));
+        let response = request(
+            &mut app,
+            json!({
+                "op":"plot",
+                "layout":"Layout1",
+                "path":svg.to_string_lossy(),
+                "area":"window",
+                "window":[5,5,290,200]
+            }),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        assert_eq!(response["result"]["page_sizes"], json!([[297.0, 210.0]]));
+        let svg_text = std::fs::read_to_string(&svg).expect("window SVG");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        let clip = svg_text
+            .lines()
+            .find(|line| line.contains("clipPath") || line.contains("clip-path"))
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| panic!("clip from the requested window: {svg_text}"));
+        assert!(clip.contains("width=\"285\""), "{clip}");
+        assert!(clip.contains("height=\"195\""), "{clip}");
+        roxmltree::Document::parse(&svg_text).expect("well-formed SVG");
+        assert!(
+            svg_text.lines().any(|line| line.starts_with("<path")),
+            "the viewport reaches the model content: {svg_text}"
+        );
+        let _ = std::fs::remove_file(&svg);
+    }
 }

@@ -17,6 +17,8 @@ use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Tas
 use iced_aw::ContextMenu;
 
 #[cfg(test)]
+mod hatch_panel_widget_tests;
+#[cfg(test)]
 mod select_similar_clipboard_tests;
 #[cfg(test)]
 mod table_inplace_widget_tests;

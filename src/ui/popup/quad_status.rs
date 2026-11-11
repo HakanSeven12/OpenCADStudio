@@ -31,22 +31,22 @@ pub struct QuadStatusFlags {
 /// options. Every row keeps the menu open (`Entry::stay`), like the snap
 /// type list it mirrors.
 pub fn menu_entries<'a>(flags: QuadStatusFlags) -> Vec<Entry<'a>> {
-    let master = quad_row("Quad cursor menu", flags.on, |on| {
+    let master = quad_row("Quad Cursor Menu", flags.on, |on| {
         Message::QuadOption(crate::QuadOptionMsg::Quad(on))
     });
-    let on_hover = quad_row("Offer the quad while hovering", flags.on_hover, |on| {
+    let on_hover = quad_row("Hover an object: offer its commands", flags.on_hover, |on| {
         Message::QuadOption(crate::QuadOptionMsg::OnHover(on))
     });
-    let on_select = quad_row("Offer the quad for a selection", flags.on_select, |on| {
+    let on_select = quad_row("A selection offers its shared commands", flags.on_select, |on| {
         Message::QuadOption(crate::QuadOptionMsg::OnSelect(on))
     });
     let on_right_click = quad_row(
-        "Right-click in the void opens it",
+        "Right-click in the void: creation commands",
         flags.on_right_click,
         |on| Message::QuadOption(crate::QuadOptionMsg::OnRightClick(on)),
     );
     let suppress = quad_row(
-        "Suppress the hover quad while selected",
+        "Suppress the hover quad while a selection exists",
         flags.suppress_hover_when_selection,
         |on| Message::QuadOption(crate::QuadOptionMsg::SuppressHoverWhenSelection(on)),
     );

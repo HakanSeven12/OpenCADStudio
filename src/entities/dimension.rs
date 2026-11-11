@@ -7413,7 +7413,12 @@ fn dimension_text_parts(
         }
         return Some((user_text.replace("<>", &primary), tolerance_suffix));
     }
-    if !base.text.trim().is_empty() {
+    // The stored text the same way: empty is the measurement, blank (" ")
+    // hides it.
+    if !base.text.is_empty() {
+        if base.text.trim().is_empty() {
+            return None;
+        }
         return Some((base.text.replace("<>", &primary), tolerance_suffix));
     }
     Some((primary, tolerance_suffix))

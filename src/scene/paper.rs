@@ -275,7 +275,7 @@ impl Scene {
                     && self.category_cache_valid(
                         cache.epoch,
                         super::CACHE_CATEGORY_IMAGE,
-                        |handle| self.images.contains_key(&handle),
+                        |handle| self.is_image_entity(handle),
                     )
                 {
                     Some((

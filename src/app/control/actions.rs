@@ -1241,6 +1241,94 @@ impl OpenCADStudio {
         Ok(Task::batch(tasks))
     }
 
+    pub(super) fn panel_button_action(
+        controls: &[ocs_plugin_api::dialog::DialogControl],
+        control_id: &str,
+    ) -> Option<String> {
+        for control in controls {
+            match control {
+                ocs_plugin_api::dialog::DialogControl::Button { id, action, .. }
+                    if id == control_id =>
+                {
+                    return action.clone();
+                }
+                ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Fields { controls, .. } => {
+                    if let Some(action) = Self::panel_button_action(controls, control_id) {
+                        return Some(action);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Edit a native panel widget only. This does not touch document records,
+    /// entities, edit_revision or undo state; the normal PanelAction remains
+    /// a notification and never acquires HostApi.
+    pub(super) fn control_panel_input(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        if !self.plugin_panels.contains_key(panel_id) {
+            return Err(failure("panel_not_found", "The requested panel is not registered"));
+        }
+        let text = if let Some(text) = req["text"].as_str() {
+            text.to_string()
+        } else if let Some(value) = req["value"].as_f64().filter(|value| value.is_finite()) {
+            value.to_string()
+        } else {
+            return Err(failure(
+                "invalid_request",
+                "Supply exact text or a finite numeric value",
+            ));
+        };
+        Ok(self.update(Message::PluginPanelTextChange(
+            panel_id.to_string(),
+            control_id.to_string(),
+            text,
+        )))
+    }
+
+    /// Activate the declared action of a native panel button through the same
+    /// Message used by the actual widget. Only that declared command runs.
+    pub(super) fn control_panel_button(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        let panel = self
+            .plugin_panels
+            .get(panel_id)
+            .ok_or_else(|| failure("panel_not_found", "The requested panel is not registered"))?;
+        let action = if control_id == "reset" {
+            "reset".to_string()
+        } else {
+            Self::panel_button_action(&panel.def.controls, control_id).ok_or_else(|| {
+                failure(
+                    "panel_action_not_found",
+                    "The requested panel button has no declared action",
+                )
+            })?
+        };
+        Ok(self.update(Message::PluginPanelButtonClick(
+            panel_id.to_string(),
+            control_id.to_string(),
+            Some(action),
+        )))
+    }
+
     /// Replay pointer events on the drawing canvas in order, as the mouse
     /// sends them: moves (canvas pixels, or a world point projected through
     /// the editing camera), button presses and releases, and wheel steps.

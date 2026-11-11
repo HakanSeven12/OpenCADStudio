@@ -4119,6 +4119,21 @@ impl Scene {
     /// pre-erase category mask stored in the journal. Thus deleting a LINE no
     /// longer rebuilds every hatch/image/mesh/text cache merely because its type
     /// became unknowable after removal.
+    /// Whether `handle` draws as an image. A modified image whose model was
+    /// dropped (an underlay turned off) is still one: the cached image list
+    /// that holds it must be rebuilt (#2839).
+    pub(super) fn is_image_entity(&self, handle: Handle) -> bool {
+        self.images.contains_key(&handle)
+            || matches!(
+                self.document.get_entity(handle),
+                Some(
+                    EntityType::RasterImage(_)
+                        | EntityType::Ole2Frame(_)
+                        | EntityType::Underlay(_)
+                )
+            )
+    }
+
     fn category_cache_valid(
         &self,
         cached_epoch: u64,
@@ -10738,7 +10753,7 @@ impl Scene {
                         if self.category_cache_valid(
                             *cached_epoch,
                             CACHE_CATEGORY_IMAGE,
-                            |h| self.images.contains_key(&h),
+                            |h| self.is_image_entity(h),
                         ) =>
                     {
                         Some(Arc::clone(arc))

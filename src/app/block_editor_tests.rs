@@ -4789,7 +4789,7 @@ fn a_linear_asks_for_its_grip_count_after_the_label() {
     feed(&mut app, "5,2");
     assert_eq!(
         prompt(&app),
-        "BPARAMETER Linear  Enter number of grips [0/1] <1>:",
+        "BPARAMETER Linear  Enter number of grips [0/1/2] <2>:",
         "the label pick is followed by the grip count"
     );
     assert!(
@@ -4797,35 +4797,56 @@ fn a_linear_asks_for_its_grip_count_after_the_label() {
         "the parameter waits for the grip count"
     );
     let before = app.tabs[i].scene.document.clone();
-    for invalid in ["2", "-1", "four"] {
+    for unlisted in ["3", "-1", "9"] {
         app.command_line.last_error = None;
-        feed(&mut app, invalid);
-        assert_eq!(app.tabs[i].scene.document, before, "{invalid}");
+        feed(&mut app, unlisted);
+        assert_eq!(app.tabs[i].scene.document, before, "{unlisted}");
         assert_eq!(
-            app.command_line.last_error.as_deref(),
-            Some("Enter the number of grips: 0 or 1."),
-            "{invalid}"
+            app.command_line.last_error, None,
+            "{unlisted} is a count the list does not offer, so the question repeats without a message"
         );
-        assert!(app.tabs[i].active_cmd.is_some(), "{invalid}");
+        assert!(app.tabs[i].active_cmd.is_some(), "{unlisted}");
     }
+    app.command_line.last_error = None;
+    feed(&mut app, "four");
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some("Requires an integer value."),
+        "words are no count at all"
+    );
+    assert!(app.tabs[i].active_cmd.is_some());
     feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
     let first = placed(&app)[0];
     assert_eq!(
         config::count(&app.tabs[i].scene.document, definition, first),
-        Some(1),
-        "Enter keeps the one grip a new linear starts with"
+        Some(2),
+        "Enter takes the two grips the prompt offers by default"
     );
 
     let _ = app.dispatch_command("BPARAMETER LINEAR");
     feed(&mut app, "20,0");
     feed(&mut app, "30,0");
     feed(&mut app, "25,2");
-    feed(&mut app, "0");
+    feed(&mut app, "1");
     assert!(app.tabs[i].active_cmd.is_none());
     let second = placed(&app)[1];
     assert_eq!(
         config::count(&app.tabs[i].scene.document, definition, second),
+        Some(1),
+        "one grip is the middle of the list"
+    );
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "40,0");
+    feed(&mut app, "50,0");
+    feed(&mut app, "45,2");
+    feed(&mut app, "0");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let third = placed(&app)[2];
+    assert_eq!(
+        config::count(&app.tabs[i].scene.document, definition, third),
         Some(0),
         "zero removes the linear's grip"
     );
@@ -8599,7 +8620,7 @@ fn block_grip_cycling_dialog_is_staged_undoable_and_rejects_stale_grips() {
     assert!(app.block_cycle_order.as_ref().unwrap().rows.is_empty());
     assert_eq!(app.block_cycle_order.as_ref().unwrap().selected, None);
     let _ = app.update(Message::CloseModal);
-    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2");
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2 1");
     let _ = app.run_command_line("BPARAMETER POINT 3,4 6,6");
     let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
     let baseline = app.tabs[i].scene.document.clone();
@@ -8690,7 +8711,7 @@ fn block_grip_cycling_ctrl_edges_use_saved_order_during_classic_insertion() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
     let i = app.active_tab;
-    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2");
+    let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2 1");
     let _ = app.run_command_line("BPARAMETER POINT 3,4 6,6");
     let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
     let grips = crate::scene::block_grips::grips(&app.tabs[i].scene.document, definition).unwrap();
@@ -10270,7 +10291,7 @@ fn block_grip_locations_edit_undo_and_drag_in_transformed_references_and_test_bl
         let (mut app, reference) = fixture();
         begin(&mut app, reference);
         let source = app.active_tab;
-        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2");
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,2 1");
         let definition = app.tabs[source]
             .active_block_edit_session()
             .unwrap()

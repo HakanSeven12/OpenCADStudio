@@ -163,7 +163,13 @@
 /// plugin-rendered SVG image, e.g. a chart), appended to the enum. A v18 host
 /// cannot decode them, so a plugin that sends them declares v19; v18 and
 /// older plugins remain supported unchanged.
-pub const API_VERSION: u32 = 19;
+/// v20 adds `PluginClassInstance::selectable_custom`: flagged display entities
+/// stay selectable for plugin custom grips/panels, expose a class-only label,
+/// and refuse native geometry editing. Unflagged instances keep the legacy
+/// reference-only staging behavior.
+/// v21 adds `PluginGrip::xy_plane`: every custom-grip event is constrained to
+/// the grip's original world-XY plane. The default preserves legacy behavior.
+pub const API_VERSION: u32 = 21;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

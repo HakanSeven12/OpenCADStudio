@@ -3837,6 +3837,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             grip.targets.iter().any(|target| {
                 self.tabs[i].scene.is_layer_locked(target.handle)
                     || self.tabs[i].scene.is_reference_only(target.handle)
+                    || self.tabs[i].scene.native_edit_disabled(target.handle)
             })
         });
         if locked_active_grip {
@@ -3870,7 +3871,8 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             let selected = self.tabs[i].scene.selected_entities();
             let single_handle = (selected.len() == 1
                 && !self.tabs[i].scene.is_layer_locked(selected[0].0)
-                && !self.tabs[i].scene.is_reference_only(selected[0].0))
+                && !self.tabs[i].scene.is_reference_only(selected[0].0)
+                && !self.tabs[i].scene.native_edit_disabled(selected[0].0))
             .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
@@ -3899,7 +3901,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             for (members, min, max) in &whole_groups {
                 let centre = (*min + *max) * 0.5;
                 for &member in members {
-                    if self.tabs[i].scene.is_layer_locked(member) {
+                    if self.tabs[i].scene.is_layer_locked(member)
+                        || self.tabs[i].scene.native_edit_disabled(member)
+                    {
                         continue;
                     }
                     handles.push(member);
@@ -3921,6 +3925,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             // A table whose cells are picked shows no table grips.
             let picked_table = self.tabs[i].scene.table_cells_handle();
             for (handle, entity) in selected {
+                if self.tabs[i].scene.native_edit_disabled(handle) {
+                    continue;
+                }
                 if group_members.contains(&handle) {
                     continue;
                 }
@@ -4084,6 +4091,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         };
         if self.tabs[i].scene.is_layer_locked(handle)
             || self.tabs[i].scene.is_reference_only(handle)
+            || self.tabs[i].scene.native_edit_disabled(handle)
         {
             return Ok(Vec::new());
         }
@@ -4218,7 +4226,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     pub(super) fn property_target_handles(&self, i: usize) -> Vec<Handle> {
         // The node graph edits its own node's entity through the panel's
         // handlers, independent of the drawing selection.
-        self.resolve_property_targets(i, true, |scene, handle| !scene.is_layer_locked(handle))
+        self.resolve_property_targets(i, true, |scene, handle| {
+            !scene.is_layer_locked(handle) && !scene.native_edit_disabled(handle)
+        })
     }
 
     /// The point clouds the Locked row applies to: locked ones too, unless

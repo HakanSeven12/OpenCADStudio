@@ -12533,6 +12533,14 @@ impl Scene {
         self.reference_only.is_marked(handle) && self.document.get_entity(handle).is_some()
     }
 
+    /// API v18 selectable-custom owner-stamp flag. Unlike reference-only,
+    /// this never affects hit-testing or ordinary selection.
+    pub fn native_edit_disabled(&self, handle: Handle) -> bool {
+        self.document
+            .get_entity(handle)
+            .is_some_and(crate::plugin::entity_labels::native_edit_disabled)
+    }
+
     /// Insert or remove `handle` in the scene-scoped designation set,
     /// returning whether membership changed. Pure storage: no epoch bump, no
     /// undo bookkeeping — those belong to the callers (the plugin host API

@@ -742,7 +742,10 @@ impl Scene {
         let mut changed = Vec::with_capacity(updates.len());
         let mut block_change = false;
         for entity in updates {
-            if !allow_reference_only && self.is_reference_only(entity.common().handle) {
+            if !allow_reference_only
+                && (self.is_reference_only(entity.common().handle)
+                    || self.native_edit_disabled(entity.common().handle))
+            {
                 continue;
             }
             if self.update_entity_impl(entity, &mut changed, &mut block_change) {

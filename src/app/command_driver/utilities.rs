@@ -32,6 +32,13 @@ fn dynamic_ucs_applies(command: &str) -> bool {
 
 impl OpenCADStudio {
     pub(in crate::app) fn reject_locked_edit(&mut self, i: usize, handle: Handle) -> bool {
+        if self.tabs[i].scene.native_edit_disabled(handle) {
+            self.command_line.push_info(
+                crate::t!("Object is selectable custom geometry — use its plugin custom grips or panel to edit it.")
+                    .as_ref(),
+            );
+            return true;
+        }
         let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) else {
             return false;
         };

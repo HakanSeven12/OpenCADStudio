@@ -299,6 +299,7 @@ mod tests {
             grip_id: 42,
             anchor: Some(document::Handle::from(0x8A)),
             point: [12.5, -3.25, 0.0],
+            xy_plane: false,
             axis: Some([
                 std::f64::consts::FRAC_1_SQRT_2,
                 std::f64::consts::FRAC_1_SQRT_2,
@@ -433,6 +434,7 @@ mod tests {
             grip_id: 1,
             anchor: None,
             point: [0.0; 3],
+            xy_plane: false,
             axis: None,
             shape: Default::default(),
         };

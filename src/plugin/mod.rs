@@ -81,7 +81,7 @@ pub(crate) fn guard<T>(what: &str, f: impl FnOnce() -> T) -> Option<T> {
             // The plugin hooks run deep inside the update / render loop where
             // the app's command line isn't reachable, so queue the error and
             // let the next update tick drain it into the command line. (#145)
-            errors().lock().unwrap().push(line);
+            errors().lock().unwrap_or_else(|e| e.into_inner()).push(line);
             None
         }
     }
@@ -98,7 +98,7 @@ fn errors() -> &'static std::sync::Mutex<Vec<String>> {
 /// Take and return every queued plugin-guard error since the last drain.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn drain_errors() -> Vec<String> {
-    std::mem::take(&mut *errors().lock().unwrap())
+    std::mem::take(&mut *errors().lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// Queue one line for the command-line history from plugin paths that cannot
@@ -106,7 +106,7 @@ pub(crate) fn drain_errors() -> Vec<String> {
 /// failures). Surfaced by [`drain_errors`] on the next update tick.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn push_guard_error(line: String) {
-    errors().lock().unwrap().push(line);
+    errors().lock().unwrap_or_else(|e| e.into_inner()).push(line);
 }
 
 #[cfg(test)]

@@ -208,15 +208,26 @@ impl<'a> HostSession<'a> {
                 // the message boundary's fingerprint guard then dedupes.
                 v4_support::publish_document_changed(key.1);
             }
-            v4_support::publish_document_view_v4(self.tab_id(), doc);
-            if key_changed {
-                // API v13 dirty regions: the plugin-write boundary carries
-                // the touched identity set, so consumers visit only what
-                // changed (empty sets mean "walk everything").
-                self.publish_plugin_dirty_regions();
+            // API v13/P1-18: the snapshot publication is fallible. A failed
+            // publication must NOT broadcast dirty regions or record the key
+            // as settled — that would claim a boundary the plugins cannot
+            // observe. The failure is logged; the next publish retries.
+            match v4_support::publish_document_view_v4(self.tab_id(), doc) {
+                Ok(()) => {
+                    if key_changed {
+                        // API v13 dirty regions: the plugin-write boundary
+                        // carries the touched identity set, so consumers
+                        // visit only what changed (empty sets mean "walk
+                        // everything").
+                        self.publish_plugin_dirty_regions();
+                    }
+                    self.app.last_plugin_document =
+                        Some((self.tab_id(), self.app.tabs[self.tab].scene.geometry_epoch));
+                }
+                Err(e) => {
+                    eprintln!("[host] document boundary for tab {} withheld: {e}", self.tab);
+                }
             }
-            self.app.last_plugin_document =
-                Some((self.tab_id(), self.app.tabs[self.tab].scene.geometry_epoch));
         }
     }
 
@@ -6246,6 +6257,7 @@ mod tests {
             &plugin_path,
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .expect("spawn staged Python plugin");
         assert_eq!(process.id(), "opencad.python");
@@ -6378,6 +6390,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -6578,6 +6591,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -6797,6 +6811,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7073,6 +7088,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7274,6 +7290,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7505,6 +7522,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7849,6 +7867,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8137,6 +8156,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8476,6 +8496,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8744,6 +8765,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -9007,6 +9029,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -10400,6 +10423,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -10758,6 +10782,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11054,6 +11079,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11138,6 +11164,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11420,6 +11447,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11816,6 +11844,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12137,6 +12166,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12239,6 +12269,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12330,6 +12361,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12471,6 +12503,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12676,6 +12709,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -12880,6 +12914,7 @@ L.delete('Structure', erase_objects=True)
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13115,6 +13150,7 @@ S.delete('Heading')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13379,6 +13415,7 @@ B.delete('Widget2')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13581,6 +13618,7 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13850,6 +13888,7 @@ LT.delete('Temp')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -14255,6 +14294,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let script = std::env::temp_dir().join(format!("ocs_nested_{}.py", std::process::id()));
@@ -14450,6 +14490,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+            None,
         )
         .unwrap();
         let script = dir.join(format!("ocs_link_{}.py", std::process::id()));

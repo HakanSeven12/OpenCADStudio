@@ -26,6 +26,10 @@ fn global_manager() -> &'static Mutex<HostV4SnapshotManager> {
 /// Per-tab V4 shared-memory snapshot manager.
 pub struct HostV4SnapshotManager {
     stores: HashMap<u64, DocumentSnapshotStore<DocumentViewDataV4>>,
+    /// Stores replaced by a larger mapping (see `publish_document`). Their
+    /// mappings stay readable until the process exits so readers of the old
+    /// path are never pinned to a frozen, deleted file.
+    retired: Vec<DocumentSnapshotStore<DocumentViewDataV4>>,
     segment_size: usize,
 }
 
@@ -34,6 +38,7 @@ impl HostV4SnapshotManager {
     pub fn new() -> Self {
         Self {
             stores: HashMap::new(),
+            retired: Vec::new(),
             segment_size: default_segment_size(),
         }
     }
@@ -50,7 +55,11 @@ impl HostV4SnapshotManager {
     }
 
     /// A drawing that outgrows its mapping moves to a new one at a new path,
-    /// twice its size; plugins re-open the view once the old file is gone.
+    /// twice its size; plugins re-open the view via the fresh path. The
+    /// replaced store is RETIRED, not dropped: its mapping (and file) must
+    /// stay readable for readers that still hold the old path open — deleting
+    /// the file would leave them pinned to a frozen view forever. Retired
+    /// stores accumulate only per resize event (rare).
     fn publish_document(
         &mut self,
         tab_id: u64,
@@ -80,8 +89,24 @@ impl HostV4SnapshotManager {
                 .unwrap_or(usize::MAX)
                 .max(self.segment_size);
             match DocumentSnapshotStore::new(tab_id, size) {
-                Ok(store) => {
-                    self.stores.insert(tab_id, store);
+                Ok(mut store) => {
+                    // Publish the new mapping BEFORE it becomes authoritative,
+                    // then retire the old store (keep its file alive) instead
+                    // of deleting it out from under existing readers.
+                    if let Err(e) = store.publish_bytes(&bytes) {
+                        eprintln!(
+                            "[host] failed to publish V4 document view for tab {tab_id}: {e}"
+                        );
+                        return None;
+                    }
+                    let info = DocumentViewInfo {
+                        path: store.path().to_string_lossy().into_owned(),
+                        version: store.version(),
+                    };
+                    if let Some(old) = self.stores.insert(tab_id, store) {
+                        self.retired.push(old);
+                    }
+                    return Some(info);
                 }
                 Err(e) => {
                     eprintln!(

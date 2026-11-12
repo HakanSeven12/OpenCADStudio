@@ -8,7 +8,9 @@ use ocs_plugin_api::process::NotificationHandler;
 use ocs_plugin_api::shm::DocumentViewInfo;
 
 fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
-    manager().lock().unwrap()
+    // Poisoned-lock tolerance: a publication panic elsewhere must not turn
+    // every later plugin IPC into a panic cascade (`unwrap()` would).
+    manager().lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
@@ -22,14 +24,22 @@ pub fn close_document_view_v4(tab_id: u64) {
 }
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
-/// a change notification when successful.
-pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) {
+/// a change notification when successful. The `Err` betrays the failure to the
+/// caller so dirty-region/epoch claims are never broadcast on top of a
+/// snapshot that did not actually update.
+pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) -> Result<(), String> {
     let info = mgr().publish(tab_id, doc);
-    if let Some(info) = info {
-        broadcast(HostNotification::DocumentChangedV4 {
-            tab_id,
-            version: info.version,
-        });
+    match info {
+        Some(info) => {
+            broadcast(HostNotification::DocumentChangedV4 {
+                tab_id,
+                version: info.version,
+            });
+            Ok(())
+        }
+        None => Err(format!(
+            "failed to publish the V4 document view for tab {tab_id}"
+        )),
     }
 }
 

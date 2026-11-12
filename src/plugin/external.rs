@@ -639,7 +639,7 @@ mod loader {
     /// platform's extension. A declared name that is missing or does not
     /// carry the platform extension refuses the load with an honest error
     /// instead of silently loading some other `.so`/`.dll` in the folder.
-    fn lib_file_for(plugin: &ExternalPlugin) -> Option<PathBuf> {
+    fn lib_file_for(plugin: &super::ExternalPlugin) -> Option<PathBuf> {
         if let Some(name) = plugin.library.as_deref() {
             let path = plugin.dir.join(name);
             let matches_ext = path

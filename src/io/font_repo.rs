@@ -233,11 +233,19 @@ pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn forget_font_paths() {
+    #[cfg(test)]
+    let _not_counting = KEEP_FONT_PATHS.read().unwrap_or_else(|e| e.into_inner());
     font_paths()
         .write()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
 }
+
+/// Held by a test while it counts font folder searches. Every test that
+/// builds an app applies its settings, which set the font folders and forget
+/// the lookups; they wait here so the count sees only the test's own work.
+#[cfg(test)]
+pub(crate) static KEEP_FONT_PATHS: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 #[cfg(test)]
 thread_local! {

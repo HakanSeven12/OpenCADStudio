@@ -119,6 +119,7 @@ impl OpenCADStudio {
             &self.tabs[i].scene.document,
             handle,
         ));
+        sections.extend(crate::entities::civil::properties(entity, &self.tabs[i].scene.document));
 
         // Turn the Material row into an editable picker: the source
         // options (ByLayer / ByBlock) plus every named material the

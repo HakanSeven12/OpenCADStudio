@@ -741,6 +741,30 @@ mod tests {
         assert_eq!(e.uv_max, e2.uv_max);
     }
 
+    #[test]
+    fn shx_cache_identity_includes_the_drawings_code_page() {
+        let dir = std::env::temp_dir().join(format!("ocs-shx-atlas-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cp1250.shx");
+        std::fs::write(
+            &path,
+            crate::scene::text::shx::tests::synthetic_shapes(&[0x3F, 0xEC]),
+        )
+        .unwrap();
+        let path = path.to_string_lossy().into_owned();
+        let cp1250 = Face::with_code_page(&path, "ANSI_1250");
+        let cp1252 = Face::with_code_page(&path, "ANSI_1252");
+        let mut atlas = GlyphAtlas::new(512, 512);
+        let _ = atlas.get_or_insert(&cp1250, 'ě', false);
+        let _ = atlas.get_or_insert(&cp1252, 'ě', false);
+        assert_eq!(
+            atlas.entries.len(),
+            2,
+            "different pages must not share a tile"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Field value (0..1) at a glyph-space point, filtered the way the GPU
     /// sampler reads it: bilinear between texel centres, clamped at the edge.
     fn sample_linear(tile: &BakedTile, gx: f32, gy: f32) -> f32 {

@@ -1113,6 +1113,16 @@ fn emit_searchable_text(
 
 fn svg_font_family(name: &str) -> String {
     let trimmed = name.trim();
+    // Resolved SHX identities can carry a legacy code page and a big-font
+    // path; neither belongs in an SVG font-family attribute.
+    let trimmed = trimmed
+        .split([
+            crate::scene::text::font_face::BIG_FONT_SEP,
+            crate::scene::text::font_face::CODE_PAGE_SEP,
+        ])
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
     if trimmed.is_empty() {
         return "sans-serif".to_string();
     }
@@ -1420,6 +1430,15 @@ mod tests {
         assert!(svg.contains("width=\"210mm\""), "{svg}");
         assert!(svg.contains("<rect"), "{svg}");
         assert!(svg.trim_end().ends_with("</svg>"), "{svg}");
+    }
+
+    #[test]
+    fn svg_font_family_omits_resolved_shx_metadata() {
+        let font =
+            crate::scene::text::font_face::Face::with_code_page("cs_ENGINEERING.shx", "ANSI_1250");
+        let paired = crate::scene::text::font_face::Face::with_big_font(&font, "chineset.shx");
+        assert_eq!(svg_font_family(&font), "cs_ENGINEERING.shx, sans-serif");
+        assert_eq!(svg_font_family(&paired), "cs_ENGINEERING.shx, sans-serif");
     }
 
     #[test]

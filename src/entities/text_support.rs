@@ -165,6 +165,17 @@ fn resolve_style(
         }
     }
 
+    // Legacy SHX glyphs are keyed in the drawing's code page, not necessarily
+    // by Unicode. Carry that page in the resolved font identity so every text
+    // renderer and the SDF cache uses the right shape; Unicode unifonts ignore
+    // it. Apply this before pairing a big font so its primary face keeps it.
+    if font_name.to_ascii_lowercase().ends_with(".shx")
+        && crate::scene::text::shx::file_on_disk(&font_name)
+        && crate::scene::text::shx::font_metrics(&font_name).is_some()
+    {
+        font_name = Face::with_code_page(&font_name, &document.header.code_page);
+    }
+
     // A style's "Big Font" (`chineset.shx`, `hztxt.shx`, …) supplies the
     // double-byte characters. Resolve it like the primary font (next to the
     // drawing, then the per-user fonts folder) and pair it with the face; an
@@ -4423,6 +4434,36 @@ mod font_style_tests {
         assert!(!ttf.to_ascii_lowercase().ends_with(".shx"), "{ttf}");
         let shx = resolve_text_style("SHX", &doc).font_name;
         assert!(shx.ends_with("NLCS-ISO.shx"), "{shx}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_legacy_shx_style_carries_the_documents_code_page() {
+        let dir =
+            std::env::temp_dir().join(format!("ocs-cp1250-style-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("cs_ENGINEERING.shx"),
+            crate::scene::text::shx::tests::synthetic_shapes(&[0xEC, 0xF9]),
+        )
+        .unwrap();
+        let mut doc = document::Document::new();
+        doc.header.code_page = "ANSI_1250".into();
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        let mut style = document::tables::TextStyle::new("CS");
+        style.font_file = "cs_ENGINEERING.shx".into();
+        doc.text_styles.add(style).unwrap();
+
+        let resolved = resolve_text_style("CS", &doc);
+        let (path, page) = resolved
+            .font_name
+            .split_once(crate::scene::text::font_face::CODE_PAGE_SEP)
+            .expect("the resolved SHX identity carries its code page");
+        assert!(path.ends_with("cs_ENGINEERING.shx"), "{path}");
+        assert_eq!(page, "ANSI_1250");
+        let face = crate::scene::text::font_face::Face::resolve(&resolved.font_name);
+        assert!(face.own_glyph('ě').is_some());
+        assert!(face.own_glyph('ů').is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

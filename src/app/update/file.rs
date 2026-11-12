@@ -2276,7 +2276,16 @@ impl OpenCADStudio {
             Self::native_save_verification(&path, lease, expected_fingerprint)?;
 
         self.prepare_native_save(i);
-        let snapshot = self.tabs[i].scene.document_for_save();
+        let mut snapshot = self.tabs[i].scene.document_for_save();
+        // A Save As renames the drawing, but the save event above evaluated
+        // the name-reporting fields against the path it was opened from. Stamp
+        // the destination into the snapshot and re-evaluate there, so the
+        // written file carries its own name and a failed write changes
+        // nothing in the open drawing.
+        if set_current_path && path_changed {
+            snapshot.source_path = Some(path.to_string_lossy().into_owned());
+            crate::entities::field::update_fields(&mut snapshot, 2, None);
+        }
         let write_path = if path_changed {
             path.clone()
         } else {
@@ -2298,6 +2307,9 @@ impl OpenCADStudio {
         if set_current_path {
             self.tabs[i].current_path = Some(path.clone());
             self.tabs[i].scene.document.version = version;
+            if path_changed {
+                self.adopt_saved_path(i, &path);
+            }
         }
         self.refresh_native_edit_guard_after_save(i, &path, path_changed, destination_lease);
         self.tabs[i].dirty = false;
@@ -3339,6 +3351,17 @@ impl OpenCADStudio {
         // A save is a field evaluation event (FIELDEVAL bit 2).
         self.tabs[i].scene.update_fields(2, None);
         self.prepare_snapshot_save(i);
+    }
+
+    /// Point the drawing at the file it now lives in. The fields that report
+    /// the drawing's own file (FILENAME, DWGNAME, DWGPREFIX) read
+    /// `document.source_path`, which is only written when a file is opened —
+    /// so without this a Save As left them naming the file the drawing came
+    /// from (and a new drawing stuck on `Drawing1.dwg`). The save event is
+    /// re-raised so the displayed text follows the new name.
+    pub(in crate::app) fn adopt_saved_path(&mut self, i: usize, path: &std::path::Path) {
+        self.tabs[i].scene.document.source_path = Some(path.to_string_lossy().into_owned());
+        self.tabs[i].scene.update_fields(2, None);
     }
 
     /// Bring the drawing state the file stores up to date, without the save

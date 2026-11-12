@@ -1436,6 +1436,25 @@ impl Scene {
                     .next()
                     {
                         path.edges = exact.edges;
+                        // The re-derivation replaces the loop contents with
+                        // plain Line/arc edges, while a DWG-imported path
+                        // still carries the POLYLINE format flag next to
+                        // them. The DWG writer follows the flag: finding no
+                        // polyline edge in the path, it writes an empty
+                        // polyline loop and the fill is silently lost on the
+                        // next save. Mirror the new-hatch rule — fold the
+                        // plain edges into one closed polyline edge when they
+                        // represent a loop (the shape the imported path
+                        // carried) and mark the format bit exactly from the
+                        // contents otherwise.
+                        if !path.edges.is_empty() {
+                            if let Some(edges) = polyline_form(&path.edges) {
+                                path.edges = edges;
+                                path.flags.set_polyline(true);
+                            } else {
+                                path.flags.set_polyline(false);
+                            }
+                        }
                     }
                     modified = true;
                 }

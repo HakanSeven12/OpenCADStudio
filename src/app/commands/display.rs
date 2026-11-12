@@ -3102,6 +3102,7 @@ mod tests {
     fn stale_mesh() -> crate::scene::model::mesh_model::MeshLodSet {
         crate::scene::model::mesh_model::MeshLodSet {
             lods: Vec::new(),
+            effective_layer: None,
             material: None,
             face_materials: Default::default(),
             visual_style: None,

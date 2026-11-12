@@ -2346,23 +2346,10 @@ impl Scene {
         entity: &EntityType,
         context: &crate::scene::render_graph::InstanceContext,
     ) -> bool {
-        let common = entity.common();
-        let layer = if crate::scene::view::render::is_effective_layer_zero(&common.layer) {
-            context
-                .insert_path
-                .iter()
-                .rev()
-                .find(|insert| {
-                    !crate::scene::view::render::is_effective_layer_zero(&insert.common.layer)
-                })
-                .map(|insert| insert.common.layer.as_str())
-                .unwrap_or(common.layer.as_str())
-        } else {
-            common.layer.as_str()
-        };
+        let layer = context.effective_layer(&entity.common().layer);
         self.document
             .layers
-            .get(layer)
+            .get(&layer)
             .map(|layer| layer.is_plottable)
             .unwrap_or(true)
     }
@@ -2620,6 +2607,9 @@ impl Scene {
                     return;
                 };
                 model.entity = Some(source_hatch.common.handle);
+                model.effective_layer = Some(std::sync::Arc::from(
+                    context.effective_layer(&source_hatch.common.layer),
+                ));
                 if let Some((report, palette)) = &constraint_display {
                     if let Some(mut color) =
                         self.constraint_display_color(report, context.root_handle, palette)
@@ -2888,6 +2878,9 @@ impl Scene {
                 let fill_plane = Some(fill_plane.0);
                 models.push(HatchModel {
                     entity: None,
+                    effective_layer: Some(std::sync::Arc::from(
+                        context.effective_layer(&source.common.layer),
+                    )),
                     pattern_origin: None,
                     render_instance,
                     boundary: Arc::new(boundary),
@@ -3413,6 +3406,7 @@ impl Scene {
         let storage = crate::entities::curve::ocs_plane(dxf.normal, dxf.elevation);
         Some(HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: Some([dxf.pattern_origin().x, dxf.pattern_origin().y]),
             render_instance: None,
             boundary: std::sync::Arc::new(boundary_f32),
@@ -3816,6 +3810,7 @@ impl Scene {
             .collect();
         HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             boundary: std::sync::Arc::new(boundary),

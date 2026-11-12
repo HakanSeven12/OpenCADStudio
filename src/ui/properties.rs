@@ -136,6 +136,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
             HatchPattern::Pattern(_) => {
                 let model = HatchModel {
                     entity: None,
+                    effective_layer: None,
                     pattern_origin: None,
                     render_instance: None,
                     world_origin: [0.0, 0.0],

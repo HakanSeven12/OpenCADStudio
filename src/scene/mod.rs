@@ -2476,6 +2476,7 @@ fn transform_block_mesh_lod_set(
     }
     MeshLodSet {
         lods: Vec::new(),
+        effective_layer: set.effective_layer.clone(),
         material: set.material.clone(),
         face_materials: set.face_materials.clone(),
         visual_style: set.visual_style.clone(),
@@ -6487,6 +6488,7 @@ impl Scene {
         let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
         Some(HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],
@@ -12735,6 +12737,9 @@ impl Scene {
                     }
                 }
                 transformed.instance_handle = Some(context.root_handle);
+                transformed.effective_layer = Some(std::sync::Arc::from(
+                    context.effective_layer(&entity.common().layer),
+                ));
                 out.push(transformed);
             },
         );

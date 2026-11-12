@@ -4192,7 +4192,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Ekleme noktasını belirtin:
-    .pastespec-paste-as = PASTESPEC  Şu biçimde yapıştır [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  Şu biçimde yapıştır [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF ölçeği: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Ekleme noktasını belirtin:
     .pdfui-no-pdf-underlays = PDF altlığı bulunamadı.

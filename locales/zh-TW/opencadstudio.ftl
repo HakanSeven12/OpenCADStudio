@@ -4217,7 +4217,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  指定插入點:
-    .pastespec-paste-as = PASTESPEC  貼上為 [物件/圖塊/文字]:
+    .pastespec-paste-as = PASTESPEC  貼上為 [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF 比例: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = 指定插入點:
     .pdfui-no-pdf-underlays = 找不到 PDF 參考底圖。

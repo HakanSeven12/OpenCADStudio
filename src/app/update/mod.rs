@@ -9396,20 +9396,18 @@ impl OpenCADStudio {
                 if !waiting {
                     return Task::none();
                 }
-                match text.filter(|text| !text.trim().is_empty()) {
-                    Some(text) => {
-                        // Same prompt, one more option: swap without echoing it.
-                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
-                        self.push_ucs_to_cmd(i);
-                        Task::none()
-                    }
+                let text = text.filter(|text| !text.trim().is_empty());
+                if text.is_none() && self.clipboard.is_empty() {
                     // Nothing but maybe an image: paste it as one.
-                    None if self.clipboard.is_empty() => {
-                        self.tabs[i].active_cmd = None;
-                        self.read_system_clipboard_image()
-                    }
-                    None => Task::none(),
+                    self.tabs[i].active_cmd = None;
+                    return self.read_system_clipboard_image();
                 }
+                // Every format is known now: ask for one of them.
+                let command = self.paste_special_command(i, text.as_deref());
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(command);
+                self.push_ucs_to_cmd(i);
+                Task::none()
             }
 
             Message::SystemClipboardPaste(result) => {

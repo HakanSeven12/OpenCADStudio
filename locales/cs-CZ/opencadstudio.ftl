@@ -4220,7 +4220,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Určete bod vložení:
-    .pastespec-paste-as = PASTESPEC  Vložit jako [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  Vložit jako [__ocs_arg_formats__]:
     .pdfui-pdf-scale = Měřítko PDF: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Určete bod vložení:
     .pdfui-no-pdf-underlays = Nebyly nalezeny žádné podklady PDF.

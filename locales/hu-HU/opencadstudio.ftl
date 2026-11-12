@@ -4210,7 +4210,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Adja meg a beszúrási pontot:
-    .pastespec-paste-as = PASTESPEC  Beillesztés mint [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  Beillesztés mint [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF-lépték: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Adja meg a beszúrási pontot:
     .pdfui-no-pdf-underlays = Nem található PDF-alávetítés.

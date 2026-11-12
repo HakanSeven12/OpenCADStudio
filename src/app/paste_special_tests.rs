@@ -40,11 +40,12 @@ fn answer(app: &mut OpenCADStudio, words: &[&str]) {
     let _ = app.finish_active_command(&tokens, true);
 }
 
+/// The tables placed in the drawing.
 fn tables(app: &OpenCADStudio) -> Vec<Table> {
     app.tabs[app.active_tab]
         .scene
         .document
-        .entities()
+        .model_space_entities()
         .filter_map(|entity| match entity {
             EntityType::Table(table) => Some((**table).clone()),
             _ => None,
@@ -52,11 +53,13 @@ fn tables(app: &OpenCADStudio) -> Vec<Table> {
         .collect()
 }
 
+/// The texts placed in the drawing. Model space only: a table keeps the
+/// text of its cells in a block of its own.
 fn texts(app: &OpenCADStudio) -> Vec<String> {
     app.tabs[app.active_tab]
         .scene
         .document
-        .entities()
+        .model_space_entities()
         .filter_map(|entity| match entity {
             EntityType::MText(text) => Some(text.value.clone()),
             _ => None,
@@ -180,11 +183,56 @@ fn rows_of_different_lengths_fill_one_grid() {
 }
 
 #[test]
+fn the_rows_of_a_pasted_table_are_as_high_as_their_text() {
+    // One line in the first row; below it a cell of two lines, and a cell
+    // whose one line is longer than its column and wraps.
+    let mut app = started(concat!(
+        "Mark\tNote\r\n",
+        "S1\t\"Slab t = 150\nmesh on both faces\"\r\n",
+        "C1\tA description that is much longer than the width of a column of the table\r\n",
+    ));
+    answer(&mut app, &["TA", "0,0"]);
+    let placed = tables(&app);
+    let rows = &placed.first().expect("the pasted table").rows;
+    let one_line = rows[0].height;
+    assert!(
+        rows[1].height > one_line * 1.5,
+        "two lines need more than the {one_line} of one: {}",
+        rows[1].height
+    );
+    assert!(
+        rows[2].height > one_line * 1.5,
+        "a line that wraps needs more than the {one_line} of one: {}",
+        rows[2].height
+    );
+}
+
+#[test]
 fn text_still_pastes_a_range_as_text() {
     let mut app = started(RANGE);
     answer(&mut app, &["T", "10,20"]);
     assert_eq!(texts(&app), ["Item\tQty\\PBolt M8\t4\\PNut M8\t4"]);
     assert!(tables(&app).is_empty());
+}
+
+#[test]
+fn the_prompt_leaves_out_the_formats_that_are_not_there() {
+    let app = started("First line\r\nSecond line\r\n");
+    let command = app.tabs[app.active_tab]
+        .active_cmd
+        .as_ref()
+        .expect("PASTESPEC is asking for the format");
+    let labels: Vec<String> = command
+        .options()
+        .into_iter()
+        .map(|option| option.label)
+        .collect();
+    assert_eq!(labels.len(), 1, "lines of text are text only");
+    assert!(
+        command.prompt().contains(&format!("[{}]", labels[0])),
+        "the prompt {:?} lists {labels:?} and nothing else",
+        command.prompt()
+    );
 }
 
 #[test]

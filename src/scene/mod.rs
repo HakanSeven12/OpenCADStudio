@@ -9631,19 +9631,33 @@ impl Scene {
                     .unwrap_or(handle.value())
             };
             // Hashed once: a linear `order.contains` per re-shown entity made
-            // turning a big layer back on quadratic.
-            let ordered: HashSet<Handle> = if visible_changed.is_empty() {
-                HashSet::default()
-            } else {
-                layout.order.iter().copied().collect()
+            // turning a big layer back on quadratic. A run in the set (live
+            // or blanked) is always listed in the order, so an edit of drawn
+            // entities alone (a move, its undo) needs no lookup at all.
+            let has_run = |handle: &Handle| {
+                layout.ranges.contains_key(handle) || layout.vacant.contains_key(handle)
             };
+            let needs_lookup = visible_changed.iter().any(|handle| !has_run(handle));
+            let ordered: HashSet<Handle> = if needs_lookup {
+                layout.order.iter().copied().collect()
+            } else {
+                HashSet::default()
+            };
+            debug_assert!(
+                visible_changed
+                    .iter()
+                    .filter(|handle| has_run(handle))
+                    .all(|handle| layout.order.contains(handle)),
+                "every run in the resident set is listed in its order"
+            );
+            let listed = |handle: &Handle| has_run(handle) || ordered.contains(handle);
             for &(handle, kind) in &deltas {
                 if matches!(kind, ChangeKind::Removed) {
                     // Keep the order entry as a tombstone. Undo/Redo can then
                     // restore the exact physical slot and submission position.
                     continue;
                 }
-                if visible_changed.contains(&handle) && !ordered.contains(&handle) {
+                if visible_changed.contains(&handle) && !listed(&handle) {
                     let key = effective(handle);
                     let position = layout
                         .order

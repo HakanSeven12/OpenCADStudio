@@ -18,6 +18,14 @@ pub struct BoundarySource {
 /// Boundary welding tolerance for tessellated wires.
 const WELD_TOLERANCE: f64 = 1.0e-6;
 
+#[cfg(test)]
+thread_local! {
+    /// How many boundary sources this thread has read to find the ones near
+    /// a ring.
+    pub(crate) static SOURCES_EXAMINED: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 fn wire_segments_on_plane(wire: &WireModel, plane: WorkingPlane, tolerance: f64) -> Vec<Line> {
     let mut segments = Vec::new();
     let mut previous: Option<glam::DVec3> = None;
@@ -344,7 +352,11 @@ pub(crate) fn sources_near_rings(
     };
     sources
         .iter()
-        .filter(|(_, source)| source.segments.iter().any(reaches))
+        .filter(|(_, source)| {
+            #[cfg(test)]
+            SOURCES_EXAMINED.with(|count| count.set(count.get() + 1));
+            source.segments.iter().any(reaches)
+        })
         .map(|(handle, source)| (*handle, source.clone()))
         .collect()
 }

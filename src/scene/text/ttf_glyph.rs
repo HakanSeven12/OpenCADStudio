@@ -436,6 +436,174 @@ pub fn descent_ratio(family: &str) -> Option<f32> {
     .flatten()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct GlyphTopologyKey {
+    font: cosmic_text::fontdb::ID,
+    weight: u16,
+    face_index: u32,
+    glyph: u16,
+    scale: u32,
+}
+
+#[derive(Clone)]
+struct CachedTopology {
+    pt_count: usize,
+    indices: Option<Arc<[u32]>>,
+}
+
+fn glyph_topology_cache() -> &'static Mutex<LruCache<GlyphTopologyKey, CachedTopology>> {
+    static CACHE: OnceLock<Mutex<LruCache<GlyphTopologyKey, CachedTopology>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(4096).expect("nonzero cache capacity"),
+        ))
+    })
+}
+
+fn contour_point_count(contours: &[Vec<[f32; 2]>]) -> usize {
+    contours
+        .iter()
+        .filter(|c| c.len() >= 3)
+        .map(|c| c.len())
+        .sum()
+}
+
+fn triangulate_contours_cached(key: GlyphTopologyKey, contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
+    if contours.is_empty() {
+        return Vec::new();
+    }
+    let pt_count = contour_point_count(contours);
+    if pt_count == 0 {
+        return Vec::new();
+    }
+
+    if let Some(cached) = glyph_topology_cache().lock().unwrap().get(&key).cloned() {
+        match cached.indices {
+            None => return triangulate_contours(contours),
+            Some(indices) if cached.pt_count == pt_count => {
+                thread_local! {
+                    static FLAT_PTS: std::cell::RefCell<Vec<[f32; 2]>> =
+                        const { std::cell::RefCell::new(Vec::new()) };
+                }
+                return FLAT_PTS.with(|cell| {
+                    let mut flat = cell.borrow_mut();
+                    flat.clear();
+                    flat.reserve(pt_count);
+                    for c in contours {
+                        if c.len() >= 3 {
+                            flat.extend_from_slice(c);
+                        }
+                    }
+                    let mut tris = Vec::with_capacity(indices.len());
+                    for &idx in indices.iter() {
+                        tris.push(flat[idx as usize]);
+                    }
+                    tris
+                });
+            }
+            Some(_) => {}
+        }
+    }
+
+    let mut builder = Path::builder();
+    for contour in contours {
+        if contour.len() < 3 {
+            continue;
+        }
+        builder.begin(point(contour[0][0], contour[0][1]));
+        for p in &contour[1..] {
+            builder.line_to(point(p[0], p[1]));
+        }
+        builder.end(true);
+    }
+    let path = builder.build();
+
+    thread_local! {
+        static TESS_SCRATCH: std::cell::RefCell<(
+            FillTessellator,
+            VertexBuffers<[f32; 2], u32>,
+            Vec<[u32; 2]>,
+            Vec<u32>,
+        )> = std::cell::RefCell::new((
+            FillTessellator::new(),
+            VertexBuffers::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+    }
+
+    let (tris, topo) = TESS_SCRATCH.with(|cell| {
+        let mut scratch = cell.borrow_mut();
+        let (tessellator, geometry, flat_bits, vert_to_flat) = &mut *scratch;
+        geometry.clear();
+        if tessellator
+            .tessellate_path(
+                &path,
+                &FillOptions::default().with_fill_rule(FillRule::NonZero),
+                &mut BuffersBuilder::new(geometry, |vertex: FillVertex| {
+                    vertex.position().to_array()
+                }),
+            )
+            .is_err()
+        {
+            return (Vec::new(), None);
+        }
+
+        let mut tris = Vec::with_capacity(geometry.indices.len());
+        for &idx in &geometry.indices {
+            if let Some(&p) = geometry.vertices.get(idx as usize) {
+                tris.push(p);
+            }
+        }
+
+        let mut topo_indices: Option<Arc<[u32]>> = None;
+        if geometry.vertices.len() <= pt_count {
+            flat_bits.clear();
+            flat_bits.reserve(pt_count);
+            for c in contours {
+                if c.len() >= 3 {
+                    for &[x, y] in c {
+                        flat_bits.push([x.to_bits(), y.to_bits()]);
+                    }
+                }
+            }
+            vert_to_flat.clear();
+            vert_to_flat.reserve(geometry.vertices.len());
+            let mut all_matched = true;
+            for &[vx, vy] in &geometry.vertices {
+                let target = [vx.to_bits(), vy.to_bits()];
+                if let Some(pos) = flat_bits.iter().position(|&b| b == target) {
+                    vert_to_flat.push(pos as u32);
+                } else {
+                    all_matched = false;
+                    break;
+                }
+            }
+            if all_matched {
+                let mapped: Vec<u32> = geometry
+                    .indices
+                    .iter()
+                    .map(|&idx| vert_to_flat[idx as usize])
+                    .collect();
+                topo_indices = Some(Arc::from(mapped));
+            }
+        }
+
+        (
+            tris,
+            Some(CachedTopology {
+                pt_count,
+                indices: topo_indices,
+            }),
+        )
+    });
+
+    if let Some(cached) = topo {
+        glyph_topology_cache().lock().unwrap().put(key, cached);
+    }
+    tris
+}
+
 fn triangulate_contours(contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
     if contours.is_empty() {
         return Vec::new();
@@ -1134,6 +1302,8 @@ pub fn clear_fallback_cache() {
     primary_metrics_cache().lock().unwrap().clear();
     #[cfg(not(target_arch = "wasm32"))]
     positioned_glyph_cache().lock().unwrap().clear();
+    #[cfg(not(target_arch = "wasm32"))]
+    glyph_topology_cache().lock().unwrap().clear();
     // Web only: the per-family outline cache can also hold stale `None`s —
     // the family only became resolvable when the font joined the sysfont
     // database (`register_web_font`). On desktop the font set never changes,
@@ -1577,7 +1747,14 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
             );
             fl.flush();
             if !fl.contours.is_empty() {
-                let fill_tris = triangulate_contours(&fl.contours);
+                let topo_key = GlyphTopologyKey {
+                    font: g.font_id,
+                    weight: g.font_weight.0,
+                    face_index,
+                    glyph: g.glyph_id,
+                    scale: scale_g.to_bits(),
+                };
+                let fill_tris = triangulate_contours_cached(topo_key, &fl.contours);
                 let glyph = Arc::new(PlacedGlyph {
                     strokes: fl.contours,
                     fill_tris,

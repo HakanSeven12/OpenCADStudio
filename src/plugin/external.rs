@@ -74,6 +74,11 @@ pub struct ExternalPlugin {
     pub bundled: bool,
     /// Whether a native library for this platform sits beside `plugin.toml`.
     pub lib_present: bool,
+    /// Explicit library filename declared as `library` in `plugin.toml`. When
+    /// set, only that exact file is accepted as the package's native library
+    /// instead of the first file with the platform extension (an additive,
+    /// optional key — older packages are unaffected).
+    pub library: Option<String>,
 }
 
 impl ExternalPlugin {
@@ -274,6 +279,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
     let mut version = String::new();
     let mut description = String::new();
     let mut repository = None;
+    let mut library = None;
     let mut api_version: u32 = 0;
     let mut acadrust_source: Option<String> = None;
     let mut acadrust_declared = false;
@@ -303,6 +309,10 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
             "version" => version = unquote(value),
             "description" => description = unquote(value),
             "repository" => repository = normalize_repository(&unquote(value)),
+            "library" => {
+                let v = unquote(value);
+                library = if v.is_empty() { None } else { Some(v) };
+            }
             "api_version" => api_version = value.parse().unwrap_or(0),
             "acadrust_source" if section == Some("opencad") => {
                 acadrust_declared = true;
@@ -336,6 +346,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         dir: PathBuf::new(),
         bundled: false,
         lib_present: false,
+        library,
     })
 }
 
@@ -495,7 +506,7 @@ mod loader {
                 ));
                 continue;
             }
-            let Some(path) = lib_file(&d.dir) else {
+            let Some(path) = lib_file_for(&d) else {
                 out.push((
                     d.id.clone(),
                     Err("no native library in package".to_string()),
@@ -503,7 +514,7 @@ mod loader {
                 continue;
             };
             let mut host = crate::app::plugin_host::HostSession::new(app, 0);
-            match manager.load(&path, &mut host) {
+            match manager.load_with_expected_id(&path, Some(&d.id), &mut host) {
                 Ok(id) => out.push((id, Ok(()))),
                 Err(e) => {
                     // Also on stderr: a headless or automation session never
@@ -621,6 +632,27 @@ mod loader {
             let p = e.path();
             (p.extension().and_then(|s| s.to_str()) == Some(ext)).then_some(p)
         })
+    }
+
+    /// The package's native library: the exact `library` file named by
+    /// `plugin.toml` when declared, otherwise the first file with this
+    /// platform's extension. A declared name that is missing or does not
+    /// carry the platform extension refuses the load with an honest error
+    /// instead of silently loading some other `.so`/`.dll` in the folder.
+    fn lib_file_for(plugin: &ExternalPlugin) -> Option<PathBuf> {
+        if let Some(name) = plugin.library.as_deref() {
+            let path = plugin.dir.join(name);
+            let matches_ext = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s == lib_extension());
+            return if matches_ext && path.is_file() {
+                Some(path)
+            } else {
+                None
+            };
+        }
+        lib_file(&plugin.dir)
     }
 }
 

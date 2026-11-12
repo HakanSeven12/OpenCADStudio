@@ -129,12 +129,47 @@ impl PluginManager {
         cdylib_path: &Path,
         host: &mut dyn HostApi,
     ) -> Result<String, PluginError> {
+        self.load_with_expected_id(cdylib_path, None, host)
+    }
+
+    /// Like [`PluginManager::load`], but with the package's expected plugin id:
+    /// the runner's self-declared manifest id must match, and the resulting id
+    /// must not collide with an already-loaded plugin (transport identity is
+    /// host-verified, not self-asserted).
+    pub fn load_with_expected_id(
+        &mut self,
+        cdylib_path: &Path,
+        expected_id: Option<&str>,
+        host: &mut dyn HostApi,
+    ) -> Result<String, PluginError> {
+        if let Some(expected) = expected_id {
+            if self
+                .plugins
+                .iter()
+                .any(|p| p.process.id().eq_ignore_ascii_case(expected))
+            {
+                return Err(PluginError::Runner(format!(
+                    "a plugin with id `{expected}` is already loaded; refusing duplicate \
+                     registration"
+                )));
+            }
+        }
         let handler: NotificationHandler = match self.notification_handler.as_ref() {
             Some(h) => Arc::clone(h),
             None => Arc::new(|_id, _cmd, _notif| {}),
         };
-        let process = PluginProcess::spawn(cdylib_path, host, handler)?;
+        let process = PluginProcess::spawn(cdylib_path, host, handler, expected_id)?;
         let id = process.id().to_string();
+        if self
+            .plugins
+            .iter()
+            .any(|p| p.process.id().eq_ignore_ascii_case(&id))
+        {
+            process.shutdown();
+            return Err(PluginError::Runner(format!(
+                "a plugin with id `{id}` is already loaded; refusing duplicate registration"
+            )));
+        }
         let name = process.manifest().name.clone();
         let module = to_shared_module(id.clone(), name, process.ribbon().to_vec());
         self.plugins.push(LoadedPlugin {

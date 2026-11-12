@@ -20,6 +20,34 @@ use crate::process::{request_kind, request_timeout, PluginError};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
+/// Maximum deferred (wrong-tab) plugin requests kept between drain ticks.
+/// Beyond the cap the OLDEST is dropped: the runner waiting for it times out
+/// and the connection dies honestly instead of growing without bound.
+const MAX_DEFERRED_REQUESTS: usize = 256;
+
+/// Maximum plugin requests served per `drain_requests` tick: bounds one
+/// host frame's plugin work; the rest stay queued for the next tick.
+const MAX_REQUESTS_PER_DRAIN: usize = 256;
+
+/// Maximum parked "late" responses (answered grip moves / stray frames).
+const MAX_DEFERRED_RESPONSES: usize = 256;
+
+/// Absolute per-call wall-time budget, capping deadline renewal (P1-1). The
+/// default is 10× the per-kind timeout so every per-kind floor and override
+/// still applies under it. `OCS_PLUGIN_CALL_MAX_SECONDS` overrides the budget;
+/// `0` disables the cap (keepalives may then renew forever).
+fn call_hard_budget(timeout: Duration) -> Option<Instant> {
+    let budget = match std::env::var("OCS_PLUGIN_CALL_MAX_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        Some(0) => return None,
+        Some(secs) => Duration::from_secs(secs),
+        None => timeout * 10,
+    };
+    Instant::now().checked_add(budget)
+}
+
 pub(crate) struct V4Connection {
     shared: Arc<V4HostShared>,
     incoming: Mutex<mpsc::Receiver<HostIncoming>>,
@@ -38,15 +66,22 @@ pub(crate) struct V4Connection {
     /// answered between polls, or a late frame while another call runs).
     /// Consumed first by the next [`V4Connection::call`], so no frame is lost.
     deferred_responses: Mutex<VecDeque<(u64, HostResponse)>>,
+    /// The runner child cell: killed (tree) whenever this connection is marked
+    /// dead, so a hung runner cannot linger half-alive holding handles.
+    terminator: Option<crate::process::SharedRunnerChild>,
 }
 
 impl V4Connection {
     /// Wrap a freshly accepted V4 stream. The stream is cloned so the reader
     /// thread owns one half and the writer half stays on the calling thread.
+    /// `terminator` is the runner child: when a call times out, the connection
+    /// is not just marked dead — the runner's whole process tree is killed
+    /// immediately, so a hung plugin cannot linger half-alive.
     #[allow(clippy::result_large_err)]
     pub fn new(
         stream: Stream,
         handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync>,
+        terminator: Option<crate::process::SharedRunnerChild>,
     ) -> Result<Self, PluginError> {
         let reader = stream.try_clone().map_err(|e| {
             PluginError::Io(std::io::Error::other(format!(
@@ -83,7 +118,17 @@ impl V4Connection {
             plugin_id: Mutex::new(String::new()),
             grip_moves_in_flight: std::sync::Mutex::new(std::collections::HashSet::new()),
             deferred_responses: Mutex::new(VecDeque::new()),
+            terminator,
         })
+    }
+
+    /// Kill the runner's whole process tree (no-op without a terminator, e.g.
+    /// in unit tests using socket pairs). Called when the connection is marked
+    /// dead so the plugin process does not outlive its useful connection.
+    fn terminate_runner(&self) {
+        if let Some(child) = &self.terminator {
+            crate::process::reap_runner_cell(child);
+        }
     }
 
     pub fn is_alive(&self) -> bool {
@@ -102,6 +147,9 @@ impl V4Connection {
         command_id: Option<u64>,
         notification: HostNotification,
     ) -> Result<(), PluginError> {
+        if !self.is_alive() {
+            return Err(PluginError::Runner("V4 connection is dead".into()));
+        }
         let envelope = NotificationEnvelope {
             command_id,
             payload: notification,
@@ -131,6 +179,11 @@ impl V4Connection {
         let kind = request_kind(&req);
         let timeout = request_timeout(kind);
         let mut deadline = Instant::now() + timeout;
+        // Nested plugin traffic (including keep-alive heartbeats) renews the
+        // per-call deadline — that keeps debugger-paused plugins responsive,
+        // but it also lets a plugin renew the deadline forever. The absolute
+        // budget below caps a single call's wall time regardless of renewal.
+        let hard_deadline = call_hard_budget(timeout);
 
         // A coalesced grip move (API v11) may have been answered between
         // polls; its response waits in `deferred_responses`. Consume ours
@@ -160,14 +213,32 @@ impl V4Connection {
         let incoming = self.incoming.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
+            let hard_remaining = hard_deadline
+                .and_then(|end| end.checked_duration_since(Instant::now()));
+            if hard_remaining.map(|r| r.is_zero()).unwrap_or(false) {
+                // Always logged: the process may still run after the
+                // connection is marked dead, and this is the only record.
+                eprintln!(
+                    "[plugin] V4 absolute call budget exhausted: request={kind} \
+                     (nested traffic kept renewing the per-call deadline; marking the \
+                     connection dead and terminating the runner)"
+                );
+                self.shared.alive.store(false, Ordering::SeqCst);
+                self.terminate_runner();
+                return Err(PluginError::CallTimeout {
+                    request: kind,
+                    duration: timeout,
+                });
+            }
             if remaining.is_zero() {
                 // Always logged: the process may still run after the
                 // connection is marked dead, and this is the only record.
                 eprintln!(
                     "[plugin] V4 call deadline expired: request={kind} timeout={timeout:?} \
-                     (marking the connection dead)"
+                     (marking the connection dead and terminating the runner)"
                 );
                 self.shared.alive.store(false, Ordering::SeqCst);
+                self.terminate_runner();
                 return Err(PluginError::CallTimeout {
                     request: kind,
                     duration: timeout,
@@ -184,10 +255,18 @@ impl V4Connection {
                     {
                         // The answer to an outstanding coalesced move: park it
                         // for the poll instead of failing this call.
-                        self.deferred_responses
+                        let mut parked = self
+                            .deferred_responses
                             .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push_back((rid, payload));
+                            .unwrap_or_else(|e| e.into_inner());
+                        if parked.len() >= MAX_DEFERRED_RESPONSES {
+                            parked.pop_front();
+                            eprintln!(
+                                "[plugin] dropped the oldest parked V4 response: the queue \
+                                 exceeded {MAX_DEFERRED_RESPONSES}"
+                            );
+                        }
+                        parked.push_back((rid, payload));
                         continue;
                     }
                     return Err(PluginError::UnexpectedResponse(Box::new(payload)));
@@ -241,9 +320,10 @@ impl V4Connection {
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     eprintln!(
                         "[plugin] V4 call recv timed out: request={kind} timeout={timeout:?} \
-                         (marking the connection dead)"
+                         (marking the connection dead and terminating the runner)"
                     );
                     self.shared.alive.store(false, Ordering::SeqCst);
+                    self.terminate_runner();
                     return Err(PluginError::CallTimeout {
                         request: kind,
                         duration: timeout,
@@ -295,20 +375,33 @@ impl V4Connection {
         }
 
         let incoming = self.incoming.lock().unwrap_or_else(|e| e.into_inner());
+        let mut served = 0usize;
         loop {
+            if served >= MAX_REQUESTS_PER_DRAIN {
+                // Leave the rest for the next tick instead of letting one
+                // flood turn a single host frame into unbounded work.
+                return Ok(());
+            }
             match incoming.try_recv() {
                 Ok(HostIncoming::Request {
                     id,
                     tab_id,
                     payload,
                 }) => {
+                    served += 1;
                     if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                         self.respond_to_plugin_request(host, id, payload, on_start_interactive)?;
                     } else {
-                        self.deferred
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push_back((id, tab_id, payload));
+                        let mut deferred =
+                            self.deferred.lock().unwrap_or_else(|e| e.into_inner());
+                        if deferred.len() >= MAX_DEFERRED_REQUESTS {
+                            deferred.pop_front();
+                            eprintln!(
+                                "[plugin] dropped the oldest deferred foreign-tab request: the \
+                                 queue exceeded {MAX_DEFERRED_REQUESTS}"
+                            );
+                        }
+                        deferred.push_back((id, tab_id, payload));
                     }
                 }
                 Ok(HostIncoming::Response { id, payload }) => {
@@ -322,10 +415,18 @@ impl V4Connection {
                         .unwrap_or_else(|e| e.into_inner())
                         .contains(&id)
                     {
-                        self.deferred_responses
+                        let mut parked = self
+                            .deferred_responses
                             .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push_back((id, payload));
+                            .unwrap_or_else(|e| e.into_inner());
+                        if parked.len() >= MAX_DEFERRED_RESPONSES {
+                            parked.pop_front();
+                            eprintln!(
+                                "[plugin] dropped the oldest parked V4 response: the queue \
+                                 exceeded {MAX_DEFERRED_RESPONSES}"
+                            );
+                        }
+                        parked.push_back((id, payload));
                     }
                     continue;
                 }
@@ -351,6 +452,9 @@ impl V4Connection {
         tab_index: usize,
         event: crate::host::CustomGripEvent,
     ) -> Result<u64, PluginError> {
+        if !self.is_alive() {
+            return Err(PluginError::Runner("V4 connection is dead".into()));
+        }
         let _call_guard = self.call_lock.lock().unwrap_or_else(|e| e.into_inner());
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         {
@@ -388,8 +492,28 @@ impl V4Connection {
         // grip routing, reaping). The runner is reaped with the process; the
         // reason travels via the host's error queue — the plugin process is
         // not trusted to log anything.
-        let mut writer = self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());
-        *writer = None;
+        match self.shared.writer.try_lock() {
+            Ok(mut writer) => {
+                *writer = None;
+            }
+            Err(TryLockError::Poisoned(error)) => {
+                *error.into_inner() = None;
+            }
+            Err(TryLockError::WouldBlock) => {
+                // A write is wedged inside `send` holding the writer lock —
+                // exactly the stall this watchdog exists for. The runner's
+                // tree dies now; its socket peer closes and unblocks that
+                // write, and a detached janitor clears the writer half so no
+                // state lingers.
+                self.terminate_runner();
+                let shared = Arc::clone(&self.shared);
+                std::thread::spawn(move || {
+                    if let Ok(mut writer) = shared.writer.lock() {
+                        *writer = None;
+                    }
+                });
+            }
+        }
         let _ = reason;
     }
 
@@ -451,10 +575,18 @@ impl V4Connection {
                         return Ok(Some((rid, payload)));
                     }
                     // Not ours (a late frame for a future call): park it.
-                    self.deferred_responses
+                    let mut parked = self
+                        .deferred_responses
                         .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .push_back((rid, payload));
+                        .unwrap_or_else(|e| e.into_inner());
+                    if parked.len() >= MAX_DEFERRED_RESPONSES {
+                        parked.pop_front();
+                        eprintln!(
+                            "[plugin] dropped the oldest parked V4 response: the queue \
+                             exceeded {MAX_DEFERRED_RESPONSES}"
+                        );
+                    }
+                    parked.push_back((rid, payload));
                 }
                 Ok(HostIncoming::Request {
                     id: rid,
@@ -575,25 +707,41 @@ impl V4Connection {
     }
 
     /// Shut down the V4 connection. The writer half is dropped, which causes
-    /// the reader thread to exit, then the thread handle is joined.
+    /// the reader thread to exit, then the thread handle is joined. If a
+    /// wedged write holds the writer lock, the runner's tree is killed first:
+    /// its socket peer closes, unblocking the write, and a janitor clears the
+    /// writer half — shutdown never blocks on a stuck plugin.
     pub fn shutdown(&self) {
-        {
-            let mut writer = self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());
-            // Ask the runner to shut down gracefully so the plugin has a chance
-            // to clean up spawned child processes (e.g. the Python REPL). The
-            // runner will send an Ack, then observe EOF on the next loop
-            // iteration and exit.
-            if let Some(stream) = writer.as_mut() {
-                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-                let _ = send(
-                    stream,
-                    &HostToPluginV4::Request {
-                        id,
-                        payload: HostRequest::Shutdown,
-                    },
-                );
+        match self.shared.writer.try_lock() {
+            Ok(mut writer) => {
+                // Ask the runner to shut down gracefully so the plugin has a chance
+                // to clean up spawned child processes (e.g. the Python REPL). The
+                // runner will send an Ack, then observe EOF on the next loop
+                // iteration and exit.
+                if let Some(stream) = writer.as_mut() {
+                    let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                    let _ = send(
+                        stream,
+                        &HostToPluginV4::Request {
+                            id,
+                            payload: HostRequest::Shutdown,
+                        },
+                    );
+                }
+                let _ = writer.take();
             }
-            let _ = writer.take();
+            Err(TryLockError::Poisoned(error)) => {
+                let _ = error.into_inner().take();
+            }
+            Err(TryLockError::WouldBlock) => {
+                self.terminate_runner();
+                let shared = Arc::clone(&self.shared);
+                std::thread::spawn(move || {
+                    if let Ok(mut writer) = shared.writer.lock() {
+                        let _ = writer.take();
+                    }
+                });
+            }
         }
         // Dropping the writer closes the socket. The reader thread will then
         // exit and clear `alive`. Joining can deadlock if a plugin child
@@ -826,7 +974,7 @@ mod tests {
         let (host_stream, mut runner_stream) = connect_pair();
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
 
         let runner = thread::spawn(move || {
             // Read the host's V4 request and respond.
@@ -872,7 +1020,7 @@ mod tests {
         let (host_stream, mut runner_stream) = connect_pair();
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
 
         let runner = thread::spawn(move || {
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
@@ -945,7 +1093,7 @@ mod tests {
         let (host_stream, mut runner_stream) = connect_pair();
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
         let (done_tx, done_rx) = mpsc::channel::<()>();
 
         let runner = thread::spawn(move || {
@@ -1040,7 +1188,7 @@ mod tests {
         let (host_stream, mut runner_stream) = connect_pair();
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
         let mut point = document::entities::Point::new();
         point.common.handle = Handle::new(42);
         point.location.x = 7.0;
@@ -1116,7 +1264,7 @@ mod tests {
             Arc::new(move |cmd_id, notif| {
                 received2.lock().unwrap().push((cmd_id, notif));
             });
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
 
         let runner = thread::spawn(move || {
             send(
@@ -1159,7 +1307,7 @@ mod tests {
                 }
                 received2.lock().unwrap().push((cmd_id, notif));
             });
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
 
         let runner = thread::spawn(move || {
             for i in 0..2 {
@@ -1204,7 +1352,7 @@ mod tests {
             Arc::new(move |_, _| {
                 *received2.lock().unwrap() += 1;
             });
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
         let (checked_tx, checked_rx) = mpsc::channel::<()>();
 
         let runner = thread::spawn(move || {
@@ -1251,7 +1399,7 @@ mod tests {
         let (host_stream, mut runner_stream) = connect_pair();
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
-        let conn = V4Connection::new(host_stream, handler).unwrap();
+        let conn = V4Connection::new(host_stream, handler, None).unwrap();
 
         let runner = thread::spawn(move || {
             let req = recv::<HostToPluginV4>(&mut runner_stream).unwrap();
@@ -1458,7 +1606,7 @@ mod tests {
             )
             .expect("settle answer");
         });
-        let conn = V4Connection::new(host_end, Arc::new(|_, _| {})).expect("connection");
+        let conn = V4Connection::new(host_end, Arc::new(|_, _| {}), None).expect("connection");
         conn.attach_plugin_id("test.grip-points");
         let mut host = RecordingHost::default();
         let settle_id = conn
@@ -1517,7 +1665,7 @@ mod tests {
             std::thread::sleep(Duration::from_secs(1));
             let _ = id;
         });
-        let conn = V4Connection::new(host_end, Arc::new(|_, _| {})).expect("connection");
+        let conn = V4Connection::new(host_end, Arc::new(|_, _| {}), None).expect("connection");
         conn.attach_plugin_id("test.grip-points");
         let mut host = RecordingHost::default();
         let start = Instant::now();
@@ -1615,7 +1763,7 @@ mod tests {
             let _ = done_rx.recv_timeout(Duration::from_secs(10));
         });
 
-        let conn = V4Connection::new(host_end, Arc::new(|_, _| {})).expect("connection");
+        let conn = V4Connection::new(host_end, Arc::new(|_, _| {}), None).expect("connection");
         let mut host = RecordingHost::default();
         let resp = conn
             .call(

@@ -80,6 +80,8 @@ pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(
     }
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
+    // Wire the per-frame dialog decode budget (see `crate::dialog`).
+    crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf)?;
     Ok(msg)
 }
@@ -154,6 +156,8 @@ fn recv_framed_with_poll<R: Read>(
     }
     let mut buf = vec![0u8; len];
     read_with_poll(reader, &mut buf, poll)?;
+    // Wire the per-frame dialog decode budget (see `crate::dialog`).
+    crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf).map_err(ProxyError::Encode)?;
     Ok(msg)
 }

@@ -720,7 +720,7 @@ impl Scene {
             .iter()
             .filter_map(|handle| self.document.get_entity(*handle).cloned())
             .collect();
-        self.define_block_raw(&name, base, copies);
+        self.define_block_raw_unbumped(&name, base, copies);
         let record = self.document.block_records.get_mut(&name)?;
         record.flags.anonymous = true;
         let copy = record.handle;
@@ -789,7 +789,7 @@ impl Scene {
             .insert(data, ObjectType::DynamicBlock(link));
         self.document.block_representations.insert(data, definition);
         self.repoint_representation(insert, source, copy, &name);
-        self.bump_geometry();
+        self.bump_block_visibility(insert, &name);
         Some(name)
     }
 

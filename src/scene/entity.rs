@@ -1836,6 +1836,25 @@ impl Scene {
         base_point: document::types::Vector3,
         entities: Vec<EntityType>,
     ) {
+        self.define_block_raw_with_bump(name, base_point, entities, true);
+    }
+
+    pub(crate) fn define_block_raw_unbumped(
+        &mut self,
+        name: &str,
+        base_point: document::types::Vector3,
+        entities: Vec<EntityType>,
+    ) {
+        self.define_block_raw_with_bump(name, base_point, entities, false);
+    }
+
+    fn define_block_raw_with_bump(
+        &mut self,
+        name: &str,
+        base_point: document::types::Vector3,
+        entities: Vec<EntityType>,
+        bump: bool,
+    ) {
         if name.is_empty() || self.document.block_records.get(name).is_some() {
             return;
         }
@@ -1875,7 +1894,9 @@ impl Scene {
         }
         Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&added);
-        self.bump_geometry();
+        if bump {
+            self.bump_geometry();
+        }
     }
 
     /// Replace the contents and base point of block `name`, defining it when

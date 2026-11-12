@@ -8564,4 +8564,40 @@ mod batch7_tests {
             .expect("the saved drawing keeps its text");
         assert_eq!(stored, "m043-save.dwg");
     }
+
+    /// M072: IMAGEATTACH takes a path on the command line and places the
+    /// picture without the file picker; the insertion-point prompt follows as
+    /// after a dropped file.
+    #[test]
+    fn imageattach_takes_a_path_from_the_command_line() {
+        use base64::Engine as _;
+        let mut app = new_app();
+        let path = temp_named("m072-pic", "png");
+        let png = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+            .expect("the fixture is valid base64");
+        std::fs::write(&path, png).expect("the picture is written");
+
+        let _ = app.run_command_line(&format!("IMAGEATTACH \"{}\"", path.display()));
+        let out = out_text(&app);
+        assert!(out.contains("1×1 px"), "{out}");
+        assert!(out.contains("Specify insertion point"), "{out}");
+
+        let _ = app.feed_active_cmd("0,0");
+        let _ = app.feed_active_cmd("5,0");
+        let after = out_text(&app);
+        let image = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::RasterImage(image) => Some(image.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the command placed a raster image; said: {after}"));
+        assert_eq!(image.file_path, path.to_string_lossy());
+        // One pixel wide placed 5 units across: the u-vector is one pixel.
+        let world_width = image.u_vector.length() * image.size.x;
+        assert!((world_width - 5.0).abs() < 1.0e-6, "{world_width}");
+    }
 }

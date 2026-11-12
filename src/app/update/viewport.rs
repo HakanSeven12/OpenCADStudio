@@ -4707,6 +4707,7 @@ impl OpenCADStudio {
             "CIRCLE",
             "ARC",
             "ELLIPSE",
+            "ELLIPSE_CENTER",
             "POLY",
             "SPLINE",
             "XLINE",

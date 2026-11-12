@@ -1,6 +1,7 @@
 // PASTESPEC — paste the clipboard in a chosen format: the copied objects, the
-// copied objects as a block, or the system clipboard's text as multi-line
-// text or, when it is in rows of cells, as a table.
+// copied objects as a block, the system clipboard's text as multi-line text
+// or, when it is in rows of cells, as a table, or its picture as an image
+// file the drawing points at or as an image inside the drawing.
 
 use crate::t;
 use document::entities::mtext::AttachmentPoint;
@@ -10,6 +11,7 @@ use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
+use crate::io::ole_embed::EmbeddedImage;
 use crate::scene::model::wire_model::WireModel;
 
 /// What the command is asking for.
@@ -30,6 +32,8 @@ pub struct PasteSpecCommand {
     text: Option<String>,
     /// The table of that text's cells, when it is in rows of cells.
     table: Option<Table>,
+    /// The system clipboard's picture.
+    picture: Option<EmbeddedImage>,
     style: String,
     height: f64,
     step: Step,
@@ -41,6 +45,7 @@ impl PasteSpecCommand {
         objects: bool,
         text: Option<&str>,
         table: Option<Table>,
+        picture: Option<EmbeddedImage>,
         style: String,
         height: f64,
     ) -> Self {
@@ -48,6 +53,7 @@ impl PasteSpecCommand {
             objects,
             text: text.map(mtext_value),
             table,
+            picture,
             style,
             height,
             step: Step::Format,
@@ -194,6 +200,10 @@ impl CadCommand for PasteSpecCommand {
         if self.table.is_some() {
             options.push(CmdOption::new("TAble", "TA"));
         }
+        if self.picture.is_some() {
+            options.push(CmdOption::new("Image", "I"));
+            options.push(CmdOption::new("Embedded image", "E"));
+        }
         options
     }
 
@@ -221,6 +231,21 @@ impl CadCommand for PasteSpecCommand {
                 self.step = Step::Table;
                 Some(CmdResult::NeedPoint)
             }
+            // The picture goes on as IMAGE or IMAGEEMBED places one.
+            "I" | "IMAGE" => self
+                .picture
+                .take()
+                .map(|image| CmdResult::PlacePastedImage {
+                    image,
+                    embedded: false,
+                }),
+            "E" | "EMBEDDED" => self
+                .picture
+                .take()
+                .map(|image| CmdResult::PlacePastedImage {
+                    image,
+                    embedded: true,
+                }),
             _ => None,
         }
     }

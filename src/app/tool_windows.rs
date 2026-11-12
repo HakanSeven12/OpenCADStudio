@@ -1004,20 +1004,36 @@ impl OpenCADStudio {
             .filter(|tool| tool.wants_window && tool.window.is_none())
             .filter_map(|tool| Some((tool.kind, tool.content_size?, tool.resize, tool.opener)))
             .collect();
+        // A dialog's window is never as big as the main window: content that
+        // fills what it is given measures the whole main window, and a window
+        // that size comes up maximized (#2917), which is then remembered.
+        let (main_w, main_h) = self.win_size;
+        let known = main_w > 0.0 && main_h > 0.0;
+        let fits = |w: f32, h: f32| !known || (w < main_w && h < main_h);
         for (kind, size, resize, opener) in tools {
             let placement = self
                 .dock
                 .tool_windows
                 .get(&tool_key(kind))
                 .copied()
-                .filter(WindowPlacement::is_usable)
-                .unwrap_or(WindowPlacement {
-                    x: f32::NAN,
-                    y: f32::NAN,
+                .filter(|placement| placement.is_usable() && fits(placement.w, placement.h))
+                .unwrap_or_else(|| {
                     // Whole pixels and a little slack: text laid out a
                     // fraction narrower than measured wraps a line lower.
-                    w: size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.x,
-                    h: size.height.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.y,
+                    let w = size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.x;
+                    let h = size.height.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.y;
+                    let (w, h) = if fits(w, h) {
+                        (w, h)
+                    } else {
+                        let cap = |v: f32, main: f32| if v < main { v } else { main * 0.8 };
+                        (cap(w, main_w), cap(h, main_h))
+                    };
+                    WindowPlacement {
+                        x: f32::NAN,
+                        y: f32::NAN,
+                        w,
+                        h,
+                    }
                 });
             // A dialog opened from another dialog's window comes up in front
             // of it, not behind the window that was clicked (#2750).

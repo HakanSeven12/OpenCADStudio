@@ -1571,7 +1571,7 @@ mod tests {
                    <rect width=\"10\" height=\"10\" fill=\"#fff\"/></svg>";
         let state = panel_state(vec![
             DialogControl::StyledText {
-                text: "Supply sufficient".to_string(),
+                text: "Check passed".to_string(),
                 style: ocs_plugin_api::dialog::TextStyle::Success,
                 align_h: None,
             },

@@ -648,7 +648,7 @@ mod tests {
             align_h: None,
         };
         let styled = DialogControl::StyledText {
-            text: "Supply sufficient".to_string(),
+            text: "Check passed".to_string(),
             style: TextStyle::Success,
             align_h: Some(HorizontalAlign::Center),
         };

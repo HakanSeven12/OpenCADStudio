@@ -740,6 +740,11 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
     // Only a record's first 5/105 is its own handle; SORTENTSTABLE stores its
     // sort handles under 5 as well (#2211).
     let mut record_has_handle = false;
+    // A reactor only notifies its target; one left pointing at an erased
+    // object (common in drawings from other CAD) is an AUDIT warning there,
+    // not a broken file, so it is reported apart and does not fail the save.
+    let mut in_reactors = false;
+    let mut reactors = Vec::new();
     for pair in lines.chunks_exact(2) {
         let Ok(code) = pair[0].trim().parse::<i32>() else {
             return Ok(
@@ -754,8 +759,14 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
             version = Some(value.clone());
             variable = None;
         }
+        if code == 102 {
+            in_reactors = value == "{ACAD_REACTORS";
+        }
         if code == 0 {
             record_has_handle = false;
+            in_reactors = false;
+        } else if code == 330 && in_reactors {
+            reactors.push(value);
         } else if code == 5 || code == 105 {
             if !std::mem::replace(&mut record_has_handle, true) && !declared.insert(value.clone()) {
                 duplicate.insert(value.clone());
@@ -765,6 +776,10 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
         }
     }
     let dangling: std::collections::BTreeSet<String> = references
+        .into_iter()
+        .filter(|handle| !declared.contains(handle))
+        .collect();
+    let dangling_reactors: std::collections::BTreeSet<String> = reactors
         .into_iter()
         .filter(|handle| !declared.contains(handle))
         .collect();
@@ -859,6 +874,7 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
         "declared_handles":declared.len() - 1,
         "duplicate_handles":duplicate,
         "dangling_handles":dangling,
+        "dangling_reactors":dangling_reactors,
         "orphaned_objects":orphaned_objects,
         "declared_version":version,
     }))
@@ -2644,6 +2660,69 @@ mod tests {
         assert_eq!(audit["ok"], false, "{audit}");
         assert_eq!(audit["dangling_handles"], serde_json::json!(["2"]));
         let _ = std::fs::remove_file(path);
+    }
+
+    /// A reactor naming an object that is gone (as drawings from other CAD
+    /// carry) is reported, but the file is sound; an owner that is gone is not.
+    #[test]
+    fn raw_dxf_audit_reports_dangling_reactors_without_failing() {
+        let path =
+            std::env::temp_dir().join(format!("ocs_dangling_reactor_{}.dxf", std::process::id()));
+        std::fs::write(
+            &path,
+            "  0
+LINE
+  5
+1
+102
+{ACAD_REACTORS
+330
+DEAD
+102
+}
+330
+1
+",
+        )
+        .unwrap();
+        let audit = super::audit_ascii_dxf_references(&path).unwrap();
+        assert_eq!(audit["ok"], true, "{audit}");
+        assert_eq!(audit["dangling_reactors"], serde_json::json!(["DEAD"]));
+        assert_eq!(audit["dangling_handles"], serde_json::json!([]));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The same through save_verified: a line whose reactor names a missing
+    /// object saves as DXF, as it already did as DWG.
+    #[test]
+    fn save_verified_dxf_tolerates_a_dangling_entity_reactor() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        {
+            let document = &mut app.tabs[app.active_tab].scene.document;
+            let handle = document.entities().next().unwrap().common().handle;
+            document
+                .get_entity_mut(handle)
+                .unwrap()
+                .common_mut()
+                .reactors
+                .push(document::Handle::new(0xDEAD0));
+        }
+        for format in ["dwg", "dxf"] {
+            let path = std::env::temp_dir().join(format!(
+                "ocs_dangling_reactor_save_{}.{format}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let result = app
+                .save_verified_request(&serde_json::json!({
+                    "path":path,"target_format":format,"target_version":"AC1027","overwrite":true,
+                }))
+                .unwrap_or_else(|error| panic!("{format}: {error}"));
+            assert_eq!(result["verified"], true, "{format}: {result}");
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// SORTENTSTABLE keeps its sort handles under code 5 after its own; they

@@ -1324,10 +1324,7 @@ impl HatchCommand {
             .collect();
         let near = crate::scene::sources_near_rings(&rings, &self.boundary_sources, 1.0e-6);
         let near_source_count = near.len();
-        let mut boundary_sources: Vec<Vec<Handle>> = rings
-            .iter()
-            .map(|ring| crate::scene::ring_source_handles(ring, &near))
-            .collect();
+        let mut boundary_sources = crate::scene::rings_source_handles(&rings, &near);
         let source_of = |index: usize| {
             if self
                 .point_regions
@@ -2706,6 +2703,64 @@ mod tests {
         command.on_point(DVec3::new(5.0, 5.0, 0.0));
         assert_eq!(command.point_regions.len(), 1);
         assert_eq!(command.point_regions[0].len(), 2, "outer ring plus island");
+    }
+
+    /// A hatch over many selected outlines reads each boundary source a few
+    /// times. Reading every source again for each outline made HATCH take
+    /// seconds to start on a few thousand selected objects, and four times
+    /// as long for twice as many.
+    #[test]
+    fn hatch_over_many_selected_outlines_reads_each_source_a_few_times() {
+        use document::entities::{LwPolyline, LwVertex};
+        use document::types::Vector2;
+
+        const OUTLINES: usize = 400;
+        let mut scene = crate::scene::Scene::new();
+        let handles: Vec<Handle> = (0..OUTLINES)
+            .map(|index| {
+                let x = (index % 20) as f64 * 10.0;
+                let y = (index / 20) as f64 * 10.0;
+                let mut outline = LwPolyline::new();
+                outline.vertices = [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0), (0.0, 6.0)]
+                    .into_iter()
+                    .map(|(dx, dy)| LwVertex::new(Vector2::new(x + dx, y + dy)))
+                    .collect();
+                outline.is_closed = true;
+                scene.add_entity(EntityType::LwPolyline(outline))
+            })
+            .collect();
+        let plane = WorkingPlane::default();
+        let sources = scene.boundary_sources_on_plane(plane, 1.0e-6);
+        assert_eq!(sources.len(), OUTLINES);
+        let command = HatchCommand::new(sources, handles.clone(), None, plane);
+        assert_eq!(command.object_regions.len(), OUTLINES);
+
+        let examined = || crate::scene::SOURCES_EXAMINED.with(std::cell::Cell::get);
+        let before = examined();
+        let preview = command.hatch_preview_models().expect("a hatch preview");
+        let examined = examined() - before;
+
+        // The hatch is the same whatever the search costs: one loop for each
+        // outline, bounded by that outline alone.
+        assert_eq!(preview.len(), 1);
+        let paths = preview[0].boundary_paths.as_ref().expect("boundary paths");
+        assert_eq!(paths.len(), OUTLINES);
+        let mut bounded_by: Vec<Handle> = paths
+            .iter()
+            .map(|path| match path.boundary_handles.as_slice() {
+                [handle] => *handle,
+                other => panic!("a loop bounded by {other:?}"),
+            })
+            .collect();
+        bounded_by.sort_by_key(|handle| handle.value());
+        let mut expected = handles;
+        expected.sort_by_key(|handle| handle.value());
+        assert_eq!(bounded_by, expected);
+
+        assert!(
+            examined <= 40 * OUTLINES,
+            "the hatch read {examined} boundary sources for {OUTLINES} outlines"
+        );
     }
 
     #[test]

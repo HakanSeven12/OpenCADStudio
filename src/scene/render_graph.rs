@@ -1292,7 +1292,14 @@ pub fn any_block_definition_holds(
     document
         .block_records
         .iter()
-        .filter(|record| !record.is_layout())
+        // `is_layout()` alone is not enough: an orphaned block can carry a
+        // dangling layout handle and still be inserted somewhere.
+        .filter(|record| {
+            !matches!(
+                document.objects.get(&record.layout),
+                Some(document::objects::ObjectType::Layout(_))
+            )
+        })
         .any(|record| {
             record
                 .entity_handles

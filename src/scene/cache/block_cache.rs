@@ -3262,6 +3262,219 @@ fn band_scale(accum_xform: &Transform) -> f32 {
     ((sx + sy) * 0.5) as f32
 }
 
+/// How an insert that does not keep shapes widens a wide polyline. A band's
+/// edges run beside each segment, so the insert takes them to lines beside the
+/// segment's image at the plane's area scale over the segment's length scale:
+/// stretched only along a segment its band keeps its width, stretched only
+/// across it the band takes the whole scale.
+enum DirectionalBand {
+    /// Every segment widens by this one factor.
+    Uniform(f32),
+    /// The segments widen differently. The wire is split at every joint where
+    /// the width changes and carries each point's drawn width in
+    /// `taper_widths`; `corners` are the drawing-space triangles that close
+    /// the outer corner of each turn, which the split leaves unmitred.
+    Split {
+        wire: LocalWire,
+        corners: Vec<[f64; 3]>,
+    },
+}
+
+/// The band's own widening under `accum_xform`, or `None` when the insert
+/// keeps shapes on the band's plane (any scale with rotation or mirror),
+/// where `band_scale` widens every direction alike.
+fn directional_band(lw: &LocalWire, accum_xform: &Transform) -> Option<DirectionalBand> {
+    use glam::DVec3;
+    let count = lw.points.len();
+    if lw.world_width <= 0.0
+        || lw.point_marker.is_some()
+        || !lw.pattern_stations.is_empty()
+        || count < 2
+    {
+        return None;
+    }
+    let at = |index: usize| -> Option<DVec3> {
+        let point = lw.points[index];
+        let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        point[0].is_finite().then(|| {
+            DVec3::new(
+                point[0] as f64 + low[0] as f64,
+                point[1] as f64 + low[1] as f64,
+                point[2] as f64 + low[2] as f64,
+            )
+        })
+    };
+    let linear = |v: DVec3| {
+        let image = accum_xform.apply_rotation(Vector3::new(v.x, v.y, v.z));
+        DVec3::new(image.x, image.y, image.z)
+    };
+    let normal = local_band_normal(lw, &at);
+    let u = normal.any_orthonormal_vector();
+    let (mu, mv) = (linear(u), linear(normal.cross(u)));
+    let plane_image = mu.cross(mv);
+    let area = plane_image.length();
+    let largest = mu.length().max(mv.length());
+    if area <= 1e-12 * largest * largest {
+        return None;
+    }
+    if (mu.length() - mv.length()).abs() <= 1e-9 * largest
+        && mu.dot(mv).abs() <= 1e-9 * largest * largest
+    {
+        return None;
+    }
+
+    // Each segment that has a length: where it starts, its direction, and
+    // how much the insert widens it.
+    let segments: Vec<(usize, DVec3, f64)> = (0..count - 1)
+        .filter_map(|index| {
+            let direction = (at(index + 1)? - at(index)?).try_normalize()?;
+            Some((index, direction, area / linear(direction).length()))
+        })
+        .collect();
+    let first = segments.first()?.2;
+    let same = |a: f64, b: f64| (a - b).abs() <= 1e-6 * a.max(b);
+    if segments.iter().all(|&(_, _, factor)| same(factor, first)) {
+        return Some(DirectionalBand::Uniform(first as f32));
+    }
+
+    // The factor of the segment leaving each point; a zero-length one takes
+    // its neighbour's, a NaN break has none.
+    let mut factors: Vec<Option<f64>> = vec![None; count - 1];
+    for &(index, _, factor) in &segments {
+        factors[index] = Some(factor);
+    }
+    let joined = |index: usize| at(index).is_some() && at(index + 1).is_some();
+    for index in 1..count - 1 {
+        if factors[index].is_none() && joined(index) {
+            factors[index] = factors[index - 1];
+        }
+    }
+    for index in (0..count - 2).rev() {
+        if factors[index].is_none() && joined(index) {
+            factors[index] = factors[index + 1];
+        }
+    }
+
+    let local_width =
+        |index: usize| f64::from(lw.taper_widths.get(index).copied().unwrap_or(lw.world_width));
+    let mut wire = lw.clone();
+    wire.points = Vec::with_capacity(count * 2);
+    wire.points_low = Vec::with_capacity(count * 2);
+    wire.taper_widths = Vec::with_capacity(count * 2);
+    let push = |wire: &mut LocalWire, point: [f32; 3], low: [f32; 3], width: f64| {
+        wire.points.push(point);
+        wire.points_low.push(low);
+        wire.taper_widths.push(width as f32);
+    };
+    for index in 0..count {
+        let point = lw.points[index];
+        if !point[0].is_finite() {
+            push(&mut wire, [f32::NAN; 3], [0.0; 3], 0.0);
+            continue;
+        }
+        let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let width = local_width(index);
+        let arriving = index.checked_sub(1).and_then(|before| factors[before]);
+        let leaving = factors.get(index).copied().flatten();
+        match (arriving, leaving) {
+            (Some(before), Some(after)) if !same(before, after) => {
+                push(&mut wire, point, low, width * before);
+                push(&mut wire, [f32::NAN; 3], [0.0; 3], 0.0);
+                push(&mut wire, point, low, width * after);
+            }
+            (Some(factor), _) | (None, Some(factor)) => push(&mut wire, point, low, width * factor),
+            (None, None) => push(&mut wire, point, low, width * first),
+        }
+    }
+
+    // A constant band is mitred at its joints; a tapered one meets them
+    // square, inside the block and out.
+    let mut corners = Vec::new();
+    if lw.taper_widths.is_empty() {
+        let world_normal = plane_image / area;
+        let half = 0.5 * f64::from(lw.world_width);
+        let same_point = |a: DVec3, b: DVec3| a.distance(b) <= 1e-9 * (1.0 + a.length());
+        let mut corner = |arriving: (usize, DVec3, f64), leaving: (usize, DVec3, f64)| {
+            let (Some(end), Some(start)) = (at(arriving.0 + 1), at(leaving.0)) else {
+                return;
+            };
+            if !same_point(end, start) {
+                return;
+            }
+            let (e1, e2) = (linear(arriving.1).normalize(), linear(leaving.1).normalize());
+            let cos = e1.dot(e2);
+            let turn = world_normal.dot(e1.cross(e2));
+            let half_turn = turn / (1.0 + cos);
+            if cos <= -1.0 + 1e-9
+                || half_turn.abs() < 1e-9
+                || half_turn.abs() > crate::scene::pipeline::wire_gpu::MITER_LIMIT
+            {
+                return;
+            }
+            // The outer side is right of a left turn; its two edges meet
+            // where the shader's mitre would have put the corner.
+            let side = -half_turn.signum();
+            let joint = accum_xform.apply(Vector3::new(end.x, end.y, end.z));
+            let joint = DVec3::new(joint.x, joint.y, joint.z);
+            let a = joint + world_normal.cross(e1) * (side * half * arriving.2);
+            let b = joint + world_normal.cross(e2) * (side * half * leaving.2);
+            let tip = a + e1 * (world_normal.dot((b - a).cross(e2)) / turn);
+            for vertex in [joint, a, tip, joint, tip, b] {
+                corners.push(vertex.to_array());
+            }
+        };
+        for pair in segments.windows(2) {
+            corner(pair[0], pair[1]);
+        }
+        if segments.len() > 2 {
+            corner(segments[segments.len() - 1], segments[0]);
+        }
+    }
+    Some(DirectionalBand::Split { wire, corners })
+}
+
+/// The block-local plane of a band: its arcs' plane, else the plane through
+/// its first turn, else the XY plane.
+fn local_band_normal(
+    lw: &LocalWire,
+    at: &impl Fn(usize) -> Option<glam::DVec3>,
+) -> glam::DVec3 {
+    use glam::DVec3;
+    for tangent in &lw.tangent_geoms {
+        let normal = match tangent {
+            TangentGeom::Arc { axis_x, axis_y, .. }
+            | TangentGeom::PlanarCircle { axis_x, axis_y, .. } => {
+                DVec3::from_array(*axis_x).cross(DVec3::from_array(*axis_y))
+            }
+            TangentGeom::PlanarEllipse { normal, .. } => DVec3::from_array(*normal),
+            _ => continue,
+        };
+        if let Some(normal) = normal.try_normalize() {
+            return normal;
+        }
+    }
+    let mut points = (0..lw.points.len()).filter_map(at);
+    if let Some(origin) = points.next() {
+        let mut reference: Option<DVec3> = None;
+        for point in points {
+            let offset = point - origin;
+            match reference {
+                None if offset.length() > 0.0 => reference = Some(offset),
+                Some(reference) => {
+                    let cross = reference.cross(offset);
+                    if cross.length() > 1e-9 * reference.length() * offset.length() {
+                        if let Some(normal) = cross.try_normalize() {
+                            return normal;
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    DVec3::Z
+}
+
 fn emit_wire(
     lw: &LocalWire,
     accum_xform: &Transform,
@@ -3497,6 +3710,25 @@ fn emit_wire(
             }
         }
     }
+
+    // A band the insert stretches unevenly takes its width from the insert's
+    // scale across each segment, not from the mean of its two axes.
+    let split;
+    let mut band_corners = Vec::new();
+    let (lw, final_world_width, final_taper_widths) = match directional_band(lw, accum_xform) {
+        None => (lw, final_world_width, final_taper_widths),
+        Some(DirectionalBand::Uniform(factor)) => (
+            lw,
+            lw.world_width * factor,
+            lw.taper_widths.iter().map(|width| width * factor).collect(),
+        ),
+        Some(DirectionalBand::Split { wire, corners }) => {
+            band_corners = corners;
+            split = wire;
+            let widest = split.taper_widths.iter().copied().fold(0.0, f32::max);
+            (&split, widest, split.taper_widths.clone())
+        }
+    };
 
     let station_values = pattern_station_values(&lw.pattern_stations, lw.points.len());
     let station_map = decode_pattern_station_map(&lw.pattern_stations, lw.points.len());
@@ -3800,6 +4032,15 @@ fn emit_wire(
         let (hx, lx) = WireModel::split_ds(v.x);
         let (hy, ly) = WireModel::split_ds(v.y);
         let (hz, lz) = WireModel::split_ds(v.z);
+        entry.fill_tris.push([hx, hy, hz]);
+        entry.fill_tris_low.push([lx, ly, lz]);
+    }
+    // A band split at its joints has its turns' outer corners closed here,
+    // already in drawing space.
+    for corner in &band_corners {
+        let (hx, lx) = WireModel::split_ds(corner[0]);
+        let (hy, ly) = WireModel::split_ds(corner[1]);
+        let (hz, lz) = WireModel::split_ds(corner[2]);
         entry.fill_tris.push([hx, hy, hz]);
         entry.fill_tris_low.push([lx, ly, lz]);
     }

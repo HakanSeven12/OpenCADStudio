@@ -3110,6 +3110,9 @@ pub struct Scene {
     /// Conservative hint for whether any section object exists in the
     /// document. The live-section lookup runs on every resident patch.
     has_section_objects: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any table exists in the document. The
+    /// table-cell pick runs on every click.
+    has_tables: std::cell::Cell<Option<bool>>,
     /// Whether the current space holds objects the drawing saves as invisible,
     /// keyed by `(geometry_epoch, space block)`. Read every frame by the
     /// isolation menus, so the entity scan runs once per edit, not per frame.
@@ -3441,6 +3444,32 @@ mod section_hint_tests {
         scene.erase_entities(&[section]);
         assert!(scene.active_live_section(model).is_none());
     }
+
+    /// Without a table a click skips the cell pick; a table added by an
+    /// edit is picked at once, and none after it is erased.
+    #[test]
+    fn table_cell_pick_follows_added_and_erased_tables() {
+        let mut scene = Scene::new();
+        let inside = glam::DVec3::new(10.0, -5.0, 0.0);
+        assert!(scene.table_cell_pick(inside, 0.0).is_none());
+        assert_eq!(scene.has_tables.get(), Some(false));
+
+        let mut table = document::entities::Table::new(Vector3::ZERO, 3, 4);
+        for column in &mut table.columns {
+            column.width = 20.0;
+        }
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        let handle = scene.add_entity(EntityType::Table(Box::new(table)));
+        assert_eq!(
+            scene.table_cell_pick(inside, 0.0).map(|(table, _)| table),
+            Some(handle)
+        );
+
+        scene.erase_entities(&[handle]);
+        assert!(scene.table_cell_pick(inside, 0.0).is_none());
+    }
 }
 
 #[derive(Clone)]
@@ -3680,6 +3709,7 @@ impl Scene {
             has_underlays: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
             has_section_objects: std::cell::Cell::new(None),
+            has_tables: std::cell::Cell::new(None),
             persisted_hidden_cache: std::cell::Cell::new(None),
             document_render_env_cache: RefCell::new(None),
             background_image_cache: RefCell::new(HashMap::default()),
@@ -4480,6 +4510,19 @@ impl Scene {
         any
     }
 
+    /// Fast check for whether any table exists in the document.
+    pub(crate) fn has_tables(&self) -> bool {
+        if let Some(known) = self.has_tables.get() {
+            return known;
+        }
+        let any = self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Table(_)));
+        self.has_tables.set(Some(any));
+        any
+    }
+
     /// Fast check for whether any Face3D entities exist in the document.
     pub(crate) fn has_face3d(&self) -> bool {
         if let Some(known) = self.has_face3d.get() {
@@ -5106,6 +5149,20 @@ impl Scene {
         {
             self.has_section_objects.set(Some(true));
         }
+        if let Some(true) = self.has_tables.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_tables.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Table(_)))
+        }) {
+            self.has_tables.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5232,6 +5289,7 @@ impl Scene {
         self.has_underlays.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
+        self.has_tables.set(None);
         // Default: also invalidate block definitions. Safe for every caller;
         // operations that know blocks are untouched use `bump_geometry_no_blocks`.
         self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
@@ -5342,6 +5400,7 @@ impl Scene {
         self.background_image_cache.borrow_mut().clear();
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
+        self.has_tables.set(None);
         self.invalidate_dependency_index();
         self.push_geometry_delta(epoch, Vec::new(), true);
     }

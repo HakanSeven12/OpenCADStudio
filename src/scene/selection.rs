@@ -1973,6 +1973,11 @@ impl Scene {
         point: glam::DVec3,
         margin: f64,
     ) -> Option<(Handle, (usize, usize))> {
+        // Asked on every click: skip the walk of the space when the drawing
+        // has no table at all.
+        if !self.has_tables() {
+            return None;
+        }
         let block = self.interaction_block_handle();
         let record = self
             .document

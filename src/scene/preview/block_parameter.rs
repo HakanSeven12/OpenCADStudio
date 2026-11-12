@@ -207,14 +207,20 @@ impl Scene {
         parameter: Handle,
         local_point: glam::DVec3,
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
+        let def = crate::scene::block_actions::instance::definition(&self.document, handle)?;
+        let scoped = crate::scene::block_actions::instance::scoped_document_for_insert(
+            &mut self.document,
+            handle,
+            def,
+        );
         let staged = crate::scene::block_actions::instance::evaluate_value(
-            &self.document,
+            &scoped,
             handle,
             parameter,
             crate::scene::block_actions::Value::Point(local_point),
         )
         .ok()?;
-        self.reference_document_preview(staged.as_ref().unwrap_or(&self.document), handle)
+        self.reference_document_preview(staged.as_ref().unwrap_or(&scoped), handle)
     }
 
     #[doc(hidden)]
@@ -224,14 +230,20 @@ impl Scene {
         parameter: Handle,
         flipped: bool,
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
+        let def = crate::scene::block_actions::instance::definition(&self.document, handle)?;
+        let scoped = crate::scene::block_actions::instance::scoped_document_for_insert(
+            &mut self.document,
+            handle,
+            def,
+        );
         let staged = crate::scene::block_actions::instance::evaluate_value(
-            &self.document,
+            &scoped,
             handle,
             parameter,
             crate::scene::block_actions::Value::Flip(flipped),
         )
         .ok()?;
-        self.reference_document_preview(staged.as_ref().unwrap_or(&self.document), handle)
+        self.reference_document_preview(staged.as_ref().unwrap_or(&scoped), handle)
     }
 
     #[doc(hidden)]

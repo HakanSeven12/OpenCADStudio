@@ -757,6 +757,56 @@ pub(crate) fn definition(doc: &Document, insert: Handle) -> Option<Handle> {
     doc.dynamic_definition_for_insert(insert)
 }
 
+/// Build a minimal document containing only `insert`, `def`, the insert's
+/// current representation block, and any nested blocks they reference.
+/// Avoids cloning unrelated ModelSpace/PaperSpace entities during live previews.
+pub(crate) fn scoped_document_for_insert(
+    doc: &mut Document,
+    insert: Handle,
+    def: Handle,
+) -> Document {
+    let mut scoped = doc.snapshot_structure();
+    let mut handles_to_copy: Vec<Handle> = vec![insert];
+    let mut visited_blocks = rustc_hash::FxHashSet::default();
+    let mut block_queue: Vec<String> = Vec::new();
+    if let Some(def_record) = doc.block_records.iter().find(|b| b.handle == def) {
+        block_queue.push(def_record.name.clone());
+    }
+    if let Some(EntityType::Insert(reference)) = doc.get_entity(insert) {
+        block_queue.push(reference.block_name.clone());
+    }
+    while let Some(name) = block_queue.pop() {
+        if !visited_blocks.insert(name.clone()) {
+            continue;
+        }
+        let Some(record) = doc.block_records.get(&name) else {
+            continue;
+        };
+        for &h in &record.entity_handles {
+            handles_to_copy.push(h);
+            if let Some(EntityType::Insert(nested)) = doc.get_entity(h) {
+                block_queue.push(nested.block_name.clone());
+            }
+        }
+    }
+    let insert_owner = doc.get_entity(insert).map(|e| e.common().owner_handle);
+    for record in scoped.block_records.iter_mut() {
+        if !visited_blocks.contains(&record.name) {
+            if Some(record.handle) == insert_owner {
+                record.entity_handles = vec![insert];
+            } else {
+                record.entity_handles.clear();
+            }
+        }
+    }
+    for h in handles_to_copy {
+        if let Some(arc) = doc.get_entity_arc(h) {
+            scoped.restore_entity_arc(arc);
+        }
+    }
+    scoped
+}
+
 /// Stage and validate completely before exposing any changes to the drawing.
 #[cfg(test)]
 pub(crate) fn evaluate(

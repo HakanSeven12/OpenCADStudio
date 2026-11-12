@@ -130,6 +130,23 @@ pub struct WindowPlacement {
     pub h: f32,
 }
 
+impl WindowPlacement {
+    /// The smallest window of its own (see `open_window`): a minimized
+    /// window reports exactly this size.
+    const MIN_W: f32 = 240.0;
+    const MIN_H: f32 = 160.0;
+
+    /// Whether this is where a window really was. A minimized window is
+    /// parked far off screen (-32000 on Windows) and shrunk to the smallest
+    /// size; remembering that brought every later window back as a speck
+    /// nobody could find.
+    pub fn is_usable(&self) -> bool {
+        let parked = |v: f32| v.is_finite() && v <= -10000.0;
+        let shrunk = self.w <= Self::MIN_W + 0.5 && self.h <= Self::MIN_H + 0.5;
+        self.w.is_finite() && self.h.is_finite() && !parked(self.x) && !parked(self.y) && !shrunk
+    }
+}
+
 fn nan_when_null<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     use serde::Deserialize;
     Ok(Option::<f32>::deserialize(d)?.unwrap_or(f32::NAN))
@@ -762,8 +779,15 @@ impl OpenCADStudio {
             .dock
             .detached
             .get(&id)
-            .or_else(|| self.dock.tool_windows.get(&pallet_key(id)))
             .copied()
+            .filter(WindowPlacement::is_usable)
+            .or_else(|| {
+                self.dock
+                    .tool_windows
+                    .get(&pallet_key(id))
+                    .copied()
+                    .filter(WindowPlacement::is_usable)
+            })
             .unwrap_or(WindowPlacement {
                 x: f32::NAN,
                 y: f32::NAN,
@@ -855,6 +879,12 @@ impl OpenCADStudio {
 
     pub(crate) fn os_window_resized(&mut self, id: iced::window::Id, w: f32, h: f32) {
         if let Some(window) = self.os_windows.iter_mut().find(|window| window.id == id) {
+            // Minimizing reports the smallest size: the window keeps the
+            // size it had.
+            let candidate = WindowPlacement { w, h, ..window.placement };
+            if !candidate.is_usable() {
+                return;
+            }
             window.placement.w = w;
             window.placement.h = h;
             let placement = window.placement;
@@ -868,8 +898,17 @@ impl OpenCADStudio {
                 // The window's own move to its place is still to come.
                 return;
             }
-            window.placement.x = at.x * window.scale;
-            window.placement.y = at.y * window.scale;
+            // Minimizing parks the window off screen: its place stays.
+            let candidate = WindowPlacement {
+                x: at.x * window.scale,
+                y: at.y * window.scale,
+                ..window.placement
+            };
+            if !candidate.is_usable() {
+                return;
+            }
+            window.placement.x = candidate.x;
+            window.placement.y = candidate.y;
             let placement = window.placement;
             self.remember_placement(window_content(&self.os_windows, id), placement);
         }
@@ -895,6 +934,10 @@ impl OpenCADStudio {
     }
 
     fn remember_placement(&mut self, content: Option<Detached>, placement: WindowPlacement) {
+        // A minimized window's rectangle is not where it was.
+        if !placement.is_usable() {
+            return;
+        }
         match content {
             Some(Detached::Tool(kind)) => {
                 self.dock.tool_windows.insert(tool_key(kind), placement);
@@ -967,6 +1010,7 @@ impl OpenCADStudio {
                 .tool_windows
                 .get(&tool_key(kind))
                 .copied()
+                .filter(WindowPlacement::is_usable)
                 .unwrap_or(WindowPlacement {
                     x: f32::NAN,
                     y: f32::NAN,
@@ -998,7 +1042,17 @@ impl OpenCADStudio {
             })
             .map(|(panel, placement)| (*panel, *placement))
             .collect();
-        for (panel, placement) in panels {
+        for (panel, mut placement) in panels {
+            // A pallet saved minimized opens centred at a workable size.
+            if !placement.is_usable() {
+                let (w, h) = self.dock_float_size(panel);
+                placement = WindowPlacement {
+                    x: f32::NAN,
+                    y: f32::NAN,
+                    w,
+                    h: h.max(PALLET_WINDOW_MIN_H) + HEADER_H,
+                };
+            }
             let (id, open) = open_window(placement, panel.title().to_string(), false);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement, None));

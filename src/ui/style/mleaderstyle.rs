@@ -1,257 +1,2008 @@
 //! Multileader style manager.
+//!
+//! One window with three faces. The manager lists the styles, shows the
+//! selected one, makes it current and deletes it. New… asks for a name and
+//! the style to start from; Continue, like Modify…, opens the style's
+//! settings in three tabs beside a preview. OK keeps them (a new style also
+//! becomes current), Cancel takes them back. Everything done in the window
+//! is one undo step when it closes.
 
 use crate::app::Message;
-use crate::t;
+use crate::tr;
 use crate::ui::style::common::muted_style;
-use iced::widget::{canvas, checkbox, column, container, row, text, text_input};
-use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
-use std::borrow::Cow;
+use crate::ui::style::form::{button_style, dialog_button, field_style};
+use crate::ui::window::pdf_dialogs::{card, card_style};
+use document::objects::{
+    BlockContentConnectionType, LeaderContentType, MultiLeaderPathType, MultiLeaderStyle,
+    TextAttachmentDirectionType, TextAttachmentType,
+};
+use iced::widget::{
+    button, canvas, checkbox, column, container, mouse_area, radio, row, scrollable, stack, text,
+    text_input, Space,
+};
+use iced::{mouse, Background, Border, Color, Element, Fill, Length, Point, Rectangle, Size, Theme};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct EnumChoice {
-    code: String,
-    label: Cow<'static, str>,
+/// The window's natural size, the same on every face so it does not jump.
+const WIDTH: f32 = 880.0;
+const HEIGHT: f32 = 600.0;
+/// Width of a field's label column on the Modify tabs.
+const LABEL: f32 = 150.0;
+/// Width of the fields on the Modify tabs.
+const FIELD: f32 = 210.0;
+
+/// What the window is showing beyond the manager.
+#[derive(Debug, Clone, Default)]
+pub struct Dialog {
+    /// The list shows only the styles multileaders use.
+    pub in_use_only: bool,
+    /// The New face: a name and the style to start from.
+    pub create: Option<CreateDraft>,
+    /// The Modify face of the selected style.
+    pub modify: Option<Modify>,
+    /// A refused new name.
+    pub notice: Option<Notice>,
+    /// Delete was asked for this style.
+    pub delete_ask: Option<String>,
+    /// A chooser opened from a list's last entry.
+    pub pick: Option<Pick>,
+    /// The Load Linetypes window over Select Linetype.
+    pub load: Option<LoadDraft>,
 }
 
-impl fmt::Display for EnumChoice {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.label.as_ref())
+/// The linetypes of a `.lin` source offered for loading.
+#[derive(Debug, Clone)]
+pub struct LoadDraft {
+    /// The chosen file's name (empty: the program's own definitions).
+    pub file: String,
+    pub dir: Option<std::path::PathBuf>,
+    pub source: String,
+    /// Name, description and dash lengths, in file order.
+    pub entries: Vec<(String, String, Vec<f64>)>,
+    /// The names ticked for loading.
+    pub picked: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateDraft {
+    pub name: String,
+    pub start_with: String,
+    pub annotative: bool,
+}
+
+/// The Modify face's own state; the style itself is edited in place.
+#[derive(Debug, Clone)]
+pub struct Modify {
+    pub handle: document::Handle,
+    /// The style before Modify opened; `None` when Continue created it.
+    pub backup: Option<MultiLeaderStyle>,
+    /// The style selected in the list before Continue.
+    pub previous_selected: String,
+    pub tab: u8,
+    pub max_points_on: bool,
+    pub first_angle_on: bool,
+    pub second_angle_on: bool,
+    pub scale_to_layout: bool,
+}
+
+/// Why a new name was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Notice {
+    EmptyName,
+    Exists(String),
+    UnsupportedCharacters,
+}
+
+/// The choosers behind Other…, User Arrow… and User Block….
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pick {
+    Linetype(String),
+    UserArrow(String),
+    UserBlock(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum MlsMsg {
+    Select(String),
+    ListFilter(bool),
+    SetCurrent,
+    New,
+    Modify,
+    Delete,
+    DeleteAnswer(bool),
+    Help,
+    CreateName(String),
+    CreateStart(String),
+    CreateAnnotative(bool),
+    CreateContinue,
+    CreateCancel,
+    NoticeClose,
+    Tab(u8),
+    /// A constraint switch: `max_points`, `first_angle` or `second_angle`.
+    Constraint(&'static str, bool),
+    /// The scale choice: true for "scale to layout".
+    ScaleToLayout(bool),
+    PickChoice(String),
+    PickLoad,
+    /// Load Linetypes: choose another `.lin` file.
+    LoadFile,
+    LoadFileChosen(Option<crate::io::PickedLinetypeFile>),
+    LoadToggle(String),
+    LoadOk,
+    LoadCancel,
+    PickOk,
+    PickCancel,
+    DefaultText,
+    TextStyles,
+    Ok,
+    Cancel,
+}
+
+fn msg(m: MlsMsg) -> Message {
+    Message::MLeaderStyleDlg(m)
+}
+
+/// The text field each numeric value is typed into, focused when OK refuses
+/// its value.
+pub fn field_id(field: &str) -> iced::widget::Id {
+    iced::widget::Id::new(match field {
+        "arrowhead_size" => "mls-arrowhead-size",
+        "break_gap" => "mls-break-gap",
+        "max_points" => "mls-max-points",
+        "landing_distance" => "mls-landing-distance",
+        "scale_factor" => "mls-scale-factor",
+        "text_height" => "mls-text-height",
+        "landing_gap" => "mls-landing-gap",
+        "block_scale" => "mls-block-scale",
+        _ => "mls-field",
+    })
+}
+
+/// The tab a value's field is on.
+pub fn field_tab(field: &str) -> u8 {
+    match field {
+        "arrowhead_size" | "break_gap" => 0,
+        "max_points" | "landing_distance" | "scale_factor" => 1,
+        _ => 2,
     }
 }
 
-fn choices(values: &[(&str, &str)]) -> Vec<EnumChoice> {
-    values
+// ── Choice lists ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Choice {
+    code: String,
+    label: String,
+}
+
+impl fmt::Display for Choice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+fn choice(code: impl Into<String>, label: impl Into<String>) -> Choice {
+    Choice {
+        code: code.into(),
+        label: label.into(),
+    }
+}
+
+/// The reference's Left / Right attachment list, in its order.
+const SIDE_ATTACHMENTS: [TextAttachmentType; 9] = [
+    TextAttachmentType::TopOfTopLine,
+    TextAttachmentType::MiddleOfTopLine,
+    TextAttachmentType::BottomOfTopLineUnderlineTopLine,
+    TextAttachmentType::BottomOfTopLineUnderlineBottomLine,
+    TextAttachmentType::MiddleOfText,
+    TextAttachmentType::MiddleOfBottomLine,
+    TextAttachmentType::BottomOfBottomLine,
+    TextAttachmentType::BottomLine,
+    TextAttachmentType::BottomOfTopLineUnderlineAll,
+];
+
+/// Values 5–8 are named one place off in the codec; the labels follow what
+/// they draw (see `ATTACH_LABELS` in entities/multileader.rs).
+fn attachment_label(value: TextAttachmentType) -> String {
+    match value {
+        TextAttachmentType::TopOfTopLine => tr!("mleader-style", "att-top-of-top"),
+        TextAttachmentType::MiddleOfTopLine => tr!("mleader-style", "att-middle-of-top"),
+        TextAttachmentType::BottomOfTopLineUnderlineTopLine => {
+            tr!("mleader-style", "att-bottom-of-top")
+        }
+        TextAttachmentType::BottomOfTopLineUnderlineBottomLine => {
+            tr!("mleader-style", "att-underline-top")
+        }
+        TextAttachmentType::MiddleOfText => tr!("mleader-style", "att-middle-of-text"),
+        TextAttachmentType::MiddleOfBottomLine => tr!("mleader-style", "att-middle-of-bottom"),
+        TextAttachmentType::BottomOfBottomLine => tr!("mleader-style", "att-bottom-of-bottom"),
+        TextAttachmentType::BottomLine => tr!("mleader-style", "att-underline-bottom"),
+        TextAttachmentType::BottomOfTopLineUnderlineAll => {
+            tr!("mleader-style", "att-underline-all")
+        }
+        TextAttachmentType::CenterOfText => tr!("mleader-style", "att-center"),
+        TextAttachmentType::CenterOfTextOverline => tr!("mleader-style", "att-overline-center"),
+    }
+}
+
+/// The code a picker value carries for an attachment.
+pub fn attachment_code(value: TextAttachmentType) -> String {
+    format!("{value:?}")
+}
+
+fn side_attachment_choices() -> Vec<Choice> {
+    SIDE_ATTACHMENTS
         .iter()
-        .map(|(code, label)| EnumChoice {
-            code: (*code).to_string(),
-            label: crate::i18n::translate(label),
-        })
+        .map(|&a| choice(attachment_code(a), attachment_label(a)))
         .collect()
 }
 
-pub struct MLeaderStyleView<'a> {
-    pub styles: Vec<String>,
+/// Top: Center or Overline and center; bottom: Center or Underline and
+/// center (both store 10 for the lined one).
+fn vertical_attachment_choices(top: bool) -> Vec<Choice> {
+    vec![
+        choice(
+            attachment_code(TextAttachmentType::CenterOfText),
+            tr!("mleader-style", "att-center"),
+        ),
+        choice(
+            attachment_code(TextAttachmentType::CenterOfTextOverline),
+            if top {
+                tr!("mleader-style", "att-overline-center")
+            } else {
+                tr!("mleader-style", "att-underline-center")
+            },
+        ),
+    ]
+}
+
+fn vertical_attachment_choice(value: TextAttachmentType, top: bool) -> Choice {
+    let list = vertical_attachment_choices(top);
+    if value == TextAttachmentType::CenterOfTextOverline {
+        list[1].clone()
+    } else {
+        list[0].clone()
+    }
+}
+
+/// What the arrowhead picker shows for a standard name; a user block keeps
+/// its own name.
+pub fn arrow_label(name: &str) -> String {
+    match name {
+        "Closed filled" => tr!("mleader-style", "arrow-closed-filled"),
+        "Closed blank" => tr!("mleader-style", "arrow-closed-blank"),
+        "Closed" => tr!("mleader-style", "arrow-closed"),
+        "Dot" => tr!("mleader-style", "arrow-dot"),
+        "Architectural tick" => tr!("mleader-style", "arrow-arch-tick"),
+        "Oblique" => tr!("mleader-style", "arrow-oblique"),
+        "Open" => tr!("mleader-style", "arrow-open"),
+        "Origin indicator" => tr!("mleader-style", "arrow-origin"),
+        "Origin indicator 2" => tr!("mleader-style", "arrow-origin2"),
+        "Right angle" => tr!("mleader-style", "arrow-right-angle"),
+        "Open 30" => tr!("mleader-style", "arrow-open30"),
+        "Dot small" => tr!("mleader-style", "arrow-dot-small"),
+        "Dot blank" => tr!("mleader-style", "arrow-dot-blank"),
+        "Dot small blank" => tr!("mleader-style", "arrow-dot-small-blank"),
+        "Box" => tr!("mleader-style", "arrow-box"),
+        "Box filled" => tr!("mleader-style", "arrow-box-filled"),
+        "Datum triangle" => tr!("mleader-style", "arrow-datum"),
+        "Datum triangle filled" => tr!("mleader-style", "arrow-datum-filled"),
+        "Integral" => tr!("mleader-style", "arrow-integral"),
+        "None" => tr!("mleader-style", "arrow-none"),
+        _ => name.to_string(),
+    }
+}
+
+/// What the source block picker shows for a predefined block's name.
+pub fn block_label(name: &str) -> String {
+    match name {
+        "Detail Callout" => tr!("mleader-style", "block-detail-callout"),
+        "Slot" => tr!("mleader-style", "block-slot"),
+        "Circle" => tr!("mleader-style", "block-circle"),
+        "Box" => tr!("mleader-style", "block-box"),
+        "Hexagon" => tr!("mleader-style", "block-hexagon"),
+        "Triangle" => tr!("mleader-style", "block-triangle"),
+        _ => name.to_string(),
+    }
+}
+
+/// The value a list's last entry sends to open its chooser.
+pub const OTHER: &str = "\u{1}other";
+
+/// `ByLayer` / `ByBlock` in the user's language; other names as they are.
+fn record_label(name: &str) -> String {
+    match name {
+        "ByLayer" | "ByBlock" => crate::t!(name).into_owned(),
+        _ => name.to_string(),
+    }
+}
+
+// ── View data ───────────────────────────────────────────────────────────────
+
+/// A loaded linetype for the Select Linetype chooser: name, description and
+/// its dash pattern (positive dash, negative gap, zero dot).
+pub struct LinetypeRow {
+    pub name: String,
+    pub description: String,
+    pub pattern: Vec<f64>,
+}
+
+pub struct View<'a> {
+    pub dialog: &'a Dialog,
+    /// Every style, with whether it is annotative.
+    pub styles: Vec<(String, bool)>,
+    /// The styles multileaders use.
+    pub in_use: Vec<String>,
     pub selected: &'a str,
-    pub style: Option<&'a document::objects::MultiLeaderStyle>,
-    pub current: String,
-    pub tab: u8,
-    pub compare_name: String,
-    pub compare_opts: Vec<String>,
-    pub comparison_sections: Vec<String>,
-    pub in_use: bool,
+    pub current: &'a str,
+    pub style: Option<&'a MultiLeaderStyle>,
     pub landing_distance: &'a str,
     pub landing_gap: &'a str,
     pub arrowhead_size: &'a str,
     pub text_height: &'a str,
     pub scale_factor: &'a str,
     pub break_gap: &'a str,
-    pub first_seg_angle: &'a str,
-    pub second_seg_angle: &'a str,
     pub max_points: &'a str,
     pub default_text: &'a str,
     pub line_color: &'a str,
     pub text_color: &'a str,
-    pub description: &'a str,
-    pub align_space: &'a str,
     pub block_color: &'a str,
-    pub block_rotation: &'a str,
-    pub block_scale_x: &'a str,
-    pub block_scale_y: &'a str,
-    pub block_scale_z: &'a str,
-    pub block_opts: Vec<String>,
-    pub arrow_opts: Vec<String>,
-    pub lt_opts: Vec<String>,
-    pub textstyle_opts: Vec<String>,
-    pub line_type_name: String,
-    pub arrowhead_name: String,
-    pub text_style_name: String,
-    pub block_content_name: String,
-    pub rename_active: Option<&'a str>,
-    pub rename_buf: &'a str,
+    pub block_scale: &'a str,
     pub color_open: Option<&'static str>,
+    pub line_type_name: String,
+    pub linetype_opts: Vec<String>,
+    pub linetypes: Vec<LinetypeRow>,
+    pub arrowhead_name: String,
+    pub arrow_opts: Vec<String>,
+    pub text_style_name: String,
+    pub textstyle_opts: Vec<String>,
+    pub block_name: String,
+    pub block_opts: Vec<String>,
+    /// The drawing's blocks a user arrow or content block can be.
+    pub user_blocks: Vec<String>,
+    /// The drawing's usual text height (metric 2.5-based styles 4, imperial
+    /// 0.18): the preview's yardstick for the style's sizes.
+    pub unit: f64,
 }
 
-fn input_row<'a>(
-    label: Cow<'static, str>,
-    placeholder: &'static str,
-    value: &'a str,
-    field: &'static str,
-) -> Element<'a, Message> {
-    row![
-        text(label).size(11).style(muted_style).width(165),
-        text_input(placeholder, value)
-            .on_input(move |value| Message::MLeaderStyleEdit { field, value })
+pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let face: Element<'a, Message> = if v.dialog.modify.is_some() {
+        modify_view(&v)
+    } else {
+        manager_view(&v)
+    };
+    let mut layers: Vec<Element<'a, Message>> = vec![
+        Space::new()
+            .width(Length::Fixed(WIDTH))
+            .height(Length::Fixed(HEIGHT))
+            .into(),
+        container(face)
+            .width(sizing.width)
+            .height(sizing.height)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.base.color)),
+                ..Default::default()
+            })
+            .into(),
+    ];
+    let overlay: Option<(Element<'a, Message>, Message)> =
+        if let Some(notice) = &v.dialog.notice {
+            Some((notice_card(notice), msg(MlsMsg::NoticeClose)))
+        } else if let Some(name) = &v.dialog.delete_ask {
+            Some((delete_card(name), msg(MlsMsg::DeleteAnswer(false))))
+        } else if let Some(draft) = &v.dialog.create {
+            Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
+        } else if let Some(load) = &v.dialog.load {
+            Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
+        } else {
+            v.dialog
+                .pick
+                .as_ref()
+                .map(|pick| (pick_card(pick, &v), msg(MlsMsg::PickCancel)))
+        };
+    if let Some((panel, dismiss)) = overlay {
+        layers.push(
+            mouse_area(
+                container(Space::new())
+                    .width(Fill)
+                    .height(Fill)
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(
+                            theme.palette().background.strongest.color.scale_alpha(0.55),
+                        )),
+                        ..Default::default()
+                    }),
+            )
+            .on_press(dismiss)
+            .into(),
+        );
+        layers.push(
+            container(panel)
+                .width(Fill)
+                .height(Fill)
+                .center_x(Fill)
+                .center_y(Fill)
+                .into(),
+        );
+    }
+    stack(layers).into()
+}
+
+/// The window's title for its current face.
+pub fn title(dialog: &Dialog, selected: &str) -> String {
+    if dialog.create.is_some() {
+        tr!("mleader-style", "create-title")
+    } else if dialog.modify.is_some() {
+        tr!("mleader-style", "modify-title", name = selected.to_string())
+    } else {
+        tr!("modal", "multileader-style-manager")
+    }
+}
+
+/// A text field that reads as off while it takes no input.
+fn input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let mut style = field_style(theme, status);
+    if matches!(status, text_input::Status::Disabled) {
+        style.value = style.value.scale_alpha(0.45);
+        style.background = Background::Color(theme.palette().background.weak.color);
+    }
+    style
+}
+
+/// The preview's frame: a darker panel than the window.
+fn preview_style(theme: &Theme) -> container::Style {
+    let palette = theme.palette();
+    container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
+        border: Border {
+            color: palette.background.neutral.color,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn help_button<'a>() -> Element<'a, Message> {
+    button(text("?").size(12))
+        .on_press(msg(MlsMsg::Help))
+        .style(button_style(false))
+        .padding([5, 11])
+        .into()
+}
+
+fn side_button<'a>(label: String, message: Option<Message>) -> Element<'a, Message> {
+    crate::ui::style::form::dialog_button_styled_opt(label, message, button::secondary)
+        .width(Fill)
+        .into()
+}
+
+fn label<'a>(value: String) -> Element<'a, Message> {
+    text(value)
+        .size(11)
+        .style(muted_style)
+        .width(Length::Fixed(LABEL))
+        .into()
+}
+
+// ── Manager ─────────────────────────────────────────────────────────────────
+
+fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
+    let listed: Vec<&(String, bool)> = v
+        .styles
+        .iter()
+        .filter(|(name, _)| {
+            !v.dialog.in_use_only || v.in_use.iter().any(|used| used.eq_ignore_ascii_case(name))
+        })
+        .collect();
+    let rows: Vec<Element<'a, Message>> = listed
+        .iter()
+        .map(|(name, annotative)| {
+            let selected = name == v.selected;
+            let mut line = row![].spacing(6).align_y(iced::Center);
+            line = line.push(if *annotative {
+                crate::ui::icons::tinted(ANNOTATIVE, 12.0, move |theme: &Theme| {
+                    if selected {
+                        theme.palette().primary.strong.text
+                    } else {
+                        theme.palette().primary.base.color
+                    }
+                })
+            } else {
+                Space::new().width(12).into()
+            });
+            line = line.push(text(name.clone()).size(11));
+            let cell = container(line)
+                .padding([4, 8])
+                .width(Fill)
+                .style(move |theme: &Theme| {
+                    let pair = theme.palette().primary.strong;
+                    container::Style {
+                        background: selected.then_some(Background::Color(pair.color)),
+                        text_color: selected.then_some(pair.text),
+                        ..Default::default()
+                    }
+                });
+            mouse_area(cell)
+                .on_press(msg(MlsMsg::Select(name.clone())))
+                .into()
+        })
+        .collect();
+    let list = container(scrollable(column(rows).spacing(1)).height(Fill))
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(Background::Color(palette.background.weak.color)),
+                border: Border {
+                    color: palette.background.neutral.color,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .padding(2)
+        .width(Fill)
+        .height(Fill);
+    let filters = vec![
+        choice("all", tr!("mleader-style", "all-styles")),
+        choice("used", tr!("mleader-style", "styles-in-use")),
+    ];
+    let filter_selected = filters[usize::from(v.dialog.in_use_only)].clone();
+    let filter = crate::ui::dropdown_list::pick_list(Some(filter_selected), filters, |c| {
+        c.to_string()
+    })
+    .on_select(|c: Choice| msg(MlsMsg::ListFilter(c.code == "used")))
+    .text_size(11)
+    .width(Fill);
+    let left = column![
+        text(tr!("mleader-style", "styles")).size(11).style(muted_style),
+        list,
+        text(tr!("mleader-style", "list")).size(11).style(muted_style),
+        filter,
+    ]
+    .spacing(6)
+    .width(Length::Fixed(230.0))
+    .height(Fill);
+
+    let in_use = v.in_use.iter().any(|u| u.eq_ignore_ascii_case(v.selected));
+    let can_delete = v.style.is_some()
+        && !v.selected.eq_ignore_ascii_case("Standard")
+        && !v.selected.eq_ignore_ascii_case(v.current)
+        && !in_use;
+    let actions = column![
+        side_button(
+            tr!("mleader-style", "set-current"),
+            v.style.is_some().then(|| msg(MlsMsg::SetCurrent))
+        ),
+        side_button(tr!("mleader-style", "new"), Some(msg(MlsMsg::New))),
+        side_button(
+            tr!("mleader-style", "modify"),
+            v.style.is_some().then(|| msg(MlsMsg::Modify))
+        ),
+        side_button(
+            tr!("mleader-style", "delete"),
+            can_delete.then(|| msg(MlsMsg::Delete))
+        ),
+    ]
+    .spacing(8)
+    .width(Length::Fixed(132.0));
+
+    let preview = column![
+        text(tr!(
+            "mleader-style",
+            "preview-of",
+            name = v.selected.to_string()
+        ))
+        .size(11)
+        .style(muted_style),
+        preview_well(v, Length::Fill),
+    ]
+    .spacing(6)
+    .width(Fill)
+    .height(Fill);
+
+    let body = column![
+        container(
+            text(tr!(
+                "mleader-style",
+                "current",
+                name = v.current.to_string()
+            ))
+            .size(12)
+        )
+        .padding([8, 12])
+        .width(Fill)
+        .style(card_style),
+        row![left, preview, actions].spacing(12).height(Fill),
+    ]
+    .spacing(10)
+    .padding([12, 14])
+    .height(Fill);
+
+    let footer = row![
+        help_button(),
+        Space::new().width(Fill),
+        dialog_button(tr!("mleader-style", "close"), Message::CloseModal, true),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+
+    column![
+        container(body).height(Fill),
+        crate::ui::style::form::hdivider(Fill),
+        container(footer).padding([8, 14]),
+    ]
+    .height(Fill)
+    .into()
+}
+
+// ── Cards over the manager ──────────────────────────────────────────────────
+
+fn panel<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
+    container(content)
+        .padding([16, 18])
+        .width(Length::Fixed(width))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.base.color)),
+            border: Border {
+                width: 1.0,
+                radius: 8.0.into(),
+                color: theme.palette().background.strong.color,
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn create_card<'a>(draft: &'a CreateDraft, v: &View<'a>) -> Element<'a, Message> {
+    let starts: Vec<String> = v.styles.iter().map(|(name, _)| name.clone()).collect();
+    let name = text_input("", &draft.name)
+        .id(iced::widget::Id::new("mls-new-name"))
+        .on_input(|value| msg(MlsMsg::CreateName(value)))
+        .on_submit(msg(MlsMsg::CreateContinue))
+        .size(12)
+        .padding([5, 8])
+        .style(input_style)
+        .width(Fill);
+    let start = crate::ui::dropdown_list::pick_list(
+        Some(draft.start_with.clone()),
+        starts,
+        |value| value.to_string(),
+    )
+    .on_select(|value| msg(MlsMsg::CreateStart(value)))
+    .text_size(12)
+    .width(Fill);
+    let annotative = row![
+        checkbox(draft.annotative)
+            .on_toggle(|on| msg(MlsMsg::CreateAnnotative(on)))
+            .size(14),
+        crate::ui::icons::tinted(ANNOTATIVE, 12.0, |theme: &Theme| {
+            theme.palette().primary.base.color
+        }),
+        text(tr!("mleader-style", "annotative")).size(11),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    let body = column![
+        text(tr!("mleader-style", "create-title"))
+            .size(13)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        column![
+            text(tr!("mleader-style", "new-name")).size(11).style(muted_style),
+            name
+        ]
+        .spacing(4),
+        column![
+            text(tr!("mleader-style", "start-with")).size(11).style(muted_style),
+            start
+        ]
+        .spacing(4),
+        annotative,
+        Space::new().height(4),
+        row![
+            help_button(),
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::CreateCancel), false),
+            dialog_button(
+                tr!("mleader-style", "continue"),
+                msg(MlsMsg::CreateContinue),
+                true
+            ),
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+    ]
+    .spacing(10);
+    panel(body.into(), 420.0)
+}
+
+const WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
+const ANNOTATIVE: &[u8] = include_bytes!("../../../assets/icons/ui/annotative.svg");
+
+fn notice_card<'a>(notice: &'a Notice) -> Element<'a, Message> {
+    let (title, detail): (String, Option<String>) = match notice {
+        Notice::EmptyName => (tr!("mleader-style", "name-empty"), None),
+        Notice::Exists(name) => (
+            tr!("mleader-style", "name-exists", name = name.clone()),
+            Some(tr!("mleader-style", "name-exists-detail")),
+        ),
+        Notice::UnsupportedCharacters => (
+            tr!("mleader-style", "name-chars"),
+            Some(format!(
+                "{}\n\\ < > / ? \" : ; * | , = `",
+                tr!("mleader-style", "name-chars-detail")
+            )),
+        ),
+    };
+    let mut lines = column![text(title).size(13)].spacing(6);
+    if let Some(detail) = detail {
+        lines = lines.push(text(detail).size(11).style(muted_style));
+    }
+    let body = column![
+        row![crate::ui::icons::semantic(WARN, 20.0), lines]
+            .spacing(12)
+            .align_y(iced::Alignment::Start),
+        row![
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "close"), msg(MlsMsg::NoticeClose), true),
+        ],
+    ]
+    .spacing(14);
+    panel(body.into(), 420.0)
+}
+
+fn delete_card<'a>(name: &'a str) -> Element<'a, Message> {
+    let body = column![
+        text(tr!("mleader-style", "delete-title"))
+            .size(13)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        row![
+            crate::ui::icons::semantic(WARN, 20.0),
+            text(tr!("mleader-style", "delete-ask", name = name.to_string())).size(12),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        row![
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "yes"), msg(MlsMsg::DeleteAnswer(true)), false),
+            dialog_button(tr!("mleader-style", "no"), msg(MlsMsg::DeleteAnswer(false)), true),
+        ]
+        .spacing(6),
+    ]
+    .spacing(14);
+    panel(body.into(), 420.0)
+}
+
+fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
+    let footer = |load: bool| {
+        let mut left = row![].spacing(6).align_y(iced::Center);
+        if load {
+            left = left.push(dialog_button(
+                tr!("mleader-style", "load"),
+                msg(MlsMsg::PickLoad),
+                false,
+            ));
+        }
+        row![
+            left,
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::PickCancel), false),
+            dialog_button(tr!("mleader-style", "ok"), msg(MlsMsg::PickOk), true),
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
+    };
+    match pick {
+        Pick::Linetype(selected) => {
+            let header = row![
+                text(tr!("mleader-style", "linetype"))
+                    .size(10)
+                    .style(muted_style)
+                    .width(Length::Fixed(150.0)),
+                text(tr!("mleader-style", "appearance"))
+                    .size(10)
+                    .style(muted_style)
+                    .width(Length::Fixed(120.0)),
+                text(tr!("mleader-style", "description"))
+                    .size(10)
+                    .style(muted_style),
+            ]
+            .spacing(8)
+            .padding([0, 8]);
+            let rows: Vec<Element<'a, Message>> = v
+                .linetypes
+                .iter()
+                .map(|lt| {
+                    let on = lt.name.eq_ignore_ascii_case(selected);
+                    let cell = container(
+                        row![
+                            text(record_label(&lt.name))
+                                .size(11)
+                                .width(Length::Fixed(150.0)),
+                            canvas(PatternSample {
+                                pattern: lt.pattern.clone(),
+                            })
+                            .width(Length::Fixed(120.0))
+                            .height(Length::Fixed(14.0)),
+                            text(lt.description.clone())
+                                .size(11)
+                                .wrapping(iced::advanced::text::Wrapping::None),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Center),
+                    )
+                    .padding([4, 8])
+                    .width(Fill)
+                    .style(move |theme: &Theme| {
+                        let pair = theme.palette().primary.strong;
+                        container::Style {
+                            background: on.then_some(Background::Color(pair.color)),
+                            text_color: on.then_some(pair.text),
+                            ..Default::default()
+                        }
+                    });
+                    mouse_area(cell)
+                        .on_press(msg(MlsMsg::PickChoice(lt.name.clone())))
+                        .into()
+                })
+                .collect();
+            let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(220.0)))
+                .padding(2)
+                .width(Fill)
+                .style(crate::ui::window::pdf_dialogs::well_style);
+            let body = column![
+                text(tr!("mleader-style", "linetype-title"))
+                    .size(13)
+                    .style(crate::ui::window::pdf_dialogs::accent_text),
+                text(tr!("mleader-style", "loaded-linetypes"))
+                    .size(11)
+                    .style(muted_style),
+                header,
+                list,
+                footer(true),
+            ]
+            .spacing(8);
+            panel(body.into(), 560.0)
+        }
+        Pick::UserArrow(selected) | Pick::UserBlock(selected) => {
+            let title = if matches!(pick, Pick::UserArrow(_)) {
+                tr!("mleader-style", "arrow-title")
+            } else {
+                tr!("mleader-style", "block-title")
+            };
+            let chooser: Element<'a, Message> = if v.user_blocks.is_empty() {
+                text(tr!("mleader-style", "no-blocks"))
+                    .size(11)
+                    .style(muted_style)
+                    .into()
+            } else {
+                crate::ui::dropdown_list::pick_list(
+                    (!selected.is_empty()).then(|| selected.clone()),
+                    v.user_blocks.clone(),
+                    |value| value.to_string(),
+                )
+                .on_select(|value| msg(MlsMsg::PickChoice(value)))
+                .text_size(12)
+                .width(Fill)
+                .into()
+            };
+            let body = column![
+                text(title)
+                    .size(13)
+                    .style(crate::ui::window::pdf_dialogs::accent_text),
+                text(tr!("mleader-style", "from-blocks"))
+                    .size(11)
+                    .style(muted_style),
+                chooser,
+                footer(false),
+            ]
+            .spacing(10);
+            panel(body.into(), 420.0)
+        }
+    }
+}
+
+fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
+    let file = if load.file.is_empty() {
+        tr!("mleader-style", "program-linetypes")
+    } else {
+        load.file.clone()
+    };
+    let rows: Vec<Element<'a, Message>> = load
+        .entries
+        .iter()
+        .map(|(name, description, pattern)| {
+            let loaded = v
+                .linetype_opts
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(name));
+            let on = loaded || load.picked.iter().any(|p| p.eq_ignore_ascii_case(name));
+            let caption = if loaded {
+                tr!("mleader-style", "already-loaded", name = name.clone())
+            } else {
+                name.clone()
+            };
+            let cell = container(
+                row![
+                    crate::ui::icons::themed_check_cell(on),
+                    text(caption).size(11).width(Length::Fixed(170.0)),
+                    canvas(PatternSample {
+                        pattern: pattern.clone(),
+                    })
+                    .width(Length::Fixed(110.0))
+                    .height(Length::Fixed(14.0)),
+                    text(description.clone())
+                        .size(11)
+                        .wrapping(iced::advanced::text::Wrapping::None),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .padding([3, 8])
+            .width(Fill);
+            let area = mouse_area(cell);
+            if loaded {
+                area.into()
+            } else {
+                area.on_press(msg(MlsMsg::LoadToggle(name.clone()))).into()
+            }
+        })
+        .collect();
+    let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(260.0)))
+        .padding(2)
+        .width(Fill)
+        .style(preview_style);
+    let body = column![
+        text(tr!("mleader-style", "load-title"))
+            .size(13)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        row![
+            text(tr!("mleader-style", "file")).size(11).style(muted_style),
+            text(file).size(11).width(Fill),
+            dialog_button(tr!("mleader-style", "choose-file"), msg(MlsMsg::LoadFile), false),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        text(tr!("mleader-style", "available-linetypes"))
             .size(11)
-            .width(190),
+            .style(muted_style),
+        list,
+        row![
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::LoadCancel), false),
+            crate::ui::style::form::dialog_button_styled_opt(
+                tr!("mleader-style", "ok"),
+                (!load.picked.is_empty()).then(|| msg(MlsMsg::LoadOk)),
+                button::primary,
+            ),
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
     ]
-    .spacing(8)
-    .align_y(iced::Center)
-    .into()
+    .spacing(8);
+    panel(body.into(), 600.0)
 }
 
-fn readonly_row<'a>(label: Cow<'static, str>, value: Cow<'static, str>) -> Element<'a, Message> {
-    row![
-        text(label).size(11).style(muted_style).width(165),
-        crate::ui::read_only::field(value.as_ref(), 11.0, Length::Fixed(190.0)),
-    ]
-    .spacing(8)
-    .align_y(iced::Center)
-    .into()
+/// A lineweight drawn as a line that thick (thin for the By… values).
+struct WeightSample {
+    width: f32,
 }
 
-fn color_row<'a>(
-    label: Cow<'static, str>,
-    value: &'a str,
+impl canvas::Program<Message> for WeightSample {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let y = bounds.height * 0.5;
+        frame.stroke(
+            &canvas::Path::line(Point::new(2.0, y), Point::new(bounds.width - 2.0, y)),
+            canvas::Stroke::default()
+                .with_color(theme.palette().background.base.text)
+                .with_width(self.width),
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+fn weight_sample<'a>(weight: document::types::LineWeight) -> Element<'a, Message> {
+    // Hundredths of a millimetre at 96 px per inch, at least a pixel.
+    let width = match weight {
+        document::types::LineWeight::Value(v) => (f32::from(v) / 100.0 * 96.0 / 25.4).max(1.0),
+        _ => 1.0,
+    }
+    .min(8.0);
+    canvas(WeightSample { width })
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(12.0))
+        .into()
+}
+
+fn pattern_sample<'a>(pattern: Vec<f64>) -> Element<'a, Message> {
+    canvas(PatternSample { pattern })
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(12.0))
+        .into()
+}
+
+/// A list whose entries show a line sample beside their names (linetypes,
+/// lineweights), opened and closed like the colour lists.
+fn sample_selector<'a>(
+    caption: String,
+    current: (Element<'a, Message>, String),
+    entries: Vec<(Element<'a, Message>, String, Message)>,
     field: &'static str,
     open: bool,
+    enabled: bool,
 ) -> Element<'a, Message> {
-    let current = crate::ui::color_select::aci_string_to_color(value);
-    let selector = crate::ui::color_select::color_selector(
-        current,
-        open,
-        crate::ui::color_select::ColorExtras {
-            by_layer: true,
-            by_block: true,
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+    let (sample, name) = current;
+    let control: Element<'a, Message> = if !enabled {
+        container(
+            row![sample, text(name).size(11).style(muted_style)]
+                .spacing(6)
+                .align_y(iced::Center),
+        )
+        .padding([4, 8])
+        .width(Fill)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weak.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
             ..Default::default()
-        },
-        move |color| Message::MLeaderStyleEdit {
-            field,
-            value: crate::ui::color_select::color_to_aci_string(color),
-        },
-        Message::MLeaderColorMore(field),
-        Message::OpenColorWindow(crate::app::ColorPickTarget::MLeader(field), current),
-    );
-    row![text(label).size(11).style(muted_style).width(165), selector]
+        })
+        .into()
+    } else {
+        let head = button(
+            row![
+                sample,
+                text(name).size(11),
+                Space::new().width(Fill),
+                crate::ui::icons::themed_arrow_toggle(open, 9.0),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        )
+        .on_press(Message::MLeaderColorMore(field))
+        .style(button_style(false))
+        .padding([3, 8])
+        .width(Fill);
+        if open {
+            let rows: Vec<DropdownRow<'a, Message>> = entries
+                .into_iter()
+                .map(|(sample, label, message)| {
+                    let element: Element<'a, Message> = button(
+                        row![sample, text(label.clone()).size(11)]
+                            .spacing(6)
+                            .align_y(iced::Center),
+                    )
+                    .on_press(message.clone())
+                    .style(crate::ui::color_select::list_row_style)
+                    .padding([2, 4])
+                    .width(Fill)
+                    .into();
+                    DropdownRow::item(element, label, message)
+                })
+                .collect();
+            let popup = container(DropdownList::with_options(
+                rows,
+                Length::Shrink,
+                Length::Fill,
+                1.0,
+                0.0,
+            ))
+            .style(crate::ui::color_select::popup_panel_style)
+            .padding(2);
+            crate::ui::drop_down_fit::drop_down_fit(
+                iced_aw::DropDown::new(head, popup, true)
+                    .alignment(iced_aw::drop_down::Alignment::Bottom)
+                    .offset(2.0)
+                    .on_dismiss(Message::MLeaderColorMore(field)),
+            )
+        } else {
+            head.into()
+        }
+    };
+    row![label(caption), container(control).width(Length::Fixed(FIELD))]
         .spacing(8)
         .align_y(iced::Center)
         .into()
 }
 
-fn enum_row<'a>(
-    label: Cow<'static, str>,
-    values: &[(&str, &str)],
-    selected: String,
-    field: &'static str,
-) -> Element<'a, Message> {
-    let selected_label = values
-        .iter()
-        .find(|(code, _)| *code == selected)
-        .map(|(_, label)| crate::i18n::translate(label))
-        .unwrap_or_else(|| crate::i18n::translate(&selected));
-    row![
-        text(label).size(11).style(muted_style).width(165),
-        crate::ui::dropdown_list::pick_list(
-            Some(EnumChoice {
-                code: selected,
-                label: selected_label
-            }),
-            choices(values),
-            |value| value.to_string(),
-        )
-        .on_select(move |choice| Message::MLeaderStyleSetEnum {
-            field,
-            value: choice.code
-        })
-        .text_size(11)
-        .width(220),
-    ]
-    .spacing(8)
-    .align_y(iced::Center)
-    .into()
+/// A linetype's dash pattern drawn across its cell.
+struct PatternSample {
+    pattern: Vec<f64>,
 }
 
-fn handle_row<'a>(
-    label: Cow<'static, str>,
-    options: Vec<String>,
-    selected: String,
-    field: &'static str,
-) -> Element<'a, Message> {
-    let display_label = |value: &str| match value {
-        "None" | "ByBlock" | "ByLayer" | "Default" | "Closed filled" => {
-            crate::i18n::translate(value)
+impl canvas::Program<Message> for PatternSample {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let ink = theme.palette().background.base.text;
+        let y = bounds.height * 0.5;
+        let total: f64 = self.pattern.iter().map(|v| v.abs()).sum();
+        let stroke = canvas::Stroke::default().with_color(ink).with_width(1.2);
+        if self.pattern.is_empty() || total <= 1e-9 {
+            frame.stroke(
+                &canvas::Path::line(Point::new(2.0, y), Point::new(bounds.width - 2.0, y)),
+                stroke,
+            );
+            return vec![frame.into_geometry()];
         }
-        _ => Cow::Owned(value.to_string()),
-    };
-    let selected = EnumChoice {
-        code: selected.clone(),
-        label: display_label(&selected),
-    };
-    let options: Vec<EnumChoice> = options
-        .into_iter()
-        .map(|code| EnumChoice {
-            label: display_label(&code),
-            code,
-        })
-        .collect();
-    row![
-        text(label).size(11).style(muted_style).width(165),
-        crate::ui::dropdown_list::pick_list(Some(selected), options, |value| value.to_string())
-            .on_select(move |value| Message::MLeaderStyleSetHandle {
-                field,
-                value: value.code
-            })
-            .text_size(11)
-            .width(220),
-    ]
-    .spacing(8)
-    .align_y(iced::Center)
-    .into()
+        // Two repeats of the pattern across the cell.
+        let scale = f64::from(bounds.width - 4.0) / (total * 2.0);
+        let mut x = 2.0f64;
+        'draw: for _ in 0..2 {
+            for &element in &self.pattern {
+                let length = element.abs() * scale;
+                let end = (x + length).min(f64::from(bounds.width) - 2.0);
+                if element > 0.0 {
+                    frame.stroke(
+                        &canvas::Path::line(Point::new(x as f32, y), Point::new(end as f32, y)),
+                        stroke,
+                    );
+                } else if element == 0.0 {
+                    frame.fill(&canvas::Path::circle(Point::new(x as f32, y), 1.0), ink);
+                }
+                x = end;
+                if x >= f64::from(bounds.width) - 2.0 {
+                    break 'draw;
+                }
+            }
+        }
+        vec![frame.into_geometry()]
+    }
 }
 
-fn toggle<'a>(label: Cow<'static, str>, value: bool, field: &'static str) -> Element<'a, Message> {
-    checkbox(value)
-        .label(label)
-        .on_toggle(move |_| Message::MLeaderStyleToggle(field))
-        .size(14)
-        .text_size(11)
+// ── Modify ──────────────────────────────────────────────────────────────────
+
+fn number_field<'a>(
+    caption: String,
+    value: &'a str,
+    field: &'static str,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let mut input = text_input("", value)
+        .id(field_id(field))
+        .size(11)
+        .padding([4, 8])
+        .width(Length::Fixed(FIELD))
+        .style(input_style);
+    if enabled {
+        input = input.on_input(move |value| Message::MLeaderStyleEdit { field, value });
+    }
+    row![label(caption), input]
+        .spacing(8)
+        .align_y(iced::Center)
         .into()
 }
 
-const ATTACHMENTS: [(&str, &str); 11] = [
-    ("TopOfTopLine", "Top of top line"),
-    ("MiddleOfTopLine", "Middle of top line"),
-    ("MiddleOfText", "Middle of text"),
-    ("MiddleOfBottomLine", "Middle of bottom line"),
-    ("BottomOfBottomLine", "Bottom of bottom line"),
-    // The codec names values 5–8 one place off from AutoCAD; the labels
-    // follow AutoCAD (see `ATTACH_LABELS` in entities/multileader.rs).
-    ("BottomLine", "Underline bottom line"),
-    ("BottomOfTopLineUnderlineBottomLine", "Underline top line"),
-    ("BottomOfTopLineUnderlineTopLine", "Bottom of top line"),
-    ("BottomOfTopLineUnderlineAll", "Underline all text"),
-    ("CenterOfText", "Center of text"),
-    ("CenterOfTextOverline", "Center of text with overline"),
-];
-
-const LEADER_DRAW_ORDERS: [(&str, &str); 2] = [
-    ("LeaderHeadFirst", "Arrowhead first"),
-    ("LeaderTailFirst", "Content first"),
-];
-const MULTILEADER_DRAW_ORDERS: [(&str, &str); 2] = [
-    ("ContentFirst", "Content first"),
-    ("LeaderFirst", "Leader first"),
-];
-const BLOCK_CONNECTIONS: [(&str, &str); 2] = [
-    ("BlockExtents", "Block extents"),
-    ("BasePoint", "Base point"),
-];
-
-fn choice_label(values: &[(&str, &str)], selected: String) -> String {
-    values
-        .iter()
-        .find(|(code, _)| *code == selected)
-        .map(|(_, label)| crate::i18n::translate(label).into_owned())
-        .unwrap_or(selected)
+fn choice_row<'a>(
+    caption: String,
+    options: Vec<Choice>,
+    selected: Choice,
+    enabled: bool,
+    on_select: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    let mut list = crate::ui::dropdown_list::pick_list(Some(selected), options, |c| c.to_string())
+        .text_size(11)
+        .width(Length::Fixed(FIELD));
+    if enabled {
+        list = list.on_select(move |c: Choice| on_select(c.code));
+    }
+    row![label(caption), list]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
 }
 
-fn handle_label(value: &str) -> String {
-    match value {
-        "None" | "ByBlock" | "ByLayer" | "Default" | "Closed filled" => {
-            crate::i18n::translate(value).into_owned()
-        }
-        _ => value.to_string(),
+fn color_row<'a>(
+    caption: String,
+    value: &'a str,
+    field: &'static str,
+    open: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let current = crate::ui::color_select::aci_string_to_color(value);
+    let control: Element<'a, Message> = if enabled {
+        crate::ui::color_select::color_selector(
+            current,
+            open,
+            crate::ui::color_select::ColorExtras {
+                by_layer: true,
+                by_block: true,
+                standard_only: true,
+                ..Default::default()
+            },
+            move |color| Message::MLeaderStyleEdit {
+                field,
+                value: crate::ui::color_select::color_to_aci_string(color),
+            },
+            Message::MLeaderColorMore(field),
+            Message::OpenColorWindow(crate::app::ColorPickTarget::MLeader(field), current),
+        )
+    } else {
+        crate::ui::read_only::field(
+            &crate::ui::color_select::color_display_name(current),
+            11.0,
+            Length::Fill,
+        )
+    };
+    row![label(caption), container(control).width(Length::Fixed(FIELD))]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+}
+
+fn toggle<'a>(
+    caption: String,
+    value: bool,
+    on_toggle: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+) -> Element<'a, Message> {
+    let mut check = checkbox(value).size(14);
+    // The checkbox draws its own disabled look; the caption follows it.
+    let enabled = on_toggle.is_some();
+    if let Some(on_toggle) = on_toggle {
+        check = check.on_toggle(on_toggle);
     }
+    let caption = text(caption).size(11).style(move |theme: &Theme| {
+        iced::widget::text::Style {
+            color: (!enabled)
+                .then(|| crate::ui::style::readable::muted_text(theme).scale_alpha(0.7)),
+        }
+    });
+    row![check, caption]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into()
+}
+
+fn style_toggle<'a>(caption: String, value: bool, field: &'static str, enabled: bool) -> Element<'a, Message> {
+    toggle(
+        caption,
+        value,
+        enabled.then(|| {
+            Box::new(move |_| Message::MLeaderStyleToggle(field)) as Box<dyn Fn(bool) -> Message>
+        }),
+    )
+}
+
+/// A radio choice, inert (shown muted) while `enabled` is false.
+fn radio_choice<'a>(
+    caption: String,
+    value: bool,
+    selected: bool,
+    enabled: bool,
+    on: impl Fn(bool) -> Message + 'a,
+) -> Element<'a, Message> {
+    let r = radio(caption, value, Some(selected), move |v| {
+        if enabled {
+            on(v)
+        } else {
+            Message::Noop
+        }
+    })
+    .size(14)
+    .spacing(6)
+    .text_size(11);
+    if enabled {
+        r.into()
+    } else {
+        r.style(|theme: &Theme, status| {
+            let mut style = radio::default(theme, status);
+            style.text_color = Some(crate::ui::style::readable::muted_text(theme).scale_alpha(0.7));
+            style.dot_color = style.dot_color.scale_alpha(0.45);
+            style.border_color = style.border_color.scale_alpha(0.45);
+            style
+        })
+        .into()
+    }
+}
+
+fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+    let leader = style.path_type != MultiLeaderPathType::Invisible;
+    let types = vec![
+        choice("StraightLineSegments", tr!("mleader-style", "straight")),
+        choice("Spline", tr!("mleader-style", "spline")),
+        choice("Invisible", tr!("mleader-style", "none")),
+    ];
+    let type_code = format!("{:?}", style.path_type);
+    let type_selected = types
+        .iter()
+        .find(|c| c.code == type_code)
+        .cloned()
+        .unwrap_or_else(|| types[0].clone());
+    let pattern_of = |name: &str| -> Vec<f64> {
+        v.linetypes
+            .iter()
+            .find(|row| row.name.eq_ignore_ascii_case(name))
+            .map(|row| row.pattern.clone())
+            .unwrap_or_default()
+    };
+    let mut linetype_entries: Vec<(Element<'a, Message>, String, Message)> = v
+        .linetype_opts
+        .iter()
+        .map(|name| {
+            (
+                pattern_sample(pattern_of(name)),
+                record_label(name),
+                Message::MLeaderStyleSetHandle {
+                    field: "line_type_handle",
+                    value: name.clone(),
+                },
+            )
+        })
+        .collect();
+    linetype_entries.push((
+        Space::new().width(48).into(),
+        tr!("mleader-style", "other"),
+        Message::MLeaderStyleSetHandle {
+            field: "line_type_handle",
+            value: OTHER.to_string(),
+        },
+    ));
+    let linetype = sample_selector(
+        tr!("mleader-style", "linetype"),
+        (
+            pattern_sample(pattern_of(&v.line_type_name)),
+            record_label(&v.line_type_name),
+        ),
+        linetype_entries,
+        "line_type",
+        v.color_open == Some("line_type"),
+        leader,
+    );
+    let lineweight = sample_selector(
+        tr!("mleader-style", "lineweight"),
+        (
+            weight_sample(style.line_weight),
+            crate::ui::properties::LwItem(style.line_weight).to_string(),
+        ),
+        crate::ui::properties::lw_options()
+            .into_iter()
+            .map(|item| {
+                (
+                    weight_sample(item.0),
+                    item.to_string(),
+                    Message::MLeaderStyleLineWeightChanged(item.0),
+                )
+            })
+            .collect(),
+        "line_weight",
+        v.color_open == Some("line_weight"),
+        leader,
+    );
+    let mut arrows: Vec<Choice> = v
+        .arrow_opts
+        .iter()
+        .map(|name| choice(name.clone(), arrow_label(name)))
+        .collect();
+    arrows.push(choice(OTHER, tr!("mleader-style", "user-arrow")));
+    let arrow = choice(v.arrowhead_name.clone(), arrow_label(&v.arrowhead_name));
+    column![
+        card(
+            tr!("mleader-style", "general"),
+            column![
+                choice_row(
+                    tr!("mleader-style", "type"),
+                    types,
+                    type_selected,
+                    true,
+                    |code| Message::MLeaderStyleSetEnum {
+                        field: "path_type",
+                        value: code
+                    }
+                ),
+                color_row(
+                    tr!("mleader-style", "color"),
+                    v.line_color,
+                    "line_color",
+                    v.color_open == Some("line_color"),
+                    leader
+                ),
+                linetype,
+                lineweight,
+            ]
+            .spacing(8)
+        ),
+        card(
+            tr!("mleader-style", "arrowhead"),
+            column![
+                choice_row(
+                    tr!("mleader-style", "symbol"),
+                    arrows,
+                    arrow,
+                    leader,
+                    |code| Message::MLeaderStyleSetHandle {
+                        field: "arrowhead_handle",
+                        value: code
+                    }
+                ),
+                // A None arrowhead keeps its size; only no leader turns it off.
+                number_field(
+                    tr!("mleader-style", "size"),
+                    v.arrowhead_size,
+                    "arrowhead_size",
+                    leader
+                ),
+            ]
+            .spacing(8)
+        ),
+        card(
+            tr!("mleader-style", "leader-break"),
+            number_field(
+                tr!("mleader-style", "break-size"),
+                v.break_gap,
+                "break_gap",
+                leader
+            ),
+        ),
+    ]
+    .spacing(10)
+    .into()
+}
+
+const ANGLES: [&str; 6] = ["0", "15", "30", "45", "60", "90"];
+
+fn angle_text(radians: f64) -> String {
+    trim_number(radians.to_degrees())
+}
+
+fn structure_tab<'a>(
+    v: &View<'a>,
+    style: &'a MultiLeaderStyle,
+    m: &'a Modify,
+) -> Element<'a, Message> {
+    let leader = style.path_type != MultiLeaderPathType::Invisible;
+    let angle_row = |caption: String,
+                     on: bool,
+                     key: &'static str,
+                     value: f64,
+                     field: &'static str|
+     -> Element<'a, Message> {
+        let mut list = crate::ui::dropdown_list::pick_list(
+            Some(angle_text(value)),
+            ANGLES.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+            |value| value.to_string(),
+        )
+        .text_size(11)
+        .width(Length::Fixed(90.0));
+        if on {
+            list = list.on_select(move |value| Message::MLeaderStyleSetEnum { field, value });
+        }
+        row![
+            container(toggle(
+                caption,
+                on,
+                Some(Box::new(move |checked| msg(MlsMsg::Constraint(key, checked)))
+                    as Box<dyn Fn(bool) -> Message>)
+            ))
+            .width(Length::Fixed(LABEL + 80.0)),
+            list,
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+    };
+    let mut max_input = text_input("", v.max_points)
+        .id(field_id("max_points"))
+        .size(11)
+        .padding([4, 8])
+        .width(Length::Fixed(90.0))
+        .style(input_style);
+    if m.max_points_on {
+        max_input = max_input.on_input(|value| Message::MLeaderStyleEdit {
+            field: "max_points",
+            value,
+        });
+    }
+    let constraints = column![
+        row![
+            container(toggle(
+                tr!("mleader-style", "max-points"),
+                m.max_points_on,
+                Some(Box::new(|checked| msg(MlsMsg::Constraint("max_points", checked)))
+                    as Box<dyn Fn(bool) -> Message>)
+            ))
+            .width(Length::Fixed(LABEL + 80.0)),
+            max_input,
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        angle_row(
+            tr!("mleader-style", "first-angle"),
+            m.first_angle_on,
+            "first_angle",
+            style.first_segment_angle,
+            "first_seg_angle"
+        ),
+        angle_row(
+            tr!("mleader-style", "second-angle"),
+            m.second_angle_on,
+            "second_angle",
+            style.second_segment_angle,
+            "second_seg_angle"
+        ),
+    ]
+    .spacing(8);
+    let distance_on = leader && style.enable_landing && style.enable_dogleg;
+    let mut distance = text_input("", v.landing_distance)
+        .id(field_id("landing_distance"))
+        .size(11)
+        .padding([4, 8])
+        .width(Length::Fixed(110.0))
+        .style(input_style);
+    if distance_on {
+        distance = distance.on_input(|value| Message::MLeaderStyleEdit {
+            field: "landing_distance",
+            value,
+        });
+    }
+    let landing = column![
+        style_toggle(
+            tr!("mleader-style", "auto-landing"),
+            style.enable_landing,
+            "enable_landing",
+            leader
+        ),
+        style_toggle(
+            tr!("mleader-style", "landing-distance"),
+            style.enable_dogleg,
+            "enable_dogleg",
+            leader && style.enable_landing
+        ),
+        row![Space::new().width(22), distance],
+    ]
+    .spacing(8);
+    let annotative = style.is_annotative;
+    let shown_scale: &str = if m.scale_to_layout { "0" } else { v.scale_factor };
+    let mut scale_input = text_input("", shown_scale)
+        .id(field_id("scale_factor"))
+        .size(11)
+        .padding([4, 8])
+        .width(Length::Fixed(110.0))
+        .style(input_style);
+    if !annotative && !m.scale_to_layout {
+        scale_input = scale_input.on_input(|value| Message::MLeaderStyleEdit {
+            field: "scale_factor",
+            value,
+        });
+    }
+    let scale = column![
+        row![
+            style_toggle(
+                tr!("mleader-style", "annotative"),
+                annotative,
+                "annotative",
+                true
+            ),
+            crate::ui::icons::tinted(ANNOTATIVE, 12.0, |theme: &Theme| {
+                theme.palette().primary.base.color
+            }),
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+        row![
+            Space::new().width(22),
+            radio_choice(
+                tr!("mleader-style", "scale-layout"),
+                true,
+                m.scale_to_layout,
+                !annotative,
+                |v| msg(MlsMsg::ScaleToLayout(v))
+            ),
+        ],
+        row![
+            Space::new().width(22),
+            container(radio_choice(
+                tr!("mleader-style", "specify-scale"),
+                false,
+                m.scale_to_layout,
+                !annotative,
+                |v| msg(MlsMsg::ScaleToLayout(v))
+            ))
+            .width(Length::Fixed(LABEL + 58.0)),
+            scale_input,
+        ]
+        .align_y(iced::Center),
+    ]
+    .spacing(8);
+    column![
+        card(tr!("mleader-style", "constraints"), constraints),
+        card(tr!("mleader-style", "landing-settings"), landing),
+        card(tr!("mleader-style", "scale"), scale),
+    ]
+    .spacing(10)
+    .into()
+}
+
+fn content_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+    let types = vec![
+        choice("MText", tr!("mleader-style", "mtext")),
+        choice("Block", tr!("mleader-style", "block")),
+        choice("None", tr!("mleader-style", "none")),
+    ];
+    let type_code = match style.content_type {
+        LeaderContentType::Block => "Block",
+        LeaderContentType::None => "None",
+        _ => "MText",
+    };
+    let type_selected = types
+        .iter()
+        .find(|c| c.code == type_code)
+        .cloned()
+        .unwrap_or_else(|| types[0].clone());
+    let type_row = choice_row(
+        tr!("mleader-style", "multileader-type"),
+        types,
+        type_selected,
+        true,
+        |code| Message::MLeaderStyleSetEnum {
+            field: "content_type",
+            value: code,
+        },
+    );
+    let mut body = column![type_row].spacing(10);
+    match style.content_type {
+        LeaderContentType::Block => body = body.push(block_options(v, style)),
+        LeaderContentType::None => {}
+        _ => {
+            body = body.push(text_options(v, style));
+            body = body.push(leader_connection(v, style));
+        }
+    }
+    body.into()
+}
+
+fn dots_button<'a>(message: Message) -> Element<'a, Message> {
+    button(text("…").size(11))
+        .on_press(message)
+        .style(button_style(false))
+        .padding([3, 10])
+        .into()
+}
+
+fn text_options<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+    let shown = if v.default_text.is_empty() {
+        tr!("mleader-style", "default-text-sample")
+    } else {
+        v.default_text.replace("\\P", " ").replace('\n', " ")
+    };
+    let default_text = row![
+        label(tr!("mleader-style", "default-text")),
+        crate::ui::read_only::field(&shown, 11.0, Length::Fixed(FIELD - 44.0)),
+        dots_button(msg(MlsMsg::DefaultText)),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    let text_style = row![
+        label(tr!("mleader-style", "text-style")),
+        crate::ui::dropdown_list::pick_list(
+            Some(v.text_style_name.clone()),
+            v.textstyle_opts.clone(),
+            |value| value.to_string(),
+        )
+        .on_select(|value| Message::MLeaderStyleSetHandle {
+            field: "text_style_handle",
+            value,
+        })
+        .text_size(11)
+        .width(Length::Fixed(FIELD - 44.0)),
+        dots_button(msg(MlsMsg::TextStyles)),
+    ]
+    .spacing(8)
+    .align_y(iced::Center);
+    let angles = vec![
+        choice("Optimized", tr!("mleader-style", "angle-right-reading")),
+        choice("ParallelToLastLeaderLine", tr!("mleader-style", "angle-as-inserted")),
+        choice("Horizontal", tr!("mleader-style", "angle-horizontal")),
+    ];
+    let angle_code = format!("{:?}", style.text_angle_type);
+    let angle_selected = angles
+        .iter()
+        .find(|c| c.code == angle_code)
+        .cloned()
+        .unwrap_or_else(|| angles[2].clone());
+    card(
+        tr!("mleader-style", "text-options"),
+        column![
+            default_text,
+            text_style,
+            choice_row(
+                tr!("mleader-style", "text-angle"),
+                angles,
+                angle_selected,
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "text_angle_type",
+                    value: code
+                }
+            ),
+            color_row(
+                tr!("mleader-style", "text-color"),
+                v.text_color,
+                "text_color",
+                v.color_open == Some("text_color"),
+                true
+            ),
+            number_field(
+                tr!("mleader-style", "text-height"),
+                v.text_height,
+                "text_height",
+                true
+            ),
+            row![
+                container(style_toggle(
+                    tr!("mleader-style", "always-left"),
+                    style.text_always_left,
+                    "text_always_left",
+                    true
+                ))
+                .width(Length::Fixed(LABEL + 60.0)),
+                style_toggle(
+                    tr!("mleader-style", "frame-text"),
+                    style.text_frame,
+                    "text_frame",
+                    true
+                ),
+            ]
+            .align_y(iced::Center),
+        ]
+        .spacing(8),
+    )
+}
+
+fn leader_connection<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+    let vertical = style.text_attachment_direction == TextAttachmentDirectionType::Vertical;
+    let direction = |value: bool, caption: String| {
+        radio(caption, value, Some(vertical), |value| {
+            Message::MLeaderStyleSetEnum {
+                field: "text_attachment_direction",
+                value: if value { "Vertical" } else { "Horizontal" }.to_string(),
+            }
+        })
+        .size(14)
+        .spacing(6)
+        .text_size(11)
+    };
+    let mut body = column![
+        direction(false, tr!("mleader-style", "horizontal")),
+        direction(true, tr!("mleader-style", "vertical")),
+    ]
+    .spacing(8);
+    let indented = |e: Element<'a, Message>| row![Space::new().width(22), e];
+    if vertical {
+        body = body
+            .push(indented(choice_row(
+                tr!("mleader-style", "top-attachment"),
+                vertical_attachment_choices(true),
+                vertical_attachment_choice(style.text_top_attachment, true),
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "text_top_attachment",
+                    value: code,
+                },
+            )))
+            .push(indented(choice_row(
+                tr!("mleader-style", "bottom-attachment"),
+                vertical_attachment_choices(false),
+                vertical_attachment_choice(style.text_bottom_attachment, false),
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "text_bottom_attachment",
+                    value: code,
+                },
+            )))
+            .push(indented(number_field(
+                tr!("mleader-style", "landing-gap"),
+                v.landing_gap,
+                "landing_gap",
+                true,
+            )));
+    } else {
+        let side = |value: TextAttachmentType| choice(attachment_code(value), attachment_label(value));
+        // Framed text always meets the leader: Extend is off with it.
+        body = body
+            .push(indented(choice_row(
+                tr!("mleader-style", "left-attachment"),
+                side_attachment_choices(),
+                side(style.text_left_attachment),
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "text_left_attachment",
+                    value: code,
+                },
+            )))
+            .push(indented(choice_row(
+                tr!("mleader-style", "right-attachment"),
+                side_attachment_choices(),
+                side(style.text_right_attachment),
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "text_right_attachment",
+                    value: code,
+                },
+            )))
+            .push(indented(number_field(
+                tr!("mleader-style", "landing-gap"),
+                v.landing_gap,
+                "landing_gap",
+                true,
+            )))
+            .push(indented(style_toggle(
+                tr!("mleader-style", "extend-leader"),
+                style.unknown_flag_298,
+                "extend_leader",
+                !style.text_frame,
+            )));
+    }
+    card(tr!("mleader-style", "leader-connection"), body)
+}
+
+fn block_options<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+    let mut blocks: Vec<Choice> = v
+        .block_opts
+        .iter()
+        .map(|name| choice(name.clone(), block_label(name)))
+        .collect();
+    blocks.push(choice(OTHER, tr!("mleader-style", "user-block")));
+    let block = choice(v.block_name.clone(), block_label(&v.block_name));
+    let attachments = vec![
+        choice("BlockExtents", tr!("mleader-style", "center-extents")),
+        choice("BasePoint", tr!("mleader-style", "insertion-point")),
+    ];
+    let attachment = if style.block_content_connection == BlockContentConnectionType::BasePoint {
+        attachments[1].clone()
+    } else {
+        attachments[0].clone()
+    };
+    card(
+        tr!("mleader-style", "block-options"),
+        column![
+            choice_row(
+                tr!("mleader-style", "source-block"),
+                blocks,
+                block,
+                true,
+                |code| Message::MLeaderStyleSetHandle {
+                    field: "block_content_handle",
+                    value: code
+                }
+            ),
+            choice_row(
+                tr!("mleader-style", "attachment"),
+                attachments,
+                attachment,
+                true,
+                |code| Message::MLeaderStyleSetEnum {
+                    field: "block_content_connection",
+                    value: code
+                }
+            ),
+            color_row(
+                tr!("mleader-style", "color"),
+                v.block_color,
+                "block_color",
+                v.color_open == Some("block_color"),
+                true
+            ),
+            number_field(
+                tr!("mleader-style", "scale"),
+                v.block_scale,
+                "block_scale",
+                true
+            ),
+        ]
+        .spacing(8),
+    )
+}
+
+fn modify_view<'a>(v: &View<'a>) -> Element<'a, Message> {
+    let (Some(style), Some(m)) = (v.style, v.dialog.modify.as_ref()) else {
+        return Space::new().into();
+    };
+    let tabs = [
+        tr!("mleader-style", "tab-format"),
+        tr!("mleader-style", "tab-structure"),
+        tr!("mleader-style", "tab-content"),
+    ];
+    let tab_bar = container(
+        iced::widget::Row::with_children(
+            tabs.into_iter()
+                .enumerate()
+                .map(|(index, caption)| {
+                    let on = m.tab == index as u8;
+                    button(text(caption).size(11).width(Fill).align_x(iced::Center))
+                        .on_press(msg(MlsMsg::Tab(index as u8)))
+                        .style(button_style(on))
+                        .padding([5, 6])
+                        .width(Fill)
+                        .into()
+                })
+                .collect::<Vec<_>>(),
+        )
+        .spacing(2),
+    )
+    .padding(2)
+    .width(Fill)
+    .style(crate::ui::window::pdf_dialogs::well_style);
+    let page: Element<'a, Message> = match m.tab {
+        0 => format_tab(v, style),
+        1 => structure_tab(v, style, m),
+        _ => content_tab(v, style),
+    };
+    let left = column![
+        tab_bar,
+        scrollable(container(page).padding([2, 2]).width(Fill))
+            .height(Fill)
+            .width(Fill),
+    ]
+    .spacing(10)
+    .width(Length::Fixed(500.0))
+    .height(Fill);
+    let right = column![
+        text(tr!(
+            "mleader-style",
+            "preview-of",
+            name = v.selected.to_string()
+        ))
+        .size(11)
+        .style(muted_style),
+        preview_well(v, Length::Fixed(240.0)),
+    ]
+    .spacing(6)
+    .width(Fill);
+    let body = row![left, right].spacing(14).padding([12, 14]).height(Fill);
+    let footer = row![
+        help_button(),
+        Space::new().width(Fill),
+        dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::Cancel), false),
+        dialog_button(tr!("mleader-style", "ok"), msg(MlsMsg::Ok), true),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    column![
+        container(body).height(Fill),
+        crate::ui::style::form::hdivider(Fill),
+        container(footer).padding([8, 14]),
+    ]
+    .height(Fill)
+    .into()
+}
+
+// ── Preview ─────────────────────────────────────────────────────────────────
+
+fn preview_well<'a>(v: &View<'a>, height: Length) -> Element<'a, Message> {
+    let content: Element<'a, Message> = match v.style {
+        Some(style) => canvas(LeaderPreview::new(v, style))
+            .width(Fill)
+            .height(Fill)
+            .into(),
+        None => Space::new().into(),
+    };
+    container(content)
+        .width(Fill)
+        .height(height)
+        .style(preview_style)
+        .into()
 }
 
 fn aci_color(value: &str, fallback: Color) -> Color {
@@ -261,54 +2012,95 @@ fn aci_color(value: &str, fallback: Color) -> Color {
         .unwrap_or(fallback)
 }
 
-struct LeaderPreviewCanvas {
-    path_type: String,
-    content_type: String,
-    line_color: String,
-    line_weight: i16,
-    line_type: String,
-    arrow_name: String,
-    arrow_name_code: String,
-    arrow_size: String,
-    break_gap: String,
-    landing: bool,
-    dogleg: bool,
-    landing_distance: String,
-    landing_gap: String,
-    max_points: String,
-    first_angle: String,
-    second_angle: String,
-    scale: String,
-    annotative: bool,
-    align_space: String,
-    default_text: String,
-    text_style: String,
-    text_height: String,
-    text_color: String,
-    text_angle: String,
-    text_alignment: String,
-    attachment_direction: String,
-    left_attachment: String,
-    left_attachment_code: String,
-    right_attachment: String,
-    top_attachment: String,
-    bottom_attachment: String,
-    text_frame: bool,
-    text_always_left: bool,
-    block_name: String,
-    block_color: String,
-    block_connection: String,
-    block_connection_code: String,
-    block_rotation: String,
-    block_scale: [String; 3],
-    enable_block_scale: bool,
-    enable_block_rotation: bool,
-    leader_draw_order: String,
-    multileader_draw_order: String,
-    description: String,
+/// A number as the dialog shows it: no trailing zeros.
+pub fn trim_number(value: f64) -> String {
+    let text = format!("{value:.6}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text.is_empty() || text == "-0" {
+        "0".to_string()
+    } else {
+        text.to_string()
+    }
 }
 
-impl canvas::Program<Message> for LeaderPreviewCanvas {
+struct LeaderPreview {
+    leader: bool,
+    spline: bool,
+    content: LeaderContentType,
+    line_color: String,
+    line_weight: i16,
+    dashed: bool,
+    arrow: String,
+    landing: bool,
+    dogleg: bool,
+    text: String,
+    text_color: String,
+    frame: bool,
+    vertical: bool,
+    block: String,
+    block_color: String,
+    /// Pixels per drawing unit: the drawing's usual text height draws 15 px
+    /// high, times the style's overall scale.
+    px_per_unit: f32,
+    arrow_size: f32,
+    landing_distance: f32,
+    landing_gap: f32,
+    text_height: f32,
+    block_scale: f32,
+}
+
+/// A typed value, or the style's while the field holds no number.
+fn typed(value: &str, stored: f64) -> f32 {
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(stored) as f32
+}
+
+impl LeaderPreview {
+    fn new(v: &View<'_>, style: &MultiLeaderStyle) -> Self {
+        let lt = v.line_type_name.to_ascii_lowercase();
+        Self {
+            leader: style.path_type != MultiLeaderPathType::Invisible,
+            spline: style.path_type == MultiLeaderPathType::Spline,
+            content: style.content_type,
+            line_color: v.line_color.to_string(),
+            line_weight: style.line_weight.value(),
+            dashed: !(lt.is_empty() || lt == "bylayer" || lt == "byblock" || lt.contains("continuous")),
+            arrow: v.arrowhead_name.to_ascii_uppercase(),
+            landing: style.enable_landing,
+            dogleg: style.enable_dogleg,
+            text: if v.default_text.trim().is_empty() {
+                tr!("mleader-style", "default-text-sample")
+            } else {
+                v.default_text.replace("\\P", " ").replace('\n', " ")
+            },
+            text_color: v.text_color.to_string(),
+            frame: style.text_frame,
+            vertical: style.text_attachment_direction == TextAttachmentDirectionType::Vertical,
+            block: v.block_name.clone(),
+            block_color: v.block_color.to_string(),
+            px_per_unit: {
+                let scale = if style.is_annotative || v.dialog.modify.as_ref().is_some_and(|m| m.scale_to_layout) {
+                    1.0
+                } else {
+                    typed(v.scale_factor, style.scale_factor)
+                };
+                let scale = if scale > 0.0 { scale } else { 1.0 };
+                15.0 / v.unit.max(1e-9) as f32 * scale
+            },
+            arrow_size: typed(v.arrowhead_size, style.arrowhead_size),
+            landing_distance: typed(v.landing_distance, style.landing_distance),
+            landing_gap: typed(v.landing_gap, style.landing_gap),
+            text_height: typed(v.text_height, style.text_height),
+            block_scale: typed(v.block_scale, style.block_content_scale_x),
+        }
+    }
+}
+
+impl canvas::Program<Message> for LeaderPreview {
     type State = ();
 
     fn draw(
@@ -322,57 +2114,22 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let ink = theme.palette().background.base.text;
         let line_color = aci_color(&self.line_color, ink);
-        let scale = if self.annotative {
-            1.0
+        let width = (f32::from(self.line_weight.max(0)) / 35.0).clamp(1.0, 4.0);
+        let head = Point::new(18.0, bounds.height - 22.0);
+        let elbow = Point::new(bounds.width * 0.42, bounds.height * 0.32);
+        let px = |value: f32| value * self.px_per_unit;
+        let tail = if self.landing && self.dogleg {
+            Point::new(
+                elbow.x + px(self.landing_distance).clamp(0.0, bounds.width * 0.5),
+                elbow.y,
+            )
         } else {
-            self.scale
-                .trim()
-                .parse::<f32>()
-                .unwrap_or(1.0)
-                .abs()
-                .clamp(0.35, 2.2)
+            elbow
         };
-        let head = Point::new(34.0, bounds.height - 37.0);
-        let angle1 = self
-            .first_angle
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(28.0)
-            .to_radians();
-        let angle2 = self
-            .second_angle
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(0.0)
-            .to_radians();
-        let points = self
-            .max_points
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(2)
-            .clamp(2, 5);
-        let elbow = Point::new(
-            head.x + 105.0 * scale * angle1.cos().abs().max(0.25),
-            head.y - 70.0 * scale * angle1.sin().abs().max(0.2),
-        );
-        let landing_length = self
-            .landing_distance
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(8.0)
-            .abs()
-            .mul_add(6.0, 18.0)
-            .clamp(24.0, 145.0)
-            * scale;
-        let tail = Point::new(elbow.x + landing_length * angle2.cos().abs(), elbow.y);
-        let width = (self.line_weight.abs() as f32 / 35.0).clamp(0.8, 4.0);
-        let dashed = !self.line_type.eq_ignore_ascii_case("None")
-            && !self.line_type.eq_ignore_ascii_case("ByBlock")
-            && !self.line_type.to_ascii_lowercase().contains("continuous");
         let stroke = canvas::Stroke {
             style: canvas::Style::Solid(line_color),
             width,
-            line_dash: if dashed {
+            line_dash: if self.dashed {
                 canvas::LineDash {
                     segments: &[7.0, 4.0],
                     offset: 0,
@@ -382,666 +2139,159 @@ impl canvas::Program<Message> for LeaderPreviewCanvas {
             },
             ..Default::default()
         };
-        if self.path_type != "Invisible" {
-            if self.path_type == "Spline" {
-                let path = canvas::Path::new(|builder| {
-                    builder.move_to(head);
-                    for step in 1..=18 {
-                        let t = step as f32 / 18.0;
-                        let x = head.x + (elbow.x - head.x) * t;
-                        let y = head.y + (elbow.y - head.y) * t
-                            - (t * std::f32::consts::PI).sin() * 15.0;
-                        builder.line_to(Point::new(x, y));
-                    }
-                });
-                frame.stroke(&path, stroke);
-            } else {
-                let path = canvas::Path::new(|builder| {
-                    builder.move_to(head);
-                    for index in 1..points {
-                        let t = index as f32 / (points - 1) as f32;
-                        let bend = if index + 1 == points {
-                            0.0
-                        } else {
-                            (index as f32 * 7.0) % 14.0 - 7.0
-                        };
-                        builder.line_to(Point::new(
-                            head.x + (elbow.x - head.x) * t,
-                            head.y + (elbow.y - head.y) * t + bend,
-                        ));
-                    }
-                });
-                frame.stroke(&path, stroke);
-            }
-            if self.landing && self.dogleg {
-                let gap = self
-                    .break_gap
-                    .trim()
-                    .parse::<f32>()
-                    .unwrap_or(0.0)
-                    .abs()
-                    .clamp(0.0, 8.0);
-                frame.stroke(
-                    &canvas::Path::line(elbow, Point::new((elbow.x + tail.x) * 0.5 - gap, elbow.y)),
-                    stroke,
-                );
-                frame.stroke(
-                    &canvas::Path::line(Point::new((elbow.x + tail.x) * 0.5 + gap, elbow.y), tail),
-                    stroke,
-                );
-            }
-        }
-        let arrow = self
-            .arrow_size
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(0.18)
-            .abs()
-            .mul_add(12.0, 4.0)
-            .clamp(5.0, 18.0)
-            * scale;
-        let arrow_code = self.arrow_name_code.to_ascii_uppercase();
-        if arrow_code.contains("DOT") {
-            frame.fill(&canvas::Path::circle(head, arrow * 0.42), line_color);
-        } else if arrow_code.contains("TICK") || arrow_code.contains("OBLIQUE") {
-            frame.stroke(
-                &canvas::Path::line(
-                    Point::new(head.x - arrow * 0.35, head.y + arrow * 0.65),
-                    Point::new(head.x + arrow * 0.35, head.y - arrow * 0.65),
-                ),
-                canvas::Stroke::default()
-                    .with_color(line_color)
-                    .with_width(width),
-            );
-        } else if arrow_code.contains("BOX") {
-            frame.fill(
-                &canvas::Path::rectangle(
-                    Point::new(head.x - arrow * 0.35, head.y - arrow * 0.35),
-                    Size::new(arrow * 0.7, arrow * 0.7),
-                ),
-                line_color,
-            );
-        } else {
-            let arrow_path = canvas::Path::new(|builder| {
-                builder.move_to(head);
-                builder.line_to(Point::new(head.x + arrow, head.y - arrow * 0.45));
-                builder.line_to(Point::new(head.x + arrow, head.y + arrow * 0.45));
-                builder.close();
-            });
-            if arrow_code.contains("OPEN") {
-                let open_path = canvas::Path::new(|builder| {
-                    builder.move_to(Point::new(head.x + arrow, head.y - arrow * 0.45));
-                    builder.line_to(head);
-                    builder.line_to(Point::new(head.x + arrow, head.y + arrow * 0.45));
-                });
-                frame.stroke(
-                    &open_path,
-                    canvas::Stroke::default()
-                        .with_color(line_color)
-                        .with_width(width),
-                );
-            } else {
-                frame.fill(&arrow_path, line_color);
-            }
-        }
-        let landing_gap = self
-            .landing_gap
-            .trim()
-            .parse::<f32>()
-            .unwrap_or(0.09)
-            .abs()
-            .mul_add(8.0, 5.0)
-            .clamp(5.0, 24.0);
-        let content_origin = Point::new(tail.x + landing_gap, tail.y);
-        if self.content_type == "Block" {
-            let scales = self
-                .block_scale
-                .iter()
-                .map(|value| value.trim().parse::<f32>().unwrap_or(1.0).abs())
-                .collect::<Vec<_>>();
-            let (scale_x, scale_y) = if self.enable_block_scale {
-                (scales[0].clamp(0.3, 2.5), scales[1].clamp(0.3, 2.5))
-            } else {
-                (1.0, 1.0)
-            };
-            let size = Size::new(42.0 * scale_x, 30.0 * scale_y);
-            let rotation = if self.enable_block_rotation {
-                self.block_rotation
-                    .trim()
-                    .parse::<f32>()
-                    .unwrap_or(0.0)
-                    .to_radians()
-            } else {
-                0.0
-            };
-            let center_x = if self.block_connection_code == "BasePoint" {
-                content_origin.x
-            } else {
-                content_origin.x + size.width * 0.5
-            };
-            frame.with_save(|frame| {
-                frame.translate(iced::Vector::new(center_x, content_origin.y));
-                frame.rotate(iced::Radians(rotation));
-                let top_left = Point::new(-size.width * 0.5, -size.height * 0.5);
-                let rect = canvas::Path::rectangle(top_left, size);
-                let color = aci_color(&self.block_color, ink);
-                frame.stroke(
-                    &rect,
-                    canvas::Stroke::default().with_color(color).with_width(1.5),
-                );
-                frame.stroke(
-                    &canvas::Path::line(top_left, Point::new(size.width * 0.5, size.height * 0.5)),
-                    canvas::Stroke::default().with_color(color),
-                );
-            });
-        } else if self.content_type != "None" {
-            let content = if self.content_type == "Tolerance" {
-                "⌀0.01 | A".to_string()
-            } else if self.default_text.trim().is_empty() {
-                t!("Leader note").into_owned()
-            } else {
-                self.default_text.clone()
-            };
-            let text_size = self
-                .text_height
-                .trim()
-                .parse::<f32>()
-                .unwrap_or(0.18)
-                .abs()
-                .mul_add(22.0, 8.0)
-                .clamp(9.0, 19.0)
-                * scale;
-            let box_width = (content.chars().count() as f32 * text_size * 0.55 + 14.0)
-                .clamp(60.0, bounds.width - content_origin.x - 8.0);
-            let box_height = text_size
-                + 12.0
-                + self
-                    .align_space
-                    .trim()
-                    .parse::<f32>()
-                    .unwrap_or(0.0)
-                    .abs()
-                    .min(8.0);
-            let attachment_offset = if self.attachment_direction == "Horizontal" {
-                match self.left_attachment_code.as_str() {
-                    // Values 6–8 attach at the top line (see `ATTACHMENTS`).
-                    "TopOfTopLine"
-                    | "BottomOfTopLineUnderlineBottomLine"
-                    | "BottomOfTopLineUnderlineTopLine"
-                    | "BottomOfTopLineUnderlineAll" => box_height * 0.5,
-                    "MiddleOfTopLine" => box_height * 0.25,
-                    "MiddleOfBottomLine" => -box_height * 0.25,
-                    "BottomOfBottomLine" | "BottomLine" => -box_height * 0.5,
-                    _ => 0.0,
+        if self.leader {
+            let path = canvas::Path::new(|b| {
+                b.move_to(head);
+                if self.spline {
+                    let control = Point::new(head.x + (elbow.x - head.x) * 0.15, elbow.y);
+                    b.quadratic_curve_to(control, elbow);
+                } else {
+                    b.line_to(elbow);
                 }
-            } else {
-                0.0
+                b.line_to(tail);
+            });
+            frame.stroke(&path, stroke);
+            // The arrowhead, pointing back along the first segment.
+            let dir = {
+                let dx = elbow.x - head.x;
+                let dy = elbow.y - head.y;
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                (dx / len, dy / len)
             };
-            let content_y = content_origin.y + attachment_offset;
-            if self.text_frame {
+            let size = px(self.arrow_size).clamp(1.0, bounds.height * 0.5);
+            let along = |d: f32, side: f32| {
+                Point::new(
+                    head.x + dir.0 * d - dir.1 * side,
+                    head.y + dir.1 * d + dir.0 * side,
+                )
+            };
+            let thin = canvas::Stroke::default()
+                .with_color(line_color)
+                .with_width(width);
+            let code = self.arrow.as_str();
+            if code.contains("NONE") {
+            } else if code.contains("DOT") {
+                let filled = !code.contains("BLANK");
+                let r = if code.contains("SMALL") { 2.0 } else { 4.0 };
+                if filled {
+                    frame.fill(&canvas::Path::circle(head, r), line_color);
+                } else {
+                    frame.stroke(&canvas::Path::circle(head, r), thin);
+                }
+            } else if code.contains("TICK") || code.contains("OBLIQUE") {
                 frame.stroke(
-                    &canvas::Path::rectangle(
-                        Point::new(content_origin.x, content_y - box_height * 0.5),
-                        Size::new(box_width, box_height),
+                    &canvas::Path::line(
+                        Point::new(head.x - 5.0, head.y + 5.0),
+                        Point::new(head.x + 5.0, head.y - 5.0),
                     ),
-                    canvas::Stroke::default()
-                        .with_color(aci_color(&self.text_color, ink))
-                        .with_width(1.0),
+                    thin,
                 );
+            } else if code.contains("BOX") {
+                let square = canvas::Path::rectangle(
+                    Point::new(head.x - 4.0, head.y - 4.0),
+                    Size::new(8.0, 8.0),
+                );
+                if code.contains("FILLED") {
+                    frame.fill(&square, line_color);
+                } else {
+                    frame.stroke(&square, thin);
+                }
+            } else if code.contains("ORIGIN") || code.contains("INTEGRAL") {
+                frame.stroke(&canvas::Path::circle(head, 4.0), thin);
+            } else {
+                let half = if code.contains("30") { 0.27 } else { 0.32 };
+                let tri = canvas::Path::new(|b| {
+                    b.move_to(head);
+                    b.line_to(along(size, size * half));
+                    b.line_to(along(size, -size * half));
+                    b.close();
+                });
+                if code.contains("OPEN") || code.contains("RIGHT") {
+                    let open = canvas::Path::new(|b| {
+                        b.move_to(along(size, size * half));
+                        b.line_to(head);
+                        b.line_to(along(size, -size * half));
+                    });
+                    frame.stroke(&open, thin);
+                } else if code.contains("BLANK") || code == "CLOSED" || code.contains("DATUM TRIANGLE") && !code.contains("FILLED") {
+                    frame.stroke(&tri, thin);
+                } else {
+                    frame.fill(&tri, line_color);
+                }
             }
-            let align = if self.text_always_left || self.text_alignment == "Left" {
-                iced::advanced::text::Alignment::Left
-            } else if self.text_alignment == "Right" {
-                iced::advanced::text::Alignment::Right
-            } else {
-                iced::advanced::text::Alignment::Center
-            };
-            let x = match align {
-                iced::advanced::text::Alignment::Left => content_origin.x + 5.0,
-                iced::advanced::text::Alignment::Right => content_origin.x + box_width - 5.0,
-                _ => content_origin.x + box_width * 0.5,
-            };
-            let rotation = if self.attachment_direction == "Vertical" {
-                std::f32::consts::FRAC_PI_2
-            } else if self.text_angle == "ParallelToLastLeaderLine" {
-                -angle2
-            } else {
-                0.0
-            };
-            frame.with_save(|frame| {
-                frame.translate(iced::Vector::new(x, content_y));
-                frame.rotate(iced::Radians(rotation));
+        }
+        let origin = Point::new(tail.x + px(self.landing_gap).clamp(0.0, bounds.width * 0.5), tail.y);
+        match self.content {
+            LeaderContentType::Block => {
+                let color = aci_color(&self.block_color, ink);
+                let s = canvas::Stroke::default().with_color(color).with_width(1.4);
+                // The predefined blocks are a unit across their centre.
+                let r = px(self.block_scale).clamp(1.0, bounds.height * 0.45);
+                let c = Point::new(origin.x + r, origin.y);
+                let shape = match self.block.as_str() {
+                    "Box" => canvas::Path::rectangle(
+                        Point::new(c.x - r, c.y - r),
+                        Size::new(2.0 * r, 2.0 * r),
+                    ),
+                    "Hexagon" | "Triangle" => {
+                        let (n, start) = if self.block == "Hexagon" { (6, 0.0) } else { (3, 90.0f32) };
+                        canvas::Path::new(|b| {
+                            for i in 0..n {
+                                let a = (start + 360.0 * i as f32 / n as f32).to_radians();
+                                let p = Point::new(c.x + r * a.cos(), c.y - r * a.sin());
+                                if i == 0 {
+                                    b.move_to(p);
+                                } else {
+                                    b.line_to(p);
+                                }
+                            }
+                            b.close();
+                        })
+                    }
+                    "Slot" => canvas::Path::rounded_rectangle(
+                        Point::new(c.x - r, c.y - r * 0.5),
+                        Size::new(2.0 * r, r),
+                        (r * 0.5).into(),
+                    ),
+                    _ => canvas::Path::circle(c, r),
+                };
+                frame.stroke(&shape, s);
+                if self.block == "Detail Callout" {
+                    frame.stroke(
+                        &canvas::Path::line(Point::new(c.x - r, c.y), Point::new(c.x + r, c.y)),
+                        s,
+                    );
+                }
+            }
+            LeaderContentType::None => {}
+            _ => {
+                let size = px(self.text_height).clamp(1.0, bounds.height * 0.6);
+                let color = aci_color(&self.text_color, ink);
+                let width = self.text.chars().count() as f32 * size * 0.55;
+                let (x, y) = if self.vertical {
+                    (origin.x - width * 0.5, origin.y - size)
+                } else {
+                    (origin.x, origin.y)
+                };
+                if self.frame {
+                    frame.stroke(
+                        &canvas::Path::rectangle(
+                            Point::new(x - 4.0, y - size * 0.75),
+                            Size::new(width + 8.0, size * 1.5),
+                        ),
+                        canvas::Stroke::default().with_color(color).with_width(1.0),
+                    );
+                }
                 frame.fill_text(canvas::Text {
-                    content,
-                    position: Point::ORIGIN,
-                    color: aci_color(&self.text_color, ink),
-                    size: iced::Pixels(text_size),
-                    align_x: align,
+                    content: self.text.clone(),
+                    position: Point::new(x, y),
+                    color,
+                    size: iced::Pixels(size),
                     align_y: iced::alignment::Vertical::Center,
                     ..Default::default()
                 });
-            });
+            }
         }
-        frame.fill_text(canvas::Text {
-            content: format!(
-                "{} · {} · {} · {} · {} / {} · {}",
-                handle_label(&self.line_type),
-                self.arrow_name,
-                self.text_style,
-                self.block_name,
-                self.leader_draw_order,
-                self.multileader_draw_order,
-                self.description,
-            ),
-            position: Point::new(10.0, bounds.height - 9.0),
-            color: ink.scale_alpha(0.62),
-            size: iced::Pixels(9.0),
-            align_y: iced::alignment::Vertical::Center,
-            ..Default::default()
-        });
-        frame.fill_text(canvas::Text {
-            content: format!(
-                "{} / {} / {} / {} · {} · {}{} · z {} · {}",
-                self.left_attachment,
-                self.right_attachment,
-                self.top_attachment,
-                self.bottom_attachment,
-                self.block_connection,
-                if self.enable_block_rotation {
-                    &self.block_rotation
-                } else {
-                    "0"
-                },
-                "°",
-                self.block_scale[2],
-                if self.annotative {
-                    t!("Annotative")
-                } else {
-                    t!("Drawing scale")
-                },
-            ),
-            position: Point::new(10.0, 9.0),
-            color: ink.scale_alpha(0.55),
-            size: iced::Pixels(9.0),
-            align_y: iced::alignment::Vertical::Center,
-            ..Default::default()
-        });
         vec![frame.into_geometry()]
     }
-}
-
-pub fn view_window<'a>(
-    v: MLeaderStyleView<'a>,
-    sizing: crate::ui::modal::ModalSizing,
-) -> Element<'a, Message> {
-    let style = v.style;
-    let content: Element<'a, Message> = match (v.tab, style) {
-        (_, None) => text(t!("Select a style to view details.")).size(11).into(),
-        (0, Some(style)) => column![
-            input_row(t!("Description"), "", v.description, "description"),
-            enum_row(
-                t!("Path type"),
-                &[
-                    ("Invisible", "None"),
-                    ("StraightLineSegments", "Straight"),
-                    ("Spline", "Spline")
-                ],
-                format!("{:?}", style.path_type),
-                "path_type"
-            ),
-            color_row(
-                t!("Line color"),
-                v.line_color,
-                "line_color",
-                v.color_open == Some("line_color")
-            ),
-            row![
-                text(t!("Line weight"))
-                    .size(11)
-                    .style(muted_style)
-                    .width(165),
-                crate::ui::dropdown_list::pick_list(
-                    Some(crate::ui::properties::LwItem(style.line_weight)),
-                    crate::ui::properties::lw_options(),
-                    |value| value.to_string(),
-                )
-                .on_select(|item| Message::MLeaderStyleLineWeightChanged(item.0))
-                .text_size(11)
-                .width(220),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
-            handle_row(
-                t!("Line type"),
-                v.lt_opts.clone(),
-                v.line_type_name.clone(),
-                "line_type_handle"
-            ),
-            handle_row(
-                t!("Arrowhead"),
-                v.arrow_opts.clone(),
-                v.arrowhead_name.clone(),
-                "arrowhead_handle"
-            ),
-            input_row(
-                t!("Arrowhead size"),
-                "0.18",
-                v.arrowhead_size,
-                "arrowhead_size"
-            ),
-            input_row(t!("Break gap size"), "0.125", v.break_gap, "break_gap"),
-        ]
-        .spacing(8)
-        .into(),
-        (1, Some(style)) => column![
-            toggle(t!("Enable landing"), style.enable_landing, "enable_landing"),
-            toggle(t!("Enable dogleg"), style.enable_dogleg, "enable_dogleg"),
-            input_row(
-                t!("Landing distance"),
-                "8.0",
-                v.landing_distance,
-                "landing_distance"
-            ),
-            input_row(t!("Landing gap"), "0.09", v.landing_gap, "landing_gap"),
-            input_row(t!("Maximum leader points"), "2", v.max_points, "max_points"),
-            input_row(
-                t!("First segment angle"),
-                "0",
-                v.first_seg_angle,
-                "first_seg_angle"
-            ),
-            input_row(
-                t!("Second segment angle"),
-                "0",
-                v.second_seg_angle,
-                "second_seg_angle"
-            ),
-            if style.is_annotative {
-                readonly_row(t!("Scale factor"), t!("By annotation scale"))
-            } else {
-                input_row(t!("Scale factor"), "1.0", v.scale_factor, "scale_factor")
-            },
-            input_row(t!("Alignment spacing"), "4.0", v.align_space, "align_space"),
-            enum_row(
-                t!("Leader draw order"),
-                &LEADER_DRAW_ORDERS,
-                format!("{:?}", style.leader_draw_order),
-                "leader_draw_order"
-            ),
-            enum_row(
-                t!("Multileader draw order"),
-                &MULTILEADER_DRAW_ORDERS,
-                format!("{:?}", style.multileader_draw_order),
-                "multileader_draw_order"
-            ),
-            toggle(t!("Annotative"), style.is_annotative, "annotative"),
-        ]
-        .spacing(8)
-        .into(),
-        (2, Some(style)) => column![
-            enum_row(
-                t!("Content type"),
-                &[
-                    ("None", "None"),
-                    ("Block", "Block"),
-                    ("MText", "Text"),
-                    ("Tolerance", "Tolerance")
-                ],
-                format!("{:?}", style.content_type),
-                "content_type"
-            ),
-            input_row(t!("Default text"), "", v.default_text, "default_text"),
-            handle_row(
-                t!("Text style"),
-                v.textstyle_opts.clone(),
-                v.text_style_name.clone(),
-                "text_style_handle"
-            ),
-            input_row(t!("Text height"), "0.18", v.text_height, "text_height"),
-            color_row(
-                t!("Text color"),
-                v.text_color,
-                "text_color",
-                v.color_open == Some("text_color")
-            ),
-            enum_row(
-                t!("Text angle"),
-                &[
-                    ("ParallelToLastLeaderLine", "Parallel to last segment"),
-                    ("Horizontal", "Horizontal"),
-                    ("Optimized", "Optimized")
-                ],
-                format!("{:?}", style.text_angle_type),
-                "text_angle_type"
-            ),
-            enum_row(
-                t!("Text alignment"),
-                &[("Left", "Left"), ("Center", "Center"), ("Right", "Right")],
-                format!("{:?}", style.text_alignment),
-                "text_alignment"
-            ),
-            enum_row(
-                t!("Attachment direction"),
-                &[("Horizontal", "Horizontal"), ("Vertical", "Vertical")],
-                format!("{:?}", style.text_attachment_direction),
-                "text_attachment_direction"
-            ),
-            enum_row(
-                t!("Left attachment"),
-                &ATTACHMENTS,
-                format!("{:?}", style.text_left_attachment),
-                "text_left_attachment"
-            ),
-            enum_row(
-                t!("Right attachment"),
-                &ATTACHMENTS,
-                format!("{:?}", style.text_right_attachment),
-                "text_right_attachment"
-            ),
-            enum_row(
-                t!("Top attachment"),
-                &ATTACHMENTS,
-                format!("{:?}", style.text_top_attachment),
-                "text_top_attachment"
-            ),
-            enum_row(
-                t!("Bottom attachment"),
-                &ATTACHMENTS,
-                format!("{:?}", style.text_bottom_attachment),
-                "text_bottom_attachment"
-            ),
-            row![
-                toggle(t!("Text frame"), style.text_frame, "text_frame"),
-                toggle(
-                    t!("Always left align"),
-                    style.text_always_left,
-                    "text_always_left"
-                )
-            ]
-            .spacing(18),
-        ]
-        .spacing(8)
-        .into(),
-        (_, Some(style)) => column![
-            handle_row(
-                t!("Block"),
-                v.block_opts.clone(),
-                v.block_content_name.clone(),
-                "block_content_handle"
-            ),
-            color_row(
-                t!("Block color"),
-                v.block_color,
-                "block_color",
-                v.color_open == Some("block_color")
-            ),
-            enum_row(
-                t!("Block connection"),
-                &BLOCK_CONNECTIONS,
-                format!("{:?}", style.block_content_connection),
-                "block_content_connection"
-            ),
-            input_row(
-                t!("Block rotation"),
-                "0",
-                v.block_rotation,
-                "block_rotation"
-            ),
-            input_row(t!("Block scale X"), "1.0", v.block_scale_x, "block_scale_x"),
-            input_row(t!("Block scale Y"), "1.0", v.block_scale_y, "block_scale_y"),
-            input_row(t!("Block scale Z"), "1.0", v.block_scale_z, "block_scale_z"),
-            toggle(
-                t!("Enable block scale"),
-                style.enable_block_scale,
-                "enable_block_scale"
-            ),
-            toggle(
-                t!("Enable block rotation"),
-                style.enable_block_rotation,
-                "enable_block_rotation"
-            ),
-        ]
-        .spacing(8)
-        .into(),
-    };
-    let preview: Element<'a, Message> = if let Some(style) = style {
-        canvas(LeaderPreviewCanvas {
-            path_type: format!("{:?}", style.path_type),
-            content_type: format!("{:?}", style.content_type),
-            line_color: v.line_color.to_string(),
-            line_weight: style.line_weight.value(),
-            line_type: v.line_type_name.clone(),
-            arrow_name: handle_label(&v.arrowhead_name),
-            arrow_name_code: v.arrowhead_name.clone(),
-            arrow_size: v.arrowhead_size.to_string(),
-            break_gap: v.break_gap.to_string(),
-            landing: style.enable_landing,
-            dogleg: style.enable_dogleg,
-            landing_distance: v.landing_distance.to_string(),
-            landing_gap: v.landing_gap.to_string(),
-            max_points: v.max_points.to_string(),
-            first_angle: v.first_seg_angle.to_string(),
-            second_angle: v.second_seg_angle.to_string(),
-            scale: v.scale_factor.to_string(),
-            annotative: style.is_annotative,
-            align_space: v.align_space.to_string(),
-            default_text: v.default_text.to_string(),
-            text_style: handle_label(&v.text_style_name),
-            text_height: v.text_height.to_string(),
-            text_color: v.text_color.to_string(),
-            text_angle: format!("{:?}", style.text_angle_type),
-            text_alignment: format!("{:?}", style.text_alignment),
-            attachment_direction: format!("{:?}", style.text_attachment_direction),
-            left_attachment: choice_label(
-                &ATTACHMENTS,
-                format!("{:?}", style.text_left_attachment),
-            ),
-            left_attachment_code: format!("{:?}", style.text_left_attachment),
-            right_attachment: choice_label(
-                &ATTACHMENTS,
-                format!("{:?}", style.text_right_attachment),
-            ),
-            top_attachment: choice_label(&ATTACHMENTS, format!("{:?}", style.text_top_attachment)),
-            bottom_attachment: choice_label(
-                &ATTACHMENTS,
-                format!("{:?}", style.text_bottom_attachment),
-            ),
-            text_frame: style.text_frame,
-            text_always_left: style.text_always_left,
-            block_name: handle_label(&v.block_content_name),
-            block_color: v.block_color.to_string(),
-            block_connection: choice_label(
-                &BLOCK_CONNECTIONS,
-                format!("{:?}", style.block_content_connection),
-            ),
-            block_connection_code: format!("{:?}", style.block_content_connection),
-            block_rotation: v.block_rotation.to_string(),
-            block_scale: [
-                v.block_scale_x.to_string(),
-                v.block_scale_y.to_string(),
-                v.block_scale_z.to_string(),
-            ],
-            enable_block_scale: style.enable_block_scale,
-            enable_block_rotation: style.enable_block_rotation,
-            leader_draw_order: choice_label(
-                &LEADER_DRAW_ORDERS,
-                format!("{:?}", style.leader_draw_order),
-            ),
-            multileader_draw_order: choice_label(
-                &MULTILEADER_DRAW_ORDERS,
-                format!("{:?}", style.multileader_draw_order),
-            ),
-            description: v.description.to_string(),
-        })
-        .width(Length::Fill)
-        .height(150)
-        .into()
-    } else {
-        container(text(t!("No preview"))).height(150).into()
-    };
-    let status = if v.selected.eq_ignore_ascii_case(&v.current) {
-        t!("Current style")
-    } else if v.in_use {
-        t!("Used in drawing")
-    } else {
-        t!("Available style")
-    };
-    let summary = if v.comparison_sections.is_empty() {
-        t!("No differences").into_owned()
-    } else {
-        format!("{}: {}", t!("Different"), v.comparison_sections.join(", "))
-    };
-    let editor = crate::ui::style::style_manager::editor_shell(
-        crate::ui::style::style_manager::EditorShell {
-            sizing,
-            selected: v.selected.to_string(),
-            status,
-            preview,
-            comparison: Some(crate::ui::style::style_manager::EditorComparison {
-                selected: v.compare_name,
-                options: v.compare_opts,
-                summary,
-                on_select: Message::MLeaderStyleDialogCompare,
-            }),
-            tabs: [
-                t!("Leader Format"),
-                t!("Leader Structure"),
-                t!("Content"),
-                t!("Block Content"),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(tab, label)| crate::ui::style::style_manager::EditorTab {
-                label,
-                active: v.tab == tab as u8,
-                on_press: Message::MLeaderStyleDialogTab(tab as u8),
-            })
-            .collect(),
-            content,
-        },
-    );
-    crate::ui::style::style_manager::view(crate::ui::style::style_manager::Scaffold {
-        sizing,
-        kind: crate::app::StyleKind::MLeader,
-        styles: &v.styles,
-        selected: v.selected,
-        current: Some(v.current.as_str()),
-        rename_active: v.rename_active,
-        rename_buf: v.rename_buf,
-        on_new: Message::MLeaderStyleDialogNew,
-        on_copy: Message::MLeaderStyleDialogCopy,
-        on_delete: Message::MLeaderStyleDialogDelete,
-        on_import: None,
-        on_select: Message::MLeaderStyleDialogSelect,
-        on_set_current: Message::MLeaderStyleDialogSetCurrent,
-        on_apply: Message::MLeaderStyleApply,
-        read_only: false,
-        locked_keeps_actions: false,
-        on_list_scroll: None,
-        in_use_filter: None,
-        apply_blocked: None,
-        rows: None,
-        compact: false,
-        editor,
-    })
 }

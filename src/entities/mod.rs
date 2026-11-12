@@ -1,5 +1,6 @@
 pub mod arc;
 pub(crate) mod arrowheads;
+pub(crate) mod leader_blocks;
 pub mod attribute;
 pub mod circle;
 pub(crate) mod civil;

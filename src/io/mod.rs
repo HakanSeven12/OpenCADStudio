@@ -2329,9 +2329,33 @@ pub async fn pick_linetype_export_path(suggested: String) -> Option<String> {
     Some(crate::sys::handle_path(&handle).display().to_string())
 }
 
-/// Pick a `.lin` linetype definition file and return its folder (where the
-/// shape files it names are looked for; none on the web) and text (#1588).
-pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
+/// A picked `.lin` linetype definition file: its file name, its folder
+/// (where the shape files it names are looked for; none on the web) and its
+/// text.
+#[derive(Debug, Clone)]
+pub struct PickedLinetypeFile {
+    pub name: String,
+    pub dir: Option<std::path::PathBuf>,
+    pub source: String,
+}
+
+impl PickedLinetypeFile {
+    /// The file at `path`, read as a picked one.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read(path: &Path) -> std::io::Result<Self> {
+        Ok(Self {
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            dir: path.parent().map(Path::to_path_buf),
+            source: String::from_utf8_lossy(&std::fs::read(path)?).into_owned(),
+        })
+    }
+}
+
+/// Pick a `.lin` linetype definition file (#1588).
+pub async fn pick_linetype_file_named() -> Option<PickedLinetypeFile> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Load Linetypes").as_ref())
         .add_filter(crate::t!("Linetype Files").as_ref(), &["lin", "LIN"])
@@ -2341,10 +2365,18 @@ pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)
     let dir = handle.path().parent().map(Path::to_path_buf);
     #[cfg(target_arch = "wasm32")]
     let dir = None;
-    Some((
+    Some(PickedLinetypeFile {
+        name: handle.file_name(),
         dir,
-        String::from_utf8_lossy(&handle.read().await).into_owned(),
-    ))
+        source: String::from_utf8_lossy(&handle.read().await).into_owned(),
+    })
+}
+
+/// Pick a `.lin` linetype definition file and return its folder and text.
+pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
+    pick_linetype_file_named()
+        .await
+        .map(|file| (file.dir, file.source))
 }
 
 pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {

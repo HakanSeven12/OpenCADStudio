@@ -2918,6 +2918,18 @@ pub struct Scene {
             Arc<HashMap<Handle, Vec<u32>>>,
         )>,
     >,
+    /// The box around the vertices of each mesh the current renderer mesh
+    /// source draws, by the mesh's address: the references of a block share
+    /// one. The box and lasso tests tell the solids clear of a selection from
+    /// it. Guarded by the weak source like the lookup above.
+    #[allow(clippy::type_complexity)]
+    mesh_pick_boxes_cache: RefCell<
+        Option<(
+            usize,
+            std::sync::Weak<Vec<MeshLodSet>>,
+            Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>>,
+        )>,
+    >,
     /// Per-viewport (VP-frozen-layer) filtered fill / image / mesh sets, keyed by
     /// the order-independent signature of the viewport's frozen-layer set. A
     /// content viewport that freezes layers must hide their hatches, 2-D solids,
@@ -3636,6 +3648,7 @@ impl Scene {
             mesh_cache: RefCell::new(HashMap::default()),
             interaction_mesh_cache: RefCell::new(None),
             mesh_pick_lookup_cache: RefCell::new(None),
+            mesh_pick_boxes_cache: RefCell::new(None),
             frozen_hatch_cache: RefCell::new(HashMap::default()),
             frozen_wipeout_cache: RefCell::new(HashMap::default()),
             frozen_image_cache: RefCell::new(HashMap::default()),
@@ -5947,6 +5960,7 @@ impl Scene {
             *self.wire_cache.borrow_mut() = None;
             *self.interaction_mesh_cache.borrow_mut() = None;
             *self.mesh_pick_lookup_cache.borrow_mut() = None;
+            *self.mesh_pick_boxes_cache.borrow_mut() = None;
             *self.insert_hatch_cache.borrow_mut() = None;
         }
     }
@@ -11702,6 +11716,47 @@ impl Scene {
         lookup
     }
 
+    /// The box around the vertices of each mesh `meshes` draws, in the mesh's
+    /// own coordinates, by the mesh's address. A mesh with no vertices, or
+    /// with one that is not finite, has none. Measured once for a mesh list:
+    /// a selection box asked every solid of the drawing for its vertices on
+    /// every pointer move.
+    fn mesh_pick_boxes(
+        &self,
+        meshes: &Arc<Vec<MeshLodSet>>,
+    ) -> Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>> {
+        let source = Arc::as_ptr(meshes) as usize;
+        {
+            let cache = self.mesh_pick_boxes_cache.borrow();
+            if let Some((ptr, weak, boxes)) = cache.as_ref() {
+                if *ptr == source
+                    && weak
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, meshes))
+                {
+                    return Arc::clone(boxes);
+                }
+            }
+        }
+        let mut boxes = rustc_hash::FxHashMap::default();
+        let mut measured = rustc_hash::FxHashSet::default();
+        for set in meshes.iter() {
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            let address = std::ptr::from_ref(mesh) as usize;
+            if measured.insert(address) {
+                if let Some(local) = pick::hit_test::mesh_local_box(mesh) {
+                    boxes.insert(address, local);
+                }
+            }
+        }
+        let boxes = Arc::new(boxes);
+        *self.mesh_pick_boxes_cache.borrow_mut() =
+            Some((source, Arc::downgrade(meshes), Arc::clone(&boxes)));
+        boxes
+    }
+
     /// Solid-mesh set (top-level + block-instanced), optionally dropping those
     /// whose layer is frozen in a content viewport (`frozen`). `None` reproduces
     /// the full set.
@@ -14465,6 +14520,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14479,16 +14535,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -14648,6 +14721,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14662,15 +14736,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices
@@ -14962,6 +15051,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14976,16 +15066,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -15022,6 +15129,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -15036,15 +15144,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices

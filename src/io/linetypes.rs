@@ -1143,7 +1143,8 @@ mod shape_file_tests {
         });
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
-            file.as_ref().is_some_and(|file| file.ends_with("NLCS.shx")),
+            file.as_ref()
+                .is_some_and(|file| file.to_ascii_lowercase().ends_with("nlcs.shx")),
             "{file:?}"
         );
     }

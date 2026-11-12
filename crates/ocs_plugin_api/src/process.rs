@@ -185,6 +185,13 @@ macro_rules! vlog {
 /// `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` overrides it.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// How often the connect wait checks whether the runner has already exited.
+const SPAWN_EXIT_POLL: Duration = Duration::from_millis(50);
+
+/// How long a runner that exited before connecting gets to flush its stderr
+/// into the spawn error.
+const SPAWN_STDERR_GRACE: Duration = Duration::from_millis(500);
+
 fn spawn_timeout() -> Duration {
     std::env::var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS")
         .ok()
@@ -349,6 +356,7 @@ impl PluginProcess {
         let (io_tx, io_rx) = mpsc::channel::<PluginIoLine>();
         let plugin_id_for_io: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
         let last_stderr: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let (stderr_done_tx, stderr_done) = mpsc::channel::<()>();
         if let Some(stdout) = child.stdout.take() {
             let io_tx = io_tx.clone();
             let plugin_id = Arc::clone(&plugin_id_for_io);
@@ -381,6 +389,7 @@ impl PluginProcess {
                         text: line,
                     });
                 }
+                let _ = stderr_done_tx.send(());
             });
         }
         let child = Mutex::new(Some(child));
@@ -391,31 +400,34 @@ impl PluginProcess {
         std::thread::spawn(move || {
             let _ = tx.send(listener.accept());
         });
-        let stream = match rx.recv_timeout(spawn_timeout()) {
-            Ok(Ok(stream)) => {
-                vlog!("[plugin] runner connected");
-                Mutex::new(Some(stream))
-            }
-            Ok(Err(e)) => return Err(e.into()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                let status = spawn_failure_status(&child, &last_stderr);
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+        // The wait also watches the runner itself: one that exits before it
+        // connects (a plugin built against another wire schema, a crash while
+        // loading) fails the spawn at once instead of after the whole budget.
+        let accept_deadline = Instant::now() + spawn_timeout();
+        let stream = loop {
+            let remaining = accept_deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(remaining.min(SPAWN_EXIT_POLL)) {
+                Ok(Ok(stream)) => {
+                    vlog!("[plugin] runner connected");
+                    break Mutex::new(Some(stream));
                 }
-                return Err(PluginError::RunnerCrashed {
-                    request: "spawn/accept",
-                    status,
-                });
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let status = spawn_failure_status(&child, &last_stderr);
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+                Ok(Err(e)) => return Err(e.into()),
+                Err(mpsc::RecvTimeoutError::Timeout)
+                    if !remaining.is_zero() && child_status(&child).is_none() => {}
+                Err(_) => {
+                    if child_status(&child).is_some() {
+                        // Let the drain thread read the runner's last words.
+                        let _ = stderr_done.recv_timeout(SPAWN_STDERR_GRACE);
+                    }
+                    let status = spawn_failure_status(&child, &last_stderr);
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::RunnerCrashed {
+                        request: "spawn/accept",
+                        status,
+                    });
                 }
-                return Err(PluginError::RunnerCrashed {
-                    request: "spawn/accept",
-                    status,
-                });
             }
         };
 
@@ -1641,6 +1653,61 @@ mod timeout_tests {
             io_lines: Mutex::new(None),
         };
         (process, runner_stream)
+    }
+
+    /// A runner that exits before it connects (a plugin built against another
+    /// wire schema, a missing dependency, a crash in `on_load`) must fail the
+    /// spawn as soon as it exits, not after the whole connect budget.
+    #[test]
+    fn spawn_fails_as_soon_as_the_runner_exits_before_connecting() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock");
+        let prev_runner = std::env::var("OCS_PLUGIN_RUNNER_EXE").ok();
+        let prev_timeout = std::env::var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS").ok();
+        // The test binary itself stands in for the runner: it rejects
+        // `--ocs-plugin-runner` as an unknown option and exits at once.
+        let this_test = std::env::current_exe().expect("test executable");
+        std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &this_test);
+        std::env::set_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS", "20");
+
+        let mut host = DummyHost::new(Document::default());
+        let start = Instant::now();
+        let result = PluginProcess::spawn(
+            Path::new("no-such-plugin"),
+            &mut host,
+            Arc::new(|_, _, _| {}),
+        );
+        let elapsed = start.elapsed();
+
+        match prev_runner {
+            Some(v) => std::env::set_var("OCS_PLUGIN_RUNNER_EXE", v),
+            None => std::env::remove_var("OCS_PLUGIN_RUNNER_EXE"),
+        }
+        match prev_timeout {
+            Some(v) => std::env::set_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS"),
+        }
+
+        match result {
+            Err(PluginError::RunnerCrashed {
+                request: "spawn/accept",
+                ref status,
+            }) => {
+                assert!(
+                    status.contains("exit code"),
+                    "the exit status is reported: {status}"
+                );
+                assert!(
+                    status.contains("Unrecognized option"),
+                    "the runner's last stderr line says why: {status}"
+                );
+            }
+            Err(e) => panic!("expected RunnerCrashed during spawn/accept, got {e:?}"),
+            Ok(_) => panic!("the spawn must fail"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "the host waited {elapsed:?} for a runner that had already exited"
+        );
     }
 
     #[test]

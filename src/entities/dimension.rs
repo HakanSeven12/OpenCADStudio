@@ -5678,24 +5678,27 @@ fn append_linear_dimension(
 ) {
     let perp = Vec3::new(-axis.y, axis.x, 0.0);
     let dim_line_pos = def.dot(perp);
-    let offset1 = dim_line_pos - first.dot(perp);
-    let offset2 = dim_line_pos - second.dot(perp);
-    let d1 = first + perp * offset1;
-    let d2 = second + perp * offset2;
-    let sign1 = if offset1 >= 0.0 { 1.0_f32 } else { -1.0 };
-    let sign2 = if offset2 >= 0.0 { 1.0_f32 } else { -1.0 };
-
-    // ext_line_rotation (DIMEDIT "Oblique"): rotate the extension lines by
-    // this angle relative to perpendicular. The ext line still starts at
-    // the def point; only the direction differs.
-    let ext_dir = if ext_line_rotation.abs() > 1e-6 {
-        let c = ext_line_rotation.cos();
-        let s = ext_line_rotation.sin();
-        // Rotate `perp` by ext_line_rotation around Z.
-        Vec3::new(perp.x * c - perp.y * s, perp.x * s + perp.y * c, 0.0)
+    // ext_line_rotation (DIMEDIT "Oblique", DXF 52): the extension lines'
+    // angle from the X axis; 0 means none (perpendicular). Each extension
+    // line runs from its def point along that angle until it meets the
+    // dimension line, so the dimension line ends where the lines cross it.
+    let oblique = Vec3::new(ext_line_rotation.cos(), ext_line_rotation.sin(), 0.0);
+    let ext_dir = if ext_line_rotation.abs() > 1e-6 && oblique.dot(perp).abs() > 1e-3 {
+        oblique / oblique.dot(perp)
     } else {
         perp
     };
+    // `ext_dir` advances one unit of perpendicular offset per step, so the
+    // same offsets reach the dimension line; lengths below use its unit form.
+    let offset1 = dim_line_pos - first.dot(perp);
+    let offset2 = dim_line_pos - second.dot(perp);
+    let d1 = first + ext_dir * offset1;
+    let d2 = second + ext_dir * offset2;
+    let sign1 = if offset1 >= 0.0 { 1.0_f32 } else { -1.0 };
+    let sign2 = if offset2 >= 0.0 { 1.0_f32 } else { -1.0 };
+    let along1 = offset1.abs() * ext_dir.length();
+    let along2 = offset2.abs() * ext_dir.length();
+    let ext_dir = normalized_or(ext_dir, perp);
 
     // DIMFXLON / DIMFXL: fixed extension-line length from the dim line back
     // toward (but not past) the definition point. Otherwise grow from the
@@ -5705,8 +5708,8 @@ fn append_linear_dimension(
         let fxl = params.dimfxl.max(0.0);
         // Never past the DIMEXO gap at the definition point: a length longer
         // than the line itself would otherwise shoot far beyond the object.
-        let fxl1 = fxl.min((offset1.abs() - params.dimexo).max(0.0));
-        let fxl2 = fxl.min((offset2.abs() - params.dimexo).max(0.0));
+        let fxl1 = fxl.min((along1 - params.dimexo).max(0.0));
+        let fxl2 = fxl.min((along2 - params.dimexo).max(0.0));
         let s1 = d1 - ext_dir * (sign1 * fxl1);
         let e1 = d1 + ext_dir * (sign1 * params.dimexe);
         let s2 = d2 - ext_dir * (sign2 * fxl2);

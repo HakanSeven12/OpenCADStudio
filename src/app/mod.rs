@@ -630,7 +630,6 @@ pub(crate) enum FindMatchKey {
 use crate::snap::Snapper;
 use crate::ui::{CommandLine, Ribbon, StatusBar};
 use document::types::{Color as AcadColor, LineWeight};
-use document::Document;
 
 use iced::time::Instant;
 use iced::window;
@@ -3712,7 +3711,7 @@ pub enum Message {
     WebFileCached(u64, crate::io::WebOpenOutcome, Result<(), String>),
     FileOpened(
         u64,
-        Result<(String, PathBuf, Document, crate::scene::DerivedCaches), crate::io::OpenLoadError>,
+        Result<crate::io::OpenedDrawing, crate::io::OpenLoadError>,
     ),
     RecoveryClose,
     RecoveryAttempt,

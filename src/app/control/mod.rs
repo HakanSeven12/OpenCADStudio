@@ -1582,6 +1582,10 @@ impl OpenCADStudio {
                     return Err(lossy_refusal(&losses));
                 }
                 let ext = if is_dxf { "dxf" } else { "dwg" };
+                if let Some(session) = &self.tabs[i].ifccad_session {
+                    session.check_destination(ext)
+                        .map_err(|error| failure("save_failed", error))?;
+                }
                 self.sync_view_state_for_save(i);
                 super::update::util::sync_annotation_scale_header(&mut self.tabs[i].scene);
                 self.stamp_header_sysvars(i);

@@ -3950,3 +3950,305 @@ fn entities_create_insert_refuses_unknown_constant_and_non_text_attributes() {
     assert!(crate::entity_creation::validate_entity(&spec, "").is_err());
     assert_eq!(count_type(&mut app, "Insert"), 0, "nothing was created");
 }
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
+    use super::tests::request;
+    use crate::app::{SaveContinuation, SavePurpose};
+    use document::entities::{Line, MLine};
+    use document::ifccad::{
+        encode_ifccad_document, load_ifccad_bytes, IfccadLinePatternId, IfccadPreservationBinding,
+        IfccadPreservationTarget,
+    };
+    use document::objects::{MLineStyle, MLineStyleElement, ObjectType, Scale};
+    use document::tables::{Layer, LineType, LineTypeElement};
+    use document::{Color, Document, EntityType, Vector3};
+    use serde_json::json;
+
+    fn live_mline(app: &OpenCADStudio) -> &MLine {
+        let mut mlines = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::MLine(mline) => Some(mline),
+                _ => None,
+            });
+        let mline = mlines.next().expect("live MLINE A");
+        assert!(mlines.next().is_none(), "B must have no CAD geometry");
+        mline
+    }
+
+    fn check_live_style(app: &OpenCADStudio) {
+        let mline = live_mline(app);
+        let document = &app.tabs[app.active_tab].scene.document;
+        let Some(ObjectType::MLineStyle(style)) =
+            document.objects.get(&mline.style_handle.unwrap())
+        else {
+            panic!("missing restored MLINESTYLE");
+        };
+        assert_eq!(style.name, "Wall edges");
+        assert_eq!(style.elements.len(), 2);
+        assert_eq!(style.elements[0].offset, -0.3);
+        assert_eq!(style.elements[1].offset, 0.4);
+        assert!(style
+            .elements
+            .iter()
+            .all(|element| element.linetype == "Wall dash"));
+        let pattern = document.line_types.get("Wall dash").unwrap();
+        assert_eq!(pattern.pattern_length, 1.25);
+        assert_eq!(
+            pattern
+                .elements
+                .iter()
+                .map(|entry| entry.length)
+                .collect::<Vec<_>>(),
+            [0.75, -0.5]
+        );
+    }
+
+    let dir = std::env::temp_dir().join(format!("ocs-blocked-mline-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("blocked-input.ifccad");
+    let output = dir.join("blocked-output.ifccad");
+    let mut source = Document::new();
+    source.header.insertion_units = 4;
+    let scale_dict = source.ensure_subdictionary("ACAD_SCALELIST");
+    let mut scale = Scale::new("1:1", 1.0, 1.0);
+    scale.handle = source.allocate_handle();
+    scale.owner_handle = scale_dict;
+    scale.is_unit_scale = true;
+    let Some(ObjectType::Dictionary(dictionary)) = source.objects.get_mut(&scale_dict) else {
+        panic!("missing fixture scale dictionary");
+    };
+    dictionary.insert("*A1".to_owned(), scale.handle);
+    source
+        .objects
+        .insert(scale.handle, ObjectType::Scale(scale));
+    source.header.current_annotation_scale = "1:1".into();
+    crate::io::set_drawing_variable(&mut source, "CANNOSCALE", "1:1");
+    let mut edited_layer = Layer::new("Edited MLINE");
+    edited_layer.handle = source.allocate_handle();
+    source.layers.add(edited_layer).unwrap();
+    let mut pattern = LineType::new("Wall dash");
+    pattern.handle = source.allocate_handle();
+    pattern.elements = vec![LineTypeElement::dash(0.75), LineTypeElement::space(0.5)];
+    pattern.pattern_length = 1.25;
+    source.line_types.add(pattern).unwrap();
+    let mut style = MLineStyle::new("Wall edges");
+    style.handle = source.allocate_handle();
+    style.owner = source.header.acad_mlinestyle_dict_handle;
+    style.elements = vec![
+        MLineStyleElement::full(-0.3, Color::ByLayer, "Wall dash"),
+        MLineStyleElement::full(0.4, Color::ByLayer, "Wall dash"),
+    ];
+    let Some(ObjectType::Dictionary(dictionary)) = source.objects.get_mut(&style.owner) else {
+        panic!("missing source MLINESTYLE dictionary");
+    };
+    dictionary.add_entry(&style.name, style.handle);
+    let mut a = MLine::from_points(&[Vector3::new(2.0, 3.0, 0.0), Vector3::new(5.0, 3.0, 0.0)]);
+    a.style_name.clone_from(&style.name);
+    a.style_handle = Some(style.handle);
+    source
+        .objects
+        .insert(style.handle, ObjectType::MLineStyle(style));
+    source.add_entity(EntityType::MLine(a)).unwrap();
+    source
+        .add_entity(EntityType::MLine(MLine::from_points(&[
+            Vector3::new(12.0, 3.0, 0.0),
+            Vector3::new(15.0, 3.0, 0.0),
+        ])))
+        .unwrap();
+    source
+        .add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(1.0, 1.0, 0.0),
+        )))
+        .unwrap();
+    let mut drawing = document::Ifcx.export_ifccad(&source).unwrap().drawing;
+    drawing
+        .line_patterns
+        .retain(|pattern| pattern.name != "Wall dash");
+    let b = drawing.model.entities[1].as_opaque().unwrap().clone();
+    let missing = IfccadLinePatternId(drawing.id_counters.next_line_pattern_id);
+    let record = drawing
+        .preservation
+        .as_mut()
+        .unwrap()
+        .records
+        .iter_mut()
+        .find(|record| record.id == b.preservation_record_id)
+        .unwrap();
+    record.bindings.push(IfccadPreservationBinding {
+        slot: "root-linetype".into(),
+        source_key: "original-root-linetype".into(),
+        target: IfccadPreservationTarget::LinePattern(missing),
+    });
+    let original_b = record.clone();
+    std::fs::write(&input, encode_ifccad_document(&drawing).unwrap().bytes()).unwrap();
+
+    let mut app = OpenCADStudio::new_for_test();
+    let req = |app: &mut OpenCADStudio, request_json| {
+        let result = request(app, request_json);
+        assert_eq!(result["ok"], true, "{result}");
+    };
+    let history_before_open = app.command_line.history.len();
+    req(&mut app, json!({"op":"open","path":input}));
+    assert!(app.command_line.history[history_before_open..]
+        .iter()
+        .any(|entry| { entry.text.contains("Autosave is disabled") }));
+    check_live_style(&app);
+    let original = live_mline(&app).vertices[0].position;
+    let handle = live_mline(&app).common.handle;
+    let tab = app.tabs[app.active_tab].id;
+    let blocked = app.tabs[app.active_tab]
+        .ifccad_session
+        .as_ref()
+        .unwrap()
+        .blocked_entities();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].0, b.id);
+    let i = app.active_tab;
+    let wblock_dwg = dir.join("blocked-wblock.dwg");
+    let wblock_ifccad = dir.join("blocked-wblock.ifccad");
+    let history_before_wblock = app.command_line.history.len();
+    let task = app.wblock_write(
+        i,
+        crate::modules::insert::block_cmdline::WblockSource::Drawing,
+        wblock_dwg.clone(),
+        4,
+    );
+    app.drive_headless_task(task).unwrap();
+    assert!(!wblock_dwg.exists());
+    assert!(app.command_line.history[history_before_wblock..]
+        .iter()
+        .any(|entry| { entry.text.contains("retained IFCCAD content") }));
+    let task = app.wblock_write(
+        i,
+        crate::modules::insert::block_cmdline::WblockSource::Drawing,
+        wblock_ifccad.clone(),
+        4,
+    );
+    app.drive_headless_task(task).unwrap();
+    let bytes = std::fs::read(&wblock_ifccad).unwrap();
+    let file = load_ifccad_bytes(&bytes, Default::default()).unwrap();
+    assert!(file
+        .document()
+        .preservation
+        .as_ref()
+        .unwrap()
+        .records
+        .contains(&original_b));
+    std::fs::remove_file(wblock_ifccad).unwrap();
+    req(
+        &mut app,
+        json!({"op":"select","handles":[format!("{handle:X}")]}),
+    );
+    req(
+        &mut app,
+        json!({"op":"property","field":"layer","value":"Edited MLINE"}),
+    );
+    assert_eq!(live_mline(&app).common.layer, "Edited MLINE");
+    req(&mut app, json!({"op":"run","cmd":"MOVE 0,0,0 10,4,0"}));
+    let moved = original + Vector3::new(10.0, 4.0, 0.0);
+    assert_eq!(live_mline(&app).vertices[0].position, moved);
+    req(&mut app, json!({"op":"undo"}));
+    assert_eq!(live_mline(&app).vertices[0].position, original);
+    req(&mut app, json!({"op":"redo"}));
+    assert_eq!(live_mline(&app).vertices[0].position, moved);
+
+    req(&mut app, json!({"op":"new"}));
+    assert_ne!(app.tabs[app.active_tab].id, tab);
+    assert!(app.tabs[app.active_tab].ifccad_session.is_none());
+    let i = app
+        .tabs
+        .iter()
+        .position(|drawing| drawing.id == tab)
+        .unwrap();
+    let task = app.queue_native_save(
+        i,
+        output.clone(),
+        document::DxfVersion::AC1032,
+        SavePurpose::SaveAs,
+        SaveContinuation::None,
+        true,
+        true,
+    );
+    app.drive_headless_task(task).unwrap();
+    let saved = std::fs::read(&output).expect("queued Studio save");
+    let file = load_ifccad_bytes(&saved, Default::default()).unwrap();
+    let saved = file.document();
+    assert_eq!(saved.model.entities.len(), 3);
+    assert!(saved.model.entities[0].as_opaque().is_some());
+    assert_eq!(saved.model.entities[1].id(), b.id);
+    assert!(saved.model.entities[2].as_native().is_some());
+    assert!(saved
+        .line_patterns
+        .iter()
+        .all(|pattern| pattern.id != missing));
+    assert!(saved
+        .preservation
+        .as_ref()
+        .unwrap()
+        .records
+        .contains(&original_b));
+    drop(app);
+
+    let mut reopened = OpenCADStudio::new_for_test();
+    req(&mut reopened, json!({"op":"open","path":output}));
+    check_live_style(&reopened);
+    assert_eq!(live_mline(&reopened).vertices[0].position, moved);
+    assert_eq!(live_mline(&reopened).common.layer, "Edited MLINE");
+    req(&mut reopened, json!({"op":"save"}));
+    let bytes = std::fs::read(&output).unwrap();
+    let file = load_ifccad_bytes(&bytes, Default::default()).unwrap();
+    assert!(file
+        .document()
+        .preservation
+        .as_ref()
+        .unwrap()
+        .records
+        .contains(&original_b));
+    let no_live_mline = |app: &OpenCADStudio| {
+        let tab = &app.tabs[app.active_tab];
+        assert!(tab
+            .scene
+            .document
+            .entities()
+            .all(|entity| !matches!(entity, EntityType::MLine(_))));
+        let blocked = tab.ifccad_session.as_ref().unwrap().blocked_entities();
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].0, b.id);
+    };
+    let handle = live_mline(&reopened).common.handle;
+    req(
+        &mut reopened,
+        json!({"op":"select","handles":[format!("{handle:X}")]}),
+    );
+    req(&mut reopened, json!({"op":"run","cmd":"ERASE"}));
+    no_live_mline(&reopened);
+    req(&mut reopened, json!({"op":"undo"}));
+    check_live_style(&reopened);
+    assert_eq!(live_mline(&reopened).vertices[0].position, moved);
+    assert_eq!(live_mline(&reopened).common.layer, "Edited MLINE");
+    req(&mut reopened, json!({"op":"redo"}));
+    no_live_mline(&reopened);
+    req(&mut reopened, json!({"op":"save"}));
+    drop(reopened);
+    let bytes = std::fs::read(&output).unwrap();
+    let file = load_ifccad_bytes(&bytes, Default::default()).unwrap();
+    let saved = file.document();
+    assert_eq!(saved.model.entities.len(), 2);
+    assert_eq!(saved.model.entities[0].as_opaque().unwrap().id, b.id);
+    assert!(saved.model.entities[1].as_native().is_some());
+    assert_eq!(saved.preservation.as_ref().unwrap().records, [original_b]);
+    let mut reopened = OpenCADStudio::new_for_test();
+    req(&mut reopened, json!({"op":"open","path":output}));
+    no_live_mline(&reopened);
+    drop(reopened);
+    for path in [&input, &output] {
+        let _ = std::fs::remove_file(path);
+    }
+    let _ = std::fs::remove_file(output.with_extension("bak"));
+}

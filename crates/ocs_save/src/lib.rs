@@ -96,6 +96,13 @@ pub fn external_format(ext: &str) -> Option<&'static (dyn Format + Sync)> {
     })
 }
 
+pub fn is_ifccad_extension(ext: &str) -> bool {
+    ifccad::IfccadFormat
+        .extensions()
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(ext))
+}
+
 /// Filename gate shared by browser drop and URL opening. Matches the reader's
 /// extension convention, including dot-less names such as `DWG`.
 pub fn is_drawing_name(name: &str) -> bool {
@@ -113,9 +120,26 @@ pub fn write_external(
     format: &dyn Format,
     allow_loss: bool,
 ) -> Result<Vec<u8>, String> {
-    let (bytes, losses) = format
-        .write(doc)
-        .map_err(|e| format!("{}: {e}", format.name()))?;
+    write_external_for_edit(doc, format, allow_loss, None)
+}
+
+pub fn write_external_for_edit(
+    doc: &Document,
+    format: &dyn Format,
+    allow_loss: bool,
+    session: Option<&IfccadSession>,
+) -> Result<Vec<u8>, String> {
+    let (bytes, losses) = if let Some(session) = session {
+        session.check_destination(format.extensions().first().copied().unwrap_or_default())?;
+        let result = session.export(doc, false)?;
+        let bytes = document::ifccad::encode_ifccad_document(&result.drawing)
+            .map_err(|error| error.to_string())?;
+        (bytes.bytes().to_vec(), result.losses)
+    } else {
+        format
+            .write(doc)
+            .map_err(|e| format!("{}: {e}", format.name()))?
+    };
     if losses.is_empty() || allow_loss {
         return Ok(bytes);
     }
@@ -136,6 +160,23 @@ pub fn external_losses(doc: &Document, format: &dyn Format) -> Result<Vec<String
     Ok(losses.into_iter().map(|loss| loss.message).collect())
 }
 
+pub fn external_losses_for_edit(
+    doc: &Document,
+    format: &dyn Format,
+    session: Option<&IfccadSession>,
+) -> Result<Vec<String>, String> {
+    let Some(session) = session else {
+        return external_losses(doc, format);
+    };
+    session.check_destination(format.extensions().first().copied().unwrap_or_default())?;
+    let outcome = session.export(doc, true)?;
+    Ok(outcome
+        .losses
+        .into_iter()
+        .map(|loss| loss.message)
+        .collect())
+}
+
 /// Diagnostic code for something a converter could not carry over on read.
 pub const CONVERSION_LOSS: &str = "conversion-loss";
 
@@ -150,6 +191,10 @@ pub fn read_external(format: &dyn Format, bytes: &[u8]) -> Result<ReadOutcome, S
             format!("{}: {error}", format.name())
         }
     })?;
+    Ok(external_read_outcome(document, losses))
+}
+
+fn external_read_outcome(document: Document, losses: Vec<document::Loss>) -> ReadOutcome {
     let output_entities = document.entities().count();
     let output_objects = document.objects.len();
     // The open path refuses a read that decoded no records; an empty
@@ -170,8 +215,10 @@ pub fn read_external(format: &dyn Format, bytes: &[u8]) -> Result<ReadOutcome, S
         diagnostic.record_handle = loss.handle.map(|handle| handle.value());
         push_read_diagnostic(&mut stats.diagnostics, diagnostic);
     }
-    Ok(ReadOutcome::new(document, stats))
+    ReadOutcome::new(document, stats)
 }
+
+pub use ifccad::{read_ifccad_for_edit, IfccadSession};
 
 // ── Runtime-field sidecar ──────────────────────────────────────────────────
 

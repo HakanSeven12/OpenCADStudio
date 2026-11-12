@@ -2747,6 +2747,9 @@ pub struct Scene {
     /// origin grip. Kept separate from the resident hatch set so moving one
     /// pattern never re-uploads every hatch in a large drawing.
     pub preview_hatches: Arc<Vec<HatchModel>>,
+    /// Cached scoped document and last evaluated parameter preview for the
+    /// active dynamic block grip drag.
+    dynamic_preview_cache: Option<preview::block_parameter::DynamicPreviewCache>,
     /// In-progress preview SDF glyph quads (grip drag / command preview). Rides
     /// a per-frame GPU buffer separate from the epoch-cached base text so the
     /// dragged text stays visible while it's hidden from the base set (#316).
@@ -3501,6 +3504,7 @@ impl Scene {
             preview_wires: vec![],
             solid_history_preview_wires: HashMap::default(),
             preview_hatches: Arc::new(Vec::new()),
+            dynamic_preview_cache: None,
             preview_text: vec![],
             interim_wire: None,
             layer_table_dirty: false,

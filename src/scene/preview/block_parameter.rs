@@ -1,6 +1,109 @@
 use super::*;
 
+#[derive(Clone)]
+pub(in crate::scene) struct DynamicPreviewCache {
+    insert: Handle,
+    definition: Handle,
+    geometry_epoch: u64,
+    block_epoch: u64,
+    next_handle: u64,
+    objects_len: usize,
+    scoped: Document,
+    last_eval: Option<(
+        Handle,
+        crate::scene::block_actions::Value,
+        Vec<WireModel>,
+        Vec<HatchModel>,
+    )>,
+}
+
+fn block_has_hatch(
+    document: &Document,
+    block_name: &str,
+    visited: &mut rustc_hash::FxHashSet<String>,
+) -> bool {
+    if !visited.insert(block_name.to_string()) {
+        return false;
+    }
+    let Some(record) = document.block_records.get(block_name) else {
+        return false;
+    };
+    for &h in &record.entity_handles {
+        match document.get_entity(h) {
+            Some(EntityType::Hatch(_)) => return true,
+            Some(EntityType::Insert(nested)) => {
+                if block_has_hatch(document, &nested.block_name, visited) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 impl Scene {
+    /// Evaluate `parameter` on `insert` using a cached scoped document and
+    /// value memoization, then render its preview wires and hatches.
+    pub(crate) fn dynamic_block_parameter_preview(
+        &mut self,
+        handle: Handle,
+        definition: Handle,
+        parameter: Handle,
+        local: crate::scene::block_actions::Value,
+    ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
+        let geometry_epoch = self.geometry_epoch;
+        let block_epoch = self.block_epoch;
+        let next_handle = self.document.next_handle();
+        let objects_len = self.document.objects.len();
+        let cache_valid = self.dynamic_preview_cache.as_ref().is_some_and(|c| {
+            c.insert == handle
+                && c.definition == definition
+                && c.geometry_epoch == geometry_epoch
+                && c.block_epoch == block_epoch
+                && c.next_handle == next_handle
+                && c.objects_len == objects_len
+        });
+        if !cache_valid {
+            let scoped = crate::scene::block_actions::instance::scoped_document_for_insert(
+                &mut self.document,
+                handle,
+                definition,
+            );
+            self.dynamic_preview_cache = Some(DynamicPreviewCache {
+                insert: handle,
+                definition,
+                geometry_epoch,
+                block_epoch,
+                next_handle,
+                objects_len,
+                scoped,
+                last_eval: None,
+            });
+        }
+        if let Some(cache) = self.dynamic_preview_cache.as_ref() {
+            if let Some((cached_param, cached_val, wires, hatches)) = &cache.last_eval {
+                if *cached_param == parameter && *cached_val == local {
+                    return Some((wires.clone(), hatches.clone()));
+                }
+            }
+        }
+        let scoped = &self.dynamic_preview_cache.as_ref()?.scoped;
+        let staged = crate::scene::block_actions::instance::evaluate_value(
+            scoped,
+            handle,
+            parameter,
+            local,
+        )
+        .ok()?;
+        let preview_doc = staged.as_ref().unwrap_or(scoped);
+        let (wires, hatches) = self.reference_document_preview(preview_doc, handle)?;
+        if let Some(cache) = self.dynamic_preview_cache.as_mut() {
+            cache.last_eval = Some((parameter, local, wires.clone(), hatches.clone()));
+        }
+        Some((wires, hatches))
+    }
+
     /// Render an evaluated reference without installing its transient document
     /// or representation in the resident scene/cache.
     pub(crate) fn reference_document_preview(
@@ -37,26 +140,34 @@ impl Scene {
             paper.then_some(1.0),
             self.reference_only.handles(),
         );
-        let frozen: rustc_hash::FxHashSet<Handle> = self
-            .interaction_viewport_frozen_layers()
-            .into_iter()
-            .flatten()
-            .copied()
-            .collect();
-        let targets = [handle].into_iter().collect();
-        let hatches = self.instanced_hatch_models_for_document(
+        let hatches = if block_has_hatch(
             document,
-            self.interaction_block_handle(),
-            bg,
-            true,
-            (!frozen.is_empty()).then_some(&frozen),
-            annotation,
-            self.annotation_all_visible(),
-            self.active_viewport,
-            Some(&targets),
-            true,
-            false,
-        );
+            &insert.block_name,
+            &mut rustc_hash::FxHashSet::default(),
+        ) {
+            let frozen: rustc_hash::FxHashSet<Handle> = self
+                .interaction_viewport_frozen_layers()
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect();
+            let targets = [handle].into_iter().collect();
+            self.instanced_hatch_models_for_document(
+                document,
+                self.interaction_block_handle(),
+                bg,
+                true,
+                (!frozen.is_empty()).then_some(&frozen),
+                annotation,
+                self.annotation_all_visible(),
+                self.active_viewport,
+                Some(&targets),
+                true,
+                false,
+            )
+        } else {
+            Vec::new()
+        };
         Some((wires, hatches))
     }
 
@@ -208,19 +319,12 @@ impl Scene {
         local_point: glam::DVec3,
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
         let def = crate::scene::block_actions::instance::definition(&self.document, handle)?;
-        let scoped = crate::scene::block_actions::instance::scoped_document_for_insert(
-            &mut self.document,
+        self.dynamic_block_parameter_preview(
             handle,
             def,
-        );
-        let staged = crate::scene::block_actions::instance::evaluate_value(
-            &scoped,
-            handle,
             parameter,
             crate::scene::block_actions::Value::Point(local_point),
         )
-        .ok()?;
-        self.reference_document_preview(staged.as_ref().unwrap_or(&scoped), handle)
     }
 
     #[doc(hidden)]
@@ -231,19 +335,12 @@ impl Scene {
         flipped: bool,
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
         let def = crate::scene::block_actions::instance::definition(&self.document, handle)?;
-        let scoped = crate::scene::block_actions::instance::scoped_document_for_insert(
-            &mut self.document,
+        self.dynamic_block_parameter_preview(
             handle,
             def,
-        );
-        let staged = crate::scene::block_actions::instance::evaluate_value(
-            &scoped,
-            handle,
             parameter,
             crate::scene::block_actions::Value::Flip(flipped),
         )
-        .ok()?;
-        self.reference_document_preview(staged.as_ref().unwrap_or(&scoped), handle)
     }
 
     #[doc(hidden)]

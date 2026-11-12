@@ -2343,6 +2343,12 @@ pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
 fn ellipse_bounds(el: &document::entities::Ellipse) -> Option<([f64; 3], [f64; 3])> {
     let (c, a, n) = (el.center, el.major_axis, el.normal);
     let r = el.minor_axis_ratio;
+    // A stored normal need not be unit length; the minor axis must be.
+    let len = (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
+    if !(len > 0.0) {
+        return None;
+    }
+    let n = document::types::Vector3::new(n.x / len, n.y / len, n.z / len);
     // Minor axis = normal x major, scaled by the ratio.
     let b = [
         (n.y * a.z - n.z * a.y) * r,

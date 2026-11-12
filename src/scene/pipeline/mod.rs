@@ -4083,12 +4083,28 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .filter_map(|value| value.parse::<u64>().ok())
             .map(document::Handle::new)
             .collect();
+        self.mesh_highlight_draws = Self::mesh_highlight_draws(
+            &self.mesh_ranges_by_handle,
+            selected,
+            hovered,
+            &edge_handles,
+        );
+    }
+
+    /// The highlight draws for the picked and the hovered solids: the resident
+    /// ranges of each, leaving out the ones highlighted by their edges.
+    fn mesh_highlight_draws(
+        ranges_by_handle: &rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>>,
+        selected: &rustc_hash::FxHashSet<document::Handle>,
+        hovered: &rustc_hash::FxHashSet<document::Handle>,
+        edge_handles: &rustc_hash::FxHashSet<document::Handle>,
+    ) -> Vec<MeshHighlightDraw> {
         let mut out = Vec::new();
         for handle in selected
             .iter()
             .filter(|handle| !edge_handles.contains(handle))
         {
-            if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
+            if let Some(ranges) = ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
                     kind: MeshHighlightKind::Selected,
@@ -4099,14 +4115,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .iter()
             .filter(|handle| !selected.contains(handle) && !edge_handles.contains(handle))
         {
-            if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
+            if let Some(ranges) = ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
                     kind: MeshHighlightKind::Hover,
                 }));
             }
         }
-        self.mesh_highlight_draws = out;
+        out
     }
 
     fn active_mesh_chunks_indexed(
@@ -6614,6 +6630,98 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             mesh_batch_cache: Default::default(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod mesh_highlight_draw_tests {
+    use super::*;
+
+    type Handles = rustc_hash::FxHashSet<document::Handle>;
+
+    /// Triangle indices of the block's solid.
+    const INDICES: u32 = 36;
+
+    fn handle(index: u32) -> document::Handle {
+        document::Handle::new(0x100 + u64::from(index))
+    }
+
+    /// The resident ranges of `count` references of one block: the solid's
+    /// triangles once, and an instance of them for each reference.
+    fn references_of_one_block(
+        count: u32,
+    ) -> rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>> {
+        (0..count)
+            .map(|index| {
+                (
+                    handle(index),
+                    vec![MeshResidentRange {
+                        chunk: 0,
+                        dynamic: false,
+                        index_start: 0,
+                        index_count: INDICES,
+                        transparent: false,
+                        instance_start: index,
+                        instance_count: 1,
+                    }],
+                )
+            })
+            .collect()
+    }
+
+    /// Each index of each instance the draws cover, in which buffers and with
+    /// which tint, as often as it is drawn.
+    fn drawn(draws: &[MeshHighlightDraw]) -> Vec<(bool, bool, usize, bool, u32, u32)> {
+        let mut out = Vec::new();
+        for draw in draws {
+            let range = &draw.range;
+            for instance in range.instance_start..range.instance_start + range.instance_count {
+                for index in range.index_start..range.index_start + range.index_count {
+                    out.push((
+                        draw.kind == MeshHighlightKind::Hover,
+                        range.dynamic,
+                        range.chunk,
+                        range.transparent,
+                        index,
+                        instance,
+                    ));
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// With every reference of a block picked, the solids under the highlight
+    /// are one instanced draw. The highlight must not be a draw for each
+    /// reference on every frame.
+    #[test]
+    fn every_reference_of_a_block_picked_is_highlighted_in_one_draw() {
+        const REFERENCES: u32 = 1_000;
+        let ranges = references_of_one_block(REFERENCES);
+        let selected: Handles = (0..REFERENCES).map(handle).collect();
+
+        let draws = Pipeline::mesh_highlight_draws(
+            &ranges,
+            &selected,
+            &Handles::default(),
+            &Handles::default(),
+        );
+
+        let every_index_of_every_reference: Vec<_> = (0..INDICES)
+            .flat_map(|index| {
+                (0..REFERENCES).map(move |instance| (false, false, 0, false, index, instance))
+            })
+            .collect();
+        let mut expected = every_index_of_every_reference;
+        expected.sort_unstable();
+        assert_eq!(drawn(&draws), expected, "each reference once, whole");
+        assert_eq!(
+            draws.len(),
+            1,
+            "{} highlight draws for {REFERENCES} picked references of one block",
+            draws.len(),
+        );
     }
 }
 

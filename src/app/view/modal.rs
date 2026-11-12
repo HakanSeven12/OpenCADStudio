@@ -120,7 +120,9 @@ impl OpenCADStudio {
             Some(K::MlStyle) => crate::tr!("modal", "multiline-style-manager"),
             Some(K::LinetypeManager) => crate::tr!("modal", "linetype-manager"),
             Some(K::TableStyle) => crate::tr!("modal", "table-style-manager"),
-            Some(K::MLeaderStyle) => crate::tr!("modal", "multileader-style-manager"),
+            Some(K::MLeaderStyle) => {
+                crate::ui::style::mleaderstyle::title(&self.mls, &self.mleaderstyle_selected)
+            }
             Some(K::DimStyle) => crate::tr!("modal", "dimension-style-manager"),
             Some(K::AssocPrompt) => crate::tr!("modal", "default-application"),
             Some(K::AecDropWarning) => crate::tr!("modal", "save-warning"),
@@ -1407,261 +1409,137 @@ impl OpenCADStudio {
             super::super::ModalKind::MLeaderStyle => {
                 use document::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
-                let styles: Vec<String> = tab
-                    .scene
-                    .document
+                let doc = &tab.scene.document;
+                let mut styles: Vec<(String, bool)> = doc
                     .objects
                     .values()
                     .filter_map(|o| match o {
-                        ObjectType::MultiLeaderStyle(s) => Some(s.name.clone()),
+                        ObjectType::MultiLeaderStyle(s) => Some((s.name.clone(), s.is_annotative)),
                         _ => None,
                     })
                     .collect();
-                let selected_style = tab.scene.document.objects.values().find_map(|o| match o {
+                styles.sort_by_key(|(name, _)| name.to_lowercase());
+                let used: Vec<document::Handle> = doc
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        document::EntityType::MultiLeader(leader) => leader.style_handle,
+                        _ => None,
+                    })
+                    .collect();
+                let in_use: Vec<String> = doc
+                    .objects
+                    .iter()
+                    .filter_map(|(handle, o)| match o {
+                        ObjectType::MultiLeaderStyle(s) if used.contains(handle) => {
+                            Some(s.name.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let style = doc.objects.values().find_map(|o| match o {
                     ObjectType::MultiLeaderStyle(s) if s.name == self.mleaderstyle_selected => {
                         Some(s)
                     }
                     _ => None,
                 });
-                let doc = &tab.scene.document;
-                let mut block_opts: Vec<String> = vec!["None".to_string()];
-                block_opts.extend(doc.block_records.iter().map(|b| b.name.clone()));
-                let arrow_opts = crate::entities::arrowheads::options(
-                    selected_style
-                        .and_then(|s| s.arrowhead_handle)
-                        .map(|h| crate::entities::arrowheads::label(doc, h))
-                        .as_deref(),
-                );
-                let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
-                lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
-                let mut textstyle_opts: Vec<String> = vec!["None".to_string()];
-                textstyle_opts.extend(
-                    doc.text_styles
+                // ByLayer and ByBlock first, then the drawing's linetypes.
+                let mut linetype_opts = vec!["ByLayer".to_string(), "ByBlock".to_string()];
+                linetype_opts.extend(
+                    doc.line_types
                         .iter()
-                        .filter(|t| !t.is_shape_file)
-                        .map(|t| t.name.clone()),
+                        .map(|lt| lt.name.clone())
+                        .filter(|name| {
+                            !name.eq_ignore_ascii_case("ByLayer")
+                                && !name.eq_ignore_ascii_case("ByBlock")
+                        }),
                 );
-                let opt_block = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .block_records
-                            .iter()
-                            .find(|b| b.handle == h)
-                            .map(|b| b.name.clone())
-                            .unwrap_or_else(|| "None".to_string()),
-                        None => "None".to_string(),
-                    }
+                let linetype_rows = || -> Vec<crate::ui::style::mleaderstyle::LinetypeRow> {
+                    linetype_opts
+                        .iter()
+                        .map(|name| {
+                            let record = doc.line_types.get(name);
+                            crate::ui::style::mleaderstyle::LinetypeRow {
+                                name: name.clone(),
+                                description: record
+                                    .map(|lt| lt.description.clone())
+                                    .unwrap_or_default(),
+                                pattern: record
+                                    .map(|lt| lt.elements.iter().map(|e| e.length).collect())
+                                    .unwrap_or_default(),
+                            }
+                        })
+                        .collect()
                 };
-                let opt_lt = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .line_types
-                            .iter()
-                            .find(|lt| lt.handle == h)
-                            .map(|lt| lt.name.clone())
-                            .unwrap_or_else(|| "ByBlock".to_string()),
-                        None => "ByBlock".to_string(),
-                    }
-                };
-                let opt_ts = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .text_styles
-                            .iter()
-                            .find(|t| t.handle == h)
-                            .map(|t| t.name.clone())
-                            .unwrap_or_else(|| "None".to_string()),
-                        None => "None".to_string(),
-                    }
-                };
-                let (line_type_name, arrowhead_name, text_style_name, block_content_name) =
-                    match selected_style {
-                        Some(s) => (
-                            opt_lt(s.line_type_handle),
-                            crate::entities::arrowheads::label(
-                                doc,
-                                s.arrowhead_handle.unwrap_or(document::types::Handle::NULL),
-                            ),
-                            opt_ts(s.text_style_handle),
-                            opt_block(s.block_content_handle),
-                        ),
-                        None => Default::default(),
-                    };
-                let compare_opts: Vec<String> = styles
+                // A style without a linetype draws ByBlock.
+                let line_type_name = style
+                    .and_then(|s| s.line_type_handle)
+                    .and_then(|h| doc.line_types.iter().find(|lt| lt.handle == h))
+                    .map(|lt| lt.name.clone())
+                    .unwrap_or_else(|| "ByBlock".to_string());
+                let arrowhead_name = crate::entities::arrowheads::label(
+                    doc,
+                    style
+                        .and_then(|s| s.arrowhead_handle)
+                        .unwrap_or(document::types::Handle::NULL),
+                );
+                let arrow_opts =
+                    crate::entities::arrowheads::options(std::iter::once(arrowhead_name.as_str()));
+                let mut textstyle_opts: Vec<String> = doc
+                    .text_styles
                     .iter()
-                    .filter(|name| !name.eq_ignore_ascii_case(&self.mleaderstyle_selected))
-                    .cloned()
+                    .filter(|t| !t.is_shape_file && !t.name.is_empty())
+                    .map(|t| t.name.clone())
                     .collect();
-                let compare_name = compare_opts
+                textstyle_opts.sort_by_key(|name| name.to_lowercase());
+                let text_style_name = style
+                    .and_then(|s| s.text_style_handle)
+                    .and_then(|h| doc.text_styles.iter().find(|t| t.handle == h))
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "Standard".to_string());
+                let block_name = crate::entities::leader_blocks::label(
+                    doc,
+                    style.and_then(|s| s.block_content_handle),
+                );
+                let mut block_opts: Vec<String> = crate::entities::leader_blocks::STANDARD
                     .iter()
-                    .find(|name| name.eq_ignore_ascii_case(&self.mleaderstyle_compare))
-                    .cloned()
-                    .or_else(|| compare_opts.first().cloned())
-                    .unwrap_or_default();
-                let compare_style = doc.objects.values().find_map(|object| match object {
-                    ObjectType::MultiLeaderStyle(style) if style.name == compare_name => {
-                        Some(style)
-                    }
-                    _ => None,
-                });
-                let mut comparison_sections = Vec::new();
-                if let (Some(a), Some(b)) = (selected_style, compare_style) {
-                    if (
-                        &a.description,
-                        a.path_type,
-                        a.line_color,
-                        a.line_type_handle,
-                        a.line_weight,
-                        a.arrowhead_handle,
-                        a.arrowhead_size,
-                        a.break_gap_size,
-                    ) != (
-                        &b.description,
-                        b.path_type,
-                        b.line_color,
-                        b.line_type_handle,
-                        b.line_weight,
-                        b.arrowhead_handle,
-                        b.arrowhead_size,
-                        b.break_gap_size,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Leader Format").into_owned());
-                    }
-                    if (
-                        a.enable_landing,
-                        a.enable_dogleg,
-                        a.landing_distance,
-                        a.landing_gap,
-                        a.scale_factor,
-                        a.align_space,
-                        a.max_leader_points,
-                        a.first_segment_angle,
-                        a.second_segment_angle,
-                        a.leader_draw_order,
-                        a.multileader_draw_order,
-                        a.is_annotative,
-                    ) != (
-                        b.enable_landing,
-                        b.enable_dogleg,
-                        b.landing_distance,
-                        b.landing_gap,
-                        b.scale_factor,
-                        b.align_space,
-                        b.max_leader_points,
-                        b.first_segment_angle,
-                        b.second_segment_angle,
-                        b.leader_draw_order,
-                        b.multileader_draw_order,
-                        b.is_annotative,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Leader Structure").into_owned());
-                    }
-                    if (
-                        a.content_type,
-                        &a.default_text,
-                        a.text_style_handle,
-                        a.text_height,
-                        a.text_color,
-                        a.text_angle_type,
-                        a.text_alignment,
-                    ) != (
-                        b.content_type,
-                        &b.default_text,
-                        b.text_style_handle,
-                        b.text_height,
-                        b.text_color,
-                        b.text_angle_type,
-                        b.text_alignment,
-                    ) || (
-                        a.text_left_attachment,
-                        a.text_right_attachment,
-                        a.text_top_attachment,
-                        a.text_bottom_attachment,
-                        a.text_attachment_direction,
-                        a.text_frame,
-                        a.text_always_left,
-                    ) != (
-                        b.text_left_attachment,
-                        b.text_right_attachment,
-                        b.text_top_attachment,
-                        b.text_bottom_attachment,
-                        b.text_attachment_direction,
-                        b.text_frame,
-                        b.text_always_left,
-                    ) {
-                        comparison_sections.push(crate::i18n::translate("Content").into_owned());
-                    }
-                    if (
-                        a.block_content_handle,
-                        a.block_content_color,
-                        a.block_content_connection,
-                        a.block_content_rotation,
-                        a.block_content_scale_x,
-                        a.block_content_scale_y,
-                        a.block_content_scale_z,
-                        a.enable_block_scale,
-                        a.enable_block_rotation,
-                    ) != (
-                        b.block_content_handle,
-                        b.block_content_color,
-                        b.block_content_connection,
-                        b.block_content_rotation,
-                        b.block_content_scale_x,
-                        b.block_content_scale_y,
-                        b.block_content_scale_z,
-                        b.enable_block_scale,
-                        b.enable_block_rotation,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Block Content").into_owned());
-                    }
+                    .map(|(name, _)| name.to_string())
+                    .collect();
+                if !block_opts.contains(&block_name) {
+                    block_opts.push(block_name.clone());
                 }
-                let in_use =
-                    self.style_in_use(crate::app::StyleKind::MLeader, &self.mleaderstyle_selected);
-                sized_flow(ex, 960, 680, |flow| {
+                let user_blocks = super::super::update::mleader_style::user_blocks(doc);
+                sized_flow(ex, 880, 600, |flow| {
                     crate::ui::style::mleaderstyle::view_window(
-                        crate::ui::style::mleaderstyle::MLeaderStyleView {
+                        crate::ui::style::mleaderstyle::View {
+                            dialog: &self.mls,
                             styles: styles.clone(),
+                            in_use: in_use.clone(),
                             selected: &self.mleaderstyle_selected,
-                            style: selected_style,
-                            current: tab.active_mleader_style.clone(),
-                            tab: self.mleaderstyle_tab,
-                            compare_name: compare_name.clone(),
-                            compare_opts: compare_opts.clone(),
-                            comparison_sections: comparison_sections.clone(),
-                            in_use,
+                            current: &tab.active_mleader_style,
+                            style,
                             landing_distance: &self.mls_landing_distance,
                             landing_gap: &self.mls_landing_gap,
                             arrowhead_size: &self.mls_arrowhead_size,
                             text_height: &self.mls_text_height,
                             scale_factor: &self.mls_scale_factor,
                             break_gap: &self.mls_break_gap,
-                            first_seg_angle: &self.mls_first_seg_angle,
-                            second_seg_angle: &self.mls_second_seg_angle,
                             max_points: &self.mls_max_points,
                             default_text: &self.mls_default_text,
                             line_color: &self.mls_line_color,
                             text_color: &self.mls_text_color,
-                            description: &self.mls_description,
-                            align_space: &self.mls_align_space,
                             block_color: &self.mls_block_color,
-                            block_rotation: &self.mls_block_rotation,
-                            block_scale_x: &self.mls_block_scale_x,
-                            block_scale_y: &self.mls_block_scale_y,
-                            block_scale_z: &self.mls_block_scale_z,
-                            block_opts: block_opts.clone(),
-                            arrow_opts: arrow_opts.clone(),
-                            lt_opts: lt_opts.clone(),
-                            textstyle_opts: textstyle_opts.clone(),
-                            line_type_name: line_type_name.clone(),
-                            arrowhead_name: arrowhead_name.clone(),
-                            text_style_name: text_style_name.clone(),
-                            block_content_name: block_content_name.clone(),
-                            rename_active: self.style_rename.as_deref(),
-                            rename_buf: &self.style_rename_buf,
+                            block_scale: &self.mls_block_scale,
                             color_open: self.mls_color_open,
+                            line_type_name: line_type_name.clone(),
+                            linetype_opts: linetype_opts.clone(),
+                            linetypes: linetype_rows(),
+                            arrowhead_name: arrowhead_name.clone(),
+                            arrow_opts: arrow_opts.clone(),
+                            text_style_name: text_style_name.clone(),
+                            textstyle_opts: textstyle_opts.clone(),
+                            block_name: block_name.clone(),
+                            block_opts: block_opts.clone(),
+                            user_blocks: user_blocks.clone(),
                         },
                         flow,
                     )

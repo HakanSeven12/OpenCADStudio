@@ -33,6 +33,9 @@ pub struct ColorExtras {
     /// The closed selector as a plain table cell: swatch and name, no
     /// button colour or arrow (the Layer manager's Color column).
     pub flat: bool,
+    /// Only the seven standard colours (no greys, no recent colours) before
+    /// Select Color..., as a style dialog's colour list.
+    pub standard_only: bool,
 }
 
 thread_local! {
@@ -340,13 +343,18 @@ pub fn color_list_with_current<'a>(
         let (_, name) = acad_color_display(AcadColor::ByBlock);
         push_color(AcadColor::ByBlock, t!(name).into_owned());
     }
-    for i in 1u8..=9 {
+    let last = if extras.standard_only { 7u8 } else { 9 };
+    for i in 1u8..=last {
         let color = AcadColor::Index(i);
         let (_, name) = acad_color_display(color);
         push_color(color, t!(name).into_owned());
     }
     // Colours picked recently beyond the nine standard ones.
-    let recent = RECENT.with(|recent| recent.borrow().clone());
+    let recent = if extras.standard_only {
+        Vec::new()
+    } else {
+        RECENT.with(|recent| recent.borrow().clone())
+    };
     for color in recent
         .into_iter()
         .filter(|color| !matches!(color, AcadColor::Index(1..=9)))

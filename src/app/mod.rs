@@ -2021,8 +2021,8 @@ pub(super) struct OpenCADStudio {
 
     // ── MLeaderStyle Dialog ───────────────────────────────────────────────
     mleaderstyle_selected: String,
-    mleaderstyle_tab: u8,
-    mleaderstyle_compare: String,
+    /// The manager's faces and choosers (New, Modify, Delete, notices).
+    mls: crate::ui::style::mleaderstyle::Dialog,
     /// Colour field whose expanded palette is open (line/text/block).
     mls_color_open: Option<&'static str>,
     mls_landing_distance: String,
@@ -2031,19 +2031,12 @@ pub(super) struct OpenCADStudio {
     mls_text_height: String,
     mls_scale_factor: String,
     mls_break_gap: String,
-    mls_first_seg_angle: String,
-    mls_second_seg_angle: String,
     mls_max_points: String,
     mls_default_text: String,
     mls_line_color: String,
     mls_text_color: String,
-    mls_description: String,
-    mls_align_space: String,
     mls_block_color: String,
-    mls_block_rotation: String,
-    mls_block_scale_x: String,
-    mls_block_scale_y: String,
-    mls_block_scale_z: String,
+    mls_block_scale: String,
 
     // ── TableStyle Dialog ─────────────────────────────────────────────────
     tablestyle_selected: String,
@@ -5958,15 +5951,8 @@ pub enum Message {
     MlStyleElementDelete(usize),
     // ── MLeaderStyle Dialog ───────────────────────────────────────────────
     MLeaderStyleDialogOpen,
-    #[allow(dead_code)]
-    MLeaderStyleDialogClose,
-    MLeaderStyleDialogSelect(String),
-    MLeaderStyleDialogTab(u8),
-    MLeaderStyleDialogCompare(String),
-    MLeaderStyleDialogSetCurrent,
-    MLeaderStyleDialogNew,
-    MLeaderStyleDialogCopy,
-    MLeaderStyleDialogDelete,
+    /// The manager's list, faces and choosers.
+    MLeaderStyleDlg(crate::ui::style::mleaderstyle::MlsMsg),
     MLeaderStyleEdit {
         field: &'static str,
         value: String,
@@ -5985,7 +5971,6 @@ pub enum Message {
         field: &'static str,
         value: String,
     },
-    MLeaderStyleApply,
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     DimStyleDialogOpen,
     DimStyleDialogClose,
@@ -6948,8 +6933,7 @@ impl OpenCADStudio {
             mln_elements: Vec::new(),
             // MLeaderStyle dialog
             mleaderstyle_selected: "Standard".to_string(),
-            mleaderstyle_tab: 0,
-            mleaderstyle_compare: String::new(),
+            mls: Default::default(),
             mls_color_open: None,
             mls_landing_distance: String::new(),
             mls_landing_gap: String::new(),
@@ -6957,19 +6941,12 @@ impl OpenCADStudio {
             mls_text_height: String::new(),
             mls_scale_factor: String::new(),
             mls_break_gap: String::new(),
-            mls_first_seg_angle: String::new(),
-            mls_second_seg_angle: String::new(),
             mls_max_points: String::new(),
             mls_default_text: String::new(),
             mls_line_color: String::new(),
             mls_text_color: String::new(),
-            mls_description: String::new(),
-            mls_align_space: String::new(),
             mls_block_color: String::new(),
-            mls_block_rotation: String::new(),
-            mls_block_scale_x: String::new(),
-            mls_block_scale_y: String::new(),
-            mls_block_scale_z: String::new(),
+            mls_block_scale: String::new(),
             // DimStyle dialog
             dimstyle_selected: "Standard".to_string(),
             dimstyle_user_arrow: None,

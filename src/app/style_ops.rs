@@ -329,6 +329,11 @@ impl OpenCADStudio {
     /// Refresh anything that mirrors the style list / current style after a
     /// mutation (ribbon dropdowns, geometry that depends on the style).
     pub(super) fn after_style_change(&mut self, kind: StyleKind) {
+        // A new, renamed or deleted multileader style keeps its dictionary
+        // entry and owner, whether or not the change is applied before a save.
+        if kind == StyleKind::MLeader {
+            sync_mleaderstyle_dictionary(&mut self.tabs[self.active_tab].scene.document);
+        }
         if kind.in_ribbon() {
             self.sync_ribbon_styles();
         }
@@ -355,6 +360,7 @@ impl OpenCADStudio {
             }
             StyleKind::MLeader => {
                 let mut s = MultiLeaderStyle::new(name);
+                s.description = name.to_string();
                 s.handle = handle;
                 doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
             }
@@ -381,7 +387,13 @@ impl OpenCADStudio {
 
     /// Clone the style named `src` under `name` with a fresh `handle`.
     /// Returns false if `src` no longer exists.
-    fn clone_style_as(&mut self, kind: StyleKind, src: &str, name: &str, handle: Handle) -> bool {
+    pub(super) fn clone_style_as(
+        &mut self,
+        kind: StyleKind,
+        src: &str,
+        name: &str,
+        handle: Handle,
+    ) -> bool {
         let doc = &mut self.tabs[self.active_tab].scene.document;
         match kind {
             StyleKind::Text => {
@@ -438,6 +450,7 @@ impl OpenCADStudio {
                     _ => None,
                 }) {
                     s.name = name.to_string();
+                    s.description = name.to_string();
                     s.handle = handle;
                     doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
                     return true;
@@ -623,6 +636,10 @@ impl OpenCADStudio {
                     let doc = &mut self.tabs[i].scene.document;
                     if let Some(h) = object_handle(doc, old, kind) {
                         if let Some(ObjectType::MultiLeaderStyle(s)) = doc.objects.get_mut(&h) {
+                            // The description written with the style is its name.
+                            if s.description.is_empty() || s.description == s.name {
+                                s.description = new.to_string();
+                            }
                             s.name = new.to_string();
                         }
                     }

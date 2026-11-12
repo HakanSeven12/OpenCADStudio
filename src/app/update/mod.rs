@@ -134,6 +134,7 @@ pub(in crate::app) mod linetype_manager;
 mod file;
 mod graphic_attributes;
 mod keytips;
+pub(in crate::app) mod mleader_style;
 pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
@@ -217,6 +218,16 @@ impl OpenCADStudio {
                 self.active_modal = Some(parent);
                 return;
             }
+        }
+        // The Text Style manager opened from the multileader style window
+        // returns to it.
+        if self.active_modal == Some(TextStyle) && self.mls.parked.is_some() {
+            self.mleader_style_back_from_text_styles();
+            return;
+        }
+        // The multileader style window keeps what it changed as one step.
+        if self.active_modal == Some(MLeaderStyle) {
+            self.mleader_style_close();
         }
         if self.active_modal == Some(TableStyle)
             && std::mem::take(&mut self.tablestyle_parent_table)
@@ -12534,6 +12545,12 @@ impl OpenCADStudio {
                 )
             }
             Message::CloseModal => {
+                // The multileader style window's ✕ closes its topmost face.
+                if self.active_modal == Some(super::ModalKind::MLeaderStyle)
+                    && self.mleader_style_close_face()
+                {
+                    return Task::none();
+                }
                 if self.active_modal == Some(super::ModalKind::BlockLookup) {
                     self.block_lookup = None;
                 }
@@ -15197,51 +15214,9 @@ impl OpenCADStudio {
 
             // ── MLeaderStyle Dialog ───────────────────────────────────────────
             Message::MLeaderStyleDialogOpen => self.on_mleader_style_dialog_open(),
-            Message::MLeaderStyleDialogClose => {
-                self.close_active_modal();
-                Task::none()
-            }
-            Message::MLeaderStyleDialogSelect(name) => {
-                self.stage_mleaderstyle_bufs();
-                self.mleaderstyle_selected = name;
-                let i = self.active_tab;
-                self.load_mleaderstyle_bufs(i);
-                Task::none()
-            }
-            Message::MLeaderStyleDialogTab(tab) => {
-                self.mleaderstyle_tab = tab;
-                Task::none()
-            }
-            Message::MLeaderStyleDialogCompare(name) => {
-                self.mleaderstyle_compare = name;
-                Task::none()
-            }
-            Message::MLeaderStyleDialogSetCurrent => self.on_mleader_style_dialog_set_current(),
-            Message::MLeaderStyleDialogNew => self.style_new(crate::app::StyleKind::MLeader),
-            Message::MLeaderStyleDialogCopy => self.style_copy(crate::app::StyleKind::MLeader),
-            Message::MLeaderStyleDialogDelete => {
-                self.style_delete(crate::app::StyleKind::MLeader);
-                Task::none()
-            }
+            Message::MLeaderStyleDlg(message) => self.on_mleader_style_dlg(message),
             Message::MLeaderStyleEdit { field, value } => self.on_mleader_style_edit(field, value),
-            Message::MLeaderStyleToggle(field) => {
-                let i = self.active_tab;
-                if let Some(s) = self.mleaderstyle_mut(i) {
-                    match field {
-                        "enable_landing" => s.enable_landing = !s.enable_landing,
-                        "enable_dogleg" => s.enable_dogleg = !s.enable_dogleg,
-                        "text_frame" => s.text_frame = !s.text_frame,
-                        "text_always_left" => s.text_always_left = !s.text_always_left,
-                        "annotative" => s.is_annotative = !s.is_annotative,
-                        "enable_block_scale" => s.enable_block_scale = !s.enable_block_scale,
-                        "enable_block_rotation" => {
-                            s.enable_block_rotation = !s.enable_block_rotation
-                        }
-                        _ => {}
-                    }
-                }
-                Task::none()
-            }
+            Message::MLeaderStyleToggle(field) => self.on_mleader_style_toggle(field),
             Message::MLeaderColorMore(field) => {
                 self.mls_color_open = if self.mls_color_open == Some(field) {
                     None
@@ -15263,7 +15238,6 @@ impl OpenCADStudio {
             Message::MLeaderStyleSetHandle { field, value } => {
                 self.on_mleader_style_set_handle(field, value)
             }
-            Message::MLeaderStyleApply => self.on_mleader_style_apply(),
 
             // ── DimStyle Dialog ───────────────────────────────────────────────
             Message::DimStyleDialogOpen => self.on_dim_style_dialog_open(),

@@ -4071,6 +4071,11 @@ impl Scene {
         // left it at the unitless 1, which drew annotative objects 1000x too
         // large until the first CANNOSCALE change shrank them. (#1674)
         self.sync_annotation_scale_from_header();
+        let by_block_linetype = self
+            .document
+            .line_types
+            .get("ByBlock")
+            .map(|linetype| linetype.handle);
         for obj in self.document.objects.values_mut() {
             match obj {
                 document::objects::ObjectType::Layout(l) if l.name != "Model" => {
@@ -4089,6 +4094,24 @@ impl Scene {
                     s.landing_gap = 2.0;
                     s.landing_distance = 8.0;
                     s.break_gap_size = 3.75;
+                    // The rest as the reference's Standard: its name as the
+                    // description, a ByBlock linetype, leader drawn first,
+                    // underlined top line on the right, centred top and
+                    // bottom attachments and the leader extended to the text.
+                    s.description = s.name.clone();
+                    if by_block_linetype.is_some() {
+                        s.line_type_handle = by_block_linetype;
+                    }
+                    s.multileader_draw_order =
+                        document::objects::MultiLeaderDrawOrderType::LeaderFirst;
+                    s.text_right_attachment =
+                        document::objects::TextAttachmentType::BottomOfTopLineUnderlineBottomLine;
+                    s.text_top_attachment = document::objects::TextAttachmentType::CenterOfText;
+                    s.text_bottom_attachment =
+                        document::objects::TextAttachmentType::CenterOfText;
+                    s.unknown_flag_298 = true;
+                    s.enable_block_scale = true;
+                    s.enable_block_rotation = true;
                 }
                 // Likewise the Standard table style: the metric template's
                 // cells are 4.5 high (title 6) with 1.5 margins, not 0.18.

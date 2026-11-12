@@ -116,6 +116,11 @@ objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSFont", "NSRes
 block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
+# OLE2FRAME compound files written back verbatim (#2862); drop once the
+# opencaddocument pin includes hakanaktt/acadrust with that fix.
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/assamaral/acadrust.git", rev = "ce1b89194bd1215403e46c7e849835c94b4222d5" }
+
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

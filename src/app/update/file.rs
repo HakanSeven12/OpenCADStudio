@@ -9216,6 +9216,41 @@ mod plot_paper_tests {
         }
     }
 
+    /// A layout whose paper image origin (DXF 148/149) is not zero has its
+    /// printable corner at minus that origin: a sheet border drawn there
+    /// plots at the paper corner instead of shifted by it (#2864).
+    #[test]
+    fn layout_sheet_origin_follows_the_paper_image_origin() {
+        use document::objects::PlotRotation;
+        let mut app =
+            layout_with_margins_and_stale_limmin((2.0, 3.0, 0.0, 0.0), PlotRotation::None);
+        let i = app.active_tab;
+        for object in app.tabs[i].scene.document.objects.values_mut() {
+            if let document::objects::ObjectType::Layout(layout) = object {
+                if layout.name == "Layout1" {
+                    layout.paper_image_origin_x = -40.0;
+                    layout.paper_image_origin_y = -25.0;
+                }
+            }
+        }
+        app.tabs[i].scene.geometry_epoch += 1;
+        let ((x0, y0), _) = app.tabs[i].scene.paper_limits().unwrap();
+        assert!(
+            (x0 - 38.0).abs() < 1e-9 && (y0 - 22.0).abs() < 1e-9,
+            "sheet origin {x0} {y0}"
+        );
+        let ((px, py), _) = app.tabs[i].scene.printable_area_limits().unwrap();
+        assert!((px - 40.0).abs() < 1e-9 && (py - 25.0).abs() < 1e-9, "{px} {py}");
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        let scale = page.scale as f64;
+        let at = ((40.0 + page.offset_x) * scale, (25.0 + page.offset_y) * scale);
+        assert!(
+            (at.0 - 2.0).abs() < 1e-6 && (at.1 - 3.0).abs() < 1e-6,
+            "printable corner plots at {at:?}"
+        );
+    }
+
     /// Open the metric page-setup fixture written by the commercial
     /// application (see `tests/fixtures/plot/README.md`).
     #[cfg(not(target_arch = "wasm32"))]

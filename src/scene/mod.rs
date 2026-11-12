@@ -3107,6 +3107,9 @@ pub struct Scene {
     pub(crate) has_underlays: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any section object exists in the
+    /// document. The live-section lookup runs on every resident patch.
+    has_section_objects: std::cell::Cell<Option<bool>>,
     /// Whether the current space holds objects the drawing saves as invisible,
     /// keyed by `(geometry_epoch, space block)`. Read every frame by the
     /// isolation menus, so the entity scan runs once per edit, not per frame.
@@ -3382,6 +3385,64 @@ fn section_frame(
     Some((origin, tangent, vertical, viewing))
 }
 
+/// A section object entity (live or not); see `Scene::active_live_section`.
+fn is_section_object(entity: &EntityType) -> bool {
+    matches!(
+        entity,
+        EntityType::Extended(extended)
+            if matches!(
+                extended.data,
+                document::entities::ExtendedEntityData::SectionObject(_)
+            )
+    )
+}
+
+#[cfg(test)]
+mod section_hint_tests {
+    use super::*;
+    use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+    use document::types::{Color, Vector3};
+
+    fn live_section() -> EntityType {
+        EntityType::Extended(Box::new(ExtendedEntity {
+            common: EntityCommon::new(),
+            data: ExtendedEntityData::SectionObject(SectionObjectData {
+                state: 1,
+                flags: 1,
+                name: "Section Plane (1)".to_string(),
+                vertical_direction: Vector3::new(0.0, 0.0, 1.0),
+                top_height: 1.0,
+                bottom_height: 1.0,
+                indicator_alpha: 70,
+                indicator_color: Color::from_index(9),
+                vertices: vec![Vector3::ZERO, Vector3::new(0.0, 10.0, 0.0)],
+                back_line_vertices: Vec::new(),
+                settings_handle: Handle::NULL,
+            }),
+        }))
+    }
+
+    /// With no section object the lookup answers at once; adding one, or
+    /// erasing it again, is seen through the entity edit alone.
+    #[test]
+    fn live_section_follows_added_and_erased_section_objects() {
+        let mut scene = Scene::new();
+        let model = scene.model_space_block_handle();
+        scene.add_entity(EntityType::Line(document::entities::Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        assert!(scene.active_live_section(model).is_none());
+        assert_eq!(scene.has_section_objects.get(), Some(false));
+
+        let section = scene.add_entity(live_section());
+        assert!(scene.active_live_section(model).is_some());
+
+        scene.erase_entities(&[section]);
+        assert!(scene.active_live_section(model).is_none());
+    }
+}
+
 #[derive(Clone)]
 struct LiveSection {
     data: document::entities::SectionObjectData,
@@ -3618,6 +3679,7 @@ impl Scene {
             has_dimension_associations: std::cell::Cell::new(None),
             has_underlays: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
+            has_section_objects: std::cell::Cell::new(None),
             persisted_hidden_cache: std::cell::Cell::new(None),
             document_render_env_cache: RefCell::new(None),
             background_image_cache: RefCell::new(HashMap::default()),
@@ -4408,6 +4470,16 @@ impl Scene {
         any
     }
 
+    /// Fast check for whether any section object exists in the document.
+    fn has_section_objects(&self) -> bool {
+        if let Some(known) = self.has_section_objects.get() {
+            return known;
+        }
+        let any = self.document.entities().any(is_section_object);
+        self.has_section_objects.set(Some(any));
+        any
+    }
+
     /// Fast check for whether any Face3D entities exist in the document.
     pub(crate) fn has_face3d(&self) -> bool {
         if let Some(known) = self.has_face3d.get() {
@@ -5021,6 +5093,19 @@ impl Scene {
         }) {
             self.has_face3d.set(Some(true));
         }
+        if let Some(true) = self.has_section_objects.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_section_objects.set(None);
+            }
+        } else if changes
+            .iter()
+            .any(|(h, _)| self.document.get_entity(*h).is_some_and(is_section_object))
+        {
+            self.has_section_objects.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5146,6 +5231,7 @@ impl Scene {
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
         self.has_face3d.set(None);
+        self.has_section_objects.set(None);
         // Default: also invalidate block definitions. Safe for every caller;
         // operations that know blocks are untouched use `bump_geometry_no_blocks`.
         self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
@@ -5255,6 +5341,7 @@ impl Scene {
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
         self.has_face3d.set(None);
+        self.has_section_objects.set(None);
         self.invalidate_dependency_index();
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
@@ -11621,6 +11708,9 @@ impl Scene {
     }
 
     fn active_live_section(&self, target_block: Handle) -> Option<LiveSection> {
+        if !self.has_section_objects() {
+            return None;
+        }
         self.document
             .entities()
             .filter_map(|entity| {

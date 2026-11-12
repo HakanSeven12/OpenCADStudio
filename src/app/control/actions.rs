@@ -630,9 +630,14 @@ impl OpenCADStudio {
         // Optional plot style table: a CTB path or a folder-discovered name.
         let style = req["plot_style"].as_str().filter(|s| !s.is_empty());
         let loaded_style = match style {
-            Some(name) => Some(
+            // An existing file reports its own load error; anything else is
+            // looked up by name in the plot styles folder.
+            Some(name) if std::path::Path::new(name).is_file() => Some(
                 crate::io::plot_style::PlotStyleTable::load(std::path::Path::new(name))
-                    .or_else(|_| crate::io::plot_style::PlotStyleTable::load_named(name))
+                    .map_err(|e| failure("plot_style_invalid", e))?,
+            ),
+            Some(name) => Some(
+                crate::io::plot_style::PlotStyleTable::load_named(name)
                     .map_err(|e| failure("plot_style_missing", e))?,
             ),
             None => None,

@@ -1,6 +1,8 @@
 // MLEADER: pick the arrow and elbow, then edit the text.
 
-use document::entities::{LeaderContentType, MultiLeader, MultiLeaderPathType};
+use document::entities::{
+    AttributeDefinition, LeaderContentType, MultiLeader, MultiLeaderPathType,
+};
 use document::types::Vector3;
 use document::EntityType;
 use glam::{DVec3, Mat4, Vec3};
@@ -57,6 +59,12 @@ pub struct MLeaderCommand {
     block_handle: Option<document::Handle>,
     layers: Vec<String>,
     text_styles: Vec<(String, document::Handle)>,
+    /// A block-content leader parked for its placement and attribute
+    /// values, with the point its block centre goes to.
+    pending: Option<(MultiLeader, Vector3)>,
+    attributes: Vec<AttributeDefinition>,
+    attribute_values: Vec<(usize, String)>,
+    attribute_index: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -119,6 +127,7 @@ enum Step {
     PreEnterText,
     SelectMText,
     BlockSource,
+    Attribute,
 }
 
 impl Default for MLeaderCommand {
@@ -154,6 +163,10 @@ impl MLeaderCommand {
             block_handle: None,
             layers: Vec::new(),
             text_styles: Vec::new(),
+            pending: None,
+            attributes: Vec::new(),
+            attribute_values: Vec::new(),
+            attribute_index: 0,
         }
     }
 
@@ -198,6 +211,10 @@ impl MLeaderCommand {
             block_handle: style.block_content_handle,
             layers: Vec::new(),
             text_styles: Vec::new(),
+            pending: None,
+            attributes: Vec::new(),
+            attribute_values: Vec::new(),
+            attribute_index: 0,
         }
     }
 
@@ -250,7 +267,7 @@ impl MLeaderCommand {
         };
     }
 
-    fn finish(&self) -> CmdResult {
+    fn finish(&mut self) -> CmdResult {
         if self.verts.len() < 2 {
             return CmdResult::Cancel;
         }
@@ -371,6 +388,25 @@ impl MLeaderCommand {
                 .map(|(_, handle)| *handle);
             ml.text_style_handle = style_handle;
             ml.context.text_style_handle = style_handle;
+        }
+        // A block is placed and its attributes asked once the host has the
+        // drawing at hand.
+        if self.content_type == LeaderContentType::Block {
+            let name = ml.block_content_handle.and_then(|handle| {
+                self.block_sources
+                    .iter()
+                    .find(|(_, h)| *h == handle)
+                    .map(|(name, _)| name.clone())
+            });
+            if let Some(block_name) = name {
+                let click = match self.order {
+                    CreationOrder::ArrowFirst => self.plane.to_local(self.verts[self.verts.len() - 1]),
+                    _ => self.plane.to_local(self.verts[0]),
+                };
+                self.pending = Some((ml, v3(click)));
+                self.step = Step::Attribute;
+                return CmdResult::AttreqNeeded { block_name };
+            }
         }
         let entity = self
             .plane
@@ -562,6 +598,22 @@ impl CadCommand for MLeaderCommand {
                 }
             }
             Step::PickPoints => tr!("mleader-prompt", "next-point"),
+            Step::Attribute => {
+                let Some(ad) = self.attributes.get(self.attribute_index) else {
+                    return String::new();
+                };
+                let hint = if ad.default_value.is_empty() {
+                    String::new()
+                } else {
+                    format!("  <{}>", ad.default_value)
+                };
+                let prompt = if ad.prompt.is_empty() {
+                    ad.tag.as_str()
+                } else {
+                    ad.prompt.as_str()
+                };
+                t!("MLEADER  %{prompt}%{hint}:", prompt = prompt, hint = hint).into_owned()
+            }
         }
     }
 
@@ -678,6 +730,7 @@ impl CadCommand for MLeaderCommand {
             }
             Step::PickPoints if self.verts.len() >= 2 => self.finish(),
             Step::PickPoints => CmdResult::Cancel,
+            Step::Attribute => self.accept_attribute(""),
         }
     }
 
@@ -759,7 +812,7 @@ impl CadCommand for MLeaderCommand {
     }
 
     fn input_kind(&self) -> InputKind {
-        if matches!(self.step, Step::Layer | Step::PreEnterText) {
+        if matches!(self.step, Step::Layer | Step::PreEnterText | Step::Attribute) {
             InputKind::FreeText
         } else if matches!(self.step, Step::PickPoints | Step::SelectMText) {
             InputKind::Point
@@ -773,6 +826,9 @@ impl CadCommand for MLeaderCommand {
     }
 
     fn on_text_input(&mut self, input: &str) -> Option<CmdResult> {
+        if self.step == Step::Attribute {
+            return Some(self.accept_attribute(input));
+        }
         let text = input.trim();
         let upper = text.to_ascii_uppercase();
         let upper = upper.trim_start_matches('_');
@@ -933,13 +989,49 @@ impl CadCommand for MLeaderCommand {
                 self.content_type = LeaderContentType::Block;
                 self.step = Step::Options;
             }
-            Step::PickPoints => return None,
+            Step::PickPoints | Step::Attribute => return None,
         }
         Some(CmdResult::NeedPoint)
     }
 
     fn needs_entity_pick(&self) -> bool {
         matches!(self.step, Step::SelectMText | Step::Layer)
+    }
+
+    fn attreq_set_document(&mut self, document: &document::Document) {
+        let Some((ml, click)) = self.pending.as_mut() else {
+            return;
+        };
+        let record = ml.block_content_handle.and_then(|handle| {
+            document
+                .block_records
+                .iter()
+                .find(|record| record.handle == handle)
+        });
+        if let Some(record) = record {
+            let bounds = crate::entities::multileader::block_content_bounds(document, record);
+            place_block_content(ml, *click, bounds, record.base_point);
+        }
+    }
+
+    fn attreq_set_attdefs(&mut self, attdefs: Vec<AttributeDefinition>) -> Option<EntityType> {
+        self.attributes = attdefs;
+        self.attribute_values.clear();
+        self.attribute_index = 0;
+        self.advance_attributes()
+    }
+
+    fn prompt_heading(&self) -> Option<String> {
+        let first = self
+            .attributes
+            .iter()
+            .position(|ad| !ad.flags.constant && !ad.flags.preset);
+        (self.step == Step::Attribute && first == Some(self.attribute_index))
+            .then(|| "Enter attribute values".to_string())
+    }
+
+    fn attreq_take_insert(&mut self) -> Option<EntityType> {
+        self.finish_block()
     }
 
     fn drawing_variable_update(&self) -> Option<(&'static str, String)> {
@@ -985,6 +1077,111 @@ impl CadCommand for MLeaderCommand {
         self.order = CreationOrder::ContentFirst;
         self.step = Step::PickPoints;
         CmdResult::NeedPoint
+    }
+}
+
+impl MLeaderCommand {
+    fn accept_attribute(&mut self, text: &str) -> CmdResult {
+        let Some(ad) = self.attributes.get(self.attribute_index) else {
+            return CmdResult::Cancel;
+        };
+        let value = if text.trim().is_empty() {
+            ad.default_value.clone()
+        } else {
+            text.trim().to_string()
+        };
+        self.attribute_values.push((self.attribute_index, value));
+        self.attribute_index += 1;
+        match self.advance_attributes() {
+            Some(entity) => CmdResult::CommitAndExit(entity),
+            None => CmdResult::NeedPoint,
+        }
+    }
+
+    /// Constant and preset definitions keep their own value; stop at the next
+    /// one to ask, or finish when none is left.
+    // ponytail: no Verify pass (INSERT asks verified values twice); add it
+    // once the leader's attribute prompts are measured.
+    fn advance_attributes(&mut self) -> Option<EntityType> {
+        while let Some(ad) = self.attributes.get(self.attribute_index) {
+            if !ad.flags.constant && !ad.flags.preset {
+                return None;
+            }
+            self.attribute_values
+                .push((self.attribute_index, ad.default_value.clone()));
+            self.attribute_index += 1;
+        }
+        self.finish_block()
+    }
+
+    fn finish_block(&mut self) -> Option<EntityType> {
+        let (mut ml, _) = self.pending.take()?;
+        ml.block_attributes = self
+            .attribute_values
+            .iter()
+            .filter_map(|(index, text)| {
+                let ad = self.attributes.get(*index)?;
+                Some(document::entities::BlockAttribute {
+                    attribute_definition_handle: Some(ad.common.handle),
+                    index: *index as i16,
+                    width: 0.0,
+                    text: text.clone(),
+                })
+            })
+            .collect();
+        Some(
+            self.plane
+                .place_entity(EntityType::MultiLeader(Box::new(ml))),
+        )
+    }
+}
+
+/// The block's centre (its insertion point, by an insertion-point style) goes
+/// to `click`; the landing runs from the block's edge back toward the arrow.
+fn place_block_content(
+    ml: &mut MultiLeader,
+    click: Vector3,
+    bounds: Option<[f64; 4]>,
+    base: Vector3,
+) {
+    use document::entities::BlockContentConnectionType;
+    let Some(root) = ml.context.leader_roots.first() else {
+        return;
+    };
+    let dir = root.direction;
+    let landing = if ml.enable_landing {
+        root.landing_distance
+    } else {
+        0.0
+    };
+    let factor = if ml.context.scale_factor.abs() > 1.0e-12 {
+        ml.context.scale_factor
+    } else {
+        1.0
+    };
+    let (sx, sy) = (ml.block_scale.x * factor, ml.block_scale.y * factor);
+    let (sin, cos) = ml.block_rotation.sin_cos();
+    let rotate = |x: f64, y: f64| (x * sx * cos - y * sy * sin, x * sx * sin + y * sy * cos);
+    let [min_x, min_y, max_x, max_y] = bounds.unwrap_or([base.x, base.y, base.x, base.y]);
+    let pivot = if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
+        ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5)
+    } else {
+        (base.x, base.y)
+    };
+    // The edge facing the arrow: the landing points into the block.
+    let from_left = dir.x * cos + dir.y * sin >= 0.0;
+    let edge = (if from_left { min_x } else { max_x }, (min_y + max_y) * 0.5);
+    let (ex, ey) = rotate(edge.0 - pivot.0, edge.1 - pivot.1);
+    let (ix, iy) = rotate(pivot.0 - base.x, pivot.1 - base.y);
+    let content_base = Vector3::new(click.x + ex, click.y + ey, click.z);
+    ml.context.content_base_point = content_base;
+    ml.context.block_content_location = Vector3::new(click.x - ix, click.y - iy, click.z);
+    if let Some(root) = ml.context.leader_roots.first_mut() {
+        root.connection_point = Vector3::new(
+            content_base.x - dir.x * landing,
+            content_base.y - dir.y * landing,
+            content_base.z,
+        );
     }
 }
 

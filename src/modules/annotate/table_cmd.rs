@@ -1365,6 +1365,11 @@ pub(crate) fn table_cell_at(
             Some(*offset)
         })
         .position(|end| y <= end)?;
+    // A merged cell is one cell: a pick anywhere inside its span edits the
+    // owner, never a hidden covered cell underneath it (the in-place editor
+    // already widens, and a scripted TABLEDIT must reach the same cell).
+    let (row, column, _, _) =
+        crate::entities::table::widen_to_merged(table, (row, column, row, column));
     Some(TableCellHit {
         row,
         column,

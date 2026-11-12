@@ -8600,4 +8600,55 @@ mod batch7_tests {
         let world_width = image.u_vector.length() * image.size.x;
         assert!((world_width - 5.0).abs() < 1.0e-6, "{world_width}");
     }
+
+    /// A table with a title row merged across both columns. Columns are 20
+    /// wide and rows 10 high; the insertion point is the world origin.
+    fn merged_title_table(app: &mut OpenCADStudio) -> document::Handle {
+        use document::entities::table::CellRange;
+        let mut table = document::entities::Table::new(document::types::Vector3::ZERO, 3, 2);
+        for column in &mut table.columns {
+            column.width = 20.0;
+        }
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        table.merge_cells(CellRange::new(0, 0, 0, 1));
+        table.cell_mut(0, 0).unwrap().set_text("before");
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Table(Box::new(table)))
+    }
+
+    /// M047: a merged cell is one cell. A TABLEDIT that lands in the covered
+    /// half must write the merged cell the drawing shows, not the hidden one
+    /// underneath it; the in-place editor and the command-line form have to
+    /// agree on which cell is being edited.
+    #[test]
+    fn tabledit_in_a_merged_cell_edits_the_merged_cell() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let handle = merged_title_table(&mut app);
+
+        // (30, -5) is the right half of the merged title row: column 1 is
+        // covered by the merge that starts in column 0.
+        let _ = app.run_command_line("TABLEDIT 30,-5 after");
+        let out = out_text(&app);
+        assert!(out.contains("TABLE CELL  Enter text for [0,0]"), "{out}");
+
+        let Some(document::EntityType::Table(table)) =
+            app.tabs[i].scene.document.get_entity(handle)
+        else {
+            panic!("the table disappeared");
+        };
+        assert_eq!(
+            table.cell_text(0, 0),
+            Some("after"),
+            "the merged cell takes the text"
+        );
+        assert_eq!(
+            table.cell_text(0, 1),
+            Some(""),
+            "the covered cell must not hold the text"
+        );
+    }
 }

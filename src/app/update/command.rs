@@ -4797,14 +4797,9 @@ impl OpenCADStudio {
                 // Named plot-style pick: ByLayer / ByBlock clear the
                 // handle; a named style resolves through the drawing's
                 // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
-                let dict_h = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .acad_plotstylename_dict_handle;
                 let ph: Option<document::Handle> =
-                    crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
-                        .and_then(|d| d.entries.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
+                    crate::app::properties::plot_style_entries(&self.tabs[i].scene.document)
+                        .and_then(|e| e.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
                 for &handle in &handles {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;

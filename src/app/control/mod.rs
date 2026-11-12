@@ -541,7 +541,7 @@ pub(super) fn active_command_metadata(command: &dyn crate::command::CadCommand) 
     })
 }
 
-fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
+pub(super) fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
     use crate::io::xref::XrefStatus as S;
     match status {
         S::Loaded => "loaded",
@@ -549,6 +549,22 @@ fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
         S::Failed => "failed",
         S::NotFound => "not_found",
         S::Unloaded => "unloaded",
+    }
+}
+
+/// Status label for a live [`crate::io::xref_model::RefStatus`] row. The
+/// palette shows the same vocabulary (`xref_manager::status_label`), so the
+/// automation report and the Reference Manager can never disagree.
+pub(super) fn ref_status_name(status: crate::io::xref_model::RefStatus) -> &'static str {
+    use crate::io::xref_model::RefStatus as S;
+    match status {
+        S::Loaded => "loaded",
+        S::Unloaded => "unloaded",
+        S::NotFound => "not_found",
+        S::Failed => "failed",
+        S::Stale => "stale",
+        S::Orphaned => "orphaned",
+        S::Unreferenced => "unreferenced",
     }
 }
 
@@ -610,7 +626,7 @@ impl OpenCADStudio {
         json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
             "read_only":self.read_only,"missing_fonts":missing_fonts,
-            "xrefs":tab.xref_report.iter().map(|(name,path,status)|json!({"name":name,"path":path,"status":xref_status_name(status)})).collect::<Vec<_>>(),
+            "xrefs":tab.xref_report.iter().map(|(name,path,status)|json!({"name":name,"path":path,"status":status})).collect::<Vec<_>>(),
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
             "hand_seed":format!("{:X}",tab.scene.document.header.handle_seed.max(tab.scene.document.next_handle())),
             "plugins":plugin_ids(),

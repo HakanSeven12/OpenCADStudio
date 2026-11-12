@@ -2466,7 +2466,13 @@ impl OpenCADStudio {
         self.tabs[i].xref_report = caches
             .xrefs
             .iter()
-            .map(|item| (item.name.clone(), item.path.clone(), item.status.clone()))
+            .map(|item| {
+                (
+                    item.name.clone(),
+                    item.path.clone(),
+                    crate::app::control::xref_status_name(&item.status),
+                )
+            })
             .collect();
         if missing > 0 {
             self.command_line.push_output(

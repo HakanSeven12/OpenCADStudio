@@ -1300,23 +1300,11 @@ impl OpenCADStudio {
                     return Some(self.finish_dispatch(cmd));
                 }
                 if op.is_empty() || op == "?" {
-                    // List every reference via collect_entries_with_prev. The
-                    // base dir is the drawing's parent (or "." unsaved); the
-                    // tab's session sets keep CLI and palette in agreement.
-                    // Header lines stay byte-identical to the legacy listing;
-                    // each entry line gains an " [Attach]" / " [Overlay]"
-                    // type suffix.
-                    let base_dir: std::path::PathBuf = self.tabs[i]
-                        .current_path
-                        .as_ref()
-                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                        .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    let entries = crate::io::xref::collect_entries_with_prev(
-                        &self.tabs[i].scene.document,
-                        &base_dir,
-                        self.tabs[i].xref_unloaded.as_set(),
-                        &self.tabs[i].xref_stat_cache.0,
-                    );
+                    // List every reference with the live status the
+                    // Reference Manager shows. The refresh also rebuilds the
+                    // automation report, so `state.xrefs` answers a status
+                    // query with the same rows.
+                    let entries = self.refresh_xref_report(i);
                     if entries.is_empty() {
                         self.command_line.push_output(
                             crate::t!("XREF  No external references in this drawing.").as_ref(),
@@ -1334,8 +1322,38 @@ impl OpenCADStudio {
                                 crate::io::xref_model::RefType::Overlay => " [Overlay]",
                                 crate::io::xref_model::RefType::Attach => " [Attach]",
                             };
-                            self.command_line
-                                .push_output(&format!("  {} — {}{}", entry.name, path, suffix));
+                            self.command_line.push_output(&format!(
+                                "  {} — {}{} [{}]",
+                                entry.name,
+                                path,
+                                suffix,
+                                crate::ui::window::xref_manager::status_text(entry.status)
+                            ));
+                        }
+                        // A reference whose source is gone, or changed since
+                        // it was loaded, is the one thing the author must not
+                        // miss; the palette shows the same two states.
+                        let missing = entries
+                            .iter()
+                            .filter(|e| e.status == crate::io::xref_model::RefStatus::NotFound)
+                            .count();
+                        let stale = entries
+                            .iter()
+                            .filter(|e| e.status == crate::io::xref_model::RefStatus::Stale)
+                            .count();
+                        if missing > 0 {
+                            self.command_line.push_output(
+                                crate::tf!("XREF  {} reference(s) not found.", missing).as_ref(),
+                            );
+                        }
+                        if stale > 0 {
+                            self.command_line.push_output(
+                                crate::tf!(
+                                    "XREF  {} reference(s) stale — the source changed since it was loaded.",
+                                    stale
+                                )
+                                .as_ref(),
+                            );
                         }
                     }
                 } else if op.eq_ignore_ascii_case("Reload") {

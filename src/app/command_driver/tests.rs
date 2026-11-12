@@ -8350,4 +8350,106 @@ mod batch7_tests {
             1
         );
     }
+
+    /// The live status of one reference as the automation surface reports it.
+    fn xref_status(app: &OpenCADStudio, name: &str) -> String {
+        app.control_state()["xrefs"]
+            .as_array()
+            .and_then(|xs| xs.iter().find(|x| x["name"].as_str() == Some(name)))
+            .and_then(|x| x["status"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// The name of the host's external reference block record.
+    fn xref_name(app: &OpenCADStudio, tab: usize) -> String {
+        app.tabs[tab]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+            .map(|br| br.name.clone())
+            .expect("the host carries a reference")
+    }
+
+    /// A saved one-line source drawing and a host that references it, so the
+    /// reference loads from disk. Returns the app, the source path, the host
+    /// tab, the reference's block record and its name.
+    fn m074_host(
+        stem: &str,
+    ) -> (
+        OpenCADStudio,
+        std::path::PathBuf,
+        usize,
+        document::Handle,
+        String,
+    ) {
+        let source = temp_named(stem, "dwg");
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let source_fwd = source.display().to_string().replace('\\', "/");
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{source_fwd}"}}"#));
+        let (host, record) = host_with_xref(&mut app, &source);
+        let name = xref_name(&app, host);
+        // Save the host so it has a folder: a relative reference path only
+        // resolves (and only reloads) against a saved drawing.
+        let host_path = source.with_file_name(format!("{stem}-host.dwg"));
+        let host_fwd = host_path.display().to_string().replace('\\', "/");
+        app.active_tab = host;
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{host_fwd}"}}"#));
+        (app, source, host, record, name)
+    }
+
+    /// M074: unloading a reference reports the unloaded status and hides its
+    /// merged geometry.
+    #[test]
+    fn xref_unload_reports_status_and_hides_geometry() {
+        let (mut app, _source, host, record, name) = m074_host("m074-unload");
+        assert_eq!(referenced_entity_count(&app, host, record), 1);
+        assert_eq!(xref_status(&app, &name), "loaded");
+
+        let _ = app.run_command_line(&format!("XREF Unload {name}"));
+        let out = out_text(&app);
+        assert!(out.contains("unloaded"), "{out}");
+        assert_eq!(xref_status(&app, &name), "unloaded");
+        assert_eq!(
+            referenced_entity_count(&app, host, record),
+            0,
+            "the unloaded reference's merged geometry is hidden"
+        );
+    }
+
+    /// M074: reloading clears the unloaded status and restores the geometry.
+    #[test]
+    fn xref_reload_reports_status_and_restores_geometry() {
+        let (mut app, _source, host, record, name) = m074_host("m074-reload");
+        let _ = app.run_command_line(&format!("XREF Unload {name}"));
+        assert_eq!(xref_status(&app, &name), "unloaded");
+
+        let _ = app.run_command_line(&format!("XREF Reload {name}"));
+        let out = out_text(&app);
+        assert!(out.contains("Reloaded"), "{out}");
+        assert_eq!(xref_status(&app, &name), "loaded");
+        assert_eq!(
+            referenced_entity_count(&app, host, record),
+            1,
+            "the reloaded reference's geometry is back"
+        );
+    }
+
+    /// M074: a source that disappears is reported not-found, on demand.
+    #[test]
+    fn xref_status_reports_a_missing_source() {
+        let (mut app, source, _host, _record, name) = m074_host("m074-missing");
+        assert_eq!(xref_status(&app, &name), "loaded");
+
+        std::fs::remove_file(&source).expect("the source file is removed");
+        let _ = app.run_command_line("XREF ?");
+        let out = out_text(&app);
+        assert!(out.contains("Not found"), "{out}");
+        assert!(out.contains("not found"), "{out}");
+        assert_eq!(xref_status(&app, &name), "not_found");
+    }
 }

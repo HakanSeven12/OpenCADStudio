@@ -780,7 +780,6 @@ pub fn tessellate_text_run(
     const OVER_Y: f32 = 10.5;
     const STRIKE_Y: f32 = 4.5;
 
-    let toks = tokenize_run(text);
     let ttf_family = face.ttf_family();
     let shaping_family = ttf_family.or_else(|| {
         crate::scene::text::web_font::requires_shaping(text)
@@ -803,6 +802,30 @@ pub fn tessellate_text_run(
             fill_tris.push(xform(v[0], v[1], cx));
         }
     };
+
+    if let Some(family) = shaping_family {
+        if !text.contains(['\\', '%', crate::scene::text::ttf_glyph::LRM]) {
+            if let Some(run) = crate::scene::text::ttf_glyph::shape_run(family, text) {
+                let contour_count = run
+                    .glyphs
+                    .iter()
+                    .flat_map(|glyph| &glyph.strokes)
+                    .filter(|stroke| stroke.len() >= 2)
+                    .count();
+                let triangle_points: usize =
+                    run.glyphs.iter().map(|glyph| glyph.fill_tris.len()).sum();
+                out.reserve(contour_count);
+                fill_tris.reserve(triangle_points);
+                for g in &run.glyphs {
+                    emit_glyph(&mut out, &g.strokes, 0.0);
+                    emit_fill(&mut fill_tris, &g.fill_tris, 0.0);
+                }
+                return (out, fill_tris);
+            }
+        }
+    }
+
+    let toks = tokenize_run(text);
 
     // Flush a buffered TTF segment: shape it, emit the positioned glyph
     // contours, and advance the pen by the shaped run width. Falls back to

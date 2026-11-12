@@ -15009,15 +15009,54 @@ impl Scene {
                     *slot.insert(self.document.layers.get(e.common().layer.as_str()))
                 }
             };
+        let has_temporary_hidden = self.object_isolation.is_active()
+            || !self.preview_hidden.is_empty()
+            || !self.command_preview_hidden.is_empty()
+            || !self.hidden_dynamic_dimensions.is_empty();
         let visibility_ok = |e: &'doc EntityType| {
-            self.resident_entity_visible_with_layer(
-                e,
-                block_handle,
-                frozen_layers,
-                annotation_scale_handle,
-                all_visible,
-                layer_for(e),
-            )
+            let c = e.common();
+            if c.invisible && self.display_entity_invisible(c) {
+                return false;
+            }
+            if has_temporary_hidden && self.entity_temporarily_hidden(c.handle) {
+                return false;
+            }
+            if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+                return false;
+            }
+            let layer = layer_for(e);
+            if layer
+                .map(|l| l.flags.off || l.flags.frozen)
+                .unwrap_or(false)
+            {
+                return false;
+            }
+            if self.layer_walk_hidden(layer) {
+                return false;
+            }
+            if let Some(frozen) = frozen_layers {
+                if !frozen.is_empty() {
+                    if frozen.contains(&c.handle) {
+                        return false;
+                    }
+                    if let Some(lh) = layer.map(|l| l.handle) {
+                        if frozen.contains(&lh) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            if !all_visible
+                && crate::scene::annotative::annotative_offscale_for(
+                    &self.document,
+                    c,
+                    annotation_scale_handle,
+                    all_visible,
+                )
+            {
+                return false;
+            }
+            self.belongs_to_visible_block(c.handle, c.owner_handle, block_handle)
         };
 
         let sort_cache_ms = crate::perf::elapsed_ms(t_fn);

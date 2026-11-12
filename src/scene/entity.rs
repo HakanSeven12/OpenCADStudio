@@ -2508,6 +2508,14 @@ impl Scene {
         include_preview_hidden: bool,
         plot_only: bool,
     ) -> Vec<(Handle, HatchModel)> {
+        // Only fills placed through a block reference come out of this walk;
+        // with no hatch in any block definition there are none, and the walk
+        // of every object in the space would find nothing.
+        if !crate::scene::render_graph::any_block_definition_holds(document, |entity| {
+            matches!(entity, EntityType::Hatch(_))
+        }) {
+            return Vec::new();
+        }
         let constraint_display = (!plot_only
             && self.constraint_shading_active()
             && self.block_edit_block == Some(layout_block))
@@ -2757,6 +2765,15 @@ impl Scene {
         plot_only: bool,
         viewport: Option<Handle>,
     ) -> Vec<HatchModel> {
+        // Without a single mask in the drawing there is nothing to place;
+        // skip the walk of every object in the space.
+        if !self
+            .document
+            .entities()
+            .any(|entity| matches!(entity, EntityType::Wipeout(_)))
+        {
+            return Vec::new();
+        }
         let depth_map = self.draw_depth_map();
         let visibility_reveal = if plot_only {
             rustc_hash::FxHashSet::default()

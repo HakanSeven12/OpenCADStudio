@@ -1265,6 +1265,27 @@ pub fn block_contains_hatch(
     })
 }
 
+/// Whether any block definition (a block record that is not a layout)
+/// directly holds an entity of the kind. Nesting only places what some
+/// definition holds, so when none does no reference in the drawing can
+/// place such an entity: walks that look only for those leaves inside
+/// blocks can be skipped.
+pub fn any_block_definition_holds(
+    document: &Document,
+    is_kind: impl Fn(&EntityType) -> bool,
+) -> bool {
+    document
+        .block_records
+        .iter()
+        .filter(|record| !record.is_layout())
+        .any(|record| {
+            record
+                .entity_handles
+                .iter()
+                .any(|&handle| document.get_entity(handle).is_some_and(&is_kind))
+        })
+}
+
 /// Whether the block, or a block it nests, holds a WIPEOUT mask.
 pub fn block_contains_wipeout(
     document: &Document,
@@ -1379,6 +1400,34 @@ mod tests {
         assert_eq!(leaves(&document), 1);
         document.layers.get_mut("0").unwrap().flags.frozen = true;
         assert_eq!(leaves(&document), 0);
+    }
+
+    /// Only block definitions count: an object of the kind in model space
+    /// does not make a reference able to place one.
+    #[test]
+    fn any_block_definition_holds_ignores_layouts() {
+        use document::entities::{Circle, Line};
+        use document::tables::BlockRecord;
+        let mut document = Document::new();
+        document
+            .add_entity(EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 1.0)))
+            .unwrap();
+        let mut record = BlockRecord::new("ARROW");
+        record.handle = document.allocate_handle();
+        let block = record.handle;
+        document.block_records.add(record).unwrap();
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.owner_handle = block;
+        document.add_entity(EntityType::Line(line)).unwrap();
+
+        assert!(any_block_definition_holds(&document, |entity| matches!(
+            entity,
+            EntityType::Line(_)
+        )));
+        assert!(!any_block_definition_holds(&document, |entity| matches!(
+            entity,
+            EntityType::Circle(_)
+        )));
     }
 
     #[test]

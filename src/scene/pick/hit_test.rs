@@ -1245,6 +1245,14 @@ fn mesh_vert(hi: [f32; 3], low: &[[f32; 3]], i: usize) -> glam::DVec3 {
     )
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Mesh vertices projected to the screen by the box and lasso tests, so a
+    /// test can tell how many solids a selection had to look into.
+    pub(crate) static MESH_VERTS_PROJECTED: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 /// Project a mesh's vertices to screen space. `None` for a vertex the eye-plane
 /// guard rejects: its raw projection would be a mirrored pixel that the box or
 /// lasso must not reach (#64).
@@ -1255,6 +1263,8 @@ fn project_mesh_verts(
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> Vec<Option<Point>> {
+    #[cfg(test)]
+    MESH_VERTS_PROJECTED.with(|count| count.set(count.get() + mesh.verts.len()));
     mesh.verts
         .iter()
         .enumerate()

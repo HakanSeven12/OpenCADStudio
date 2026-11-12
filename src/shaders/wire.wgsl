@@ -12,8 +12,8 @@
 //     (distance_a, distance_b) by `which_end`.
 //   • pattern_length > 0 enables the dash test; 0 = solid (no discard).
 //   • pat0/pat1 encode up to 8 elements: positive=dash, negative=gap,
-//     exactly 0=dot (rendered as a fixed ~1 px mark). Trailing 0.0 slots are
-//     padding; the real element count is (index of last non-zero) + 1.
+//     exactly 0=dot (rendered round at the stroke's width). Trailing 0.0 slots
+//     are padding; the real element count is (index of last non-zero) + 1.
 
 struct Uniforms {
     viewport_size:    vec2<f32>,
@@ -107,6 +107,8 @@ struct VertexOut {
     @location(8)                    cap:            vec2<f32>,
     // (segment pixel length, end half-width at A, end half-width at B).
     @location(9) @interpolate(flat) cap_ends:       vec3<f32>,
+    // Dot half-width and signed across distance, both in world units.
+    @location(10)                   dot:            vec2<f32>,
 }
 
 // Half-width of one segment end: a tapered band's own end width wins, then a
@@ -191,6 +193,7 @@ fn front_t(w: f32, other: f32) -> f32 {
     var out_dist: f32;
     var out_cap: vec2<f32>;
     var out_cap_ends: vec3<f32>;
+    var out_dot: vec2<f32>;
 
     if is_world {
         // Wide polylines have physical world-unit width (in.misc.w or in.taper > 0).
@@ -237,6 +240,7 @@ fn front_t(w: f32, other: f32) -> f32 {
         out_dist = mix(in.dists.x, in.dists.y, which_end) + along * (in.dists.y - in.dists.x) / max(world_len, 1e-6);
         out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
         out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+        out_dot = vec2<f32>(max(cur_world_hw, 0.75 * u.world_per_pixel), eff_hw * side);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
         let raw_a = u.view_rot * vec4<f32>(rel_a, 1.0);
@@ -275,6 +279,7 @@ fn front_t(w: f32, other: f32) -> f32 {
         out_dist = mix(in.dists.x, in.dists.y, mix(t_a, 1.0 - t_b, which_end)) + ext * hw * u.world_per_pixel;
         out_cap = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
         out_cap_ends = vec3<f32>(seg_len, hw, hw);
+        out_dot = vec2<f32>(max(hw, 0.75) * u.world_per_pixel, hw * side * u.world_per_pixel);
     }
 
     // Smallest non-zero dash / gap element, in world units. Used by
@@ -299,6 +304,7 @@ fn front_t(w: f32, other: f32) -> f32 {
     out.distance       = out_dist;
     out.cap            = out_cap;
     out.cap_ends       = out_cap_ends;
+    out.dot            = out_dot;
     out.pattern_length = in.dists.w * lt_scale;
     out.pat0           = in.pat0 * lt_scale;
     out.pat1           = in.pat1 * lt_scale;
@@ -313,7 +319,7 @@ fn front_t(w: f32, other: f32) -> f32 {
 }
 
 // Returns true if arc-length `dist` falls inside a dash or on a dot.
-fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32, align_total: f32) -> bool {
+fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32, align_total: f32, dot: vec2<f32>) -> bool {
     let elems = array<f32, 8>(p0.x, p0.y, p0.z, p0.w, p1.x, p1.y, p1.z, p1.w);
     // Real element count = (index of last non-zero) + 1. Trailing 0.0 slots
     // are padding; a 0.0 within this range is a real dot.
@@ -352,18 +358,15 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
     }
 
     var pos = 0.0f;
-    // A dot is a zero-length element: render it as a fixed ~1.5 px mark
-    // (half-width ~0.75 px in world units) so it stays visible at any zoom
-    // instead of vanishing with its zero world-length. Mirrors the hatch
-    // shader's pixel-snapped dot. (#149)
-    let dot_half = u.world_per_pixel * 0.75;
     for (var i = 0u; i < count; i++) {
         let elem = elems[i];
         if elem == 0.0 {
-            // Dot centred at `pos` (zero length); light a small mark, wrapped
-            // around the pattern so a dot at 0 also covers the seam at pat_len.
+            // A zero-length element is a round dot with the stroke's own
+            // half-width (and a hairline-sized minimum). Include the fragment's
+            // across distance so a weighted line gets a circle, not a rectangle.
             let dd = abs(d - pos);
-            if min(dd, pat_len - dd) <= dot_half { return true; }
+            let along = min(dd, pat_len - dd);
+            if along * along + dot.y * dot.y <= dot.x * dot.x { return true; }
         } else if elem > 0.0 {
             if d >= pos && d < pos + elem { return true; }   // inside a dash
             pos += elem;
@@ -402,7 +405,7 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         // test and return solid colour — also saves the per-fragment
         // arc-length math + `discard`.
         if in.min_elem >= u.world_per_pixel {
-            if !in_dash(in.distance, in.pattern_length, in.pat0, in.pat1, in.align_end, in.align_total) {
+            if !in_dash(in.distance, in.pattern_length, in.pat0, in.pat1, in.align_end, in.align_total, in.dot) {
                 discard;
             }
         }
@@ -424,7 +427,7 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
     }
     if in.pattern_length > 0.0 {
         if in.min_elem >= u.world_per_pixel {
-            if !in_dash(in.distance, in.pattern_length, in.pat0, in.pat1, in.align_end, in.align_total) {
+            if !in_dash(in.distance, in.pattern_length, in.pat0, in.pat1, in.align_end, in.align_total, in.dot) {
                 discard;
             }
         }

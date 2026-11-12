@@ -1540,6 +1540,7 @@ impl OpenCADStudio {
                             block_name: block_name.clone(),
                             block_opts: block_opts.clone(),
                             user_blocks: user_blocks.clone(),
+                            unit: if doc.header.measurement == 1 { 4.0 } else { 0.18 },
                         },
                         flow,
                     )

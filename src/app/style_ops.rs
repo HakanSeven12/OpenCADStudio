@@ -1190,6 +1190,36 @@ impl OpenCADStudio {
         });
     }
 
+    /// A child manager's Apply: its changes stay staged in the parent's
+    /// transaction (one undo step when the parent closes) and become what
+    /// the child's Close keeps. `false` when there is no parent.
+    pub(super) fn style_stage_child_apply(&mut self) -> bool {
+        let Some(parent) = self.style_parent_stage.as_mut() else {
+            return false;
+        };
+        if let Some(child) = self.style_stage.take() {
+            // The parent keeps each entity as it was before either opened.
+            for (handle, before) in child.entities {
+                parent.entities.entry(handle).or_insert(before);
+            }
+            self.style_stage = Some(StyleStage {
+                dirty_at_open: child.dirty_at_open,
+                baseline: self.capture_style_state(child.linetypes),
+                entities: FxHashMap::default(),
+                linetypes: child.linetypes,
+            });
+        }
+        self.sync_ribbon_styles();
+        true
+    }
+
+    /// A child manager closes: what it did not apply is taken back and the
+    /// parent's transaction goes on.
+    pub(super) fn style_stage_child_close(&mut self) {
+        self.style_stage_discard();
+        self.style_stage = self.style_parent_stage.take();
+    }
+
     /// Discard staged changes (window closed without Apply): restore the
     /// snapshot taken when the manager opened.
     pub(super) fn style_stage_discard(&mut self) {

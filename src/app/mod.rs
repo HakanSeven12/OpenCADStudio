@@ -2074,6 +2074,10 @@ pub(super) struct OpenCADStudio {
     /// in-dialog preview but only persist on Apply; closing without Apply
     /// restores this snapshot. `None` when no style manager is staging.
     style_stage: Option<style_ops::StyleStage>,
+    /// The transaction of the manager a child manager was opened from (the
+    /// Text Style manager from the multileader style window): it goes on
+    /// when the child closes.
+    style_parent_stage: Option<style_ops::StyleStage>,
     style_import: Option<update::style_import::StyleImportDraft>,
 
     // ── TextStyle Font Browser ────────────────────────────────────────────
@@ -6890,6 +6894,7 @@ impl OpenCADStudio {
             style_rename_buf: String::new(),
             style_rename_kind: None,
             style_stage: None,
+            style_parent_stage: None,
             style_import: None,
             textstyle_selected: "Standard".to_string(),
             textstyle_counts: Default::default(),

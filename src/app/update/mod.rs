@@ -221,7 +221,7 @@ impl OpenCADStudio {
         }
         // The Text Style manager opened from the multileader style window
         // returns to it.
-        if self.active_modal == Some(TextStyle) && self.mls.parked.is_some() {
+        if self.active_modal == Some(TextStyle) && self.style_parent_stage.is_some() {
             self.mleader_style_back_from_text_styles();
             return;
         }
@@ -15229,6 +15229,7 @@ impl OpenCADStudio {
                 self.on_mleader_style_set_enum(field, value)
             }
             Message::MLeaderStyleLineWeightChanged(line_weight) => {
+                self.mls_color_open = None;
                 let i = self.active_tab;
                 if let Some(s) = self.mleaderstyle_mut(i) {
                     s.line_weight = line_weight;

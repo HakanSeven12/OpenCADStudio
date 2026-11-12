@@ -739,7 +739,11 @@ impl OpenCADStudio {
             return Task::none();
         }
         self.flush_textstyle_draft();
-        self.style_stage_commit();
+        // Opened from another manager, Apply keeps the changes in that
+        // manager's transaction.
+        if !self.style_stage_child_apply() {
+            self.style_stage_commit();
+        }
         // Re-base the draft on the stored values so a second Apply is a no-op.
         self.load_textstyle_draft(self.active_tab);
         Task::none()

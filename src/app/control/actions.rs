@@ -2975,8 +2975,11 @@ impl OpenCADStudio {
             // "handle=<field>:<name|other>" (line_type_handle,
             // arrowhead_handle, text_style_handle, block_content_handle),
             // "lineweight=<1/100 mm|-1|-2|-3>", "constraint=<key>:0|1",
-            // "scale_layout=0|1", "color_list=<field>", "pick=<name>",
-            // "pick_ok", "pick_cancel", "pick_load", "default_text",
+            // "scale_layout=0|1", "color_list=<field>" (line_color,
+            // text_color, block_color, line_type, line_weight),
+            // "pick=<name>", "pick_ok", "pick_cancel", "pick_load",
+            // "load_file", "load_toggle=<linetype>", "load_ok", "load_cancel",
+            // "default_text",
             // "text_styles", "ok", "cancel".
             "mleader_style_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::MLeaderStyle) {
@@ -3077,12 +3080,22 @@ impl OpenCADStudio {
                     )),
                     "scale_layout" => dlg(M::ScaleToLayout(value == "1")),
                     "color_list" => {
-                        Message::MLeaderColorMore(known(&["line_color", "text_color", "block_color"])?)
+                        Message::MLeaderColorMore(known(&[
+                            "line_color",
+                            "text_color",
+                            "block_color",
+                            "line_type",
+                            "line_weight",
+                        ])?)
                     }
                     "pick" => dlg(M::PickChoice(value.to_string())),
                     "pick_ok" => dlg(M::PickOk),
                     "pick_cancel" => dlg(M::PickCancel),
                     "pick_load" => dlg(M::PickLoad),
+                    "load_file" => dlg(M::LoadFile),
+                    "load_toggle" => dlg(M::LoadToggle(value.to_string())),
+                    "load_ok" => dlg(M::LoadOk),
+                    "load_cancel" => dlg(M::LoadCancel),
                     "default_text" => dlg(M::DefaultText),
                     "text_styles" => dlg(M::TextStyles),
                     "ok" => dlg(M::Ok),

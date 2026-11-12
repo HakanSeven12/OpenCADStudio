@@ -7,7 +7,7 @@
 
 use crate::app::{Message, ModalKind, OpenCADStudio, StyleKind};
 use crate::ui::style::mleaderstyle::{
-    field_id, field_tab, trim_number, CreateDraft, MlsMsg, Modify, Notice, Pick, OTHER,
+    field_id, field_tab, trim_number, CreateDraft, LoadDraft, MlsMsg, Modify, Notice, Pick, OTHER,
 };
 use document::objects::{
     BlockContentConnectionType, LeaderContentType, MultiLeaderPathType, MultiLeaderStyle,
@@ -195,7 +195,8 @@ impl OpenCADStudio {
         self.mls_color_open = None;
         self.load_mleaderstyle_bufs(i);
         self.active_modal = Some(ModalKind::MLeaderStyle);
-        self.style_stage_begin();
+        // Linetypes loaded from Select Linetype belong to the session too.
+        self.style_stage_begin_linetypes();
         Task::none()
     }
 
@@ -458,6 +459,7 @@ impl OpenCADStudio {
     pub(super) fn mleader_style_close_face(&mut self) -> bool {
         if self.mls.notice.take().is_some()
             || self.mls.delete_ask.take().is_some()
+            || self.mls.load.take().is_some()
             || self.mls.pick.take().is_some()
             || self.mls.create.take().is_some()
         {
@@ -481,21 +483,10 @@ impl OpenCADStudio {
         self.style_stage = None;
     }
 
-    /// The text style manager opened from Modify closed: Modify comes back
-    /// with the style as it was being edited.
+    /// The Text Style manager opened from Modify closed: what it did not
+    /// apply is taken back and Modify comes back in the same transaction.
     pub(super) fn mleader_style_back_from_text_styles(&mut self) {
-        self.style_stage_discard();
-        self.style_stage_begin();
-        let i = self.active_tab;
-        if let Some(style) = self.mls.parked.take() {
-            self.mleaderstyle_selected = style.name.clone();
-            self.tabs[i]
-                .scene
-                .document
-                .objects
-                .insert(style.handle, ObjectType::MultiLeaderStyle(style));
-            self.after_style_change(StyleKind::MLeader);
-        }
+        self.style_stage_child_close();
         self.active_modal = Some(ModalKind::MLeaderStyle);
         self.reset_modal_geometry();
     }
@@ -652,8 +643,62 @@ impl OpenCADStudio {
                 }
                 None => {}
             },
+            // Load… lists the program's linetypes first; File… picks a
+            // `.lin` file instead.
             MlsMsg::PickLoad => {
-                return Task::perform(crate::io::pick_linetype_file(), Message::LinetypeLoaded);
+                let source = crate::io::linetypes::catalog_source();
+                self.mls.load = Some(LoadDraft {
+                    file: String::new(),
+                    dir: None,
+                    entries: crate::io::linetypes::source_entries(&source),
+                    source,
+                    picked: Vec::new(),
+                });
+            }
+            MlsMsg::LoadFile => {
+                return Task::perform(crate::io::pick_linetype_file(), |picked| {
+                    Message::MLeaderStyleDlg(MlsMsg::LoadFileChosen(picked))
+                });
+            }
+            MlsMsg::LoadFileChosen(Some((dir, source))) => {
+                if let Some(load) = self.mls.load.as_mut() {
+                    load.file = dir
+                        .as_ref()
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default();
+                    load.entries = crate::io::linetypes::source_entries(&source);
+                    load.source = source;
+                    load.dir = dir;
+                    load.picked.clear();
+                }
+            }
+            MlsMsg::LoadFileChosen(None) => {}
+            MlsMsg::LoadToggle(name) => {
+                if let Some(load) = self.mls.load.as_mut() {
+                    if let Some(at) = load.picked.iter().position(|p| p.eq_ignore_ascii_case(&name)) {
+                        load.picked.remove(at);
+                    } else {
+                        load.picked.push(name);
+                    }
+                }
+            }
+            MlsMsg::LoadCancel => self.mls.load = None,
+            MlsMsg::LoadOk => {
+                if let Some(load) = self.mls.load.take() {
+                    let doc = &mut self.tabs[i].scene.document;
+                    crate::io::linetypes::populate_document_named(
+                        doc,
+                        &load.source,
+                        load.dir.as_deref(),
+                        &load.picked,
+                    );
+                    // The last loaded linetype is the one picked.
+                    if let (Some(Pick::Linetype(selected)), Some(last)) =
+                        (self.mls.pick.as_mut(), load.picked.last())
+                    {
+                        *selected = last.clone();
+                    }
+                }
             }
             MlsMsg::PickCancel => self.mls.pick = None,
             MlsMsg::PickOk => {
@@ -794,33 +839,16 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// Text style "…": the window waits while the Text Style manager is
-    /// open. What Modify has changed so far is kept aside, and the drawing
-    /// is left as it was before Modify so the manager works on that.
+    /// Text style "…": the Text Style manager opens as a child of this
+    /// window's transaction, so the whole session stays one undo step.
     fn mleader_style_open_text_styles(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let Some(m) = self.mls.modify.clone() else {
+        if self.mls.modify.is_none() {
             return Task::none();
-        };
-        let Some(edited) = self.mleaderstyle_ref(i).cloned() else {
-            return Task::none();
-        };
-        {
-            let doc = &mut self.tabs[i].scene.document;
-            match m.backup {
-                Some(style) => {
-                    doc.objects.insert(m.handle, ObjectType::MultiLeaderStyle(style));
-                }
-                None => {
-                    crate::app::style_ops::remove_object(doc, m.handle);
-                }
-            }
         }
-        self.after_style_change(StyleKind::MLeader);
-        self.style_stage_commit();
-        self.style_stage = None;
-        self.mls.parked = Some(edited);
         self.mls_color_open = None;
-        self.on_text_style_dialog_open()
+        let parent = self.style_stage.take();
+        let task = self.on_text_style_dialog_open();
+        self.style_parent_stage = parent;
+        task
     }
 }

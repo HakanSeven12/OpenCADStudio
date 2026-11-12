@@ -46,8 +46,21 @@ pub struct Dialog {
     pub delete_ask: Option<String>,
     /// A chooser opened from a list's last entry.
     pub pick: Option<Pick>,
-    /// The style as edited while the Text Style manager is open from Modify.
-    pub parked: Option<MultiLeaderStyle>,
+    /// The Load Linetypes window over Select Linetype.
+    pub load: Option<LoadDraft>,
+}
+
+/// The linetypes of a `.lin` source offered for loading.
+#[derive(Debug, Clone)]
+pub struct LoadDraft {
+    /// The file shown (empty: the program's own definitions).
+    pub file: String,
+    pub dir: Option<std::path::PathBuf>,
+    pub source: String,
+    /// Name, description and dash lengths, in file order.
+    pub entries: Vec<(String, String, Vec<f64>)>,
+    /// The names ticked for loading.
+    pub picked: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +124,12 @@ pub enum MlsMsg {
     ScaleToLayout(bool),
     PickChoice(String),
     PickLoad,
+    /// Load Linetypes: choose another `.lin` file.
+    LoadFile,
+    LoadFileChosen(Option<(Option<std::path::PathBuf>, String)>),
+    LoadToggle(String),
+    LoadOk,
+    LoadCancel,
     PickOk,
     PickCancel,
     DefaultText,
@@ -341,6 +360,9 @@ pub struct View<'a> {
     pub block_opts: Vec<String>,
     /// The drawing's blocks a user arrow or content block can be.
     pub user_blocks: Vec<String>,
+    /// The drawing's usual text height (metric 2.5-based styles 4, imperial
+    /// 0.18): the preview's yardstick for the style's sizes.
+    pub unit: f64,
 }
 
 pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
@@ -370,6 +392,8 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
             Some((delete_card(name), msg(MlsMsg::DeleteAnswer(false))))
         } else if let Some(draft) = &v.dialog.create {
             Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
+        } else if let Some(load) = &v.dialog.load {
+            Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
         } else {
             v.dialog
                 .pick
@@ -879,6 +903,222 @@ fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
     }
 }
 
+fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
+    let file = if load.file.is_empty() {
+        tr!("mleader-style", "program-linetypes")
+    } else {
+        load.file.clone()
+    };
+    let rows: Vec<Element<'a, Message>> = load
+        .entries
+        .iter()
+        .map(|(name, description, pattern)| {
+            let loaded = v
+                .linetype_opts
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(name));
+            let on = loaded || load.picked.iter().any(|p| p.eq_ignore_ascii_case(name));
+            let caption = if loaded {
+                tr!("mleader-style", "already-loaded", name = name.clone())
+            } else {
+                name.clone()
+            };
+            let cell = container(
+                row![
+                    crate::ui::icons::themed_check_cell(on),
+                    text(caption).size(11).width(Length::Fixed(170.0)),
+                    canvas(PatternSample {
+                        pattern: pattern.clone(),
+                    })
+                    .width(Length::Fixed(110.0))
+                    .height(Length::Fixed(14.0)),
+                    text(description.clone())
+                        .size(11)
+                        .wrapping(iced::advanced::text::Wrapping::None),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .padding([3, 8])
+            .width(Fill);
+            let area = mouse_area(cell);
+            if loaded {
+                area.into()
+            } else {
+                area.on_press(msg(MlsMsg::LoadToggle(name.clone()))).into()
+            }
+        })
+        .collect();
+    let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(260.0)))
+        .padding(2)
+        .width(Fill)
+        .style(preview_style);
+    let body = column![
+        text(tr!("mleader-style", "load-title"))
+            .size(13)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        row![
+            text(tr!("mleader-style", "file")).size(11).style(muted_style),
+            text(file).size(11).width(Fill),
+            dialog_button(tr!("mleader-style", "choose-file"), msg(MlsMsg::LoadFile), false),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        text(tr!("mleader-style", "available-linetypes"))
+            .size(11)
+            .style(muted_style),
+        list,
+        row![
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::LoadCancel), false),
+            crate::ui::style::form::dialog_button_styled_opt(
+                tr!("mleader-style", "ok"),
+                (!load.picked.is_empty()).then(|| msg(MlsMsg::LoadOk)),
+                button::primary,
+            ),
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+    ]
+    .spacing(8);
+    panel(body.into(), 600.0)
+}
+
+/// A lineweight drawn as a line that thick (thin for the By… values).
+struct WeightSample {
+    width: f32,
+}
+
+impl canvas::Program<Message> for WeightSample {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let y = bounds.height * 0.5;
+        frame.stroke(
+            &canvas::Path::line(Point::new(2.0, y), Point::new(bounds.width - 2.0, y)),
+            canvas::Stroke::default()
+                .with_color(theme.palette().background.base.text)
+                .with_width(self.width),
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+fn weight_sample<'a>(weight: document::types::LineWeight) -> Element<'a, Message> {
+    // Hundredths of a millimetre at 96 px per inch, at least a pixel.
+    let width = match weight {
+        document::types::LineWeight::Value(v) => (f32::from(v) / 100.0 * 96.0 / 25.4).max(1.0),
+        _ => 1.0,
+    }
+    .min(8.0);
+    canvas(WeightSample { width })
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(12.0))
+        .into()
+}
+
+fn pattern_sample<'a>(pattern: Vec<f64>) -> Element<'a, Message> {
+    canvas(PatternSample { pattern })
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(12.0))
+        .into()
+}
+
+/// A list whose entries show a line sample beside their names (linetypes,
+/// lineweights), opened and closed like the colour lists.
+fn sample_selector<'a>(
+    caption: String,
+    current: (Element<'a, Message>, String),
+    entries: Vec<(Element<'a, Message>, String, Message)>,
+    field: &'static str,
+    open: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+    let (sample, name) = current;
+    let control: Element<'a, Message> = if !enabled {
+        container(
+            row![sample, text(name).size(11).style(muted_style)]
+                .spacing(6)
+                .align_y(iced::Center),
+        )
+        .padding([4, 8])
+        .width(Fill)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weak.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+    } else {
+        let head = button(
+            row![
+                sample,
+                text(name).size(11),
+                Space::new().width(Fill),
+                crate::ui::icons::themed_arrow_toggle(open, 9.0),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        )
+        .on_press(Message::MLeaderColorMore(field))
+        .style(button_style(false))
+        .padding([3, 8])
+        .width(Fill);
+        if open {
+            let rows: Vec<DropdownRow<'a, Message>> = entries
+                .into_iter()
+                .map(|(sample, label, message)| {
+                    let element: Element<'a, Message> = button(
+                        row![sample, text(label.clone()).size(11)]
+                            .spacing(6)
+                            .align_y(iced::Center),
+                    )
+                    .on_press(message.clone())
+                    .style(crate::ui::color_select::list_row_style)
+                    .padding([2, 4])
+                    .width(Fill)
+                    .into();
+                    DropdownRow::item(element, label, message)
+                })
+                .collect();
+            let popup = container(DropdownList::with_options(
+                rows,
+                Length::Shrink,
+                Length::Fill,
+                1.0,
+                0.0,
+            ))
+            .style(crate::ui::color_select::popup_panel_style)
+            .padding(2);
+            crate::ui::drop_down_fit::drop_down_fit(
+                iced_aw::DropDown::new(head, popup, true)
+                    .alignment(iced_aw::drop_down::Alignment::Bottom)
+                    .offset(2.0)
+                    .on_dismiss(Message::MLeaderColorMore(field)),
+            )
+        } else {
+            head.into()
+        }
+    };
+    row![label(caption), container(control).width(Length::Fixed(FIELD))]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+}
+
 /// A linetype's dash pattern drawn across its cell.
 struct PatternSample {
     pattern: Vec<f64>,
@@ -1090,29 +1330,66 @@ fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Mess
         .find(|c| c.code == type_code)
         .cloned()
         .unwrap_or_else(|| types[0].clone());
-    let mut linetypes: Vec<Choice> = v
+    let pattern_of = |name: &str| -> Vec<f64> {
+        v.linetypes
+            .iter()
+            .find(|row| row.name.eq_ignore_ascii_case(name))
+            .map(|row| row.pattern.clone())
+            .unwrap_or_default()
+    };
+    let mut linetype_entries: Vec<(Element<'a, Message>, String, Message)> = v
         .linetype_opts
         .iter()
-        .map(|name| choice(name.clone(), record_label(name)))
+        .map(|name| {
+            (
+                pattern_sample(pattern_of(name)),
+                record_label(name),
+                Message::MLeaderStyleSetHandle {
+                    field: "line_type_handle",
+                    value: name.clone(),
+                },
+            )
+        })
         .collect();
-    linetypes.push(choice(OTHER, tr!("mleader-style", "other")));
-    let linetype = choice(v.line_type_name.clone(), record_label(&v.line_type_name));
-    let lineweight: Element<'a, Message> = {
-        let mut list = crate::ui::dropdown_list::pick_list(
-            Some(crate::ui::properties::LwItem(style.line_weight)),
-            crate::ui::properties::lw_options(),
-            |value| value.to_string(),
-        )
-        .text_size(11)
-        .width(Length::Fixed(FIELD));
-        if leader {
-            list = list.on_select(|item| Message::MLeaderStyleLineWeightChanged(item.0));
-        }
-        row![label(tr!("mleader-style", "lineweight")), list]
-            .spacing(8)
-            .align_y(iced::Center)
-            .into()
-    };
+    linetype_entries.push((
+        Space::new().width(48).into(),
+        tr!("mleader-style", "other"),
+        Message::MLeaderStyleSetHandle {
+            field: "line_type_handle",
+            value: OTHER.to_string(),
+        },
+    ));
+    let linetype = sample_selector(
+        tr!("mleader-style", "linetype"),
+        (
+            pattern_sample(pattern_of(&v.line_type_name)),
+            record_label(&v.line_type_name),
+        ),
+        linetype_entries,
+        "line_type",
+        v.color_open == Some("line_type"),
+        leader,
+    );
+    let lineweight = sample_selector(
+        tr!("mleader-style", "lineweight"),
+        (
+            weight_sample(style.line_weight),
+            crate::ui::properties::LwItem(style.line_weight).to_string(),
+        ),
+        crate::ui::properties::lw_options()
+            .into_iter()
+            .map(|item| {
+                (
+                    weight_sample(item.0),
+                    item.to_string(),
+                    Message::MLeaderStyleLineWeightChanged(item.0),
+                )
+            })
+            .collect(),
+        "line_weight",
+        v.color_open == Some("line_weight"),
+        leader,
+    );
     let mut arrows: Vec<Choice> = v
         .arrow_opts
         .iter()
@@ -1141,16 +1418,7 @@ fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Mess
                     v.color_open == Some("line_color"),
                     leader
                 ),
-                choice_row(
-                    tr!("mleader-style", "linetype"),
-                    linetypes,
-                    linetype,
-                    leader,
-                    |code| Message::MLeaderStyleSetHandle {
-                        field: "line_type_handle",
-                        value: code
-                    }
-                ),
+                linetype,
                 lineweight,
             ]
             .spacing(8)
@@ -1771,6 +2039,24 @@ struct LeaderPreview {
     vertical: bool,
     block: String,
     block_color: String,
+    /// Pixels per drawing unit: the drawing's usual text height draws 15 px
+    /// high, times the style's overall scale.
+    px_per_unit: f32,
+    arrow_size: f32,
+    landing_distance: f32,
+    landing_gap: f32,
+    text_height: f32,
+    block_scale: f32,
+}
+
+/// A typed value, or the style's while the field holds no number.
+fn typed(value: &str, stored: f64) -> f32 {
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(stored) as f32
 }
 
 impl LeaderPreview {
@@ -1796,6 +2082,20 @@ impl LeaderPreview {
             vertical: style.text_attachment_direction == TextAttachmentDirectionType::Vertical,
             block: v.block_name.clone(),
             block_color: v.block_color.to_string(),
+            px_per_unit: {
+                let scale = if style.is_annotative || v.dialog.modify.as_ref().is_some_and(|m| m.scale_to_layout) {
+                    1.0
+                } else {
+                    typed(v.scale_factor, style.scale_factor)
+                };
+                let scale = if scale > 0.0 { scale } else { 1.0 };
+                15.0 / v.unit.max(1e-9) as f32 * scale
+            },
+            arrow_size: typed(v.arrowhead_size, style.arrowhead_size),
+            landing_distance: typed(v.landing_distance, style.landing_distance),
+            landing_gap: typed(v.landing_gap, style.landing_gap),
+            text_height: typed(v.text_height, style.text_height),
+            block_scale: typed(v.block_scale, style.block_content_scale_x),
         }
     }
 }
@@ -1817,8 +2117,12 @@ impl canvas::Program<Message> for LeaderPreview {
         let width = (f32::from(self.line_weight.max(0)) / 35.0).clamp(1.0, 4.0);
         let head = Point::new(18.0, bounds.height - 22.0);
         let elbow = Point::new(bounds.width * 0.42, bounds.height * 0.32);
+        let px = |value: f32| value * self.px_per_unit;
         let tail = if self.landing && self.dogleg {
-            Point::new(elbow.x + bounds.width * 0.12, elbow.y)
+            Point::new(
+                elbow.x + px(self.landing_distance).clamp(0.0, bounds.width * 0.5),
+                elbow.y,
+            )
         } else {
             elbow
         };
@@ -1854,7 +2158,7 @@ impl canvas::Program<Message> for LeaderPreview {
                 let len = (dx * dx + dy * dy).sqrt().max(1.0);
                 (dx / len, dy / len)
             };
-            let size = 14.0;
+            let size = px(self.arrow_size).clamp(1.0, bounds.height * 0.5);
             let along = |d: f32, side: f32| {
                 Point::new(
                     head.x + dir.0 * d - dir.1 * side,
@@ -1916,12 +2220,13 @@ impl canvas::Program<Message> for LeaderPreview {
                 }
             }
         }
-        let origin = Point::new(tail.x + 6.0, tail.y);
+        let origin = Point::new(tail.x + px(self.landing_gap).clamp(0.0, bounds.width * 0.5), tail.y);
         match self.content {
             LeaderContentType::Block => {
                 let color = aci_color(&self.block_color, ink);
                 let s = canvas::Stroke::default().with_color(color).with_width(1.4);
-                let r = (bounds.height * 0.16).clamp(14.0, 40.0);
+                // The predefined blocks are a unit across their centre.
+                let r = px(self.block_scale).clamp(1.0, bounds.height * 0.45);
                 let c = Point::new(origin.x + r, origin.y);
                 let shape = match self.block.as_str() {
                     "Box" => canvas::Path::rectangle(
@@ -1960,7 +2265,7 @@ impl canvas::Program<Message> for LeaderPreview {
             }
             LeaderContentType::None => {}
             _ => {
-                let size = 15.0;
+                let size = px(self.text_height).clamp(1.0, bounds.height * 0.6);
                 let color = aci_color(&self.text_color, ink);
                 let width = self.text.chars().count() as f32 * size * 0.55;
                 let (x, y) = if self.vertical {

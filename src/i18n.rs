@@ -233,6 +233,17 @@ fn load_language(
     Ok(())
 }
 
+/// `text` without the Unicode isolation marks Fluent puts around each
+/// placeable: what a translated message gives a name (a style named "Copy of
+/// X") must hold only the characters it shows.
+pub fn plain(text: String) -> String {
+    if text.contains(['\u{2068}', '\u{2069}']) {
+        text.replace(['\u{2068}', '\u{2069}'], "")
+    } else {
+        text
+    }
+}
+
 pub fn loader() -> &'static FluentLanguageLoader {
     static LOADER: OnceLock<FluentLanguageLoader> = OnceLock::new();
     LOADER.get_or_init(|| {

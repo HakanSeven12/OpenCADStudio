@@ -252,9 +252,11 @@ fn annotative_dimension_text_follows_the_scale_once() {
         .header
         .current_dimstyle_name
         .clone();
-    app.load_dimstyle_bufs(i);
-    app.apply_ds_toggle(crate::app::DsField::Annotative);
-    app.apply_dimstyle_bufs(i);
+    let name = app.dimstyle_selected.clone();
+    if let Some(style) = app.tabs[i].scene.document.dim_styles.get_mut(&name) {
+        style.annotative = true;
+        style.dimscale = 0.0;
+    }
     let dimension = place_linear(
         &mut app,
         DVec3::ZERO,

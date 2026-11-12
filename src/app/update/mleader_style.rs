@@ -521,7 +521,7 @@ impl OpenCADStudio {
                 let start = self.mleaderstyle_selected.clone();
                 let annotative = self.mleaderstyle_ref(i).is_some_and(|s| s.is_annotative);
                 self.mls.create = Some(CreateDraft {
-                    name: crate::tr!("mleader-style", "copy-of", name = start.clone()),
+                    name: crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = start.clone())),
                     start_with: start,
                     annotative,
                 });
@@ -544,9 +544,9 @@ impl OpenCADStudio {
                 if let Some(draft) = self.mls.create.as_mut() {
                     // A name still as offered follows the style it copies.
                     let offered =
-                        crate::tr!("mleader-style", "copy-of", name = draft.start_with.clone());
+                        crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = draft.start_with.clone()));
                     if draft.name == offered {
-                        draft.name = crate::tr!("mleader-style", "copy-of", name = start.clone());
+                        draft.name = crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = start.clone()));
                     }
                     draft.start_with = start;
                     draft.annotative = annotative;

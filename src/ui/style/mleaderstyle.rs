@@ -310,7 +310,7 @@ pub fn block_label(name: &str) -> String {
 pub const OTHER: &str = "\u{1}other";
 
 /// `ByLayer` / `ByBlock` in the user's language; other names as they are.
-fn record_label(name: &str) -> String {
+pub(crate) fn record_label(name: &str) -> String {
     match name {
         "ByLayer" | "ByBlock" => crate::t!(name).into_owned(),
         _ => name.to_string(),
@@ -440,7 +440,7 @@ pub fn title(dialog: &Dialog, selected: &str) -> String {
 }
 
 /// A text field that reads as off while it takes no input.
-fn input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+pub(crate) fn input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let mut style = field_style(theme, status);
     if matches!(status, text_input::Status::Disabled) {
         style.value = style.value.scale_alpha(0.45);
@@ -450,7 +450,7 @@ fn input_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
 }
 
 /// The preview's frame: a darker panel than the window.
-fn preview_style(theme: &Theme) -> container::Style {
+pub(crate) fn preview_style(theme: &Theme) -> container::Style {
     let palette = theme.palette();
     container::Style {
         background: Some(Background::Color(palette.background.weak.color)),
@@ -639,7 +639,7 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
 
 // ── Cards over the manager ──────────────────────────────────────────────────
 
-fn panel<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
+pub(crate) fn panel<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
     container(content)
         .padding([16, 18])
         .width(Length::Fixed(width))
@@ -775,17 +775,8 @@ fn delete_card<'a>(name: &'a str) -> Element<'a, Message> {
 }
 
 fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
-    let footer = |load: bool| {
-        let mut left = row![].spacing(6).align_y(iced::Center);
-        if load {
-            left = left.push(dialog_button(
-                tr!("mleader-style", "load"),
-                msg(MlsMsg::PickLoad),
-                false,
-            ));
-        }
+    let footer = || {
         row![
-            left,
             Space::new().width(Fill),
             dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::PickCancel), false),
             dialog_button(tr!("mleader-style", "ok"), msg(MlsMsg::PickOk), true),
@@ -794,77 +785,14 @@ fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
         .align_y(iced::Center)
     };
     match pick {
-        Pick::Linetype(selected) => {
-            let header = row![
-                text(tr!("mleader-style", "linetype"))
-                    .size(10)
-                    .style(muted_style)
-                    .width(Length::Fixed(150.0)),
-                text(tr!("mleader-style", "appearance"))
-                    .size(10)
-                    .style(muted_style)
-                    .width(Length::Fixed(120.0)),
-                text(tr!("mleader-style", "description"))
-                    .size(10)
-                    .style(muted_style),
-            ]
-            .spacing(8)
-            .padding([0, 8]);
-            let rows: Vec<Element<'a, Message>> = v
-                .linetypes
-                .iter()
-                .map(|lt| {
-                    let on = lt.name.eq_ignore_ascii_case(selected);
-                    let cell = container(
-                        row![
-                            text(record_label(&lt.name))
-                                .size(11)
-                                .width(Length::Fixed(150.0)),
-                            canvas(PatternSample {
-                                pattern: lt.pattern.clone(),
-                            })
-                            .width(Length::Fixed(120.0))
-                            .height(Length::Fixed(14.0)),
-                            text(lt.description.clone())
-                                .size(11)
-                                .wrapping(iced::advanced::text::Wrapping::None),
-                        ]
-                        .spacing(8)
-                        .align_y(iced::Center),
-                    )
-                    .padding([4, 8])
-                    .width(Fill)
-                    .style(move |theme: &Theme| {
-                        let pair = theme.palette().primary.strong;
-                        container::Style {
-                            background: on.then_some(Background::Color(pair.color)),
-                            text_color: on.then_some(pair.text),
-                            ..Default::default()
-                        }
-                    });
-                    mouse_area(cell)
-                        .on_press(msg(MlsMsg::PickChoice(lt.name.clone())))
-                        .into()
-                })
-                .collect();
-            let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(220.0)))
-                .padding(2)
-                .width(Fill)
-                .style(crate::ui::window::pdf_dialogs::well_style);
-            let body = column![
-                text(tr!("mleader-style", "linetype-title"))
-                    .size(13)
-                    .style(crate::ui::window::pdf_dialogs::accent_text),
-                text(tr!("mleader-style", "loaded-linetypes"))
-                    .size(11)
-                    .style(muted_style),
-                header,
-                list,
-                footer(true),
-            ]
-            .spacing(8);
-            panel(body.into(), 560.0)
-        }
+        Pick::Linetype(selected) => linetype_card(
+            &v.linetypes,
+            selected,
+            |name| msg(MlsMsg::PickChoice(name)),
+            msg(MlsMsg::PickLoad),
+            msg(MlsMsg::PickCancel),
+            msg(MlsMsg::PickOk),
+        ),
         Pick::UserArrow(selected) | Pick::UserBlock(selected) => {
             let title = if matches!(pick, Pick::UserArrow(_)) {
                 tr!("mleader-style", "arrow-title")
@@ -895,7 +823,7 @@ fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
                     .size(11)
                     .style(muted_style),
                 chooser,
-                footer(false),
+                footer(),
             ]
             .spacing(10);
             panel(body.into(), 420.0)
@@ -903,7 +831,114 @@ fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
     }
 }
 
+/// Select Linetype: the loaded linetypes with their samples, Load… to bring
+/// in more.
+pub(crate) fn linetype_card<'a>(
+    linetypes: &[LinetypeRow],
+    selected: &str,
+    on_pick: impl Fn(String) -> Message,
+    on_load: Message,
+    on_cancel: Message,
+    on_ok: Message,
+) -> Element<'a, Message> {
+    let header = row![
+        text(tr!("mleader-style", "linetype"))
+            .size(10)
+            .style(muted_style)
+            .width(Length::Fixed(150.0)),
+        text(tr!("mleader-style", "appearance"))
+            .size(10)
+            .style(muted_style)
+            .width(Length::Fixed(120.0)),
+        text(tr!("mleader-style", "description"))
+            .size(10)
+            .style(muted_style),
+    ]
+    .spacing(8)
+    .padding([0, 8]);
+    let rows: Vec<Element<'a, Message>> = linetypes
+        .iter()
+        .map(|lt| {
+            let on = lt.name.eq_ignore_ascii_case(selected);
+            let cell = container(
+                row![
+                    text(record_label(&lt.name))
+                        .size(11)
+                        .width(Length::Fixed(150.0)),
+                    canvas(PatternSample {
+                        pattern: lt.pattern.clone(),
+                    })
+                    .width(Length::Fixed(120.0))
+                    .height(Length::Fixed(14.0)),
+                    text(lt.description.clone())
+                        .size(11)
+                        .wrapping(iced::advanced::text::Wrapping::None),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .padding([4, 8])
+            .width(Fill)
+            .style(move |theme: &Theme| {
+                let pair = theme.palette().primary.strong;
+                container::Style {
+                    background: on.then_some(Background::Color(pair.color)),
+                    text_color: on.then_some(pair.text),
+                    ..Default::default()
+                }
+            });
+            mouse_area(cell)
+                .on_press(on_pick(lt.name.clone()))
+                .into()
+        })
+        .collect();
+    let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(220.0)))
+        .padding(2)
+        .width(Fill)
+        .style(crate::ui::window::pdf_dialogs::well_style);
+    let body = column![
+        text(tr!("mleader-style", "linetype-title"))
+            .size(13)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        text(tr!("mleader-style", "loaded-linetypes"))
+            .size(11)
+            .style(muted_style),
+        header,
+        list,
+        row![
+            dialog_button(tr!("mleader-style", "load"), on_load, false),
+            Space::new().width(Fill),
+            dialog_button(tr!("mleader-style", "cancel"), on_cancel, false),
+            dialog_button(tr!("mleader-style", "ok"), on_ok, true),
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+    ]
+    .spacing(8);
+    panel(body.into(), 560.0)
+        }
+
 fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
+    load_linetypes_card(
+        load,
+        &v.linetype_opts,
+        msg(MlsMsg::LoadFile),
+        |name| msg(MlsMsg::LoadToggle(name)),
+        msg(MlsMsg::LoadOk),
+        msg(MlsMsg::LoadCancel),
+    )
+}
+
+/// Load Linetypes: the linetypes of a `.lin` source, ticked for loading;
+/// the drawing's own (`loaded`) shown as already there.
+pub(crate) fn load_linetypes_card<'a>(
+    load: &'a LoadDraft,
+    loaded: &[String],
+    on_file: Message,
+    on_toggle: impl Fn(String) -> Message,
+    on_ok: Message,
+    on_cancel: Message,
+) -> Element<'a, Message> {
     let file = if load.file.is_empty() {
         tr!("mleader-style", "program-linetypes")
     } else {
@@ -913,10 +948,7 @@ fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
         .entries
         .iter()
         .map(|(name, description, pattern)| {
-            let loaded = v
-                .linetype_opts
-                .iter()
-                .any(|known| known.eq_ignore_ascii_case(name));
+            let loaded = loaded.iter().any(|known| known.eq_ignore_ascii_case(name));
             let on = loaded || load.picked.iter().any(|p| p.eq_ignore_ascii_case(name));
             let caption = if loaded {
                 tr!("mleader-style", "already-loaded", name = name.clone())
@@ -945,7 +977,7 @@ fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
             if loaded {
                 area.into()
             } else {
-                area.on_press(msg(MlsMsg::LoadToggle(name.clone()))).into()
+                area.on_press(on_toggle(name.clone())).into()
             }
         })
         .collect();
@@ -960,7 +992,7 @@ fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
         row![
             text(tr!("mleader-style", "file")).size(11).style(muted_style),
             text(file).size(11).width(Fill),
-            dialog_button(tr!("mleader-style", "choose-file"), msg(MlsMsg::LoadFile), false),
+            dialog_button(tr!("mleader-style", "choose-file"), on_file, false),
         ]
         .spacing(8)
         .align_y(iced::Center),
@@ -970,10 +1002,10 @@ fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
         list,
         row![
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::LoadCancel), false),
+            dialog_button(tr!("mleader-style", "cancel"), on_cancel, false),
             crate::ui::style::form::dialog_button_styled_opt(
                 tr!("mleader-style", "ok"),
-                (!load.picked.is_empty()).then(|| msg(MlsMsg::LoadOk)),
+                (!load.picked.is_empty()).then_some(on_ok),
                 button::primary,
             ),
         ]
@@ -1012,7 +1044,7 @@ impl canvas::Program<Message> for WeightSample {
     }
 }
 
-fn weight_sample<'a>(weight: document::types::LineWeight) -> Element<'a, Message> {
+pub(crate) fn weight_sample<'a>(weight: document::types::LineWeight) -> Element<'a, Message> {
     // Hundredths of a millimetre at 96 px per inch, at least a pixel.
     let width = match weight {
         document::types::LineWeight::Value(v) => (f32::from(v) / 100.0 * 96.0 / 25.4).max(1.0),
@@ -1025,7 +1057,7 @@ fn weight_sample<'a>(weight: document::types::LineWeight) -> Element<'a, Message
         .into()
 }
 
-fn pattern_sample<'a>(pattern: Vec<f64>) -> Element<'a, Message> {
+pub(crate) fn pattern_sample<'a>(pattern: Vec<f64>) -> Element<'a, Message> {
     canvas(PatternSample { pattern })
         .width(Length::Fixed(48.0))
         .height(Length::Fixed(12.0))
@@ -1039,6 +1071,21 @@ fn sample_selector<'a>(
     current: (Element<'a, Message>, String),
     entries: Vec<(Element<'a, Message>, String, Message)>,
     field: &'static str,
+    open: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let control = sample_list(current, entries, Message::MLeaderColorMore(field), open, enabled);
+    row![label(caption), container(control).width(Length::Fixed(FIELD))]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+}
+
+/// The list control of [`sample_selector`]: `toggle` opens and closes it.
+pub(crate) fn sample_list<'a>(
+    current: (Element<'a, Message>, String),
+    entries: Vec<(Element<'a, Message>, String, Message)>,
+    toggle: Message,
     open: bool,
     enabled: bool,
 ) -> Element<'a, Message> {
@@ -1073,7 +1120,7 @@ fn sample_selector<'a>(
             .spacing(6)
             .align_y(iced::Center),
         )
-        .on_press(Message::MLeaderColorMore(field))
+        .on_press(toggle.clone())
         .style(button_style(false))
         .padding([3, 8])
         .width(Fill);
@@ -1107,16 +1154,13 @@ fn sample_selector<'a>(
                 iced_aw::DropDown::new(head, popup, true)
                     .alignment(iced_aw::drop_down::Alignment::Bottom)
                     .offset(2.0)
-                    .on_dismiss(Message::MLeaderColorMore(field)),
+                    .on_dismiss(toggle),
             )
         } else {
             head.into()
         }
     };
-    row![label(caption), container(control).width(Length::Fixed(FIELD))]
-        .spacing(8)
-        .align_y(iced::Center)
-        .into()
+    control
 }
 
 /// A linetype's dash pattern drawn across its cell.

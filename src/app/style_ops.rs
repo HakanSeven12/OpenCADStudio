@@ -318,7 +318,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         match kind {
             StyleKind::Text => self.load_textstyle_draft(i),
-            StyleKind::Dim => self.load_dimstyle_bufs(i),
+            StyleKind::Dim => {}
             StyleKind::MLeader => self.load_mleaderstyle_bufs(i),
             StyleKind::Table => self.load_tablestyle_bufs(i),
             StyleKind::MLine => self.load_mlstyle_bufs(i),
@@ -938,6 +938,15 @@ impl OpenCADStudio {
             active_table: self.ribbon.active_table_style.clone(),
             active_mleader: self.ribbon.active_mleader_style.clone(),
             tab_active_mleader: self.tabs[i].active_mleader_style.clone(),
+            dim_overrides: self.tabs[i].scene.dim_overrides.clone(),
+            dim_style_xdata: doc
+                .dim_styles
+                .iter()
+                .filter_map(|style| {
+                    doc.object_xdata(style.handle)
+                        .map(|data| (style.handle, data.clone()))
+                })
+                .collect(),
             linetypes: linetypes.then(|| LinetypeState {
                 table: doc.line_types.clone(),
                 layer_linetypes: doc
@@ -985,6 +994,15 @@ impl OpenCADStudio {
             self.ribbon.active_mleader_style = snap.active_mleader.clone();
         }
         self.tabs[i].active_mleader_style = snap.tab_active_mleader.clone();
+        self.tabs[i].scene.dim_overrides = snap.dim_overrides.clone();
+        // The extended data of the dimension styles (break size, jog
+        // height, DIMTALN) goes back with them.
+        let doc = &mut self.tabs[i].scene.document;
+        for (handle, data) in &snap.dim_style_xdata {
+            for record in data.records() {
+                doc.set_object_xdata_record(*handle, record.clone());
+            }
+        }
         if let Some(state) = &snap.linetypes {
             let scene = &mut self.tabs[i].scene;
             let doc = &mut scene.document;
@@ -1259,6 +1277,9 @@ pub(super) struct StyleStateSnapshot {
     active_table: String,
     active_mleader: String,
     tab_active_mleader: String,
+    /// The current style's overrides for new dimensions.
+    dim_overrides: Option<(String, Vec<(i16, document::xdata::XDataValue)>)>,
+    dim_style_xdata: Vec<(Handle, document::xdata::ExtendedData)>,
     linetypes: Option<LinetypeState>,
 }
 

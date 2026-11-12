@@ -213,6 +213,10 @@ pub struct HatchModel {
     /// catalog name (not an entity handle) in `name`, so plot exports resolve
     /// the fill's drawing layer through this handle.
     pub entity: Option<document::Handle>,
+    /// Fully resolved display/export layer for this occurrence. This is
+    /// placement-specific because one block definition can be inserted on many
+    /// layers; `None` retains the entity-handle fallback for direct hatches.
+    pub effective_layer: Option<std::sync::Arc<str>>,
     /// Recorded hatch origin in its fill plane, independent of intrinsic PAT line bases.
     pub pattern_origin: Option<[f64; 2]>,
     pub render_instance: Option<super::instance_model::RenderInstance>,

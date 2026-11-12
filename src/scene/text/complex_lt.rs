@@ -548,6 +548,7 @@ fn apply_stretched(
             text_verts,
             searchable_text: searchable,
             name: name.to_string(),
+            effective_layer: None,
             points: Vec::new(),
             points_low: Vec::new(),
             color,

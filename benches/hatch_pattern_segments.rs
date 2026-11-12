@@ -35,6 +35,8 @@ fn digest(segments: &[[[f64; 2]; 2]]) -> (u64, usize) {
 
 fn model(boundary: Vec<[f32; 2]>, families: Vec<PatFamily>) -> HatchModel {
     HatchModel {
+        entity: None,
+        effective_layer: None,
         pattern_origin: None,
         render_instance: None,
         // UTM-sized anchor: the rasteriser resolves absolute WCS in f64, so

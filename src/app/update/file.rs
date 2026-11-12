@@ -726,11 +726,9 @@ fn plot_entity_styles(
     styles
 }
 
-/// Drawing layer of every entity the plot draws, keyed by the handle in its
-/// wire or hatch name.
-// ponytail: expanded block geometry carries its INSERT's handle, so a block's
-// children all land on the INSERT's layer; per-child layers need BlockCache to
-// keep the child handle on each wire.
+/// Legacy handle-based layer fallback for direct and synthetic plot items.
+/// Expanded block items carry their placement-specific `effective_layer`;
+/// this map cannot represent one definition inserted on several layers.
 fn plot_entity_layers(
     scene: &crate::scene::Scene,
     wires: &[crate::io::pdf_export::PlotWire],

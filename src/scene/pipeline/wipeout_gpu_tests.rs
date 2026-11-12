@@ -70,6 +70,7 @@ fn thousand_wipeouts_share_bind_groups() {
     let models: Vec<_> = (0..1000)
         .map(|index| HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [index as f64 * 2.0, 0.0],

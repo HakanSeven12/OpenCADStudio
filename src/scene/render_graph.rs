@@ -253,6 +253,21 @@ impl InstanceContext {
         !self.root_handle.is_null()
     }
 
+    /// Display/export layer for one occurrence without changing the source
+    /// entity. Layer 0 defers to the nearest nonzero INSERT ancestor; every
+    /// other layer, including a dependent xref layer, remains its own.
+    pub fn effective_layer(&self, raw_layer: &str) -> String {
+        if !is_effective_layer_zero(raw_layer) {
+            return raw_layer.to_string();
+        }
+        self.insert_path
+            .iter()
+            .rev()
+            .find(|insert| !is_effective_layer_zero(&insert.common.layer))
+            .map_or(raw_layer, |insert| insert.common.layer.as_str())
+            .to_string()
+    }
+
     pub fn style_for(&self, document: &Document, entity: &EntityType) -> ResolvedStyle {
         if self
             .insert_path
@@ -1351,6 +1366,26 @@ mod tests {
 
         assert!((from_insert.x - 12.0).abs() < 1.0e-9);
         assert!((applied.x - 11.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn effective_layer_skips_zero_inserts_and_keeps_dependent_layers() {
+        let mut context = InstanceContext::direct(0.0, None);
+        let mut outer = Insert::new("OUTER", Vector3::ZERO);
+        outer.common.layer = "OUTER_LAYER".into();
+        let mut zero = Insert::new("ZERO", Vector3::ZERO);
+        zero.common.layer = "0".into();
+        let mut inner = Insert::new("INNER", Vector3::ZERO);
+        inner.common.layer = "INNER_LAYER".into();
+
+        context.insert_path = vec![outer, zero];
+        assert_eq!(context.effective_layer("0"), "OUTER_LAYER");
+        assert_eq!(context.effective_layer("XREF|0"), "OUTER_LAYER");
+        assert_eq!(context.effective_layer("XREF|WALLS"), "XREF|WALLS");
+        context.insert_path.push(inner);
+        assert_eq!(context.effective_layer("0"), "INNER_LAYER");
+        context.insert_path.clear();
+        assert_eq!(context.effective_layer("XREF|0"), "XREF|0");
     }
 
     #[test]

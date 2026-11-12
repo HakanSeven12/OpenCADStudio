@@ -480,8 +480,16 @@ pub(crate) fn append_insert_attribute_wires(
                 bg_color,
                 false,
             );
+            let effective_layer = if render::is_effective_layer_zero(&attr.layer)
+                && !render::is_effective_layer_zero(&ins.common.layer)
+            {
+                ins.common.layer.as_str()
+            } else {
+                attr.layer.as_str()
+            };
             for w in &mut attr_wires {
                 w.name = insert_handle.value().to_string();
+                w.effective_layer = Some(std::sync::Arc::from(effective_layer));
                 w.aci = sub_aci;
                 w.aabb = sub_aabb;
                 w.plot_visible &= attr_plottable;

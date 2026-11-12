@@ -2996,6 +2996,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),
+                        effective_layer: None,
                         points: deco_pts,
                         points_low: Vec::new(),
                         color: neutral,

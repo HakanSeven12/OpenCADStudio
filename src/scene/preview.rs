@@ -281,6 +281,7 @@ impl Scene {
         }
         let mut model = HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: origin,

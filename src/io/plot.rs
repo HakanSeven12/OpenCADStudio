@@ -26,6 +26,31 @@ impl std::ops::Deref for PlotWire {
     }
 }
 
+/// Resolve export attribution per occurrence, retaining the handle map for
+/// direct, synthetic, and externally constructed plot models.
+pub(crate) fn wire_layer<'a>(
+    wire: &'a WireModel,
+    entity_layers: &'a std::collections::HashMap<document::Handle, String>,
+) -> Option<&'a str> {
+    wire.effective_layer.as_deref().or_else(|| {
+        crate::scene::Scene::handle_from_wire_name(&wire.name)
+            .and_then(|handle| entity_layers.get(&handle))
+            .map(String::as_str)
+    })
+}
+
+pub(crate) fn hatch_layer<'a>(
+    hatch: &'a HatchModel,
+    entity_layers: &'a std::collections::HashMap<document::Handle, String>,
+) -> Option<&'a str> {
+    hatch.effective_layer.as_deref().or_else(|| {
+        hatch
+            .entity
+            .and_then(|handle| entity_layers.get(&handle))
+            .map(String::as_str)
+    })
+}
+
 /// Decoded image geometry plus inherited block/viewport clip boundaries.
 #[derive(Clone, Debug)]
 pub struct PlotImage {
@@ -117,8 +142,8 @@ pub struct PlotContent {
     pub wipeouts: Vec<HatchModel>,
     pub images: Vec<PlotImage>,
     pub group_splits: PlotGroupSplits,
-    /// Drawing layer of each plotted entity, keyed by the handle its wire or
-    /// hatch name carries; the PDF groups output into one layer per entry.
+    /// Legacy handle-based layer fallback. Per-occurrence `effective_layer`
+    /// metadata takes precedence for expanded block and xref content.
     pub entity_layers: std::collections::HashMap<document::Handle, String>,
     /// Named plot style of each plotted entity (ByLayer and ByBlock already
     /// resolved), keyed like `entity_layers`; a named (STB) table plots each

@@ -136,6 +136,9 @@ pub struct LocalWire {
     pub region_boundary_click: bool,
     pub plot_visible: bool,
     pub plot_l0: bool,
+    /// Raw source layer, retained separately from the outer INSERT handle so
+    /// expansion can resolve placement-specific display/export attribution.
+    pub source_layer: Arc<str>,
     pub hide_unselected: bool,
     /// Set at construction; used to discriminate fill-only GPU batches from
     /// stroke batches in [`StyleKey`]. Derived from
@@ -252,6 +255,7 @@ pub struct NestedRef {
     pub instance_offsets: Vec<[f64; 3]>,
     pub plot_visible: bool,
     pub plot_l0: bool,
+    pub source_layer: Arc<str>,
     /// True when this nested INSERT is itself on a locked layer.
     pub layer_locked: bool,
     /// XCLIP boundary for this nested insert, in the parent defn's local frame
@@ -317,6 +321,8 @@ struct ExpansionPrototypeKey {
     block_name: String,
     linear: [u64; 9],
     insert_style: Vec<u32>,
+    /// Layer-0 attribution is placement metadata, not geometry or style.
+    inherited_layer: Option<Arc<str>>,
     selected: bool,
     is_xref: bool,
     suppress_root_points: bool,
@@ -1066,6 +1072,7 @@ fn build_nested_ref(
         instance_offsets: crate::scene::render_graph::array_offsets(nested_ins),
         plot_visible,
         plot_l0,
+        source_layer: Arc::from(nested_ins.common.layer.as_str()),
         layer_locked: crate::scene::view::render::layer_locked(
             doc,
             &EntityType::Insert(nested_ins.clone()),
@@ -1217,6 +1224,7 @@ fn tessellate_sub_local(
     let walks_whole_path = polyline_path.is_some();
     let complex_lt_scale = (doc.header.linetype_scale * sub.common().linetype_scale) as f32;
 
+    let source_layer: Arc<str> = Arc::from(sub.common().layer.as_str());
     let mut result = Vec::with_capacity(wires_out.len());
     for wire in wires_out {
         // Per-wire point-count cap: a single wire that exceeds this is skipped
@@ -1382,6 +1390,7 @@ fn tessellate_sub_local(
                 && frame_mode.is_none_or(|mode| mode == 1)
                 && (on_l0 || layer_plottable),
             plot_l0: on_l0,
+            source_layer: Arc::clone(&source_layer),
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
             color_is_byblock: wire_color_is_byblock,
@@ -1694,6 +1703,8 @@ pub fn expand_insert(
         l0: ins_layer,
         l0_aci: ins_layer_aci,
         l0_plottable: ins_layer_plottable,
+        inherited_layer: (!crate::scene::view::render::is_effective_layer_zero(&ins.common.layer))
+            .then(|| Arc::from(ins.common.layer.as_str())),
         plot_visible: ins_layer_plottable,
         selected,
         pslt_factor,
@@ -1869,6 +1880,8 @@ fn expansion_prototype_key(
         block_name: ins.block_name.clone(),
         linear,
         insert_style,
+        inherited_layer: (!crate::scene::view::render::is_effective_layer_zero(&ins.common.layer))
+            .then(|| Arc::from(ins.common.layer.as_str())),
         selected,
         is_xref,
         suppress_root_points,
@@ -2002,6 +2015,8 @@ struct ExpandCtx<'a> {
     l0: crate::scene::view::render::InheritStyle,
     l0_aci: u8,
     l0_plottable: bool,
+    /// Nearest nonzero INSERT layer inherited by Layer-0 descendants.
+    inherited_layer: Option<Arc<str>>,
     plot_visible: bool,
     selected: bool,
     pslt_factor: f32,
@@ -2066,6 +2081,7 @@ fn nested_prototype_key(
         block_name: block_name.to_string(),
         linear,
         style,
+        inherited_layer: ctx.inherited_layer.clone(),
         selected: ctx.selected,
         is_xref: ctx.is_xref,
         depth_scale: depth_scale.to_bits(),
@@ -2136,6 +2152,9 @@ pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StyleKey {
+    /// Keep identical geometry on different effective layers in distinct
+    /// batches; a finalized WireModel has only one layer attribution.
+    effective_layer: Option<Arc<str>>,
     color: [u32; 4],
     contrast_bg: Option<[u32; 4]>,
     preserve_color: bool,
@@ -2182,6 +2201,7 @@ struct PointMarkerKey {
 
 #[derive(Default, Debug)]
 struct BatchEntry {
+    effective_layer: Option<Arc<str>>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
     preserve_color: bool,
@@ -2240,6 +2260,7 @@ struct NestedPrototypeKey {
     block_name: String,
     linear: [u64; 9],
     style: Vec<u32>,
+    inherited_layer: Option<Arc<str>>,
     selected: bool,
     is_xref: bool,
     depth_scale: u32,
@@ -2278,6 +2299,7 @@ struct Batches {
 
 impl BatchEntry {
     fn new(
+        effective_layer: Arc<str>,
         color: [f32; 4],
         contrast_bg: Option<[f32; 4]>,
         preserve_color: bool,
@@ -2302,6 +2324,7 @@ impl BatchEntry {
         // the face3d-dim discriminator). It isn't stored on the entry
         // itself — the empty `points` field is enough at finalize time.
         Self {
+            effective_layer: Some(effective_layer),
             color,
             contrast_bg,
             preserve_color,
@@ -2421,6 +2444,7 @@ impl Batches {
                     text_verts: b.text_verts,
                     searchable_text: b.searchable_text,
                     name: name.to_string(),
+                    effective_layer: b.effective_layer,
                     points: b.points,
                     points_low: b.points_low,
                     color,
@@ -2451,6 +2475,7 @@ impl Batches {
 }
 
 fn style_key(
+    effective_layer: Arc<str>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
     preserve_color: bool,
@@ -2471,6 +2496,7 @@ fn style_key(
     local_depth: Option<f32>,
 ) -> StyleKey {
     StyleKey {
+        effective_layer: Some(effective_layer),
         color: [
             color[0].to_bits(),
             color[1].to_bits(),
@@ -2595,6 +2621,11 @@ fn expand_defn(
                     l0: nested_style.layer0,
                     l0_aci: nested_style.layer0_aci,
                     l0_plottable: nested_layer_plottable,
+                    inherited_layer: if nref.plot_l0 {
+                        ctx.inherited_layer.clone()
+                    } else {
+                        Some(Arc::clone(&nref.source_layer))
+                    },
                     plot_visible: ctx.plot_visible && nested_layer_plottable,
                     selected: ctx.selected,
                     pslt_factor: ctx.pslt_factor,
@@ -3530,8 +3561,15 @@ fn emit_wire(
         }
     }
 
-    // Resolve final style for this LocalWire against the outer Insert ctx
-    // before we hash it into a batch.
+    // Resolve final style and occurrence layer against the outer Insert ctx
+    // before we hash this child into a batch.
+    let effective_layer = if lw.plot_l0 {
+        ctx.inherited_layer
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&lw.source_layer))
+    } else {
+        Arc::clone(&lw.source_layer)
+    };
     let final_color = resolve_wire_color(lw, ctx);
     let final_aci = if lw.color_is_byblock {
         ctx.ins_aci
@@ -3694,6 +3732,7 @@ fn emit_wire(
                     dash_closure: lw.dash_closure,
                     text_verts: Vec::new(),
                     name: String::new(),
+                    effective_layer: Some(Arc::clone(&effective_layer)),
                     points,
                     points_low,
                     color,
@@ -3810,6 +3849,7 @@ fn emit_wire(
             || transformed_stations.is_some()
             || lw.points.iter().any(|point| point[0].is_nan()));
     let mut key = style_key(
+        Arc::clone(&effective_layer),
         final_color,
         lw.contrast_bg,
         lw.preserve_color,
@@ -3859,6 +3899,7 @@ fn emit_wire(
     }
     let entry = out.by_style.entry(key).or_insert_with(|| {
         BatchEntry::new(
+            Arc::clone(&effective_layer),
             final_color,
             lw.contrast_bg,
             lw.preserve_color,
@@ -4309,6 +4350,7 @@ mod bg_resolution_tests {
         canvas_color: bool,
     ) -> BatchEntry {
         let mut e = BatchEntry::new(
+            Arc::from("0"),
             color,
             contrast_bg,
             preserve_color,

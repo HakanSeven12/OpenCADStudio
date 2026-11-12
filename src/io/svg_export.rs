@@ -289,22 +289,6 @@ fn emit_page_content(
     let (ox, oy) = (page.offset_x, page.offset_y);
     let options = page.options;
 
-    // The drawing layer of each plotted entity, for the `data-layer` groups
-    // an SVG consumer toggles. Same resolution the PDF export uses. Hatch
-    // models name their fill pattern, not a handle, so they resolve through
-    // their plotted entity.
-    let layer_of = |name: &str| -> Option<&str> {
-        crate::scene::Scene::handle_from_wire_name(name)
-            .and_then(|handle| content.entity_layers.get(&handle))
-            .map(String::as_str)
-    };
-    let hatch_layer_of = |hatch: &crate::scene::model::hatch_model::HatchModel| -> Option<&str> {
-        hatch
-            .entity
-            .and_then(|handle| content.entity_layers.get(&handle))
-            .map(String::as_str)
-    };
-
     let (first_wires, second_wires) = content
         .wires
         .split_at(content.group_splits.wires.min(content.wires.len()));
@@ -362,9 +346,9 @@ fn emit_page_content(
             let layer = if options.layer_attributes {
                 match &item {
                     DrawItem::WireFill(w) | DrawItem::Wire(w) | DrawItem::Text(w) => {
-                        layer_of(&w.wire.name)
+                        crate::io::plot::wire_layer(&w.wire, &content.entity_layers)
                     }
-                    DrawItem::Hatch(h) => hatch_layer_of(h),
+                    DrawItem::Hatch(h) => crate::io::plot::hatch_layer(h, &content.entity_layers),
                     DrawItem::Image(_) => None,
                 }
             } else {
@@ -1507,12 +1491,47 @@ mod tests {
     }
 
     #[test]
+    fn per_occurrence_layers_override_a_shared_insert_handle() {
+        let wire = |layer: &str, depth| {
+            let mut wire = WireModel::solid(
+                "126".to_string(),
+                vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                [1.0, 0.0, 0.0, 1.0],
+                false,
+            );
+            wire.effective_layer = Some(std::sync::Arc::from(layer));
+            PlotWire {
+                wire,
+                draw_depth: depth,
+            }
+        };
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![wire("FIRST", 0.4), wire("SECOND", 0.5)]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+                "OUTER_INSERT".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let mut page = page_with(content, 210.0, 297.0);
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(svg.contains("<g data-layer=\"FIRST\">"), "{svg}");
+        assert!(svg.contains("<g data-layer=\"SECOND\">"), "{svg}");
+        assert!(!svg.contains("data-layer=\"OUTER_INSERT\""), "{svg}");
+    }
+
+    #[test]
     fn hatches_land_in_layer_groups_through_their_plotted_entity() {
         // Hatch models name their fill pattern in `name` — `SOLID`, `ANSI31`,
         // … — which parses to nothing. The layer attribution must come from
         // the entity the model plots for instead.
         let mut tagged = HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],
@@ -1550,16 +1569,28 @@ mod tests {
         // A hatch whose entity is unknown carries no layer markup.
         page.content = content_for(tagged.clone());
         let svg = build_svg(&page, None).expect("builds");
-        assert!(!svg.contains("data-layer=\"Parcels\""), "no entity set: {svg}");
+        assert!(
+            !svg.contains("data-layer=\"Parcels\""),
+            "no entity set: {svg}"
+        );
 
         // With the plotted entity recorded, the fill sits in its layer group.
         tagged.entity = Some(crate::scene::Scene::handle_from_wire_name("128").expect("handle"));
-        page.content = content_for(tagged);
+        page.content = content_for(tagged.clone());
         let svg = build_svg(&page, None).expect("builds");
         assert!(
             svg.contains("<g data-layer=\"Parcels\">"),
             "the hatch fill must sit in its layer group: {svg}"
         );
+
+        tagged.effective_layer = Some(std::sync::Arc::from("INHERITED_PLACEMENT"));
+        page.content = content_for(tagged);
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"INHERITED_PLACEMENT\">"),
+            "placement metadata must beat the raw entity fallback: {svg}"
+        );
+        assert!(!svg.contains("data-layer=\"Parcels\""), "{svg}");
     }
 
     #[test]
@@ -1587,6 +1618,7 @@ mod tests {
         ]);
         let hatch = |pattern, color| HatchModel {
             entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],

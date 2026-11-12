@@ -517,19 +517,6 @@ fn append_pdf_page(
         entity_layers,
         entity_plot_styles,
     } = &page.content;
-    let layer_of = |name: &str| {
-        crate::scene::Scene::handle_from_wire_name(name)
-            .and_then(|handle| entity_layers.get(&handle))
-            .map(String::as_str)
-    };
-    // Hatch models name their fill pattern in `name`, not an entity handle;
-    // their drawing layer comes from the entity the model plots for.
-    let hatch_layer_of = |hatch: &crate::scene::model::hatch_model::HatchModel| {
-        hatch
-            .entity
-            .and_then(|handle| entity_layers.get(&handle))
-            .map(String::as_str)
-    };
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
     let (ox, oy) = (page.offset_x, page.offset_y);
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
@@ -750,9 +737,9 @@ fn append_pdf_page(
             }
             let layer = match &item {
                 DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
-                    layer_of(&wire.name)
+                    super::plot::wire_layer(&wire.wire, entity_layers)
                 }
-                DrawItem::Hatch(hatch) => hatch_layer_of(hatch),
+                DrawItem::Hatch(hatch) => super::plot::hatch_layer(hatch, entity_layers),
                 DrawItem::Image(_) => None,
             };
             // A named (STB) table plots each entity with its own object style.
@@ -1582,6 +1569,7 @@ fn emit_wire_fills(
                 boundary.push(boundary[0]);
                 let hatch = HatchModel {
                     entity: None,
+                    effective_layer: wire.effective_layer.clone(),
                     pattern_origin: None,
                     render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],
@@ -2974,6 +2962,32 @@ mod tests {
             options: PdfPlotOptions::default(),
             plot_style: None,
         }
+    }
+
+    #[test]
+    fn optional_content_uses_per_occurrence_layers_before_handle_fallback() {
+        let wire = |layer: &str, depth| {
+            let mut wire = WireModel::solid(
+                "126".into(),
+                vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                WireModel::WHITE,
+                false,
+            );
+            wire.effective_layer = Some(std::sync::Arc::from(layer));
+            PlotWire {
+                wire,
+                draw_depth: depth,
+            }
+        };
+        let mut page = test_page(vec![wire("FIRST_LAYER", 0.4), wire("SECOND_LAYER", 0.5)]);
+        page.content.entity_layers = std::collections::HashMap::from([(
+            crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+            "OUTER_INSERT".to_string(),
+        )]);
+        let text = pdf_stream_text(&render_pdf_bytes(&[page], None).unwrap());
+        assert!(text.contains("FIRST_LAYER"), "{text}");
+        assert!(text.contains("SECOND_LAYER"), "{text}");
+        assert!(!text.contains("OUTER_INSERT"), "{text}");
     }
 
     #[test]

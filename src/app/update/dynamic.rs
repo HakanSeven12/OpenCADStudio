@@ -849,8 +849,10 @@ impl OpenCADStudio {
         } else {
             let mut wires = parent.on_preview_wires_with_tangent(cursor, tangent);
             wires.extend(parent.persistent_preview_wires());
-            let entities = parent.preview_entities(&tab.scene.document, cursor);
-            wires.extend(tab.scene.wires_for_entities(&entities));
+            if !parent.preview_wires_replace_entities() {
+                let entities = parent.preview_entities(&tab.scene.document, cursor);
+                wires.extend(tab.scene.wires_for_entities(&entities));
+            }
             (wires, parent.preview_hidden_handles().to_vec())
         };
         hidden.extend_from_slice(modifier.preview_hidden_handles());
@@ -930,8 +932,10 @@ impl OpenCADStudio {
                     }
                     let mut wires = c.on_preview_wires(cur);
                     wires.extend(c.persistent_preview_wires());
-                    let entities = c.preview_entities(&tab.scene.document, cur);
-                    wires.extend(tab.scene.wires_for_entities(&entities));
+                    if !c.preview_wires_replace_entities() {
+                        let entities = c.preview_entities(&tab.scene.document, cur);
+                        wires.extend(tab.scene.wires_for_entities(&entities));
+                    }
                     wires
                 })
                 .unwrap_or_default()

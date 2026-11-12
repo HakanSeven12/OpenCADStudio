@@ -4219,8 +4219,10 @@ impl OpenCADStudio {
                 let tab = &mut self.tabs[i];
                 if let Some(cmd) = tab.active_cmd.as_mut() {
                     p.extend(cmd.on_preview_wires_with_tangent(effective, live_tangent));
-                    let entities = cmd.preview_entities(&tab.scene.document, effective);
-                    p.extend(tab.scene.wires_for_entities(&entities));
+                    if !cmd.preview_wires_replace_entities() {
+                        let entities = cmd.preview_entities(&tab.scene.document, effective);
+                        p.extend(tab.scene.wires_for_entities(&entities));
+                    }
                 }
                 p
             } else if needs_entity && deferred_command_hover {

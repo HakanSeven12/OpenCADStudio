@@ -3646,6 +3646,12 @@ pub trait CadCommand: Send {
         Vec::new()
     }
 
+    /// True when `on_preview_wires` already supplies the transformed geometry
+    /// for `preview_entities`, so the host can skip re-tessellating them.
+    fn preview_wires_replace_entities(&self) -> bool {
+        false
+    }
+
     /// Source entities replaced by the current live preview. The host removes
     /// these from the resident render until the command commits or cancels.
     /// Commands such as COPY keep their sources visible and use the default.

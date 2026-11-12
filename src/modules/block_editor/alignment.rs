@@ -1,7 +1,8 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, PointPickContext};
 use crate::scene::block_alignment::{Alignment, Targets};
+use crate::scene::WireModel;
 use document::{Document, EntityType, Handle};
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 
 pub struct AlignmentCommand {
     document: u64,
@@ -10,10 +11,21 @@ pub struct AlignmentCommand {
     context: Option<PointPickContext>,
     flipped: bool,
     hidden: [Handle; 1],
+    cached_wires: Vec<WireModel>,
 }
 
 impl AlignmentCommand {
+    #[allow(dead_code)]
     pub fn new(document: u64, alignment: Alignment, targets: Targets) -> Self {
+        Self::with_cached_wires(document, alignment, targets, Vec::new())
+    }
+
+    pub fn with_cached_wires(
+        document: u64,
+        alignment: Alignment,
+        targets: Targets,
+        cached_wires: Vec<WireModel>,
+    ) -> Self {
         let hidden = [alignment.reference.common.handle];
         Self {
             document,
@@ -22,6 +34,7 @@ impl AlignmentCommand {
             context: None,
             flipped: false,
             hidden,
+            cached_wires,
         }
     }
 }
@@ -70,6 +83,35 @@ impl CadCommand for AlignmentCommand {
     }
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+    fn on_preview_wires(&mut self, cursor: DVec3) -> Vec<WireModel> {
+        if self.cached_wires.is_empty() {
+            return Vec::new();
+        }
+        let Ok((destination, angle)) =
+            self.targets
+                .pose(&self.alignment, cursor, self.context, self.flipped)
+        else {
+            return Vec::new();
+        };
+        if !destination.is_finite()
+            || !angle.is_finite()
+            || self.alignment.plane.to_local(destination).z.abs() > 1e-7
+        {
+            return Vec::new();
+        }
+        let anchor = self.alignment.anchor;
+        let axis = self.alignment.plane.z.normalize_or_zero();
+        let rot = DQuat::from_axis_angle(axis, angle);
+        self.cached_wires
+            .iter()
+            .map(|wire| {
+                wire.mapped_preserving_style(|p| destination + rot * (p - anchor))
+            })
+            .collect()
+    }
+    fn preview_wires_replace_entities(&self) -> bool {
+        !self.cached_wires.is_empty()
     }
     fn preview_entities(&mut self, _doc: &Document, cursor: DVec3) -> Vec<EntityType> {
         self.targets

@@ -257,9 +257,14 @@ impl Scene {
             insert,
             alignment.plane,
         );
+        let cached_wires = self
+            .wires_for_entities(&[EntityType::Insert(alignment.reference.clone())]);
         Some(Box::new(
-            crate::modules::block_editor::alignment::AlignmentCommand::new(
-                1, alignment, targets,
+            crate::modules::block_editor::alignment::AlignmentCommand::with_cached_wires(
+                1,
+                alignment,
+                targets,
+                cached_wires,
             ),
         ))
     }

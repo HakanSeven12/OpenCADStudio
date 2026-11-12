@@ -1018,6 +1018,14 @@ impl WireModel {
         out
     }
 
+    /// Like [`Self::mapped`], but preserves the wire's existing color and selection state.
+    pub fn mapped_preserving_style(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.mapped(map);
+        out.color = self.color;
+        out.selected = self.selected;
+        out
+    }
+
     /// Return a clone with every point rotated around `center` by `angle_rad`.
     pub fn rotated(&self, center: glam::Vec3, angle_rad: f32) -> Self {
         self.rotated_about_axis(center, glam::Vec3::Z, angle_rad)

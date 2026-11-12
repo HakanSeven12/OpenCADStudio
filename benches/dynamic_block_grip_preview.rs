@@ -97,8 +97,10 @@ fn bench_alignment(scene: &Scene, insert: document::types::Handle) {
     for i in 0..WARMUP {
         let cur = DVec3::new(120.0, (i as f64) * 2.0, 0.0);
         let mut wires = cmd.on_preview_wires(cur);
-        let entities = cmd.preview_entities(&scene.document, cur);
-        wires.extend(scene.wires_for_entities(&entities));
+        if !cmd.preview_wires_replace_entities() {
+            let entities = cmd.preview_entities(&scene.document, cur);
+            wires.extend(scene.wires_for_entities(&entities));
+        }
         sink = sink.wrapping_add(wires.len());
     }
     for _ in 0..RUNS {
@@ -106,8 +108,10 @@ fn bench_alignment(scene: &Scene, insert: document::types::Handle) {
         for i in 0..ITERATIONS {
             let cur = black_box(DVec3::new(120.0 + (i as f64) * 0.5, (i as f64) * 2.0, 0.0));
             let mut wires = cmd.on_preview_wires(cur);
-            let entities = cmd.preview_entities(&scene.document, cur);
-            wires.extend(scene.wires_for_entities(&entities));
+            if !cmd.preview_wires_replace_entities() {
+                let entities = cmd.preview_entities(&scene.document, cur);
+                wires.extend(scene.wires_for_entities(&entities));
+            }
             sink = sink.wrapping_add(wires.len());
         }
         samples.push((start.elapsed().as_nanos() / ITERATIONS as u128) as u64);

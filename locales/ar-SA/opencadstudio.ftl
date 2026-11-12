@@ -6176,11 +6176,9 @@ styles =
     .value-0-variable = 0 = متغير
     .aci-color-index = فهرس ألوان ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: لم يُعثر على مشكلات.
     .audit-fix-any-errors-detected = AUDIT  هل تريد إصلاح الأخطاء المكتشفة؟ [نعم / لا] <لا>:
-    .audit-error-s-warning-s-found = AUDIT: تم العثور على __ocs_fmt_0__ خطأ و__ocs_fmt_1__ تحذير.
-    .audit-repair-s-applied-issue-s-left = AUDIT: تم تطبيق __ocs_fmt_0__ إصلاح، و__ocs_fmt_1__ مشكلة بلا حل.
-    .audit-scanned-total-object-s = AUDIT: فُحص __ocs_fmt_0__ كائن.
+    .audit-objects-audited = تم تدقيق __ocs_fmt_0__ كائن
+    .audit-total-errors-found-fixed = إجمالي الأخطاء المكتشفة __ocs_fmt_0__، تم إصلاح __ocs_fmt_1__
     .above-text = أعلى النص
     .active-dim-style-set-to-name-arg = عُيّن نمط الأبعاد النشط إلى "__ocs_fmt_0__"
     .add-leader = إضافة خط قائد

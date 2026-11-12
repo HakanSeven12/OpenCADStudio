@@ -46,7 +46,7 @@ fn array_rows_ask_for_spacing_with_one_term_per_shape() {
         (
             "Linear Array",
             &["0,0", "20,0", "0,10"] as &[&str],
-            "BACTION  Specify distance between columns:",
+            "BACTION  Enter the distance between columns (|||):",
         ),
         (
             "Polar Array",
@@ -62,6 +62,34 @@ fn array_rows_ask_for_spacing_with_one_term_per_shape() {
         let (_app, prompt) = spacing_prompt(label, points);
         assert_eq!(prompt, expected, "{label} asks with its own term");
     }
+}
+
+/// An array finishes as soon as its spacing is answered: the command returns
+/// to the prompt and the action is recorded without asking where its marker
+/// goes.
+#[test]
+fn a_linear_array_is_recorded_as_soon_as_the_column_distance_is_answered() {
+    let (mut app, prompt) = spacing_prompt("Linear Array", &["0,0", "20,0", "0,10"]);
+    assert!(
+        prompt.contains("columns"),
+        "the linear array asks for columns"
+    );
+    let i = app.active_tab;
+    let definition = app.tabs[i]
+        .active_block_edit_session()
+        .expect("the block editor is open")
+        .br_handle;
+    let count = crate::scene::block_actions::actions(&app.tabs[i].scene.document, definition).len();
+    feed(&mut app, "10");
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "answering the spacing ends the command"
+    );
+    assert_eq!(
+        crate::scene::block_actions::actions(&app.tabs[i].scene.document, definition).len(),
+        count + 1,
+        "the array action is recorded without a marker-location prompt"
+    );
 }
 
 #[test]

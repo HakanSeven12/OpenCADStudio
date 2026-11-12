@@ -6162,11 +6162,9 @@ styles =
     .value-0-variable = 0 = Variable
     .aci-color-index = ACI Farbindex
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: keine Probleme gefunden.
     .audit-fix-any-errors-detected = AUDIT  Gefundene Fehler beheben? [Ja / Nein] <Nein>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ Fehler, __ocs_fmt_1__ Warnung(en) gefunden.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ Reparatur(en) ausgeführt, __ocs_fmt_1__ Problem(e) ungelöst.
-    .audit-scanned-total-object-s = AUDIT: gescanntes __ocs_fmt_0__ Objekt(e).
+    .audit-objects-audited = __ocs_fmt_0__ Objekte geprüft
+    .audit-total-errors-found-fixed = Gefundene Fehler insgesamt __ocs_fmt_0__, behoben __ocs_fmt_1__
     .above-text = Vorstehender Text
     .active-dim-style-set-to-name-arg = Aktiver Bemaßungsstil auf „__ocs_fmt_0__“ gesetzt
     .add-leader = Führungslinie hinzufügen

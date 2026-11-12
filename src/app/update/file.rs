@@ -608,6 +608,8 @@ fn plot_scene_content(
         };
         let entity_layers =
             plot_entity_layers(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
+        let entity_plot_styles =
+            plot_entity_styles(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
         return PlotContent {
             wires: std::sync::Arc::new(paper_wires),
             hatches: paper_hatches,
@@ -615,6 +617,7 @@ fn plot_scene_content(
             images: paper_images,
             group_splits: splits,
             entity_layers,
+            entity_plot_styles,
         };
     }
     let (mut model_pattern_wires, model_hatches, model_wipeouts, model_images) =
@@ -664,6 +667,7 @@ fn plot_scene_content(
         (wires, hatches, wipeouts, images, splits)
     };
     let entity_layers = plot_entity_layers(scene, &wires, &hatches, &wipeouts);
+    let entity_plot_styles = plot_entity_styles(scene, &wires, &hatches, &wipeouts);
     PlotContent {
         wires: std::sync::Arc::new(wires),
         hatches,
@@ -671,7 +675,55 @@ fn plot_scene_content(
         images,
         group_splits: splits,
         entity_layers,
+        entity_plot_styles,
     }
+}
+
+/// Named plot style of every entity the plot draws, keyed like
+/// `plot_entity_layers`: the object's own style, its layer's for ByLayer, and
+/// `Normal` for ByBlock at the top level or a layer without one.
+// shortcut: block children plot with their INSERT's style (wires carry the
+// INSERT handle), like `plot_entity_layers`; per-child needs BlockCache handles.
+fn plot_entity_styles(
+    scene: &crate::scene::Scene,
+    wires: &[crate::io::pdf_export::PlotWire],
+    hatches: &[crate::scene::model::hatch_model::HatchModel],
+    wipeouts: &[crate::scene::model::hatch_model::HatchModel],
+) -> std::collections::HashMap<document::Handle, String> {
+    let doc = &scene.document;
+    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
+        hatches
+            .iter()
+            .chain(wipeouts)
+            .map(|hatch| hatch.name.as_str()),
+    );
+    let mut styles = std::collections::HashMap::new();
+    for name in names {
+        let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if styles.contains_key(&handle) {
+            continue;
+        }
+        let Some(entity) = doc.get_entity(handle) else {
+            continue;
+        };
+        let common = entity.common();
+        let style = match common.plotstyle_flags {
+            0 => doc
+                .layers
+                .get(&common.layer)
+                .map(|layer| layer.plotstyle_handle)
+                .filter(|h| !h.is_null())
+                .map(|h| crate::app::properties::plot_style_name(doc, 3, Some(h)))
+                .filter(|name| name != "ByLayer")
+                .unwrap_or_else(|| "Normal".to_string()),
+            1 => "Normal".to_string(),
+            flags => crate::app::properties::plot_style_name(doc, flags, common.plotstyle_handle),
+        };
+        styles.insert(handle, style);
+    }
+    styles
 }
 
 /// Drawing layer of every entity the plot draws, keyed by the handle in its
@@ -2051,6 +2103,84 @@ impl OpenCADStudio {
             None => self.install_native_edit_guard(i, path, None),
         }
         self.tabs[i].disk_fingerprint = crate::io::edit_lock::FileFingerprint::capture(path).ok();
+        #[cfg(not(target_arch = "wasm32"))]
+        // Any other open drawing that references `path` re-reads it, the
+        // same as an external reload: a source edited and saved in this
+        // session is not allowed to go stale in its hosts.
+        self.reload_xrefs_pointing_at(i, path);
+    }
+
+    /// Reload, in every other tab that references `path`, the definitions
+    /// the save refreshed. `resolve_xrefs_for_keys` does the merge; this
+    /// finds the matching records, refreshes the stat cache and marks the
+    /// host dirty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn reload_xrefs_pointing_at(
+        &mut self,
+        saved: usize,
+        path: &std::path::Path,
+    ) {
+        let mut matches: Vec<(usize, rustc_hash::FxHashSet<document::Handle>)> = Vec::new();
+        for (j, tab) in self.tabs.iter().enumerate() {
+            if j == saved || tab.block_test.is_some() {
+                continue;
+            }
+            let base_dir = tab
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let keys: rustc_hash::FxHashSet<document::Handle> = tab
+                .scene
+                .document
+                .block_records
+                .iter()
+                .filter(|br| {
+                    (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty()
+                })
+                .filter_map(|br| {
+                    crate::io::xref::resolve_path(&br.xref_path, &base_dir)
+                        .filter(|resolved| native_paths_match(resolved, path))
+                        .map(|_| br.handle)
+                })
+                .collect();
+            if !keys.is_empty() {
+                matches.push((j, keys));
+            }
+        }
+        for (j, keys) in matches {
+            let base_dir = self.tabs[j]
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                &mut self.tabs[j].scene.document,
+                &base_dir,
+                &keys,
+            );
+            if infos.is_empty() {
+                continue;
+            }
+            // The stat cache reports the saved file as current again.
+            let fresh = crate::io::xref::collect_entries_with_prev(
+                &self.tabs[j].scene.document,
+                &base_dir,
+                self.tabs[j].xref_unloaded.as_set(),
+                &self.tabs[j].xref_stat_cache.0,
+            );
+            for entry in &fresh {
+                if let Some(modified) = entry.modified {
+                    self.tabs[j].xref_stat_cache.insert(entry.key, modified);
+                }
+            }
+            self.tabs[j].dirty = true;
+            self.tabs[j].scene.bump_geometry_no_blocks();
+            self.post_ref_op(j);
+            self.command_line.push_info(
+                crate::tf!("XREF: references to the saved source were reloaded.").as_ref(),
+            );
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2388,7 +2518,13 @@ impl OpenCADStudio {
         self.tabs[i].xref_report = caches
             .xrefs
             .iter()
-            .map(|item| (item.name.clone(), item.path.clone(), item.status.clone()))
+            .map(|item| {
+                (
+                    item.name.clone(),
+                    item.path.clone(),
+                    crate::app::control::xref_status_name(&item.status),
+                )
+            })
             .collect();
         if missing > 0 {
             self.command_line.push_output(
@@ -9078,6 +9214,41 @@ mod plot_paper_tests {
                 "{rotation:?}: printable {px} {py}"
             );
         }
+    }
+
+    /// A layout whose paper image origin (DXF 148/149) is not zero has its
+    /// printable corner at minus that origin: a sheet border drawn there
+    /// plots at the paper corner instead of shifted by it (#2864).
+    #[test]
+    fn layout_sheet_origin_follows_the_paper_image_origin() {
+        use document::objects::PlotRotation;
+        let mut app =
+            layout_with_margins_and_stale_limmin((2.0, 3.0, 0.0, 0.0), PlotRotation::None);
+        let i = app.active_tab;
+        for object in app.tabs[i].scene.document.objects.values_mut() {
+            if let document::objects::ObjectType::Layout(layout) = object {
+                if layout.name == "Layout1" {
+                    layout.paper_image_origin_x = -40.0;
+                    layout.paper_image_origin_y = -25.0;
+                }
+            }
+        }
+        app.tabs[i].scene.geometry_epoch += 1;
+        let ((x0, y0), _) = app.tabs[i].scene.paper_limits().unwrap();
+        assert!(
+            (x0 - 38.0).abs() < 1e-9 && (y0 - 22.0).abs() < 1e-9,
+            "sheet origin {x0} {y0}"
+        );
+        let ((px, py), _) = app.tabs[i].scene.printable_area_limits().unwrap();
+        assert!((px - 40.0).abs() < 1e-9 && (py - 25.0).abs() < 1e-9, "{px} {py}");
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        let scale = page.scale as f64;
+        let at = ((40.0 + page.offset_x) * scale, (25.0 + page.offset_y) * scale);
+        assert!(
+            (at.0 - 2.0).abs() < 1e-6 && (at.1 - 3.0).abs() < 1e-6,
+            "printable corner plots at {at:?}"
+        );
     }
 
     /// Open the metric page-setup fixture written by the commercial

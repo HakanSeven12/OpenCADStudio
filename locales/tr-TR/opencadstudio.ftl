@@ -6104,11 +6104,9 @@ styles =
     .value-0-variable = 0 = değişken
     .aci-color-index = ACI renk dizini
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: sorun bulunamadı.
     .audit-fix-any-errors-detected = AUDIT  Bulunan hatalar düzeltilsin mi? [Evet / Hayır] <Hayır>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ hata, __ocs_fmt_1__ uyarı bulundu.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ onarım uygulandı, __ocs_fmt_1__ sorun çözülemedi.
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ nesne tarandı.
+    .audit-objects-audited = __ocs_fmt_0__ nesne denetlendi
+    .audit-total-errors-found-fixed = Bulunan toplam hata __ocs_fmt_0__, düzeltilen __ocs_fmt_1__
     .above-text = Metnin üstünde
     .active-dim-style-set-to-name-arg = Etkin ölçü stili "__ocs_fmt_0__" olarak ayarlandı.
     .add-leader = Kılavuz ekle

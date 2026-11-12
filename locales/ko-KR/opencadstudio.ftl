@@ -6163,11 +6163,9 @@ styles =
     .value-0-variable = 0 = 변수
     .aci-color-index = ACI 컬러 인덱스
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: 문제가 발견되지 않았습니다.
     .audit-fix-any-errors-detected = AUDIT  감지된 오류를 수정하시겠습니까? [예 / 아니요] <아니요>:
-    .audit-error-s-warning-s-found = AUDIT: 오류 __ocs_fmt_0__개, 경고 __ocs_fmt_1__개를 찾았습니다.
-    .audit-repair-s-applied-issue-s-left = AUDIT: 복구 __ocs_fmt_0__개 적용, 미해결 문제 __ocs_fmt_1__개.
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ 개체를 스캔했습니다.
+    .audit-objects-audited = __ocs_fmt_0__개 객체 감사됨
+    .audit-total-errors-found-fixed = 발견된 총 오류 __ocs_fmt_0__, 수정 __ocs_fmt_1__
     .above-text = 텍스트 위
     .active-dim-style-set-to-name-arg = 활성 밝기 스타일이 "__ocs_fmt_0__"로 설정됨
     .add-leader = 리더 추가

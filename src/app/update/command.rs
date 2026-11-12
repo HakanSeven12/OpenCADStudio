@@ -3866,6 +3866,9 @@ impl OpenCADStudio {
         if field == "authoring_alignment_type" {
             return self.set_authoring_alignment_type(&value);
         }
+        if field == "authoring_base_location" {
+            return self.set_authoring_base_location(&value);
+        }
         if field.starts_with("bedit_") {
             return self.set_block_property(field, &value);
         }

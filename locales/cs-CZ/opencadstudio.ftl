@@ -6166,11 +6166,9 @@ styles =
     .value-0-variable = 0 Proměnná =
     .aci-color-index = Barevný index ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: nebyly nalezeny žádné problémy.
     .audit-fix-any-errors-detected = AUDIT  Opravit zjištěné chyby? [Ano / Ne] <Ne>:
-    .audit-error-s-warning-s-found = AUDIT: nalezeno chyb: __ocs_fmt_0__, varování: __ocs_fmt_1__.
-    .audit-repair-s-applied-issue-s-left = AUDIT: provedeno oprav: __ocs_fmt_0__, nevyřešeno problémů: __ocs_fmt_1__.
-    .audit-scanned-total-object-s = AUDIT: zkontrolováno objektů: __ocs_fmt_0__.
+    .audit-objects-audited = Zkontrolováno objektů: __ocs_fmt_0__
+    .audit-total-errors-found-fixed = Celkem nalezeno chyb __ocs_fmt_0__, opraveno __ocs_fmt_1__
     .above-text = Nad textem
     .active-dim-style-set-to-name-arg = Aktivní kótovací styl nastaven na „__ocs_fmt_0__“
     .add-leader = Přidat odkazovou čáru

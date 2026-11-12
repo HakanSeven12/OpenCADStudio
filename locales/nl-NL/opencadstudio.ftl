@@ -6162,11 +6162,9 @@ styles =
     .value-0-variable = 0 = variabele
     .aci-color-index = ACI Kleurindex
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: geen problemen gevonden.
     .audit-fix-any-errors-detected = AUDIT  Gevonden fouten herstellen? [Ja / Nee] <Nee>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ fout(en), __ocs_fmt_1__ waarschuwing(en) gevonden.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ herstelling(en) toegepast, __ocs_fmt_1__ probleem/problemen onopgelost.
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ object(en) gecontroleerd.
+    .audit-objects-audited = __ocs_fmt_0__ objecten gecontroleerd
+    .audit-total-errors-found-fixed = Totaal gevonden fouten __ocs_fmt_0__, hersteld __ocs_fmt_1__
     .above-text = Bovenstaande tekst
     .active-dim-style-set-to-name-arg = Actieve maatstijl ingesteld op "__ocs_fmt_0__"
     .add-leader = Verwijslijn toevoegen

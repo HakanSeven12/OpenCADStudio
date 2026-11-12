@@ -1905,12 +1905,6 @@ pub enum CmdResult {
         /// keeps the parameter's own default.
         options: crate::modules::block_editor::single_parameter::Options,
     },
-    /// An action type was chosen that has no geometry action of its own:
-    /// continue with Lookup parameter selection.
-    StartBlockLookupAction {
-        document: u64,
-        definition: Handle,
-    },
     /// The chosen Lookup parameter's property table should open for editing.
     OpenBlockLookupTable {
         document: u64,

@@ -6152,11 +6152,9 @@ styles =
     .value-0-variable = 0 = 可変
     .aci-color-index = ACI カラーインデックス
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: 問題は見つかりませんでした。
     .audit-fix-any-errors-detected = AUDIT  検出されたエラーを修正しますか? [はい / いいえ] <いいえ>:
-    .audit-error-s-warning-s-found = AUDIT: エラー __ocs_fmt_0__ 件、警告 __ocs_fmt_1__ 件が見つかりました。
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ 件の修復を適用し、__ocs_fmt_1__ 件の問題が未解決です。
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ 個のオブジェクトを検査しました。
+    .audit-objects-audited = __ocs_fmt_0__ 個のオブジェクトを監査しました
+    .audit-total-errors-found-fixed = 検出されたエラー合計 __ocs_fmt_0__、修正 __ocs_fmt_1__
     .above-text = 文字の上
     .active-dim-style-set-to-name-arg = 現在の寸法スタイルを "__ocs_fmt_0__" に設定しました
     .add-leader = 引出線を追加

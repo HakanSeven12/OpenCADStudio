@@ -6164,11 +6164,9 @@ styles =
     .value-0-variable = 0 = μεταβλητό
     .aci-color-index = Δείκτης χρώματος ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: δεν βρέθηκαν προβλήματα.
     .audit-fix-any-errors-detected = AUDIT  Διόρθωση των σφαλμάτων που εντοπίστηκαν; [Ναι / Όχι] <Όχι>:
-    .audit-error-s-warning-s-found = AUDIT: βρέθηκαν __ocs_fmt_0__ σφάλματα, __ocs_fmt_1__ προειδοποιήσεις.
-    .audit-repair-s-applied-issue-s-left = AUDIT: εφαρμόστηκαν __ocs_fmt_0__ επιδιορθώσεις, __ocs_fmt_1__ προβλήματα παραμένουν άλυτα.
-    .audit-scanned-total-object-s = AUDIT: σαρώθηκαν __ocs_fmt_0__ αντικείμενο(α).
+    .audit-objects-audited = Ελέγχθηκαν __ocs_fmt_0__ αντικείμενα
+    .audit-total-errors-found-fixed = Συνολικά σφάλματα __ocs_fmt_0__, διορθώθηκαν __ocs_fmt_1__
     .above-text = Πάνω από το κείμενο
     .active-dim-style-set-to-name-arg = Το ενεργό στυλ διαστάσεων ορίστηκε σε "__ocs_fmt_0__"
     .add-leader = Προσθήκη επεξήγησης

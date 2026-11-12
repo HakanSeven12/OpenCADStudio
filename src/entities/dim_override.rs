@@ -494,6 +494,15 @@ pub fn style_value_text(style: &document::tables::DimStyle, code: i16) -> Option
     })
 }
 
+/// The name of the variable stored under `code`, if it is one of the
+/// variables DIMOVERRIDE knows by name.
+pub fn variable_for_code(code: i16) -> Option<(&'static str, VarKind)> {
+    NAMED_VARS
+        .iter()
+        .find(|(_, known, _)| *known == code)
+        .map(|&(name, _, kind)| (name, kind))
+}
+
 /// The group code and storage kind of the dimension variable `name`.
 pub fn named_var(name: &str) -> Option<(i16, VarKind)> {
     NAMED_VARS

@@ -3516,14 +3516,12 @@ impl OpenCADStudio {
                 }
                 snap
             } else if discrete_preview_enabled {
-                // Keep the previous marker only while it is still inside the
-                // current aperture. This avoids flicker between throttled
-                // samples without showing a snap that is no longer nearby.
-                self.tabs[i].snap_result.filter(|hit| {
-                    let dx = hit.screen.x - p_full.x;
-                    let dy = hit.screen.y - p_full.y;
-                    dx * dx + dy * dy <= self.snapper.osnap_radius_px.powi(2)
-                })
+                // Keep the last sample's marker until the next sample decides.
+                // The object under the cursor offers its nearest point from
+                // anywhere along it (#1914), so that marker is often outside
+                // the aperture; dropping it here made the point jump between
+                // the snap and the cursor on every other move (#2882).
+                self.tabs[i].snap_result
             } else {
                 None
             };

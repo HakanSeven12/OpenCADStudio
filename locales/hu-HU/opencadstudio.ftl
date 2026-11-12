@@ -6147,11 +6147,9 @@ styles =
     .value-0-variable = 0 = változó
     .aci-color-index = ACI színindex
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: nem található probléma.
     .audit-fix-any-errors-detected = AUDIT  Kijavítja az észlelt hibákat? [Yes / No] <No>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ hiba, __ocs_fmt_1__ figyelmeztetés található.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ javítás alkalmazva, __ocs_fmt_1__ probléma megoldatlan.
-    .audit-scanned-total-object-s = AUDIT: __ocs_fmt_0__ objektum ellenőrizve.
+    .audit-objects-audited = __ocs_fmt_0__ objektum ellenőrizve
+    .audit-total-errors-found-fixed = Összes talált hiba __ocs_fmt_0__, javítva __ocs_fmt_1__
     .above-text = A szöveg felett
     .active-dim-style-set-to-name-arg = Aktív méretezési stílus: „__ocs_fmt_0__”
     .add-leader = Mutatóvonal hozzáadása

@@ -6165,11 +6165,9 @@ styles =
     .value-0-variable = 0 = ປ່ຽນແປງໄດ້
     .aci-color-index = ດັດຊະນີສີ ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: ບໍ່ພົບຂໍ້ຜິດພາດ.
     .audit-fix-any-errors-detected = AUDIT  ແກ້ໄຂຂໍ້ຜິດພາດທີ່ກວດພົບບໍ? [ແມ່ນ / ບໍ່] <ບໍ່>:
-    .audit-error-s-warning-s-found = AUDIT: ພົບຂໍ້ຜິດພາດ __ocs_fmt_0__ ລາຍການ, ຄຳເຕືອນ __ocs_fmt_1__ ລາຍການ.
-    .audit-repair-s-applied-issue-s-left = AUDIT: ສ້ອມແປງແລ້ວ __ocs_fmt_0__ ລາຍການ, ບັນຫາທີ່ຍັງບໍ່ໄດ້ແກ້ __ocs_fmt_1__ ລາຍການ.
-    .audit-scanned-total-object-s = AUDIT: ສະແກນທັງໝົດ __ocs_fmt_0__ ວັດຖຸ.
+    .audit-objects-audited = ກວດສອບ __ocs_fmt_0__ ວັດຖຸແລ້ວ
+    .audit-total-errors-found-fixed = ພົບຂໍ້ຜິດພາດທັງໝົດ __ocs_fmt_0__, ແກ້ໄຂ __ocs_fmt_1__
     .above-text = ເທິງຂໍ້ຄວາມ
     .active-dim-style-set-to-name-arg = ຮູບແບບຂະໜາດທີ່ໃຊ້ງານຕັ້ງເປັນ "__ocs_fmt_0__"
     .add-leader = ເພີ່ມເສັ້ນຊີ້

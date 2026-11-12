@@ -6147,11 +6147,9 @@ styles =
     .value-0-variable = 0 = 可变
     .aci-color-index = ACI 颜色索引
     .aci = ACI：
-    .audit-no-issues-found = AUDIT:没有找到问题。
     .audit-fix-any-errors-detected = AUDIT  修复检测到的错误? [是 / 否] <否>:
-    .audit-error-s-warning-s-found = AUDIT: 发现 __ocs_fmt_0__ 个错误，__ocs_fmt_1__ 个警告。
-    .audit-repair-s-applied-issue-s-left = AUDIT: 已应用 __ocs_fmt_0__ 项修复，__ocs_fmt_1__ 个问题未解决。
-    .audit-scanned-total-object-s = AUDIT: 扫描__ocs_fmt_0__对象。
+    .audit-objects-audited = 已核查 __ocs_fmt_0__ 个对象
+    .audit-total-errors-found-fixed = 共发现错误 __ocs_fmt_0__ 个，已修复 __ocs_fmt_1__ 个
     .above-text = 上方为文本
     .active-dim-style-set-to-name-arg = 当前标注样式已设为“__ocs_fmt_0__”
     .add-leader = 添加头号

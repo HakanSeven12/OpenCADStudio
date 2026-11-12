@@ -4063,48 +4063,40 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("AUDIT ") => {
+                // Report as other CAD auditors do: "N objects audited" and
+                // "Total errors found X fixed Y".
                 let fix = cmd[6..].trim().to_uppercase().starts_with('Y');
                 let report = self.tabs[i].scene.document.audit();
-                let total = {
-                    let doc = &self.tabs[i].scene.document;
-                    doc.entities().count() + doc.objects.len()
-                };
-                self.command_line
-                    .push_output(crate::tf!("AUDIT: scanned {total} object(s).").as_ref());
-                if report.is_clean() {
-                    self.command_line
-                        .push_output(crate::t!("AUDIT: no issues found.").as_ref());
-                    return Some(Task::none());
-                }
-                self.command_line.push_error(
-                    crate::tf!(
-                        "AUDIT: {} error(s), {} warning(s) found.",
-                        report.error_count(),
-                        report.warning_count()
-                    )
-                    .as_ref(),
-                );
-                // ponytail: first 50 issues only; the counts above cover the rest.
+                // ponytail: first 50 issues only; the totals below cover the rest.
                 for issue in report.issues.iter().take(50) {
                     self.command_line
                         .push_info(&format!("  {:?}: {}", issue.code, issue.message));
                 }
-                if fix {
+                let mut fixed = 0;
+                if fix && !report.is_clean() {
                     self.push_undo_snapshot(i, "AUDIT");
                     let repair = self.tabs[i].scene.document.repair();
-                    self.command_line.push_output(
-                        crate::tf!(
-                            "AUDIT: {} repair(s) applied, {} issue(s) left unresolved.",
-                            repair.actions.len(),
-                            repair.unresolved.len()
-                        )
-                        .as_ref(),
-                    );
+                    fixed = report
+                        .error_count()
+                        .saturating_sub(repair.after.error_count());
                     if !repair.actions.is_empty() {
                         self.tabs[i].dirty = true;
                         self.tabs[i].scene.rebuild_derived_caches();
                         self.refresh_layer_panel();
                     }
+                }
+                self.command_line.push_output(
+                    crate::tf!("{} objects audited", report.scanned_records).as_ref(),
+                );
+                let total = crate::tf!(
+                    "Total errors found {} fixed {}",
+                    report.error_count(),
+                    fixed
+                );
+                if report.error_count() == 0 {
+                    self.command_line.push_output(total.as_ref());
+                } else {
+                    self.command_line.push_error(total.as_ref());
                 }
             }
 

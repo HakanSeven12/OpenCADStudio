@@ -587,6 +587,7 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
             subassembly(data, handle, document, &mut out);
         }
         CivilKind::Other if data.dxf_name == "AECC_PIPE" => pipe(data, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => feature_line(data, handle, document, &mut out)?,
         _ => return None,
     }
     Some(out)
@@ -1080,6 +1081,25 @@ fn pipe(data: &ArchEntityData, document: &document::Document, out: &mut Decoded)
             styled(out, style, vec![[p.x, p.y, 0.0], [q.x, q.y, 0.0]]);
         }
     }
+    Some(())
+}
+
+/// Plan component of a feature line style that draws the line.
+const FEATURE_LINE: usize = 0;
+
+/// A feature line keeps no geometry of its own: it is an edge of its site's
+/// topology, with the elevations in the nodes.
+fn feature_line(data: &ArchEntityData, handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let container = object_arch(document, data.feature_line_container()?)?;
+    let members = container.site_members();
+    let topology = container.topology()?;
+    if members.len() != topology.edges.len() {
+        return None;
+    }
+    let index = members.iter().position(|h| *h == handle)?;
+    let components = style_components(document, &data.decode().handles, "AECC_FEATURELINE_STYLE");
+    let points = topology.edge_points(index).into_iter().map(|p| [p.x, p.y, p.z]).collect();
+    styled(out, component(document, components.as_deref(), FEATURE_LINE), points);
     Some(())
 }
 

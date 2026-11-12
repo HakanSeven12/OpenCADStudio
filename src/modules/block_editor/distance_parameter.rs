@@ -640,7 +640,7 @@ impl CadCommand for DistanceParameterCommand {
             "Specify parameter endpoint:"
         } else if self.asking_grips() {
             if self.kind == Kind::Linear {
-                "Enter number of grips [0/1] <1>:"
+                "Enter number of grips [0/1/2] <2>:"
             } else {
                 "Specify number of grips [0/1/2/4] <1>:"
             }
@@ -787,13 +787,18 @@ impl CadCommand for DistanceParameterCommand {
         let answer = text.trim();
         if self.kind == Kind::Linear {
             let grips = match answer {
-                "" => 1,
+                "" => 2,
                 "0" => 0,
                 "1" => 1,
+                "2" => 2,
                 _ => {
-                    return Some(CmdResult::ReportError(
-                        crate::t!("Enter the number of grips: 0 or 1.").into_owned(),
-                    ))
+                    // A whole number outside the list repeats the question with
+                    // no message; words are no count at all and say so.
+                    return Some(if answer.parse::<i128>().is_ok() {
+                        CmdResult::NeedPoint
+                    } else {
+                        CmdResult::ReportError(crate::t!("Requires an integer value.").into_owned())
+                    });
                 }
             };
             self.grips = Some(grips);
@@ -871,8 +876,9 @@ impl CadCommand for DistanceParameterCommand {
             return self.accept(None);
         }
         if self.asking_grips() {
-            self.grips = Some(1);
-            return self.commit_grips(1);
+            let grips = if self.kind == Kind::Linear { 2 } else { 1 };
+            self.grips = Some(grips);
+            return self.commit_grips(grips);
         }
         CmdResult::Cancel
     }

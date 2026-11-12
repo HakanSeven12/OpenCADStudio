@@ -1,6 +1,32 @@
 use super::*;
 
 /// The symbol-kind words `XBIND` accepts.
+/// The source of the reference named `name`, resolved against `base_dir`;
+/// `Err` keeps the message honest for the command line.
+fn xref_source_path(
+    doc: &document::Document,
+    name: &str,
+    base_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let Some(record) = doc.block_records.get(name) else {
+        return Err(format!(
+            "XOPEN: no definition for \"{name}\"."
+        ));
+    };
+    if !record.flags.is_xref && !record.flags.is_xref_overlay {
+        return Err("XOPEN: select an external reference (xref) to open.".to_string());
+    }
+    let raw = &record.xref_path;
+    if raw.is_empty() {
+        return Err(format!(
+            "XOPEN: \"{}\" is not a reference to a file.",
+            record.name
+        ));
+    }
+    crate::io::xref::resolve_path(raw, base_dir)
+        .ok_or_else(|| format!("XOPEN: cannot find \"{raw}\". The reference is missing."))
+}
+
 fn xbind_kind(word: &str) -> Option<crate::io::xref::XbindKind> {
     use crate::io::xref::XbindKind;
     match word.to_ascii_uppercase().as_str() {
@@ -1274,23 +1300,11 @@ impl OpenCADStudio {
                     return Some(self.finish_dispatch(cmd));
                 }
                 if op.is_empty() || op == "?" {
-                    // List every reference via collect_entries_with_prev. The
-                    // base dir is the drawing's parent (or "." unsaved); the
-                    // tab's session sets keep CLI and palette in agreement.
-                    // Header lines stay byte-identical to the legacy listing;
-                    // each entry line gains an " [Attach]" / " [Overlay]"
-                    // type suffix.
-                    let base_dir: std::path::PathBuf = self.tabs[i]
-                        .current_path
-                        .as_ref()
-                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                        .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    let entries = crate::io::xref::collect_entries_with_prev(
-                        &self.tabs[i].scene.document,
-                        &base_dir,
-                        self.tabs[i].xref_unloaded.as_set(),
-                        &self.tabs[i].xref_stat_cache.0,
-                    );
+                    // List every reference with the live status the
+                    // Reference Manager shows. The refresh also rebuilds the
+                    // automation report, so `state.xrefs` answers a status
+                    // query with the same rows.
+                    let entries = self.refresh_xref_report(i);
                     if entries.is_empty() {
                         self.command_line.push_output(
                             crate::t!("XREF  No external references in this drawing.").as_ref(),
@@ -1308,8 +1322,38 @@ impl OpenCADStudio {
                                 crate::io::xref_model::RefType::Overlay => " [Overlay]",
                                 crate::io::xref_model::RefType::Attach => " [Attach]",
                             };
-                            self.command_line
-                                .push_output(&format!("  {} — {}{}", entry.name, path, suffix));
+                            self.command_line.push_output(&format!(
+                                "  {} — {}{} [{}]",
+                                entry.name,
+                                path,
+                                suffix,
+                                crate::ui::window::xref_manager::status_text(entry.status)
+                            ));
+                        }
+                        // A reference whose source is gone, or changed since
+                        // it was loaded, is the one thing the author must not
+                        // miss; the palette shows the same two states.
+                        let missing = entries
+                            .iter()
+                            .filter(|e| e.status == crate::io::xref_model::RefStatus::NotFound)
+                            .count();
+                        let stale = entries
+                            .iter()
+                            .filter(|e| e.status == crate::io::xref_model::RefStatus::Stale)
+                            .count();
+                        if missing > 0 {
+                            self.command_line.push_output(
+                                crate::tf!("XREF  {} reference(s) not found.", missing).as_ref(),
+                            );
+                        }
+                        if stale > 0 {
+                            self.command_line.push_output(
+                                crate::tf!(
+                                    "XREF  {} reference(s) stale — the source changed since it was loaded.",
+                                    stale
+                                )
+                                .as_ref(),
+                            );
                         }
                     }
                 } else if op.eq_ignore_ascii_case("Reload") {
@@ -2001,33 +2045,108 @@ impl OpenCADStudio {
             }
 
             // XOPEN — open the source file of the selected external reference in
-            // a new tab (reuses the existence-checked OpenRecent path).
+            // a new tab (reuses the existence-checked OpenRecent path). With
+            // nothing selected it asks to pick one under the point.
             "XOPEN" => {
-                let names: Vec<String> = self.tabs[i]
+                let base_dir = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let selected: Vec<(document::Handle, document::EntityType)> = self.tabs[i]
                     .scene
                     .selected_entities()
-                    .iter()
-                    .filter_map(|(_, e)| match e {
-                        document::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                    .into_iter()
+                    .map(|(handle, entity)| (handle, entity.clone()))
+                    .collect();
+                let had_selection = !selected.is_empty();
+                if let Some((_, document::EntityType::Insert(insert))) = selected
+                    .into_iter()
+                    .find(|(_, e)| matches!(e, document::EntityType::Insert(_)))
+                {
+                    return Some(match xref_source_path(
+                        &self.tabs[i].scene.document,
+                        &insert.block_name,
+                        &base_dir,
+                    ) {
+                        Ok(path) => {
+                            self.command_line.push_output(
+                                crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
+                            );
+                            Task::done(Message::OpenRecent(path))
+                        }
+                        Err(message) => {
+                            self.command_line.push_error(&message);
+                            self.finish_dispatch(cmd)
+                        }
+                    });
+                }
+                if had_selection {
+                    self.command_line.push_error(
+                        crate::t!("XOPEN: select an external reference (xref) to open.").as_ref(),
+                    );
+                    return Some(self.finish_dispatch(cmd));
+                }
+                let references: std::collections::HashSet<document::Handle> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        document::EntityType::Insert(insert) => self.tabs[i]
+                            .scene
+                            .document
+                            .block_records
+                            .get(&insert.block_name)
+                            .filter(|record| record.flags.is_xref || record.flags.is_xref_overlay)
+                            .map(|_| insert.common.handle),
                         _ => None,
                     })
                     .collect();
-                let path = names.iter().find_map(|bn| {
-                    let br = self.tabs[i].scene.document.block_records.get(bn)?;
-                    if br.xref_path.is_empty() {
-                        None
-                    } else {
-                        Some(br.xref_path.clone())
+                use crate::command::CadCommand;
+                let command =
+                    crate::modules::insert::xref_cmd::XOpenPickCommand::new(references);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                return Some(Task::none());
+            }
+
+            cmd if cmd.starts_with("XOPEN_PICK:") => {
+                let value = cmd.trim_start_matches("XOPEN_PICK:").trim();
+                let handle = document::Handle::new(
+                    value
+                        .parse::<u64>()
+                        .or_else(|_| u64::from_str_radix(value, 16))
+                        .unwrap_or(0),
+                );
+                let base_dir = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let insert = match self.tabs[i].scene.document.get_entity(handle) {
+                    Some(document::EntityType::Insert(insert)) => insert,
+                    _ => {
+                        self.command_line
+                            .push_error(crate::t!("XOPEN: the reference is gone.").as_ref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                };
+                return Some(match xref_source_path(
+                    &self.tabs[i].scene.document,
+                    &insert.block_name,
+                    &base_dir,
+                ) {
+                    Ok(path) => {
+                        self.command_line.push_output(
+                            crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
+                        );
+                        Task::done(Message::OpenRecent(path))
+                    }
+                    Err(message) => {
+                        self.command_line.push_error(&message);
+                        self.finish_dispatch(cmd)
                     }
                 });
-                match path {
-                    Some(p) => {
-                        return Some(Task::done(Message::OpenRecent(std::path::PathBuf::from(p))))
-                    }
-                    None => self.command_line.push_error(
-                        crate::t!("XOPEN: select an external reference (xref) to open.").as_ref(),
-                    ),
-                }
             }
 
             "NCOPY" | "NCOPYALL" => {

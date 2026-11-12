@@ -1103,6 +1103,7 @@ mod dgn_dialog_tests {
     #[test]
     fn dialog_code_page_choice_stores_the_v7_page() {
         use crate::modules::insert::dgn_import::DgnImportSettings;
+        let _own = crate::modules::insert::dgn_import::OwnSettings::take();
         // The checkbox must win over the stored code page for this window
         // even when a command-line import earlier kept 1250.
         dgn_import::set_settings(DgnImportSettings {

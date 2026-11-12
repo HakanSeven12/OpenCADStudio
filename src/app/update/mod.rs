@@ -14502,15 +14502,6 @@ impl OpenCADStudio {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
             Message::PlotStyleLoaded(Ok(Some(table))) => {
-                if table.is_stb {
-                    self.command_line.push_error(
-                        crate::t!(
-                            "Named plot style tables are not supported by the vector plotter."
-                        )
-                        .as_ref(),
-                    );
-                    return Task::none();
-                }
                 self.plot_dialog.style_name = table.name.clone();
                 self.plot_dialog.style_missing = false;
                 self.plot_dialog.style_error = None;

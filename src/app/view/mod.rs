@@ -581,6 +581,17 @@ pub(crate) fn main_window_event(
                     }
                 }
             }
+            // With an input method open (Bopomofo, Pinyin, ...) a character key
+            // arrives without text and the method hands what it composes to the
+            // focused field; it is not a shortcut, so the field keeps focus (#2835).
+            #[cfg(not(target_arch = "wasm32"))]
+            if status == Status::Ignored
+                && !shortcut_modifier
+                && text.as_deref().is_none_or(str::is_empty)
+                && matches!(key, keyboard::Key::Character(_))
+            {
+                return None;
+            }
             let shortcut = shortcut_key_name(&key, modifiers)?;
             if shortcut == "ESCAPE"
                 && status == Status::Captured

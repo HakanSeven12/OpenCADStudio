@@ -275,6 +275,26 @@ fn normal_entry(table: &PlotStyleTable) -> Option<&PlotStyleEntry> {
             .to_string()
     }
 
+/// A named table (STB) narrowed to one object style: the copy plots every
+/// object with `style` the way the full table plots `Normal`, so the colour,
+/// lineweight and screening resolvers apply it unchanged. `None` for a colour
+/// table, or for a style the table does not define (the object then plots
+/// with `Normal`, as the reference application does).
+pub fn with_object_style(table: &PlotStyleTable, style: &str) -> Option<PlotStyleTable> {
+    if !table.is_stb {
+        return None;
+    }
+    let entry = table
+        .named_entries
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(style))
+        .map(|(_, entry)| entry.clone())?;
+    let mut narrowed = table.clone();
+    narrowed.named_entries.clear();
+    narrowed.named_entries.insert("Normal".to_string(), entry);
+    Some(narrowed)
+}
+
 /// Where Open CAD Studio finds plot style tables: on disk, in this session's
 /// registry, and among the shipped ones.
 pub trait PlotStyleTableExt: Sized {
@@ -341,6 +361,10 @@ impl PlotStyleTableExt for PlotStyleTable {
             "screening 75%.ctb" => Ok(screening(SCREENING_75_PLOT_STYLE, 75)),
             "screening 50%.ctb" => Ok(screening(SCREENING_50_PLOT_STYLE, 50)),
             "screening 25%.ctb" => Ok(screening(SCREENING_25_PLOT_STYLE, 25)),
+            // The named tables every reference install ships, so a layout set
+            // up with one plots without a copy in the plot styles folder.
+            "acad.stb" | "autodesk-color.stb" => Ok(named_normal(name, None)),
+            "monochrome.stb" | "autodesk-mono.stb" => Ok(named_normal(name, Some([0, 0, 0]))),
             _ => Err(format!("Unknown built-in plot style: {name}")),
         }
     }
@@ -459,6 +483,20 @@ impl PlotStyleTableExt for PlotStyleTable {
     }
 }
 
+/// A named table holding only `Normal`: `color` replaces every object's
+/// colour, or `None` keeps it.
+fn named_normal(name: &str, color: Option<[u8; 3]>) -> PlotStyleTable {
+    let mut table = PlotStyleTable::identity(name);
+    table.is_stb = true;
+    let mut normal = PlotStyleEntry::default();
+    normal.name = "Normal".to_string();
+    normal.color = color;
+    normal.color_policy = 0;
+    normal.screening = 100;
+    table.named_entries.insert("Normal".to_string(), normal);
+    table
+}
+
 /// A table that screens every color to `percent`.
 fn screening(name: &str, percent: u8) -> PlotStyleTable {
     let mut table = PlotStyleTable::identity(name);
@@ -517,6 +555,19 @@ mod round_trip_tests {
 #[cfg(test)]
 mod lenient_loading_tests {
     use super::{PlotStyleTable, PlotStyleTableExt};
+
+    #[test]
+    fn standard_named_tables_load_without_a_file() {
+        for name in ["acad.stb", "Autodesk-Color.stb"] {
+            let table = PlotStyleTable::load_named(name).expect("shipped named table");
+            assert!(table.is_stb);
+            assert_eq!(table.resolve_style_color(1), None, "{name} keeps object colour");
+        }
+        let mono = PlotStyleTable::load_named("monochrome.stb").expect("monochrome.stb");
+        assert_eq!(mono.resolve_style_color(1), Some([0.0; 3]));
+        assert!(super::with_object_style(&mono, "Normal").is_some());
+        assert!(super::with_object_style(&mono, "Nope").is_none());
+    }
 
     #[test]
     fn named_tables_and_missing_files_get_a_reason() {

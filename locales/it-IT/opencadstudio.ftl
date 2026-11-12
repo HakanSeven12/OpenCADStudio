@@ -6163,11 +6163,9 @@ styles =
     .value-0-variable = 0 variabile =
     .aci-color-index = ACI Indice colori
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: nessun problema trovato.
     .audit-fix-any-errors-detected = AUDIT  Correggere gli errori rilevati? [Sì / No] <No>:
-    .audit-error-s-warning-s-found = AUDIT: trovati __ocs_fmt_0__ errore/i, __ocs_fmt_1__ avviso/i.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ riparazione/i applicata/e, __ocs_fmt_1__ problema/i irrisolto/i.
-    .audit-scanned-total-object-s = AUDIT: oggetto/i __ocs_fmt_0__ scansionato/i.
+    .audit-objects-audited = __ocs_fmt_0__ oggetti controllati
+    .audit-total-errors-found-fixed = Errori totali trovati __ocs_fmt_0__, corretti __ocs_fmt_1__
     .above-text = Sopra il testo
     .active-dim-style-set-to-name-arg = Stile di attenuazione attivo impostato su "__ocs_fmt_0__"
     .add-leader = Aggiungi leader

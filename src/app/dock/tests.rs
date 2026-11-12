@@ -1506,7 +1506,7 @@ fn block_actions_palette_controls_require_compatible_parameters_and_start_comman
             "BACTION"
         );
         let _ = app.update(Message::CommandEscape);
-        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 1,0 0.5,0.3");
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 1,0 0.5,0.3 1");
         let point = authoring_control(&app, "authoring-tool-scale-action");
         authoring_click(&mut app, point);
         assert_eq!(

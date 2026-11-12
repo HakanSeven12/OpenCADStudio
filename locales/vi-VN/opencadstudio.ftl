@@ -6171,11 +6171,9 @@ styles =
     .value-0-variable = 0 = biến
     .aci-color-index = Chỉ số màu ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: không tìm thấy vấn đề nào.
     .audit-fix-any-errors-detected = AUDIT Sửa bất kỳ lỗi nào được phát hiện? [Có / Không] <Không>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ lỗi, __ocs_fmt_1__ cảnh báo được tìm thấy.
-    .audit-repair-s-applied-issue-s-left = AUDIT: đã áp dụng __ocs_fmt_0__ sửa lỗi, còn __ocs_fmt_1__ vấn đề chưa giải quyết.
-    .audit-scanned-total-object-s = AUDIT: đã quét __ocs_fmt_0__ đối tượng.
+    .audit-objects-audited = Đã kiểm tra __ocs_fmt_0__ đối tượng
+    .audit-total-errors-found-fixed = Tổng số lỗi tìm thấy __ocs_fmt_0__, đã sửa __ocs_fmt_1__
     .above-text = Văn bản phía trên
     .active-dim-style-set-to-name-arg = Đã đặt kiểu kích thước hiện hành thành "__ocs_fmt_0__"
     .add-leader = Thêm đường dẫn

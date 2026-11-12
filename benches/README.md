@@ -170,6 +170,13 @@ allocations, GUI, GPU and child processes; allocation byte totals exclude
 reallocation sizes. Counting allocations adds overhead, so the probe is kept
 separate from the timing benchmark.
 
+To exercise glyphs at a wider range of pen positions, pass `--fixture varied`
+to either benchmark. This selects 256 deterministic distinct alphanumeric
+labels of 24–40 characters at a local origin; its small cache-hit sample uses
+the first 16 labels. The default `drawing` fixture is unchanged. Compare only
+reports with matching fixture, font and geometry hashes; this varied workload
+is synthetic and is not a model of the 10,000-text drawing.
+
 ---
 
 ## Benchmark Suite Catalog (31 Metrics)

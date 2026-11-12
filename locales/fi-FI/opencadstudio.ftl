@@ -6163,11 +6163,9 @@ styles =
     .value-0-variable = 0 = muuttuja
     .aci-color-index = ACI väriindeksi
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: ongelmia ei löytynyt.
     .audit-fix-any-errors-detected = AUDIT  Korjataanko havaitut virheet? [Kyllä / Ei] <Ei>:
-    .audit-error-s-warning-s-found = AUDIT: löytyi __ocs_fmt_0__ virhettä, __ocs_fmt_1__ varoitusta.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ korjausta tehty, __ocs_fmt_1__ ongelmaa ratkaisematta.
-    .audit-scanned-total-object-s = AUDIT: skannatut __ocs_fmt_0__-objektit.
+    .audit-objects-audited = Tarkastettu __ocs_fmt_0__ objektia
+    .audit-total-errors-found-fixed = Virheitä yhteensä __ocs_fmt_0__, korjattu __ocs_fmt_1__
     .above-text = Tekstin yläpuolella
     .active-dim-style-set-to-name-arg = Aktiivinen himmennystyyli asetettu "__ocs_fmt_0__"
     .add-leader = Lisää johtaja

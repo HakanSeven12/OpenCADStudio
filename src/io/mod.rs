@@ -1873,13 +1873,23 @@ pub fn drawing_properties_lost_on_save(
 /// bytes — that would be DROPPED when saving `doc` to `target_version` (or to
 /// DXF). Returns 0 for a same-version DWG save, where they round-trip verbatim.
 /// Used to warn the user before a lossy Save-As.
+///
+/// Also counts OLE2FRAMEs read from a file whose embedded compound file was
+/// changed: the writer then rebuilds it, and other DWG readers can reject the
+/// rebuilt object and drop the frame (#2862), whatever the target.
 pub fn dropped_on_save_count(
     doc: &document::Document,
     target_version: document::DxfVersion,
     is_dxf: bool,
 ) -> usize {
+    let rebuilt_ole = doc
+        .entities()
+        .filter(
+            |e| matches!(e, document::EntityType::Ole2Frame(ole) if ole.rewrites_source_storage()),
+        )
+        .count();
     if !is_dxf && doc.dwg_source_version == Some(target_version) {
-        return 0;
+        return rebuilt_ole;
     }
 
     let mut n = doc
@@ -1920,7 +1930,7 @@ pub fn dropped_on_save_count(
             n += 1;
         }
     }
-    n
+    n + rebuilt_ole
 }
 
 /// MTEXT data the pinned codec's writer has no place for in an older target.
@@ -4092,5 +4102,47 @@ mod dxf_annotation_scale_tests {
             doc.header.annotation_scale_value,
             default.header.annotation_scale_value
         );
+    }
+}
+
+#[cfg(test)]
+mod ole_save_loss_tests {
+    use document::types::Vector3;
+
+    /// An OLE2FRAME as read from a file, with a synthetic (non-image) payload.
+    fn read_frame() -> document::entities::Ole2Frame {
+        let image = super::ole_embed::EmbeddedImage {
+            bytes: vec![7; 600],
+            pixel_width: 1,
+            pixel_height: 1,
+            name: "synthetic.png".into(),
+        };
+        let built = super::ole_embed::build_embedded_ole(
+            &image,
+            Vector3::new(0.0, 10.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        let mut frame = document::entities::Ole2Frame::new();
+        frame.set_payload(&built.encoded_payload());
+        frame
+    }
+
+    fn dropped(frame: document::entities::Ole2Frame) -> usize {
+        let mut doc = document::Document::new();
+        doc.dwg_source_version = Some(document::DxfVersion::AC1032);
+        doc.add_entity(document::EntityType::Ole2Frame(Box::new(frame)))
+            .unwrap();
+        super::dropped_on_save_count(&doc, document::DxfVersion::AC1032, false)
+    }
+
+    // #2862: a rebuilt compound file is dropped by other DWG readers, so a
+    // read frame whose storage changed must be reported even on a same-version save.
+    #[test]
+    fn rebuilt_ole_storage_is_reported_as_a_save_loss() {
+        assert_eq!(dropped(read_frame()), 0);
+        let mut edited = read_frame();
+        edited.storage.trailing_records =
+            document::compound_file::BinaryRecord::split(&[1, 2, 3], 4096);
+        assert_eq!(dropped(edited), 1);
     }
 }

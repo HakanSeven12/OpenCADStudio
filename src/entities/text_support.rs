@@ -3383,6 +3383,9 @@ mod tests {
         doc.text_styles.add(gone).unwrap();
         let doc: document::Document = doc.into();
         let searches = || crate::io::font_repo::FOLDER_SEARCHES.with(std::cell::Cell::get);
+        let _keep = crate::io::font_repo::KEEP_FONT_PATHS
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
 
         let before = searches();
         for _ in 0..50 {

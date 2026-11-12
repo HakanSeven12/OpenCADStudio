@@ -6165,11 +6165,9 @@ styles =
     .value-0-variable = 0 = variable
     .aci-color-index = ACI Indice de couleur
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: aucun problème trouvé.
     .audit-fix-any-errors-detected = AUDIT  Corriger les erreurs détectées ? [Oui / Non] <Non> :
-    .audit-error-s-warning-s-found = AUDIT : __ocs_fmt_0__ erreur(s), __ocs_fmt_1__ avertissement(s) trouvé(s).
-    .audit-repair-s-applied-issue-s-left = AUDIT : __ocs_fmt_0__ réparation(s) appliquée(s), __ocs_fmt_1__ problème(s) non résolu(s).
-    .audit-scanned-total-object-s = AUDIT : objets analysés : __ocs_fmt_0__.
+    .audit-objects-audited = __ocs_fmt_0__ objets contrôlés
+    .audit-total-errors-found-fixed = Total des erreurs trouvées __ocs_fmt_0__, corrigées __ocs_fmt_1__
     .above-text = Texte ci-dessus
     .active-dim-style-set-to-name-arg = Style de cote courant défini sur « __ocs_fmt_0__ »
     .add-leader = Ajouter le repère

@@ -6164,11 +6164,9 @@ styles =
     .value-0-variable = 0 = променлива
     .aci-color-index = ACI Цветови индекс
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: не са открити проблеми.
     .audit-fix-any-errors-detected = AUDIT  Да се поправят ли откритите грешки? [Да / Не] <Не>:
-    .audit-error-s-warning-s-found = AUDIT: открити грешки: __ocs_fmt_0__, предупреждения: __ocs_fmt_1__.
-    .audit-repair-s-applied-issue-s-left = AUDIT: приложени поправки: __ocs_fmt_0__, нерешени проблеми: __ocs_fmt_1__.
-    .audit-scanned-total-object-s = AUDIT: сканирани __ocs_fmt_0__ обект(а).
+    .audit-objects-audited = Проверени обекти: __ocs_fmt_0__
+    .audit-total-errors-found-fixed = Общо открити грешки __ocs_fmt_0__, поправени __ocs_fmt_1__
     .above-text = Над текста
     .active-dim-style-set-to-name-arg = Активният стил за оразмеряване е зададен на "__ocs_fmt_0__"
     .add-leader = Добави водач

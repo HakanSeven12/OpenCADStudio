@@ -6163,11 +6163,9 @@ styles =
     .value-0-variable = 0 = zmienna
     .aci-color-index = Indeks kolorów ACI
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: nie znaleziono żadnych problemów.
     .audit-fix-any-errors-detected = AUDIT  Naprawić wykryte błędy? [Tak / Nie] <Nie>:
-    .audit-error-s-warning-s-found = AUDIT: znaleziono błędy: __ocs_fmt_0__, ostrzeżenia: __ocs_fmt_1__.
-    .audit-repair-s-applied-issue-s-left = AUDIT: zastosowane naprawy: __ocs_fmt_0__, nierozwiązane problemy: __ocs_fmt_1__.
-    .audit-scanned-total-object-s = AUDIT: zeskanowane obiekty __ocs_fmt_0__.
+    .audit-objects-audited = Sprawdzono obiektów: __ocs_fmt_0__
+    .audit-total-errors-found-fixed = Łącznie znalezionych błędów __ocs_fmt_0__, naprawionych __ocs_fmt_1__
     .above-text = Powyżej tekstu
     .active-dim-style-set-to-name-arg = Aktywny styl przyciemnienia ustawiony na „__ocs_fmt_0__”
     .add-leader = Dodaj lidera

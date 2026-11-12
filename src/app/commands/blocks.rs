@@ -535,10 +535,13 @@ impl OpenCADStudio {
                 self.sync_dyn_fields();
                 let started = self.focus_cmd_input();
                 #[cfg(target_arch = "wasm32")]
-                let read = Task::perform(crate::sys::read_clipboard_text(), Message::PasteSpecial);
+                let read = Task::perform(crate::sys::read_clipboard_text(), |text| {
+                    Message::PasteSpecial(text, None)
+                });
                 #[cfg(not(target_arch = "wasm32"))]
-                let read = iced::clipboard::read_text()
-                    .map(|result| Message::PasteSpecial(result.ok().map(|text| (*text).clone())));
+                let read = iced::clipboard::read_text().map(|result| {
+                    Message::PasteSpecial(result.ok().map(|text| (*text).clone()), None)
+                });
                 return Some(Task::batch([started, read]));
             }
 

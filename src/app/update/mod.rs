@@ -9387,7 +9387,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text) => {
+            Message::PasteSpecial(text, _picture) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd

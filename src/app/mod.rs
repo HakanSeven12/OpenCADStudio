@@ -3461,8 +3461,9 @@ pub enum Message {
     PasteShortcut,
     /// Which text input held focus when `PasteShortcut` arrived.
     PasteShortcutResolved(PasteFocus),
-    /// Completion of the system text clipboard read PASTESPEC starts.
-    PasteSpecial(Option<String>),
+    /// Completion of the system clipboard read PASTESPEC starts: its text
+    /// and its picture.
+    PasteSpecial(Option<String>, Option<crate::io::ole_embed::EmbeddedImage>),
     /// Completion of the system text clipboard read PASTEASHYPERLINK starts.
     PasteAsHyperlink(Option<String>),
     /// Completion of a system text clipboard read requested by PASTECLIP.

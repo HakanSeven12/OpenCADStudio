@@ -1,7 +1,8 @@
 //! PASTESPEC: the formats it offers for what the clipboard holds, and what
 //! each one places.
 use super::{Message, OpenCADStudio};
-use document::entities::Table;
+use crate::io::ole_embed::EmbeddedImage;
+use document::entities::{Line, Ole2Frame, OlePresentation, RasterImage, Table};
 use document::types::Vector3;
 use document::EntityType;
 
@@ -11,11 +12,78 @@ const RANGE: &str = "Item\tQty\r\nBolt M8\t4\r\nNut M8\t4\r\n";
 
 /// PASTESPEC in a new drawing, once the system clipboard's text is read.
 fn started(text: &str) -> OpenCADStudio {
+    started_with(false, Some(text), None)
+}
+
+/// PASTESPEC in a new drawing — with a line copied in the program when
+/// `objects` — once the system clipboard is read: its text and its picture.
+fn started_with(
+    objects: bool,
+    text: Option<&str>,
+    picture: Option<EmbeddedImage>,
+) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
+    if objects {
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::UNIT_X,
+            )));
+        app.tabs[i].scene.select_entity(line, true);
+        let _ = app.dispatch_command("COPYCLIP");
+        app.tabs[i].scene.deselect_all();
+    }
     let _ = app.dispatch_command("PASTESPEC");
-    let _ = app.update(Message::PasteSpecial(Some(text.to_string())));
+    let _ = app.update(Message::PasteSpecial(text.map(str::to_string), picture));
     app
+}
+
+/// A picture as it is read off the clipboard: 40 × 30 pixels, as a PNG.
+fn picture() -> EmbeddedImage {
+    let pixels = image::RgbaImage::from_pixel(40, 30, image::Rgba([200, 30, 30, 255]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    pixels
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("a PNG of the pixels");
+    EmbeddedImage::from_bytes("pasted-1.png".to_string(), png.into_inner())
+        .expect("a picture to place")
+}
+
+/// The pictures held inside the drawing.
+fn embedded(app: &OpenCADStudio) -> Vec<Ole2Frame> {
+    app.tabs[app.active_tab]
+        .scene
+        .document
+        .model_space_entities()
+        .filter_map(|entity| match entity {
+            EntityType::Ole2Frame(frame) => Some((**frame).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The pictures the drawing points at in files.
+fn linked(app: &OpenCADStudio) -> Vec<RasterImage> {
+    app.tabs[app.active_tab]
+        .scene
+        .document
+        .model_space_entities()
+        .filter_map(|entity| match entity {
+            EntityType::RasterImage(image) => Some(image.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A folder of its own for a drawing that is saved there.
+fn drawing_folder(name: &str) -> std::path::PathBuf {
+    let folder = std::env::temp_dir().join(format!("ocs-pastespec-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("a folder for the drawing");
+    folder
 }
 
 /// The keywords of the formats the running command offers.
@@ -256,5 +324,103 @@ fn the_prompt_lists_the_formats_on_hand() {
             .contains(&format!("[{}]", labels.join("/"))),
         "the prompt {:?} lists {labels:?} and nothing else",
         command.prompt()
+    );
+}
+
+#[test]
+fn a_copied_picture_is_offered_as_an_image_and_as_an_embedded_image() {
+    let app = started_with(false, None, Some(picture()));
+    assert_eq!(keywords(&app), ["I", "E"]);
+}
+
+#[test]
+fn a_picture_joins_the_formats_of_what_else_was_copied() {
+    // A spreadsheet copies a range as text and as a picture of it.
+    let app = started_with(true, Some(RANGE), Some(picture()));
+    assert_eq!(keywords(&app), ["O", "B", "T", "TA", "I", "E"]);
+}
+
+#[test]
+fn embedded_image_places_the_picture_inside_the_drawing() {
+    let source = picture();
+    let mut app = started_with(false, None, Some(source.clone()));
+    // The format, the insertion point, and Enter for the default width: a
+    // drawing unit for each 100 pixels, one at the least.
+    answer(&mut app, &["E", "5,5"]);
+    let i = app.active_tab;
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "the command ends with the picture placed"
+    );
+    let placed = embedded(&app);
+    assert_eq!(placed.len(), 1, "one picture inside the drawing");
+    match document::entities::extract_presentation(&placed[0].encoded_payload()) {
+        Some(OlePresentation::Raster(bytes)) => assert_eq!(bytes, source.bytes),
+        other => panic!("the drawing holds the picture's own bytes, not {other:?}"),
+    }
+    // 40 × 30 pixels at one unit wide, its lower left corner at the point.
+    assert_eq!(placed[0].upper_left_corner, Vector3::new(5.0, 5.75, 0.0));
+    assert_eq!(placed[0].lower_right_corner, Vector3::new(6.0, 5.0, 0.0));
+    assert!(linked(&app).is_empty(), "and no file to point at");
+    // One undo step takes the picture off again.
+    let _ = app.automation_op(r#"{"op":"undo"}"#);
+    assert!(embedded(&app).is_empty());
+}
+
+#[test]
+fn image_saves_the_picture_beside_the_drawing_and_points_at_it() {
+    let folder = drawing_folder("image");
+    let source = picture();
+    let mut app = started_with(false, None, Some(source.clone()));
+    let i = app.active_tab;
+    app.tabs[i].current_path = Some(folder.join("drawing.dwg"));
+    answer(&mut app, &["I", "5,5"]);
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "the command ends with the picture placed"
+    );
+    let placed = linked(&app);
+    assert_eq!(placed.len(), 1, "one picture the drawing points at");
+    let file = std::path::PathBuf::from(&placed[0].file_path);
+    assert_eq!(
+        file.parent(),
+        Some(folder.as_path()),
+        "the picture is saved beside the drawing"
+    );
+    assert_eq!(
+        std::fs::read(&file).expect("the saved picture"),
+        source.bytes
+    );
+    assert_eq!(placed[0].insertion_point, Vector3::new(5.0, 5.0, 0.0));
+    assert!(embedded(&app).is_empty(), "and nothing inside the drawing");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn enter_takes_the_first_format_of_a_picture() {
+    let folder = drawing_folder("enter");
+    let mut app = started_with(false, None, Some(picture()));
+    let i = app.active_tab;
+    app.tabs[i].current_path = Some(folder.join("drawing.dwg"));
+    // Enter at the format prompt, then the insertion point and the width.
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    answer(&mut app, &["5,5"]);
+    assert_eq!(linked(&app).len(), 1, "Image is the first format offered");
+    assert!(embedded(&app).is_empty());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn with_nothing_to_paste_the_command_says_so_and_ends() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let errors = app.command_line.error_revision;
+    let _ = app.dispatch_command("PASTESPEC");
+    let _ = app.update(Message::PasteSpecial(None, None));
+    let i = app.active_tab;
+    assert!(app.tabs[i].active_cmd.is_none(), "no format, no command");
+    assert!(
+        app.command_line.error_revision > errors,
+        "the command line says the clipboard holds nothing to paste"
     );
 }

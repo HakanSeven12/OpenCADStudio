@@ -30,6 +30,30 @@ pub enum VerticalAlign {
     Bottom,
 }
 
+/// Emphasis of a [`DialogControl::StyledText`] (API v19).
+///
+/// The host maps each style onto its theme (font weight, size and the theme's
+/// success/warning/danger colours), so plugins state intent, not colours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextStyle {
+    /// Regular body text at full contrast.
+    #[default]
+    Normal,
+    /// De-emphasised secondary text (the look of [`DialogControl::InfoText`]).
+    Muted,
+    /// Bold body text, e.g. a key figure.
+    Strong,
+    /// A larger bold heading that introduces a group of controls.
+    Heading,
+    /// A positive state ("check passed"), bold in the theme's success colour.
+    Success,
+    /// A state that needs attention, bold in the theme's warning colour.
+    Warning,
+    /// A failed state, bold in the theme's danger colour.
+    Danger,
+}
+
 /// A single interactive control inside a dialog row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogControl {
@@ -136,6 +160,28 @@ pub enum DialogControl {
         #[serde(default)]
         align_h: Option<HorizontalAlign>,
     },
+    /// Static text with an emphasis [`TextStyle`] (API v19): headings, key
+    /// figures and pass/fail states. Appended so older variants keep their
+    /// wire index; a v18 host cannot decode it, so a plugin that sends it
+    /// declares v19.
+    StyledText {
+        text: String,
+        #[serde(default)]
+        style: TextStyle,
+        #[serde(default)]
+        align_h: Option<HorizontalAlign>,
+    },
+    /// A static SVG image (API v19), e.g. a chart the plugin renders itself.
+    /// `svg` is the complete document text; it is scaled to the available
+    /// width keeping its aspect ratio, or to `height` logical pixels when
+    /// given. External references are not loaded. Appended for the same wire
+    /// reason as [`DialogControl::StyledText`].
+    Svg {
+        id: String,
+        svg: String,
+        #[serde(default)]
+        height: Option<f32>,
+    },
 }
 
 fn default_true() -> bool {
@@ -145,8 +191,12 @@ fn default_true() -> bool {
 impl DialogControl {
     pub fn id(&self) -> Option<&str> {
         match self {
-            Self::InfoText { .. } | Self::Row { .. } | Self::Column { .. } => None,
+            Self::InfoText { .. }
+            | Self::StyledText { .. }
+            | Self::Row { .. }
+            | Self::Column { .. } => None,
             Self::Label { id, .. }
+            | Self::Svg { id, .. }
             | Self::Text { id, .. }
             | Self::Number { id, .. }
             | Self::Checkbox { id, .. }
@@ -581,6 +631,61 @@ mod tests {
         let restored_resp: DialogResponse =
             bincode::deserialize(&resp_bytes).expect("deserialize response");
         assert_eq!(response, restored_resp);
+    }
+
+    #[test]
+    fn styled_text_and_svg_roundtrip_and_are_appended_to_the_wire_enum() {
+        // API v19: both variants ride at the enum tail, so every older
+        // variant keeps its bincode tag and an older plugin's panels decode
+        // unchanged on a v19 host.
+        let tag = |control: &DialogControl| -> u32 {
+            let bytes = bincode::serialize(control).expect("serialize control");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+        let label = DialogControl::Label {
+            id: "l".to_string(),
+            text: "x".to_string(),
+            align_h: None,
+        };
+        let styled = DialogControl::StyledText {
+            text: "Supply sufficient".to_string(),
+            style: TextStyle::Success,
+            align_h: Some(HorizontalAlign::Center),
+        };
+        let svg = DialogControl::Svg {
+            id: "chart".to_string(),
+            svg: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"/>".to_string(),
+            height: Some(240.0),
+        };
+        assert_eq!(tag(&label), 12);
+        assert_eq!(tag(&styled), 13);
+        assert_eq!(tag(&svg), 14);
+        assert_eq!(styled.id(), None);
+        assert_eq!(svg.id(), Some("chart"));
+
+        let panel = PanelDef::new("results", "Results")
+            .with_control(styled)
+            .with_control(svg);
+        let bytes = bincode::serialize(&panel).expect("serialize panel");
+        let restored: PanelDef = bincode::deserialize(&bytes).expect("deserialize panel");
+        assert_eq!(panel, restored);
+
+        // JSON (manifest/registry tooling) uses lowercase style names and
+        // defaults a missing style to `Normal`.
+        let json = serde_json::json!({ "StyledText": { "text": "t" } });
+        let parsed: DialogControl = serde_json::from_value(json).expect("default style");
+        assert_eq!(
+            parsed,
+            DialogControl::StyledText {
+                text: "t".to_string(),
+                style: TextStyle::Normal,
+                align_h: None,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(TextStyle::Danger).expect("style json"),
+            serde_json::json!("danger")
+        );
     }
 
     #[test]

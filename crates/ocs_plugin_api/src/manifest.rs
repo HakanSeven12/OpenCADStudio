@@ -157,7 +157,13 @@
 /// request requires v18: a v17 host refuses the new plugin at load rather
 /// than accepting it and failing to decode the request. v17 plugins remain
 /// supported. Asynchronous `PanelAction` notifications remain read-only.
-pub const API_VERSION: u32 = 18;
+/// v19: presentation controls for dialogs and dock panels —
+/// `DialogControl::StyledText` (heading / strong / muted / success / warning /
+/// danger text, mapped onto the host theme) and `DialogControl::Svg` (a static
+/// plugin-rendered SVG image, e.g. a chart), appended to the enum. A v18 host
+/// cannot decode them, so a plugin that sends them declares v19; v18 and
+/// older plugins remain supported unchanged.
+pub const API_VERSION: u32 = 19;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

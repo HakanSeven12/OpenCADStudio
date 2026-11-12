@@ -17,6 +17,32 @@ The host and each plugin run in separate OS processes. The host re-executes itse
 
 ---
 
+## API 19 — styled text and SVG images in dialogs and panels
+
+API v19 appends two presentation controls to `DialogControl`:
+
+- `StyledText { text, style, align_h }` with `TextStyle` = `normal`, `muted`,
+  `strong`, `heading`, `success`, `warning`, `danger`. The host maps the style
+  onto its theme (bold weight, a larger heading size, the theme's own
+  success/warning/danger colour moved in hue only as far as it needs to read
+  on the panel surface), so plugins state intent rather than colours.
+- `Svg { id, svg, height }`: a static, plugin-rendered SVG document (for
+  example a chart), scaled to the available width keeping its aspect ratio,
+  or to `height` logical pixels. The handle is parsed once when the panel or
+  dialog is registered or updated, not per frame. External references are not
+  loaded.
+
+Both are display only: they contribute no `DialogValue` and no snapshot value
+(an `Svg` id is declared for duplicate-id checks and `Visible` updates). They
+are appended at the enum tail, so every older variant keeps its bincode tag
+and older plugins decode unchanged; a v18 host cannot decode them, so a plugin
+that sends them declares v19.
+
+Implementation references: `dialog.rs` (`TextStyle`, the two variants and a
+wire-tag test), `src/ui/window/plugin_dialog.rs` (`styled_text`,
+`svg_image`, `collect_svg_handles`, shared with the panel renderer) and
+`src/ui/window/plugin_panel.rs`.
+
 ## API 18 — synchronous panel form snapshots (2026-11-11)
 
 API v18 adds `PanelSnapshot` and `HostApi::panel_snapshot` so a normal,

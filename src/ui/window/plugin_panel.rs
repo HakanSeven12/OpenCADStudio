@@ -17,7 +17,8 @@ use crate::app::Message;
 use crate::ui::dock::{title_bar, Chrome, PanelId};
 use crate::ui::style::form::{button_style, field_style};
 use crate::ui::window::plugin_dialog::{
-    apply_control_value_updates, find_choice_option_in_controls, ChoiceOption,
+    apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
+    svg_image, ChoiceOption,
 };
 
 const LABEL_WIDTH: f32 = 110.0;
@@ -40,6 +41,10 @@ pub struct PluginPanelState {
     pub disabled_controls: HashSet<String>,
     pub hidden_controls: HashSet<String>,
     pub dynamic_choice_options: HashMap<String, Vec<String>>,
+    /// Parsed-once handles of the panel's [`DialogControl::Svg`] images, by
+    /// control id; rebuilt with the state whenever the plugin re-registers or
+    /// updates the panel definition.
+    pub svg_handles: HashMap<String, iced::widget::svg::Handle>,
 }
 
 impl PluginPanelState {
@@ -113,7 +118,8 @@ impl PluginPanelState {
                         init_control(sub, tv, bv, cv, clrv, fv, tbv, cs);
                     }
                 }
-                DialogControl::InfoText { .. } => {}
+                DialogControl::InfoText { .. } | DialogControl::StyledText { .. } => {}
+                DialogControl::Svg { .. } => {}
                 DialogControl::Label { id, text, .. } => {
                     tv.insert(id.clone(), text.clone());
                 }
@@ -134,6 +140,9 @@ impl PluginPanelState {
             );
         }
 
+        let mut svg_handles = HashMap::new();
+        collect_svg_handles(&def.controls, &mut svg_handles);
+
         Self {
             def,
             owner_plugin_id: None,
@@ -148,6 +157,7 @@ impl PluginPanelState {
             disabled_controls: HashSet::new(),
             hidden_controls: HashSet::new(),
             dynamic_choice_options: HashMap::new(),
+            svg_handles,
         }
     }
 
@@ -227,7 +237,11 @@ impl PluginPanelState {
         ) {
             for control in controls {
                 match control {
-                    DialogControl::InfoText { .. } => {}
+                    DialogControl::InfoText { .. } | DialogControl::StyledText { .. } => {}
+                    // An image is display, not a form value.
+                    DialogControl::Svg { id, .. } => {
+                        declare_control(id, None, ids, expected, errors);
+                    }
                     // A label's text may be rewritten through `text_values`;
                     // it is display, not a form value.
                     DialogControl::Label { id, .. } => {
@@ -706,6 +720,12 @@ impl PluginPanelState {
                     t.into()
                 }
             }
+            DialogControl::StyledText {
+                text: msg,
+                style,
+                align_h,
+            } => styled_text(msg, *style, *align_h),
+            DialogControl::Svg { id, height, .. } => svg_image(self.svg_handles.get(id), *height),
             DialogControl::Row {
                 controls,
                 align_h,
@@ -1541,6 +1561,49 @@ mod tests {
         assert_eq!(state.def.controls, original_controls);
         assert_eq!(state.text_values.get("length").map(String::as_str), Some("2.5"));
         assert!(!state.text_values.contains_key("title"));
+    }
+
+    #[test]
+    fn styled_text_and_svg_are_presentation_only_and_parse_once() {
+        // API v19: the SVG handle is built at registration (nested in a
+        // collapsed card), and neither control contributes a form value.
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">\
+                   <rect width=\"10\" height=\"10\" fill=\"#fff\"/></svg>";
+        let state = panel_state(vec![
+            DialogControl::StyledText {
+                text: "Supply sufficient".to_string(),
+                style: ocs_plugin_api::dialog::TextStyle::Success,
+                align_h: None,
+            },
+            DialogControl::Fields {
+                id: "card".to_string(),
+                title: Some("Card".to_string()),
+                collapsed: true,
+                controls: vec![DialogControl::Svg {
+                    id: "chart".to_string(),
+                    svg: svg.to_string(),
+                    height: Some(120.0),
+                }],
+            },
+        ]);
+        assert_eq!(
+            state.svg_handles.get("chart"),
+            Some(&iced::widget::svg::Handle::from_memory(svg.as_bytes().to_vec()))
+        );
+        let snapshot = state.snapshot(0);
+        assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
+        assert!(!snapshot.values.contains_key("chart"));
+        // Re-registering an updated definition rebuilds the handle.
+        let mut def = state.def.clone();
+        if let DialogControl::Fields { controls, .. } = &mut def.controls[1] {
+            controls[0] = DialogControl::Svg {
+                id: "chart".to_string(),
+                svg: svg.replace("#fff", "#000"),
+                height: None,
+            };
+        }
+        let updated = PluginPanelState::from_def(def);
+        assert_ne!(updated.svg_handles.get("chart"), state.svg_handles.get("chart"));
     }
 
     #[test]

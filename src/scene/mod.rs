@@ -12870,6 +12870,12 @@ impl Scene {
         interaction_block: Handle,
         entities: impl Iterator<Item = &'a EntityType>,
     ) -> HashMap<Handle, Vec<HatchModel>> {
+        // No block definition holds a hatch, so no reference places one.
+        if !render_graph::any_block_definition_holds(&self.document, |entity| {
+            matches!(entity, EntityType::Hatch(_))
+        }) {
+            return HashMap::default();
+        }
         let layer_hidden =
             |layer: &str| self.layer_hidden(layer) || self.interaction_layer_frozen(layer);
         let mut out: HashMap<Handle, Vec<HatchModel>> = HashMap::default();

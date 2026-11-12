@@ -2978,7 +2978,8 @@ impl OpenCADStudio {
             // "scale_layout=0|1", "color_list=<field>" (line_color,
             // text_color, block_color, line_type, line_weight),
             // "pick=<name>", "pick_ok", "pick_cancel", "pick_load",
-            // "load_file", "load_toggle=<linetype>", "load_ok", "load_cancel",
+            // "load_file", "load_path=<.lin path>", "load_toggle=<linetype>",
+            // "load_ok", "load_cancel",
             // "default_text",
             // "text_styles", "ok", "cancel".
             "mleader_style_dialog" => {
@@ -3093,6 +3094,12 @@ impl OpenCADStudio {
                     "pick_cancel" => dlg(M::PickCancel),
                     "pick_load" => dlg(M::PickLoad),
                     "load_file" => dlg(M::LoadFile),
+                    // The file Load Linetypes' File… would pick, by path.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    "load_path" => dlg(M::LoadFileChosen(Some(
+                        crate::io::PickedLinetypeFile::read(std::path::Path::new(value))
+                            .map_err(|error| failure("invalid_value", error.to_string()))?,
+                    ))),
                     "load_toggle" => dlg(M::LoadToggle(value.to_string())),
                     "load_ok" => dlg(M::LoadOk),
                     "load_cancel" => dlg(M::LoadCancel),

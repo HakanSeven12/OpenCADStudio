@@ -53,7 +53,7 @@ pub struct Dialog {
 /// The linetypes of a `.lin` source offered for loading.
 #[derive(Debug, Clone)]
 pub struct LoadDraft {
-    /// The file shown (empty: the program's own definitions).
+    /// The chosen file's name (empty: the program's own definitions).
     pub file: String,
     pub dir: Option<std::path::PathBuf>,
     pub source: String,
@@ -126,7 +126,7 @@ pub enum MlsMsg {
     PickLoad,
     /// Load Linetypes: choose another `.lin` file.
     LoadFile,
-    LoadFileChosen(Option<(Option<std::path::PathBuf>, String)>),
+    LoadFileChosen(Option<crate::io::PickedLinetypeFile>),
     LoadToggle(String),
     LoadOk,
     LoadCancel,

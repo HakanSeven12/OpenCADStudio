@@ -656,19 +656,16 @@ impl OpenCADStudio {
                 });
             }
             MlsMsg::LoadFile => {
-                return Task::perform(crate::io::pick_linetype_file(), |picked| {
+                return Task::perform(crate::io::pick_linetype_file_named(), |picked| {
                     Message::MLeaderStyleDlg(MlsMsg::LoadFileChosen(picked))
                 });
             }
-            MlsMsg::LoadFileChosen(Some((dir, source))) => {
+            MlsMsg::LoadFileChosen(Some(file)) => {
                 if let Some(load) = self.mls.load.as_mut() {
-                    load.file = dir
-                        .as_ref()
-                        .map(|d| d.display().to_string())
-                        .unwrap_or_default();
-                    load.entries = crate::io::linetypes::source_entries(&source);
-                    load.source = source;
-                    load.dir = dir;
+                    load.entries = crate::io::linetypes::source_entries(&file.source);
+                    load.file = file.name;
+                    load.source = file.source;
+                    load.dir = file.dir;
                     load.picked.clear();
                 }
             }

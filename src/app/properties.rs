@@ -5683,25 +5683,26 @@ pub(crate) fn plot_style_name(
 }
 
 /// Entries of the drawing's ACAD_PLOTSTYLENAME dictionary. Drawings keep it
-/// as a dictionary with default (Normal); a DXF read leaves the header
-/// pointer empty, so the root dictionary's entry is the fallback.
+/// as a dictionary with default (Normal). The root dictionary's entry wins:
+/// a DXF read leaves the header pointer empty or on the new document's own
+/// dictionary, not the file's.
 pub(crate) fn plot_style_entries(
     doc: &document::Document,
 ) -> Option<&[(String, document::Handle)]> {
     use document::objects::ObjectType;
-    let mut handle = doc.header.acad_plotstylename_dict_handle;
-    if handle.is_null() {
-        handle = crate::scene::annotative::as_dict(doc, doc.header.named_objects_dict_handle)?
-            .entries
-            .iter()
-            .find(|(name, _)| name == "ACAD_PLOTSTYLENAME")?
-            .1;
-    }
-    match doc.objects.get(&handle)? {
-        ObjectType::DictionaryWithDefault(d) => Some(&d.entries),
-        ObjectType::Dictionary(d) => Some(&d.entries),
+    let entries = |handle: document::Handle| match doc.objects.get(&handle)? {
+        ObjectType::DictionaryWithDefault(d) => Some(&d.entries[..]),
+        ObjectType::Dictionary(d) => Some(&d.entries[..]),
         _ => None,
-    }
+    };
+    crate::scene::annotative::as_dict(doc, doc.header.named_objects_dict_handle)
+        .and_then(|root| {
+            root.entries
+                .iter()
+                .find(|(name, _)| name == "ACAD_PLOTSTYLENAME")
+        })
+        .and_then(|(_, handle)| entries(*handle))
+        .or_else(|| entries(doc.header.acad_plotstylename_dict_handle))
 }
 
 pub(crate) fn lineweight_options() -> Vec<String> {
@@ -6035,6 +6036,20 @@ mod plot_style_name_tests {
     fn without_the_header_pointer_the_root_dictionary_names_the_style() {
         let (mut doc, placeholder) = drawing_with_style("Black");
         doc.header.acad_plotstylename_dict_handle = document::Handle::NULL;
+        assert_eq!(plot_style_name(&doc, 3, Some(placeholder)), "Black");
+    }
+
+    /// A header pointer left on another (empty) dictionary does not hide the
+    /// root dictionary's ACAD_PLOTSTYLENAME.
+    #[test]
+    fn a_stale_header_pointer_does_not_hide_the_root_entry() {
+        let (mut doc, placeholder) = drawing_with_style("Black");
+        let stale = doc.allocate_handle();
+        let mut empty = document::objects::DictionaryWithDefault::new();
+        empty.handle = stale;
+        doc.objects
+            .insert(stale, ObjectType::DictionaryWithDefault(empty));
+        doc.header.acad_plotstylename_dict_handle = stale;
         assert_eq!(plot_style_name(&doc, 3, Some(placeholder)), "Black");
     }
 }

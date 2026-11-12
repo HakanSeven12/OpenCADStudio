@@ -2306,7 +2306,27 @@ impl canvas::Program<Message> for LeaderPreview {
                 } else {
                     frame.stroke(&square, thin);
                 }
-            } else if code.contains("ORIGIN") || code.contains("INTEGRAL") {
+            } else if code.contains("INTEGRAL") {
+                // Two shallow arcs meeting at the tip, across the leader.
+                let r = size * 0.4542;
+                let arc = |cx: f32, cy: f32, a0: f32, a1: f32| {
+                    canvas::Path::new(|b| {
+                        let steps = 12;
+                        for i in 0..=steps {
+                            let a = a0 + (a1 - a0) * i as f32 / steps as f32;
+                            let (x, y) = (cx + r * a.cos(), cy + r * a.sin());
+                            let p = along(-x, y);
+                            if i == 0 {
+                                b.move_to(p);
+                            } else {
+                                b.line_to(p);
+                            }
+                        }
+                    })
+                };
+                frame.stroke(&arc(size * 0.4449, -size * 0.0913, 1.7802, 2.9322), thin);
+                frame.stroke(&arc(-size * 0.4449, size * 0.0913, 4.9218, 6.0737), thin);
+            } else if code.contains("ORIGIN") {
                 frame.stroke(&canvas::Path::circle(head, 4.0), thin);
             } else {
                 let half = if code.contains("30") { 0.27 } else { 0.32 };
@@ -2335,42 +2355,67 @@ impl canvas::Program<Message> for LeaderPreview {
             LeaderContentType::Block => {
                 let color = aci_color(&self.block_color, ink);
                 let s = canvas::Stroke::default().with_color(color).with_width(1.4);
-                // The predefined blocks are a unit across their centre.
-                let r = px(self.block_scale).clamp(1.0, bounds.height * 0.45);
+                // The predefined blocks at their drawing size: a 0.25
+                // radius callout, quarter-unit tags, 0.09375 high tags.
+                let u = |value: f32| px(value * self.block_scale);
+                let half = if self.block == "Detail Callout" { 0.25 } else { 0.125 };
+                let r = u(half).max(1.0);
                 let c = Point::new(origin.x + r, origin.y);
-                let shape = match self.block.as_str() {
-                    "Box" => canvas::Path::rectangle(
-                        Point::new(c.x - r, c.y - r),
-                        Size::new(2.0 * r, 2.0 * r),
-                    ),
-                    "Hexagon" | "Triangle" => {
-                        let (n, start) = if self.block == "Hexagon" { (6, 0.0) } else { (3, 90.0f32) };
-                        canvas::Path::new(|b| {
-                            for i in 0..n {
-                                let a = (start + 360.0 * i as f32 / n as f32).to_radians();
-                                let p = Point::new(c.x + r * a.cos(), c.y - r * a.sin());
-                                if i == 0 {
-                                    b.move_to(p);
-                                } else {
-                                    b.line_to(p);
-                                }
+                let at = |x: f32, y: f32| Point::new(c.x + u(x), c.y - u(y));
+                let polygon = |points: &[(f32, f32)]| {
+                    canvas::Path::new(|b| {
+                        for (i, &(x, y)) in points.iter().enumerate() {
+                            if i == 0 {
+                                b.move_to(at(x, y));
+                            } else {
+                                b.line_to(at(x, y));
                             }
-                            b.close();
-                        })
-                    }
+                        }
+                        b.close();
+                    })
+                };
+                let (hx, tx) = (0.25 / 3f32.sqrt(), 0.25 * 3f32.sqrt() / 2.0);
+                let shape = match self.block.as_str() {
+                    "Box" => polygon(&[(-0.125, 0.125), (0.125, 0.125), (0.125, -0.125), (-0.125, -0.125)]),
+                    "Hexagon" => polygon(&[
+                        (-hx, 0.0),
+                        (-hx / 2.0, 0.125),
+                        (hx / 2.0, 0.125),
+                        (hx, 0.0),
+                        (hx / 2.0, -0.125),
+                        (-hx / 2.0, -0.125),
+                    ]),
+                    "Triangle" => polygon(&[(-tx, -0.125), (0.0, 0.25), (tx, -0.125)]),
                     "Slot" => canvas::Path::rounded_rectangle(
-                        Point::new(c.x - r, c.y - r * 0.5),
-                        Size::new(2.0 * r, r),
-                        (r * 0.5).into(),
+                        at(-0.25, 0.125),
+                        Size::new(u(0.5), u(0.25)),
+                        u(0.125).into(),
                     ),
                     _ => canvas::Path::circle(c, r),
                 };
                 frame.stroke(&shape, s);
+                // The attribute tags, centred on their baselines.
+                let tags: &[(&str, f32)] = match self.block.as_str() {
+                    "Detail Callout" => &[("VIEWNUMBER", 1.0 / 48.0), ("SHEETNUMBER", -0.15625)],
+                    "Slot" | "Circle" | "Box" | "Hexagon" | "Triangle" => &[("TAGNUMBER", -0.046875)],
+                    _ => &[],
+                };
                 if self.block == "Detail Callout" {
-                    frame.stroke(
-                        &canvas::Path::line(Point::new(c.x - r, c.y), Point::new(c.x + r, c.y)),
-                        s,
-                    );
+                    frame.stroke(&canvas::Path::line(at(-0.25, 0.0), at(0.25, 0.0)), s);
+                }
+                let tag_size = u(0.09375);
+                if tag_size >= 2.0 {
+                    for &(tag, y) in tags {
+                        frame.fill_text(canvas::Text {
+                            content: tag.to_string(),
+                            position: at(0.0, y),
+                            color,
+                            size: iced::Pixels(tag_size / 0.72),
+                            align_x: iced::advanced::text::Alignment::Center,
+                            align_y: iced::alignment::Vertical::Bottom,
+                            ..Default::default()
+                        });
+                    }
                 }
             }
             LeaderContentType::None => {}

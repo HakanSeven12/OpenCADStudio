@@ -6327,6 +6327,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  線の太さを表示しますか？ [オン / オフ]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = 引出線の矢印 (DIMLDRBLK)
     .leader-draw-order = 引出線の表示順序:
     .leaderfirst = 引出線を先に

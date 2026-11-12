@@ -6279,6 +6279,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  Çizgi kalınlıkları gösterilsin mi? [AÇIK / KAPALI]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = Kılavuz ok ucu (DIMLDRBLK)
     .leader-draw-order = Kılavuz çizim sırası:
     .leaderfirst = Önce kılavuz

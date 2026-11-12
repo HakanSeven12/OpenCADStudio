@@ -4489,6 +4489,37 @@ impl OpenCADStudio {
                     }
                 }
             }
+            "LWEIGHT" => {
+                let c = crate::command::FreeTextValuePromptCommand::new(
+                    "LWEIGHT",
+                    "LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:",
+                );
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            cmd if cmd.starts_with("LWEIGHT ") => {
+                use crate::ui::window::attman_dialog::{lineweight_label, parse_lineweight};
+                let value = cmd.trim_start_matches("LWEIGHT").trim();
+                if value.is_empty() {
+                    let current = document::types::LineWeight::from_value(
+                        self.tabs[i].scene.document.header.current_line_weight,
+                    );
+                    self.command_line.push_output(
+                        crate::tf!("LWEIGHT = {}", lineweight_label(current)).as_ref(),
+                    );
+                } else if let Some(lw) = parse_lineweight(value) {
+                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
+                    self.tabs[i].dirty = true;
+                    self.ribbon.active_lineweight = lw;
+                    self.refresh_properties();
+                    self.command_line.push_output(
+                        crate::tf!("LWEIGHT = {}", lineweight_label(lw)).as_ref(),
+                    );
+                } else {
+                    self.command_line
+                        .push_error(crate::t!("LWEIGHT: invalid lineweight.").as_ref());
+                }
+            }
             "CELTSCALE" => {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new(

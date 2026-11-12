@@ -6339,6 +6339,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  покажи дебелини на линии?  [ВКЛ. / ИЗКЛ.]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = Връх на стрелка на водач (DIMLDRBLK)
     .leader-draw-order = Ред на чертане на водач:
     .leaderfirst = Първо водачът

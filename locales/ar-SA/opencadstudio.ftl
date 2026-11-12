@@ -6351,6 +6351,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  إظهار سماكات الخطوط؟ [تشغيل / إيقاف]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = رأس سهم الخط القائد (DIMLDRBLK)
     .leader-draw-order = ترتيب رسم الخط القائد:
     .leaderfirst = الخط القائد أولًا

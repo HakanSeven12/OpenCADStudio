@@ -6322,6 +6322,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  显示行重? [上/下]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__ 时间轴 :
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = 引线箭头 (DIMLDRBLK)
     .leader-draw-order = 引线绘制顺序：
     .leaderfirst = 引线优先

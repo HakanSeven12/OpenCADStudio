@@ -6338,6 +6338,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY는 선가중치를 표시합니까?  [ON / OFF]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = 지시선 화살촉(DIMLDRBLK)
     .leader-draw-order = 지시선 그리기 순서:
     .leaderfirst = 리더 우선

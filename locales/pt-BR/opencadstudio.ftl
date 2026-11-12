@@ -6339,6 +6339,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  mostrar espessuras de linha? [ON / OFF]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = Ponta da linha de chamada (DIMLDRBLK)
     .leader-draw-order = Ordem de desenho da linha de chamada:
     .leaderfirst = Linha de chamada primeiro

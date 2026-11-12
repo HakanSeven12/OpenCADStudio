@@ -6337,6 +6337,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  Liniengewichte zeigen? [EIN/AUS]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = Pfeilspitze der Führungslinie (DIMLDRBLK)
     .leader-draw-order = Zeichenreihenfolge der Führungslinie:
     .leaderfirst = Führungslinie zuerst

@@ -6339,6 +6339,9 @@ styles =
     .lwdisplay-show-lineweights-on-off = LWDISPLAY  ¿Mostrar grosores de línea? [ACTIVADO/DESACTIVADO]:
     .lwdisplay-value-assignment-uppercase = LWDISPLAY = __ocs_fmt_0__
     .lwdisplay-value-uppercase = LWDISPLAY __ocs_fmt_0__
+    .lweight-default-lineweight-prompt = LWEIGHT  default lineweight for new objects  [ByLayer / ByBlock / Default / 0.00-2.11 mm]:
+    .lweight-value-assignment-uppercase = LWEIGHT = __ocs_fmt_0__
+    .lweight-invalid-lineweight = LWEIGHT: invalid lineweight.
     .leader-arrowhead-dimldrblk = Punta de flecha de directriz (DIMLDRBLK)
     .leader-draw-order = Orden de dibujo de directrices:
     .leaderfirst = Directriz primero

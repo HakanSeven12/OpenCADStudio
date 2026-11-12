@@ -156,6 +156,29 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             "SAVEAS" => return Some(Task::done(Message::SaveAs)),
+            // DXFOUT: Save As with the DXF format already chosen.
+            "DXFOUT" => {
+                if self.file_prompts_on_command_line() {
+                    let path = self.tabs[i]
+                        .current_path
+                        .as_ref()
+                        .map(|path| path.with_extension("dxf").to_string_lossy().into_owned())
+                        .unwrap_or_else(|| format!("{}.dxf", self.tabs[i].tab_title));
+                    let c = crate::command::ScriptPromptCommand::new(
+                        "SAVEAS",
+                        saveas_flow("DXF".to_string(), path),
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.command_line.set_step_options(c.options());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                    return Some(Task::none());
+                }
+                let format = crate::io::format_for_version(self.tabs[i].scene.document.version, true);
+                return Some(
+                    Task::done(Message::SaveAs)
+                        .chain(Task::done(Message::SaveDialogFormatChanged(format))),
+                );
+            }
             cmd if cmd.starts_with("SAVEAS ") => {
                 return Some(self.save_as_from_command_line(i, cmd["SAVEAS ".len()..].trim()));
             }

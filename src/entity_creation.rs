@@ -41,6 +41,51 @@ mod tests {
         assert_eq!(built.degree, 2);
     }
 
+    /// ATTDEF, REGION and the lineweight, linetype and justification that
+    /// MCP callers set at creation instead of patching afterwards.
+    #[test]
+    fn builds_attdef_region_and_creation_properties() {
+        let document = document::Document::new();
+        let spec = json!({"type":"AttDef","tag":"circuit","prompt":"Circuit","default":"7",
+            "position":[10,20],"height":3,"justify":"MC","invisible":true,"preset":true,
+            "lineweight":35,"layer":"TAGS"});
+        validate_entity(&spec, "").unwrap();
+        let built = build_entity(&spec, Some(&document)).unwrap();
+        assert_eq!(built.common().line_weight.value(), 35);
+        assert_eq!(built.common().layer, "TAGS");
+        let document::EntityType::AttributeDefinition(definition) = built else {
+            panic!("expected an attribute definition")
+        };
+        assert_eq!(definition.tag, "CIRCUIT");
+        assert_eq!((definition.prompt.as_str(), definition.default_value.as_str()), ("Circuit", "7"));
+        assert!(definition.flags.invisible && definition.flags.preset && !definition.flags.constant);
+        assert_eq!((definition.alignment_point.x, definition.alignment_point.y), (10.0, 20.0));
+        assert!(definition.insertion_point.x < 10.0, "start sits left of the centre");
+
+        let region = json!({"type":"Region","loops":[[[0,0],[10,0],[10,10],[0,10]],[[3,3],[7,3],[7,7],[3,7]]]});
+        let document::EntityType::Region(region) = build_entity(&region, Some(&document)).unwrap()
+        else {
+            panic!("expected a region")
+        };
+        assert!(region.acis_data.has_data());
+        assert_eq!(region.wires.len(), 8, "outer square and hole edges");
+        let crossing = json!({"type":"Region","loops":[[[0,0],[10,10],[10,0],[0,10]]]});
+        assert!(build_entity(&crossing, None).is_err());
+
+        let text = json!({"type":"Text","value":"A","position":[5,5],"justify":"TR"});
+        let document::EntityType::Text(text) = build_entity(&text, Some(&document)).unwrap() else {
+            panic!("expected text")
+        };
+        assert_eq!(text.alignment_point.map(|p| (p.x, p.y)), Some((5.0, 5.0)));
+        let fit = json!({"type":"Text","value":"A","position":[0,0],"justify":"F"});
+        assert_eq!(build_entity(&fit, None).unwrap_err()["code"], "second_point_required");
+
+        let dashed = json!({"type":"Line","start":[0,0],"end":[1,0],"linetype":"NOSUCH"});
+        assert_eq!(build_entity(&dashed, Some(&document)).unwrap_err()["code"], "invalid_linetype");
+        let heavy = json!({"type":"Line","start":[0,0],"end":[1,0],"lineweight":33});
+        assert!(validate_entity(&heavy, "").is_err());
+    }
+
     #[test]
     fn rejects_bad_nested_fields_and_matches_geometry_constraints() {
         let cases = [
@@ -102,6 +147,20 @@ pub const TYPES: &[&str] = &[
     "Insert",
     "Solid",
     "Hatch",
+    "AttDef",
+    "Region",
+];
+
+/// Lineweights a drawing can store, in hundredths of a millimetre, with
+/// ByLayer (-1), ByBlock (-2) and Default (-3).
+const LINEWEIGHTS: [i16; 27] = [
+    -3, -2, -1, 0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120,
+    140, 158, 200, 211,
+];
+
+/// Justification keywords as TEXT and ATTDEF take them.
+const JUSTIFY: [&str; 15] = [
+    "L", "A", "F", "C", "M", "R", "TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR",
 ];
 
 fn point(min: usize, max: usize) -> Value {
@@ -153,7 +212,8 @@ fn build_schema(name: &str) -> Result<Value, String> {
     let number = json!({"type":"number"});
     let string = json!({"type":"string"});
     let boolean = json!({"type":"boolean"});
-    let mut properties = json!({"type":{"type":"string","pattern":pattern},"layer":{"type":"string","description":"Missing layers are created; empty uses the default layer."},"color":{"type":"integer","minimum":-32768,"maximum":32767,"description":"DXF indexed color, including ByLayer/ByBlock sentinels."}});
+    let mut properties = json!({"type":{"type":"string","pattern":pattern},"layer":{"type":"string","description":"Missing layers are created; empty uses the default layer."},"color":{"type":"integer","minimum":-32768,"maximum":32767,"description":"DXF indexed color, including ByLayer/ByBlock sentinels."},"lineweight":{"type":"integer","enum":LINEWEIGHTS,"description":"Hundredths of a millimetre (25 = 0.25 mm); -1 ByLayer, -2 ByBlock, -3 Default."},"linetype":{"type":"string","description":"Nonempty linetype names must exist in the target document; empty or ByLayer keeps ByLayer."}});
+    let justify = json!({"type":"string","enum":JUSTIFY,"description":"L (default), A(lign), F(it), C, M, R, TL…BR. Except L, position is the justification point; A and F also take second_point."});
     let (required, example) = match *canonical {
         "Line" => {
             properties["start"] = point(2, 3);
@@ -205,6 +265,10 @@ fn build_schema(name: &str) -> Result<Value, String> {
             properties["height"] = json!({"type":"number","default":2.5,"description":"Absolute value, clamped to at least 0.000001."});
             properties["rotation_deg"] = number.clone();
             properties["style"] = json!({"type":"string","description":"Nonempty style names must exist in the target document."});
+            if *canonical == "Text" {
+                properties["justify"] = justify.clone();
+                properties["second_point"] = point(2, 3);
+            }
             if *canonical == "MText" {
                 properties["width"] = json!({"type":"number","description":"Positive values set rectangle width; otherwise default."});
             }
@@ -235,12 +299,37 @@ fn build_schema(name: &str) -> Result<Value, String> {
         "Hatch" => {
             properties["boundary"] = json!({"type":"array","minItems":3,"items":point(2,3),"description":"Closed XY boundary; optional Z is ignored."});
             properties["solid"] = boolean.clone();
-            properties["pattern"] = string;
+            properties["pattern"] = string.clone();
             properties["pattern_scale"] = json!({"type":"number","default":1,"description":"Absolute value, clamped to at least 0.000001."});
             properties["pattern_angle_deg"] = number.clone();
             (
                 vec!["boundary"],
                 json!({"type":"Hatch","boundary":[[0,0],[10,0],[0,10]],"solid":true}),
+            )
+        }
+        "AttDef" => {
+            properties["tag"] = json!({"type":"string","minLength":1,"pattern":"^\\S+$","description":"No spaces; stored upper case."});
+            properties["prompt"] = string.clone();
+            properties["default"] = json!({"type":"string","description":"Default value (the value of a constant attribute)."});
+            properties["position"] = point(2, 3);
+            properties["second_point"] = point(2, 3);
+            properties["height"] = json!({"type":"number","default":2.5,"description":"Absolute value, clamped to at least 0.000001."});
+            properties["rotation_deg"] = number.clone();
+            properties["style"] = json!({"type":"string","description":"Nonempty style names must exist in the target document."});
+            properties["justify"] = justify.clone();
+            for key in ["invisible", "constant", "verify", "preset", "lock_position"] {
+                properties[key] = boolean.clone();
+            }
+            (
+                vec!["tag", "position"],
+                json!({"type":"AttDef","tag":"CIRCUIT","prompt":"Circuit number","default":"1","position":[0,0],"height":2.5,"justify":"MC"}),
+            )
+        }
+        "Region" => {
+            properties["loops"] = json!({"type":"array","minItems":1,"items":{"type":"array","minItems":3,"items":point(2,3)},"description":"Closed coplanar boundaries as vertex lists: the first is the outer boundary, any others are holes."});
+            (
+                vec!["loops"],
+                json!({"type":"Region","loops":[[[0,0],[10,0],[10,10],[0,10]],[[3,3],[7,3],[7,7],[3,7]]]}),
             )
         }
         "Spline" => {
@@ -404,7 +493,11 @@ fn finite_angle_field(spec: &Value, key: &str) -> Parsed<f64> {
         .ok_or_else(|| failure("invalid_angle", format!("arc needs a finite {key}")))
 }
 
-fn apply_common_properties(spec: &Value, entity: &mut document::EntityType) -> Parsed<()> {
+fn apply_common_properties(
+    spec: &Value,
+    entity: &mut document::EntityType,
+    document: Option<&document::Document>,
+) -> Parsed<()> {
     if let Some(layer) = spec["layer"].as_str() {
         if !layer.is_empty()
             && !matches!(
@@ -421,7 +514,65 @@ fn apply_common_properties(spec: &Value, entity: &mut document::EntityType) -> P
     {
         entity.common_mut().color = document::types::Color::from_index(index as i16);
     }
+    if let Some(weight) = spec["lineweight"].as_f64() {
+        let weight = Some(weight)
+            .filter(|w| w.fract() == 0.0 && LINEWEIGHTS.contains(&(*w as i16)))
+            .ok_or_else(|| {
+                failure_at(
+                    "invalid_lineweight",
+                    "/lineweight",
+                    "lineweight must be a standard value in hundredths of a millimetre, or -1/-2/-3",
+                )
+            })?;
+        entity.common_mut().line_weight = document::types::LineWeight::from_value(weight as i16);
+    }
+    if let Some(linetype) = spec["linetype"].as_str().filter(|name| !name.is_empty()) {
+        if !linetype.eq_ignore_ascii_case("ByLayer")
+            && document.is_some_and(|document| !document.line_types.contains(linetype))
+        {
+            return Err(failure_at(
+                "invalid_linetype",
+                "/linetype",
+                format!("Linetype '{linetype}' does not exist in the document"),
+            ));
+        }
+        entity.common_mut().linetype = linetype.to_owned();
+    }
     Ok(())
+}
+
+/// `justify` as the attribute-definition builder takes it; `None` is Left.
+fn justify_field(spec: &Value) -> Parsed<crate::modules::draw::draw::attdef::Justify> {
+    use crate::modules::draw::draw::attdef::Justify;
+    match spec.get("justify") {
+        None | Some(Value::Null) => Ok(Justify::Left),
+        Some(value) => value.as_str().and_then(Justify::from_keyword).ok_or_else(|| {
+            failure_at(
+                "invalid_justify",
+                "/justify",
+                "justify must be one of L, A, F, C, M, R, TL, TC, TR, ML, MC, MR, BL, BC, BR",
+            )
+        }),
+    }
+}
+
+/// Align and Fit run the baseline from `position` to `second_point`.
+fn second_point_field(
+    spec: &Value,
+    justify: crate::modules::draw::draw::attdef::Justify,
+) -> Parsed<Option<document::types::Vector3>> {
+    let point = spec
+        .get("second_point")
+        .map(|_| point_field(spec, "second_point"))
+        .transpose()?;
+    if justify.two_point() && point.is_none() {
+        return Err(failure_at(
+            "second_point_required",
+            "/second_point",
+            "justify A or F needs second_point, the other end of the baseline",
+        ));
+    }
+    Ok(point.filter(|_| justify.two_point()))
 }
 
 /// An explicit text style must exist in the current document; otherwise a
@@ -700,6 +851,34 @@ pub(crate) fn build_entity(
             if let Some(style) = text_style_field(spec, document)? {
                 text.style = style;
             }
+            let justify = justify_field(spec)?;
+            let second = second_point_field(spec, justify)?;
+            let (h, v) = justify.alignment();
+            use document::entities::attribute_definition::{
+                HorizontalAlignment as AH, VerticalAlignment as AV,
+            };
+            text.horizontal_alignment = match h {
+                AH::Left => TextHorizontalAlignment::Left,
+                AH::Center => TextHorizontalAlignment::Center,
+                AH::Right => TextHorizontalAlignment::Right,
+                AH::Aligned => TextHorizontalAlignment::Aligned,
+                AH::Middle => TextHorizontalAlignment::Middle,
+                AH::Fit => TextHorizontalAlignment::Fit,
+            };
+            text.vertical_alignment = match v {
+                AV::Baseline => TextVerticalAlignment::Baseline,
+                AV::Bottom => TextVerticalAlignment::Bottom,
+                AV::Middle => TextVerticalAlignment::Middle,
+                AV::Top => TextVerticalAlignment::Top,
+            };
+            // Except Left, the given point is where the justification puts
+            // the text; Align and Fit run from it to second_point.
+            text.alignment_point = second;
+            if let Some(end) = second {
+                text.rotation =
+                    (end.y - text.insertion_point.y).atan2(end.x - text.insertion_point.x);
+            }
+            crate::entities::text::sync_text_alignment_point(&mut text);
             EntityType::Text(text)
         }
         "MTEXT" => {
@@ -807,19 +986,107 @@ pub(crate) fn build_entity(
             hatch.paths.push(path);
             EntityType::Hatch(Box::new(hatch))
         }
+        "ATTDEF" => {
+            use crate::modules::draw::draw::attdef::{self as attdef, AttdefSpec};
+            let tag = spec["tag"].as_str().unwrap_or("").trim();
+            if tag.is_empty() || tag.contains(char::is_whitespace) {
+                return Err(failure_at(
+                    "invalid_tag",
+                    "/tag",
+                    "attribute tag needs a nonempty value without spaces",
+                ));
+            }
+            let flag = |key: &str, bit: u8| if spec[key].as_bool() == Some(true) { bit } else { 0 };
+            let justify = justify_field(spec)?;
+            let second = second_point_field(spec, justify)?;
+            let to_dvec = |p: Vector3| glam::DVec3::new(p.x, p.y, p.z);
+            let attdef_spec = AttdefSpec {
+                aflags: flag("invisible", attdef::AFLAG_INVISIBLE)
+                    | flag("constant", attdef::AFLAG_CONSTANT)
+                    | flag("verify", attdef::AFLAG_VERIFY)
+                    | flag("preset", attdef::AFLAG_PRESET)
+                    | flag("lock_position", attdef::AFLAG_LOCK),
+                annotative: false,
+                tag: tag.to_owned(),
+                prompt: spec["prompt"].as_str().unwrap_or("").to_owned(),
+                value: spec["default"].as_str().unwrap_or("").to_owned(),
+                justify,
+                style: text_style_field(spec, document)?.unwrap_or_else(|| "Standard".to_owned()),
+                height: spec["height"].as_f64().unwrap_or(2.5).abs().max(1e-6),
+                rotation: deg_field(spec, "rotation_deg"),
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                boundary_width: 0.0,
+                line_spacing: 1.0,
+                field: None,
+            };
+            attdef::build(
+                &attdef_spec,
+                crate::command::WorkingPlane::default(),
+                to_dvec(point_field(spec, "position")?),
+                second.map(to_dvec),
+            )
+        }
+        "REGION" => region_from_loops(spec)?,
         other => {
             return Err(failure(
                 "unknown_entity_type",
                 format!(
-                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch"
+                    "Unknown entity type '{other}'. Supported: Line, Circle, Arc, Spline, LwPolyline, Point, Text, MText, Insert, Solid, Hatch, AttDef, Region"
                 ),
             ))
         }
     };
     let mut entity = entity;
-    apply_common_properties(spec, &mut entity)?;
+    apply_common_properties(spec, &mut entity, document)?;
     let contract = schema(&kind).expect("supported factory type");
     crate::schema_validation::validate_shape(&contract, spec, "")
         .map_err(|error| failure("invalid_entity_definition", error))?;
     Ok(entity)
+}
+
+/// A REGION bounded by closed vertex loops, built by the geometry kernel the
+/// way the REGION command builds one from closed polylines: the first loop
+/// is the outer boundary, the others holes.
+fn region_from_loops(spec: &Value) -> Parsed<document::EntityType> {
+    let invalid = |error: &str| failure_at("invalid_region", "/loops", error);
+    let loops = spec["loops"]
+        .as_array()
+        .filter(|loops| !loops.is_empty())
+        .ok_or_else(|| invalid("region needs loops:[[[x,y],…],…]"))?;
+    let mut plane = None;
+    let mut curves = Vec::with_capacity(loops.len());
+    for (index, vertices) in loops.iter().enumerate() {
+        let points = point_list_field(&json!({ "loop": vertices }), "loop", 3)
+            .map_err(|_| invalid(&format!("loops[{index}] needs at least 3 finite points")))?;
+        let mut pline = document::entities::LwPolyline::new();
+        pline.elevation = points[0].z;
+        for point in &points {
+            pline.add_point(document::types::Vector2::new(point.x, point.y));
+        }
+        pline.close();
+        let Some((loop_plane, mut pieces, true)) =
+            crate::scene::model::presspull_model::profile_geometry(
+                &document::EntityType::LwPolyline(pline),
+            )
+        else {
+            return Err(invalid(&format!(
+                "loops[{index}] is not a closed planar boundary"
+            )));
+        };
+        plane.get_or_insert(loop_plane);
+        curves.append(&mut pieces);
+    }
+    let plane = plane.expect("at least one loop");
+    let body = kernel::brep::planar_region(plane, &curves).ok_or_else(|| {
+        invalid("the loops do not bound a region (self-intersecting, or a hole outside the boundary)")
+    })?;
+    let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
+        .ok_or_else(|| invalid("the region could not be encoded as ACIS"))?;
+    let mut region = document::entities::Region::new();
+    region.point_of_reference =
+        document::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
+    region.wires = crate::scene::model::solid_model::edge_wires(&body);
+    region.set_sat_document(&sat);
+    Ok(document::EntityType::Region(region))
 }

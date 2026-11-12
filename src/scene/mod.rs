@@ -8431,8 +8431,34 @@ impl Scene {
             self.interaction_block_handle()
         };
         if let Some((epoch, cached_space, any)) = self.persisted_hidden_cache.get() {
-            if epoch == self.geometry_epoch && cached_space == space {
-                return any;
+            if cached_space == space {
+                if epoch == self.geometry_epoch {
+                    return any;
+                }
+                // The status bar asks on every frame and the answer is a
+                // scan of every object in the space. Fold the edits since
+                // the cached answer instead where they cannot change it:
+                // with no hidden object before, only an edited object that
+                // is now hidden can make one; with one before, only adds
+                // leave it standing. Anything else scans again.
+                if let Some(changes) = self.replay_since(epoch) {
+                    let unchanged = if any {
+                        changes
+                            .iter()
+                            .all(|(_, kind)| matches!(kind, ChangeKind::Added))
+                    } else {
+                        changes.iter().all(|(handle, _)| {
+                            self.document
+                                .get_entity(*handle)
+                                .is_none_or(|entity| !entity.common().invisible)
+                        })
+                    };
+                    if unchanged {
+                        self.persisted_hidden_cache
+                            .set(Some((self.geometry_epoch, space, any)));
+                        return any;
+                    }
+                }
             }
         }
         let any = !self.persisted_hidden_objects().is_empty();

@@ -1643,6 +1643,61 @@ mod timeout_tests {
         (process, runner_stream)
     }
 
+    /// A runner that exits before it connects (a plugin built against another
+    /// wire schema, a missing dependency, a crash in `on_load`) must fail the
+    /// spawn as soon as it exits, not after the whole connect budget.
+    #[test]
+    fn spawn_fails_as_soon_as_the_runner_exits_before_connecting() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock");
+        let prev_runner = std::env::var("OCS_PLUGIN_RUNNER_EXE").ok();
+        let prev_timeout = std::env::var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS").ok();
+        // The test binary itself stands in for the runner: it rejects
+        // `--ocs-plugin-runner` as an unknown option and exits at once.
+        let this_test = std::env::current_exe().expect("test executable");
+        std::env::set_var("OCS_PLUGIN_RUNNER_EXE", &this_test);
+        std::env::set_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS", "20");
+
+        let mut host = DummyHost::new(Document::default());
+        let start = Instant::now();
+        let result = PluginProcess::spawn(
+            Path::new("no-such-plugin"),
+            &mut host,
+            Arc::new(|_, _, _| {}),
+        );
+        let elapsed = start.elapsed();
+
+        match prev_runner {
+            Some(v) => std::env::set_var("OCS_PLUGIN_RUNNER_EXE", v),
+            None => std::env::remove_var("OCS_PLUGIN_RUNNER_EXE"),
+        }
+        match prev_timeout {
+            Some(v) => std::env::set_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS", v),
+            None => std::env::remove_var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS"),
+        }
+
+        match result {
+            Err(PluginError::RunnerCrashed {
+                request: "spawn/accept",
+                ref status,
+            }) => {
+                assert!(
+                    status.contains("exit code"),
+                    "the exit status is reported: {status}"
+                );
+                assert!(
+                    status.contains("Unrecognized option"),
+                    "the runner's last stderr line says why: {status}"
+                );
+            }
+            Err(e) => panic!("expected RunnerCrashed during spawn/accept, got {e:?}"),
+            Ok(_) => panic!("the spawn must fail"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "the host waited {elapsed:?} for a runner that had already exited"
+        );
+    }
+
     #[test]
     fn dispatch_call_timeout_marks_process_dead() {
         let _env_guard = ENV_LOCK.lock().expect("env lock");

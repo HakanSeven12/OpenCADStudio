@@ -86,6 +86,8 @@ pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
 mod layout;
+#[cfg(test)]
+mod layout_viewport_tests;
 mod limits;
 mod modify;
 pub(crate) mod table_content;
@@ -5910,14 +5912,15 @@ impl Scene {
             _ => None,
         };
 
+        // The ordered handles put the overall sheet viewport first. Some DWGs
+        // number that viewport 2 and a model-content viewport 1, so an ID must
+        // never override the drawing's stored order. `layout.viewport` is not
+        // used here: it records the last active viewport, which can be content.
         let listed = layout
             .viewports
             .iter()
             .copied()
             .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
-        if let Some((handle, _)) = listed.clone().find(|(_, vp)| vp.id == 1) {
-            return handle;
-        }
         if let Some((handle, _)) = listed.into_iter().next() {
             return handle;
         }
@@ -5932,9 +5935,6 @@ impl Scene {
             .iter()
             .copied()
             .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
-        if let Some((handle, _)) = block_viewports.clone().find(|(_, vp)| vp.id == 1) {
-            return handle;
-        }
         if let Some((handle, _)) = block_viewports.into_iter().next() {
             return handle;
         }
@@ -5960,21 +5960,17 @@ impl Scene {
         document: &document::Document,
         vp: &document::entities::Viewport,
     ) -> bool {
-        if vp.id == 1 {
-            return true;
-        }
-        if vp.id > 1 {
-            return false;
-        }
-        document.objects.values().any(|object| {
-            matches!(
-                object,
-                ObjectType::Layout(layout)
-                    if layout.block_record == vp.common.owner_handle
-                        && Self::layout_sheet_viewport_handle(document, layout)
-                            == vp.common.handle
-            )
-        })
+        document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::Layout(layout) if layout.block_record == vp.common.owner_handle => {
+                    Some(Self::layout_sheet_viewport_handle(document, layout) == vp.common.handle)
+                }
+                _ => None,
+            })
+            // Keep the legacy classification for orphaned viewport entities.
+            .unwrap_or(vp.id == 1)
     }
 
     pub(crate) fn sheet_viewport_handles(&self) -> std::collections::HashSet<Handle> {

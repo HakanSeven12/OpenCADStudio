@@ -377,6 +377,10 @@ harness = false
 name = "text_shaping_memory"
 harness = false
 
+[[bench]]
+name = "dynamic_block_grip_preview"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

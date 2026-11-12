@@ -499,6 +499,7 @@ fn append_pdf_page(
         images,
         group_splits,
         entity_layers,
+        entity_plot_styles,
     } = &page.content;
     let layer_of = |name: &str| {
         crate::scene::Scene::handle_from_wire_name(name)
@@ -520,6 +521,8 @@ fn append_pdf_page(
     let options = page.options;
     let line_step = vector_step(options);
     let mut ops: Vec<Op> = Vec::new();
+    let mut named_styles: std::collections::HashMap<String, Option<PlotStyleTable>> =
+        std::collections::HashMap::new();
 
     // White page background.
     ops.push(Op::SetFillColor {
@@ -735,6 +738,27 @@ fn append_pdf_page(
                 }
                 DrawItem::Hatch(hatch) => hatch_layer_of(hatch),
                 DrawItem::Image(_) => None,
+            };
+            // A named (STB) table plots each entity with its own object style.
+            let item_name = match &item {
+                DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
+                    Some(wire.name.as_str())
+                }
+                DrawItem::Hatch(hatch) => Some(hatch.name.as_str()),
+                DrawItem::Image(_) => None,
+            };
+            let object_style = item_name
+                .and_then(crate::scene::Scene::handle_from_wire_name)
+                .and_then(|handle| entity_plot_styles.get(&handle));
+            let plot_style = match (plot_style, object_style) {
+                (Some(table), Some(style)) if table.is_stb => {
+                    if !named_styles.contains_key(style) {
+                        let narrowed = crate::io::plot_style::with_object_style(table, style);
+                        named_styles.insert(style.clone(), narrowed);
+                    }
+                    named_styles[style].as_ref().or(Some(table))
+                }
+                (table, _) => table,
             };
             if layer != open_layer {
                 if open_layer.is_some() {
@@ -3194,6 +3218,51 @@ mod tests {
             !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
             "STB Normal (black) must recolor the wire"
         );
+    }
+
+    #[test]
+    fn stb_plots_each_entity_with_its_own_named_style() {
+        // Two red wires: entity 10 takes the "Blue" named style, entity 11
+        // has a style the table lacks and falls back to Normal (green).
+        let entry = |name: &str, rgb: [u8; 3]| {
+            let mut e = crate::io::plot_style::PlotStyleEntry::default();
+            e.name = name.to_string();
+            e.color = Some(rgb);
+            e.screening = 100;
+            e
+        };
+        let mut named = PlotStyleTable::identity("Named.stb");
+        named.is_stb = true;
+        named
+            .named_entries
+            .insert("Normal".to_string(), entry("Normal", [0, 255, 0]));
+        named
+            .named_entries
+            .insert("Blue".to_string(), entry("Blue", [0, 0, 255]));
+        let wire = |handle: &str| {
+            let mut w = PlotWire {
+                wire: WireModel::solid(
+                    handle.into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            w.wire.aci = 1;
+            w
+        };
+        let mut page = test_page(vec![wire("10"), wire("11")]);
+        page.content.entity_plot_styles = [
+            (document::Handle::new(10), "blue".to_string()),
+            (document::Handle::new(11), "Missing".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
+        assert!(text.contains("0 0 1 RG"), "named style Blue applies: {text}");
+        assert!(text.contains("0 1 0 RG"), "unknown style falls back to Normal");
+        assert!(!text.contains("1 0 0 RG"), "no wire keeps its object colour");
     }
 
     #[test]

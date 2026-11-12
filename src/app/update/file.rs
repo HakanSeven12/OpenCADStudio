@@ -608,6 +608,8 @@ fn plot_scene_content(
         };
         let entity_layers =
             plot_entity_layers(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
+        let entity_plot_styles =
+            plot_entity_styles(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
         return PlotContent {
             wires: std::sync::Arc::new(paper_wires),
             hatches: paper_hatches,
@@ -615,6 +617,7 @@ fn plot_scene_content(
             images: paper_images,
             group_splits: splits,
             entity_layers,
+            entity_plot_styles,
         };
     }
     let (mut model_pattern_wires, model_hatches, model_wipeouts, model_images) =
@@ -664,6 +667,7 @@ fn plot_scene_content(
         (wires, hatches, wipeouts, images, splits)
     };
     let entity_layers = plot_entity_layers(scene, &wires, &hatches, &wipeouts);
+    let entity_plot_styles = plot_entity_styles(scene, &wires, &hatches, &wipeouts);
     PlotContent {
         wires: std::sync::Arc::new(wires),
         hatches,
@@ -671,7 +675,55 @@ fn plot_scene_content(
         images,
         group_splits: splits,
         entity_layers,
+        entity_plot_styles,
     }
+}
+
+/// Named plot style of every entity the plot draws, keyed like
+/// `plot_entity_layers`: the object's own style, its layer's for ByLayer, and
+/// `Normal` for ByBlock at the top level or a layer without one.
+// shortcut: block children plot with their INSERT's style (wires carry the
+// INSERT handle), like `plot_entity_layers`; per-child needs BlockCache handles.
+fn plot_entity_styles(
+    scene: &crate::scene::Scene,
+    wires: &[crate::io::pdf_export::PlotWire],
+    hatches: &[crate::scene::model::hatch_model::HatchModel],
+    wipeouts: &[crate::scene::model::hatch_model::HatchModel],
+) -> std::collections::HashMap<document::Handle, String> {
+    let doc = &scene.document;
+    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
+        hatches
+            .iter()
+            .chain(wipeouts)
+            .map(|hatch| hatch.name.as_str()),
+    );
+    let mut styles = std::collections::HashMap::new();
+    for name in names {
+        let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if styles.contains_key(&handle) {
+            continue;
+        }
+        let Some(entity) = doc.get_entity(handle) else {
+            continue;
+        };
+        let common = entity.common();
+        let style = match common.plotstyle_flags {
+            0 => doc
+                .layers
+                .get(&common.layer)
+                .map(|layer| layer.plotstyle_handle)
+                .filter(|h| !h.is_null())
+                .map(|h| crate::app::properties::plot_style_name(doc, 3, Some(h)))
+                .filter(|name| name != "ByLayer")
+                .unwrap_or_else(|| "Normal".to_string()),
+            1 => "Normal".to_string(),
+            flags => crate::app::properties::plot_style_name(doc, flags, common.plotstyle_handle),
+        };
+        styles.insert(handle, style);
+    }
+    styles
 }
 
 /// Drawing layer of every entity the plot draws, keyed by the handle in its

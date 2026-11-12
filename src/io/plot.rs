@@ -120,6 +120,10 @@ pub struct PlotContent {
     /// Drawing layer of each plotted entity, keyed by the handle its wire or
     /// hatch name carries; the PDF groups output into one layer per entry.
     pub entity_layers: std::collections::HashMap<document::Handle, String>,
+    /// Named plot style of each plotted entity (ByLayer and ByBlock already
+    /// resolved), keyed like `entity_layers`; a named (STB) table plots each
+    /// entity with this style.
+    pub entity_plot_styles: std::collections::HashMap<document::Handle, String>,
 }
 
 /// Owned geometry and settings for one plot page.

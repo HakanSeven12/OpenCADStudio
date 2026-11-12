@@ -2,10 +2,69 @@
 //! Diagnostic inspection never accepts a file.
 
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use document::{Document, Error, Format, Loss};
 use serde_json::Value;
+
+/// State owned by one open tab, shared with that tab's save snapshots.
+#[derive(Clone, Debug)]
+pub struct IfccadSession(Arc<Mutex<document::IfccadRoundtripContext>>);
+
+impl IfccadSession {
+    /// Human-readable notices for preserved content that has no CAD geometry.
+    pub fn blocked_entities(&self) -> Vec<(u64, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .blocked_entities()
+            .map(|(id, reason)| (id, reason.to_owned()))
+            .collect()
+    }
+
+    /// Prevent a save to a format that cannot carry the session's retained roots.
+    pub fn check_destination(&self, ext: &str) -> Result<(), String> {
+        if super::is_ifccad_extension(ext) {
+            Ok(())
+        } else {
+            Err("This drawing has retained IFCCAD content. Save it as .ifccad to keep that content.".into())
+        }
+    }
+
+    pub(super) fn export(
+        &self,
+        doc: &Document,
+        preview: bool,
+    ) -> Result<document::IfccadExportOutcome, String> {
+        let mut context = self
+            .0
+            .lock()
+            .map_err(|_| "IFCCAD save state is unavailable")?;
+        let result = if preview {
+            document::Ifcx.export_ifccad_preserving(doc, &mut context.clone())
+        } else {
+            document::Ifcx.export_ifccad_preserving(doc, &mut context)
+        };
+        result.map_err(|error| error.to_string())
+    }
+}
+
+/// Read IFCCAD for a drawing tab. A context is needed while it retains roots.
+pub fn read_ifccad_for_edit(
+    bytes: &[u8],
+) -> Result<(document::ReadOutcome, Option<IfccadSession>), String> {
+    let read = || -> Result<_, Error> {
+        let file = document::ifccad::load_ifccad_bytes(bytes, Default::default())?;
+        document::Ifcx.import_ifccad_preserving(file.document())
+    };
+    let (outcome, context) = read().map_err(|error| read_error(bytes, &error.to_string()))?;
+    let has_blocked = context.blocked_entities().next().is_some();
+    let session = has_blocked.then(|| IfccadSession(Arc::new(Mutex::new(context))));
+    Ok((
+        super::external_read_outcome(outcome.document, outcome.losses),
+        session,
+    ))
+}
 
 /// Application filenames; the underlying IFCX codec and file contents stay unchanged.
 pub(super) struct IfccadFormat;

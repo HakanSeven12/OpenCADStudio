@@ -968,7 +968,7 @@ impl OpenCADStudio {
                 self.tabs[i].is_start = false;
                 // A fresh document became resident (API v9): the post-op
                 // boundary announces `DocumentOpened`.
-                self.tabs[i].note_document_loaded();
+                self.tabs[i].note_document_loaded(None);
                 self.entity_summary()
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1013,7 +1013,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.rebuild_derived_caches();
                         // The opened document settled (API v9): the post-op
                         // boundary announces `DocumentOpened` once for this load.
-                        self.tabs[i].note_document_loaded();
+                        self.tabs[i].note_document_loaded(None);
                         // DXEVAL: an open through automation compares the
                         // extraction tables as an open from the GUI does.
                         let _ = self.evaluate_extraction_tables(
@@ -1290,6 +1290,13 @@ impl OpenCADStudio {
                 let Some(path) = path else {
                     return err("save: no \"path\" and the document has none");
                 };
+                if let Some(session) = &self.tabs[i].ifccad_session {
+                    if let Err(error) = session.check_destination(
+                        path.extension().and_then(|ext| ext.to_str()).unwrap_or_default(),
+                    ) {
+                        return err(format!("save: {error}"));
+                    }
+                }
                 // A .dwt target is written as DWG bytes through a hidden
                 // scratch file and renamed afterwards — DWT is a DWG-family
                 // file, and the plain io path keeps no locks on the scratch.
@@ -1880,6 +1887,12 @@ impl OpenCADStudio {
                 json!({"ok":false,"code":"temporary_document","error":"Test Block is temporary and cannot be saved."}),
             );
         }
+        if self.tabs[i].ifccad_session.is_some() {
+            return Err(json!({
+                "ok": false, "status": "failed", "code": "unsupported_format",
+                "error": "This drawing has retained IFCCAD content. Use Save as .ifccad.",
+            }));
+        }
         let Some(raw_path) = req["path"].as_str() else {
             return Err(
                 json!({"ok":false,"status":"failed","code":"path_required","error":"save_verified requires an explicit absolute path"}),
@@ -2252,6 +2265,7 @@ mod tests {
                 path.clone(),
                 document,
                 caches,
+                None,
             )),
         ));
 
@@ -5023,7 +5037,7 @@ mod tests {
             let caches = crate::scene::build_derived_caches_with_progress(&doc, &|_| {}, None);
             app.update_root(Message::FileOpened(
                 id,
-                Ok(("x".into(), path.to_path_buf(), doc, caches)),
+                Ok(("x".into(), path.to_path_buf(), doc, caches, None)),
             ))
         };
         let prompt_open = |app: &OpenCADStudio| {

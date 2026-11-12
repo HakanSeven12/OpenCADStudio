@@ -482,7 +482,7 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
         // A whole document just became resident in the tab (API v9): the
         // boundary announces `DocumentOpened` once.
-        self.tabs[i].note_document_loaded();
+        self.tabs[i].note_document_loaded(None);
         Ok(())
     }
 

@@ -172,6 +172,7 @@ pub(super) const NAMES: &[&str] = &[
     "table_cell_entry",
     "hyperlink_dialog",
     "object_scale_dialog",
+    "mleader_style_dialog",
     "scale_list_dialog",
     "spell_dialog",
     "table_cell_tab",
@@ -629,9 +630,14 @@ impl OpenCADStudio {
         // Optional plot style table: a CTB path or a folder-discovered name.
         let style = req["plot_style"].as_str().filter(|s| !s.is_empty());
         let loaded_style = match style {
-            Some(name) => Some(
+            // An existing file reports its own load error; anything else is
+            // looked up by name in the plot styles folder.
+            Some(name) if std::path::Path::new(name).is_file() => Some(
                 crate::io::plot_style::PlotStyleTable::load(std::path::Path::new(name))
-                    .or_else(|_| crate::io::plot_style::PlotStyleTable::load_named(name))
+                    .map_err(|e| failure("plot_style_invalid", e))?,
+            ),
+            Some(name) => Some(
+                crate::io::plot_style::PlotStyleTable::load_named(name)
                     .map_err(|e| failure("plot_style_missing", e))?,
             ),
             None => None,
@@ -2956,6 +2962,162 @@ impl OpenCADStudio {
                             ))
                         }
                     })
+                }
+            }
+            // The Multileader Style window, one field per call. Manager:
+            // "select=<style>", "filter=all|used", "set_current", "new",
+            // "modify", "delete", "delete_yes", "delete_no", "help", "close".
+            // New: "name=<text>", "start=<style>", "annotative=0|1",
+            // "continue", "create_cancel", "notice_close". Modify:
+            // "tab=0|1|2", "value=<field>:<text>" (arrowhead_size, break_gap,
+            // max_points, landing_distance, scale_factor, text_height,
+            // landing_gap, block_scale, line_color, text_color, block_color),
+            // "toggle=<field>" (enable_landing, enable_dogleg, annotative,
+            // text_frame, text_always_left, extend_leader),
+            // "set=<field>:<code>" (path_type, content_type, text_angle_type,
+            // text_attachment_direction, text_*_attachment,
+            // block_content_connection, first_seg_angle, second_seg_angle),
+            // "handle=<field>:<name|other>" (line_type_handle,
+            // arrowhead_handle, text_style_handle, block_content_handle),
+            // "lineweight=<1/100 mm|-1|-2|-3>", "constraint=<key>:0|1",
+            // "scale_layout=0|1", "color_list=<field>" (line_color,
+            // text_color, block_color, line_type, line_weight),
+            // "pick=<name>", "pick_ok", "pick_cancel", "pick_load",
+            // "load_file", "load_path=<.lin path>", "load_toggle=<linetype>",
+            // "load_ok", "load_cancel",
+            // "default_text",
+            // "text_styles", "ok", "cancel".
+            "mleader_style_dialog" => {
+                if !self.focus_dialog(crate::app::ModalKind::MLeaderStyle) {
+                    return Err(failure(
+                        "no_dialog",
+                        "The Multileader Style window is not open",
+                    ));
+                }
+                use crate::ui::style::mleaderstyle::MlsMsg as M;
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let (field, arg) = value.split_once(':').unwrap_or((value, ""));
+                let known = |names: &[&'static str]| -> Result<&'static str, Value> {
+                    names
+                        .iter()
+                        .find(|name| **name == field)
+                        .copied()
+                        .ok_or_else(|| failure("invalid_value", "Unknown Multileader Style field"))
+                };
+                let dlg = Message::MLeaderStyleDlg;
+                match key {
+                    "select" => dlg(M::Select(value.to_string())),
+                    "filter" => dlg(M::ListFilter(value == "used")),
+                    "set_current" => dlg(M::SetCurrent),
+                    "new" => dlg(M::New),
+                    "modify" => dlg(M::Modify),
+                    "delete" => dlg(M::Delete),
+                    "delete_yes" => dlg(M::DeleteAnswer(true)),
+                    "delete_no" => dlg(M::DeleteAnswer(false)),
+                    "help" => dlg(M::Help),
+                    "close" => Message::CloseModal,
+                    "name" => dlg(M::CreateName(value.to_string())),
+                    "start" => dlg(M::CreateStart(value.to_string())),
+                    "annotative" => dlg(M::CreateAnnotative(value == "1")),
+                    "continue" => dlg(M::CreateContinue),
+                    "create_cancel" => dlg(M::CreateCancel),
+                    "notice_close" => dlg(M::NoticeClose),
+                    "tab" => dlg(M::Tab(value.parse().unwrap_or(0))),
+                    "value" => Message::MLeaderStyleEdit {
+                        field: known(&[
+                            "arrowhead_size",
+                            "break_gap",
+                            "max_points",
+                            "landing_distance",
+                            "scale_factor",
+                            "text_height",
+                            "landing_gap",
+                            "block_scale",
+                            "line_color",
+                            "text_color",
+                            "block_color",
+                        ])?,
+                        value: arg.to_string(),
+                    },
+                    "toggle" => Message::MLeaderStyleToggle(known(&[
+                        "enable_landing",
+                        "enable_dogleg",
+                        "annotative",
+                        "text_frame",
+                        "text_always_left",
+                        "extend_leader",
+                    ])?),
+                    "set" => Message::MLeaderStyleSetEnum {
+                        field: known(&[
+                            "path_type",
+                            "content_type",
+                            "text_angle_type",
+                            "text_attachment_direction",
+                            "text_left_attachment",
+                            "text_right_attachment",
+                            "text_top_attachment",
+                            "text_bottom_attachment",
+                            "block_content_connection",
+                            "first_seg_angle",
+                            "second_seg_angle",
+                        ])?,
+                        value: arg.to_string(),
+                    },
+                    "handle" => Message::MLeaderStyleSetHandle {
+                        field: known(&[
+                            "line_type_handle",
+                            "arrowhead_handle",
+                            "text_style_handle",
+                            "block_content_handle",
+                        ])?,
+                        value: if arg == "other" {
+                            crate::ui::style::mleaderstyle::OTHER.to_string()
+                        } else {
+                            arg.to_string()
+                        },
+                    },
+                    "lineweight" => Message::MLeaderStyleLineWeightChanged(
+                        document::types::LineWeight::from_value(value.parse().unwrap_or(-2)),
+                    ),
+                    "constraint" => dlg(M::Constraint(
+                        known(&["max_points", "first_angle", "second_angle"])?,
+                        arg == "1",
+                    )),
+                    "scale_layout" => dlg(M::ScaleToLayout(value == "1")),
+                    "color_list" => {
+                        Message::MLeaderColorMore(known(&[
+                            "line_color",
+                            "text_color",
+                            "block_color",
+                            "line_type",
+                            "line_weight",
+                        ])?)
+                    }
+                    "pick" => dlg(M::PickChoice(value.to_string())),
+                    "pick_ok" => dlg(M::PickOk),
+                    "pick_cancel" => dlg(M::PickCancel),
+                    "pick_load" => dlg(M::PickLoad),
+                    "load_file" => dlg(M::LoadFile),
+                    // The file Load Linetypes' File… would pick, by path.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    "load_path" => dlg(M::LoadFileChosen(Some(
+                        crate::io::PickedLinetypeFile::read(std::path::Path::new(value))
+                            .map_err(|error| failure("invalid_value", error.to_string()))?,
+                    ))),
+                    "load_toggle" => dlg(M::LoadToggle(value.to_string())),
+                    "load_ok" => dlg(M::LoadOk),
+                    "load_cancel" => dlg(M::LoadCancel),
+                    "default_text" => dlg(M::DefaultText),
+                    "text_styles" => dlg(M::TextStyles),
+                    "ok" => dlg(M::Ok),
+                    "cancel" => dlg(M::Cancel),
+                    _ => {
+                        return Err(failure(
+                            "invalid_value",
+                            "Unknown Multileader Style field",
+                        ))
+                    }
                 }
             }
             // The Annotation Object Scale window, one field per call:

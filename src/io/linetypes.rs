@@ -394,6 +394,39 @@ pub fn ensure_catalog_linetype(doc: &mut Document, name: &str) -> bool {
         }) > 0
 }
 
+/// The program's linetype definitions (the bundled ones and the user's own
+/// `.lin` files), as a `.lin` source.
+pub fn catalog_source() -> String {
+    catalog().source.clone()
+}
+
+/// The linetypes a `.lin` source defines, in file order, the first
+/// definition of a name only: name, description and dash lengths.
+pub fn source_entries(source: &str) -> Vec<(String, String, Vec<f64>)> {
+    let mut seen = std::collections::HashSet::new();
+    parse(source)
+        .into_iter()
+        .filter(|lt| seen.insert(lt.name.to_ascii_uppercase()))
+        .map(|lt| {
+            let lengths = lt.elements.iter().map(|e| e.length).collect();
+            (lt.name, lt.description, lengths)
+        })
+        .collect()
+}
+
+/// Add the linetypes `names` of a `.lin` source the drawing does not have
+/// yet (see [`populate_document_from_source`]). Returns how many were added.
+pub fn populate_document_named(
+    doc: &mut Document,
+    source: &str,
+    lin_dir: Option<&std::path::Path>,
+    names: &[String],
+) -> usize {
+    populate_matching(doc, source, lin_dir, |candidate| {
+        names.iter().any(|name| name.eq_ignore_ascii_case(candidate))
+    })
+}
+
 /// Add the linetypes of a caller-supplied `.lin` source, embedded shapes and
 /// text included, so the drawing draws them and a saved file carries them.
 /// Returns the number of definitions newly registered in the drawing.

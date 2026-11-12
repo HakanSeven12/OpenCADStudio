@@ -166,6 +166,7 @@ pub(super) struct DocumentTab {
     pub(super) recovery_save_as_required: bool,
     /// Experimental IFCCAD consent belongs only to this open document session.
     pub(super) ifccad_alpha_acknowledged: bool,
+    pub(super) ifccad_session: Option<ocs_save::IfccadSession>,
     /// Monotonic committed-edit/undo/redo revision. Background save completion
     /// uses it with scene epochs so an older snapshot never clears newer work.
     pub(super) edit_revision: u64,
@@ -813,6 +814,7 @@ impl DocumentTab {
             dirty: false,
             recovery_save_as_required: false,
             ifccad_alpha_acknowledged: false,
+            ifccad_session: None,
             edit_revision: 0,
             document_opened_pending: true,
             prev_selection: Vec::new(),
@@ -927,11 +929,12 @@ impl DocumentTab {
     /// new, system open): the next message boundary announces
     /// `DocumentOpened` once for this load (API v9). Call after the document
     /// and its derived caches have settled.
-    pub(super) fn note_document_loaded(&mut self) {
+    pub(super) fn note_document_loaded(&mut self, ifccad_session: Option<ocs_save::IfccadSession>) {
         // The document this tab's identity remembers a placed position in is
         // gone, and its coordinates are not the new document's.
         crate::modules::draw::draw::attdef::session().forget_place_of(self.id);
         crate::modules::annotate::text::forget_place_of(self.id);
+        self.ifccad_session = ifccad_session;
         self.document_opened_pending = true;
     }
 

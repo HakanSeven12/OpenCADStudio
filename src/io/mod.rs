@@ -356,6 +356,20 @@ pub async fn pick_datalink_csv_web() -> Option<(String, Vec<u8>)> {
     Some((name, bytes))
 }
 
+pub type OpenedDrawing = (
+    String,
+    PathBuf,
+    Document,
+    DerivedCaches,
+    Option<ocs_save::IfccadSession>,
+);
+
+fn is_ifccad_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(ocs_save::is_ifccad_extension)
+}
+
 /// Load a CAD file from a known path. Parsing and cache building run on a
 /// dedicated OS thread so the async executor stays free for rendering during
 /// the load. Writes phase markers into `phase` so the UI can show
@@ -366,7 +380,7 @@ pub async fn open_path_with_phase(
     path: PathBuf,
     progress: Arc<OpenProgressState>,
     model_bg: [f32; 4],
-) -> Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError> {
+) -> Result<OpenedDrawing, OpenLoadError> {
     open_path_with_phase_attempt(path, progress, model_bg, OpenAttempt::Strict).await
 }
 
@@ -375,7 +389,7 @@ pub async fn open_path_with_phase(
     _path: PathBuf,
     _progress: Arc<OpenProgressState>,
     _model_bg: [f32; 4],
-) -> Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError> {
+) -> Result<OpenedDrawing, OpenLoadError> {
     Err(OpenLoadError::from(
         "filesystem path opening is unavailable on this target",
     ))
@@ -388,7 +402,7 @@ pub async fn recover_path_with_phase(
     model_bg: [f32; 4],
     initial_error: String,
     initial_stats: Option<document::ReadStats>,
-) -> Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError> {
+) -> Result<OpenedDrawing, OpenLoadError> {
     open_path_with_phase_attempt(
         path,
         progress,
@@ -429,7 +443,7 @@ async fn open_path_with_phase_attempt(
     progress: Arc<OpenProgressState>,
     model_bg: [f32; 4],
     attempt: OpenAttempt,
-) -> Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError> {
+) -> Result<OpenedDrawing, OpenLoadError> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -479,7 +493,16 @@ async fn open_path_with_phase_attempt(
                             recoverable: false,
                         }
                     })?;
-                    let outcome = load_file_for_open(&path2, Some(parser_progress), &attempt)?;
+                    let (outcome, ifccad_session) = if is_ifccad_path(&path2) {
+                        let bytes = std::fs::read(&path2).map_err(|error| error.to_string())?;
+                        let (outcome, session) = ocs_save::read_ifccad_for_edit(&bytes)?;
+                        (finalize_loaded_outcome(&path2, outcome)?, session)
+                    } else {
+                        (
+                            load_file_for_open(&path2, Some(parser_progress), &attempt)?,
+                            None,
+                        )
+                    };
                     let read_stats = outcome.stats;
                     let mut doc = outcome.document;
                     let parse_ms = t_parse.elapsed().as_millis() as u32;
@@ -567,7 +590,7 @@ async fn open_path_with_phase_attempt(
                     caches.timings.caches_ms,
                     caches.timings.finalize_ms,
                 );
-                    Ok((doc, caches))
+                    Ok((doc, caches, ifccad_session))
                 })()
             }));
             let result = match attempted {
@@ -598,10 +621,10 @@ async fn open_path_with_phase_attempt(
             let _ = sender.send(result);
         })
         .map_err(|error| OpenLoadError::from(format!("failed to start parser thread: {error}")))?;
-    let (doc, caches) = receiver
+    let (doc, caches, ifccad_session) = receiver
         .await
         .map_err(|_| OpenLoadError::from("parser thread stopped without a result"))??;
-    Ok((name, path, doc, caches))
+    Ok((name, path, doc, caches, ifccad_session))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -639,7 +662,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 pub struct WebOpenOutcome {
     pub name: String,
     pub size_bytes: u64,
-    pub result: Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError>,
+    pub result: Result<OpenedDrawing, OpenLoadError>,
     pub recovery_bytes: Option<Arc<[u8]>>,
     pub cache_bytes: Option<Arc<[u8]>>,
     pub record_recent: bool,
@@ -794,11 +817,15 @@ async fn load_web_bytes(
     recovery_mode: bool,
     initial_error: &str,
     mut initial_stats: Option<document::ReadStats>,
-) -> Result<(String, PathBuf, Document, DerivedCaches), OpenLoadError> {
+) -> Result<OpenedDrawing, OpenLoadError> {
     progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
-    let (outcome, mut source_sha256) =
+    let (outcome, mut source_sha256, ifccad_session) = if is_ifccad_path(Path::new(name)) {
+        let (outcome, session) =
+            ocs_save::read_ifccad_for_edit(bytes).map_err(OpenLoadError::from)?;
+        (outcome, None, session)
+    } else {
         match web_worker::parse_document(name, bytes, recovery_mode, initial_error).await {
-            Ok(result) => result,
+            Ok((outcome, sha256)) => (outcome, sha256, None),
             Err(error) => {
                 let recoverable_parse_error = error.recovery_available;
                 let mut source_sha256 = error.source_sha256;
@@ -821,7 +848,8 @@ async fn load_web_bytes(
                     read_stats,
                 });
             }
-        };
+        }
+    };
     let mut outcome = outcome;
     if let Some(initial_stats) = initial_stats.take() {
         merge_read_diagnostics(&mut outcome.stats, initial_stats);
@@ -858,7 +886,7 @@ async fn load_web_bytes(
     caches.source_sha256 = source_sha256;
     progress.set(crate::app::OPEN_PHASE_FINALIZING, 9900, 1, 1);
     let path = PathBuf::from(name);
-    Ok((name.to_string(), path, doc, caches))
+    Ok((name.to_string(), path, doc, caches, ifccad_session))
 }
 
 /// Web: parse a *second* drawing (a block to insert, a layer-standards
@@ -2200,6 +2228,7 @@ mod save_failure_tests {
             false,
             false,
             None,
+            None,
         )
         .unwrap_err();
 
@@ -2237,6 +2266,7 @@ mod save_failure_tests {
             false,
             false,
             None,
+            None,
         )
         .unwrap_err();
 
@@ -2270,6 +2300,7 @@ mod save_failure_tests {
             false,
             true,
             None,
+            None,
         )
         .unwrap_err();
         assert!(error.externally_modified);
@@ -2298,9 +2329,33 @@ pub async fn pick_linetype_export_path(suggested: String) -> Option<String> {
     Some(crate::sys::handle_path(&handle).display().to_string())
 }
 
-/// Pick a `.lin` linetype definition file and return its folder (where the
-/// shape files it names are looked for; none on the web) and text (#1588).
-pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
+/// A picked `.lin` linetype definition file: its file name, its folder
+/// (where the shape files it names are looked for; none on the web) and its
+/// text.
+#[derive(Debug, Clone)]
+pub struct PickedLinetypeFile {
+    pub name: String,
+    pub dir: Option<std::path::PathBuf>,
+    pub source: String,
+}
+
+impl PickedLinetypeFile {
+    /// The file at `path`, read as a picked one.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read(path: &Path) -> std::io::Result<Self> {
+        Ok(Self {
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            dir: path.parent().map(Path::to_path_buf),
+            source: String::from_utf8_lossy(&std::fs::read(path)?).into_owned(),
+        })
+    }
+}
+
+/// Pick a `.lin` linetype definition file (#1588).
+pub async fn pick_linetype_file_named() -> Option<PickedLinetypeFile> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Load Linetypes").as_ref())
         .add_filter(crate::t!("Linetype Files").as_ref(), &["lin", "LIN"])
@@ -2310,10 +2365,18 @@ pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)
     let dir = handle.path().parent().map(Path::to_path_buf);
     #[cfg(target_arch = "wasm32")]
     let dir = None;
-    Some((
+    Some(PickedLinetypeFile {
+        name: handle.file_name(),
         dir,
-        String::from_utf8_lossy(&handle.read().await).into_owned(),
-    ))
+        source: String::from_utf8_lossy(&handle.read().await).into_owned(),
+    })
+}
+
+/// Pick a `.lin` linetype definition file and return its folder and text.
+pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
+    pick_linetype_file_named()
+        .await
+        .map(|file| (file.dir, file.source))
 }
 
 pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
@@ -2486,7 +2549,15 @@ pub fn save_as_version(
     let snapshot = doc.clone();
     let clone_ms = clone_started.elapsed().as_secs_f64() * 1000.0;
     save_owned_as_version_inner(
-        snapshot, path, version, false, false, clone_ms, false, |_| Ok(()),
+        snapshot,
+        path,
+        version,
+        false,
+        false,
+        clone_ms,
+        false,
+        None,
+        |_| Ok(()),
     )
     .map_err(|error| error.to_string())
 }
@@ -2506,6 +2577,7 @@ pub fn save_owned_as_version_atomic(
     allow_loss: bool,
     require_new_destination: bool,
     logical_path: Option<&Path>,
+    ifccad_session: Option<&ocs_save::IfccadSession>,
 ) -> Result<(), SaveFailure> {
     if let Some(logical) = logical_path {
         verify_save_destination(logical, path)?;
@@ -2518,6 +2590,7 @@ pub fn save_owned_as_version_atomic(
         allow_loss,
         0.0,
         require_new_destination,
+        ifccad_session,
         move |path| {
             if let Some(logical) = logical_path {
                 verify_save_destination(logical, path)?;
@@ -2570,6 +2643,7 @@ fn save_owned_as_version_inner<F>(
     allow_loss: bool,
     clone_ms: f64,
     require_new_destination: bool,
+    ifccad_session: Option<&ocs_save::IfccadSession>,
     before_replace: F,
 ) -> Result<(), SaveFailure>
 where
@@ -2590,6 +2664,11 @@ where
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    if let Some(session) = ifccad_session {
+        session
+            .check_destination(&ext)
+            .map_err(SaveFailure::other)?;
+    }
     let write_started = iced::time::Instant::now();
     if ext == "dxf" {
         crate::entities::spline::complete_nurbs_for_dxf(&mut doc);
@@ -2600,9 +2679,11 @@ where
             .write_to_file(&temp_path)
             .map_err(|e| SaveFailure::other(e.to_string())),
         other => match ocs_save::external_format(other) {
-            Some(format) => ocs_save::write_external(&doc, format, allow_loss)
-                .and_then(|bytes| std::fs::write(&temp_path, bytes).map_err(|e| e.to_string()))
-                .map_err(SaveFailure::other),
+            Some(format) => {
+                ocs_save::write_external_for_edit(&doc, format, allow_loss, ifccad_session)
+                    .and_then(|bytes| std::fs::write(&temp_path, bytes).map_err(|e| e.to_string()))
+                    .map_err(SaveFailure::other)
+            }
             None => DwgWriter::write_to_file(&temp_path, &doc)
                 .map_err(|e| SaveFailure::other(e.to_string())),
         },
@@ -2767,6 +2848,28 @@ pub fn save(doc: &Document, path: &Path) -> Result<(), String> {
     save_as_version(doc, path, doc.version)
 }
 
+/// Write a WBLOCK snapshot, including retained IFCCAD entities for a whole drawing.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn save_wblock_snapshot(
+    doc: Document,
+    path: &Path,
+    ifccad_session: Option<&ocs_save::IfccadSession>,
+) -> Result<(), String> {
+    let version = doc.version;
+    save_owned_as_version_inner(
+        doc,
+        path,
+        version,
+        false,
+        false,
+        0.0,
+        false,
+        ifccad_session,
+        |_| Ok(()),
+    )
+    .map_err(|error| error.to_string())
+}
+
 /// Serialize a document to an in-memory byte buffer, format chosen by `ext`
 /// (`dxf` → DXF, anything else → DWG) at the given DXF version (overriding
 /// `doc.version`). Used by the web build, which hands the bytes to a browser
@@ -2882,11 +2985,20 @@ pub async fn serialize_prepared_document(
     prepared: &Document,
     ext: &str,
     allow_conversion_loss: bool,
+    ifccad_session: Option<&ocs_save::IfccadSession>,
 ) -> Result<Vec<u8>, String> {
+    if let Some(session) = ifccad_session {
+        session.check_destination(ext)?;
+    }
     // A converter writes inline: the worker only carries the DWG/DXF writers,
     // and the user's "Save anyway" lives on this side.
     if let Some(format) = ocs_save::external_format(ext) {
-        return ocs_save::write_external(prepared, format, allow_conversion_loss);
+        return ocs_save::write_external_for_edit(
+            prepared,
+            format,
+            allow_conversion_loss,
+            ifccad_session,
+        );
     }
     let encoded = match ocs_save::encode_request(prepared, ext) {
         Ok(encoded) => encoded,

@@ -465,6 +465,22 @@ pub(crate) fn render_pdf_bytes(
     // for a CAD sheet — went out uncompressed: a 16-sheet set weighed 280 MB.
     // Serialise through lopdf ourselves and Flate-compress the streams.
     let mut lo = printpdf::to_lopdf_doc(&doc, &PdfSaveOptions::default(), &mut warnings);
+    // printpdf writes page boxes rounded to whole points (an A3 sheet came
+    // out 1191 x 842 instead of 1190.55 x 841.89); write the exact size.
+    for (page, id) in pages.iter().zip(lo.get_pages().into_values()) {
+        let size = [page.paper_w, page.paper_h].map(|mm| (mm * 72.0 / 25.4) as f32);
+        let Some(dict) = lo.get_object_mut(id).ok().and_then(|o| o.as_dict_mut().ok()) else {
+            continue;
+        };
+        for key in [&b"MediaBox"[..], b"TrimBox", b"CropBox"] {
+            if let Some(rect) = dict.get_mut(key).ok().and_then(|o| o.as_array_mut().ok()) {
+                if rect.len() == 4 {
+                    rect[2] = size[0].into();
+                    rect[3] = size[1].into();
+                }
+            }
+        }
+    }
     lo.compress();
     let mut bytes = Vec::new();
     lo.save_to(&mut bytes)

@@ -1170,7 +1170,7 @@ fn claim_path(seen: &mut HashSet<(String, String)>, saved_path: &str, name: &str
 
 // ── Text helpers ──────────────────────────────────────────────────────────
 
-fn status_text(status: RefStatus) -> std::borrow::Cow<'static, str> {
+pub(crate) fn status_text(status: RefStatus) -> std::borrow::Cow<'static, str> {
     match status {
         RefStatus::Loaded => crate::t!("Loaded"),
         RefStatus::Unloaded => crate::t!("Unloaded"),

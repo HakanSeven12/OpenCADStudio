@@ -541,7 +541,7 @@ pub(super) fn active_command_metadata(command: &dyn crate::command::CadCommand) 
     })
 }
 
-fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
+pub(super) fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
     use crate::io::xref::XrefStatus as S;
     match status {
         S::Loaded => "loaded",
@@ -549,6 +549,22 @@ fn xref_status_name(status: &crate::io::xref::XrefStatus) -> &'static str {
         S::Failed => "failed",
         S::NotFound => "not_found",
         S::Unloaded => "unloaded",
+    }
+}
+
+/// Status label for a live [`crate::io::xref_model::RefStatus`] row. The
+/// palette shows the same vocabulary (`xref_manager::status_label`), so the
+/// automation report and the Reference Manager can never disagree.
+pub(super) fn ref_status_name(status: crate::io::xref_model::RefStatus) -> &'static str {
+    use crate::io::xref_model::RefStatus as S;
+    match status {
+        S::Loaded => "loaded",
+        S::Unloaded => "unloaded",
+        S::NotFound => "not_found",
+        S::Failed => "failed",
+        S::Stale => "stale",
+        S::Orphaned => "orphaned",
+        S::Unreferenced => "unreferenced",
     }
 }
 
@@ -610,11 +626,27 @@ impl OpenCADStudio {
         json!({"ok":true,"protocol":1,"session_id":session_id(),"version":env!("OCS_APP_VERSION"),
             "mode":if self.main_window.is_some(){"gui"}else{"headless"},"enabled":self.control.enabled,
             "read_only":self.read_only,"missing_fonts":missing_fonts,
-            "xrefs":tab.xref_report.iter().map(|(name,path,status)|json!({"name":name,"path":path,"status":xref_status_name(status)})).collect::<Vec<_>>(),
+            "xrefs":tab.xref_report.iter().map(|(name,path,status)|json!({"name":name,"path":path,"status":status})).collect::<Vec<_>>(),
             "document_id":tab.id,"revision":tab.edit_revision,"geometry_revision":tab.scene.geometry_epoch,"camera_revision":tab.scene.camera_generation,
             "hand_seed":format!("{:X}",tab.scene.document.header.handle_seed.max(tab.scene.document.next_handle())),
             "plugins":plugin_ids(),
             "documents":self.tabs.iter().map(|t|json!({"id":t.id,"title":t.tab_title,"path":t.current_path,"dirty":t.dirty,"revision":t.edit_revision,"start":t.is_start})).collect::<Vec<_>>(),
+            "clean_screen":self.clean_screen,
+            "dock":{
+                "left":self.dock.left.iter().enumerate().map(|(index,group)|json!({"index":index,"panels":group.panels.iter().map(|id|json!({"id":format!("{:?}",id),"visible":self.dock_panel_visible(*id)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "right":self.dock.right.iter().enumerate().map(|(index,group)|json!({"index":index,"panels":group.panels.iter().map(|id|json!({"id":format!("{:?}",id),"visible":self.dock_panel_visible(*id)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "auto_hide":[self.dock.auto_hide.0,self.dock.auto_hide.1],
+            },
+            "plugin_panels":self.plugin_panels.iter().map(|(id,panel)|{
+                let number = self.plugin_panel_by_num.iter().find_map(|(number,panel_id)| (panel_id == id).then_some(*number));
+                json!({"id":id,"dock_id":number,"owner":panel.owner_plugin_id,"title":panel.def.title,"visible":panel.visible,"on_screen":number.map(|number|self.dock_panel_on_screen(crate::ui::dock::PanelId::Plugin(number))),"location":number.and_then(|number|self.dock.location(crate::ui::dock::PanelId::Plugin(number))).map(|(side,group)|json!({"side":format!("{:?}",side),"group":group})),"auto_collapse":number.map(|number|self.dock.auto_collapse(crate::ui::dock::PanelId::Plugin(number))),"fields":panel.def.controls.iter().map(|control|match control {
+                    ocs_plugin_api::dialog::DialogControl::Text { id, label, default } => json!({"id":id,"kind":"Text","label":label,"value":panel.text_values.get(id).cloned().unwrap_or_else(||default.clone())}),
+                    ocs_plugin_api::dialog::DialogControl::Number { id, label, .. } => json!({"id":id,"kind":"Number","label":label,"value":panel.text_values.get(id)}),
+                    ocs_plugin_api::dialog::DialogControl::InfoText { text, .. } => json!({"kind":"InfoText","text":text}),
+                    ocs_plugin_api::dialog::DialogControl::Button { id, label, .. } => json!({"id":id,"kind":"Button","label":label}),
+                    other => json!({"kind":format!("{:?}",other)}),
+                }).collect::<Vec<_>>()})
+            }).collect::<Vec<_>>(),
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "selection_revision":self.control.selection_revision,
             "command":command,"command_owner_client_id":self.control.owner.as_ref().filter(|(owner_tab,_)|*owner_tab==tab.id).map(|(_,owner)|owner.clone()),"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
@@ -1396,6 +1428,8 @@ impl OpenCADStudio {
             "pointer" => self.control_pointer(req)?,
             "set_properties" => self.control_set_record_properties(req)?,
             "action" => self.control_ui_action(req)?,
+            "panel_input" => self.control_panel_input(req)?,
+            "panel_button" => self.control_panel_button(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             #[cfg(not(target_arch = "wasm32"))]
@@ -6612,5 +6646,79 @@ mod tests {
             "the stale record list must not drop the viewport content"
         );
         let _ = std::fs::remove_file(&stale);
+    }
+
+    #[test]
+    fn panel_ui_automation_edits_and_resets_only_the_form() {
+        use ocs_plugin_api::dialog::{DialogControl, PanelDef};
+
+        let mut app = OpenCADStudio::new_for_test();
+        let panel_id = "cvifc.ifc_h_properties";
+        let panel = PanelDef::new(panel_id, "IFC properties")
+            .with_control(DialogControl::Number {
+                id: "SegmentLength".into(),
+                label: "SegmentLength".into(),
+                default: 100.0,
+                min: None,
+                max: None,
+                step: None,
+            })
+            .with_control(DialogControl::Button {
+                id: "apply".into(),
+                label: "Apply".into(),
+                action: Some("CVI_IFC_PANEL_APPLY".into()),
+                align_h: None,
+                width: None,
+            });
+        let mut state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
+        state.owner_plugin_id = Some("opencad.civil_ifc".into());
+        app.plugin_panels.insert(panel_id.into(), state);
+        let before = app.tabs[0].scene.document.clone();
+        let before_undo = app.tabs[0].history.undo_stack.len();
+
+        let response = request(&mut app, json!({
+            "op": "panel_input",
+            "panel_id": panel_id,
+            "control_id": "SegmentLength",
+            "text": "101.5",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            Some("101.5"),
+        );
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
+
+        let response = request(&mut app, json!({
+            "op": "panel_button",
+            "panel_id": panel_id,
+            "control_id": "reset",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            Some("100"),
+        );
+        assert_eq!(
+            app.plugin_panels[panel_id].owner_plugin_id.as_deref(),
+            Some("opencad.civil_ifc"),
+        );
+        let declared_action = OpenCADStudio::panel_button_action(
+            &app.plugin_panels[panel_id].def.controls,
+            "apply",
+        );
+        assert_eq!(declared_action.as_deref(), Some("CVI_IFC_PANEL_APPLY"));
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
+
+        let response = request(&mut app, json!({
+            "op": "panel_button",
+            "panel_id": panel_id,
+            "control_id": "apply",
+        }));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(app.tabs[0].scene.document, before);
+        assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
     }
 }

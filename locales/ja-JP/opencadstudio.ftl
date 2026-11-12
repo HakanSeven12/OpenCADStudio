@@ -2962,10 +2962,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  分割するオブジェクトを選択:
     .deselected = 選択を解除しました。
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__°
+        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__
           デルタ X = __ocs_arg_dx__、デルタ Y = __ocs_arg_dy__、デルタ Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__°、XY 平面からの角度 = __ocs_arg_angle_z__°
+        距離 = __ocs_arg_dist__、XY 平面角度 = __ocs_arg_angle_xy__、XY 平面からの角度 = __ocs_arg_angle_z__
           デルタ X = __ocs_arg_dx__、デルタ Y = __ocs_arg_dy__、デルタ Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = 検索/置換: "__ocs_fmt_1__" の __ocs_fmt_0__ 件を "__ocs_fmt_2__" に置換しました。
     .find-not-found = 検索: "__ocs_fmt_0__" が見つかりません。
@@ -5599,6 +5599,9 @@ properties =
     .chord-z = 弦 Z
     .circumference = 円周
     .class = クラス
+    .start-station = 開始測点
+    .design-speeds = 設計速度
+    .station-equations = 測点方程式
     .class-id = クラス ID
     .classification-scheme = 分類方式
     .clip-inverted = クリップを反転
@@ -6438,6 +6441,7 @@ plot =
     .vector-dpi = ベクトル DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = レイヤーデータ属性
     .open-when-done = Open in viewer when done
     .no-page-setups = （ページ設定なし）
     .none = <なし>

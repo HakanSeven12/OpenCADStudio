@@ -2972,10 +2972,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  ເລືອກວັດຖຸທີ່ຈະແບ່ງ:
     .deselected = ຍົກເລີກການເລືອກແລ້ວ.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        ໄລຍະຫ່າງ = __ocs_arg_dist__,  ມຸມໃນລະນາບ XY = __ocs_arg_angle_xy__°
+        ໄລຍະຫ່າງ = __ocs_arg_dist__,  ມຸມໃນລະນາບ XY = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        ໄລຍະຫ່າງ = __ocs_arg_dist__,  ມຸມໃນລະນາບ XY = __ocs_arg_angle_xy__°,  ມຸມຈາກລະນາບ XY = __ocs_arg_angle_z__°
+        ໄລຍະຫ່າງ = __ocs_arg_dist__,  ມຸມໃນລະນາບ XY = __ocs_arg_angle_xy__,  ມຸມຈາກລະນາບ XY = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: ປ່ຽນແທນ __ocs_fmt_0__ ບ່ອນ ຈາກ "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: ບໍ່ພົບ "__ocs_fmt_0__".
@@ -5594,6 +5594,9 @@ properties =
     .chord = ຄອດ (Chord)
     .circumference = ເສັ້ນຮອບວົງ
     .class = ຄລາສ
+    .start-station = ສະຖານີເລີ່ມຕົ້ນ
+    .design-speeds = ຄວາມໄວອອກແບບ
+    .station-equations = ສົມຜົນສະຖານີ
     .class-id = ID ຄລາສ
     .classification-scheme = ລະບົບການຈັດໝວດໝູ່
     .clip-inverted = ຕັດຂອບແບບກັບດ້ານ
@@ -6451,6 +6454,7 @@ plot =
     .vector-dpi = DPI ເວັກເຕີ
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = ຄຸນສົມບັດຂໍ້ມູນຊັ້ນ
     .open-when-done = Open in viewer when done
     .no-page-setups = (ບໍ່ມີການຕັ້ງຄ່າໜ້າ)
     .none = <ບໍ່ມີ>

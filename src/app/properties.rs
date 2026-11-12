@@ -3313,16 +3313,46 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         self.authoring_parameter_properties(item.handle)
                     {
                         if let Some(chain_actions) = chaining {
+                            let mut props = vec![Property {
+                                label: crate::t!("Chain actions").into_owned(),
+                                field: "authoring_chain_actions",
+                                value: PropValue::BoolToggle {
+                                    field: "authoring_chain_actions",
+                                    value: chain_actions,
+                                },
+                            }];
+                            if let Some(document::objects::ObjectType::DynamicBlock(object)) =
+                                self.tabs[i].scene.document.objects.get(&item.handle)
+                            {
+                                if let document::objects::DynamicBlockData::LinearParameter(
+                                    parameter,
+                                ) = &object.data
+                                {
+                                    props.push(Property {
+                                        label: crate::t!("Base location").into_owned(),
+                                        field: "authoring_base_location",
+                                        value: PropValue::Choice {
+                                            selected: crate::t!(if parameter
+                                                .parameter
+                                                .parameter_base_location
+                                                != 0
+                                            {
+                                                "Midpoint"
+                                            } else {
+                                                "Startpoint"
+                                            })
+                                            .into_owned(),
+                                            options: vec![
+                                                crate::t!("Startpoint").into_owned(),
+                                                crate::t!("Midpoint").into_owned(),
+                                            ],
+                                        },
+                                    });
+                                }
+                            }
                             panel.sections.push(PropSection {
                                 title: crate::t!("Behavior").into_owned(),
-                                props: vec![Property {
-                                    label: crate::t!("Chain actions").into_owned(),
-                                    field: "authoring_chain_actions",
-                                    value: PropValue::BoolToggle {
-                                        field: "authoring_chain_actions",
-                                        value: chain_actions,
-                                    },
-                                }],
+                                props,
                             });
                         }
                         if !value_sets.is_empty() {

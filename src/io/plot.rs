@@ -95,6 +95,10 @@ pub struct PlotOptions {
     /// SVG: keep stroke widths constant under subsequent SVG transforms.
     /// CAD plot scale is unchanged and PDF ignores this flag.
     pub non_scaling_stroke: bool,
+    /// SVG: tag every drawn item with its drawing layer as a `data-layer`
+    /// group, so SVG consumers can toggle layers dynamically in CSS. PDF
+    /// ignores this flag.
+    pub layer_attributes: bool,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -148,6 +152,7 @@ impl Default for PlotOptions {
             vector_dpi: None,
             text_as_outlines: false,
             non_scaling_stroke: false,
+            layer_attributes: false,
         }
     }
 }

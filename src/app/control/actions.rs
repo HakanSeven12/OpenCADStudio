@@ -674,6 +674,9 @@ impl OpenCADStudio {
         if let Some(outlines) = req["text_as_outlines"].as_bool() {
             request.text_as_outlines = outlines;
         }
+        if let Some(layer_attrs) = req["layer_attributes"].as_bool() {
+            request.layer_attributes = layer_attrs;
+        }
         if req.get("upside_down").is_some() {
             request.upside_down = req["upside_down"].as_bool().unwrap_or(false);
         }
@@ -844,6 +847,9 @@ impl OpenCADStudio {
                     }
                     if req["non_scaling_stroke"].is_boolean() {
                         page_dialog.non_scaling_stroke = request.non_scaling_stroke;
+                    }
+                    if req["layer_attributes"].is_boolean() {
+                        page_dialog.layer_attributes = request.layer_attributes;
                     }
                     if req["scale_lineweights"].is_boolean() {
                         page_dialog.scale_lw = request.scale_lw;
@@ -1239,6 +1245,94 @@ impl OpenCADStudio {
         ];
         (self.ctrl_down, self.shift_down) = saved;
         Ok(Task::batch(tasks))
+    }
+
+    pub(super) fn panel_button_action(
+        controls: &[ocs_plugin_api::dialog::DialogControl],
+        control_id: &str,
+    ) -> Option<String> {
+        for control in controls {
+            match control {
+                ocs_plugin_api::dialog::DialogControl::Button { id, action, .. }
+                    if id == control_id =>
+                {
+                    return action.clone();
+                }
+                ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Column { controls, .. }
+                | ocs_plugin_api::dialog::DialogControl::Fields { controls, .. } => {
+                    if let Some(action) = Self::panel_button_action(controls, control_id) {
+                        return Some(action);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Edit a native panel widget only. This does not touch document records,
+    /// entities, edit_revision or undo state; the normal PanelAction remains
+    /// a notification and never acquires HostApi.
+    pub(super) fn control_panel_input(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        if !self.plugin_panels.contains_key(panel_id) {
+            return Err(failure("panel_not_found", "The requested panel is not registered"));
+        }
+        let text = if let Some(text) = req["text"].as_str() {
+            text.to_string()
+        } else if let Some(value) = req["value"].as_f64().filter(|value| value.is_finite()) {
+            value.to_string()
+        } else {
+            return Err(failure(
+                "invalid_request",
+                "Supply exact text or a finite numeric value",
+            ));
+        };
+        Ok(self.update(Message::PluginPanelTextChange(
+            panel_id.to_string(),
+            control_id.to_string(),
+            text,
+        )))
+    }
+
+    /// Activate the declared action of a native panel button through the same
+    /// Message used by the actual widget. Only that declared command runs.
+    pub(super) fn control_panel_button(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        let panel = self
+            .plugin_panels
+            .get(panel_id)
+            .ok_or_else(|| failure("panel_not_found", "The requested panel is not registered"))?;
+        let action = if control_id == "reset" {
+            "reset".to_string()
+        } else {
+            Self::panel_button_action(&panel.def.controls, control_id).ok_or_else(|| {
+                failure(
+                    "panel_action_not_found",
+                    "The requested panel button has no declared action",
+                )
+            })?
+        };
+        Ok(self.update(Message::PluginPanelButtonClick(
+            panel_id.to_string(),
+            control_id.to_string(),
+            Some(action),
+        )))
     }
 
     /// Replay pointer events on the drawing canvas in order, as the mouse
@@ -2870,20 +2964,30 @@ impl OpenCADStudio {
             // "common=0|1", "add", "delete", "ok" or "cancel".
             "object_scale_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::AnnoObjectScale) {
-                    return Err(failure("no_dialog", "The Annotation Object Scale window is not open"));
+                    return Err(failure(
+                        "no_dialog",
+                        "The Annotation Object Scale window is not open",
+                    ));
                 }
                 let spec = string(req, "value")?;
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 self.ctrl_down = key == "ctrl";
                 self.shift_down = key == "shift";
                 match key {
-                    "select" | "ctrl" | "shift" => Message::AnnoObjectScaleSelect(value.to_string()),
+                    "select" | "ctrl" | "shift" => {
+                        Message::AnnoObjectScaleSelect(value.to_string())
+                    }
                     "common" => Message::AnnoObjectScaleCommon(value == "1"),
                     "add" => Message::AnnoObjectScaleAdd,
                     "delete" => Message::AnnoObjectScaleDelete,
                     "ok" => Message::AnnoObjectScaleOk,
                     "cancel" => Message::CloseModal,
-                    _ => return Err(failure("invalid_value", "Unknown Annotation Object Scale field")),
+                    _ => {
+                        return Err(failure(
+                            "invalid_value",
+                            "Unknown Annotation Object Scale field",
+                        ))
+                    }
                 }
             }
             // The scale list window, one field per call: "select=<scale>",

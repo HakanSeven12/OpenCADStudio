@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Wybierz obiekt do podziału:
     .deselected = Odznaczono.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Odległość = __ocs_arg_dist__, Kąt w płaszczyźnie XY = __ocs_arg_angle_xy__°
+        Odległość = __ocs_arg_dist__, Kąt w płaszczyźnie XY = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Odległość = __ocs_arg_dist__, Kąt w płaszczyźnie XY = __ocs_arg_angle_xy__°, Kąt od płaszczyzny XY = __ocs_arg_angle_z__°
+        Odległość = __ocs_arg_dist__, Kąt w płaszczyźnie XY = __ocs_arg_angle_xy__, Kąt od płaszczyzny XY = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: zastąpiono wystąpienia __ocs_fmt_0__ z „__ocs_fmt_1__” → „__ocs_fmt_2__”.
     .find-not-found = FIND: Nie znaleziono „__ocs_fmt_0__”.
@@ -5610,6 +5610,9 @@ properties =
     .chord-z = Akord Z
     .circumference = Obwód
     .class = Klasa
+    .start-station = Kilometraż początkowy
+    .design-speeds = Prędkości projektowe
+    .station-equations = Równania kilometrażu
     .class-id = Klasa ID
     .classification-scheme = Schemat klasyfikacji
     .clip-inverted = Klip odwrócony
@@ -6449,6 +6452,7 @@ plot =
     .vector-dpi = DPI wektora
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Atrybuty danych warstw
     .open-when-done = Open in viewer when done
     .no-page-setups = (bez konfiguracji strony)
     .none = <brak>

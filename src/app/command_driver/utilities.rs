@@ -1066,12 +1066,14 @@ impl OpenCADStudio {
         };
         let is_escape = matches!(&input, StepInput::Escape);
         let keyed = matches!(&input, StepInput::Text(_) | StepInput::Enter);
-        let (result, panel_updates): (Option<CmdResult>, Vec<_>) = {
+        let typed = matches!(&input, StepInput::Text(_));
+        let (result, panel_updates, moved_step): (Option<CmdResult>, Vec<_>, bool) = {
             let Some(cmd) = self.tabs[i].active_cmd.as_mut() else {
                 return (Task::none(), false);
             };
             cmd.set_ctrl(ctrl);
             cmd.set_shift(shift);
+            let before = typed.then(|| crate::command::step_signature(cmd.as_ref()));
             let res = match input {
                 StepInput::Point(p) => Some(cmd.on_point(p)),
                 StepInput::Text(s) => cmd.on_text_input(&s),
@@ -1084,7 +1086,12 @@ impl OpenCADStudio {
                 StepInput::Escape => Some(cmd.on_escape()),
             };
             let updates = cmd.take_pending_panel_updates();
-            (res, updates)
+            // Text a step took without a result (a count, a toggle) still
+            // moved the prompt on; read as unclaimed, it was fed again as a
+            // distance into the next step (#1571).
+            let moved_step = res.is_none()
+                && before.is_some_and(|b| b != crate::command::step_signature(cmd.as_ref()));
+            (res, updates, moved_step)
         };
         self.apply_panel_or_dialog_updates(panel_updates);
         if let Some(handle) = picked_handle {
@@ -1104,7 +1111,12 @@ impl OpenCADStudio {
                 }
                 (task, true)
             }
-            None => (Task::none(), false),
+            None => {
+                if moved_step && self.active_tab == i {
+                    self.refresh_active_cmd_preview(i);
+                }
+                (Task::none(), moved_step)
+            }
         }
     }
 

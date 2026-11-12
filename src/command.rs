@@ -1905,12 +1905,6 @@ pub enum CmdResult {
         /// keeps the parameter's own default.
         options: crate::modules::block_editor::single_parameter::Options,
     },
-    /// An action type was chosen that has no geometry action of its own:
-    /// continue with Lookup parameter selection.
-    StartBlockLookupAction {
-        document: u64,
-        definition: Handle,
-    },
     /// The chosen Lookup parameter's property table should open for editing.
     OpenBlockLookupTable {
         document: u64,
@@ -3055,6 +3049,13 @@ impl CmdOption {
             keyword: String::new(),
         }
     }
+}
+
+/// What a step shows: its prompt and option labels. Typed text that changed
+/// it was taken by the step, even with no result to apply.
+pub fn step_signature(command: &dyn CadCommand) -> (String, Vec<String>) {
+    let labels = command.options().into_iter().map(|o| o.label).collect();
+    (command.prompt(), labels)
 }
 
 /// The refusal a point prompt prints: the command's own message, else

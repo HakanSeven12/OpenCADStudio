@@ -685,15 +685,23 @@ fn plot_entity_layers(
     hatches: &[crate::scene::model::hatch_model::HatchModel],
     wipeouts: &[crate::scene::model::hatch_model::HatchModel],
 ) -> std::collections::HashMap<document::Handle, String> {
-    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
-        hatches
-            .iter()
-            .chain(wipeouts)
-            .map(|hatch| hatch.name.as_str()),
-    );
+    let names = wires.iter().map(|wire| wire.name.as_str());
     let mut layers = std::collections::HashMap::new();
     for name in names {
         let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if layers.contains_key(&handle) {
+            continue;
+        }
+        if let Some(entity) = scene.document.get_entity(handle) {
+            layers.insert(handle, entity.common().layer.clone());
+        }
+    }
+    // Hatch models carry the pattern name (not a handle) in `name`; their
+    // drawing layer comes from the entity the model plots for.
+    for hatch in hatches.iter().chain(wipeouts) {
+        let Some(handle) = hatch.entity else {
             continue;
         };
         if layers.contains_key(&handle) {
@@ -2043,6 +2051,84 @@ impl OpenCADStudio {
             None => self.install_native_edit_guard(i, path, None),
         }
         self.tabs[i].disk_fingerprint = crate::io::edit_lock::FileFingerprint::capture(path).ok();
+        #[cfg(not(target_arch = "wasm32"))]
+        // Any other open drawing that references `path` re-reads it, the
+        // same as an external reload: a source edited and saved in this
+        // session is not allowed to go stale in its hosts.
+        self.reload_xrefs_pointing_at(i, path);
+    }
+
+    /// Reload, in every other tab that references `path`, the definitions
+    /// the save refreshed. `resolve_xrefs_for_keys` does the merge; this
+    /// finds the matching records, refreshes the stat cache and marks the
+    /// host dirty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn reload_xrefs_pointing_at(
+        &mut self,
+        saved: usize,
+        path: &std::path::Path,
+    ) {
+        let mut matches: Vec<(usize, rustc_hash::FxHashSet<document::Handle>)> = Vec::new();
+        for (j, tab) in self.tabs.iter().enumerate() {
+            if j == saved || tab.block_test.is_some() {
+                continue;
+            }
+            let base_dir = tab
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let keys: rustc_hash::FxHashSet<document::Handle> = tab
+                .scene
+                .document
+                .block_records
+                .iter()
+                .filter(|br| {
+                    (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty()
+                })
+                .filter_map(|br| {
+                    crate::io::xref::resolve_path(&br.xref_path, &base_dir)
+                        .filter(|resolved| native_paths_match(resolved, path))
+                        .map(|_| br.handle)
+                })
+                .collect();
+            if !keys.is_empty() {
+                matches.push((j, keys));
+            }
+        }
+        for (j, keys) in matches {
+            let base_dir = self.tabs[j]
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                &mut self.tabs[j].scene.document,
+                &base_dir,
+                &keys,
+            );
+            if infos.is_empty() {
+                continue;
+            }
+            // The stat cache reports the saved file as current again.
+            let fresh = crate::io::xref::collect_entries_with_prev(
+                &self.tabs[j].scene.document,
+                &base_dir,
+                self.tabs[j].xref_unloaded.as_set(),
+                &self.tabs[j].xref_stat_cache.0,
+            );
+            for entry in &fresh {
+                if let Some(modified) = entry.modified {
+                    self.tabs[j].xref_stat_cache.insert(entry.key, modified);
+                }
+            }
+            self.tabs[j].dirty = true;
+            self.tabs[j].scene.bump_geometry_no_blocks();
+            self.post_ref_op(j);
+            self.command_line.push_info(
+                crate::tf!("XREF: references to the saved source were reloaded.").as_ref(),
+            );
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2380,7 +2466,13 @@ impl OpenCADStudio {
         self.tabs[i].xref_report = caches
             .xrefs
             .iter()
-            .map(|item| (item.name.clone(), item.path.clone(), item.status.clone()))
+            .map(|item| {
+                (
+                    item.name.clone(),
+                    item.path.clone(),
+                    crate::app::control::xref_status_name(&item.status),
+                )
+            })
             .collect();
         if missing > 0 {
             self.command_line.push_output(
@@ -3956,7 +4048,10 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn on_save_finished(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
+    pub(super) fn on_save_finished(
+        &mut self,
+        mut outcome: crate::app::SaveOutcome,
+    ) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);
@@ -7394,6 +7489,9 @@ impl OpenCADStudio {
                     PlotFlag::TextAsOutlines if d.to_file && d.file_svg => {
                         d.text_as_outlines = !d.text_as_outlines;
                     }
+                    PlotFlag::LayerAttributes if d.to_file && d.file_svg => {
+                        d.layer_attributes = !d.layer_attributes;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -8123,6 +8221,7 @@ impl OpenCADStudio {
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             text_as_outlines: d.text_as_outlines,
             non_scaling_stroke: d.non_scaling_stroke,
+            layer_attributes: d.layer_attributes,
         }
     }
 
@@ -9261,6 +9360,45 @@ mod plot_paper_tests {
         assert!((before.0 - after.0).abs() < 1e-9 && (before.1 - after.1).abs() < 1e-9);
     }
 
+    /// The sheet a window plot leaves on the layout is the page that plot
+    /// makes: page (0, 0) and (width, height) taken back to paper space.
+    fn page_of_window_plot(app: &OpenCADStudio) -> ((f64, f64), (f64, f64)) {
+        let job = app.window_plot_job().expect("a window plot job");
+        let scale = f64::from(job.scale);
+        (
+            (-job.offset_x, -job.offset_y),
+            (
+                job.paper_w / scale - job.offset_x,
+                job.paper_h / scale - job.offset_y,
+            ),
+        )
+    }
+
+    #[test]
+    fn a_fitted_window_plot_leaves_the_sheet_it_plotted() {
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Window".into()));
+        // A window away from the sheet's centre, smaller than the sheet.
+        app.plot_window = Some((20.0, 120.0, 170.0, 200.0));
+        app.plot_dialog.window = app.plot_window;
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.center = true;
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        assert_eq!(
+            layout_settings(&app).scale_type,
+            document::objects::ScaledType::ScaleToFit
+        );
+        let ((px0, py0), (px1, py1)) = page_of_window_plot(&app);
+        let ((sx0, sy0), (sx1, sy1)) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            near(sx0, px0) && near(sy0, py0) && near(sx1, px1) && near(sy1, py1),
+            "the sheet ({sx0:.2}, {sy0:.2})-({sx1:.2}, {sy1:.2}) must be the page the \
+             plot made ({px0:.2}, {py0:.2})-({px1:.2}, {py1:.2})"
+        );
+    }
+
     #[test]
     fn custom_scale_fields_follow_and_drive_the_picker() {
         use crate::ui::window::plot::PlotFlag;
@@ -9913,7 +10051,6 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert!(!app.plot_dialog.center);
         assert_eq!(app.plot_dialog.offset_x, "12.0");
     }
-
 }
 
 #[cfg(test)]

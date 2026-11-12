@@ -477,6 +477,24 @@ pub(crate) fn entity_json(
                 .collect();
             map.insert("attribute_children".into(), Value::Array(children));
         }
+        E::MultiLeader(multileader) => {
+            let leaders: Vec<Value> = multileader
+                .context
+                .leader_roots
+                .iter()
+                .flat_map(|root| {
+                    root.lines.iter().map(move |line| {
+                        json!({
+                            "index": line.index,
+                            "root": root.leader_index,
+                            "points": line.points.iter().map(|point| v3(*point)).collect::<Vec<_>>(),
+                        })
+                    })
+                })
+                .collect();
+            map.insert("leader_count".into(), json!(leaders.len()));
+            map.insert("leaders".into(), json!(leaders));
+        }
         _ => {}
     }
     if matches!(e, E::Hatch(_)) {

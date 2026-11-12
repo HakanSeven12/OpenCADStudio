@@ -1670,6 +1670,11 @@ impl OpenCADStudio {
                             .scene
                             .record_undo_parametric_constraints_before(scope, before);
                         let count = inferred.len();
+                        let mut per_kind: std::collections::BTreeMap<&'static str, usize> =
+                            std::collections::BTreeMap::new();
+                        for (kind, _) in &inferred {
+                            *per_kind.entry(kind.label()).or_default() += 1;
+                        }
                         for (kind, refs) in inferred {
                             let id = self.tabs[i]
                                 .scene
@@ -1702,6 +1707,14 @@ impl OpenCADStudio {
                             )
                             .as_str(),
                         );
+                        let mut breakdown: Vec<(&str, usize)> = per_kind.into_iter().collect();
+                        breakdown.sort_by(|left, right| {
+                            right.1.cmp(&left.1).then_with(|| left.0.cmp(right.0))
+                        });
+                        for (name, n) in breakdown {
+                            self.command_line
+                                .push_output(format!("{n} {name}").as_str());
+                        }
                         self.report_pending_network_moves(i);
                         if let Some(pd) = pending {
                             self.commit_undo_delta(i, pd);

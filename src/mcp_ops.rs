@@ -350,6 +350,32 @@ pub static SET_PROPERTIES: OpDef = OpDef {
     example: r#"{"op":"set_properties","collection":"layers","name":"Walls","updates":[{"path":"/color","value":3}]}"#,
 };
 
+pub static PANEL_INPUT: OpDef = OpDef {
+    name: "panel_input",
+    doc: "Edit one native dock-panel field. Changes only the UI draft; records and geometry are not written.",
+    batchable: false,
+    params: &[
+        req("panel_id", Ty::Str, "Registered native panel id."),
+        req("control_id", Ty::Str, "Field id declared by that panel."),
+        opt("text", Ty::Str, "Exact draft text (preferred for Number fields)."),
+        opt("value", Ty::Num, "Finite numeric draft converted to text."),
+    ],
+    rules: &[],
+    example: r#"{"op":"panel_input","panel_id":"cvifc.ifc_h_properties","control_id":"SegmentLength","text":"101.5"}"#,
+};
+
+pub static PANEL_BUTTON: OpDef = OpDef {
+    name: "panel_button",
+    doc: "Activate a native dock-panel button's declared action. The ordinary document-bound plugin command owns validation, records, and undo.",
+    batchable: false,
+    params: &[
+        req("panel_id", Ty::Str, "Registered native panel id."),
+        req("control_id", Ty::Str, "Button id declared by that panel, or reset."),
+    ],
+    rules: &[],
+    example: r#"{"op":"panel_button","panel_id":"cvifc.ifc_h_properties","control_id":"apply"}"#,
+};
+
 pub static ACTION: OpDef = OpDef {
     name: "action",
     doc: "Trigger a named GUI action or dialog command.",
@@ -431,6 +457,7 @@ pub static PLOT: OpDef = OpDef {
         opt("apply_plot_styles", Ty::Bool, "Enable/disable the selected or requested plot style; explicit false wins."),
         opt("merge_lines", Ty::Bool, "Merge overlapping lines."),
         opt("text_as_outlines", Ty::Bool, "SVG only: emit font-independent glyph paths instead of text elements."),
+        opt("layer_attributes", Ty::Bool, "SVG only: tag each drawn item with its drawing layer as data-layer groups the consumer can toggle."),
         opt("non_scaling_stroke", Ty::Bool, "SVG only: keep stroke widths constant under downstream SVG transforms (web maps)."),
         opt("stamp", Ty::Bool, "Print plot stamp."),
         opt("per_page", Ty::Bool, "When layout='all', write one output file per layout as <stem>-<Layout>.<ext>."),
@@ -1107,6 +1134,8 @@ pub static OPS: &[&OpDef] = &[
     &CLICK,
     &POINTER,
     &SET_PROPERTIES,
+    &PANEL_INPUT,
+    &PANEL_BUTTON,
     &ACTION,
     &EMBED_IMAGE,
     &WBLOCK,

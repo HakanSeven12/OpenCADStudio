@@ -2972,10 +2972,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Select object to divide:
     .deselected = Deselected.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Distance = __ocs_arg_dist__,  Angle in XY Plane = __ocs_arg_angle_xy__°
+        Distance = __ocs_arg_dist__,  Angle in XY Plane = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Distance = __ocs_arg_dist__,  Angle in XY Plane = __ocs_arg_angle_xy__°,  Angle from XY Plane = __ocs_arg_angle_z__°
+        Distance = __ocs_arg_dist__,  Angle in XY Plane = __ocs_arg_angle_xy__,  Angle from XY Plane = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: replaced __ocs_fmt_0__ occurrence(s) of "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: "__ocs_fmt_0__" not found.
@@ -5595,6 +5595,9 @@ properties =
     .chord = Chord
     .circumference = Circumference
     .class = Class
+    .start-station = Start Station
+    .design-speeds = Design Speeds
+    .station-equations = Station Equations
     .class-id = Class ID
     .classification-scheme = Classification Scheme
     .clip-inverted = Clip inverted
@@ -6451,6 +6454,7 @@ plot =
     .vector-dpi = Vector DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Layer data attributes
     .open-when-done = Open in viewer when done
     .no-page-setups = (no page setups)
     .none = <none>

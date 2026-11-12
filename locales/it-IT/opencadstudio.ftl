@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Selezionare l'oggetto da dividere:
     .deselected = Deselezionato.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Distanza = __ocs_arg_dist__, Angolo nel piano XY = __ocs_arg_angle_xy__°
+        Distanza = __ocs_arg_dist__, Angolo nel piano XY = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Distanza = __ocs_arg_dist__, Angolo nel piano XY = __ocs_arg_angle_xy__°, Angolo dal piano XY = __ocs_arg_angle_z__°
+        Distanza = __ocs_arg_dist__, Angolo nel piano XY = __ocs_arg_angle_xy__, Angolo dal piano XY = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: sostituite le occorrenze __ocs_fmt_0__ di "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: "__ocs_fmt_0__" non trovato.
@@ -5610,6 +5610,9 @@ properties =
     .chord-z = Accordo Z
     .circumference = Circonferenza
     .class = Classe
+    .start-station = Progressiva iniziale
+    .design-speeds = Velocità di progetto
+    .station-equations = Equazioni di progressiva
     .class-id = Classe ID
     .classification-scheme = Schema di classificazione
     .clip-inverted = Clip invertita
@@ -6449,6 +6452,7 @@ plot =
     .vector-dpi = DPI vettoriale
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Attributi dati dei layer
     .open-when-done = Open in viewer when done
     .no-page-setups = (nessuna impostazione di pagina)
     .none = <nessuno>

@@ -2976,10 +2976,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Chọn đối tượng cần chia:
     .deselected = Đã bỏ chọn.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Khoảng cách = __ocs_arg_dist__,  Góc trong mặt phẳng XY = __ocs_arg_angle_xy__°
+        Khoảng cách = __ocs_arg_dist__,  Góc trong mặt phẳng XY = __ocs_arg_angle_xy__
         Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Khoảng cách = __ocs_arg_dist__,  Góc trong mặt phẳng XY = __ocs_arg_angle_xy__°,  Góc so với mặt phẳng XY = __ocs_arg_angle_z__°
+        Khoảng cách = __ocs_arg_dist__,  Góc trong mặt phẳng XY = __ocs_arg_angle_xy__,  Góc so với mặt phẳng XY = __ocs_arg_angle_z__
         Delta X = __ocs_arg_dx__,  Delta Y = __ocs_arg_dy__,  Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: đã thay thế __ocs_fmt_0__ lần xuất hiện của "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: không tìm thấy "__ocs_fmt_0__".
@@ -5600,6 +5600,9 @@ properties =
     .chord = Dây cung
     .circumference = Chu vi
     .class = Lớp (Class)
+    .start-station = Lý trình đầu
+    .design-speeds = Tốc độ thiết kế
+    .station-equations = Phương trình lý trình
     .class-id = ID lớp
     .classification-scheme = Sơ đồ phân loại
     .clip-inverted = Cắt xén đảo ngược
@@ -6457,6 +6460,7 @@ plot =
     .vector-dpi = DPI vector
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Thuộc tính dữ liệu lớp
     .open-when-done = Open in viewer when done
     .no-page-setups = (không có thiết lập trang)
     .none = <không có>

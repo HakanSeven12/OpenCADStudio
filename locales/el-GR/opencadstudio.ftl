@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Επιλέξτε αντικείμενο προς διαίρεση:
     .deselected = Η επιλογή καταργήθηκε.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Απόσταση = __ocs_arg_dist__,  Γωνία στο επίπεδο XY = __ocs_arg_angle_xy__°
+        Απόσταση = __ocs_arg_dist__,  Γωνία στο επίπεδο XY = __ocs_arg_angle_xy__
           Δέλτα X = __ocs_arg_dx__,  Δέλτα Y = __ocs_arg_dy__,  Δέλτα Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Απόσταση = __ocs_arg_dist__,  Γωνία στο επίπεδο XY = __ocs_arg_angle_xy__°,  Γωνία από το επίπεδο XY = __ocs_arg_angle_z__°
+        Απόσταση = __ocs_arg_dist__,  Γωνία στο επίπεδο XY = __ocs_arg_angle_xy__,  Γωνία από το επίπεδο XY = __ocs_arg_angle_z__
           Δέλτα X = __ocs_arg_dx__,  Δέλτα Y = __ocs_arg_dy__,  Δέλτα Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: αντικαταστάθηκαν __ocs_fmt_0__ εμφάνιση(εις) του "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: το "__ocs_fmt_0__" δεν βρέθηκε.
@@ -5596,6 +5596,9 @@ properties =
     .chord = Χορδή
     .circumference = Περιφέρεια
     .class = Κλάση
+    .start-station = Αρχική χιλιομετρική θέση
+    .design-speeds = Ταχύτητες μελέτης
+    .station-equations = Εξισώσεις χιλιομέτρησης
     .class-id = Αναγνωριστικό κλάσης
     .classification-scheme = Σχήμα ταξινόμησης
     .clip-inverted = Αντεστραμμένη αποκοπή
@@ -6450,6 +6453,7 @@ plot =
     .vector-dpi = DPI διανυσμάτων
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Χαρακτηριστικά σχεδιαστικών στρωμάτων
     .open-when-done = Open in viewer when done
     .no-page-setups = (δεν υπάρχουν διαμορφώσεις σελίδας)
     .none = <καμία>

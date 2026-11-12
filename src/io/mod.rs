@@ -1631,8 +1631,15 @@ fn resolve_raster_image_paths(doc: &mut Document, base_dir: Option<&Path>) {
         })
         .collect();
 
-    for e in doc.entities_mut() {
-        if let EntityType::RasterImage(img) = e {
+    // Mutable access drops an entity's verbatim record, so only images whose
+    // path actually changes are touched; the rest of the drawing stays raw.
+    let updates: Vec<(document::Handle, String)> = doc
+        .entities()
+        .filter_map(|e| match e {
+            EntityType::RasterImage(img) => Some(img),
+            _ => None,
+        })
+        .filter_map(|img| {
             let raw = if !img.file_path.trim().is_empty() {
                 img.file_path.clone()
             } else {
@@ -1641,14 +1648,16 @@ fn resolve_raster_image_paths(doc: &mut Document, base_dir: Option<&Path>) {
                     .unwrap_or_default()
             };
             if raw.trim().is_empty() {
-                continue;
+                return None;
             }
-            if let Some(resolved) = resolve_image_file(&raw, base_dir) {
-                img.file_path = resolved;
-            } else {
-                // At least surface the stored path so the renderer can try it.
-                img.file_path = raw;
-            }
+            // Fall back to the stored path so the renderer can at least try it.
+            let path = resolve_image_file(&raw, base_dir).unwrap_or(raw);
+            (path != img.file_path).then_some((img.common.handle, path))
+        })
+        .collect();
+    for (handle, path) in updates {
+        if let Some(EntityType::RasterImage(img)) = doc.get_entity_mut(handle) {
+            img.file_path = path;
         }
     }
 
@@ -3252,15 +3261,21 @@ fn fix_double_placed_dimension_pictures(doc: &mut Document) {
 /// Files from AutoCAD and other tools always set bit 15 for active viewports, leaving bit 0
 /// clear, so document reads every such viewport as off.  Correct that here after loading.
 fn fix_viewport_status_flags(doc: &mut Document) {
-    for entity in doc.entities_mut() {
-        if let EntityType::Viewport(vp) = entity {
-            let bits = vp.status.to_bits();
-            // If bit 0 is not set but bit 15 is, this is an external-format viewport:
-            // treat bit 15 as "on" and bit 14 as "locked".
-            if (bits & 0x0001) == 0 && (bits & 0x8000) != 0 {
-                vp.turn_on();
-                vp.status.locked = (bits & 0x4000) != 0;
-            }
+    // If bit 0 is not set but bit 15 is, this is an external-format viewport:
+    // treat bit 15 as "on" and bit 14 as "locked". Only those viewports are
+    // borrowed mutably, which keeps every other entity's verbatim record.
+    let fix: Vec<_> = doc
+        .entities()
+        .filter_map(|e| match e {
+            EntityType::Viewport(vp) => Some((vp.common.handle, vp.status.to_bits())),
+            _ => None,
+        })
+        .filter(|(_, bits)| (bits & 0x0001) == 0 && (bits & 0x8000) != 0)
+        .collect();
+    for (handle, bits) in fix {
+        if let Some(EntityType::Viewport(vp)) = doc.get_entity_mut(handle) {
+            vp.turn_on();
+            vp.status.locked = (bits & 0x4000) != 0;
         }
     }
 }

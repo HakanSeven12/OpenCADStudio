@@ -1,8 +1,8 @@
 //! Windows Explorer thumbnail handler for DWG files.
 //!
-//! Implements `IThumbnailProvider` (+ `IInitializeWithFile`) as a COM in-proc
-//! server. Explorer instantiates it for `.dwg` files, hands it the path, then
-//! calls `GetThumbnail`, which extracts the DWG's embedded preview via the
+//! Implements `IThumbnailProvider` (+ `IInitializeWithStream`) as a COM in-proc
+//! server. Explorer instantiates it for `.dwg` files in its isolated thumbnail
+//! process, hands it the file as a stream, then calls `GetThumbnail`, which extracts the DWG's embedded preview via the
 //! shared [`dwg_thumbnailer`] core and returns it as an HBITMAP.
 //!
 //! ## Build & register (on Windows, elevated)
@@ -30,14 +30,16 @@ use windows::Win32::Foundation::{
 use windows::Win32::Graphics::Gdi::{
     CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
 };
-use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
+use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl, IStream};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CLASSES_ROOT,
     KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
-use windows::Win32::UI::Shell::PropertiesSystem::{IInitializeWithFile, IInitializeWithFile_Impl};
+use windows::Win32::UI::Shell::PropertiesSystem::{
+    IInitializeWithStream, IInitializeWithStream_Impl,
+};
 use windows::Win32::UI::Shell::{
     IThumbnailProvider, IThumbnailProvider_Impl, SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
     WTSAT_ARGB, WTS_ALPHATYPE,
@@ -64,17 +66,32 @@ extern "system" fn DllMain(hinst: HMODULE, reason: u32, _reserved: *mut c_void) 
 
 // ── The provider COM object ──────────────────────────────────────────────────
 
-#[implement(IThumbnailProvider, IInitializeWithFile)]
+// Explorer loads thumbnail providers in an isolated process, where only a
+// stream initializer is offered; a path initializer is never called there.
+#[implement(IThumbnailProvider, IInitializeWithStream)]
 #[derive(Default)]
 struct DwgThumbProvider {
-    path: RefCell<Option<String>>,
+    bytes: RefCell<Option<Vec<u8>>>,
 }
 
-impl IInitializeWithFile_Impl for DwgThumbProvider_Impl {
-    fn Initialize(&self, pszfilepath: &PCWSTR, _grfmode: u32) -> windows::core::Result<()> {
-        let path = unsafe { pszfilepath.to_string() }
-            .map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
-        *self.path.borrow_mut() = Some(path);
+impl IInitializeWithStream_Impl for DwgThumbProvider_Impl {
+    fn Initialize(&self, pstream: Option<&IStream>, _grfmode: u32) -> windows::core::Result<()> {
+        let stream = pstream.ok_or(windows::core::Error::from(E_INVALIDARG))?;
+        let mut bytes = Vec::new();
+        let mut chunk = vec![0u8; 1 << 16];
+        loop {
+            let mut read = 0u32;
+            unsafe {
+                stream
+                    .Read(chunk.as_mut_ptr().cast(), chunk.len() as u32, Some(&mut read))
+                    .ok()?;
+            }
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..read as usize]);
+        }
+        *self.bytes.borrow_mut() = Some(bytes);
         Ok(())
     }
 }
@@ -86,12 +103,9 @@ impl IThumbnailProvider_Impl for DwgThumbProvider_Impl {
         phbmp: *mut HBITMAP,
         pdwalpha: *mut WTS_ALPHATYPE,
     ) -> windows::core::Result<()> {
-        let path = self
-            .path
-            .borrow()
-            .clone()
-            .ok_or(windows::core::Error::from(E_FAIL))?;
-        let mut img = dwg_thumbnailer::extract(std::path::Path::new(&path), cx.max(1))
+        let bytes = self.bytes.borrow();
+        let bytes = bytes.as_deref().ok_or(windows::core::Error::from(E_FAIL))?;
+        let mut img = dwg_thumbnailer::extract_bytes(bytes, cx.max(1))
             .ok_or(windows::core::Error::from(E_FAIL))?;
         dwg_thumbnailer::badge_dwg(&mut img); // full-width "DWG" band
         let hbmp = unsafe { rgba_to_hbitmap(&img)? };

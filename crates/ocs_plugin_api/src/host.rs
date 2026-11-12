@@ -2062,6 +2062,75 @@ pub trait HostApi {
     ) -> crate::dialog::DialogResponse {
         self.show_dialog(dialog)
     }
+
+    /// Read the current form contents of a registered persistent panel (API v18,
+    /// additive).
+    ///
+    /// This is only a read snapshot during ordinary document-bound command dispatch:
+    /// it submits nothing, writes neither UI nor document state, and records no undo
+    /// step. The returned [`crate::dialog::PanelSnapshot`] is UI input, not document
+    /// authority or a document revision. An asynchronous
+    /// [`HostNotification::PanelAction`] is not a write window and carries no write
+    /// authority; it may only ask the plugin to enter ordinary command dispatch.
+    ///
+    /// Before any write based on a snapshot, the plugin must reject every snapshot
+    /// whose `errors` is non-empty, re-read the authoritative document records, and
+    /// validate that the intended target still exists and is suitable. Only then may
+    /// it perform the write under the ordinary undo contract. The default refuses the
+    /// read so hosts without panel read-back support fail closed.
+    fn panel_snapshot(&self, _panel_id: &str) -> Result<crate::dialog::PanelSnapshot, String> {
+        Err("Panel snapshots are not supported by this host".to_owned())
+    }
+
+    // ---- Panel identity (api 18, additive defaults; appended at the ABI tail). ----
+    //
+    // These methods receive identity from the host's authenticated transport,
+    // not from a PanelDef or a caller-chosen command argument. Direct HostApi
+    // implementers retain their legacy registration/update behavior. An IPC
+    // server must call the `_for_plugin` variants with its transport identity.
+    // No asynchronous notification acquires HostApi through these methods.
+
+    /// Register a panel with host-authenticated ownership. The default keeps
+    /// the legacy direct-host behavior; identity-aware hosts override it.
+    fn register_panel_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel: crate::dialog::PanelDef,
+    ) -> bool {
+        self.register_panel(panel)
+    }
+
+    /// Update only a panel owned by the authenticated caller.
+    fn update_panel_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        values: std::collections::HashMap<String, crate::dialog::DialogValue>,
+    ) -> bool {
+        self.update_panel(panel_id, values)
+    }
+
+    /// Toggle only a panel owned by the authenticated caller.
+    fn toggle_panel_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        show: Option<bool>,
+    ) -> bool {
+        self.toggle_panel(panel_id, show)
+    }
+
+    /// Read a panel after the host has authenticated its transport owner.
+    /// The returned tab is the current document-bound session's tab, not a
+    /// caller-provided target. Old hosts fail closed instead of returning an
+    /// unowned or fabricated snapshot.
+    fn panel_snapshot_for_plugin(
+        &self,
+        _plugin_id: &str,
+        _panel_id: &str,
+    ) -> Result<crate::dialog::PanelSnapshot, String> {
+        Err("Authenticated panel snapshots are not supported by this host".to_owned())
+    }
 }
 
 /// **Parametric-chain staging types (api 14, the v2 generic shapes).**

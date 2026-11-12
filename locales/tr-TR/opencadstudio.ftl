@@ -2954,9 +2954,9 @@ inquiry =
     .divide-enter-number-of-segments = DIVIDE  Parça sayısını girin:
     .divide-select-object-to-divide = DIVIDE  Bölünecek nesneyi seçin:
     .deselected = Seçim kaldırıldı.
-    .distance-dist-angle-in-xy-plane-angle-xy-delta = Mesafe = __ocs_arg_dist__,  XY düzlemindeki açı = __ocs_arg_angle_xy__°
+    .distance-dist-angle-in-xy-plane-angle-xy-delta = Mesafe = __ocs_arg_dist__,  XY düzlemindeki açı = __ocs_arg_angle_xy__
             X farkı = __ocs_arg_dx__,  Y farkı = __ocs_arg_dy__,  Z farkı = __ocs_arg_dz__
-    .distance-dist-angle-in-xy-plane-angle-xy-angle = Mesafe = __ocs_arg_dist__,  XY düzlemindeki açı = __ocs_arg_angle_xy__°,  XY düzleminden açı = __ocs_arg_angle_z__°
+    .distance-dist-angle-in-xy-plane-angle-xy-angle = Mesafe = __ocs_arg_dist__,  XY düzlemindeki açı = __ocs_arg_angle_xy__,  XY düzleminden açı = __ocs_arg_angle_z__
             X farkı = __ocs_arg_dx__,  Y farkı = __ocs_arg_dy__,  Z farkı = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: "__ocs_fmt_1__" ifadesinin __ocs_fmt_0__ eşleşmesi "__ocs_fmt_2__" olarak değiştirildi.
     .find-not-found = FIND: "__ocs_fmt_0__" bulunamadı.
@@ -5535,6 +5535,9 @@ properties =
     .chord = Kiriş
     .circumference = Çevre
     .class = Sınıf
+    .start-station = Başlangıç İstasyonu
+    .design-speeds = Tasarım Hızları
+    .station-equations = İstasyon Denklemleri
     .class-id = Sınıf Kimliği
     .classification-scheme = Sınıflandırma Düzeni
     .clip-inverted = Kırpma ters çevrildi
@@ -6390,6 +6393,7 @@ plot =
     .vector-dpi = Vektör DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Katman veri öznitelikleri
     .open-when-done = PDF bitince görüntüleyicide aç
     .no-page-setups = (sayfa ayarı yok)
     .none = <yok>

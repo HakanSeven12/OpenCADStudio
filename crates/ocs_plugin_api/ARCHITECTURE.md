@@ -17,6 +17,41 @@ The host and each plugin run in separate OS processes. The host re-executes itse
 
 ---
 
+## API 18 — synchronous panel form snapshots (2026-11-11)
+
+API v18 adds `PanelSnapshot` and `HostApi::panel_snapshot` so a normal,
+document-bound command can read a registered docked panel's complete current
+form. The snapshot contains typed `DialogValue`s, exact raw text for
+text/number/file controls, collection errors, the host-authenticated panel
+owner and the serving session's real tab id. It is an input candidate, never
+document truth: the plugin must re-read its records, validate ownership and
+run its own geometry/proof gates before writing. A malformed or incomplete
+form is rejected, not defaulted.
+
+`PanelAction` remains an asynchronous notification and never becomes a
+document write channel. Existing `PanelDef`, registration, update, toggle,
+class mirrors, legacy callbacks and API-v16 plugins remain supported. The new
+IPC `PluginRequest::PanelSnapshot` / `PluginResponse::PanelSnapshot` variants
+are appended at enum tails. An old v17 host refuses a v18-only plugin rather
+than accepting a request it cannot decode; a host without the method refuses
+the snapshot without a document write. The transport's authenticated plugin
+id is used by `register_panel_for_plugin`, `update_panel_for_plugin`,
+`toggle_panel_for_plugin` and `panel_snapshot_for_plugin`; title/command
+aliases remain owner-checked. The built-in Reset action preserves ownership.
+
+The host does not auto-commit form values, create an IFC undo scope, or infer
+a record transaction. The ordinary command's plugin owns its records,
+candidate proofs, display refresh and exactly its own undo scope. Panel
+refresh on selection is a read-only projection, never a record mutation.
+
+Implementation references: `dialog.rs` (`PanelSnapshot`), `host.rs` (appended
+`HostApi` methods), `ipc/protocol.rs` (appended variants), `ipc/server.rs`
+(authenticated forwarding), `ipc/client.rs` and `ipc/v4/client.rs`
+(forwarding), `src/ui/window/plugin_panel.rs` (recursive collection), and
+`src/app/plugin_host.rs` (owner/tab-bound snapshots). Tests cover nested
+controls, raw numeric drafts, duplicate ids, transport ownership, idempotent
+registration, Reset, aliases and two-document tab isolation.
+
 ## Module map
 
 | Module | Responsibility |

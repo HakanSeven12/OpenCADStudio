@@ -2965,10 +2965,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Jelölje ki a felosztandó objektumot:
     .deselected = Kijelölés megszüntetve.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__°
+        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__°, szög az XY síktól = __ocs_arg_angle_z__°
+        Távolság = __ocs_arg_dist__, szög az XY síkban = __ocs_arg_angle_xy__, szög az XY síktól = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: „__ocs_fmt_1__” → „__ocs_fmt_2__”: __ocs_fmt_0__ előfordulás lecserélve.
     .find-not-found = FIND: "__ocs_fmt_0__" nem található.
@@ -5594,6 +5594,9 @@ properties =
     .chord-z = Húr Z
     .circumference = Kerület
     .class = Osztály
+    .start-station = Kezdő szelvény
+    .design-speeds = Tervezési sebességek
+    .station-equations = Szelvényegyenletek
     .class-id = Osztályazonosító
     .classification-scheme = Osztályozási séma
     .clip-inverted = Körülvágás megfordítva
@@ -6433,6 +6436,7 @@ plot =
     .vector-dpi = Vektor DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Rétegadat-attribútumok
     .open-when-done = Megnyitás megjelenítőben, ha kész
     .no-page-setups = (nincs oldalbeállítás)
     .none = <nincs>

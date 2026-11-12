@@ -2972,10 +2972,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE Objekt auswählen, um zu teilen:
     .deselected = Abgewählt.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Abstand = __ocs_arg_dist__, Winkel in XY Ebene = __ocs_arg_angle_xy__°
+        Abstand = __ocs_arg_dist__, Winkel in XY Ebene = __ocs_arg_angle_xy__
         Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Abstand = __ocs_arg_dist__, Winkel in XY Ebene = __ocs_arg_angle_xy__°, Winkel von XY Ebene = __ocs_arg_angle_z__°
+        Abstand = __ocs_arg_dist__, Winkel in XY Ebene = __ocs_arg_angle_xy__, Winkel von XY Ebene = __ocs_arg_angle_z__
         Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: ersetzt durch __ocs_fmt_0__ Vorkommen(e) von "__ocs_fmt_1__" → "__ocs_fmt_2__".
     .find-not-found = FIND: "__ocs_fmt_0__" nicht gefunden.
@@ -5609,6 +5609,9 @@ properties =
     .chord-z = Akkord Z
     .circumference = Umfang
     .class = Klasse
+    .start-station = Anfangsstation
+    .design-speeds = Entwurfsgeschwindigkeiten
+    .station-equations = Stationsgleichungen
     .class-id = Klasse ID
     .classification-scheme = Einstufungsschema
     .clip-inverted = Zuschneiden invertiert
@@ -6448,6 +6451,7 @@ plot =
     .vector-dpi = Vektor-DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Layer-Datenattribute
     .open-when-done = Open in viewer when done
     .no-page-setups = (keine Seiten-Setups)
     .none = <keine>

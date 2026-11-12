@@ -1240,13 +1240,21 @@ fn compute_fillet_entities(
                     Some((a, b, Between::Corner))
                 } else if next(a) < seg_count && next(next(a)) == b && !straight(next(a)) {
                     Some((a, b, Between::Arc(next(a))))
-                } else if !closed && seg_count >= 2 && a == seg_count - 1 && b == 0 {
-                    Some((a, b, Between::OpenEnds))
                 } else {
                     None
                 }
             };
-            let (before_seg, after_seg, between) = order(*s1, *s2).or_else(|| order(*s2, *s1))?;
+            // The gap between the open ends only when the two segments share
+            // no vertex: the two segments of a V meet at both readings, and
+            // the corner they share is the one meant.
+            let open_ends = |a: usize, b: usize| {
+                (!closed && seg_count >= 2 && a == seg_count - 1 && b == 0)
+                    .then_some((a, b, Between::OpenEnds))
+            };
+            let (before_seg, after_seg, between) = order(*s1, *s2)
+                .or_else(|| order(*s2, *s1))
+                .or_else(|| open_ends(*s1, *s2))
+                .or_else(|| open_ends(*s2, *s1))?;
             if !straight(before_seg) || !straight(after_seg) {
                 return None;
             }
@@ -1398,6 +1406,49 @@ fn rebuild_poly_from_trimmed_line(
         None
     };
     lwpoly_shorten_seg(poly, seg_idx, new_start, new_end)
+}
+
+/// The single polyline a fillet of a polyline with another object leaves,
+/// and whether it takes the first pick's place: what the fillet commits and
+/// what its preview draws.
+fn joined_poly_fillet(
+    e1: &FilletEntity,
+    e2: &FilletEntity,
+    new_e1: &EntityType,
+    new_e2: &EntityType,
+    fillet: Option<&EntityType>,
+    same_entity: bool,
+) -> Option<(LwPolyline, bool)> {
+    if same_entity {
+        return None;
+    }
+    match (e1, e2, new_e1, new_e2) {
+        (
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            FilletEntity::Line(_) | FilletEntity::Arc(_),
+            EntityType::LwPolyline(moved),
+            other,
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, None, fillet).map(|p| (p, true)),
+        // Two polylines join into the first one.
+        (
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            FilletEntity::LwPoly {
+                poly: poly2,
+                seg_idx: seg2,
+                ..
+            },
+            EntityType::LwPolyline(moved),
+            other,
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, Some((poly2, *seg2)), fillet)
+            .map(|p| (p, true)),
+        (
+            FilletEntity::Line(_) | FilletEntity::Arc(_),
+            FilletEntity::LwPoly { poly, seg_idx, .. },
+            other,
+            EntityType::LwPolyline(moved),
+        ) => join_poly_fillet(poly, *seg_idx, moved, other, None, fillet).map(|p| (p, false)),
+        _ => None,
+    }
 }
 
 /// Open (if needed) and cut a polyline at a fillet with a line or arc, then
@@ -2390,71 +2441,23 @@ impl CadCommand for FilletCommand {
                             }
                             // A polyline filleted with a line or arc takes
                             // the fillet and the other object in.
-                            let joined = match (&e1, &e2, &new_e1, &new_e2) {
-                                (
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    FilletEntity::Line(_) | FilletEntity::Arc(_),
-                                    EntityType::LwPolyline(moved),
-                                    other,
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    None,
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (h1, vec![EntityType::LwPolyline(poly)]),
-                                        (handle, Vec::new()),
-                                    ]
-                                }),
-                                // Two polylines join into the first one.
-                                (
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    FilletEntity::LwPoly {
-                                        poly: poly2,
-                                        seg_idx: seg2,
-                                        ..
-                                    },
-                                    EntityType::LwPolyline(moved),
-                                    other,
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    Some((poly2, *seg2)),
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (h1, vec![EntityType::LwPolyline(poly)]),
-                                        (handle, Vec::new()),
-                                    ]
-                                }),
-                                (
-                                    FilletEntity::Line(_) | FilletEntity::Arc(_),
-                                    FilletEntity::LwPoly { poly, seg_idx, .. },
-                                    other,
-                                    EntityType::LwPolyline(moved),
-                                ) if !same_entity => join_poly_fillet(
-                                    poly,
-                                    *seg_idx,
-                                    moved,
-                                    other,
-                                    None,
-                                    maybe_arc.as_ref(),
-                                )
-                                .map(|poly| {
-                                    vec![
-                                        (handle, vec![EntityType::LwPolyline(poly)]),
-                                        (h1, Vec::new()),
-                                    ]
-                                }),
-                                _ => None,
-                            };
+                            let joined = joined_poly_fillet(
+                                &e1,
+                                &e2,
+                                &new_e1,
+                                &new_e2,
+                                maybe_arc.as_ref(),
+                                same_entity,
+                            )
+                            .map(|(poly, into_first)| {
+                                let (keep, gone) = if into_first {
+                                    (h1, handle)
+                                } else {
+                                    (handle, h1)
+                                };
+                                let poly = EntityType::LwPolyline(poly);
+                                vec![(keep, vec![poly]), (gone, Vec::new())]
+                            });
                             let original1 = self.entity_index.get(&self.all_entities, h1).cloned();
                             let original2 =
                                 self.entity_index.get(&self.all_entities, handle).cloned();
@@ -2550,8 +2553,6 @@ impl CadCommand for FilletCommand {
                         }
                         other => FilletEntity::from_entity(other),
                     });
-                // For non-LwPoly, skip same-entity hover.
-                let _ = h1;
                 if let Some(e2) = e2 {
                     if let Some((new_e1, new_e2, maybe_arc)) =
                         fillet_lines_in_their_plane(&e1, click1, &e2, pt, self.radius)
@@ -2560,6 +2561,27 @@ impl CadCommand for FilletCommand {
                                 compute_fillet_entities(&e1, click1, &e2, click, self.radius)
                             })
                     {
+                        // The polyline the commit joins, not its parts.
+                        let infinite = |h: Handle| {
+                            is_infinite(self.entity_index.get(&self.all_entities, h))
+                        };
+                        let joined = joined_poly_fillet(
+                            &e1,
+                            &e2,
+                            &new_e1,
+                            &new_e2,
+                            maybe_arc.as_ref(),
+                            handle == h1,
+                        )
+                        .filter(|_| self.trim && !infinite(h1) && !infinite(handle));
+                        if let Some((poly, _)) = joined {
+                            return vec![WireModel::solid(
+                                "fillet_joined".into(),
+                                lwpoly_pts(&poly),
+                                WireModel::CYAN,
+                                false,
+                            )];
+                        }
                         let mut out = Vec::new();
                         if self.trim {
                             out.push(WireModel::solid(

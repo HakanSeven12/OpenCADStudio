@@ -1614,6 +1614,83 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // DIMOVERRIDELIST: print every dimension variable that the
+            // selected dimensions override, one `DIMTXT = 4.0000` line per
+            // variable, or "No overrides." when none is overridden.
+            "DIMOVERRIDELIST" => {
+                let handles = self.selected_editable_dimensions(i);
+                if handles.is_empty() {
+                    self.command_line
+                        .push_output(crate::t!("No dimensions selected.").as_ref());
+                    return Some(self.finish_dispatch(cmd));
+                }
+                use crate::entities::dim_override as dov;
+                let doc = &self.tabs[i].scene.document;
+                let block_name = |handle: document::Handle| {
+                    doc.block_records
+                        .iter()
+                        .find(|record| record.handle == handle)
+                        .map(|record| record.name.clone())
+                        .unwrap_or_else(|| "?".to_string())
+                };
+                let style_name = |handle: document::Handle| {
+                    doc.text_styles
+                        .iter()
+                        .find(|style| style.handle == handle)
+                        .map(|style| style.name.clone())
+                        .unwrap_or_else(|| "?".to_string())
+                };
+                let format_value = |code: i16, value: &document::xdata::XDataValue| {
+                    use document::xdata::XDataValue as V;
+                    match value {
+                        V::Real(v) => format!("{v:.4}"),
+                        V::Integer16(v) => v.to_string(),
+                        V::Integer32(v) => v.to_string(),
+                        V::String(s) => s.clone(),
+                        V::Handle(handle) => {
+                            if code == dov::DIMTXSTY {
+                                style_name(*handle)
+                            } else if matches!(code, dov::DIMBLK | dov::DIMBLK1 | dov::DIMBLK2 | dov::DIMLDRBLK) {
+                                block_name(*handle)
+                            } else {
+                                handle.to_string()
+                            }
+                        }
+                        other => format!("{other:?}"),
+                    }
+                };
+                let mut any = false;
+                for handle in &handles {
+                    let Some(entity) = doc.get_entity(*handle) else {
+                        continue;
+                    };
+                    let common = match &entity {
+                        document::EntityType::Dimension(dimension) => &dimension.base().common,
+                        _ => continue,
+                    };
+                    let pairs = dov::pairs(&common.extended_data);
+                    if pairs.is_empty() {
+                        continue;
+                    }
+                    any = true;
+                    self.command_line
+                        .push_output(&crate::tf!("Dimension {handle}:").as_ref());
+                    for (code, value) in pairs {
+                        let Some((name, _kind)) = dov::variable_for_code(code) else {
+                            continue;
+                        };
+                        self.command_line.push_output(
+                            crate::tf!("{} = {}", name, format_value(code, &value)).as_ref(),
+                        );
+                    }
+                }
+                if !any {
+                    self.command_line
+                        .push_output(crate::t!("No overrides.").as_ref());
+                }
+                return Some(self.finish_dispatch(cmd));
+            }
+
             cmd if cmd.starts_with("DIMOVERRIDE_APPLY ") => {
                 let spec = cmd.trim_start_matches("DIMOVERRIDE_APPLY ").trim();
                 // Arrowhead blocks and the text style are written as handles,

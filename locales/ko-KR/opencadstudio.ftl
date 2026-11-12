@@ -2971,10 +2971,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE 분할할 개체 선택:
     .deselected = 선택 취소되었습니다.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        거리 = __ocs_arg_dist__, XY 평면의 각도 = __ocs_arg_angle_xy__°
+        거리 = __ocs_arg_dist__, XY 평면의 각도 = __ocs_arg_angle_xy__
           델타 X = __ocs_arg_dx__, 델타 Y = __ocs_arg_dy__, 델타 Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        거리 = __ocs_arg_dist__, XY 평면에서의 각도 = __ocs_arg_angle_xy__°, XY 평면에서의 각도 = __ocs_arg_angle_z__°
+        거리 = __ocs_arg_dist__, XY 평면에서의 각도 = __ocs_arg_angle_xy__, XY 평면에서의 각도 = __ocs_arg_angle_z__
           델타 X = __ocs_arg_dx__, 델타 Y = __ocs_arg_dy__, 델타 Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: "__ocs_fmt_1__" → "__ocs_fmt_2__"의 __ocs_fmt_0__ 항목을 대체했습니다.
     .find-not-found = FIND: "__ocs_fmt_0__"를 찾을 수 없습니다.
@@ -5610,6 +5610,9 @@ properties =
     .chord-z = 코드 Z
     .circumference = 둘레
     .class = 수업
+    .start-station = 시작 측점
+    .design-speeds = 설계 속도
+    .station-equations = 측점 방정식
     .class-id = 클래스 ID
     .classification-scheme = 분류 체계
     .clip-inverted = 클립이 반전됨
@@ -6449,6 +6452,7 @@ plot =
     .vector-dpi = 벡터 DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = 레이어 데이터 속성
     .open-when-done = Open in viewer when done
     .no-page-setups = (페이지 설정 없음)
     .none = <없음>

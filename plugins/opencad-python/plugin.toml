@@ -1,7 +1,7 @@
 [plugin]
 id = "opencad.python"
 name = "Python Scripting"
-version = "0.1.0"
+version = "0.2.0"
 description = "Embedded Python scripting (RustPython) for Open CAD Studio."
 author = "Felix Riestra"
 license = "GPL-3.0-only"

@@ -4119,6 +4119,21 @@ impl Scene {
     /// pre-erase category mask stored in the journal. Thus deleting a LINE no
     /// longer rebuilds every hatch/image/mesh/text cache merely because its type
     /// became unknowable after removal.
+    /// Whether `handle` draws as an image. A modified image whose model was
+    /// dropped (an underlay turned off) is still one: the cached image list
+    /// that holds it must be rebuilt (#2839).
+    pub(super) fn is_image_entity(&self, handle: Handle) -> bool {
+        self.images.contains_key(&handle)
+            || matches!(
+                self.document.get_entity(handle),
+                Some(
+                    EntityType::RasterImage(_)
+                        | EntityType::Ole2Frame(_)
+                        | EntityType::Underlay(_)
+                )
+            )
+    }
+
     fn category_cache_valid(
         &self,
         cached_epoch: u64,
@@ -6297,6 +6312,7 @@ impl Scene {
         let ((x0, y0), (x1, y1)) = self.paper_limits()?;
         let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
         Some(HatchModel {
+            entity: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],
@@ -6590,28 +6606,44 @@ impl Scene {
                         // it. An inch-based paper space would otherwise get a
                         // 25.4× oversized sheet, shrinking the content into the
                         // corner.
-                        let f = Self::layout_unit_factor(l);
-                        let (pw, ph) = (pw * f, ph * f);
                         let (wx0, wy0, wx1, wy1) = (
                             l.plot_window_min_x,
                             l.plot_window_min_y,
                             l.plot_window_max_x,
                             l.plot_window_max_y,
                         );
+                        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
+                        // Scale type 0 is "scaled to fit" only with the
+                        // standard-scale flag; a custom scale leaves it 0 too.
+                        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
+                        let f = if window_plot && fitted {
+                            // Fitted to the paper: the plot scales the window
+                            // to the sheet, so the sheet spans the window at
+                            // that scale, not at the layout's stored one.
+                            let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                                (wx1 - wx0, wy1 - wy0),
+                                (pw, ph),
+                                crate::io::paper_catalog::PlotScale::Fit,
+                            );
+                            1.0 / mm_per_unit.max(1e-9)
+                        } else {
+                            Self::layout_unit_factor(l)
+                        };
+                        let (pw, ph) = (pw * f, ph * f);
                         // A window plot maps that window onto the sheet, so the
                         // sheet sits around it rather than at the origin.
-                        let (ox, oy) = if l.plot_type == 4 && wx1 > wx0 && wy1 > wy0 {
+                        let (ox, oy) = if window_plot {
                             if l.plot_flags.plot_centered {
                                 ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
                             } else {
                                 (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
                             }
                         } else {
-                            // Paper (0,0) is the printable area's corner, as in
-                            // the reference application: the sheet starts at
-                            // minus the stored margins (turned with the plot).
-                            // LIMMIN is not used; it goes stale when the device
-                            // or medium changes.
+                            // The printable area's corner sits at minus the
+                            // paper image origin (paper-space units, usually
+                            // 0); the sheet starts the stored margins (turned
+                            // with the plot) before it. LIMMIN is not used; it
+                            // goes stale when the device or medium changes.
                             let (left, bottom, ..) = crate::scene::rotated_margins(
                                 (
                                     l.plot_margin_left,
@@ -6621,7 +6653,10 @@ impl Scene {
                                 ),
                                 l.plot_rotation,
                             );
-                            (-left * f, -bottom * f)
+                            (
+                                -l.paper_image_origin_x - left * f,
+                                -l.paper_image_origin_y - bottom * f,
+                            )
                         };
                         return Some(((ox, oy), (ox + pw, oy + ph)));
                     }
@@ -10738,7 +10773,7 @@ impl Scene {
                         if self.category_cache_valid(
                             *cached_epoch,
                             CACHE_CATEGORY_IMAGE,
-                            |h| self.images.contains_key(&h),
+                            |h| self.is_image_entity(h),
                         ) =>
                     {
                         Some(Arc::clone(arc))

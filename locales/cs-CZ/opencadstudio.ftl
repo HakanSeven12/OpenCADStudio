@@ -2976,10 +2976,10 @@ inquiry =
     .divide-select-object-to-divide = DIVIDE  Vyberte objekt k rozdělení:
     .deselected = Výběr zrušen.
     .distance-dist-angle-in-xy-plane-angle-xy-delta =
-        Vzdálenost = __ocs_arg_dist__, úhel v rovině XY = __ocs_arg_angle_xy__°
+        Vzdálenost = __ocs_arg_dist__, úhel v rovině XY = __ocs_arg_angle_xy__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .distance-dist-angle-in-xy-plane-angle-xy-angle =
-        Vzdálenost = __ocs_arg_dist__, úhel v rovině XY = __ocs_arg_angle_xy__°, úhel od roviny XY = __ocs_arg_angle_z__°
+        Vzdálenost = __ocs_arg_dist__, úhel v rovině XY = __ocs_arg_angle_xy__, úhel od roviny XY = __ocs_arg_angle_z__
           Delta X = __ocs_arg_dx__, Delta Y = __ocs_arg_dy__, Delta Z = __ocs_arg_dz__
     .find-replace-replaced-occurrence-s-of = FIND/REPLACE: počet nahrazených výskytů „__ocs_fmt_1__“ → „__ocs_fmt_2__“: __ocs_fmt_0__.
     .find-not-found = FIND: „__ocs_fmt_0__“ nebylo nalezeno.
@@ -5613,6 +5613,9 @@ properties =
     .chord-z = Tětiva Z
     .circumference = Obvod
     .class = Třída
+    .start-station = Počáteční staničení
+    .design-speeds = Návrhové rychlosti
+    .station-equations = Rovnice staničení
     .class-id = ID třídy
     .classification-scheme = Klasifikační schéma
     .clip-inverted = Oříznutí invertováno
@@ -6452,6 +6455,7 @@ plot =
     .vector-dpi = DPI vektoru
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .layer-attributes = Atributy kreslicích vrstev
     .open-when-done = Po dokončení otevřít v prohlížeči
     .no-page-setups = (žádná nastavení stránky)
     .none = <žádné>

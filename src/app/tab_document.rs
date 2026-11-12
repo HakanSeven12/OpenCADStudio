@@ -366,9 +366,11 @@ pub(super) struct DocumentTab {
     /// The palette renders a neutral "open EXTERNALREFERENCES" notice while non-zero;
     /// never auto-opens a modal. Cleared by a clean palette refresh.
     pub(super) xref_missing: usize,
-    /// Every external reference resolved when this drawing was opened:
-    /// (name, path, status). Automation reports it in `state.xrefs`.
-    pub(super) xref_report: Vec<(String, String, crate::io::xref::XrefStatus)>,
+    /// Every external reference in this drawing: (name, path, status label).
+    /// Automation reports it in `state.xrefs`. Rebuilt on open and after every
+    /// reference operation, so the label reflects the live status (loaded,
+    /// unloaded, not_found, stale, …) rather than the open-time snapshot.
+    pub(super) xref_report: Vec<(String, String, &'static str)>,
     /// Sentinel "Welcome / Start" tab. Always at index 0 when present.
     /// Cannot be closed; the viewport area renders a welcome page instead
     /// of the model-space shader. The scene is still constructed so the

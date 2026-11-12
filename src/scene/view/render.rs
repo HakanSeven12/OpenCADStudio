@@ -3754,6 +3754,7 @@ impl Scene {
                 }
                 boundary.push(boundary[0]);
                 hatches.push(HatchModel {
+                    entity: None,
                     pattern_origin: None,
                     render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],

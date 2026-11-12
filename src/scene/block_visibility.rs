@@ -736,7 +736,7 @@ impl Scene {
         if !direct {
             // Already linked to its definition; only its block changes.
             self.repoint_representation(insert, source, copy, &name);
-            self.bump_geometry();
+            self.bump_block_visibility(insert, &name);
             return Some(name);
         }
 

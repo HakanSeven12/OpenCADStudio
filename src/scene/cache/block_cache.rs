@@ -526,12 +526,19 @@ impl BlockCache {
         cache.viewport = self.viewport;
         cache.prototype_blocks = self.prototype_blocks.clone();
         cache.defns = self.defns.clone();
-        let rebuilt: Vec<String> = cache
+        let mut rebuilt: Vec<String> = cache
             .defns
             .keys()
             .filter(|name| changed.iter().any(|c| c.eq_ignore_ascii_case(name)))
             .cloned()
             .collect();
+        for name in changed {
+            if !rebuilt.iter().any(|r| r.eq_ignore_ascii_case(name))
+                && doc.block_records.get(name).is_some()
+            {
+                rebuilt.push(name.clone());
+            }
+        }
         let defns: Vec<(String, Arc<BlockDefn>)> = rebuilt
             .par_iter()
             .map(|name| {

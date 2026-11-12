@@ -709,6 +709,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.visibility_representation(insert_handle);
 
         // Resolve everything against an immutable borrow first.
+        let mut resolved_anon_name = None;
         let mapping = {
             let doc = &self.tabs[i].scene.document;
             (|| {
@@ -716,6 +717,7 @@ impl OpenCADStudio {
                     return None;
                 };
                 let anon_name = ins.block_name.clone();
+                resolved_anon_name = Some(anon_name.clone());
                 let (def_block, param) = doc.dynamic_visibility_for_insert(insert_handle)?;
                 Self::state_mapping(doc, def_block, &anon_name, state_idx, param)
             })()
@@ -744,7 +746,13 @@ impl OpenCADStudio {
         }
 
         self.visibility_popup = None;
-        self.tabs[i].scene.bump_geometry();
+        if let Some(anon_name) = resolved_anon_name {
+            self.tabs[i]
+                .scene
+                .bump_block_visibility(insert_handle, &anon_name);
+        } else {
+            self.tabs[i].scene.bump_geometry();
+        }
         self.tabs[i].dirty = true;
         self.refresh_selected_grips();
     }

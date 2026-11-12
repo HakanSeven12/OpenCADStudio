@@ -4693,6 +4693,31 @@ impl Scene {
         self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false, None);
     }
 
+    /// Incrementally invalidate a single block definition's cached display
+    /// and the `Insert` reference that owns it (used when switching a dynamic
+    /// block's visibility state), keeping all other blocks and entities cached.
+    pub fn bump_block_visibility(&mut self, insert_handle: Handle, block_name: &str) {
+        let from = self.block_epoch;
+        self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        let rebuilt_at_from = self
+            .block_defn_cache
+            .borrow()
+            .values()
+            .any(|(epoch, _)| *epoch == from);
+        self.block_visibility_edits = match self.block_visibility_edits.take() {
+            Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
+                names.insert(block_name.to_string());
+                Some((base, self.block_epoch, names))
+            }
+            _ => {
+                let mut names = HashSet::default();
+                names.insert(block_name.to_string());
+                Some((from, self.block_epoch, names))
+            }
+        };
+        self.bump_entities_restyled(&[(insert_handle, ChangeKind::Modified)]);
+    }
+
     /// Refresh display after a restyle that moved no geometry: nothing
     /// associated to these entities is re-resolved or re-solved.
     pub(crate) fn bump_entities_restyled(&mut self, changes: &[(Handle, ChangeKind)]) {

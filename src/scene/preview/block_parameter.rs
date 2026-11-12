@@ -472,7 +472,7 @@ impl Scene {
             }
         }
         let _ = def_handles.len();
-        self.bump_geometry();
+        self.bump_block_visibility(insert_handle, &anon_name);
         let cam = self.camera.borrow().clone();
         self.model_tile_wires_arc(0, &cam, 1.0, 1.0).len()
     }

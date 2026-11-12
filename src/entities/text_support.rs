@@ -1707,7 +1707,7 @@ pub struct MTextRenderOpts<'a> {
     /// DXF code 44 — multiplier on the default 5/3-em baseline gap.
     pub line_spacing_factor: f32,
     /// `true` fixes every baseline advance to the entity spacing. `false`
-    /// treats it as a minimum and expands for taller inline runs.
+    /// sizes each advance from the taller of its two adjacent lines.
     pub exact_line_spacing: bool,
     /// User-defined text-box/column height. Zero means content-driven.
     pub rectangle_height: f32,
@@ -2139,8 +2139,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     // Per-line vertical advance: a varying-height MText (inline `\H`) must
     // space each line by its own content height, not the entity height —
     // otherwise a small line still leaves a full-height gap and the block
-    // grows several times too tall. Accumulated per column (columns stack
-    // independently). Uniform-height text reduces to the constant `line_h`.
+    // grows several times too tall. The gap between two lines uses the taller
+    // line, so a small line between two full-height lines does not collapse
+    // both gaps and a tall line has room on both sides. Accumulated per column
+    // (columns stack independently). Uniform-height text reduces to `line_h`.
     // A blank line (an empty `\P` paragraph) carries no glyph to size it, so it
     // takes the height of the text around it — the last non-empty line — not the
     // full entity height, which would blow a small-text blank line up several
@@ -2176,7 +2178,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
                 }
                 _ if opts.exact_line_spacing => entity_gap,
-                _ => (mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing()).max(entity_gap),
+                _ => mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing(),
             }
         })
         .collect();
@@ -2306,7 +2308,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         let depth = exact_drop[i].unwrap_or(line_text_h[i]);
                         per_line_h[i - 1] - depth_above + depth
                     } else {
-                        per_line_h[i]
+                        // AtLeast/multiple spacing must fit both lines around
+                        // this baseline gap, not just the line below it.
+                        per_line_h[i - 1].max(per_line_h[i])
                     };
                     if s.is_first_in_paragraph {
                         col_y[c] -= s.space_before + pending_after[c];
@@ -3967,7 +3971,7 @@ mod v_anchor_tests {
 
     /// Baseline of each line, as a multiple of the text height, for a
     /// top-left MTEXT at the origin.
-    fn baselines_in_heights(value: &str, height: f32) -> Vec<f32> {
+    fn baselines_in_heights(value: &str, height: f32, exact: bool) -> Vec<f32> {
         use crate::entities::text_support::{
             layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
         };
@@ -3991,7 +3995,7 @@ mod v_anchor_tests {
             attach_h_anchor: 0.0,
             v_anchor: MTextVAnchor::Top,
             line_spacing_factor: 1.0,
-            exact_line_spacing: false,
+            exact_line_spacing: exact,
             rectangle_height: 0.0,
             vertical_text: false,
             want_glyph_boxes: false,
@@ -4014,9 +4018,9 @@ mod v_anchor_tests {
             .collect()
     }
 
-    fn assert_baselines(value: &str, expected: &[f32]) {
+    fn assert_baselines_with_style(value: &str, exact: bool, expected: &[f32]) {
         for height in [2.0, 10.0] {
-            let got = baselines_in_heights(value, height);
+            let got = baselines_in_heights(value, height, exact);
             assert_eq!(got.len(), expected.len(), "{value} at h {height}: {got:?}");
             for (g, e) in got.iter().zip(expected) {
                 assert!(
@@ -4025,6 +4029,10 @@ mod v_anchor_tests {
                 );
             }
         }
+    }
+
+    fn assert_baselines(value: &str, expected: &[f32]) {
+        assert_baselines_with_style(value, false, expected);
     }
 
     /// `\pxb#;` and `\pxa#;` are multiples of the text height, like the
@@ -4036,6 +4044,22 @@ mod v_anchor_tests {
         assert_baselines(r"\pxa2;AAA\P\pxa0;BBB", &[-1.0, -4.667]);
         // The space before carries to the next paragraph.
         assert_baselines(r"AAA\P\pxb2;BBB\PCCC", &[-1.0, -4.667, -8.333]);
+    }
+
+    /// AtLeast uses the taller run next to each baseline gap. Uniform inline
+    /// shrinking shortens the whole block; an interior size change does not
+    /// collapse a gap that still has to fit its full-height neighbour.
+    #[test]
+    fn at_least_line_spacing_follows_both_adjacent_line_heights() {
+        assert_baselines(r"\H0.5x;AAA\PBBB\PCCC", &[-0.5, -1.333, -2.167]);
+        assert_baselines(r"AAA\P\H0.5x;BBB\P\H2x;CCC", &[-1.0, -2.667, -4.333]);
+        assert_baselines(r"AAA\P\H2x;BBB\P\H0.5x;CCC", &[-1.0, -4.333, -7.667]);
+    }
+
+    /// Exactly keeps the entity-height pitch even when every run is smaller.
+    #[test]
+    fn exact_line_spacing_ignores_inline_height_shrinking() {
+        assert_baselines_with_style(r"\H0.5x;AAA\PBBB\PCCC", true, &[-0.5, -2.167, -3.833]);
     }
 
     /// `\pxse#;` is a factor of the default line pitch (5/3 of the height),

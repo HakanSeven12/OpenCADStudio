@@ -10,7 +10,8 @@ use iced::widget::{
 };
 use iced::{Element, Fill, Length, Theme};
 use ocs_plugin_api::dialog::{
-    DialogControl, DialogDef, DialogResponse, DialogValue, HorizontalAlign, VerticalAlign,
+    DialogControl, DialogDef, DialogResponse, DialogValue, HorizontalAlign, TextStyle,
+    VerticalAlign,
 };
 
 use crate::app::Message;
@@ -33,6 +34,9 @@ pub struct PluginDialogState {
     pub disabled_controls: HashSet<String>,
     pub hidden_controls: HashSet<String>,
     pub dynamic_choice_options: HashMap<String, Vec<String>>,
+    /// Parsed-once handles of the dialog's [`DialogControl::Svg`] images,
+    /// by control id (see [`collect_svg_handles`]).
+    pub svg_handles: HashMap<String, iced::widget::svg::Handle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,7 +180,9 @@ impl PluginDialogState {
             collapsed_sections: &mut HashSet<String>,
         ) {
             match control {
-                DialogControl::InfoText { .. } => {}
+                DialogControl::InfoText { .. }
+                | DialogControl::StyledText { .. }
+                | DialogControl::Svg { .. } => {}
                 DialogControl::Label { id, text, .. } => {
                     text_values.insert(id.clone(), text.clone());
                 }
@@ -260,6 +266,11 @@ impl PluginDialogState {
             }
         }
 
+        let mut svg_handles = HashMap::new();
+        for row in &def.rows {
+            collect_svg_handles(&row.controls, &mut svg_handles);
+        }
+
         Self {
             def,
             tab_id: None,
@@ -275,6 +286,7 @@ impl PluginDialogState {
             disabled_controls: HashSet::new(),
             hidden_controls: HashSet::new(),
             dynamic_choice_options: HashMap::new(),
+            svg_handles,
         }
     }
 
@@ -338,6 +350,8 @@ impl PluginDialogState {
                 Some((id.clone(), DialogValue::Text(val)))
             }
             DialogControl::InfoText { .. }
+            | DialogControl::StyledText { .. }
+            | DialogControl::Svg { .. }
             | DialogControl::Button { .. }
             | DialogControl::Row { .. }
             | DialogControl::Column { .. } => None,
@@ -755,6 +769,12 @@ impl PluginDialogState {
                     t.into()
                 }
             }
+            DialogControl::StyledText {
+                text: msg,
+                style,
+                align_h,
+            } => styled_text(msg, *style, *align_h),
+            DialogControl::Svg { id, height, .. } => svg_image(self.svg_handles.get(id), *height),
             DialogControl::Row {
                 controls,
                 align_h,
@@ -1299,6 +1319,90 @@ impl PluginDialogState {
                     .into()
             }
         }
+    }
+}
+
+/// Parses every [`DialogControl::Svg`] in `controls` (recursively) once,
+/// keyed by control id, so a view pass reuses the handle instead of copying
+/// and hashing the document on every frame.
+pub(crate) fn collect_svg_handles(
+    controls: &[DialogControl],
+    out: &mut HashMap<String, iced::widget::svg::Handle>,
+) {
+    for control in controls {
+        match control {
+            DialogControl::Svg { id, svg, .. } => {
+                out.insert(
+                    id.clone(),
+                    iced::widget::svg::Handle::from_memory(svg.clone().into_bytes()),
+                );
+            }
+            DialogControl::Fields { controls, .. }
+            | DialogControl::Row { controls, .. }
+            | DialogControl::Column { controls, .. } => collect_svg_handles(controls, out),
+            _ => {}
+        }
+    }
+}
+
+/// A [`DialogControl::StyledText`] (API v19), shared by dialogs and dock
+/// panels. Status styles take the theme's own success/warning/danger colour,
+/// adjusted in hue only as far as it needs to read on the panel surface.
+pub(crate) fn styled_text<'a>(
+    msg: &'a str,
+    style: TextStyle,
+    align_h: Option<HorizontalAlign>,
+) -> Element<'a, Message> {
+    let bold = iced::Font::DEFAULT.weight(iced::font::Weight::Bold);
+    let mut t = match style {
+        TextStyle::Normal => text(msg).size(12),
+        TextStyle::Muted => text(msg).size(12).style(|theme: &Theme| text::Style {
+            color: Some(crate::ui::style::readable::muted_text(theme)),
+        }),
+        TextStyle::Strong => text(msg).size(12).font(bold),
+        TextStyle::Heading => text(msg).size(15).font(bold),
+        TextStyle::Success | TextStyle::Warning | TextStyle::Danger => text(msg)
+            .size(12)
+            .font(bold)
+            .style(move |theme: &Theme| {
+                let palette = theme.palette();
+                let accent = match style {
+                    TextStyle::Success => palette.success.base.color,
+                    TextStyle::Warning => palette.warning.base.color,
+                    _ => palette.danger.base.color,
+                };
+                text::Style {
+                    color: Some(crate::ui::style::readable::icon_accent(accent, theme)),
+                }
+            }),
+    };
+    match align_h {
+        Some(h) => {
+            t = t.align_x(match h {
+                HorizontalAlign::Left => iced::alignment::Horizontal::Left,
+                HorizontalAlign::Center => iced::alignment::Horizontal::Center,
+                HorizontalAlign::Right => iced::alignment::Horizontal::Right,
+            });
+            container(t).width(Fill).into()
+        }
+        None => t.into(),
+    }
+}
+
+/// A [`DialogControl::Svg`] (API v19): the full width, keeping the aspect
+/// ratio, or `height` logical pixels tall when given. Nothing when the handle
+/// is missing.
+pub(crate) fn svg_image<'a>(
+    handle: Option<&iced::widget::svg::Handle>,
+    height: Option<f32>,
+) -> Element<'a, Message> {
+    let Some(handle) = handle else {
+        return Space::new().width(0).height(0).into();
+    };
+    let image = iced::widget::svg(handle.clone()).width(Fill);
+    match height {
+        Some(height) => image.height(Length::Fixed(height)).into(),
+        None => image.into(),
     }
 }
 

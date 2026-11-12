@@ -897,6 +897,10 @@ impl OpenCADStudio {
         if matches!(input, StepInput::Point(_)) {
             let _ = self.apply_dynamic_ucs(None);
         }
+        // Typed, scripted and API input reaches the command without a cursor
+        // move, which is what otherwise hands it the current UCS: a
+        // dimension started after a UCS change was drawn in the world plane.
+        self.push_ucs_to_cmd(self.active_tab);
         // Whatever reaches the command ends a typed window still waiting
         // for its opposite corner.
         if let Some((_, first)) = self.typed_window_corner.take() {

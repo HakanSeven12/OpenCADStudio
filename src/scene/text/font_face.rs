@@ -120,9 +120,11 @@ impl Face {
             && shx::file_on_disk(font_name)
             && shx::font_metrics(font_name).is_some()
         {
+            // Keep the sign: right-to-left fonts (SOSA, XARB) move the pen
+            // left for a space just as for their letters.
             let word = shx::font_glyph(font_name, ' ' as u16)
                 .map(|g| g.advance)
-                .filter(|a| *a > 0.0)
+                .filter(|a| *a != 0.0)
                 .unwrap_or(4.5);
             return Face::Shx {
                 path: font_name.to_string(),

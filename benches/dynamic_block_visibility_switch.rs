@@ -17,12 +17,42 @@ const RUNS: usize = 5;
 const ITERATIONS: usize = 10;
 const WARMUP: usize = 2;
 
+fn report(name: &str, samples: &[u64], sink: usize) {
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2];
+    let min = sorted[0];
+    let max = sorted[sorted.len() - 1];
+    println!(
+        "{name:<28} median={:.3} ms  min={:.3} ms  max={:.3} ms  (sink={sink})",
+        median as f64 / 1_000_000.0,
+        min as f64 / 1_000_000.0,
+        max as f64 / 1_000_000.0,
+    );
+}
+
 fn main() {
-    let (mut scene, insert, def, param) =
-        Scene::bench_setup_visibility_scene(BACKGROUND_LINES, OTHER_BLOCKS, ENTITIES_PER_BLOCK);
     println!(
         "Dynamic block visibility switch bench (bg_lines={BACKGROUND_LINES}, other_blocks={OTHER_BLOCKS}x{ENTITIES_PER_BLOCK})"
     );
+    let mut first_samples = Vec::with_capacity(RUNS);
+    let mut first_sink = 0usize;
+    for r in 0..RUNS {
+        let (mut first_scene, first_insert, first_def, first_param) =
+            Scene::bench_setup_visibility_scene(BACKGROUND_LINES, OTHER_BLOCKS, ENTITIES_PER_BLOCK);
+        let start = Instant::now();
+        first_sink = first_sink.wrapping_add(first_scene.bench_switch_visibility_state(
+            black_box(first_insert),
+            black_box(first_def),
+            black_box(first_param),
+            black_box(r % 2),
+        ));
+        first_samples.push(start.elapsed().as_nanos() as u64);
+    }
+    report("first_visibility_switch", &first_samples, first_sink);
+
+    let (mut scene, insert, def, param) =
+        Scene::bench_setup_visibility_scene(BACKGROUND_LINES, OTHER_BLOCKS, ENTITIES_PER_BLOCK);
     let mut sink = 0usize;
     for i in 0..WARMUP {
         sink = sink.wrapping_add(scene.bench_switch_visibility_state(insert, def, param, i % 2));
@@ -40,15 +70,5 @@ fn main() {
         }
         samples.push((start.elapsed().as_nanos() / ITERATIONS as u128) as u64);
     }
-    samples.sort_unstable();
-    let median = samples[samples.len() / 2];
-    let min = samples[0];
-    let max = samples[samples.len() - 1];
-    println!(
-        "{:<28} median={:.3} ms  min={:.3} ms  max={:.3} ms  (sink={sink})",
-        "visibility_state_switch",
-        median as f64 / 1_000_000.0,
-        min as f64 / 1_000_000.0,
-        max as f64 / 1_000_000.0,
-    );
+    report("visibility_state_switch", &samples, sink);
 }

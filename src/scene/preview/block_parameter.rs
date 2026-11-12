@@ -432,7 +432,8 @@ impl Scene {
         let insert = Insert::new("VisBenchBlock", Vector3::ZERO);
         let insert_handle = scene.add_entity(EntityType::Insert(insert));
         // Warm up caches just like an open drawing in the viewport.
-        let _ = scene.entity_wires();
+        let cam = scene.camera.borrow().clone();
+        let _ = scene.model_tile_wires_arc(0, &cam, 1.0, 1.0);
         (scene, insert_handle, def, param)
     }
 

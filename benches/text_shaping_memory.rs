@@ -64,12 +64,14 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut font = None;
+    let mut fixture_name = String::from("drawing");
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--font" => font = Some(args.next().expect("--font requires a family")),
+            "--fixture" => fixture_name = args.next().expect("--fixture requires a name"),
             "--self-test" => {
                 assert!(
-                    font.is_none() && args.next().is_none(),
+                    font.is_none() && fixture_name == "drawing" && args.next().is_none(),
                     "--self-test must be used alone"
                 );
                 let before = LIVE.load(Ordering::Relaxed);
@@ -89,7 +91,7 @@ fn main() {
                 println!("allocation, reallocation, peak and free accounting passed");
                 return;
             }
-            _ => panic!("usage: text_shaping_memory [--font FAMILY]"),
+            _ => panic!("usage: text_shaping_memory [--font FAMILY] [--fixture drawing|varied]"),
         }
     }
     let families = sysfont::families();
@@ -117,7 +119,7 @@ fn main() {
         (format!("{:x}", Sha256::digest(bytes)), index)
     })
     .expect("font data");
-    let fixture = workload::fixture();
+    let fixture = workload::select_fixture(&fixture_name);
     let fixture_hash = workload::fixture_digest(&fixture);
     assert!(ttf_glyph::shape_run(&font, "warmup").is_some());
     ttf_glyph::clear_fallback_cache();
@@ -137,6 +139,6 @@ fn main() {
     let after_drop = LIVE.load(Ordering::SeqCst);
     ttf_glyph::clear_fallback_cache();
     let after_clear = LIVE.load(Ordering::SeqCst);
-    let report = json!({"benchmark":"text_shaping_memory", "schema":1, "revision":option_env!("OCS_GIT_REV"), "os":std::env::consts::OS, "arch":std::env::consts::ARCH, "profile":if cfg!(debug_assertions) {"debug"} else {"release"}, "font":font, "font_sha256":font_hash, "face_index":face_index, "fixture_sha256":fixture_hash, "geometry_sha256":digest, "baseline_live_bytes":baseline, "live_with_geometry_bytes":live_geometry, "peak_live_bytes":peak_geometry, "live_after_drop_bytes":after_drop, "live_after_clear_bytes":after_clear, "allocation_calls":allocation_calls, "allocation_requested_bytes":allocation_bytes, "reallocation_calls":reallocation_calls, "scope":"Rust System allocator requested bytes; excludes allocator overhead, foreign allocations, GUI, GPU and child processes; counts exclude realloc sizes"});
+    let report = json!({"benchmark":"text_shaping_memory", "schema":1, "revision":option_env!("OCS_GIT_REV"), "os":std::env::consts::OS, "arch":std::env::consts::ARCH, "profile":if cfg!(debug_assertions) {"debug"} else {"release"}, "font":font, "font_sha256":font_hash, "face_index":face_index, "fixture":fixture_name, "fixture_sha256":fixture_hash, "geometry_sha256":digest, "baseline_live_bytes":baseline, "live_with_geometry_bytes":live_geometry, "peak_live_bytes":peak_geometry, "live_after_drop_bytes":after_drop, "live_after_clear_bytes":after_clear, "allocation_calls":allocation_calls, "allocation_requested_bytes":allocation_bytes, "reallocation_calls":reallocation_calls, "scope":"Rust System allocator requested bytes; excludes allocator overhead, foreign allocations, GUI, GPU and child processes; counts exclude realloc sizes"});
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 }

@@ -146,6 +146,44 @@ pub(crate) fn fixture() -> Vec<FixtureText> {
         .collect()
 }
 
+/// Distinct longer labels exercise glyphs at many different pen positions.
+pub(crate) fn varied_fixture() -> Vec<FixtureText> {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let mut state = 0xa237_41d5_u32;
+    let mut values = Vec::with_capacity(256);
+    for i in 0..256 {
+        let mut text = String::with_capacity(24 + i % 17);
+        for _ in 0..(24 + i % 17) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            text.push(ALPHABET[state as usize % ALPHABET.len()] as char);
+        }
+        values.push(FixtureText {
+            text,
+            origin: [0.0, 0.0],
+            rotation: 0.23,
+        });
+    }
+    assert_eq!(
+        values
+            .iter()
+            .map(|item| &item.text)
+            .collect::<HashSet<_>>()
+            .len(),
+        256
+    );
+    values
+}
+
+pub(crate) fn select_fixture(name: &str) -> Vec<FixtureText> {
+    match name {
+        "drawing" => fixture(),
+        "varied" => varied_fixture(),
+        _ => panic!("--fixture must be drawing or varied"),
+    }
+}
+
 fn shape(font: &str, texts: &[String]) -> Vec<Arc<ttf_glyph::ShapedRun>> {
     texts
         .iter()
@@ -240,6 +278,7 @@ fn elapsed<T>(f: impl FnOnce() -> T) -> (f64, T) {
 }
 fn main() {
     let mut font = None;
+    let mut fixture_name = String::from("drawing");
     let mut output: Option<PathBuf> = None;
     let mut samples = 7_usize;
     let mut args = std::env::args_os().skip(1);
@@ -253,6 +292,7 @@ fn main() {
                         .expect("UTF-8 font"),
                 )
             }
+            Some("--fixture") => fixture_name = args.next().expect("--fixture requires a name").into_string().expect("UTF-8 fixture name"),
             Some("--output") => {
                 output = Some(args.next().expect("--output requires a path").into())
             }
@@ -265,7 +305,7 @@ fn main() {
                     .expect("valid sample count")
             }
             _ => panic!(
-                "usage: text_shaping_geometry [--font FAMILY] [--samples N] [--output NEW_FILE]"
+                "usage: text_shaping_geometry [--font FAMILY] [--fixture drawing|varied] [--samples N] [--output NEW_FILE]"
             ),
         }
     }
@@ -295,15 +335,16 @@ fn main() {
         (format!("{:x}", Sha256::digest(bytes)), index)
     })
     .expect("font data must be available");
-    let drawing = fixture();
+    let drawing = select_fixture(&fixture_name);
+    let micro_text_count = if fixture_name == "varied" { 16 } else { TEXTS };
     let mut seen = HashSet::new();
     let texts: Vec<String> = drawing
         .iter()
         .filter(|item| seen.insert(&item.text))
-        .take(TEXTS)
+        .take(micro_text_count)
         .map(|item| item.text.clone())
         .collect();
-    assert_eq!(texts.len(), TEXTS);
+    assert_eq!(texts.len(), micro_text_count);
     // Initialize font discovery and shaping outside the measured samples.
     assert!(ttf_glyph::shape_run(&font, "warmup").is_some());
     let mut cold = Vec::new();
@@ -370,7 +411,12 @@ fn main() {
             expected_drawing = Some(digest);
         }
     }
-    let report = json!({"benchmark":"text_shaping_geometry", "schema":2, "revision":option_env!("OCS_GIT_REV"), "os":std::env::consts::OS, "arch":std::env::consts::ARCH, "profile": if cfg!(debug_assertions) { "debug" } else { "release" }, "font":font, "font_sha256":font_hash, "face_index":face_index, "fixture_sha256":fixture_digest(&drawing), "drawing_text_count":drawing.len(), "drawing_unique_text_count":UNIQUE_TEXTS, "micro_text_count":texts.len(), "glyph_count":glyph_count, "geometry_points":geometry_points, "drawing_points":drawing_points, "samples":samples, "cold_shape_ms":cold, "warm_shape_ms":hot, "warm_tessellation_ms":geometry, "drawing_tessellation_ms":drawing_times, "shape_sha256":expected_shape, "geometry_sha256":expected_geometry, "drawing_geometry_sha256":expected_drawing, "scope":"cold shape includes shaping, outlines and triangulation; warm tessellation includes tokenization, cache lookup, transforms and output allocation; drawing tessellation starts with an empty shape cache; hashing excluded"});
+    let unique_count = drawing
+        .iter()
+        .map(|item| &item.text)
+        .collect::<HashSet<_>>()
+        .len();
+    let report = json!({"benchmark":"text_shaping_geometry", "schema":2, "revision":option_env!("OCS_GIT_REV"), "os":std::env::consts::OS, "arch":std::env::consts::ARCH, "profile": if cfg!(debug_assertions) { "debug" } else { "release" }, "font":font, "font_sha256":font_hash, "face_index":face_index, "fixture":fixture_name, "fixture_sha256":fixture_digest(&drawing), "drawing_text_count":drawing.len(), "drawing_unique_text_count":unique_count, "micro_text_count":texts.len(), "glyph_count":glyph_count, "geometry_points":geometry_points, "drawing_points":drawing_points, "samples":samples, "cold_shape_ms":cold, "warm_shape_ms":hot, "warm_tessellation_ms":geometry, "drawing_tessellation_ms":drawing_times, "shape_sha256":expected_shape, "geometry_sha256":expected_geometry, "drawing_geometry_sha256":expected_drawing, "scope":"cold shape includes shaping, outlines and triangulation; warm tessellation includes tokenization, cache lookup, transforms and output allocation; drawing tessellation starts with an empty shape cache; hashing excluded"});
     let rendered = serde_json::to_string_pretty(&report).unwrap();
     if let Some(path) = output {
         use std::io::Write;

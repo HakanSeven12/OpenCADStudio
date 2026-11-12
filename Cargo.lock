@@ -40,6 +40,7 @@ dependencies = [
  "kurbo 0.13.1",
  "libloading",
  "log",
+ "lopdf",
  "lru",
  "lyon_tessellation",
  "md-5",

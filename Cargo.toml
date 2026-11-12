@@ -63,6 +63,9 @@ encoding_rs = "0.8"
 tiny-skia = "0.11"
 # PDF writer shared by desktop export and the web export/preview/print path.
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+# printpdf's own lopdf (same version and features, nothing new in the lockfile):
+# the page boxes are restated after serialisation, see `render_pdf_bytes`.
+lopdf = { version = "0.39", default-features = false, features = ["time"] }
 # TrueType subsetting for searchable PDF text (same version printpdf itself
 # uses, so no new binary enters the lockfile). Same feature set as printpdf's
 # own allsorts use (pure-Rust flate backend) — the defaults would drag in the

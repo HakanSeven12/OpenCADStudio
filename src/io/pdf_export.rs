@@ -465,11 +465,27 @@ pub(crate) fn render_pdf_bytes(
     // for a CAD sheet — went out uncompressed: a 16-sheet set weighed 280 MB.
     // Serialise through lopdf ourselves and Flate-compress the streams.
     let mut lo = printpdf::to_lopdf_doc(&doc, &PdfSaveOptions::default(), &mut warnings);
+    exact_page_boxes(&mut lo, pages);
     lo.compress();
     let mut bytes = Vec::new();
     lo.save_to(&mut bytes)
         .map_err(|error| format!("PDF serialisation failed: {error}"))?;
     Ok(bytes)
+}
+
+/// printpdf writes the page boxes rounded to whole points, so an A3 sheet
+/// came out 1191 x 842 pt (420.16 x 297.04 mm); restate them from the sheet.
+fn exact_page_boxes(lo: &mut lopdf::Document, pages: &[PdfPageInput]) {
+    let ids: Vec<lopdf::ObjectId> = lo.get_pages().into_values().collect();
+    for (id, page) in ids.into_iter().zip(pages) {
+        let to_pt = |mm: f64| lopdf::Object::Real((mm * 72.0 / 25.4) as f32);
+        let rect = vec![0.into(), 0.into(), to_pt(page.paper_w), to_pt(page.paper_h)];
+        if let Ok(dict) = lo.get_object_mut(id).and_then(lopdf::Object::as_dict_mut) {
+            for key in ["MediaBox", "CropBox", "TrimBox"] {
+                dict.set(key, rect.clone());
+            }
+        }
+    }
 }
 
 fn append_pdf_page(
@@ -3077,6 +3093,23 @@ mod tests {
         // A valid PDF is produced (starts with the PDF header) and is non-trivial.
         assert!(bytes.starts_with(b"%PDF"), "not a PDF");
         assert!(bytes.len() > 200, "suspiciously small: {}", bytes.len());
+    }
+
+    #[test]
+    fn page_boxes_keep_the_exact_sheet_size() {
+        // A3 landscape is 1190.55 x 841.89 pt; printpdf alone wrote 1191 x 842.
+        let mut page = test_page(Vec::new());
+        page.paper_w = 420.0;
+        page.paper_h = 297.0;
+        let doc = lopdf::Document::load_mem(&render_pdf_bytes(&[page], None).unwrap()).unwrap();
+        let id = *doc.get_pages().values().next().unwrap();
+        let dict = doc.get_object(id).unwrap().as_dict().unwrap();
+        for key in ["MediaBox", "CropBox", "TrimBox"] {
+            let rect = dict.get(key.as_bytes()).unwrap().as_array().unwrap();
+            let size: Vec<f32> = rect.iter().map(|v| v.as_float().unwrap()).collect();
+            assert!((size[2] - 1190.551).abs() < 0.01, "{key} {size:?}");
+            assert!((size[3] - 841.89).abs() < 0.01, "{key} {size:?}");
+        }
     }
 
     #[test]

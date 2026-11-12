@@ -2279,6 +2279,7 @@ impl OpenCADStudio {
             false,
             require_new_destination,
             (!path_changed).then_some(path.as_path()),
+            self.tabs[i].ifccad_session.as_ref(),
         )?;
 
         if set_current_path {
@@ -2367,6 +2368,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         doc: document::Document,
         mut caches: crate::scene::DerivedCaches,
+        ifccad_session: Option<ocs_save::IfccadSession>,
     ) -> Task<Message> {
         // If the user clicked Cancel while the parser was running, the
         // overlay state was cleared and we silently drop the result.
@@ -2566,6 +2568,16 @@ impl OpenCADStudio {
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
         self.tabs[i].ifccad_alpha_acknowledged = false;
+        if let Some(session) = &ifccad_session {
+            for (id, reason) in session.blocked_entities() {
+                self.command_line.push_info(
+                    crate::tf!("IFCCAD entity {id} retained without geometry: {reason}").as_ref(),
+                );
+            }
+            self.command_line.push_info(
+                crate::t!("Autosave is disabled for this drawing because it contains retained IFCCAD entities. Save as IFCCAD to keep them.").as_ref(),
+            );
+        }
         // A walk belongs to the drawing it was opened on. Loading a document
         // into this tab ends any walk it still held, so the new drawing can
         // never render under the previous one's hide.
@@ -2755,7 +2767,7 @@ impl OpenCADStudio {
         // The document and its derived caches have settled: the next message
         // boundary announces `DocumentOpened` to native plugins exactly once
         // for this load (API v9).
-        self.tabs[i].note_document_loaded();
+        self.tabs[i].note_document_loaded(ifccad_session);
         // The tab list just changed (and the active tab with it): remember
         // it for the next boot's restore flow (web session memory).
         #[cfg(target_arch = "wasm32")]
@@ -2830,7 +2842,53 @@ impl OpenCADStudio {
         if path.extension().is_none() {
             path.set_extension("dwg");
         }
+        let ifccad_session = if matches!(
+            &source,
+            crate::modules::insert::block_cmdline::WblockSource::Drawing
+        ) {
+            self.tabs[i].ifccad_session.clone()
+        } else {
+            None
+        };
+        if let Some(session) = &ifccad_session {
+            let ext = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default();
+            if let Err(error) = session.check_destination(ext) {
+                return Task::done(Message::WblockWriteFinished("*".into(), path, Err(error)));
+            }
+        }
         let document = self.tabs[i].scene.document_for_save();
+        #[cfg(target_arch = "wasm32")]
+        if let Some(session) = ifccad_session {
+            let ext = path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let mut document = document;
+            document.header.insertion_units = unit;
+            let version = document.version;
+            let prepared = crate::io::prepare_document_for_save(document, version);
+            return Task::perform(
+                async move {
+                    crate::io::serialize_prepared_document(&prepared, &ext, false, Some(&session))
+                        .await
+                },
+                move |result| Message::WebWblockSerialized {
+                    block_name: "*".into(),
+                    path,
+                    filename,
+                    result,
+                },
+            );
+        }
         if let crate::modules::insert::block_cmdline::WblockSource::Objects {
             handles,
             base,
@@ -2908,7 +2966,14 @@ impl OpenCADStudio {
                     )
                     .map_err(|e| e.to_string())?,
                 };
-                crate::io::save(&out_doc, &worker_path).map_err(|e| e.to_string())
+                #[cfg(not(target_arch = "wasm32"))]
+                return crate::io::save_wblock_snapshot(
+                    out_doc,
+                    &worker_path,
+                    ifccad_session.as_ref(),
+                );
+                #[cfg(target_arch = "wasm32")]
+                crate::io::save(&out_doc, &worker_path)
             },
             move |result| Message::WblockWriteFinished(display, path, result),
         )
@@ -2981,7 +3046,9 @@ impl OpenCADStudio {
             let version = document.version;
             let prepared = crate::io::prepare_document_for_save(document, version);
             Task::perform(
-                async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
+                async move {
+                    crate::io::serialize_prepared_document(&prepared, &ext, false, None).await
+                },
                 move |result| Message::WebWblockSerialized {
                     block_name,
                     path,
@@ -3021,7 +3088,7 @@ impl OpenCADStudio {
             return Task::none();
         }
         let mut skipped = 0usize;
-        let mut pending: Vec<(crate::app::WebSaveallEntry, document::Document)> = Vec::new();
+        let mut pending = Vec::new();
         for t in 0..self.tabs.len() {
             if self.tabs[t].is_start || self.tabs[t].block_test.is_some() {
                 continue;
@@ -3069,6 +3136,7 @@ impl OpenCADStudio {
             pending.push((
                 entry,
                 crate::io::prepare_document_for_save(tab.scene.document_for_save(), version),
+                tab.ifccad_session.clone(),
             ));
         }
         if pending.is_empty() {
@@ -3078,9 +3146,14 @@ impl OpenCADStudio {
         Task::perform(
             async move {
                 let mut results = Vec::with_capacity(pending.len());
-                for (mut entry, prepared) in pending {
-                    entry.result =
-                        crate::io::serialize_prepared_document(&prepared, &entry.ext, false).await;
+                for (mut entry, prepared, session) in pending {
+                    entry.result = crate::io::serialize_prepared_document(
+                        &prepared,
+                        &entry.ext,
+                        false,
+                        session.as_ref(),
+                    )
+                    .await;
                     results.push(entry);
                 }
                 results
@@ -3406,8 +3479,17 @@ impl OpenCADStudio {
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         let allow_loss = std::mem::take(&mut self.conversion_loss_allowed);
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext, allow_loss).await },
+            async move {
+                crate::io::serialize_prepared_document(
+                    &prepared,
+                    &ext,
+                    allow_loss,
+                    ifccad_session.as_ref(),
+                )
+                .await
+            },
             move |result| Message::WebSaveSerialized {
                 tab_id,
                 filename,
@@ -3972,6 +4054,7 @@ impl OpenCADStudio {
             path.clone()
         };
         let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         let mut work = Some((
             snapshot,
             thumbnail,
@@ -3983,6 +4066,7 @@ impl OpenCADStudio {
             previous_autosave,
         ));
         let mut run_save = move |screenshot: Option<iced::window::Screenshot>| {
+            let ifccad_session = ifccad_session.clone();
             let (
                 mut snapshot,
                 thumbnail,
@@ -4028,6 +4112,7 @@ impl OpenCADStudio {
                             allow_conversion_loss,
                             purpose == crate::app::SavePurpose::SaveAsNew,
                             logical_path.as_deref(),
+                            ifccad_session.as_ref(),
                         );
                         (result, refreshed_preview)
                     })
@@ -4924,7 +5009,12 @@ impl OpenCADStudio {
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         // A write that fails outright is reported by the save itself.
-        let losses = ocs_save::external_losses(&prepared, format).ok()?;
+        let losses = ocs_save::external_losses_for_edit(
+            &prepared,
+            format,
+            self.tabs[i].ifccad_session.as_ref(),
+        )
+        .ok()?;
         (!losses.is_empty()).then_some(losses)
     }
 
@@ -5197,6 +5287,7 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
+                || self.tabs[i].ifccad_session.is_some()
                 || self.active_save_jobs.contains_key(&self.tabs[i].id)
             {
                 continue;
@@ -5233,7 +5324,10 @@ impl OpenCADStudio {
         }
         let mut pending = Vec::new();
         for i in 0..self.tabs.len() {
-            if self.tabs[i].block_test.is_some() || !self.tabs[i].dirty {
+            if self.tabs[i].block_test.is_some()
+                || !self.tabs[i].dirty
+                || self.tabs[i].ifccad_session.is_some()
+            {
                 continue;
             }
             // Same pre-serialize state sync the web Save flow performs
@@ -5268,7 +5362,8 @@ impl OpenCADStudio {
                 for (name, ext, prepared) in pending {
                     // Autosave exists to recover geometry, not pretty recents:
                     // no thumbnail capture, just bytes into OPFS.
-                    match crate::io::serialize_prepared_document(&prepared, &ext, false).await {
+                    match crate::io::serialize_prepared_document(&prepared, &ext, false, None).await
+                    {
                         Ok(bytes) => {
                             if let Err(error) =
                                 crate::io::web_autosave::snapshot(&name, &bytes, None).await

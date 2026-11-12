@@ -1190,8 +1190,17 @@ impl OpenCADStudio {
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         let cmd = cmd.to_string();
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
+            async move {
+                crate::io::serialize_prepared_document(
+                    &prepared,
+                    &ext,
+                    false,
+                    ifccad_session.as_ref(),
+                )
+                .await
+            },
             move |result| Message::WebArchiveSerialized {
                 cmd,
                 zip_name,

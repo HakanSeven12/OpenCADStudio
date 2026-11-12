@@ -2053,11 +2053,11 @@ impl OpenCADStudio {
                 Task::batch([recent_task, opened_task])
             }
 
-            Message::FileOpened(open_id, Ok((name, path, doc, caches))) => {
+            Message::FileOpened(open_id, Ok((name, path, doc, caches, ifccad_session))) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
                 }
-                let task = self.on_file_opened(name, path, doc, caches);
+                let task = self.on_file_opened(name, path, doc, caches, ifccad_session);
                 // DXEVAL: an open compares the drawing's extraction tables.
                 let task = match self.evaluate_extraction_tables(
                     self.active_tab,
@@ -2967,6 +2967,12 @@ impl OpenCADStudio {
 
             Message::ClearScene => {
                 let i = self.active_tab;
+                if self.tabs[i].ifccad_session.is_some() {
+                    self.command_line.push_info(
+                        crate::t!("This drawing has retained IFCCAD content. Create a new drawing instead.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 self.push_undo_snapshot(i, "CLEAR");
                 self.tabs[i].scene.reset_to_new_drawing();
                 self.tabs[i].properties = PropertiesPanel::empty();
@@ -9906,8 +9912,17 @@ impl OpenCADStudio {
                     return task;
                 }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                    if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    let document = &mut app.tabs[i].scene.document;
+                    let layer_handle = document
+                        .layers
+                        .get(&layer)
+                        .map(|entry| entry.handle)
+                        .filter(|handle| !handle.is_null());
+                    if let Some(entity) = document.get_entity_mut(handle) {
                         crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
+                        if entity.common().layer == layer {
+                            entity.common_mut().layer_handle = layer_handle;
+                        }
                     }
                 });
                 Task::none()

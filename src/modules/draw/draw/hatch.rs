@@ -1324,10 +1324,7 @@ impl HatchCommand {
             .collect();
         let near = crate::scene::sources_near_rings(&rings, &self.boundary_sources, 1.0e-6);
         let near_source_count = near.len();
-        let mut boundary_sources: Vec<Vec<Handle>> = rings
-            .iter()
-            .map(|ring| crate::scene::ring_source_handles(ring, &near))
-            .collect();
+        let mut boundary_sources = crate::scene::rings_source_handles(&rings, &near);
         let source_of = |index: usize| {
             if self
                 .point_regions

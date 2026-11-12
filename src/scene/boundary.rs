@@ -361,12 +361,209 @@ pub(crate) fn sources_near_rings(
         .collect()
 }
 
+/// Boundary sources by where their segments are, for asking which ones lie
+/// near one ring after another. [`sources_near_rings`] reads every source on
+/// each call, so a hatch over thousands of selected outlines read them all
+/// again for each outline.
+pub(crate) struct SourcesByPlace<'a> {
+    /// The sources in the order their map gives them.
+    sources: Vec<(document::Handle, &'a BoundarySource)>,
+    origin: [f64; 2],
+    cell: f64,
+    /// Positions in `sources` of the sources with a segment in each cell.
+    cells: rustc_hash::FxHashMap<(i64, i64), Vec<usize>>,
+    /// Sources that every query reads: they span too many cells to be listed
+    /// in each, or a coordinate of theirs is not finite.
+    wide: Vec<usize>,
+}
+
+impl<'a> SourcesByPlace<'a> {
+    /// A source that spans more cells than this is read by every query.
+    const MAX_CELLS: i128 = 16;
+
+    pub(crate) fn new(
+        sources: &'a rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+    ) -> Self {
+        let sources: Vec<_> = sources
+            .iter()
+            .map(|(handle, source)| (*handle, source))
+            .collect();
+        // The box of each source, or `None` when it has no finite one.
+        let boxes: Vec<Option<([f64; 2], [f64; 2])>> = sources
+            .iter()
+            .map(|(_, source)| {
+                let mut lo = [f64::INFINITY; 2];
+                let mut hi = [f64::NEG_INFINITY; 2];
+                for point in source
+                    .segments
+                    .iter()
+                    .flat_map(|line| [line.start, line.end])
+                {
+                    for axis in 0..2 {
+                        if !point[axis].is_finite() {
+                            return None;
+                        }
+                        lo[axis] = lo[axis].min(point[axis]);
+                        hi[axis] = hi[axis].max(point[axis]);
+                    }
+                }
+                Some((lo, hi))
+            })
+            .collect();
+        let mut lo = [f64::INFINITY; 2];
+        let mut hi = [f64::NEG_INFINITY; 2];
+        let mut placed = 0usize;
+        for (source_lo, source_hi) in boxes.iter().flatten() {
+            if source_lo[0] > source_hi[0] {
+                continue; // no segments
+            }
+            placed += 1;
+            for axis in 0..2 {
+                lo[axis] = lo[axis].min(source_lo[axis]);
+                hi[axis] = hi[axis].max(source_hi[axis]);
+            }
+        }
+        // About one source to a cell when they are spread evenly.
+        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        let per_side = (placed as f64).sqrt().ceil().max(1.0);
+        let cell = if span.is_finite() && span > 0.0 {
+            span / per_side
+        } else {
+            1.0
+        };
+        let origin = if placed == 0 { [0.0; 2] } else { lo };
+        let mut by_place = Self {
+            sources,
+            origin,
+            cell,
+            cells: rustc_hash::FxHashMap::default(),
+            wide: Vec::new(),
+        };
+        for (index, source_box) in boxes.into_iter().enumerate() {
+            let Some((source_lo, source_hi)) = source_box else {
+                by_place.wide.push(index);
+                continue;
+            };
+            if source_lo[0] > source_hi[0] {
+                continue; // no segments: nothing reaches it
+            }
+            let (x, y) = (
+                by_place.cell_range(source_lo[0], source_hi[0], 0),
+                by_place.cell_range(source_lo[1], source_hi[1], 1),
+            );
+            if Self::cell_count(x, y) > Self::MAX_CELLS {
+                by_place.wide.push(index);
+                continue;
+            }
+            for cell_x in x.0..=x.1 {
+                for cell_y in y.0..=y.1 {
+                    by_place
+                        .cells
+                        .entry((cell_x, cell_y))
+                        .or_default()
+                        .push(index);
+                }
+            }
+        }
+        by_place
+    }
+
+    fn cell_range(&self, lo: f64, hi: f64, axis: usize) -> (i64, i64) {
+        let cell = |value: f64| ((value - self.origin[axis]) / self.cell).floor() as i64;
+        (cell(lo), cell(hi))
+    }
+
+    fn cell_count(x: (i64, i64), y: (i64, i64)) -> i128 {
+        (i128::from(x.1) - i128::from(x.0) + 1) * (i128::from(y.1) - i128::from(y.0) + 1)
+    }
+
+    /// What [`sources_near_rings`] gives for this one ring, entry for entry
+    /// and in the same order.
+    pub(crate) fn near(
+        &self,
+        ring: &[[f64; 2]],
+        pad: f64,
+    ) -> rustc_hash::FxHashMap<document::Handle, BoundarySource> {
+        let mut lo = [f64::INFINITY; 2];
+        let mut hi = [f64::NEG_INFINITY; 2];
+        for point in ring {
+            for axis in 0..2 {
+                lo[axis] = lo[axis].min(point[axis] - pad);
+                hi[axis] = hi[axis].max(point[axis] + pad);
+            }
+        }
+        let reaches = |line: &Line| {
+            (0..2).all(|axis| {
+                line.start[axis].min(line.end[axis]) <= hi[axis]
+                    && line.start[axis].max(line.end[axis]) >= lo[axis]
+            })
+        };
+        let mut candidates = self.wide.clone();
+        if lo[0] <= hi[0] && lo[1] <= hi[1] {
+            let (x, y) = (
+                self.cell_range(lo[0], hi[0], 0),
+                self.cell_range(lo[1], hi[1], 1),
+            );
+            if Self::cell_count(x, y) > self.cells.len() as i128 {
+                // A box over most of the drawing: go by the cells there are.
+                for ((cell_x, cell_y), listed) in &self.cells {
+                    if (x.0..=x.1).contains(cell_x) && (y.0..=y.1).contains(cell_y) {
+                        candidates.extend(listed);
+                    }
+                }
+            } else {
+                for cell_x in x.0..=x.1 {
+                    for cell_y in y.0..=y.1 {
+                        if let Some(listed) = self.cells.get(&(cell_x, cell_y)) {
+                            candidates.extend(listed);
+                        }
+                    }
+                }
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
+            .into_iter()
+            .map(|index| self.sources[index])
+            // A filter, as in `sources_near_rings`, so the map is built by the
+            // same steps and gives its entries in the same order.
+            .filter(|(_, source)| {
+                #[cfg(test)]
+                SOURCES_EXAMINED.with(|count| count.set(count.get() + 1));
+                source.segments.iter().any(reaches)
+            })
+            .map(|(handle, source)| (handle, source.clone()))
+            .collect()
+    }
+}
+
 pub(crate) fn ring_source_handles(
     ring: &[[f64; 2]],
     sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
 ) -> Vec<document::Handle> {
     let near = sources_near_rings(&[ring.to_vec()], sources, WELD_TOLERANCE);
-    let sources = &near;
+    ring_source_handles_among(ring, &near)
+}
+
+/// [`ring_source_handles`] for each of `rings`. The sources are indexed by
+/// place once instead of being read through for every ring.
+pub(crate) fn rings_source_handles(
+    rings: &[Vec<[f64; 2]>],
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+) -> Vec<Vec<document::Handle>> {
+    let by_place = SourcesByPlace::new(sources);
+    rings
+        .iter()
+        .map(|ring| ring_source_handles_among(ring, &by_place.near(ring, WELD_TOLERANCE)))
+        .collect()
+}
+
+/// The sources an edge of `ring` lies along, among the ones near it.
+fn ring_source_handles_among(
+    ring: &[[f64; 2]],
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+) -> Vec<document::Handle> {
     let mut handles = rustc_hash::FxHashSet::default();
     for (&start, &end) in ring
         .iter()
@@ -820,18 +1017,20 @@ fn exact_hatch_paths_by_ring(
 ) -> Vec<Option<document::entities::BoundaryPath>> {
     use document::entities::{BoundaryPath, BoundaryPathFlags};
 
-    let near = sources_near_rings(rings, sources, tolerance.max(WELD_TOLERANCE));
-    let sources = &near;
+    let pad = tolerance.max(WELD_TOLERANCE);
+    let near = sources_near_rings(rings, sources, pad);
+    let by_place = SourcesByPlace::new(&near);
     rings
         .iter()
         .enumerate()
         .map(|(ring_index, ring)| {
-            let (points, curves) = refined_boundary_ring(ring, sources, tolerance);
-            let count = points.len();
-            if count < 3 {
+            if ring.len() < 3 {
                 return None;
             }
-            let handles = ring_source_handles(ring, sources);
+            let (points, curves) =
+                refined_boundary_ring_among(ring, &by_place.near(ring, pad), tolerance);
+            let count = points.len();
+            let handles = ring_source_handles_among(ring, &by_place.near(ring, WELD_TOLERANCE));
             let mut bits = 0;
             if exterior.get(ring_index).copied().unwrap_or(ring_index == 0) {
                 bits |= BoundaryPathFlags::OUTERMOST.bits();
@@ -977,12 +1176,21 @@ fn refined_boundary_ring(
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
 ) -> (Vec<[f64; 2]>, Vec<Option<Curve>>) {
-    let count = ring.len();
-    if count < 3 {
+    if ring.len() < 3 {
         return (ring.to_vec(), Vec::new());
     }
     let near = sources_near_rings(&[ring.to_vec()], sources, tolerance.max(WELD_TOLERANCE));
-    let sources = &near;
+    refined_boundary_ring_among(ring, &near, tolerance)
+}
+
+/// [`refined_boundary_ring`] for a ring of three points or more, given only
+/// the sources near it.
+fn refined_boundary_ring_among(
+    ring: &[[f64; 2]],
+    sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
+    tolerance: f64,
+) -> (Vec<[f64; 2]>, Vec<Option<Curve>>) {
+    let count = ring.len();
     let edge_curves: Vec<_> = (0..count)
         .map(|index| {
             edge_curve(

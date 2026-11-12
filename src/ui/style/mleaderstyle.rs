@@ -48,6 +48,32 @@ pub struct Dialog {
     pub pick: Option<Pick>,
     /// The Load Linetypes window over Select Linetype.
     pub load: Option<LoadDraft>,
+    /// Load Linetypes asks about the ticked linetypes the drawing has.
+    pub reload_ask: Option<ReloadAsk>,
+}
+
+/// The ticked linetypes the drawing already has, asked about one by one.
+#[derive(Debug, Clone, Default)]
+pub struct ReloadAsk {
+    /// Still to be asked about, the first one now.
+    pub pending: Vec<String>,
+    /// Those to read again from the source.
+    pub reload: Vec<String>,
+}
+
+/// An answer to the reload question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reload {
+    /// Reload the linetype asked about.
+    This,
+    /// Reload it and every other one still to be asked about.
+    All,
+    /// Keep the linetype asked about.
+    Skip,
+    /// Keep it and every other one still to be asked about.
+    SkipRest,
+    /// Load nothing.
+    Cancel,
 }
 
 /// The linetypes of a `.lin` source offered for loading.
@@ -68,6 +94,9 @@ pub struct CreateDraft {
     pub name: String,
     pub start_with: String,
     pub annotative: bool,
+    /// The name was typed: picking another start style no longer renames
+    /// the copy or takes that style's annotative setting.
+    pub name_edited: bool,
 }
 
 /// The Modify face's own state; the style itself is edited in place.
@@ -130,6 +159,7 @@ pub enum MlsMsg {
     LoadToggle(String),
     LoadOk,
     LoadCancel,
+    ReloadAnswer(Reload),
     PickOk,
     PickCancel,
     DefaultText,
@@ -392,6 +422,8 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
             Some((delete_card(name), msg(MlsMsg::DeleteAnswer(false))))
         } else if let Some(draft) = &v.dialog.create {
             Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
+        } else if let Some(ask) = &v.dialog.reload_ask {
+            Some((reload_card(ask), msg(MlsMsg::ReloadAnswer(Reload::Cancel))))
         } else if let Some(load) = &v.dialog.load {
             Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
         } else {
@@ -949,7 +981,7 @@ pub(crate) fn load_linetypes_card<'a>(
         .iter()
         .map(|(name, description, pattern)| {
             let loaded = loaded.iter().any(|known| known.eq_ignore_ascii_case(name));
-            let on = loaded || load.picked.iter().any(|p| p.eq_ignore_ascii_case(name));
+            let on = load.picked.iter().any(|p| p.eq_ignore_ascii_case(name));
             let caption = if loaded {
                 tr!("mleader-style", "already-loaded", name = name.clone())
             } else {
@@ -973,12 +1005,7 @@ pub(crate) fn load_linetypes_card<'a>(
             )
             .padding([3, 8])
             .width(Fill);
-            let area = mouse_area(cell);
-            if loaded {
-                area.into()
-            } else {
-                area.on_press(on_toggle(name.clone())).into()
-            }
+            mouse_area(cell).on_press(on_toggle(name.clone())).into()
         })
         .collect();
     let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(260.0)))
@@ -1014,6 +1041,45 @@ pub(crate) fn load_linetypes_card<'a>(
     ]
     .spacing(8);
     panel(body.into(), 600.0)
+}
+
+/// Load Linetypes, OK with ticked linetypes the drawing has: reload the
+/// first one asked about, all of them, skip it, skip the rest, or load
+/// nothing.
+fn reload_card<'a>(ask: &'a ReloadAsk) -> Element<'a, Message> {
+    let name = ask.pending.first().cloned().unwrap_or_default();
+    let choice = |label: String, answer: Reload| {
+        dialog_button(label, msg(MlsMsg::ReloadAnswer(answer)), answer == Reload::This)
+            .width(Fill)
+    };
+    let body = column![
+        row![
+            crate::ui::icons::semantic(WARN, 20.0),
+            text(tr!("mleader-style", "reload-ask")).size(13),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        column![
+            choice(
+                tr!("mleader-style", "reload-this", name = name.clone()),
+                Reload::This
+            ),
+            choice(tr!("mleader-style", "reload-all"), Reload::All),
+            choice(tr!("mleader-style", "reload-skip", name = name), Reload::Skip),
+            choice(tr!("mleader-style", "reload-skip-rest"), Reload::SkipRest),
+        ]
+        .spacing(6),
+        row![
+            Space::new().width(Fill),
+            dialog_button(
+                tr!("mleader-style", "cancel"),
+                msg(MlsMsg::ReloadAnswer(Reload::Cancel)),
+                false
+            ),
+        ],
+    ]
+    .spacing(14);
+    panel(body.into(), 460.0)
 }
 
 /// A lineweight drawn as a line that thick (thin for the By… values).

@@ -2,11 +2,11 @@
 //! block, and the blocks that carry them in a drawing.
 //!
 //! Each is created the first time it is picked, centred on its insertion
-//! point at unit size, with the attributes the leader fills in.
+//! point, with the attributes the leader fills in.
 
 use document::entities::attribute_definition::{HorizontalAlignment, VerticalAlignment};
-use document::entities::{AttributeDefinition, Circle, Line, LwPolyline, LwVertex};
-use document::types::{Color, LineWeight, Vector3};
+use document::entities::{Arc, AttributeDefinition, Circle, Line, LwPolyline, LwVertex};
+use document::types::{Color, LineWeight, Transparency, Vector3};
 use document::{Document, EntityType, Handle};
 
 /// Name shown, block name. The first is the default source block.
@@ -53,84 +53,102 @@ pub(crate) fn resolve(doc: &mut Document, value: &str) -> Option<Handle> {
     if let Some(record) = doc.block_records.get(name) {
         return Some(record.handle);
     }
-    let entities = geometry(name)?;
+    // The attributes take the drawing's current text style.
+    let text_style = doc.header.current_text_style_name.clone();
+    let entities = geometry(name, &text_style)?;
     crate::app::define_block_raw_doc(doc, name, Vector3::ZERO, &entities);
     doc.block_records.get(name).map(|record| record.handle)
 }
 
-fn geometry(name: &str) -> Option<Vec<EntityType>> {
+/// The predefined blocks, sized in drawing units whatever the drawing's
+/// units: a half-unit callout circle, quarter-unit tags and attributes
+/// 0.09375 high, centred on their baseline.
+fn geometry(name: &str, text_style: &str) -> Option<Vec<EntityType>> {
     let line = |x1: f64, y1: f64, x2: f64, y2: f64| {
         EntityType::Line(Line::from_points(
             Vector3::new(x1, y1, 0.0),
             Vector3::new(x2, y2, 0.0),
         ))
     };
-    let closed = |points: &[(f64, f64, f64)]| {
+    let circle = |r: f64| EntityType::Circle(Circle::from_center_radius(Vector3::ZERO, r));
+    let arc = |cx: f64, start: f64, end: f64| {
+        EntityType::Arc(Arc::from_center_radius_angles(
+            Vector3::new(cx, 0.0, 0.0),
+            0.125,
+            start,
+            end,
+        ))
+    };
+    let closed = |points: &[(f64, f64)]| {
         let mut p = LwPolyline::new();
-        for &(x, y, bulge) in points {
-            let mut v = LwVertex::from_coords(x, y);
-            v.bulge = bulge;
-            p.vertices.push(v);
+        for &(x, y) in points {
+            p.vertices.push(LwVertex::from_coords(x, y));
         }
         p.is_closed = true;
         EntityType::LwPolyline(p)
     };
-    let attribute = |tag: &str, y: f64, height: f64| {
-        let mut a = AttributeDefinition::new(tag.to_string(), tag.to_string(), String::new());
+    let attribute = |tag: &str, prompt: &str, y: f64| {
+        let mut a =
+            AttributeDefinition::new(tag.to_string(), prompt.to_string(), tag.to_string());
         a.insertion_point = Vector3::new(0.0, y, 0.0);
         a.alignment_point = Vector3::new(0.0, y, 0.0);
-        a.height = height;
-        a.set_alignment(HorizontalAlignment::Center, VerticalAlignment::Middle);
+        a.height = 0.09375;
+        a.text_style = text_style.to_string();
+        a.set_alignment(HorizontalAlignment::Center, VerticalAlignment::Baseline);
         EntityType::AttributeDefinition(a)
     };
-    let tag = || attribute("TAGNUMBER", 0.0, 0.5);
-    let regular = |sides: usize, start: f64| {
-        let points: Vec<(f64, f64, f64)> = (0..sides)
-            .map(|i| {
-                let a = (start + 360.0 * i as f64 / sides as f64).to_radians();
-                (a.cos(), a.sin(), 0.0)
-            })
-            .collect();
-        closed(&points)
-    };
+    let tag = || attribute("TAGNUMBER", "Enter tag number", -0.046875);
+    let (half_pi, three_half_pi) = (std::f64::consts::FRAC_PI_2, 3.0 * std::f64::consts::FRAC_PI_2);
+    let (hx, hy) = (0.125 / 3f64.sqrt() * 2.0, 0.125);
+    let tx = 0.25 * 3f64.sqrt() / 2.0;
     let mut entities = match name {
         "_DetailCallout" => vec![
-            EntityType::Circle(Circle::from_center_radius(Vector3::ZERO, 1.0)),
-            line(-1.0, 0.0, 1.0, 0.0),
-            attribute("VIEWNUMBER", 0.5, 0.4),
-            attribute("SHEETNUMBER", -0.5, 0.4),
+            circle(0.25),
+            line(0.25, 0.0, -0.25, 0.0),
+            attribute("VIEWNUMBER", "Enter view number", 1.0 / 48.0),
+            attribute("SHEETNUMBER", "Enter sheet number", -0.15625),
         ],
         "_TagSlot" => vec![
-            closed(&[
-                (0.5, 0.5, 0.0),
-                (-0.5, 0.5, 1.0),
-                (-0.5, -0.5, 0.0),
-                (0.5, -0.5, 1.0),
-            ]),
+            arc(-0.125, half_pi, three_half_pi),
+            arc(0.125, three_half_pi, half_pi),
+            line(-0.125, 0.125, 0.125, 0.125),
+            line(-0.125, -0.125, 0.125, -0.125),
             tag(),
         ],
-        "_TagCircle" => vec![
-            EntityType::Circle(Circle::from_center_radius(Vector3::ZERO, 1.0)),
-            tag(),
-        ],
+        "_TagCircle" => vec![circle(0.125), tag()],
         "_TagBox" => vec![
+            closed(&[(-0.125, 0.125), (0.125, 0.125), (0.125, -0.125), (-0.125, -0.125)]),
+            tag(),
+        ],
+        "_TagHexagon" => vec![
             closed(&[
-                (-1.0, -1.0, 0.0),
-                (1.0, -1.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (-1.0, 1.0, 0.0),
+                (-hx, 0.0),
+                (-hx / 2.0, hy),
+                (hx / 2.0, hy),
+                (hx, 0.0),
+                (hx / 2.0, -hy),
+                (-hx / 2.0, -hy),
             ]),
             tag(),
         ],
-        "_TagHexagon" => vec![regular(6, 0.0), tag()],
-        "_TagTriangle" => vec![regular(3, 90.0), tag()],
+        "_TagTriangle" => vec![closed(&[(-tx, -0.125), (0.0, 0.25), (tx, -0.125)]), tag()],
         _ => return None,
     };
-    // The content takes the leader's block colour and lineweight.
+    // The content takes the leader's block colour and transparency; curves
+    // also its linetype, and all but polylines its lineweight. Attributes
+    // keep the layer's linetype and lineweight.
     for entity in &mut entities {
+        let attribute = matches!(entity, EntityType::AttributeDefinition(_));
+        let polyline = matches!(entity, EntityType::LwPolyline(_));
         let common = entity.common_mut();
         common.color = Color::ByBlock;
-        common.line_weight = LineWeight::ByBlock;
+        common.transparency = Transparency::BY_BLOCK;
+        if !attribute {
+            common.linetype = "ByBlock".to_string();
+        }
+        if !attribute && !polyline {
+            common.line_weight = LineWeight::ByBlock;
+        }
     }
     Some(entities)
 }

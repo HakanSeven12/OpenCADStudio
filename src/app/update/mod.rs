@@ -135,6 +135,7 @@ mod file;
 mod graphic_attributes;
 mod keytips;
 pub(in crate::app) mod mleader_style;
+mod dimstyle_dialog;
 pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
@@ -222,12 +223,20 @@ impl OpenCADStudio {
         // The Text Style manager opened from the multileader style window
         // returns to it.
         if self.active_modal == Some(TextStyle) && self.style_parent_stage.is_some() {
-            self.mleader_style_back_from_text_styles();
+            if self.dsd.edit.is_some() {
+                self.dim_style_back_from_text_styles();
+            } else {
+                self.mleader_style_back_from_text_styles();
+            }
             return;
         }
-        // The multileader style window keeps what it changed as one step.
+        // The multileader and dimension style windows keep what they changed
+        // as one step.
         if self.active_modal == Some(MLeaderStyle) {
             self.mleader_style_close();
+        }
+        if self.active_modal == Some(DimStyle) {
+            self.dim_style_close();
         }
         if self.active_modal == Some(TableStyle)
             && std::mem::take(&mut self.tablestyle_parent_table)
@@ -12551,6 +12560,11 @@ impl OpenCADStudio {
                 {
                     return Task::none();
                 }
+                if self.active_modal == Some(super::ModalKind::DimStyle)
+                    && self.dim_style_close_face()
+                {
+                    return Task::none();
+                }
                 if self.active_modal == Some(super::ModalKind::BlockLookup) {
                     self.block_lookup = None;
                 }
@@ -15233,158 +15247,7 @@ impl OpenCADStudio {
 
             // ── DimStyle Dialog ───────────────────────────────────────────────
             Message::DimStyleDialogOpen => self.on_dim_style_dialog_open(),
-            Message::DimStyleDialogClose => {
-                self.close_active_modal();
-                Task::none()
-            }
-            Message::DimStyleDialogApply => {
-                let i = self.active_tab;
-                self.apply_dimstyle_bufs(i);
-                if !self.selected_dimstyle_is_read_only() {
-                    self.style_stage_commit();
-                }
-                Task::none()
-            }
-            Message::DimStyleDialogSelect(name) => {
-                let i = self.active_tab;
-                // Stage the current edits before switching so they aren't lost.
-                self.apply_dimstyle_bufs(i);
-                self.dimstyle_selected = name;
-                self.load_dimstyle_bufs(i);
-                Task::none()
-            }
-            Message::DimStyleDialogTab(tab) => {
-                self.dimstyle_tab = tab;
-                Task::none()
-            }
-            Message::DimStyleDialogCompare(name) => {
-                self.dimstyle_compare = name;
-                Task::none()
-            }
-            Message::DimStyleDialogNew => self.style_new(crate::app::StyleKind::Dim),
-            Message::DimStyleDialogCopy => self.style_copy(crate::app::StyleKind::Dim),
-            Message::DimStyleDialogSetCurrent => {
-                // Staged: persists on Apply.
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let i = self.active_tab;
-
-                self.tabs[i].scene.document.header.current_dimstyle_name =
-                    self.dimstyle_selected.clone();
-                self.sync_ribbon_styles();
-                self.command_line.push_output(
-                    crate::tf!("Current dim style set to '{}'.", self.dimstyle_selected).as_ref(),
-                );
-                Task::none()
-            }
-            Message::DimStyleDialogDelete => {
-                self.style_delete(crate::app::StyleKind::Dim);
-                Task::none()
-            }
-            Message::DsEdit(field, val) => {
-                self.apply_ds_edit(field, val);
-                self.ds_color_open = None;
-                Task::none()
-            }
-            Message::DsToggle(field) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let separate_arrows = field == crate::app::DsField::Dimsah;
-                self.apply_ds_toggle(field);
-                if separate_arrows && self.ds_dimsah {
-                    let i = self.active_tab;
-                    if let Some(style) = self.tabs[i]
-                        .scene
-                        .document
-                        .dim_styles
-                        .get_mut(&self.dimstyle_selected)
-                    {
-                        if style.dimblk1.is_null() {
-                            style.dimblk1 = style.dimblk;
-                        }
-                        if style.dimblk2.is_null() {
-                            style.dimblk2 = style.dimblk1;
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::DsToleranceMode(mode) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                self.ds_dimlim = mode == "limits";
-                self.ds_dimtol = matches!(mode.as_str(), "symmetrical" | "deviation");
-                if mode == "symmetrical" {
-                    self.ds_dimtm = self.ds_dimtp.clone();
-                }
-                let gap = self.ds_dimgap.trim().parse::<f64>().unwrap_or(0.625).abs();
-                self.ds_dimgap = if mode == "basic" {
-                    format!("-{}", gap.max(f64::EPSILON))
-                } else {
-                    format!("{}", gap)
-                };
-                Task::none()
-            }
-            Message::DsZeroBase(field, base) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let current = match &field {
-                    crate::app::DsField::Dimzin => &self.ds_dimzin,
-                    crate::app::DsField::Dimaltz => &self.ds_dimaltz,
-                    crate::app::DsField::Dimalttz => &self.ds_dimalttz,
-                    crate::app::DsField::Dimtzin => &self.ds_dimtzin,
-                    _ => return Task::none(),
-                }
-                .trim()
-                .parse::<i16>()
-                .unwrap_or(0);
-                self.apply_ds_edit(field, ((current & !3) | (base & 3)).to_string());
-                Task::none()
-            }
-            Message::DsZeroFlag(field, bit) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let current = match &field {
-                    crate::app::DsField::Dimzin => &self.ds_dimzin,
-                    crate::app::DsField::Dimaltz => &self.ds_dimaltz,
-                    crate::app::DsField::Dimalttz => &self.ds_dimalttz,
-                    crate::app::DsField::Dimtzin => &self.ds_dimtzin,
-                    _ => return Task::none(),
-                }
-                .trim()
-                .parse::<i16>()
-                .unwrap_or(0);
-                self.apply_ds_edit(field, (current ^ bit).to_string());
-                Task::none()
-            }
-            Message::DsCenterMarkMode(mode) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let size = self.ds_dimcen.trim().parse::<f64>().unwrap_or(0.09).abs();
-                self.ds_dimcen = match mode.as_str() {
-                    "mark" => size.max(f64::EPSILON).to_string(),
-                    "lines" => format!("-{}", size.max(f64::EPSILON)),
-                    _ => "0".to_string(),
-                };
-                Task::none()
-            }
-            Message::DsColorMore(field) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                self.ds_color_open = if self.ds_color_open.as_ref() == Some(&field) {
-                    None
-                } else {
-                    Some(field)
-                };
-                Task::none()
-            }
+            Message::DimStyleDlg(message) => self.on_dim_style_dlg(message),
             Message::OpenColorWindow(target, color) => {
                 if matches!(
                     target,
@@ -15409,7 +15272,7 @@ impl OpenCADStudio {
                 }
                 self.color_picker = Some(picker);
                 self.modal_offset = iced::Vector::ZERO;
-                self.ds_color_open = None;
+                self.dsd.open_list = None;
                 self.mls_color_open = None;
                 self.ts_color_open = None;
                 self.ribbon.close_dropdown();
@@ -15487,7 +15350,6 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::DsSetHandle { field, value } => self.on_ds_set_handle(field, value),
         }
     }
 

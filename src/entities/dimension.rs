@@ -1651,6 +1651,35 @@ use document::entities::{MText, Text};
 use document::tables::DimStyle;
 use document::types::{Color as AcadColor, Vector3};
 
+/// The style a dimension draws with: its style's family member for the
+/// dimension's type when the drawing has one (`Name$0` linear and aligned,
+/// `$2` angular, `$3` diameter, `$4` radius, `$6` ordinate), else the style
+/// itself; a dimension without a style name uses Standard.
+pub(crate) fn dimension_source_style<'a>(
+    document: &'a Document,
+    dim: &Dimension,
+) -> Option<&'a DimStyle> {
+    let name = dim.base().style_name.trim();
+    let name = if name.is_empty() { "Standard" } else { name };
+    let find = |wanted: &str| {
+        document
+            .dim_styles
+            .iter()
+            .find(|style| style.name.eq_ignore_ascii_case(wanted))
+    };
+    let suffix = match dim {
+        Dimension::Linear(_) | Dimension::Aligned(_) => Some("$0"),
+        Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => Some("$2"),
+        Dimension::Diameter(_) => Some("$3"),
+        Dimension::Radius(_) | Dimension::LargeRadial(_) => Some("$4"),
+        Dimension::Ordinate(_) => Some("$6"),
+        _ => None,
+    };
+    suffix
+        .and_then(|suffix| find(&format!("{name}{suffix}")))
+        .or_else(|| find(name))
+}
+
 pub(crate) fn resolved_dimension_style(
     source: &DimStyle,
     dimension: &Dimension,
@@ -1660,123 +1689,8 @@ pub(crate) fn resolved_dimension_style(
 
     let mut style = source.clone();
     let data = &dimension.base().common.extended_data;
-    macro_rules! real {
-        ($field:ident, $code:ident) => {
-            if let Some(value) = ov::real(data, ov::$code) {
-                style.$field = value;
-            }
-        };
-    }
-    macro_rules! int {
-        ($field:ident, $code:ident) => {
-            if let Some(value) = ov::int(data, ov::$code) {
-                style.$field = value;
-            }
-        };
-    }
-    macro_rules! flag {
-        ($field:ident, $code:ident) => {
-            if let Some(value) = ov::int(data, ov::$code) {
-                style.$field = value != 0;
-            }
-        };
-    }
-    macro_rules! handle {
-        ($field:ident, $code:ident) => {
-            if let Some(value) = ov::handle(data, ov::$code) {
-                style.$field = value;
-            }
-        };
-    }
-
-    real!(dimscale, DIMSCALE);
-    real!(dimasz, DIMASZ);
-    real!(dimexo, DIMEXO);
-    real!(dimdli, DIMDLI);
-    real!(dimexe, DIMEXE);
-    real!(dimrnd, DIMRND);
-    real!(dimdle, DIMDLE);
-    real!(dimtp, DIMTP);
-    real!(dimtm, DIMTM);
-    real!(dimfxl, DIMFXL);
-    real!(dimjogang, DIMJOGANG);
-    real!(dimtxt, DIMTXT);
-    real!(dimcen, DIMCEN);
-    real!(dimtsz, DIMTSZ);
-    real!(dimaltf, DIMALTF);
-    real!(dimlfac, DIMLFAC);
-    real!(dimtvp, DIMTVP);
-    real!(dimtfac, DIMTFAC);
-    real!(dimgap, DIMGAP);
-    real!(dimaltrnd, DIMALTRND);
-    real!(dimaltmzf, DIMALTMZF);
-    real!(dimmzf, DIMMZF);
-    flag!(dimtol, DIMTOL);
-    flag!(dimlim, DIMLIM);
-    flag!(dimtih, DIMTIH);
-    flag!(dimtoh, DIMTOH);
-    flag!(dimse1, DIMSE1);
-    flag!(dimse2, DIMSE2);
-    flag!(dimalt, DIMALT);
-    flag!(dimtofl, DIMTOFL);
-    flag!(dimsah, DIMSAH);
-    flag!(dimtix, DIMTIX);
-    flag!(dimsoxd, DIMSOXD);
-    flag!(dimsd1, DIMSD1);
-    flag!(dimsd2, DIMSD2);
-    flag!(dimupt, DIMUPT);
-    flag!(dimfxlon, DIMFXLON);
-    flag!(dimtxtdirection, DIMTXTDIRECTION);
-    int!(dimzin, DIMZIN);
-    int!(dimtad, DIMTAD);
-    int!(dimazin, DIMAZIN);
-    int!(dimarcsym, DIMARCSYM);
-    int!(dimclrd, DIMCLRD);
-    int!(dimclre, DIMCLRE);
-    int!(dimclrt, DIMCLRT);
-    int!(dimadec, DIMADEC);
-    int!(dimaltd, DIMALTD);
-    int!(dimdec, DIMDEC);
-    int!(dimtdec, DIMTDEC);
-    int!(dimaltu, DIMALTU);
-    int!(dimalttd, DIMALTTD);
-    int!(dimaunit, DIMAUNIT);
-    int!(dimfrac, DIMFRAC);
-    int!(dimlunit, DIMLUNIT);
-    int!(dimdsep, DIMDSEP);
-    int!(dimtmove, DIMTMOVE);
-    int!(dimjust, DIMJUST);
-    int!(dimtolj, DIMTOLJ);
-    int!(dimtzin, DIMTZIN);
-    int!(dimaltz, DIMALTZ);
-    int!(dimalttz, DIMALTTZ);
-    int!(dimatfit, DIMATFIT);
-    int!(dimtfill, DIMTFILL);
-    int!(dimtfillclr, DIMTFILLCLR);
-    int!(dimlwd, DIMLWD);
-    int!(dimlwe, DIMLWE);
-    handle!(dimldrblk, DIMLDRBLK);
-    handle!(dimblk, DIMBLK);
-    handle!(dimblk1, DIMBLK1);
-    handle!(dimblk2, DIMBLK2);
-    handle!(dimltex_handle, DIMLTYPE);
-    handle!(dimltex1_handle, DIMLTEX1);
-    handle!(dimltex2_handle, DIMLTEX2);
-
-    if let Some(value) = ov::string(data, ov::DIMPOST) {
-        style.dimpost = value;
-    }
-    if let Some(value) = ov::string(data, ov::DIMAPOST) {
-        style.dimapost = value;
-    }
-    if let Some(value) = ov::string(data, ov::DIMALTMZS) {
-        style.dimaltmzs = value;
-    }
-    if let Some(value) = ov::string(data, ov::DIMMZS) {
-        style.dimmzs = value;
-    }
+    ov::apply_pairs(&mut style, &ov::pairs(data));
     if let Some(value) = ov::handle(data, ov::DIMTXSTY) {
-        style.dimtxsty_handle = value;
         if let Some(record) = document
             .text_styles
             .iter()
@@ -3290,13 +3204,7 @@ pub(crate) fn materialize_large_radial_text_position(
     if !matches!(&**dimension, Dimension::LargeRadial(_)) || dimension.base().text_user_positioned {
         return;
     }
-    let source = document.dim_styles.iter().find(|style| {
-        style
-            .name
-            .eq_ignore_ascii_case(&dimension.base().style_name)
-            || (dimension.base().style_name.trim().is_empty()
-                && style.name.eq_ignore_ascii_case("Standard"))
-    });
+    let source = dimension_source_style(document, dimension);
     let position = source
         .map(|style| resolved_dimension_style(style, dimension, document))
         .map(|style| styled_dimension_text_position(dimension, &style, 1.0, Some(&*document)))
@@ -3800,11 +3708,7 @@ fn tessellate_dimension_inner(
     let shifted = (origin != Vector3::ZERO).then(|| shift_dimension(dim, origin));
     let dim = shifted.as_ref().unwrap_or(dim);
 
-    let style_name = &dim.base().style_name;
-    let source_style = document.dim_styles.iter().find(|s| {
-        s.name.eq_ignore_ascii_case(style_name)
-            || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-    });
+    let source_style = dimension_source_style(document, dim);
     let effective_style = source_style.map(|style| resolved_dimension_style(style, dim, document));
     let style = effective_style.as_ref();
 
@@ -4040,11 +3944,18 @@ fn tessellate_dimension_inner(
         let jog_angle = style
             .map(|style| style.dimjogang as f32)
             .unwrap_or(std::f32::consts::FRAC_PI_4);
+        // The jog is as tall as the style's jog height factor times the text
+        // height: its two sides rise by tan(angle / 2) of their run.
+        let jog_height = style.map_or(1.5, |style| {
+            crate::scene::creation_style::dim_style_extras(document, style.handle).jog_height
+        }) as f32
+            * dim_txt as f32;
+        let rise = (jog_angle * 0.5).tan().abs().max(0.35);
         apply_dimension_jog(
             &mut geom.dim_lines,
             vec3_local(point_from_origin(point, origin)),
             vec3_local(dim.base().normal),
-            dim_txt as f32 * CELL_WIDTH as f32,
+            jog_height * 0.5 / rise,
             jog_angle,
         );
     }
@@ -6145,14 +6056,7 @@ pub(crate) fn dimension_text_break_world(
     let origin = dimension_precision_origin(dim);
     let shifted = (origin != Vector3::ZERO).then(|| shift_dimension(dim, origin));
     let local = shifted.as_ref().unwrap_or(dim);
-    let style_name = &local.base().style_name;
-    let style = document
-        .dim_styles
-        .iter()
-        .find(|s| {
-            s.name.eq_ignore_ascii_case(style_name)
-                || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-        })
+    let style = dimension_source_style(document, local)
         .map(|style| resolved_dimension_style(style, local, document));
     let style = style.as_ref();
     let scale = style.map_or(1.0, |s| if s.dimscale > 1e-6 { s.dimscale } else { 1.0 });
@@ -6893,10 +6797,7 @@ fn dimension_text_style_name(
 /// A dimension's text box as drawn — its middle point, width, height and
 /// reading angle — for markers placed beside the text (ANNOMONITOR).
 pub(crate) fn text_box(dim: &Dimension, document: &Document) -> Option<(Vector3, f64, f64, f64)> {
-    let source = document
-        .dim_styles
-        .iter()
-        .find(|style| style.name.eq_ignore_ascii_case(&dim.base().style_name))?;
+    let source = dimension_source_style(document, dim)?;
     let style = resolved_dimension_style(source, dim, document);
     let scale = if style.dimscale > 1e-9 {
         style.dimscale
@@ -7255,11 +7156,7 @@ pub(crate) fn dynamic_dimension_lock_anchor(
     dim: &Dimension,
     anno_scale: f64,
 ) -> Option<(Vector3, Vector3)> {
-    let style_name = &dim.base().style_name;
-    let source_style = document.dim_styles.iter().find(|s| {
-        s.name.eq_ignore_ascii_case(style_name)
-            || (style_name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-    });
+    let source_style = dimension_source_style(document, dim);
     let effective_style = source_style.map(|style| resolved_dimension_style(style, dim, document));
     let style = effective_style.as_ref();
     let dim_scale = style
@@ -8538,11 +8435,7 @@ fn stored_text_point(dim: &Dimension) -> Option<Vector3> {
 /// extension line (DIMJUST 1/2) is measured by the glyphs of its font, not
 /// by character cells.
 pub(crate) fn automatic_text_position(document: &Document, dim: &Dimension) -> Option<Vector3> {
-    let name = &dim.base().style_name;
-    let source = document.dim_styles.iter().find(|s| {
-        s.name.eq_ignore_ascii_case(name)
-            || (name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
-    })?;
+    let source = dimension_source_style(document, dim)?;
     let style = resolved_dimension_style(source, dim, document);
     let scale = if style.dimscale > 1e-6 {
         style.dimscale
@@ -9085,14 +8978,7 @@ pub(crate) fn baked_large_radial_geometry(
     let origin = dimension_precision_origin(dimension);
     let shifted = (origin != Vector3::ZERO).then(|| shift_dimension(dimension, origin));
     let dimension = shifted.as_ref().unwrap_or(dimension);
-    let style_name = dimension.base().style_name.as_str();
-    let effective_style = document
-        .dim_styles
-        .iter()
-        .find(|style| {
-            style.name.eq_ignore_ascii_case(style_name)
-                || (style_name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
-        })
+    let effective_style = dimension_source_style(document, dimension)
         .map(|style| resolved_dimension_style(style, dimension, document));
     let style = effective_style.as_ref();
     let scale = style
@@ -9252,14 +9138,7 @@ fn baked_dimension_text(
     document: &Document,
     anno_scale: f64,
 ) -> Option<(EntityType, f64)> {
-    let style_name = dim.base().style_name.as_str();
-    let effective_style = document
-        .dim_styles
-        .iter()
-        .find(|style| {
-            style.name.eq_ignore_ascii_case(style_name)
-                || (style_name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
-        })
+    let effective_style = dimension_source_style(document, dim)
         .map(|style| resolved_dimension_style(style, dim, document));
     let style = effective_style.as_ref();
     let dim_scale = style
@@ -9283,11 +9162,7 @@ pub(crate) fn baked_arc_length_symbol_points(
     if !matches!(dim, Dimension::Arc(_)) {
         return Vec::new();
     }
-    let style_name = dim.base().style_name.as_str();
-    let style = document.dim_styles.iter().find(|style| {
-        style.name.eq_ignore_ascii_case(style_name)
-            || (style_name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
-    });
+    let style = dimension_source_style(document, dim);
     let dim_scale = style
         .map(|style| {
             if style.dimscale > 1.0e-6 {

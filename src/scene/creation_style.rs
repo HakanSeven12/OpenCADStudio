@@ -89,7 +89,77 @@ pub fn ensure_iso_dim_style(doc: &mut Document) -> Handle {
     style.dimaltmzf = 100.0;
     let handle = style.handle;
     let _ = doc.dim_styles.add(style);
+    set_dim_style_extras(
+        doc,
+        handle,
+        DimStyleExtras {
+            jog_height: 1.5,
+            break_size: 3.75,
+            dimtaln: 0,
+        },
+    );
     handle
+}
+
+/// The extended data a dimension style keeps beside its variables: the
+/// linear jog height factor (`ACAD_DSTYLE_DIMJAG`, group 388), the
+/// dimension break size (`ACAD_DSTYLE_DIMBREAK`, 391) and DIMTALN
+/// (`ACAD_DSTYLE_DIMTALN`, 392).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DimStyleExtras {
+    pub jog_height: f64,
+    pub break_size: f64,
+    pub dimtaln: i16,
+}
+
+const DIMJAG_APP: &str = "ACAD_DSTYLE_DIMJAG";
+const DIMBREAK_APP: &str = "ACAD_DSTYLE_DIMBREAK";
+const DIMTALN_APP: &str = "ACAD_DSTYLE_DIMTALN";
+
+/// `handle`'s extras; a style without them has the defaults of the
+/// drawing's measurement system.
+pub fn dim_style_extras(doc: &Document, handle: Handle) -> DimStyleExtras {
+    use document::xdata::XDataValue;
+    let value = |app: &str| {
+        doc.object_xdata(handle)
+            .and_then(|data| data.get_record(app))
+            .and_then(|record| record.values.get(1).cloned())
+    };
+    let real = |app: &str, default: f64| match value(app) {
+        Some(XDataValue::Real(v) | XDataValue::Distance(v) | XDataValue::ScaleFactor(v)) => v,
+        _ => default,
+    };
+    DimStyleExtras {
+        jog_height: real(DIMJAG_APP, 1.5),
+        break_size: real(
+            DIMBREAK_APP,
+            if doc.header.measurement == 1 { 3.75 } else { 0.125 },
+        ),
+        dimtaln: match value(DIMTALN_APP) {
+            Some(XDataValue::Integer16(v)) => v,
+            _ => 0,
+        },
+    }
+}
+
+/// Store `extras` on the style `handle`, registering their applications.
+pub fn set_dim_style_extras(doc: &mut Document, handle: Handle, extras: DimStyleExtras) {
+    use document::xdata::{ExtendedDataRecord, XDataValue};
+    for (app, code, value) in [
+        (DIMJAG_APP, 388, XDataValue::Real(extras.jog_height)),
+        (DIMBREAK_APP, 391, XDataValue::Real(extras.break_size)),
+        (DIMTALN_APP, 392, XDataValue::Integer16(extras.dimtaln)),
+    ] {
+        if !doc.app_ids.contains(app) {
+            let mut entry = document::tables::AppId::new(app);
+            entry.handle = doc.allocate_handle();
+            let _ = doc.app_ids.add(entry);
+        }
+        let mut record = ExtendedDataRecord::new(app);
+        record.add_value(XDataValue::Integer16(code));
+        record.add_value(value);
+        doc.set_object_xdata_record(handle, record);
+    }
 }
 
 fn named_dim_style(doc: &Document, name: &str) -> Option<DimStyle> {

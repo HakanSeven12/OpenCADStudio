@@ -381,6 +381,10 @@ harness = false
 name = "dynamic_block_grip_preview"
 harness = false
 
+[[bench]]
+name = "dynamic_block_visibility_switch"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

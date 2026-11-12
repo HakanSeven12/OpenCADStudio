@@ -365,4 +365,115 @@ impl Scene {
             ),
         ))
     }
+
+    #[doc(hidden)]
+    pub fn bench_setup_visibility_scene(
+        background_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle, Handle, Handle) {
+        use crate::scene::block_visibility;
+        use document::entities::{Insert, Line};
+        use document::Vector3;
+
+        let mut scene = Scene::new();
+        for i in 0..background_lines {
+            let y = (i as f64) * 2.0;
+            let mut line = Line::new();
+            line.start = Vector3::new(100.0, y, 0.0);
+            line.end = Vector3::new(200.0, y, 0.0);
+            scene.add_entity(EntityType::Line(line));
+        }
+        for b in 0..other_blocks {
+            let name = format!("OtherBlock_{b}");
+            let mut ents = Vec::with_capacity(entities_per_block);
+            for j in 0..entities_per_block {
+                let mut line = Line::new();
+                line.start = Vector3::new(0.0, (j as f64) * 0.5, 0.0);
+                line.end = Vector3::new(5.0, (j as f64) * 0.5, 0.0);
+                ents.push(EntityType::Line(line));
+            }
+            scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            scene.add_entity(EntityType::Insert(ins));
+        }
+
+        let mut vis_ents = Vec::with_capacity(entities_per_block);
+        for j in 0..entities_per_block {
+            let mut line = Line::new();
+            line.start = Vector3::new(0.0, (j as f64) * 0.5, 0.0);
+            line.end = Vector3::new(8.0, (j as f64) * 0.5, 0.0);
+            vis_ents.push(EntityType::Line(line));
+        }
+        scene.define_block_raw("VisBenchBlock", Vector3::ZERO, vis_ents);
+        let def = scene
+            .document
+            .block_records
+            .get("VisBenchBlock")
+            .expect("vis block")
+            .handle;
+        let members = scene
+            .document
+            .block_records
+            .get("VisBenchBlock")
+            .unwrap()
+            .entity_handles
+            .clone();
+        let param = block_visibility::create(&mut scene.document, def, Vector3::ZERO)
+            .expect("visibility parameter");
+        block_visibility::add_state(&mut scene.document, param, "Alt", 0)
+            .expect("add visibility state");
+        let half = members.len() / 2;
+        block_visibility::set_visible(&mut scene.document, param, 0, &members[half..], false);
+        block_visibility::set_visible(&mut scene.document, param, 1, &members[..half], false);
+        block_visibility::finish_editing(&mut scene.document, def);
+
+        let insert = Insert::new("VisBenchBlock", Vector3::ZERO);
+        let insert_handle = scene.add_entity(EntityType::Insert(insert));
+        // Warm up caches just like an open drawing in the viewport.
+        let _ = scene.entity_wires();
+        (scene, insert_handle, def, param)
+    }
+
+    #[doc(hidden)]
+    pub fn bench_switch_visibility_state(
+        &mut self,
+        insert_handle: Handle,
+        def_block: Handle,
+        param_handle: Handle,
+        state_idx: usize,
+    ) -> usize {
+        self.visibility_representation(insert_handle);
+        let anon_name = match self.document.get_entity(insert_handle) {
+            Some(EntityType::Insert(ins)) => ins.block_name.clone(),
+            _ => return 0,
+        };
+        let def_handles = crate::scene::block_authoring::members(&self.document, def_block);
+        let anon_block = self
+            .document
+            .block_records
+            .iter()
+            .find(|b| b.name == anon_name)
+            .map(|b| b.handle)
+            .expect("anon block");
+        let anon_handles = crate::scene::block_authoring::members(&self.document, anon_block);
+        let shown = crate::scene::block_visibility::state_visibility(
+            &self.document,
+            param_handle,
+            state_idx,
+        );
+        for (idx, h) in anon_handles.iter().enumerate() {
+            if let Some(Some(visible)) = shown.get(idx).copied() {
+                if let Some(e) = self.document.get_entity_mut(*h) {
+                    e.common_mut().invisible =
+                        !visible || crate::scene::block_construction::is_construction(e.common());
+                }
+            }
+        }
+        let _ = def_handles.len();
+        self.bump_geometry();
+        let cam = self.camera.borrow().clone();
+        self.model_tile_wires_arc(0, &cam, 1.0, 1.0).len()
+    }
 }

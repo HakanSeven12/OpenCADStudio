@@ -56,7 +56,7 @@ const DIRS: [[f64; 2]; 16] = [
 enum ShxKind {
     /// `shapes 1.0/1.1`: keyed by 8-bit code (or shape number).
     Shapes,
-    /// `unifont 1.0`: keyed by Unicode code point.
+    /// `unifont 1.0`: keyed by Unicode or by the encoding in its header.
     Unifont,
     /// `bigfont 1.0`: keyed by a double-byte legacy code (Big5, GBK, …).
     Bigfont,
@@ -64,6 +64,9 @@ enum ShxKind {
 
 struct ShxFile {
     kind: ShxKind,
+    /// The unifont header's encoding: 0 = Unicode, 1 = packed multibyte,
+    /// 2 = shape-file encoding. Classic shapes files have no such byte.
+    encoding: Option<u8>,
     /// shape number → (name, spec bytes)
     shapes: HashMap<u16, (String, Vec<u8>)>,
 }
@@ -151,6 +154,7 @@ fn parse_file(path: &str) -> Option<ShxFile> {
         (name, spec)
     };
     let mut shapes = HashMap::new();
+    let mut encoding = None;
     match kind {
         ShxKind::Shapes => {
             let _first = rd_u16(&mut p)?;
@@ -177,6 +181,7 @@ fn parse_file(path: &str) -> Option<ShxFile> {
             let head_len = rd_u16(&mut p)? as usize;
             let end = p.checked_add(head_len)?.min(bytes.len());
             shapes.insert(0, split_named(&bytes[p..end]));
+            encoding = shapes.get(&0).and_then(|(_, spec)| spec.get(3)).copied();
             p = end;
             for _ in 1..count {
                 let Some(code) = rd_u16(&mut p) else { break };
@@ -216,7 +221,11 @@ fn parse_file(path: &str) -> Option<ShxFile> {
             }
         }
     }
-    Some(ShxFile { kind, shapes })
+    Some(ShxFile {
+        kind,
+        encoding,
+        shapes,
+    })
 }
 
 /// True when the file is an Asian big font (`AutoCAD-86 bigfont 1.0`).
@@ -272,6 +281,41 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
         return font_glyph(path, code);
     }
     None
+}
+
+/// Look up Unicode `ch` in an SHX text font. Unicode unifonts use their code
+/// point directly; classic shapes fonts and unifonts with shape-file encoding
+/// use the drawing's legacy code page. The raw numeric [`font_glyph`] lookup
+/// stays separate for shape entities, linetypes and already-encoded big fonts.
+pub fn font_char_glyph(
+    path: &str,
+    ch: char,
+    code_page: &str,
+) -> Option<Arc<crate::scene::text::lff::Glyph>> {
+    let file = load_file(path)?;
+    if file.kind == ShxKind::Bigfont {
+        return bigfont_glyph(path, ch);
+    }
+    // ASCII has the same code in every supported legacy page, including when
+    // the drawing itself uses UTF-8. Packed multibyte fonts keep this path too.
+    if ch.is_ascii() {
+        return font_glyph(path, ch as u16);
+    }
+    if file.kind == ShxKind::Unifont {
+        match file.encoding {
+            Some(0) => return font_glyph(path, u16::try_from(ch as u32).ok()?),
+            // Packed multibyte 1 is not a single-byte shape-file encoding.
+            Some(2) => {}
+            _ => return None,
+        }
+    }
+    let enc = document::io::dxf::code_page::encoding_from_code_page(code_page)?;
+    let mut buf = [0u8; 4];
+    let (bytes, _, unmappable) = enc.encode(ch.encode_utf8(&mut buf));
+    if unmappable || bytes.len() != 1 {
+        return None;
+    }
+    font_glyph(path, u16::from(bytes[0]))
 }
 
 /// Tessellate the shape named `name` (case-insensitive) from the SHX at
@@ -715,6 +759,41 @@ pub(crate) mod tests {
     /// (`0x60` = length 6, direction 0.)
     const BAR: [u8; 2] = [0x60, 0x00];
 
+    /// Czech letters whose legacy glyph keys differ from their Unicode code
+    /// points, plus the Latin-1 letters that make the bug look intermittent.
+    const CP1250_CZECH: &[(char, u16)] = &[
+        ('á', 0xE1),
+        ('č', 0xE8),
+        ('ď', 0xEF),
+        ('é', 0xE9),
+        ('ě', 0xEC),
+        ('í', 0xED),
+        ('ň', 0xF2),
+        ('ó', 0xF3),
+        ('ř', 0xF8),
+        ('š', 0x9A),
+        ('ť', 0x9D),
+        ('ú', 0xFA),
+        ('ů', 0xF9),
+        ('ý', 0xFD),
+        ('ž', 0x9E),
+        ('Á', 0xC1),
+        ('Č', 0xC8),
+        ('Ď', 0xCF),
+        ('É', 0xC9),
+        ('Ě', 0xCC),
+        ('Í', 0xCD),
+        ('Ň', 0xD2),
+        ('Ó', 0xD3),
+        ('Ř', 0xD8),
+        ('Š', 0x8A),
+        ('Ť', 0x8D),
+        ('Ú', 0xDA),
+        ('Ů', 0xD9),
+        ('Ý', 0xDD),
+        ('Ž', 0x8E),
+    ];
+
     fn tmp(name: &str, bytes: &[u8]) -> String {
         let dir = std::env::temp_dir().join(format!("ocs-shx-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -761,17 +840,45 @@ pub(crate) mod tests {
         b
     }
 
+    /// A classic `shapes 1.0` font with one BAR glyph at every listed code.
+    pub(crate) fn synthetic_shapes(codes: &[u16]) -> Vec<u8> {
+        let mut b = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
+        b.extend_from_slice(&0u16.to_le_bytes());
+        b.extend_from_slice(&codes.iter().copied().max().unwrap_or(0).to_le_bytes());
+        b.extend_from_slice(&((codes.len() + 1) as u16).to_le_bytes());
+        let head: Vec<u8> = [b"CS\x00".as_slice(), &[6u8, 2, 2]].concat();
+        let glyph: Vec<u8> = [b"\x00".as_slice(), &BAR].concat();
+        b.extend_from_slice(&0u16.to_le_bytes());
+        b.extend_from_slice(&(head.len() as u16).to_le_bytes());
+        for &code in codes {
+            b.extend_from_slice(&code.to_le_bytes());
+            b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
+        }
+        b.extend_from_slice(&head);
+        for _ in codes {
+            b.extend_from_slice(&glyph);
+        }
+        b
+    }
+
     /// A `unifont 1.0` with the font header and one glyph for `A` (U+0041).
     fn synthetic_unifont() -> Vec<u8> {
+        synthetic_unifont_with(0, &[0x41])
+    }
+
+    /// A unifont whose header declares `encoding`, with BAR at every code.
+    fn synthetic_unifont_with(encoding: u8, codes: &[u16]) -> Vec<u8> {
         let mut b = b"AutoCAD-86 unifont 1.0\r\n\x1a".to_vec();
-        b.extend_from_slice(&2u32.to_le_bytes()); // header + 1 glyph
-        let head: Vec<u8> = [b"UNI\x00".as_slice(), &[6u8, 2, 2, 0, 0, 0]].concat();
+        b.extend_from_slice(&((codes.len() + 1) as u32).to_le_bytes());
+        let head: Vec<u8> = [b"UNI\x00".as_slice(), &[6, 2, 2, encoding, 0, 0]].concat();
         b.extend_from_slice(&(head.len() as u16).to_le_bytes());
         b.extend_from_slice(&head);
         let glyph: Vec<u8> = [b"\x00".as_slice(), &BAR].concat();
-        b.extend_from_slice(&0x41u16.to_le_bytes());
-        b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
-        b.extend_from_slice(&glyph);
+        for &code in codes {
+            b.extend_from_slice(&code.to_le_bytes());
+            b.extend_from_slice(&(glyph.len() as u16).to_le_bytes());
+            b.extend_from_slice(&glyph);
+        }
         b
     }
 
@@ -845,6 +952,89 @@ pub(crate) mod tests {
             g.advance
         );
         assert!(font_glyph(&path, 'B' as u16).is_none());
+    }
+
+    #[test]
+    fn classic_font_characters_use_the_drawings_code_page() {
+        let path = tmp(
+            "cp1250.shx",
+            &synthetic_shapes(
+                &CP1250_CZECH
+                    .iter()
+                    .map(|(_, code)| *code)
+                    .collect::<Vec<_>>(),
+            ),
+        );
+        for &(ch, code) in CP1250_CZECH {
+            let expected = font_glyph(&path, code).expect("raw glyph");
+            let actual = font_char_glyph(&path, ch, "ANSI_1250").expect("CP1250 glyph");
+            assert!(Arc::ptr_eq(&expected, &actual), "{ch} must use {code:#X}");
+        }
+        for ch in ['ě', 'č', 'ř', 'ů'] {
+            assert!(
+                font_char_glyph(&path, ch, "ANSI_1252").is_none(),
+                "{ch} must not alias into CP1250 under a Western drawing"
+            );
+        }
+        for (ch, code) in [('š', 0x9A), ('ž', 0x9E)] {
+            let expected = font_glyph(&path, code).expect("raw glyph");
+            let actual = font_char_glyph(&path, ch, "ANSI_1252").expect("CP1252 glyph");
+            assert!(Arc::ptr_eq(&expected, &actual), "{ch} shares this byte");
+        }
+    }
+
+    #[test]
+    fn unifont_encoding_selects_unicode_or_legacy_shape_keys() {
+        let unicode = tmp(
+            "unicode-czech.shx",
+            &synthetic_unifont_with(0, &[0x016F, 0x00F9]),
+        );
+        let expected = font_glyph(&unicode, 0x016F).expect("Unicode glyph");
+        let actual = font_char_glyph(&unicode, 'ů', "ANSI_1250").expect("Unicode lookup");
+        assert!(Arc::ptr_eq(&expected, &actual));
+
+        let shapes = tmp(
+            "shape-encoded-czech.shx",
+            &synthetic_unifont_with(2, &[0x016F, 0x00F9]),
+        );
+        let expected = font_glyph(&shapes, 0x00F9).expect("CP1250 glyph");
+        let actual = font_char_glyph(&shapes, 'ů', "ANSI_1250").expect("legacy lookup");
+        assert!(Arc::ptr_eq(&expected, &actual));
+
+        let packed = tmp(
+            "packed-czech.shx",
+            &synthetic_unifont_with(1, &[0x41, 0x00F9]),
+        );
+        assert!(font_char_glyph(&packed, 'A', "ANSI_1250").is_some());
+        assert!(font_char_glyph(&packed, 'ů', "ANSI_1250").is_none());
+    }
+
+    #[test]
+    fn a_face_resolves_czech_glyphs_without_the_fallback() {
+        use crate::scene::text::font_face::{Face, GlyphRef};
+        let path = tmp(
+            "face-cp1250.shx",
+            &synthetic_shapes(
+                &CP1250_CZECH
+                    .iter()
+                    .map(|(_, code)| *code)
+                    .collect::<Vec<_>>(),
+            ),
+        );
+        let face = Face::resolve(&Face::with_code_page(&path, "ANSI_1250"));
+        for &(ch, code) in CP1250_CZECH {
+            let expected = font_glyph(&path, code).expect("raw glyph");
+            let GlyphRef::Owned(own) = face.own_glyph(ch).expect("face glyph") else {
+                panic!("SHX returned a borrowed glyph for {ch}");
+            };
+            assert!(Arc::ptr_eq(&expected, &own), "own_glyph: {ch}");
+            let GlyphRef::Owned(full) = face.glyph(ch).expect("face glyph") else {
+                panic!("SHX returned a borrowed glyph for {ch}");
+            };
+            assert!(Arc::ptr_eq(&expected, &full), "glyph: {ch}");
+            #[cfg(not(target_arch = "wasm32"))]
+            assert!(face.glyph_source(ch).is_none(), "fallback source: {ch}");
+        }
     }
 
     /// The `9` program of the ISOCP fonts: a fractional arc into the stem,

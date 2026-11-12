@@ -1218,7 +1218,7 @@ impl OpenCADStudio {
         }
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
-        let tokens: Vec<&str> = cmd.split_whitespace().collect();
+        let tokens = quoted_words(cmd);
         if tokens.len() <= 1 {
             return self.dispatch_command(cmd);
         }
@@ -1434,7 +1434,7 @@ impl OpenCADStudio {
                 paused = true;
                 break;
             }
-            tasks.push(self.feed_active_cmd(tok));
+            tasks.push(self.feed_active_cmd(unquote(tok)));
             consumed += 1;
         }
         if !editor_was_open && self.text_inline.is_some() && consumed < tokens.len() {
@@ -2197,5 +2197,50 @@ impl OpenCADStudio {
 
         // 4. No command is active: run as top-level command.
         self.run_command_line(trimmed)
+    }
+}
+
+/// The words of a command line, a `"double quoted"` run (a layer or style
+/// name with spaces) staying one word with its quotes, so the line can be
+/// rejoined for the next command unchanged.
+fn quoted_words(line: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut quoted = false;
+    for (at, c) in line.char_indices() {
+        if c == '"' {
+            quoted = !quoted;
+        }
+        if c.is_whitespace() && !quoted {
+            if let Some(from) = start.take() {
+                words.push(&line[from..at]);
+            }
+        } else if start.is_none() {
+            start = Some(at);
+        }
+    }
+    words.extend(start.map(|from| &line[from..]));
+    words
+}
+
+/// A word as a prompt takes it: without the quotes that kept it whole.
+fn unquote(word: &str) -> &str {
+    word.strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(word)
+}
+
+#[cfg(test)]
+mod quoted_word_tests {
+    use super::{quoted_words, unquote};
+
+    #[test]
+    fn a_quoted_name_stays_one_word() {
+        let words = quoted_words(r#"-LAYER N "Power Cables" 0,0  "" end"#);
+        assert_eq!(words, ["-LAYER", "N", r#""Power Cables""#, "0,0", r#""""#, "end"]);
+        assert_eq!(unquote(words[2]), "Power Cables");
+        assert_eq!(unquote(words[4]), "");
+        assert_eq!(unquote("Walls"), "Walls");
+        assert_eq!(quoted_words("LINE 0,0 10,0"), ["LINE", "0,0", "10,0"]);
     }
 }

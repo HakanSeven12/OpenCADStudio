@@ -454,32 +454,40 @@ fn triangulate_contours(contours: &[Vec<[f32; 2]>]) -> Vec<[f32; 2]> {
     }
     let path = builder.build();
 
-    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
-    let mut tessellator = FillTessellator::new();
-    // TrueType outlines use the nonzero winding rule; lyon's default even-odd
-    // rule mis-fills glyphs whose contours overlap. On a tessellation failure
-    // the glyph falls back to an empty fill silently — per-glyph logging would
-    // otherwise spam stderr once per character for a malformed font.
-    if tessellator
-        .tessellate_path(
-            &path,
-            &FillOptions::default().with_fill_rule(FillRule::NonZero),
-            &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| {
-                vertex.position().to_array()
-            }),
-        )
-        .is_err()
-    {
-        return Vec::new();
+    thread_local! {
+        static TESS_SCRATCH: std::cell::RefCell<(FillTessellator, VertexBuffers<[f32; 2], u32>)> =
+            std::cell::RefCell::new((FillTessellator::new(), VertexBuffers::new()));
     }
 
-    let mut tris = Vec::with_capacity(geometry.indices.len());
-    for &idx in &geometry.indices {
-        if let Some(&p) = geometry.vertices.get(idx as usize) {
-            tris.push(p);
+    TESS_SCRATCH.with(|cell| {
+        let mut scratch = cell.borrow_mut();
+        let (tessellator, geometry) = &mut *scratch;
+        geometry.clear();
+        // TrueType outlines use the nonzero winding rule; lyon's default even-odd
+        // rule mis-fills glyphs whose contours overlap. On a tessellation failure
+        // the glyph falls back to an empty fill silently — per-glyph logging would
+        // otherwise spam stderr once per character for a malformed font.
+        if tessellator
+            .tessellate_path(
+                &path,
+                &FillOptions::default().with_fill_rule(FillRule::NonZero),
+                &mut BuffersBuilder::new(geometry, |vertex: FillVertex| {
+                    vertex.position().to_array()
+                }),
+            )
+            .is_err()
+        {
+            return Vec::new();
         }
-    }
-    tris
+
+        let mut tris = Vec::with_capacity(geometry.indices.len());
+        for &idx in &geometry.indices {
+            if let Some(&p) = geometry.vertices.get(idx as usize) {
+                tris.push(p);
+            }
+        }
+        tris
+    })
 }
 
 // ── Glyph source (for exporters that embed the font) ─────────────────────────
@@ -1052,9 +1060,33 @@ pub fn fallback_glyph(ch: char) -> Option<Arc<Glyph>> {
 /// build calls this when a per-script font finishes loading: glyphs that
 /// resolved to `None` while the font was still in flight then get a real
 /// outline. (#141)
+type PrimaryMetricsCache = HashMap<String, Option<(f32, f32)>>;
+
+fn primary_metrics_cache() -> &'static Mutex<PrimaryMetricsCache> {
+    static CACHE: OnceLock<Mutex<PrimaryMetricsCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+fn cached_primary_metrics(family: &str) -> Option<(f32, f32)> {
+    if let Some(&hit) = primary_metrics_cache().lock().unwrap().get(family) {
+        return hit;
+    }
+    let computed = sysfont::with_face_data(family, |data, idx| {
+        let f = ttf_parser::Face::parse(data, idx).ok()?;
+        Some((f.units_per_em() as f32, capital_units(&f)))
+    })
+    .flatten();
+    primary_metrics_cache()
+        .lock()
+        .unwrap()
+        .insert(family.to_string(), computed);
+    computed
+}
+
 pub fn clear_fallback_cache() {
     fallback_cache().lock().unwrap().clear();
     shape_cache().lock().unwrap().clear();
+    primary_metrics_cache().lock().unwrap().clear();
     #[cfg(not(target_arch = "wasm32"))]
     positioned_glyph_cache().lock().unwrap().clear();
     // Web only: the per-family outline cache can also hold stale `None`s —
@@ -1358,11 +1390,7 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
 fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     use cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping};
 
-    let mut primary_metrics = sysfont::with_face_data(family, |data, idx| {
-        let f = ttf_parser::Face::parse(data, idx).ok()?;
-        Some((f.units_per_em() as f32, capital_units(&f)))
-    })
-    .flatten();
+    let mut primary_metrics = cached_primary_metrics(family);
 
     let mut fs = font_system().lock().unwrap();
     // A styled family shapes with the bold / italic face it names.

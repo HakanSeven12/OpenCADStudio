@@ -76,7 +76,7 @@ impl CadModule for DrawModule {
                             id: ellipse::DROPDOWN_ID,
                             icon: ellipse::ICON,
                             items: ellipse::DROPDOWN_ITEMS.to_vec(),
-                            default: "ELLIPSE",
+                            default: "ELLIPSE_CENTER",
                         },
                         RibbonItem::Dropdown {
                             id: hatch::DROPDOWN_ID,

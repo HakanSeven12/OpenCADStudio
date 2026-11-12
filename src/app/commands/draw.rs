@@ -1264,7 +1264,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "ELLIPSE" => {
+            "ELLIPSE_CENTER" => {
                 use crate::modules::draw::draw::ellipse::EllipseCommand;
                 let pellipse = self.tabs[i]
                     .scene
@@ -1277,7 +1277,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "ELLIPSE_AXIS" => {
+            "ELLIPSE" | "ELLIPSE_AXIS" => {
                 use crate::modules::draw::draw::ellipse::EllipseAxisCommand;
                 let pellipse = self.tabs[i]
                     .scene

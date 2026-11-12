@@ -81,7 +81,7 @@ fn shx_polylines(
         if font.is_empty() {
             return None;
         }
-        let resolved = crate::io::resolve_image_file(font, base)?;
+        let resolved = crate::io::linetypes::find_shape_file(font, base)?;
         if let Ok(num) = u16::try_from(shape.shape_number) {
             if num != 0 {
                 if let Some(p) = crate::scene::text::shx::shape_polylines(&resolved, num) {

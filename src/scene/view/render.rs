@@ -5596,7 +5596,7 @@ pub(crate) fn resolve_pattern(
     }
 
     // Keep dots (element length exactly 0) as 0.0 so the shader can render
-    // them as a fixed ~1 px mark; trailing array slots stay 0.0 padding and
+    // them round at the stroke's width; trailing array slots stay 0.0 padding and
     // the shader tells the two apart by position (a 0.0 before the last
     // non-zero element is a dot, trailing 0.0s are padding). The old code
     // encoded dots as `0.01 * scale` — a tiny world-length dash that went

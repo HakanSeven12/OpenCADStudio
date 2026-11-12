@@ -148,8 +148,7 @@ pub fn shx_file_missing(file: &str, base: Option<&Path>) -> bool {
         || !file.to_ascii_lowercase().ends_with(".shx")
         || crate::io::linetypes::is_bundled_shape_file(file)
         || crate::scene::text::lff::is_builtin(file)
-        || crate::io::resolve_image_file(file, base).is_some()
-        || local_font_file(file).is_some())
+        || crate::io::linetypes::find_shape_file(file, base).is_some())
 }
 
 /// The `.shx` files in the downloaded-fonts folder and the support folder,
@@ -222,8 +221,7 @@ pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
             return found.clone();
         }
     }
-    let found = crate::io::resolve_image_file(name, base)
-        .or_else(|| local_font_file(name).map(|path| path.to_string_lossy().into_owned()));
+    let found = crate::io::linetypes::find_shape_file(name, base);
     font_paths()
         .write()
         .unwrap_or_else(|e| e.into_inner())
@@ -444,6 +442,8 @@ mod tests {
         let _ = doc.text_styles.add(mk("A", "MISSING1.shx"));
         let _ = doc.text_styles.add(mk("B", "missing1.SHX"));
         let _ = doc.text_styles.add(mk("C", "exists.shx"));
+        // A differently-cased reference resolves to that same sibling (#2804).
+        let _ = doc.text_styles.add(mk("F", "EXISTS.SHX"));
         doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
         // Fonts with a built-in stroke equivalent are not missing (#2156).
         let _ = doc.text_styles.add(mk("D", "romans.shx"));

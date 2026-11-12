@@ -99,6 +99,8 @@ struct VertexOut {
     @location(7) @interpolate(flat) align_total: f32,
     @location(8) cap: vec2<f32>,
     @location(9) @interpolate(flat) cap_ends: vec3<f32>,
+    // Dot half-width and signed across distance, both in world units.
+    @location(10) dot: vec2<f32>,
 }
 
 // The selection pass widens highlighted lines by `highlight_widen` pixels;
@@ -192,6 +194,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     var out_dist: f32;
     var out_cap: vec2<f32>;
     var out_cap_ends: vec3<f32>;
+    var out_dot: vec2<f32>;
 
     if is_world {
         // Wide polylines have physical world-unit width (world_half_width or taper > 0).
@@ -238,6 +241,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         out_dist = mix(seg_distances.x, seg_distances.y, which_end) + along * (seg_distances.y - seg_distances.x) / max(world_len, 1e-6);
         out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
         out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+        out_dot = vec2<f32>(max(cur_world_hw, 0.75 * u.world_per_pixel), eff_hw * side);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
         let raw_a = u.view_rot * vec4<f32>(rel_a, 1.0);
@@ -270,6 +274,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
             + extension * half_width * u.world_per_pixel;
         out_cap = vec2<f32>(which_end * segment_length + extension * half_width, half_width * side);
         out_cap_ends = vec3<f32>(segment_length, half_width, half_width);
+        out_dot = vec2<f32>(max(half_width, 0.75) * u.world_per_pixel, half_width * side * u.world_per_pixel);
     }
 
     let scale = u.linetype_scale;
@@ -297,6 +302,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     out.distance = out_dist;
     out.cap = out_cap;
     out.cap_ends = out_cap_ends;
+    out.dot = out_dot;
     out.pattern_length = wire_const.pattern_length * scale;
     out.pat0 = wire_const.pat0 * scale;
     out.pat1 = wire_const.pat1 * scale;
@@ -318,6 +324,7 @@ fn in_dash(
     pat1: vec4<f32>,
     align_end: f32,
     align_total: f32,
+    dot: vec2<f32>,
 ) -> bool {
     let elements = array<f32, 8>(
         pat0.x, pat0.y, pat0.z, pat0.w,
@@ -349,12 +356,12 @@ fn in_dash(
         value = ((max(distance, 0.0) % pattern_length) + pattern_length) % pattern_length;
     }
     var position = 0.0;
-    let dot_half = u.world_per_pixel * 0.75;
     for (var i = 0u; i < count; i++) {
         let element = elements[i];
         if element == 0.0 {
             let delta = abs(value - position);
-            if min(delta, pattern_length - delta) <= dot_half {
+            let along = min(delta, pattern_length - delta);
+            if along * along + dot.y * dot.y <= dot.x * dot.x {
                 return true;
             }
         } else if element > 0.0 {
@@ -391,6 +398,7 @@ fn visible_fragment(in: VertexOut) -> bool {
             in.pat1,
             in.align_end,
             in.align_total,
+            in.dot,
         );
     }
     return true;

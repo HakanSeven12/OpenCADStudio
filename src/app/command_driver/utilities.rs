@@ -2202,13 +2202,14 @@ impl OpenCADStudio {
 
 /// The words of a command line, a `"double quoted"` run (a layer or style
 /// name with spaces) staying one word with its quotes, so the line can be
-/// rejoined for the next command unchanged.
+/// rejoined for the next command unchanged. Only a quote that starts a word
+/// opens a run, so inch marks (`@5'6",0`) stay plain words.
 fn quoted_words(line: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let mut start = None;
     let mut quoted = false;
     for (at, c) in line.char_indices() {
-        if c == '"' {
+        if c == '"' && (quoted || start.is_none()) {
             quoted = !quoted;
         }
         if c.is_whitespace() && !quoted {
@@ -2242,5 +2243,6 @@ mod quoted_word_tests {
         assert_eq!(unquote(words[4]), "");
         assert_eq!(unquote("Walls"), "Walls");
         assert_eq!(quoted_words("LINE 0,0 10,0"), ["LINE", "0,0", "10,0"]);
+        assert_eq!(quoted_words(r#"LINE 0,0 @5'6",0 @0,2" "#), ["LINE", "0,0", r#"@5'6",0"#, r#"@0,2""#]);
     }
 }

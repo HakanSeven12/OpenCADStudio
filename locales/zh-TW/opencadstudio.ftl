@@ -6159,11 +6159,7 @@ styles =
     .value-0-variable = 0 = 可變
     .aci-color-index = ACI 顏色索引
     .aci = ACI：
-    .audit-no-issues-found = AUDIT: 沒有找到問題。
     .audit-fix-any-errors-detected = AUDIT  是否修復偵測到的錯誤？ [是(Y)/否(N)] <否>：
-    .audit-error-s-warning-s-found = AUDIT: 發現 __ocs_fmt_0__ 個錯誤，__ocs_fmt_1__ 個警告。
-    .audit-repair-s-applied-issue-s-left = AUDIT: 已套用 __ocs_fmt_0__ 項修復，__ocs_fmt_1__ 個問題未解決。
-    .audit-scanned-total-object-s = AUDIT: 掃描了 __ocs_fmt_0__ 個物件。
     .above-text = 上方為文字
     .active-dim-style-set-to-name-arg = 目前標註型式已設為 “__ocs_fmt_0__”
     .add-leader = 新增引線

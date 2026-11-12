@@ -6165,11 +6165,9 @@ styles =
     .value-0-variable = 0 = variable
     .aci-color-index = ACI Color Index
     .aci = ACI:
-    .audit-no-issues-found = AUDIT: no issues found.
     .audit-fix-any-errors-detected = AUDIT  Fix any errors detected? [Yes / No] <No>:
-    .audit-error-s-warning-s-found = AUDIT: __ocs_fmt_0__ error(s), __ocs_fmt_1__ warning(s) found.
-    .audit-repair-s-applied-issue-s-left = AUDIT: __ocs_fmt_0__ repair(s) applied, __ocs_fmt_1__ issue(s) left unresolved.
-    .audit-scanned-total-object-s = AUDIT: scanned __ocs_fmt_0__ object(s).
+    .audit-objects-audited = __ocs_fmt_0__ objects audited
+    .audit-total-errors-found-fixed = Total errors found __ocs_fmt_0__ fixed __ocs_fmt_1__
     .above-text = Above text
     .active-dim-style-set-to-name-arg = Active dim style set to "__ocs_fmt_0__"
     .add-leader = Add leader

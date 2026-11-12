@@ -4063,7 +4063,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("AUDIT ") => {
-                // Report in AutoCAD's words: "N objects audited" and
+                // Report as other CAD auditors do: "N objects audited" and
                 // "Total errors found X fixed Y".
                 let fix = cmd[6..].trim().to_uppercase().starts_with('Y');
                 let report = self.tabs[i].scene.document.audit();

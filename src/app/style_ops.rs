@@ -581,33 +581,70 @@ impl OpenCADStudio {
             }
             StyleKind::Dim => {
                 let doc = &mut self.tabs[i].scene.document;
-                if let Some(mut s) = doc.dim_styles.get(old).cloned() {
-                    s.name = new.to_string();
-                    if !s.handle.is_valid() {
-                        s.handle = doc.allocate_handle();
+                // The family members (`NAME$0` linear, `$2` angular, ...)
+                // follow their parent's name.
+                let renames: Vec<(String, String)> = doc
+                    .dim_styles
+                    .iter()
+                    .filter_map(|style| {
+                        if style.name.eq_ignore_ascii_case(old) {
+                            return Some((style.name.clone(), new.to_string()));
+                        }
+                        let (parent, member) = style.name.rsplit_once('$')?;
+                        (parent.eq_ignore_ascii_case(old)
+                            && !member.is_empty()
+                            && member.chars().all(|c| c.is_ascii_digit()))
+                        .then(|| (style.name.clone(), format!("{new}${member}")))
+                    })
+                    .collect();
+                for (from, to) in &renames {
+                    if let Some(mut s) = doc.dim_styles.get(from).cloned() {
+                        s.name = to.clone();
+                        if !s.handle.is_valid() {
+                            s.handle = doc.allocate_handle();
+                        }
+                        if doc.dim_styles.add(s).is_ok() {
+                            doc.dim_styles.remove(from);
+                        }
                     }
-                    let _ = doc.dim_styles.add(s);
                 }
-                doc.dim_styles.remove(old);
                 if doc.header.current_dimstyle_name.eq_ignore_ascii_case(old) {
                     doc.header.current_dimstyle_name = new.to_string();
                 }
-                for e in doc.entities_mut() {
-                    match e {
-                        document::entities::EntityType::Dimension(d)
-                            if d.base().style_name.eq_ignore_ascii_case(old) =>
-                        {
-                            d.base_mut().style_name = new.to_string();
+                // Only the objects naming the style change, each through
+                // `get_entity_mut`: a bulk `entities_mut` pass would drop the
+                // stored record of every entity in the drawing.
+                let handles: Vec<Handle> = doc
+                    .entities()
+                    .filter(|entity| match entity {
+                        document::entities::EntityType::Dimension(d) => {
+                            d.base().style_name.eq_ignore_ascii_case(old)
                         }
-                        document::entities::EntityType::Leader(l)
-                            if l.dimension_style.eq_ignore_ascii_case(old) =>
-                        {
-                            l.dimension_style = new.to_string();
+                        document::entities::EntityType::Leader(l) => {
+                            l.dimension_style.eq_ignore_ascii_case(old)
                         }
-                        document::entities::EntityType::Tolerance(t)
-                            if t.dimension_style_name.eq_ignore_ascii_case(old) =>
-                        {
-                            t.dimension_style_name = new.to_string();
+                        document::entities::EntityType::Tolerance(t) => {
+                            t.dimension_style_name.eq_ignore_ascii_case(old)
+                        }
+                        _ => false,
+                    })
+                    .map(|entity| entity.common().handle)
+                    .collect();
+                for handle in handles {
+                    if let (Some(stage), Some(before)) =
+                        (self.style_stage.as_mut(), doc.get_entity_arc(handle))
+                    {
+                        stage.entities.entry(handle).or_insert(before);
+                    }
+                    match doc.get_entity_mut(handle) {
+                        Some(document::entities::EntityType::Dimension(d)) => {
+                            d.base_mut().style_name = new.to_string()
+                        }
+                        Some(document::entities::EntityType::Leader(l)) => {
+                            l.dimension_style = new.to_string()
+                        }
+                        Some(document::entities::EntityType::Tolerance(t)) => {
+                            t.dimension_style_name = new.to_string()
                         }
                         _ => {}
                     }
@@ -1538,7 +1575,28 @@ pub(crate) fn style_in_use(
 pub(crate) fn remove_style(doc: &mut document::Document, kind: StyleKind, name: &str) -> bool {
     match kind {
         StyleKind::Text => doc.text_styles.remove(name).is_some(),
-        StyleKind::Dim => doc.dim_styles.remove(name).is_some(),
+        StyleKind::Dim => {
+            // Its family members (`NAME$0`, `$2`, ...) go with it.
+            let members: Vec<String> = doc
+                .dim_styles
+                .iter()
+                .filter(|style| {
+                    style.name.rsplit_once('$').is_some_and(|(parent, member)| {
+                        parent.eq_ignore_ascii_case(name)
+                            && !member.is_empty()
+                            && member.chars().all(|c| c.is_ascii_digit())
+                    })
+                })
+                .map(|style| style.name.clone())
+                .collect();
+            let removed = doc.dim_styles.remove(name).is_some();
+            if removed {
+                for member in members {
+                    doc.dim_styles.remove(&member);
+                }
+            }
+            removed
+        }
         StyleKind::Linetype => {
             use crate::scene::linetype_service as service;
             match service::plan_delete(doc, name) {

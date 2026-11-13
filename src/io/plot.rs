@@ -185,3 +185,129 @@ impl Default for PlotOptions {
         }
     }
 }
+
+/// A circle or arc wire as cubic Bézier spans `[start, control, control,
+/// end]`, in the coordinates of its own points, so a plot draws the true
+/// curve instead of the screen's chords (#2854). The wire's tangent geometry
+/// only says that it is one circle or arc; the curve is fitted to the points,
+/// which a layout viewport has already carried onto the sheet. `None` for any
+/// other wire, or when a point is off that circle: the chords are plotted.
+pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[glam::DVec2; 4]>> {
+    use crate::scene::model::wire_model::TangentGeom;
+    use glam::DVec2;
+    let curve = matches!(
+        wire.tangent_geoms.as_slice(),
+        [TangentGeom::Circle { .. } | TangentGeom::PlanarCircle { .. } | TangentGeom::Arc { .. }]
+    );
+    if !curve
+        || wire.world_width > 0.0
+        || wire.point_marker.is_some()
+        || wire.stub.is_some()
+        || wire.points.len() < 5
+    {
+        return None;
+    }
+    let points: Vec<DVec2> = (0..wire.points.len())
+        .map(|index| wire.point_world(index, view_h).truncate())
+        .collect();
+    // A NaN pen-up (a clipped or dashed piece) is left to the chords.
+    if !points.iter().all(|point| point.is_finite()) {
+        return None;
+    }
+    let n = points.len();
+    let (a, b, c) = (points[0], points[n / 3], points[2 * n / 3]);
+    let (ab, ac) = (b - a, c - a);
+    let det = 2.0 * ab.perp_dot(ac);
+    if det.abs() <= f64::EPSILON * ab.length_squared().max(ac.length_squared()) {
+        return None;
+    }
+    let center = a + DVec2::new(
+        ac.y * ab.length_squared() - ab.y * ac.length_squared(),
+        ab.x * ac.length_squared() - ac.x * ab.length_squared(),
+    ) / det;
+    let radius = center.distance(a);
+    if points
+        .iter()
+        .any(|point| (point.distance(center) - radius).abs() > radius * 1.0e-3)
+    {
+        return None;
+    }
+    // The points turn one way round the centre, at most once.
+    let mut sweep = 0.0;
+    for pair in points.windows(2) {
+        let turn = (pair[0] - center).angle_to(pair[1] - center);
+        if turn.abs() >= std::f64::consts::PI || turn * sweep < 0.0 {
+            return None;
+        }
+        sweep += turn;
+    }
+    if sweep == 0.0 || sweep.abs() > std::f64::consts::TAU + 1.0e-6 {
+        return None;
+    }
+    let start = (a - center).to_angle();
+    // A full turn sums to a hair over 2π; that is still four quarters.
+    let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9).ceil().max(1.0) as usize;
+    let step = sweep / pieces as f64;
+    let handle = 4.0 / 3.0 * (step / 4.0).tan();
+    let at = |t: f64| center + radius * DVec2::from_angle(t);
+    let tangent = |t: f64| radius * DVec2::from_angle(t).perp();
+    Some(
+        (0..pieces)
+            .map(|piece| {
+                let (t0, t1) = (start + step * piece as f64, start + step * (piece + 1) as f64);
+                [
+                    at(t0),
+                    at(t0) + handle * tangent(t0),
+                    at(t1) - handle * tangent(t1),
+                    at(t1),
+                ]
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::scene::model::wire_model::TangentGeom;
+    use crate::scene::WireModel;
+
+    fn arc_wire(sweep: f64, segments: usize) -> WireModel {
+        let (center, radius) = ([1000.0, 2000.0], 5.0);
+        WireModel {
+            points: (0..=segments)
+                .map(|i| {
+                    let t = 0.3 + sweep * i as f64 / segments as f64;
+                    let x = center[0] + radius * t.cos();
+                    let y = center[1] + radius * t.sin();
+                    [x as f32, y as f32, 0.0]
+                })
+                .collect(),
+            tangent_geoms: vec![TangentGeom::Circle {
+                center: [1000.0, 2000.0, 0.0],
+                radius: 5.0,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn circles_and_arcs_plot_as_curves() {
+        for sweep in [1.0, -2.5, std::f64::consts::TAU] {
+            let spans = super::wire_arc_beziers(&arc_wire(sweep, 48), 1.0).unwrap();
+            assert_eq!(spans.len(), (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize);
+            let center = glam::DVec2::new(1000.0, 2000.0);
+            for [p0, c1, c2, p3] in &spans {
+                // The curve's midpoint lies on the circle.
+                let mid = (*p0 + 3.0 * *c1 + 3.0 * *c2 + *p3) / 8.0;
+                assert!((mid.distance(center) - 5.0).abs() < 1.0e-3, "{sweep}");
+            }
+            let end = 0.3 + sweep;
+            let last = spans.last().unwrap()[3];
+            assert!(last.distance(center + 5.0 * glam::DVec2::from_angle(end)) < 1.0e-3);
+        }
+        // A wire that is not a circle or arc keeps its chords.
+        let mut polygon = arc_wire(std::f64::consts::TAU, 6);
+        polygon.tangent_geoms.clear();
+        assert!(super::wire_arc_beziers(&polygon, 1.0).is_none());
+    }
+}

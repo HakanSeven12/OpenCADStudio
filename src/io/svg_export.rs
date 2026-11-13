@@ -507,7 +507,26 @@ fn emit_wire(
     let mut d = String::new();
     let mut pen_down = false;
     let mut any = false;
-    for (pi, &[x, y, _]) in wire.points.iter().enumerate() {
+    // A circle or arc is drawn as its curve, not as chords.
+    let spans = crate::io::plot::wire_arc_beziers(wire, view_h).unwrap_or_default();
+    for (index, span) in spans.iter().enumerate() {
+        let [p0, c1, c2, p3] = span.map(|p| map.apply(p.x + ox, p.y + oy));
+        if index == 0 {
+            d.push_str(&format!("M {} {} ", fmt(p0.0), fmt(p0.1)));
+        }
+        d.push_str(&format!(
+            "C {} {} {} {} {} {} ",
+            fmt(c1.0),
+            fmt(c1.1),
+            fmt(c2.0),
+            fmt(c2.1),
+            fmt(p3.0),
+            fmt(p3.1)
+        ));
+        any = true;
+    }
+    let chords = if spans.is_empty() { wire.points.as_slice() } else { &[] };
+    for (pi, &[x, y, _]) in chords.iter().enumerate() {
         if x.is_nan() || y.is_nan() {
             pen_down = false;
             continue;

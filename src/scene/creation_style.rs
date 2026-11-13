@@ -687,7 +687,27 @@ pub fn header_dim_overrides(
 ) -> Option<(String, Vec<(i16, document::xdata::XDataValue)>)> {
     let current = doc.header.current_dimstyle_name.clone();
     let style = named_dim_style(doc, &current)?;
-    let pairs = crate::entities::dim_override::diff_pairs(&style, &header_dim_style(doc, &style));
+    let mut pairs =
+        crate::entities::dim_override::diff_pairs(&style, &header_dim_style(doc, &style));
+    // A variable a DXF header left out keeps the codec's default, which
+    // stands for the current style's value, not an override.
+    if let Some(carried) = &doc.header.dxf_dim_variables {
+        use crate::entities::dim_override as o;
+        pairs.retain(|(code, _)| {
+            let name = match *code {
+                o::DIMTXSTY => Some("DIMTXSTY"),
+                o::DIMBLK => Some("DIMBLK"),
+                o::DIMBLK1 => Some("DIMBLK1"),
+                o::DIMBLK2 => Some("DIMBLK2"),
+                o::DIMLDRBLK => Some("DIMLDRBLK"),
+                o::DIMLTYPE => Some("DIMLTYPE"),
+                o::DIMLTEX1 => Some("DIMLTEX1"),
+                o::DIMLTEX2 => Some("DIMLTEX2"),
+                code => o::variable_for_code(code).map(|(name, _)| name),
+            };
+            name.is_none_or(|name| carried.contains(&format!("${name}")))
+        });
+    }
     (!pairs.is_empty()).then(|| (style.name.clone(), pairs))
 }
 

@@ -4735,6 +4735,45 @@ mod tests {
         );
     }
 
+    /// The band of row numbers and column letters around a table being
+    /// edited is as high as the smallest text of its rows. A table of data
+    /// rows measures it by the data style alone: not by the title or header
+    /// style when it has one or two rows, nor by a smaller title text when
+    /// it has more.
+    #[test]
+    fn the_indicator_of_a_table_of_data_rows_takes_the_data_text_height() {
+        use document::types::Vector3;
+        // The indicator's text height for `rows` data rows, in a table style
+        // with these title, header and data text heights.
+        let indicator = |heights: [f64; 3], rows: usize| {
+            let mut document = document::Document::new();
+            let mut style = document::objects::TableStyle::standard();
+            style.title_row_style.text_height = heights[0];
+            style.header_row_style.text_height = heights[1];
+            style.data_row_style.text_height = heights[2];
+            let handle = document.allocate_handle();
+            document
+                .objects
+                .insert(handle, document::objects::ObjectType::TableStyle(style));
+            let mut table = Table::new(Vector3::ZERO, rows, 1);
+            table.table_style_handle = Some(handle);
+            for row in &mut table.rows {
+                row.style_id = 3;
+            }
+            table_indicator(&table, &document, None)
+                .expect("the table has cells")
+                .text_height
+        };
+        let small_data = [1, 2, 3].map(|rows| indicator([6.0, 4.5, 2.0], rows));
+        let large_data = indicator([2.0, 2.0, 6.0], 3);
+        assert!(
+            small_data.iter().all(|height| (height - 2.0).abs() < 1e-6)
+                && (large_data - 6.0).abs() < 1e-6,
+            "data text 2 high: {small_data:?} for one, two and three rows; \
+             data text 6 high under a title of 2: {large_data}"
+        );
+    }
+
     /// Text wraps between the margins it is placed against: a long
     /// left-aligned line ends inside the cell, not past the
     /// cell's edge (with no table margin the text sits half its height in).

@@ -7,7 +7,8 @@
 
 use crate::app::{Message, ModalKind, OpenCADStudio, StyleKind};
 use crate::ui::style::mleaderstyle::{
-    field_id, field_tab, trim_number, CreateDraft, LoadDraft, MlsMsg, Modify, Notice, Pick, OTHER,
+    field_id, field_tab, trim_number, CreateDraft, LoadDraft, MlsMsg, Modify, Notice, Pick, Reload,
+    ReloadAsk, OTHER,
 };
 use document::objects::{
     BlockContentConnectionType, LeaderContentType, MultiLeaderPathType, MultiLeaderStyle,
@@ -457,6 +458,10 @@ impl OpenCADStudio {
     /// The ✕ of the window closes its topmost face first; `false` when only
     /// the manager is open.
     pub(super) fn mleader_style_close_face(&mut self) -> bool {
+        if self.mls.reload_ask.take().is_some() {
+            self.mls.load = None;
+            return true;
+        }
         if self.mls.notice.take().is_some()
             || self.mls.delete_ask.take().is_some()
             || self.mls.load.take().is_some()
@@ -524,6 +529,7 @@ impl OpenCADStudio {
                     name: crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = start.clone())),
                     start_with: start,
                     annotative,
+                    name_edited: false,
                 });
                 let id = iced::widget::Id::new("mls-new-name");
                 return Task::batch([
@@ -534,6 +540,7 @@ impl OpenCADStudio {
             MlsMsg::CreateName(name) => {
                 if let Some(draft) = self.mls.create.as_mut() {
                     draft.name = name;
+                    draft.name_edited = true;
                 }
             }
             MlsMsg::CreateStart(start) => {
@@ -542,14 +549,13 @@ impl OpenCADStudio {
                         if s.name.eq_ignore_ascii_case(&start) && s.is_annotative)
                 });
                 if let Some(draft) = self.mls.create.as_mut() {
-                    // A name still as offered follows the style it copies.
-                    let offered =
-                        crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = draft.start_with.clone()));
-                    if draft.name == offered {
+                    // Until the name is typed, the copy follows the style it
+                    // starts from: its name and its annotative setting.
+                    if !draft.name_edited {
                         draft.name = crate::i18n::plain(crate::tr!("mleader-style", "copy-of", name = start.clone()));
+                        draft.annotative = annotative;
                     }
                     draft.start_with = start;
-                    draft.annotative = annotative;
                 }
             }
             MlsMsg::CreateAnnotative(on) => {
@@ -634,6 +640,10 @@ impl OpenCADStudio {
             }
             MlsMsg::ScaleToLayout(on) => {
                 if let Some(m) = self.mls.modify.as_mut() {
+                    // Back to a specified scale it starts again from 1.
+                    if m.scale_to_layout && !on {
+                        self.mls_scale_factor = "1".to_string();
+                    }
                     m.scale_to_layout = on;
                 }
             }
@@ -680,21 +690,56 @@ impl OpenCADStudio {
                 }
             }
             MlsMsg::LoadCancel => self.mls.load = None,
+            // OK asks about the ticked linetypes the drawing already has,
+            // one by one, before loading anything.
             MlsMsg::LoadOk => {
-                if let Some(load) = self.mls.load.take() {
-                    let doc = &mut self.tabs[i].scene.document;
-                    crate::io::linetypes::populate_document_named(
-                        doc,
-                        &load.source,
-                        load.dir.as_deref(),
-                        &load.picked,
-                    );
-                    // The last loaded linetype is the one picked.
-                    if let (Some(Pick::Linetype(selected)), Some(last)) =
-                        (self.mls.pick.as_mut(), load.picked.last())
-                    {
-                        *selected = last.clone();
+                if let Some(load) = self.mls.load.as_ref() {
+                    let doc = &self.tabs[i].scene.document;
+                    let pending: Vec<String> = load
+                        .entries
+                        .iter()
+                        .map(|(name, _, _)| name)
+                        .filter(|name| {
+                            load.picked.iter().any(|p| p.eq_ignore_ascii_case(name))
+                                && doc.line_types.get(name).is_some()
+                        })
+                        .cloned()
+                        .collect();
+                    if pending.is_empty() {
+                        self.mleader_style_finish_load(Vec::new());
+                    } else {
+                        self.mls.reload_ask = Some(ReloadAsk {
+                            pending,
+                            reload: Vec::new(),
+                        });
                     }
+                }
+            }
+            MlsMsg::ReloadAnswer(answer) => {
+                let Some(mut ask) = self.mls.reload_ask.take() else {
+                    return Task::none();
+                };
+                match answer {
+                    Reload::This | Reload::Skip => {
+                        if !ask.pending.is_empty() {
+                            let name = ask.pending.remove(0);
+                            if answer == Reload::This {
+                                ask.reload.push(name);
+                            }
+                        }
+                    }
+                    Reload::All => ask.reload.append(&mut ask.pending),
+                    Reload::SkipRest => ask.pending.clear(),
+                    // Nothing is loaded and Load Linetypes closes.
+                    Reload::Cancel => {
+                        self.mls.load = None;
+                        return Task::none();
+                    }
+                }
+                if ask.pending.is_empty() {
+                    self.mleader_style_finish_load(ask.reload);
+                } else {
+                    self.mls.reload_ask = Some(ask);
                 }
             }
             MlsMsg::PickCancel => self.mls.pick = None,
@@ -733,6 +778,27 @@ impl OpenCADStudio {
             MlsMsg::Cancel => self.mleader_style_cancel_modify(),
         }
         Task::none()
+    }
+
+    /// Load Linetypes ends: the ticked linetypes the drawing lacks are
+    /// added, `reload` are read again; Select Linetype keeps its choice.
+    fn mleader_style_finish_load(&mut self, reload: Vec<String>) {
+        let Some(load) = self.mls.load.take() else {
+            return;
+        };
+        let doc = &mut self.tabs[self.active_tab].scene.document;
+        crate::io::linetypes::populate_document_named(
+            doc,
+            &load.source,
+            load.dir.as_deref(),
+            &load.picked,
+        );
+        crate::io::linetypes::reload_document_named(
+            doc,
+            &load.source,
+            load.dir.as_deref(),
+            &reload,
+        );
     }
 
     fn mleader_style_create(&mut self) -> Task<Message> {
@@ -786,6 +852,7 @@ impl OpenCADStudio {
     fn insert_mleader_style_default(&mut self, name: &str, handle: Handle) {
         let mut style = MultiLeaderStyle::new(name);
         style.description = name.to_string();
+        style.align_space = style.text_height;
         style.handle = handle;
         self.tabs[self.active_tab]
             .scene
@@ -843,6 +910,19 @@ impl OpenCADStudio {
             return Task::none();
         }
         self.mls_color_open = None;
+        // The Text Style manager opens on the style's text style, made the
+        // drawing's current one (it stays current after the manager closes).
+        let i = self.active_tab;
+        let doc = &self.tabs[i].scene.document;
+        let style_text = self
+            .mleaderstyle_ref(i)
+            .and_then(|s| s.text_style_handle)
+            .and_then(|h| doc.text_styles.iter().find(|t| t.handle == h))
+            .map(|t| t.name.clone());
+        if let Some(name) = style_text {
+            self.tabs[i].scene.document.header.current_text_style_name = name;
+            self.sync_ribbon_styles();
+        }
         let parent = self.style_stage.take();
         let task = self.on_text_style_dialog_open();
         self.style_parent_stage = parent;

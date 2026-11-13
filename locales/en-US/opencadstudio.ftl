@@ -9436,6 +9436,11 @@ mleader-style =
     .available-linetypes = Available linetypes
     .program-linetypes = Program linetypes
     .already-loaded = { $name } (loaded)
+    .reload-ask = One or more ticked linetypes are already in the drawing. Read them again from the file?
+    .reload-this = Reload { $name }
+    .reload-all = Reload all ticked linetypes
+    .reload-skip = Keep { $name } as it is
+    .reload-skip-rest = Keep all remaining ones as they are
 
 dim-style =
     .manager-title = Dimension Style Manager

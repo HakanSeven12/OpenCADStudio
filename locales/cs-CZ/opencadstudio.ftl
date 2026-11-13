@@ -9443,6 +9443,11 @@ mleader-style =
     .available-linetypes = Dostupné typy čar
     .program-linetypes = Typy čar programu
     .already-loaded = { $name } (načteno)
+    .reload-ask = Některé zaškrtnuté typy čar už ve výkresu jsou. Načíst je znovu ze souboru?
+    .reload-this = Znovu načíst { $name }
+    .reload-all = Znovu načíst všechny zaškrtnuté typy čar
+    .reload-skip = Ponechat { $name } beze změny
+    .reload-skip-rest = Ponechat všechny zbývající beze změny
 
 dim-style =
     .manager-title = Dimension Style Manager

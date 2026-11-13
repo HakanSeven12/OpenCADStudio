@@ -9426,6 +9426,11 @@ mleader-style =
     .available-linetypes = 사용 가능한 선종류
     .program-linetypes = 프로그램 선종류
     .already-loaded = { $name } (로드됨)
+    .reload-ask = 선택한 선종류 중 일부가 이미 도면에 있습니다. 파일에서 다시 읽으시겠습니까?
+    .reload-this = { $name } 다시 로드
+    .reload-all = 선택한 모든 선종류 다시 로드
+    .reload-skip = { $name } 그대로 두기
+    .reload-skip-rest = 나머지 모두 그대로 두기
 
 dim-style =
     .manager-title = Dimension Style Manager

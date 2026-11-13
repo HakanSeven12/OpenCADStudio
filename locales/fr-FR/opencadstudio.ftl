@@ -9437,6 +9437,11 @@ mleader-style =
     .available-linetypes = Types de ligne disponibles
     .program-linetypes = Types de ligne du programme
     .already-loaded = { $name } (chargé)
+    .reload-ask = Certains des types de ligne cochés sont déjà dans le dessin. Les relire depuis le fichier ?
+    .reload-this = Recharger { $name }
+    .reload-all = Recharger tous les types de ligne cochés
+    .reload-skip = Conserver { $name } tel quel
+    .reload-skip-rest = Conserver tous les autres tels quels
 
 dim-style =
     .manager-title = Dimension Style Manager

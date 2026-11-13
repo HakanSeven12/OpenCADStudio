@@ -9437,6 +9437,11 @@ mleader-style =
     .available-linetypes = Tipos de linha disponíveis
     .program-linetypes = Tipos de linha do programa
     .already-loaded = { $name } (carregado)
+    .reload-ask = Alguns dos tipos de linha marcados já estão no desenho. Lê-los novamente do arquivo?
+    .reload-this = Recarregar { $name }
+    .reload-all = Recarregar todos os tipos de linha marcados
+    .reload-skip = Manter { $name } como está
+    .reload-skip-rest = Manter todos os restantes como estão
 
 dim-style =
     .manager-title = Dimension Style Manager

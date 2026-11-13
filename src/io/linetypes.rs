@@ -427,6 +427,46 @@ pub fn populate_document_named(
     })
 }
 
+/// Read the linetypes `names` the drawing has again from a `.lin` source:
+/// their description and pattern become the source's, their handle and
+/// name stay. Returns how many were read.
+pub fn reload_document_named(
+    doc: &mut Document,
+    source: &str,
+    lin_dir: Option<&std::path::Path>,
+    names: &[String],
+) -> usize {
+    if names.is_empty() {
+        return 0;
+    }
+    let complex = parse_complex(source);
+    let mut seen = std::collections::HashSet::new();
+    let mut reloaded = 0;
+    for mut lt in parse(source) {
+        // The first definition of a name is the one offered.
+        if !seen.insert(lt.name.to_ascii_uppercase())
+            || !names.iter().any(|name| name.eq_ignore_ascii_case(&lt.name))
+            || doc.line_types.get(&lt.name).is_none()
+        {
+            continue;
+        }
+        if let Some(elements) = complex
+            .get(&lt.name.to_ascii_uppercase())
+            .and_then(|s| complex_elements(doc, s, &lt.elements, lin_dir))
+        {
+            lt.elements = elements;
+        }
+        if let Some(existing) = doc.line_types.get_mut(&lt.name) {
+            existing.description = lt.description;
+            existing.elements = lt.elements;
+            existing.pattern_length = lt.pattern_length;
+            existing.alignment = lt.alignment;
+            reloaded += 1;
+        }
+    }
+    reloaded
+}
+
 /// Add the linetypes of a caller-supplied `.lin` source, embedded shapes and
 /// text included, so the drawing draws them and a saved file carries them.
 /// Returns the number of definitions newly registered in the drawing.

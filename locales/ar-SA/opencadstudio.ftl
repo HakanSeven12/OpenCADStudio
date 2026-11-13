@@ -9440,6 +9440,11 @@ mleader-style =
     .available-linetypes = أنواع الخطوط المتاحة
     .program-linetypes = أنواع خطوط البرنامج
     .already-loaded = { $name } (محمّل)
+    .reload-ask = بعض أنواع الخطوط المحددة موجودة بالفعل في الرسم. هل تريد قراءتها مرة أخرى من الملف؟
+    .reload-this = إعادة تحميل { $name }
+    .reload-all = إعادة تحميل كل أنواع الخطوط المحددة
+    .reload-skip = إبقاء { $name } كما هو
+    .reload-skip-rest = إبقاء كل الأنواع المتبقية كما هي
 
 dim-style =
     .manager-title = Dimension Style Manager

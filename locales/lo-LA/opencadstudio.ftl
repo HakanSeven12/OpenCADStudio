@@ -9428,6 +9428,11 @@ mleader-style =
     .available-linetypes = ປະເພດເສັ້ນທີ່ມີ
     .program-linetypes = ປະເພດເສັ້ນຂອງໂປຣແກຣມ
     .already-loaded = { $name } (ໂຫຼດແລ້ວ)
+    .reload-ask = ປະເພດເສັ້ນທີ່ໝາຍໄວ້ບາງອັນມີຢູ່ໃນແບບແລ້ວ. ຈະອ່ານໃໝ່ຈາກໄຟລ໌ບໍ?
+    .reload-this = ໂຫຼດ { $name } ຄືນໃໝ່
+    .reload-all = ໂຫຼດປະເພດເສັ້ນທີ່ໝາຍໄວ້ທັງໝົດຄືນໃໝ່
+    .reload-skip = ຮັກສາ { $name } ໄວ້ຕາມເດີມ
+    .reload-skip-rest = ຮັກສາອັນທີ່ເຫຼືອທັງໝົດໄວ້ຕາມເດີມ
 
 dim-style =
     .manager-title = Dimension Style Manager

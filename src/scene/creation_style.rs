@@ -101,6 +101,39 @@ pub fn ensure_iso_dim_style(doc: &mut Document) -> Handle {
     handle
 }
 
+/// The metric template's Annotative dimension style: ISO-25's settings,
+/// annotative, with the overall scale 0 (the annotation scale sizes it).
+/// Made from ISO-25, which is made first when the drawing lacks it.
+pub fn ensure_annotative_dim_style(doc: &mut Document) -> Handle {
+    if let Some(style) = doc
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case("Annotative"))
+    {
+        return style.handle;
+    }
+    let iso = ensure_iso_dim_style(doc);
+    let Some(mut style) = doc.dim_styles.iter().find(|s| s.handle == iso).cloned() else {
+        return Handle::NULL;
+    };
+    style.name = "Annotative".to_string();
+    style.handle = doc.allocate_handle();
+    style.annotative = true;
+    style.dimscale = 0.0;
+    let handle = style.handle;
+    let _ = doc.dim_styles.add(style);
+    set_dim_style_extras(
+        doc,
+        handle,
+        DimStyleExtras {
+            jog_height: 1.5,
+            break_size: 3.75,
+            dimtaln: 0,
+        },
+    );
+    handle
+}
+
 /// The extended data a dimension style keeps beside its variables: the
 /// linear jog height factor (`ACAD_DSTYLE_DIMJAG`, group 388), the
 /// dimension break size (`ACAD_DSTYLE_DIMBREAK`, 391) and DIMTALN

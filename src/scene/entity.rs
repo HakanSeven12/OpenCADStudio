@@ -4122,6 +4122,8 @@ impl Scene {
         // Its solids are drawn with eight isolines.
         self.document.header.isolines = 8;
         let iso = crate::scene::creation_style::ensure_iso_dim_style(&mut self.document);
+        // The metric template also has an annotative dimension style.
+        crate::scene::creation_style::ensure_annotative_dim_style(&mut self.document);
         self.document.header.current_dimstyle_name = "ISO-25".to_string();
         crate::scene::creation_style::sync_header_dim_vars(&mut self.document);
         // The name alone leaves the header pointing at the previous style, and

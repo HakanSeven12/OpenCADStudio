@@ -1299,6 +1299,12 @@ impl OpenCADStudio {
                 }
             }
         }
+        {
+            let tab = &mut self.tabs[i];
+            if let Some(cmd) = tab.active_cmd.as_mut() {
+                cmd.attreq_set_document(&tab.scene.document);
+            }
+        }
         // Collect the full AttributeDefinitions owned by this block
         // record so each created attribute keeps its geometry (#255).
         let mut attdefs: Vec<document::entities::AttributeDefinition> = {
@@ -1333,6 +1339,20 @@ impl OpenCADStudio {
                 .active_cmd
                 .as_mut()
                 .and_then(|c| c.attreq_take_insert());
+            // A leader's block content ends its command like any other leader.
+            if let Some(entity) = entity
+                .as_ref()
+                .filter(|entity| !matches!(entity, document::EntityType::Insert(_)))
+            {
+                return Some(self.apply_cmd_result(CmdResult::CommitAndExit(entity.clone())));
+            }
+            if entity.is_none() {
+                // The command goes on (a leader's arrowhead is still to come).
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
             if let Some(entity) = entity {
                 let insert_name = match &entity {
                     document::EntityType::Insert(ins) => Some(ins.block_name.clone()),

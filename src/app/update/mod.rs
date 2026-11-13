@@ -12649,6 +12649,14 @@ impl OpenCADStudio {
                     };
                 }
                 if self.active_modal == Some(super::ModalKind::InsertAttributes) {
+                    let i = self.active_tab;
+                    if self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.attreq_cancel_keeps_defaults())
+                    {
+                        return self.keep_insert_attr_defaults();
+                    }
                     self.cancel_insert_attr_dialog();
                     self.close_active_modal();
                     return Task::none();

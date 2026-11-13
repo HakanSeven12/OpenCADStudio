@@ -4004,6 +4004,16 @@ pub trait CadCommand: Send {
     /// as the render path. Default: no-op (no base point).
     fn attreq_set_block_base(&mut self, _base: document::types::Vector3) {}
 
+    /// The host hands a parked block placement the drawing before the
+    /// attribute questions, so it can measure the block. Default: no-op.
+    fn attreq_set_document(&mut self, _document: &document::Document) {}
+
+    /// Cancel on the attribute form keeps the defaults instead of dropping
+    /// the placement. Default: false.
+    fn attreq_cancel_keeps_defaults(&self) -> bool {
+        false
+    }
+
     /// The host answers this placement's attribute questions from a form, so
     /// the verify pass is not asked a second time. Default: no-op.
     fn attreq_from_dialog(&mut self) {}

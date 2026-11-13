@@ -1244,6 +1244,7 @@ retained_contributors={}",
                         && !Arc::ptr_eq(previous, &vp.annotation_context_wires)
                 });
             if selection_changed || highlighted_geometry_changed || annotation_context_changed {
+                inner.prepare_highlight_wire_cache(vp.wire_content_id, vp.draw_depth_generation);
                 let sel_color = if self.selection_effect {
                     Some(self.selection_color)
                 } else {

@@ -607,6 +607,9 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
 
 pub struct InteractionIndex {
     wires: SpatialSet<u32>,
+    box_entities: SpatialSet<u64>,
+    box_entity_wires: rustc_hash::FxHashMap<u64, Vec<u32>>,
+    box_anonymous_wires: SpatialSet<u32>,
     /// Stable entity handle for each source wire. Lets a stale-but-valid base
     /// index feed an incremental overlay after small edits without retaining
     /// the old heavyweight wire set or trusting shifted vector indices.
@@ -968,6 +971,28 @@ impl InteractionIndex {
             screen_unbounded_wires.append(&mut batch.screen_unbounded_wires);
         }
 
+        // Window/crossing selection starts with one conservative box per CAD
+        // entity. Its wires remain grouped for exact boundary hit tests.
+        let mut box_bounds = rustc_hash::FxHashMap::<u64, [f64; 6]>::default();
+        let mut box_entity_wires = rustc_hash::FxHashMap::<u64, Vec<u32>>::default();
+        let mut box_anonymous = Vec::new();
+        for entry in &wire_entries {
+            let Some(handle) = wire_handles[entry.value as usize] else {
+                box_anonymous.push(*entry);
+                continue;
+            };
+            box_entity_wires.entry(handle).or_default().push(entry.value);
+            box_bounds.entry(handle).and_modify(|bounds| {
+                for axis in 0..3 {
+                    bounds[axis] = bounds[axis].min(entry.aabb[axis]);
+                    bounds[axis + 3] = bounds[axis + 3].max(entry.aabb[axis + 3]);
+                }
+            }).or_insert(entry.aabb);
+        }
+        let box_entities = SpatialSet::build(box_bounds.into_iter()
+            .map(|(value, aabb)| Entry3 { aabb, value }).collect());
+        let box_anonymous_wires = SpatialSet::build(box_anonymous);
+
         #[cfg(not(target_arch = "wasm32"))]
         let flatten_elapsed = flatten_started.elapsed();
         #[cfg(not(target_arch = "wasm32"))]
@@ -1045,6 +1070,9 @@ impl InteractionIndex {
 
         Self {
             wires,
+            box_entities,
+            box_entity_wires,
+            box_anonymous_wires,
             wire_handles,
             wire_ordinals,
             segments,
@@ -1667,6 +1695,45 @@ impl InteractionIndex {
         self.query_xy_selection(wires, aabb, false)
     }
 
+    /// A box tests whole entity wires, so it does not need a materialized list
+    /// of every segment inside the box.
+    pub(crate) fn query_xy_box_wires(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+    ) -> InteractionCandidates {
+        let mut wire_indices = self.box_anonymous_wires.query_xy_unordered(aabb);
+        for handle in self.box_entities.query_xy_unordered(aabb) {
+            if let Some(group) = self.box_entity_wires.get(&handle) {
+                wire_indices.extend_from_slice(group);
+            }
+        }
+        wire_indices.extend_from_slice(&self.unbounded_wires);
+        for &wire in &self.unbounded_wires {
+            if let Some(handle) = self.wire_handles[wire as usize] {
+                if let Some(group) = self.box_entity_wires.get(&handle) {
+                    wire_indices.extend_from_slice(group);
+                }
+            }
+        }
+        wire_indices.sort_unstable();
+        wire_indices.dedup();
+        InteractionCandidates {
+            wires: CandidateWires::Snapshot(wires),
+            wire_indices: Some(wire_indices),
+            segments: None,
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: None,
+            pick_triangles: None,
+            glyphs: None,
+            query_aabb: Some(aabb),
+            screen_rect: None,
+            screen_view: None,
+        }
+    }
+
     pub(crate) fn query_xy_selection(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -1886,6 +1953,9 @@ pub trait WireSource {
     fn iter(&self) -> WireIter<'_>;
     fn len(&self) -> usize;
     fn get(&self, index: usize) -> Option<&WireModel>;
+    fn box_wires_only(&self) -> bool {
+        false
+    }
     fn segments(&self) -> Option<&[SegmentRef]> {
         None
     }
@@ -2247,6 +2317,9 @@ impl InteractionCandidates {
 }
 
 impl WireSource for InteractionCandidates {
+    fn box_wires_only(&self) -> bool {
+        self.wire_indices.is_some() && self.segments.is_none()
+    }
     fn iter(&self) -> WireIter<'_> {
         self.iter()
     }

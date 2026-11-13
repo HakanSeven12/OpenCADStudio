@@ -323,6 +323,10 @@ pub struct Pipeline {
     clip_boundary: Option<(wgpu::Buffer, u32)>,
     /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
     gpu_selected_wires: Vec<WireGpu>,
+    /// Reusable GPU overlays for dense entities during changing box previews.
+    highlight_wire_cache: rustc_hash::FxHashMap<(u64, [u32; 4]), Vec<WireGpu>>,
+    highlight_wire_cache_key: Option<(u64, u64)>,
+    highlight_wire_cache_bytes: usize,
     gpu_selected_circles: Vec<CircleGpu>,
     gpu_selected_ellipses: Vec<EllipseGpu>,
     gpu_selected_block_wires: Vec<BlockWireGpu>,
@@ -2509,6 +2513,9 @@ impl Pipeline {
             silhouette_key: (usize::MAX, u64::MAX, [u32::MAX; 3], false),
             clip_boundary: None,
             gpu_selected_wires: vec![],
+            highlight_wire_cache: rustc_hash::FxHashMap::default(),
+            highlight_wire_cache_key: None,
+            highlight_wire_cache_bytes: 0,
             gpu_selected_circles: vec![],
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
@@ -3069,6 +3076,95 @@ impl Pipeline {
         (circles, ellipses, regular, blocks)
     }
 
+    pub(crate) fn prepare_highlight_wire_cache(&mut self, wire_id: u64, depth_generation: u64) {
+        let key = (wire_id, depth_generation);
+        if self.highlight_wire_cache_key != Some(key) {
+            self.highlight_wire_cache.clear();
+            self.highlight_wire_cache_bytes = 0;
+            self.highlight_wire_cache_key = Some(key);
+        }
+    }
+
+    fn highlight_regular_wires(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[&WireModel],
+        color: [f32; 4],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        annotation_context_wires: &[WireModel],
+    ) -> Vec<WireGpu> {
+        const MIN_POINTS: usize = 8192;
+        const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
+        if self.highlight_wire_cache_key.is_none() {
+            return WireGpu::from_highlight_refs(device, queue, wires, color, depth_map, self.wire_const_bgl.as_ref());
+        }
+
+        // Annotation outlines are transient and can share an entity handle
+        // with resident wires. Never include them in a resident cache entry.
+        let transient: rustc_hash::FxHashSet<usize> = annotation_context_wires
+            .iter().map(|wire| wire as *const WireModel as usize).collect();
+        let mut counts = rustc_hash::FxHashMap::<u64, usize>::default();
+        let mut wire_counts = rustc_hash::FxHashMap::<document::Handle, usize>::default();
+        let mut ineligible = rustc_hash::FxHashSet::default();
+        for wire in wires {
+            if transient.contains(&(*wire as *const WireModel as usize)) { continue; }
+            if let Some(handle) = wire_gpu::fast_parse_u64(&wire.name) {
+                *counts.entry(handle).or_default() += wire.points.len();
+                let handle = document::Handle::new(handle);
+                *wire_counts.entry(handle).or_default() += 1;
+                if wire_arena::classify_wire(wire) != wire_arena::WireKind::Regular {
+                    ineligible.insert(handle);
+                }
+            }
+        }
+        wire_counts.retain(|handle, _| !ineligible.contains(handle)
+            && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS);
+        let (mut output, reused) = match (&self.wire_arena, &self.wire_const_bgl, self.highlight_wire_cache_key) {
+            (Some(arena), Some(bgl), Some((wire_id, depth_generation)))
+                if self.wire_arena_id == wire_id && self.wire_arena_depth_generation == depth_generation =>
+                    arena.highlight_dense(device, queue, bgl, &wire_counts, color),
+            _ => (Vec::new(), rustc_hash::FxHashSet::default()),
+        };
+        let mut groups = rustc_hash::FxHashMap::<u64, Vec<&WireModel>>::default();
+        let mut small = Vec::new();
+        for &wire in wires {
+            if transient.contains(&(wire as *const WireModel as usize)) {
+                small.push(wire);
+                continue;
+            }
+            match wire_gpu::fast_parse_u64(&wire.name) {
+                Some(handle) if reused.contains(&document::Handle::new(handle)) => {},
+                Some(handle) if counts.get(&handle).copied().unwrap_or(0) >= MIN_POINTS => {
+                    groups.entry(handle).or_default().push(wire);
+                }
+                _ => small.push(wire),
+            }
+        }
+        output.extend(WireGpu::from_highlight_refs(
+            device, queue, &small, color, depth_map, self.wire_const_bgl.as_ref(),
+        ));
+        for (handle, group) in groups {
+            let key = (handle, color.map(f32::to_bits));
+            if let Some(cached) = self.highlight_wire_cache.get(&key) {
+                output.extend(cached.iter().cloned());
+                continue;
+            }
+            let gpu = WireGpu::from_highlight_refs(
+                device, queue, &group, color, depth_map, self.wire_const_bgl.as_ref(),
+            );
+            let bytes = gpu.iter().fold(0usize, |total, wire| {
+                total.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
+            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            if bytes <= MAX_CACHE_BYTES.saturating_sub(self.highlight_wire_cache_bytes) {
+                self.highlight_wire_cache_bytes += bytes;
+                self.highlight_wire_cache.insert(key, gpu.clone());
+            }
+            output.extend(gpu);
+        }
+        output
+    }
+
     pub fn upload_selected_wires(
         &mut self,
         device: &wgpu::Device,
@@ -3169,24 +3265,12 @@ impl Pipeline {
         };
         let t_split = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let mut gpu = if let Some(tint) = selected_tint {
-            WireGpu::from_highlight_refs(
-                device,
-                queue,
-                &selected_regular,
-                tint,
-                depth_map,
-                self.wire_const_bgl.as_ref(),
-            )
+            self.highlight_regular_wires(device, queue, &selected_regular, tint, depth_map, annotation_context_wires)
         } else {
             Vec::new()
         };
-        gpu.extend(WireGpu::from_highlight_refs(
-            device,
-            queue,
-            &hover_regular,
-            WireModel::HOVER,
-            depth_map,
-            self.wire_const_bgl.as_ref(),
+        gpu.extend(self.highlight_regular_wires(
+            device, queue, &hover_regular, WireModel::HOVER, depth_map, annotation_context_wires,
         ));
         let t_regular = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         self.gpu_selected_wires = gpu;

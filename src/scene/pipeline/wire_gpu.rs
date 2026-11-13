@@ -1921,7 +1921,7 @@ fn block_instances(
 }
 
 /// Upload one constant chunk; its instances use chunk-local wire IDs.
-fn build_const_bind_group(
+pub(super) fn build_const_bind_group(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bgl: &wgpu::BindGroupLayout,

@@ -1684,6 +1684,64 @@ impl PersistentWireArena {
         }
     }
 
+    /// Reuse resident geometry for dense, complete entity runs. Only the
+    /// small per-wire constants need a new selection colour.
+    pub fn highlight_dense(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        const_bgl: &wgpu::BindGroupLayout,
+        candidates: &FxHashMap<Handle, usize>,
+        color: [f32; 4],
+    ) -> (Vec<WireGpu>, rustc_hash::FxHashSet<Handle>) {
+        let PersistentWireArenaKind::Indexed(arenas) = &self.inner else {
+            return (Vec::new(), rustc_hash::FxHashSet::default());
+        };
+        let mut output = Vec::new();
+        let mut reused = rustc_hash::FxHashSet::default();
+        for arena in arenas {
+            let mut ranges = Vec::new();
+            for (&handle, &wire_count) in candidates {
+                let Some(slab) = arena.slabs.get(&handle) else { continue };
+                if slab.inst_len == 0 || slab.const_len as usize != wire_count {
+                    continue;
+                }
+                // Hidden resident slabs must not substitute for visible overlays.
+                let constants = &arena.consts_cpu[slab.const_off as usize
+                    ..(slab.const_off + slab.const_len) as usize];
+                if constants.iter().any(|c| c.hidden != 0.0) {
+                    continue;
+                }
+                ranges.push((slab.inst_off, slab.inst_off + slab.inst_len));
+                reused.insert(handle);
+            }
+            if ranges.is_empty() { continue; }
+            ranges.sort_unstable_by_key(|range| range.0);
+            let mut merged: Vec<(u32, u32)> = Vec::new();
+            for (start, end) in ranges {
+                if let Some((_, previous_end)) = merged.last_mut() {
+                    if *previous_end == start {
+                        *previous_end = end;
+                        continue;
+                    }
+                }
+                merged.push((start, end));
+            }
+            let mut constants = arena.consts_cpu.clone();
+            for constant in &mut constants { constant.color = color; }
+            let binding = super::wire_gpu::build_const_bind_group(device, queue, const_bgl, &constants);
+            output.extend(merged.into_iter().map(|(start, end)| WireGpu {
+                instance_buffer: arena.inst_buf.clone(),
+                first_instance: start,
+                instance_count: end - start,
+                is_3d_mesh_edge: false,
+                const_bind_group: Some(binding.clone()),
+            }));
+        }
+        (output, reused)
+    }
+
+
     /// Device bytes this arena holds. The instance buffer is reserved with
     /// headroom, so this is the allocation, not the occupied prefix — which is
     /// what a memory budget has to answer for.

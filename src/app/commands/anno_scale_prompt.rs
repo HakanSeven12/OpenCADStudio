@@ -30,6 +30,8 @@ impl OpenCADStudio {
         if !annotation_scale_prompt()
             || ASKED.load(Ordering::Relaxed)
             || self.active_modal.is_some()
+            // A running script has nobody to answer it.
+            || self.script_running
         {
             return;
         }

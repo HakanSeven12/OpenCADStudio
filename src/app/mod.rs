@@ -951,9 +951,10 @@ pub(super) struct OpenCADStudio {
     table_cell_block: Option<crate::ui::window::table_cell_dialog::CellBlockState>,
     /// The picked table cells' Cell Data Format window.
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
+    /// The annotation scale asked for before a session's first annotative text.
+    anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
-    anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
     table_cell_warning: Option<(
         crate::ui::window::table_cell_dialog::CellFormatState,
         Vec<String>,

@@ -672,9 +672,15 @@ impl<'a> RenderSceneGraph<'a> {
         {
             return false;
         }
+        // A viewport's frozen layer 0 hides what its space draws on layer 0.
+        // A block member on layer 0 shows on the layer of the reference that
+        // places it, which the walk has already checked against the viewport.
+        let defers_to_reference =
+            member && crate::scene::view::render::is_effective_layer_zero(&common.layer);
         if self.frozen_layers.is_some_and(|frozen| {
             frozen.contains(&common.handle)
-                || layer.is_some_and(|layer| frozen.contains(&layer.handle))
+                || (!defers_to_reference
+                    && layer.is_some_and(|layer| frozen.contains(&layer.handle)))
         }) {
             return false;
         }

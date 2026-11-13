@@ -114,6 +114,53 @@ mod tests {
         assert_eq!(app.tabs[i].history.undo_stack.len(), undo_len);
     }
 
+    /// The cached answer follows entity edits without a full rescan where it
+    /// can, and still sees every edit that hides or shows an object.
+    #[test]
+    fn hidden_objects_answer_follows_entity_edits() {
+        use crate::scene::ChangeKind;
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let a = app.tabs[i].scene.add_entity(line(0.0));
+        let b = app.tabs[i].scene.add_entity(line(1.0));
+        assert!(!app.tabs[i].scene.has_hidden_objects());
+
+        // A plain edit keeps "none"; hiding an object through an edit is seen.
+        app.tabs[i]
+            .scene
+            .bump_entities(&[(b, ChangeKind::Modified)]);
+        assert!(!app.tabs[i].scene.has_hidden_objects());
+        set_invisible(&mut app, a);
+        app.tabs[i]
+            .scene
+            .bump_entities(&[(a, ChangeKind::Modified)]);
+        assert!(app.tabs[i].scene.has_hidden_objects());
+
+        // An add keeps "some"; showing the last hidden object is seen.
+        let _ = app.tabs[i].scene.add_entity(line(2.0));
+        assert!(app.tabs[i].scene.has_hidden_objects());
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity_mut(a)
+            .unwrap()
+            .common_mut()
+            .invisible = false;
+        app.tabs[i]
+            .scene
+            .bump_entities(&[(a, ChangeKind::Modified)]);
+        assert!(!app.tabs[i].scene.has_hidden_objects());
+
+        // Erasing the only hidden object is seen too.
+        set_invisible(&mut app, b);
+        app.tabs[i]
+            .scene
+            .bump_entities(&[(b, ChangeKind::Modified)]);
+        assert!(app.tabs[i].scene.has_hidden_objects());
+        app.tabs[i].scene.erase_entities(&[b]);
+        assert!(!app.tabs[i].scene.has_hidden_objects());
+    }
+
     #[test]
     fn block_editor_reports_no_saved_hidden_objects() {
         let (mut app, _, _, _) = drawing();

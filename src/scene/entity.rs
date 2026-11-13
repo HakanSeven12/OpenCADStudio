@@ -531,6 +531,18 @@ impl Scene {
                     record.flags.has_attributes = true;
                 }
             }
+            if !handle.is_null() {
+                let current = match self.visibility_states.get(&br) {
+                    Some(&index) => index,
+                    None => super::block_visibility::parameter(&self.document, br).map_or(
+                        0,
+                        |parameter| {
+                            super::block_visibility::shown_state(&self.document, parameter.handle)
+                        },
+                    ),
+                };
+                super::block_visibility::admit_member(&mut self.document, br, handle, current);
+            }
             handle
         } else if self.current_layout != "Model" && self.active_viewport.is_none() {
             let layout_name = self.current_layout.clone();
@@ -547,7 +559,8 @@ impl Scene {
                 keep.insert(handle);
             }
             self.invalidate_dependency_index();
-            if let Some(model) = hatch_seed {
+            if let Some(mut model) = hatch_seed {
+                model.entity = Some(handle);
                 self.hatches.insert(handle, model);
             }
             if let Some(model) = image_seed {
@@ -729,7 +742,10 @@ impl Scene {
         let mut changed = Vec::with_capacity(updates.len());
         let mut block_change = false;
         for entity in updates {
-            if !allow_reference_only && self.is_reference_only(entity.common().handle) {
+            if !allow_reference_only
+                && (self.is_reference_only(entity.common().handle)
+                    || self.native_edit_disabled(entity.common().handle))
+            {
                 continue;
             }
             if self.update_entity_impl(entity, &mut changed, &mut block_change) {
@@ -852,7 +868,8 @@ impl Scene {
         self.images.remove(&handle);
         self.meshes.remove(&handle);
         self.solid_models.remove(&handle);
-        if let Some(model) = hatch_seed {
+        if let Some(mut model) = hatch_seed {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
         if let Some(model) = image_seed {
@@ -939,7 +956,8 @@ impl Scene {
         self.images.remove(&handle);
         self.meshes.remove(&handle);
         self.solid_models.remove(&handle);
-        if let Some(model) = hatch_seed {
+        if let Some(mut model) = hatch_seed {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
         if let Some(model) = image_seed {
@@ -1429,69 +1447,9 @@ impl Scene {
     /// for a block without drawable geometry.
     pub fn block_thumbnail(&self, name: &str) -> Vec<u8> {
         const SIZE: usize = 40;
-        let wires = self.block_preview_wires(name);
-        let mut lo = [f64::INFINITY; 2];
-        let mut hi = [f64::NEG_INFINITY; 2];
-        for wire in &wires {
-            for p in &wire.points {
-                if p[0].is_finite() && p[1].is_finite() {
-                    lo = [lo[0].min(p[0] as f64), lo[1].min(p[1] as f64)];
-                    hi = [hi[0].max(p[0] as f64), hi[1].max(p[1] as f64)];
-                }
-            }
-        }
-        if !lo[0].is_finite() {
+        let Some(pixels) = wire_thumbnail_bgra(&self.block_preview_wires(name), SIZE) else {
             return Vec::new();
-        }
-        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
-        let scale = (SIZE as f64 - 3.0) / span;
-        let offset = [
-            (SIZE as f64 - (hi[0] - lo[0]) * scale) / 2.0,
-            (SIZE as f64 - (hi[1] - lo[1]) * scale) / 2.0,
-        ];
-        let to_px = |p: &[f32; 3]| {
-            (
-                ((p[0] as f64 - lo[0]) * scale + offset[0]).floor() as i64,
-                ((p[1] as f64 - lo[1]) * scale + offset[1]).floor() as i64,
-            )
         };
-        // Bottom-up rows of BGRA pixels.
-        let mut pixels = vec![[0x30u8, 0x28, 0x21, 0xFF]; SIZE * SIZE];
-        let mut plot = |x: i64, y: i64| {
-            if (0..SIZE as i64).contains(&x) && (0..SIZE as i64).contains(&y) {
-                pixels[y as usize * SIZE + x as usize] = [0xFF; 4];
-            }
-        };
-        for wire in &wires {
-            let mut prev: Option<(i64, i64)> = None;
-            for p in &wire.points {
-                if !(p[0].is_finite() && p[1].is_finite()) {
-                    prev = None;
-                    continue;
-                }
-                let (x1, y1) = to_px(p);
-                let (mut x0, mut y0) = prev.unwrap_or((x1, y1));
-                let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
-                let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
-                let mut err = dx + dy;
-                loop {
-                    plot(x0, y0);
-                    if x0 == x1 && y0 == y1 {
-                        break;
-                    }
-                    let e2 = 2 * err;
-                    if e2 >= dy {
-                        err += dy;
-                        x0 += sx;
-                    }
-                    if e2 <= dx {
-                        err += dx;
-                        y0 += sy;
-                    }
-                }
-                prev = Some((x1, y1));
-            }
-        }
         let mut dib = Vec::with_capacity(40 + SIZE * SIZE * 4);
         for value in [40u32, SIZE as u32, SIZE as u32] {
             dib.extend_from_slice(&value.to_le_bytes());
@@ -1821,6 +1779,25 @@ impl Scene {
         base_point: document::types::Vector3,
         entities: Vec<EntityType>,
     ) {
+        self.define_block_raw_with_bump(name, base_point, entities, true);
+    }
+
+    pub(crate) fn define_block_raw_unbumped(
+        &mut self,
+        name: &str,
+        base_point: document::types::Vector3,
+        entities: Vec<EntityType>,
+    ) {
+        self.define_block_raw_with_bump(name, base_point, entities, false);
+    }
+
+    fn define_block_raw_with_bump(
+        &mut self,
+        name: &str,
+        base_point: document::types::Vector3,
+        entities: Vec<EntityType>,
+        bump: bool,
+    ) {
         if name.is_empty() || self.document.block_records.get(name).is_some() {
             return;
         }
@@ -1860,7 +1837,9 @@ impl Scene {
         }
         Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&added);
-        self.bump_geometry();
+        if bump {
+            self.bump_geometry();
+        }
     }
 
     /// Replace the contents and base point of block `name`, defining it when
@@ -2310,23 +2289,10 @@ impl Scene {
         entity: &EntityType,
         context: &crate::scene::render_graph::InstanceContext,
     ) -> bool {
-        let common = entity.common();
-        let layer = if crate::scene::view::render::is_effective_layer_zero(&common.layer) {
-            context
-                .insert_path
-                .iter()
-                .rev()
-                .find(|insert| {
-                    !crate::scene::view::render::is_effective_layer_zero(&insert.common.layer)
-                })
-                .map(|insert| insert.common.layer.as_str())
-                .unwrap_or(common.layer.as_str())
-        } else {
-            common.layer.as_str()
-        };
+        let layer = context.effective_layer(&entity.common().layer);
         self.document
             .layers
-            .get(layer)
+            .get(&layer)
             .map(|layer| layer.is_plottable)
             .unwrap_or(true)
     }
@@ -2472,6 +2438,14 @@ impl Scene {
         include_preview_hidden: bool,
         plot_only: bool,
     ) -> Vec<(Handle, HatchModel)> {
+        // Only fills placed through a block reference come out of this walk;
+        // with no hatch in any block definition there are none, and the walk
+        // of every object in the space would find nothing.
+        if !crate::scene::render_graph::any_block_definition_holds(document, |entity| {
+            matches!(entity, EntityType::Hatch(_))
+        }) {
+            return Vec::new();
+        }
         let constraint_display = (!plot_only
             && self.constraint_shading_active()
             && self.block_edit_block == Some(layout_block))
@@ -2575,6 +2549,10 @@ impl Scene {
                 let Some(mut model) = Self::hatch_model_from_dxf(&hatch, color) else {
                     return;
                 };
+                model.entity = Some(source_hatch.common.handle);
+                model.effective_layer = Some(std::sync::Arc::from(
+                    context.effective_layer(&source_hatch.common.layer),
+                ));
                 if let Some((report, palette)) = &constraint_display {
                     if let Some(mut color) =
                         self.constraint_display_color(report, context.root_handle, palette)
@@ -2720,6 +2698,15 @@ impl Scene {
         plot_only: bool,
         viewport: Option<Handle>,
     ) -> Vec<HatchModel> {
+        // Without a single mask in the drawing there is nothing to place;
+        // skip the walk of every object in the space.
+        if !self
+            .document
+            .entities()
+            .any(|entity| matches!(entity, EntityType::Wipeout(_)))
+        {
+            return Vec::new();
+        }
         let depth_map = self.draw_depth_map();
         let visibility_reveal = if plot_only {
             rustc_hash::FxHashSet::default()
@@ -2833,6 +2820,10 @@ impl Scene {
                 let fill_plane_boundary = Some(Arc::new(fill_plane.1));
                 let fill_plane = Some(fill_plane.0);
                 models.push(HatchModel {
+                    entity: None,
+                    effective_layer: Some(std::sync::Arc::from(
+                        context.effective_layer(&source.common.layer),
+                    )),
                     pattern_origin: None,
                     render_instance,
                     boundary: Arc::new(boundary),
@@ -3357,6 +3348,8 @@ impl Scene {
 
         let storage = crate::entities::curve::ocs_plane(dxf.normal, dxf.elevation);
         Some(HatchModel {
+            entity: None,
+            effective_layer: None,
             pattern_origin: Some([dxf.pattern_origin().x, dxf.pattern_origin().y]),
             render_instance: None,
             boundary: std::sync::Arc::new(boundary_f32),
@@ -3466,7 +3459,8 @@ impl Scene {
             }
             _ => None,
         };
-        if let Some(model) = new_model {
+        if let Some(mut model) = new_model {
+            model.entity = Some(handle);
             self.hatches.insert(handle, model);
         }
     }
@@ -3502,7 +3496,7 @@ impl Scene {
             .into_par_iter()
             .filter_map(|(handle, kind)| {
                 // Paper-space entities live in sheet coordinates — world_offset must not
-                let model = match &kind {
+                let mut model = match &kind {
                     EntityType::Hatch(dxf) => {
                         let color = convert::tess_util::aci_to_rgba(&dxf.common.color);
                         Self::hatch_model_from_dxf(dxf, color)
@@ -3513,6 +3507,9 @@ impl Scene {
                     }
                     _ => None,
                 };
+                if let Some(m) = model.as_mut() {
+                    m.entity = Some(handle);
+                }
                 model.map(|m| (handle, m))
             })
             .collect();
@@ -3536,7 +3533,19 @@ impl Scene {
                     } else {
                         self.paper_bg_color
                     };
-                    ImageModel::from_underlay(u, def, background, self.underlay_world_per_pixel)
+                    ImageModel::from_underlay_in_view(
+                        u,
+                        def,
+                        background,
+                        self.underlay_world_per_pixel,
+                        self.underlay_view,
+                    )
+                    .map(|(model, sharp)| {
+                        if sharp {
+                            self.underlay_region_used.set(true);
+                        }
+                        model
+                    })
                 }
                 _ => None,
             },
@@ -3755,6 +3764,8 @@ impl Scene {
             })
             .collect();
         HatchModel {
+            entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             boundary: std::sync::Arc::new(boundary),
@@ -4060,6 +4071,11 @@ impl Scene {
         // left it at the unitless 1, which drew annotative objects 1000x too
         // large until the first CANNOSCALE change shrank them. (#1674)
         self.sync_annotation_scale_from_header();
+        let by_block_linetype = self
+            .document
+            .line_types
+            .get("ByBlock")
+            .map(|linetype| linetype.handle);
         for obj in self.document.objects.values_mut() {
             match obj {
                 document::objects::ObjectType::Layout(l) if l.name != "Model" => {
@@ -4078,6 +4094,24 @@ impl Scene {
                     s.landing_gap = 2.0;
                     s.landing_distance = 8.0;
                     s.break_gap_size = 3.75;
+                    // The rest as the reference's Standard: its name as the
+                    // description, a ByBlock linetype, leader drawn first,
+                    // underlined top line on the right, centred top and
+                    // bottom attachments and the leader extended to the text.
+                    s.description = s.name.clone();
+                    if by_block_linetype.is_some() {
+                        s.line_type_handle = by_block_linetype;
+                    }
+                    s.multileader_draw_order =
+                        document::objects::MultiLeaderDrawOrderType::LeaderFirst;
+                    s.text_right_attachment =
+                        document::objects::TextAttachmentType::BottomOfTopLineUnderlineBottomLine;
+                    s.text_top_attachment = document::objects::TextAttachmentType::CenterOfText;
+                    s.text_bottom_attachment =
+                        document::objects::TextAttachmentType::CenterOfText;
+                    s.unknown_flag_298 = true;
+                    s.enable_block_scale = true;
+                    s.enable_block_rotation = true;
                 }
                 // Likewise the Standard table style: the metric template's
                 // cells are 4.5 high (title 6) with 1.5 margins, not 0.18.
@@ -4788,4 +4822,73 @@ mod hatch_single_loop_depth_tests {
             assert!(!fill_mesh.is_empty(), "{style:?}: fill mesh is built");
         }
     }
+}
+
+/// `size` × `size` bottom-up BGRA pixels of `wires` seen from above: white
+/// strokes on the dark preview background, fitted with a one-pixel margin.
+/// `None` when nothing in `wires` is drawable.
+pub(crate) fn wire_thumbnail_bgra(wires: &[WireModel], size: usize) -> Option<Vec<[u8; 4]>> {
+    let mut lo = [f64::INFINITY; 2];
+    let mut hi = [f64::NEG_INFINITY; 2];
+    for wire in wires {
+        for p in &wire.points {
+            if p[0].is_finite() && p[1].is_finite() {
+                lo = [lo[0].min(p[0] as f64), lo[1].min(p[1] as f64)];
+                hi = [hi[0].max(p[0] as f64), hi[1].max(p[1] as f64)];
+            }
+        }
+    }
+    if !lo[0].is_finite() {
+        return None;
+    }
+    let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
+    let scale = (size as f64 - 3.0) / span;
+    let offset = [
+        (size as f64 - (hi[0] - lo[0]) * scale) / 2.0,
+        (size as f64 - (hi[1] - lo[1]) * scale) / 2.0,
+    ];
+    let to_px = |p: &[f32; 3]| {
+        (
+            ((p[0] as f64 - lo[0]) * scale + offset[0]).floor() as i64,
+            ((p[1] as f64 - lo[1]) * scale + offset[1]).floor() as i64,
+        )
+    };
+    // Bottom-up rows of BGRA pixels.
+    let mut pixels = vec![[0x30u8, 0x28, 0x21, 0xFF]; size * size];
+    let mut plot = |x: i64, y: i64| {
+        if (0..size as i64).contains(&x) && (0..size as i64).contains(&y) {
+            pixels[y as usize * size + x as usize] = [0xFF; 4];
+        }
+    };
+    for wire in wires {
+        let mut prev: Option<(i64, i64)> = None;
+        for p in &wire.points {
+            if !(p[0].is_finite() && p[1].is_finite()) {
+                prev = None;
+                continue;
+            }
+            let (x1, y1) = to_px(p);
+            let (mut x0, mut y0) = prev.unwrap_or((x1, y1));
+            let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+            let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
+            let mut err = dx + dy;
+            loop {
+                plot(x0, y0);
+                if x0 == x1 && y0 == y1 {
+                    break;
+                }
+                let e2 = 2 * err;
+                if e2 >= dy {
+                    err += dy;
+                    x0 += sx;
+                }
+                if e2 <= dx {
+                    err += dx;
+                    y0 += sy;
+                }
+            }
+            prev = Some((x1, y1));
+        }
+    }
+    Some(pixels)
 }

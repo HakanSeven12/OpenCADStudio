@@ -1112,7 +1112,17 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
     // ── Leaders ──────────────────────────────────────────────────────────
     // Landing rows are folded in here: the standalone "Leader Structure" group
     // is a style-dialog tab, not a palette group.
+    let leader_count = ctx
+        .leader_roots
+        .iter()
+        .map(|root| root.lines.len())
+        .sum::<usize>();
     let mut leader_props = vec![
+        ro(
+            t!("Leaders").as_ref(),
+            "leader_count",
+            leader_count.to_string(),
+        ),
         choice(
             t!("Leader type").as_ref(),
             "path_type",
@@ -2986,6 +2996,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),
+                        effective_layer: None,
                         points: deco_pts,
                         points_low: Vec::new(),
                         color: neutral,

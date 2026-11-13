@@ -1846,8 +1846,48 @@ pub fn settings() -> DgnImportSettings {
 
 pub fn set_settings(mut settings: DgnImportSettings) {
     settings.mode = settings.mode.min(2);
+    // A test that reads the settings back owns them; other tests' apps
+    // (which apply their settings on start) wait until it is done.
+    #[cfg(test)]
+    let _owner = loop {
+        let owner = SETTINGS_OWNER.lock().unwrap_or_else(|e| e.into_inner());
+        if owner.is_none_or(|id| id == std::thread::current().id()) {
+            break owner;
+        }
+        drop(owner);
+        std::thread::yield_now();
+    };
     if let Ok(mut s) = SETTINGS.lock() {
         *s = Some(settings);
+    }
+}
+
+#[cfg(test)]
+static SETTINGS_OWNER: std::sync::Mutex<Option<std::thread::ThreadId>> = std::sync::Mutex::new(None);
+
+/// Keeps other threads from changing the settings until dropped.
+#[cfg(test)]
+pub(crate) struct OwnSettings;
+
+#[cfg(test)]
+impl OwnSettings {
+    pub(crate) fn take() -> Self {
+        loop {
+            let mut owner = SETTINGS_OWNER.lock().unwrap_or_else(|e| e.into_inner());
+            if owner.is_none() {
+                *owner = Some(std::thread::current().id());
+                return Self;
+            }
+            drop(owner);
+            std::thread::yield_now();
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for OwnSettings {
+    fn drop(&mut self) {
+        *SETTINGS_OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 

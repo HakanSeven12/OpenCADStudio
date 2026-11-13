@@ -171,6 +171,7 @@ fn declared(grip_id: u64, point: [f64; 3]) -> PluginGrip {
         anchor: None,
         point,
         axis: None,
+        xy_plane: false,
         shape: PluginGripShape::Square,
     }
 }
@@ -1019,6 +1020,7 @@ fn custom_grip_drag_settles_as_one_plugin_labeled_step() {
             anchor: Some(anchor),
             point: [10.0 + 8.0 * std::f64::consts::FRAC_1_SQRT_2, 10.0, 0.0],
             axis: None,
+            xy_plane: false,
             shape: PluginGripShape::Square,
         }],
     );
@@ -1129,6 +1131,7 @@ fn custom_grip_axis_hard_constrains_the_drag() {
             anchor: None,
             point: [10.0, 0.0, 0.0],
             axis: Some([1.0, 0.0, 0.0]),
+            xy_plane: false,
             shape: PluginGripShape::Circle,
         }],
     );
@@ -1180,6 +1183,7 @@ fn custom_grip_point_is_absolute_while_the_anchor_moves() {
             anchor: Some(spline),
             point: [25.0, 40.0, 0.0],
             axis: None,
+            xy_plane: false,
             shape: PluginGripShape::Triangle,
         }],
     );
@@ -1455,6 +1459,7 @@ fn live_geometry_moves_elements_during_the_drag() {
             anchor: Some(anchor),
             point: [12.0, 10.0, 0.0],
             axis: None,
+            xy_plane: false,
             shape: PluginGripShape::Square,
         }],
     );
@@ -1604,6 +1609,7 @@ fn settle_after_many_moves_writes_one_plugin_step() {
             anchor: Some(anchor),
             point: [4.0, 4.0, 0.0],
             axis: None,
+            xy_plane: false,
             shape: PluginGripShape::Square,
         }],
     );
@@ -1655,6 +1661,7 @@ fn declaration_validates_anchors_and_caps() {
                 anchor: Some(Handle::from(0xDEAD_BEEFu64)),
                 point: [0.0; 3],
                 axis: None,
+                xy_plane: false,
                 shape: PluginGripShape::Square,
             }],
         )
@@ -2371,6 +2378,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PROFILE".to_string(),
                 design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the crest instance stages");
@@ -2472,6 +2480,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         anchor: Some(handles[1]),
         point: glam::DVec3::new(300.0, 8.0, 0.0),
         axis: None,
+        xy_plane: false,
         shape: crate::scene::model::object::GripShape::Square,
     };
     assert_eq!(candidate.grip_id, 7);
@@ -2627,6 +2636,7 @@ fn descriptor_refusals_keep_the_streaming_path() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PLAN".to_string(),
                 design_record: "PLUGIN_ALIGN_PLAN".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the plan instance stages");
@@ -2670,6 +2680,7 @@ fn descriptor_refusals_keep_the_streaming_path() {
                 anchor: Some(handles[1]),
                 point: grip_point,
                 axis: None,
+                xy_plane: false,
                 shape: PluginGripShape::Square,
             }],
         )
@@ -2680,6 +2691,7 @@ fn descriptor_refusals_keep_the_streaming_path() {
         anchor: Some(handles[1]),
         point: glam::DVec3::new(300.0, 8.0, 0.0),
         axis: None,
+        xy_plane: false,
         shape: crate::scene::model::object::GripShape::Square,
     };
     let _ = app.begin_plugin_grip_drag(i, &candidate);
@@ -2748,6 +2760,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
                 tolerance: 1e-3,
                 layer: "PLUGIN_PROFILE".to_string(),
                 design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+                selectable_custom: false,
             },
         )
         .expect("the crest stages");
@@ -2788,6 +2801,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
                 anchor: Some(handles[1]),
                 point: [300.0, 8.0, 0.0],
                 axis: None,
+                xy_plane: false,
                 shape: PluginGripShape::Square,
             }],
         )
@@ -2798,6 +2812,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
         anchor: Some(handles[1]),
         point: glam::DVec3::new(300.0, 8.0, 0.0),
         axis: None,
+        xy_plane: false,
         shape: crate::scene::model::object::GripShape::Square,
     };
     let _ = app.begin_plugin_grip_drag(i, &candidate);

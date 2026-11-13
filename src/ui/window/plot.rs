@@ -14,7 +14,7 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form;
 use crate::ui::style::form::{hdivider, vseparator as vsep};
 use iced::widget::{
-    Space, button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
+    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
 use iced::{Background, Border, Element, Fit, Length, Theme};
 use std::borrow::Cow;
@@ -197,6 +197,9 @@ pub enum PlotFlag {
     TextAsOutlines,
     /// SVG only: preserve stroke widths under subsequent SVG transforms.
     NonScalingStroke,
+    /// SVG only: tag each drawn item with its drawing layer (`data-layer`),
+    /// letting SVG consumers toggle layers dynamically.
+    LayerAttributes,
     /// Hidden-line removal for paper-space objects (the page setup's
     /// "plot hidden" flag).
     HidePaperspace,
@@ -544,6 +547,7 @@ pub struct PlotDialogState {
     /// SVG-only text representation; an app preference, not a page-setup field.
     #[serde(default)]
     pub text_as_outlines: bool,
+    pub layer_attributes: bool,
     pub paper: String,
     #[serde(skip)]
     pub paper_width_mm: f64,
@@ -666,6 +670,7 @@ impl Default for PlotDialogState {
             file_svg: false,
             text_as_outlines: false,
             non_scaling_stroke: false,
+            layer_attributes: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
             paper_width_mm: 297.0,
             paper_height_mm: 210.0,
@@ -725,6 +730,7 @@ impl PlotDialogState {
         self.file_svg = o.file_svg;
         self.text_as_outlines = o.text_as_outlines;
         self.non_scaling_stroke = o.non_scaling_stroke;
+        self.layer_attributes = o.layer_attributes;
         self.paper = o.paper.clone();
         self.paper_width_mm = o.paper_width_mm;
         self.paper_height_mm = o.paper_height_mm;
@@ -1842,6 +1848,16 @@ pub fn view_window(
                 Space::new().height(0).into()
             }
         };
+    let svg_layer_option: Element<'_, Message> =
+        if to_file && s.file_svg && cfg!(not(target_arch = "wasm32")) {
+            check(
+                crate::tr!("plot", "layer-attributes").into(),
+                s.layer_attributes,
+                PlotFlag::LayerAttributes,
+            )
+        } else {
+            Space::new().height(0).into()
+        };
     let svg_text_option: Element<'_, Message> =
         if to_file && s.file_svg && cfg!(not(target_arch = "wasm32")) {
             check(
@@ -1897,6 +1913,7 @@ pub fn view_window(
                         s.merge_lines,
                         PlotFlag::MergeLines
                     ),
+                    svg_layer_option,
                     svg_text_option,
                     svg_stroke_option,
                     check(t!("Plot stamp"), s.stamp, PlotFlag::Stamp),
@@ -2034,6 +2051,40 @@ mod sidebar_layout_tests {
             state.file_svg = true;
             assert!(visible(&state, label), "SVG output shows {label}");
         }
+    }
+
+    #[test]
+    fn layer_attributes_checkbox_is_visible_only_for_svg_file_output() {
+        let _lock = crate::headless_ui_lock();
+        let mut renderer = iced::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut visible = |state: &PlotDialogState| {
+            let mut ui = iced_test::runtime::user_interface::UserInterface::build(
+                view_window(state, false, crate::ui::modal::ModalSizing::FILL),
+                iced::Size::new(1100.0, 800.0),
+                iced_test::runtime::user_interface::Cache::default(),
+                &mut renderer,
+            );
+            let mut find = iced_test::Selector::find("Layer data attributes");
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            matches!(
+                widget::Operation::finish(&find),
+                widget::operation::Outcome::Some(Some(target))
+                    if target.visible_bounds().is_some()
+            )
+        };
+
+        let mut state = PlotDialogState::default();
+        assert!(!visible(&state), "printer output hides the SVG option");
+        state.to_file = true;
+        assert!(!visible(&state), "PDF output hides the SVG option");
+        state.file_svg = true;
+        assert!(visible(&state), "SVG output shows the option");
     }
 
     #[test]

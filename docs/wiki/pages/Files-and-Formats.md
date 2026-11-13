@@ -55,7 +55,7 @@ If a drawing cannot be read cleanly, the program offers to open it in **recovery
 
 ## Sending a drawing
 
-`ETRANSMIT` (`ZIP`) packs the drawing and every file it depends on (external references, images, PDF underlays, fonts, plot style tables) into a ZIP file.
+`ETRANSMIT` (`ZIP`) packs the drawing, recursive external references, images, underlays, point clouds, fonts, SHX shapes, custom plot style tables, and external `CENTERLTYPEFILE` sources into a ZIP file. Options selects source-folder preservation, type-based folders, or a flat package; document references are rewritten to match and filename collisions receive unique names. Its `ETRANSMIT.txt` report lists missing resources; see the command page for browser limitations.
 
 ## Importing and exporting
 

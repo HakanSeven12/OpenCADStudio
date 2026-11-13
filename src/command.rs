@@ -1905,12 +1905,6 @@ pub enum CmdResult {
         /// keeps the parameter's own default.
         options: crate::modules::block_editor::single_parameter::Options,
     },
-    /// An action type was chosen that has no geometry action of its own:
-    /// continue with Lookup parameter selection.
-    StartBlockLookupAction {
-        document: u64,
-        definition: Handle,
-    },
     /// The chosen Lookup parameter's property table should open for editing.
     OpenBlockLookupTable {
         document: u64,
@@ -2513,6 +2507,13 @@ pub enum CmdResult {
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
     PasteClipboard {
         base_pt: DVec3,
+    },
+    /// PASTESPEC's Image formats: place the picture read off the system
+    /// clipboard inside the drawing as IMAGEEMBED places one (`embedded`),
+    /// or as a file the drawing points at, as IMAGE does; end command.
+    PlacePastedImage {
+        image: crate::io::ole_embed::EmbeddedImage,
+        embedded: bool,
     },
     /// Set the view's twist about its line of sight (radians,
     /// counter-clockwise); the command stays active.
@@ -3650,6 +3651,12 @@ pub trait CadCommand: Send {
     /// changes an entity's shape return edited copies of it here.
     fn preview_entities(&mut self, _document: &document::Document, _pt: DVec3) -> Vec<EntityType> {
         Vec::new()
+    }
+
+    /// True when `on_preview_wires` already supplies the transformed geometry
+    /// for `preview_entities`, so the host can skip re-tessellating them.
+    fn preview_wires_replace_entities(&self) -> bool {
+        false
     }
 
     /// Source entities replaced by the current live preview. The host removes

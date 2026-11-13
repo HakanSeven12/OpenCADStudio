@@ -8,6 +8,7 @@
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
+use crate::t;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Step {
@@ -311,6 +312,52 @@ pub fn display_path(path: &str) -> String {
         path.replace('/', "\\")
     } else {
         path.to_string()
+    }
+}
+
+/// `Select reference:` — an inserted external reference of the current space.
+/// XOPEN with nothing selected asks for one under the pick; a pick on
+/// anything else is refused, like REFEDIT's picker.
+pub struct XOpenPickCommand {
+    /// The xref-flagged reference inserts; the pick must land on one of them.
+    references: std::collections::HashSet<document::Handle>,
+}
+
+impl XOpenPickCommand {
+    pub fn new(references: std::collections::HashSet<document::Handle>) -> Self {
+        Self { references }
+    }
+}
+
+impl CadCommand for XOpenPickCommand {
+    fn name(&self) -> &'static str {
+        "XOPEN"
+    }
+
+    fn prompt(&self) -> String {
+        t!("XOPEN  Select an external reference:").into_owned()
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+
+    fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::ReportError(t!("Select a reference.").into_owned());
+        }
+        if !self.references.contains(&handle) {
+            return CmdResult::ReportError(t!("Object is not a valid reference").into_owned());
+        }
+        CmdResult::Dispatch(format!("XOPEN_PICK:{handle:X}"))
+    }
+
+    fn on_point(&mut self, _pt: DVec3) -> CmdResult {
+        CmdResult::ReportError(t!("Select an external reference (xref) to open.").into_owned())
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
     }
 }
 

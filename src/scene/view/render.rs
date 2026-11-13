@@ -3569,10 +3569,13 @@ impl Scene {
         if let Some(style) = self.display_plot_style_cache.borrow().get(&key) {
             return style.clone();
         }
-        let style =
-            crate::io::plot_style::PlotStyleTable::load_named(&settings.current_style_sheet)
-                .ok()
-                .map(Arc::new);
+        let base = crate::io::drawing_dir(&self.document);
+        let style = crate::io::plot_style::PlotStyleTable::load_named_at(
+            &settings.current_style_sheet,
+            base,
+        )
+        .ok()
+        .map(Arc::new);
         self.display_plot_style_cache
             .borrow_mut()
             .insert(key, style.clone());
@@ -3755,6 +3758,8 @@ impl Scene {
                 }
                 boundary.push(boundary[0]);
                 hatches.push(HatchModel {
+                    entity: None,
+                    effective_layer: wire.effective_layer.clone(),
                     pattern_origin: None,
                     render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],
@@ -5596,7 +5601,7 @@ pub(crate) fn resolve_pattern(
     }
 
     // Keep dots (element length exactly 0) as 0.0 so the shader can render
-    // them as a fixed ~1 px mark; trailing array slots stay 0.0 padding and
+    // them round at the stroke's width; trailing array slots stay 0.0 padding and
     // the shader tells the two apart by position (a 0.0 before the last
     // non-zero element is a dot, trailing 0.0s are padding). The old code
     // encoded dots as `0.01 * scale` — a tiny world-length dash that went

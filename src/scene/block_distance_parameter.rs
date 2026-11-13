@@ -318,6 +318,34 @@ pub(crate) fn set_xy_value_sets(
     Ok(())
 }
 
+/// Writes a Linear parameter's base location: whether its datum sits midway
+/// between the definition points instead of at the start point.
+pub(crate) fn set_base_location(
+    document: &mut Document,
+    definition: Handle,
+    handle: Handle,
+    midpoint: bool,
+) -> Result<bool, &'static str> {
+    if !parameters(document, definition)
+        .iter()
+        .any(|p| p.handle == handle && p.kind == Kind::Linear)
+    {
+        return Err("Select a Linear parameter in the active block definition.");
+    }
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
+        unreachable!()
+    };
+    let DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+        unreachable!()
+    };
+    let value = if midpoint { 1 } else { 0 };
+    if parameter.parameter.parameter_base_location == value {
+        return Ok(false);
+    }
+    parameter.parameter.parameter_base_location = value;
+    Ok(true)
+}
+
 /// Creates a parameter with the placement answers a Linear command collected.
 pub(crate) fn create_with(
     document: &mut Document,

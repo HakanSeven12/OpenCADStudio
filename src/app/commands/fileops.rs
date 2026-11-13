@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(target_arch = "wasm32")]
-use crate::io::plot_style::PlotStyleTableExt as _;
 
 impl OpenCADStudio {
     /// The drawing templates (.dwt) in the default template's folder.
@@ -156,6 +154,29 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             "SAVEAS" => return Some(Task::done(Message::SaveAs)),
+            // DXFOUT: Save As with the DXF format already chosen.
+            "DXFOUT" => {
+                if self.file_prompts_on_command_line() {
+                    let path = self.tabs[i]
+                        .current_path
+                        .as_ref()
+                        .map(|path| path.with_extension("dxf").to_string_lossy().into_owned())
+                        .unwrap_or_else(|| format!("{}.dxf", self.tabs[i].tab_title));
+                    let c = crate::command::ScriptPromptCommand::new(
+                        "SAVEAS",
+                        saveas_flow("DXF".to_string(), path),
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.command_line.set_step_options(c.options());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                    return Some(Task::none());
+                }
+                let format = crate::io::format_for_version(self.tabs[i].scene.document.version, true);
+                return Some(
+                    Task::done(Message::SaveAs)
+                        .chain(Task::done(Message::SaveDialogFormatChanged(format))),
+                );
+            }
             cmd if cmd.starts_with("SAVEAS ") => {
                 return Some(self.save_as_from_command_line(i, cmd["SAVEAS ".len()..].trim()));
             }
@@ -261,116 +282,13 @@ impl OpenCADStudio {
                 });
             }
 
-            // ARCHIVE / ETRANSMIT — package the drawing and its referenced files
-            // (xrefs + raster images) into a sibling "<name>_archive" folder.
-            // Web: there is no folder to copy into — the same dependency set is
-            // collected from the session's bytes registries and delivered as a
-            // "<name>_transmit.zip" download (`archive_web` below).
+            // Native ARCHIVE retains its sibling folder. ETRANSMIT writes a
+            // ZIP on native and web; both use the same dependency inventory.
             "ARCHIVE" | "ETRANSMIT" => {
                 #[cfg(not(target_arch = "wasm32"))]
-                {
-                    use std::path::PathBuf;
-                    if let Some(src) = self.tabs[i].current_path.clone() {
-                        let stem = src
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "drawing".into());
-                        let parent = src
-                            .parent()
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| PathBuf::from("."));
-                        let folder = parent.join(format!("{stem}_archive"));
-                        match std::fs::create_dir_all(&folder) {
-                            Ok(()) => {
-                                let mut copied = 0usize;
-                                if let Some(fname) = src.file_name() {
-                                    if std::fs::copy(&src, folder.join(fname)).is_ok() {
-                                        copied += 1;
-                                    }
-                                }
-                                // Resolve every reference the way the loaders
-                                // did (stored path, relative to the drawing,
-                                // then the bare name next to it), so what
-                                // displays is what gets packaged.
-                                let doc = &self.tabs[i].scene.document;
-                                let mut found: Vec<PathBuf> = Vec::new();
-                                let mut missing: Vec<String> = Vec::new();
-                                let mut note = |raw: &str, hit: Option<PathBuf>| match hit {
-                                    Some(p) if !found.contains(&p) => found.push(p),
-                                    Some(_) => {}
-                                    None if !missing.iter().any(|m| m == raw) => {
-                                        missing.push(raw.to_string())
-                                    }
-                                    None => {}
-                                };
-                                for br in doc.block_records.iter() {
-                                    let raw = br.xref_path.trim();
-                                    if !raw.is_empty() {
-                                        note(raw, crate::io::xref::resolve_path(raw, &parent));
-                                    }
-                                }
-                                let file = |raw: &str| {
-                                    crate::io::resolve_image_file(raw, Some(&parent))
-                                        .map(PathBuf::from)
-                                };
-                                for e in doc.entities() {
-                                    if let document::EntityType::RasterImage(img) = e {
-                                        let raw = img.file_path.trim();
-                                        if !raw.is_empty() {
-                                            note(raw, file(raw));
-                                        }
-                                    }
-                                }
-                                for o in doc.objects.values() {
-                                    if let document::objects::ObjectType::UnderlayDefinition(d) = o
-                                    {
-                                        let raw = d.file_path.trim();
-                                        if !raw.is_empty() {
-                                            note(raw, file(raw));
-                                        }
-                                    }
-                                }
-                                for resolved in &found {
-                                    if let Some(fname) = resolved.file_name() {
-                                        if std::fs::copy(resolved, folder.join(fname)).is_ok() {
-                                            copied += 1;
-                                        }
-                                    }
-                                }
-                                self.command_line.push_output(
-                                    crate::tf!(
-                                        "{cmd}: packaged {copied} file(s) into {}",
-                                        folder.display()
-                                    )
-                                    .as_ref(),
-                                );
-                                if !missing.is_empty() {
-                                    let n = missing.len();
-                                    let names = missing.join(", ");
-                                    self.command_line.push_error(
-                                        crate::tf!(
-                                            "{cmd}: {n} referenced file(s) not found: {names}"
-                                        )
-                                        .as_ref(),
-                                    );
-                                }
-                            }
-                            Err(e) => self.command_line.push_error(
-                                crate::tf!("{cmd}: cannot create folder ({e}).").as_ref(),
-                            ),
-                        }
-                    } else {
-                        self.command_line.push_error(
-                            crate::t!("ARCHIVE: save the drawing first (it has no file path yet).")
-                                .as_ref(),
-                        );
-                    }
-                }
+                self.archive_native(i, cmd);
                 #[cfg(target_arch = "wasm32")]
                 {
-                    // The drawing serialization runs on the serializer
-                    // worker; the ZIP assembly + download continue in the
-                    // completion message (`archive_web` below).
                     let task = self.archive_web(i, cmd);
                     return Some(Task::batch([task, self.finish_dispatch(cmd)]));
                 }
@@ -692,7 +610,11 @@ impl OpenCADStudio {
             }
             self.pump_plugin_requests();
             for entry in &self.command_line.history {
-                if entry.kind == crate::ui::command_line::EntryKind::Error {
+                if matches!(
+                    entry.kind,
+                    crate::ui::command_line::EntryKind::Error
+                        | crate::ui::command_line::EntryKind::Warning
+                ) {
                     eprintln!("{}", entry.text);
                 } else {
                     println!("{}", entry.text);
@@ -1048,6 +970,117 @@ fn parse_background_color(args: &[&str]) -> Option<[f32; 4]> {
     None
 }
 
+// ── Native ARCHIVE / ETRANSMIT ───────────────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OpenCADStudio {
+    fn archive_native(&mut self, i: usize, cmd: &str) {
+        let Some(src) = self.tabs[i].current_path.clone() else {
+            self.command_line.push_error(
+                crate::t!("ARCHIVE: save the drawing first (it has no file path yet).").as_ref(),
+            );
+            return;
+        };
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "drawing".into());
+        let parent = src.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let drawing_name = src
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{stem}.dwg"));
+        let active_plot_style = self
+            .active_plot_style
+            .as_ref()
+            .map(|table| table.name.clone());
+        let package = match crate::io::transmit::collect_native(
+            &self.tabs[i].scene.document,
+            &src,
+            &drawing_name,
+            active_plot_style.as_deref(),
+            self.transmittal_layout,
+        ) {
+            Ok(package) => package,
+            Err(error) => {
+                self.command_line.push_error(
+                    crate::tf!("{cmd}: cannot package the drawing ({e}).", e = error).as_ref(),
+                );
+                return;
+            }
+        };
+
+        let destination = if cmd == "ETRANSMIT" {
+            parent.join(format!("{stem}_transmit.zip"))
+        } else {
+            parent.join(format!("{stem}_archive"))
+        };
+        let written = if cmd == "ETRANSMIT" {
+            crate::io::transmit_zip::write_zip_atomic(&destination, &package.entries)
+        } else {
+            write_archive_folder(&destination, &package.entries)
+        };
+        if let Err(error) = written {
+            let message = if cmd == "ETRANSMIT" {
+                crate::tf!("{cmd}: cannot build the transmittal ZIP ({e}).", e = error)
+            } else {
+                crate::tf!("{cmd}: cannot create folder ({e}).", e = error)
+            };
+            self.command_line.push_error(message.as_ref());
+            return;
+        }
+        let copied = package.entries.len();
+        self.command_line.push_output(
+            crate::tf!(
+                "{cmd}: packaged {copied} file(s) into {}",
+                destination.display()
+            )
+            .as_ref(),
+        );
+        report_package_issues(self, cmd, &package);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_archive_folder(
+    folder: &std::path::Path,
+    entries: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    for (name, bytes) in entries {
+        let name = crate::io::transmit_zip::entry_name(name)?;
+        let path = folder.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::write(path, bytes).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn report_package_issues(
+    app: &mut OpenCADStudio,
+    cmd: &str,
+    package: &crate::io::transmit::TransmittalPackage,
+) {
+    if !package.issues.is_empty() {
+        let n = package.issues.len();
+        let names = package
+            .issues
+            .iter()
+            .map(|issue| format!("{} (from {})", issue.reference, issue.owner))
+            .collect::<Vec<_>>()
+            .join(", ");
+        app.command_line.push_warning(
+            crate::tf!("{cmd}: {n} referenced file(s) missing or conflicting: {names}").as_ref(),
+        );
+    }
+    for warning in &package.warnings {
+        app.command_line.push_output(&format!("{cmd}: {warning}"));
+    }
+}
+
 // ── Web ARCHIVE / ETRANSMIT ──────────────────────────────────────────────────
 //
 // The browser has no folder to copy into, so the transmittal is assembled in
@@ -1088,98 +1121,40 @@ impl OpenCADStudio {
         self.sync_solid_models_for_save(i);
         self.tabs[i].scene.sync_native_parametric_graph();
 
-        // The dependency set (xrefs, raster images, PDF underlays, plot
-        // tables) is collected here, at command time — cheap in-memory
-        // registry reads — so the transmittal matches the drawing snapshot
-        // serialized below even if the tab changes while the writer runs.
-        let mut deps: Vec<(String, Vec<u8>)> = Vec::new();
-        let mut skipped: Vec<String> = Vec::new();
-
-        // Xrefs — the block-record walk native copies; the bytes come from
-        // the session's xref registry (picked, dropped or opened files).
-        for br in self.tabs[i].scene.document.block_records.iter() {
-            if br.xref_path.trim().is_empty() {
-                continue;
+        // Capture dependencies with the same document snapshot that is
+        // serialized below. Nested xrefs are inspected from registered bytes;
+        // unavailable original resources are reported, never substituted.
+        let active_plot_style = self
+            .active_plot_style
+            .as_ref()
+            .map(|table| table.name.clone());
+        let save_document = self.tabs[i].scene.document_for_save();
+        let (package, drawing) = match crate::io::transmit::collect_web(
+            &save_document,
+            &filename,
+            active_plot_style.as_deref(),
+            self.transmittal_layout,
+        ) {
+            Ok(collected) => collected,
+            Err(error) => {
+                self.command_line.push_error(
+                    crate::tf!("{cmd}: cannot package the drawing ({e}).", e = error).as_ref(),
+                );
+                return Task::none();
             }
-            match crate::io::xref::find_registered_source(&br.xref_path)
-                .and_then(|key| crate::io::xref::registered_bytes(&key))
-            {
-                Some(bytes) => push_entry(
-                    &mut deps,
-                    transmit_file_name(&br.xref_path),
-                    (*bytes).clone(),
-                ),
-                None => push_skipped(&mut skipped, &transmit_file_name(&br.xref_path)),
-            }
-        }
-
-        // Raster images — picked/dropped bytes registered for the reference
-        // stand in for the file native would copy.
-        for e in self.tabs[i].scene.document.entities() {
-            if let document::EntityType::RasterImage(img) = e {
-                if img.file_path.trim().is_empty() {
-                    continue;
-                }
-                match crate::scene::model::image_model::registered_source_bytes(&img.file_path) {
-                    Some(bytes) => push_entry(
-                        &mut deps,
-                        transmit_file_name(&img.file_path),
-                        (*bytes).clone(),
-                    ),
-                    None => push_skipped(&mut skipped, &transmit_file_name(&img.file_path)),
-                }
-            }
-        }
-
-        // PDF underlays — bytes registered at attach time.
-        for o in self.tabs[i].scene.document.objects.values() {
-            if let document::objects::ObjectType::UnderlayDefinition(def) = o {
-                if !matches!(def.underlay_type, document::entities::UnderlayType::Pdf)
-                    || def.file_path.trim().is_empty()
-                {
-                    continue;
-                }
-                match crate::scene::model::pdf_raster::registered_source_bytes(&def.file_path) {
-                    Some(bytes) => push_entry(
-                        &mut deps,
-                        transmit_file_name(&def.file_path),
-                        (*bytes).clone(),
-                    ),
-                    None => push_skipped(&mut skipped, &transmit_file_name(&def.file_path)),
-                }
-            }
-        }
-
-        // Plot tables named by the layouts (and the session's active one).
-        // Only tables picked this session have bytes; the built-ins ship
-        // with the app, so they are neither packaged nor reported missing.
-        let mut style_names: Vec<String> = self.tabs[i]
-            .scene
-            .document
-            .objects
-            .values()
-            .filter_map(|o| {
-                if let document::objects::ObjectType::Layout(l) = o {
-                    Some(l.plot_style_sheet.clone())
-                } else {
-                    None
-                }
+        };
+        let deps = package.entries;
+        let skipped = package
+            .issues
+            .into_iter()
+            .map(|issue| {
+                format!(
+                    "{} (from {}): {}",
+                    issue.reference, issue.owner, issue.reason
+                )
             })
-            .collect();
-        if let Some(table) = self.active_plot_style.as_ref() {
-            style_names.push(table.name.clone());
-        }
-        for name in style_names {
-            if name.trim().is_empty()
-                || crate::io::plot_style::PlotStyleTable::builtin(&name).is_ok()
-            {
-                continue;
-            }
-            match crate::io::plot_style::session_table(&name) {
-                Some(bytes) => push_entry(&mut deps, name, (*bytes).clone()),
-                None => push_skipped(&mut skipped, &name),
-            }
-        }
+            .collect::<Vec<_>>();
+        let warnings = package.warnings;
 
         // The drawing itself: the same worker-routed serialization a web
         // Save performs (native copies the last-saved file; the web build
@@ -1187,17 +1162,26 @@ impl OpenCADStudio {
         // assembly and download are cheap and stay on the main thread —
         // they continue in the completion message.
         let zip_name = format!("{stem}_transmit.zip");
-        let prepared =
-            crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+        let prepared = crate::io::prepare_document_for_save(drawing, version);
         let cmd = cmd.to_string();
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
+            async move {
+                crate::io::serialize_prepared_document(
+                    &prepared,
+                    &ext,
+                    false,
+                    ifccad_session.as_ref(),
+                )
+                .await
+            },
             move |result| Message::WebArchiveSerialized {
                 cmd,
                 zip_name,
                 filename,
                 deps,
                 skipped,
+                warnings,
                 result,
             },
         )
@@ -1215,6 +1199,7 @@ impl OpenCADStudio {
         filename: String,
         deps: Vec<(String, Vec<u8>)>,
         skipped: Vec<String>,
+        warnings: Vec<String>,
         result: Result<Vec<u8>, String>,
     ) -> Task<Message> {
         let drawing = match result {
@@ -1226,10 +1211,8 @@ impl OpenCADStudio {
             }
         };
         let mut entries: Vec<(String, Vec<u8>)> = vec![(filename, drawing)];
-        for (name, data) in deps {
-            push_entry(&mut entries, name, data);
-        }
-        match build_zip(&entries) {
+        entries.extend(deps);
+        match crate::io::transmit_zip::build_zip(&entries) {
             Ok(zip) => {
                 crate::sys::download_bytes(&zip_name, &zip);
                 // The same report shape the native folder transmittal makes.
@@ -1245,66 +1228,15 @@ impl OpenCADStudio {
         if !skipped.is_empty() {
             let n = skipped.len();
             let names = skipped.join(", ");
-            self.command_line.push_output(
-                crate::tf!(
-                    "{cmd}: skipped {n} referenced file(s) not loaded in this session: {names}"
-                )
-                .as_ref(),
+            self.command_line.push_warning(
+                crate::tf!("{cmd}: {n} referenced file(s) missing or conflicting: {names}")
+                    .as_ref(),
             );
         }
+        for warning in warnings {
+            self.command_line.push_output(&format!("{cmd}: {warning}"));
+        }
         Task::none()
-    }
-}
-
-/// Trailing component of a reference path — the flat name a transmittal
-/// packages it under (native copies `file_name()` into one folder).
-#[cfg(target_arch = "wasm32")]
-fn transmit_file_name(path: &str) -> String {
-    path.trim()
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or_default()
-        .to_string()
-}
-
-/// Add one entry under its flat name; a later dependency with the same name
-/// replaces the bytes (native's `fs::copy` overwrite into the folder).
-#[cfg(target_arch = "wasm32")]
-fn push_entry(entries: &mut Vec<(String, Vec<u8>)>, name: String, data: Vec<u8>) {
-    if let Some(slot) = entries
-        .iter_mut()
-        .find(|(entry, _)| entry.eq_ignore_ascii_case(&name))
-    {
-        slot.1 = data;
-    } else {
-        entries.push((name, data));
-    }
-}
-
-/// Pack the transmittal entries into one deflated ZIP archive in memory.
-#[cfg(target_arch = "wasm32")]
-fn build_zip(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
-    use std::io::Write;
-    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    for (name, data) in entries {
-        writer
-            .start_file(name.as_str(), options)
-            .map_err(|e| e.to_string())?;
-        writer.write_all(data).map_err(|e| e.to_string())?;
-    }
-    writer
-        .finish()
-        .map(std::io::Cursor::into_inner)
-        .map_err(|e| e.to_string())
-}
-
-/// Remember a missing dependency for the report, once per name.
-#[cfg(target_arch = "wasm32")]
-fn push_skipped(skipped: &mut Vec<String>, name: &str) {
-    if !name.is_empty() && !skipped.iter().any(|s| s.eq_ignore_ascii_case(name)) {
-        skipped.push(name.to_string());
     }
 }
 
@@ -1531,5 +1463,139 @@ ZOOM EXTENTS
         let _ = app.update(Message::ScriptLine("3".into()));
         assert_eq!(app.tabs[i].scene.document.entities().count(), 4);
         assert!(app.tabs[i].active_cmd.is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn transmittal_command_fixture(tag: &str) -> (std::path::PathBuf, OpenCADStudio) {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmit-command-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("root.dxf");
+        let doc = document::Document::new();
+        let bytes = crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap();
+        std::fs::write(&source, bytes).unwrap();
+        let mut app = fresh_app();
+        app.tabs[app.active_tab].current_path = Some(source);
+        (dir, app)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_etransmit_writes_zip_with_saved_drawing_and_report() {
+        let (dir, mut app) = transmittal_command_fixture("zip");
+        let i = app.active_tab;
+        let expected = std::fs::read(app.tabs[i].current_path.as_ref().unwrap()).unwrap();
+        app.archive_native(i, "ETRANSMIT");
+
+        let output = dir.join("root_transmit.zip");
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(output).unwrap())).unwrap();
+        assert!(archive.len() >= 2);
+        assert_eq!(archive.by_index(0).unwrap().name(), "root.dxf");
+        let mut drawing = Vec::new();
+        std::io::Read::read_to_end(&mut archive.by_index(0).unwrap(), &mut drawing).unwrap();
+        assert_eq!(drawing, expected);
+        assert_eq!(
+            archive
+                .by_name(crate::io::transmit::REPORT_FILE)
+                .unwrap()
+                .name(),
+            crate::io::transmit::REPORT_FILE
+        );
+        assert!(!dir.join("root_archive").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_etransmit_missing_dependencies_warn_without_failing_export() {
+        let (dir, mut app) = transmittal_command_fixture("warnings");
+        let i = app.active_tab;
+        let source = app.tabs[i].current_path.clone().unwrap();
+        let mut doc = document::Document::new();
+        let mut style = document::tables::TextStyle::new("MissingFont");
+        style.font_file = "missing-ocs-etransmit-font.shx".into();
+        doc.text_styles.add(style).unwrap();
+        std::fs::write(
+            &source,
+            crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap(),
+        )
+        .unwrap();
+        let error_revision = app.command_line.error_revision;
+        let last_error = app.command_line.last_error.clone();
+
+        app.archive_native(i, "ETRANSMIT");
+
+        let output = dir.join("root_transmit.zip");
+        assert!(output.is_file(), "missing dependencies must not block the ZIP");
+        assert_eq!(app.command_line.error_revision, error_revision);
+        assert_eq!(app.command_line.last_error, last_error);
+        let notice = app.command_line.history.last().unwrap();
+        assert_eq!(
+            notice.kind,
+            crate::ui::command_line::EntryKind::Warning,
+            "{}",
+            notice.text
+        );
+        assert!(notice.text.contains("missing-ocs-etransmit-font.shx"));
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(output).unwrap())).unwrap();
+        let mut report = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name(crate::io::transmit::REPORT_FILE).unwrap(),
+            &mut report,
+        )
+        .unwrap();
+        assert!(report.contains("missing-ocs-etransmit-font.shx"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_archive_retains_folder_output() {
+        let (dir, mut app) = transmittal_command_fixture("folder");
+        let i = app.active_tab;
+        app.archive_native(i, "ARCHIVE");
+
+        let folder = dir.join("root_archive");
+        assert!(folder.join("root.dxf").is_file());
+        assert!(folder.join(crate::io::transmit::REPORT_FILE).is_file());
+        assert!(!dir.join("root_transmit.zip").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_archive_folder_creates_nested_subfolders() {
+        let folder = std::env::temp_dir().join(format!(
+            "ocs-transmit-folder-layout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let entries = vec![
+            ("root.dwg".to_owned(), b"root".to_vec()),
+            ("xref/nested.dwg".to_owned(), b"nested".to_vec()),
+            ("Fonts/custom.shx".to_owned(), b"font".to_vec()),
+        ];
+        super::write_archive_folder(&folder, &entries).unwrap();
+        assert_eq!(std::fs::read(folder.join("root.dwg")).unwrap(), b"root");
+        assert_eq!(
+            std::fs::read(folder.join("xref/nested.dwg")).unwrap(),
+            b"nested"
+        );
+        assert_eq!(
+            std::fs::read(folder.join("Fonts/custom.shx")).unwrap(),
+            b"font"
+        );
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }

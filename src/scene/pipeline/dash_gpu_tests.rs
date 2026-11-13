@@ -311,6 +311,105 @@ fn tapered(name: u32, y: f32, instanced: bool) -> WireModel {
     wire
 }
 
+fn dotted(name: u32, y: f32, weight: f32, instanced: bool) -> WireModel {
+    let mut wire = dashed(
+        name,
+        y,
+        &[-0.8, 0.8],
+        0.2,
+        [0.0, -0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    );
+    wire.dash_from_start = true;
+    wire.line_weight_px = weight;
+    if instanced {
+        wire.render_instance = Some(RenderInstance {
+            source_id: name as u64,
+            translation: [0.0, 0.0, 0.0],
+        });
+    }
+    wire
+}
+
+/// Width and height of the dot centred at NDC (0, y).
+fn dot_size(bytes: &[u8], y: f32) -> [usize; 2] {
+    let row = ((1.0 - y) * 0.5 * SIZE as f32) as isize;
+    let column = to_px(0.0) as isize;
+    let lit_at = |x: isize, y: isize| {
+        let pixel = &bytes[(y as usize * SIZE as usize + x as usize) * 4..][..3];
+        pixel.iter().any(|&channel| channel > 60)
+    };
+    assert!(lit_at(column, row), "no dot at the expected station");
+    let mut left = column;
+    let mut right = column;
+    while lit_at(left - 1, row) {
+        left -= 1;
+    }
+    while lit_at(right + 1, row) {
+        right += 1;
+    }
+    let mut top = row;
+    let mut bottom = row;
+    while lit_at(column, top - 1) {
+        top -= 1;
+    }
+    while lit_at(column, bottom + 1) {
+        bottom += 1;
+    }
+    [(right - left + 1) as usize, (bottom - top + 1) as usize]
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn dots_take_their_size_from_the_lineweight() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    for packed in [false, true] {
+        let mut limits = adapter.limits();
+        if packed {
+            limits.max_storage_buffers_per_shader_stage = 0;
+        }
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("GPU device");
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let mut block_geometry = wire_gpu::BlockGeometryCache::default();
+        let wires = [
+            dotted(200, 0.75, 1.0, false),
+            dotted(201, 0.25, 8.0, false),
+            dotted(202, -0.25, 1.0, true),
+            dotted(203, -0.75, 8.0, true),
+        ];
+        let bounds = Rectangle::with_size(Size::new(SIZE as f32, SIZE as f32));
+        let mut uniforms = Uniforms::new(&Camera::default(), bounds, true);
+        uniforms.view_rot = glam::Mat4::IDENTITY;
+        uniforms.eye_high = [0.0; 3];
+        uniforms.eye_low = [0.0; 3];
+        uniforms.world_per_pixel = 2.0 / SIZE as f32;
+        let bytes = render(
+            &device,
+            &queue,
+            &mut pipeline,
+            &mut block_geometry,
+            &uniforms,
+            &wires,
+        );
+        for (thin, thick) in [(0.75, 0.25), (-0.25, -0.75)] {
+            let thin = dot_size(&bytes, thin);
+            let thick = dot_size(&bytes, thick);
+            assert!(
+                thick[0] >= thin[0] + 5 && thick[1] >= thin[1] + 5,
+                "packed={packed}: thin {thin:?}, thick {thick:?}"
+            );
+            assert!(
+                thick[0].abs_diff(thick[1]) <= 2,
+                "packed={packed}: dot is not round: {thick:?}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_screen_draws_the_dashes_the_plot_cuts() {

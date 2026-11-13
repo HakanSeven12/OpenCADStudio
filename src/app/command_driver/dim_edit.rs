@@ -220,16 +220,35 @@ fn wire_segments(
 fn segment_intersection_xy(
     first: (glam::DVec3, glam::DVec3),
     second: (glam::DVec3, glam::DVec3),
+    half_gap: f64,
 ) -> Option<(glam::DVec3, glam::DVec3)> {
     let gap = kernel::space::segment_break_gap_xy(
         [first.0.to_array(), first.1.to_array()],
         [second.0.to_array(), second.1.to_array()],
-        0.25,
+        half_gap,
     )?;
     Some((
         glam::DVec3::from_array(gap[0]),
         glam::DVec3::from_array(gap[1]),
     ))
+}
+
+/// The gap an automatic break cuts in `dimension`: its style's break size,
+/// scaled like the rest of the dimension.
+fn dimension_break_size(document: &document::Document, dimension: Handle) -> f64 {
+    let Some(document::EntityType::Dimension(dim)) = document.get_entity(dimension) else {
+        return 0.5;
+    };
+    let name = &dim.base().style_name;
+    let Some(style) = document
+        .dim_styles
+        .iter()
+        .find(|style| style.name.eq_ignore_ascii_case(name))
+    else {
+        return 0.5;
+    };
+    let scale = if style.dimscale > 0.0 { style.dimscale } else { 1.0 };
+    crate::scene::creation_style::dim_style_extras(document, style.handle).break_size * scale
 }
 
 fn break_object_handle(document: &document::Document, dimension: Handle) -> Option<Handle> {
@@ -417,6 +436,7 @@ fn apply_dimbreak(
 
     let mut pending = Vec::new();
     for dimension in &dimensions {
+        let half_gap = dimension_break_size(&scene.document, *dimension) * 0.5;
         let existing: Vec<_> = break_object_handle(&scene.document, *dimension)
             .and_then(|handle| scene.document.objects.get(&handle))
             .and_then(|object| match object {
@@ -449,7 +469,7 @@ fn apply_dimbreak(
                 for dim_segment in &dimension_segments {
                     for crossing_segment in &crossing_segments {
                         if let Some(points) =
-                            segment_intersection_xy(*dim_segment, *crossing_segment)
+                            segment_intersection_xy(*dim_segment, *crossing_segment, half_gap)
                         {
                             let center = (points.0 + points.1) * 0.5;
                             if intersections.iter().all(

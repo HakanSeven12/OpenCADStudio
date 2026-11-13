@@ -1,80 +1,58 @@
 // Wavefront OBJ mesh importer.
 //
-// Parses vertex positions, optional normals, and triangle/quad faces.
-// Quads are split into two triangles.
-// Only the first object/group is imported (no multi-object support needed).
+// Each OBJ object (`o`) becomes one MESH entity holding its own vertices and
+// its polygons as they are in the file, so the drawing keeps, snaps, saves
+// and plots it like any other MESH.
 
-use crate::scene::model::mesh_model::MeshModel;
+use document::entities::mesh::{Mesh, MeshFace};
+use document::types::Vector3;
 
-/// Parse OBJ text into a MeshModel.
+/// Parse OBJ text into one MESH per object.
 /// Returns `None` if the file has no usable geometry.
-pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals_raw: Vec<[f32; 3]> = Vec::new();
-    // Each face vertex: (pos_idx, normal_idx_opt)
-    let mut face_verts: Vec<(usize, Option<usize>)> = Vec::new();
+pub fn parse_obj(src: &str) -> Option<Vec<Mesh>> {
+    let mut positions: Vec<Vector3> = Vec::new();
+    // Each object's faces as file vertex indices.
+    let mut objects: Vec<Vec<Vec<usize>>> = vec![Vec::new()];
 
     for line in src.lines() {
         let line = line.trim();
-        if line.starts_with('#') || line.is_empty() {
-            continue;
-        }
-
         let mut parts = line.split_whitespace();
-        let keyword = parts.next().unwrap_or("");
-
-        match keyword {
+        match parts.next().unwrap_or("") {
             "v" => {
-                let vals: Vec<f32> = parts.filter_map(|s| s.parse().ok()).collect();
+                let vals: Vec<f64> = parts.filter_map(|s| s.parse().ok()).collect();
                 if vals.len() >= 3 {
                     // OBJ is Y-up right-handed; OpenCADStudio's world is Z-up.
                     // Rotate +90° about X so OBJ Y→world Z (up): (x, y, z) → (x, -z, y).
-                    positions.push([vals[0], -vals[2], vals[1]]);
+                    positions.push(Vector3::new(vals[0], -vals[2], vals[1]));
                 }
             }
-            "vn" => {
-                let vals: Vec<f32> = parts.filter_map(|s| s.parse().ok()).collect();
-                if vals.len() >= 3 {
-                    normals_raw.push([vals[0], -vals[2], vals[1]]);
-                }
+            // An object with no faces yet is simply continued.
+            "o" if objects.last().is_some_and(|faces| !faces.is_empty()) => {
+                objects.push(Vec::new());
             }
             "f" => {
-                // Collect vertex descriptors "v", "v/vt", "v/vt/vn", "v//vn"
-                let descs: Vec<(usize, Option<usize>)> = parts
-                    .filter_map(|token| {
-                        let mut it = token.split('/');
-                        let pos_i: usize = it.next()?.parse::<i32>().ok()
-                            .map(|i| if i < 0 { positions.len() as i32 + i } else { i - 1 })? as usize;
-                        it.next(); // skip vt
-                        let norm_i = it.next().and_then(|s| s.parse::<i32>().ok())
-                            .map(|i| if i < 0 { normals_raw.len() as i32 + i } else { i - 1 } as usize);
-                        Some((pos_i, norm_i))
+                // Vertex descriptors "v", "v/vt", "v/vt/vn", "v//vn"; negative
+                // indices count back from the vertices read so far.
+                let face: Option<Vec<usize>> = parts
+                    .map(|token| {
+                        let index: i64 = token.split('/').next()?.parse().ok()?;
+                        let index = if index < 0 {
+                            positions.len() as i64 + index
+                        } else {
+                            index - 1
+                        };
+                        usize::try_from(index)
+                            .ok()
+                            .filter(|&index| index < positions.len())
                     })
                     .collect();
-                // A fan is only right for convex faces; floor-plan n-gons
-                // are concave, so larger faces go through the kernel's
-                // triangulator and fall back to the fan if it declines. (#680)
-                let corners: Vec<[f64; 3]> = descs
-                    .iter()
-                    .map(|(pos_i, _)| {
-                        let p = positions.get(*pos_i).copied().unwrap_or([0.0; 3]);
-                        [p[0] as f64, p[1] as f64, p[2] as f64]
-                    })
-                    .collect();
-                let triangles = if descs.len() > 3 {
-                    crate::entities::mesh::triangulate_planar_indices(&corners)
-                } else {
-                    Vec::new()
-                };
-                if triangles.is_empty() {
-                    for k in 1..(descs.len() as isize - 1) {
-                        face_verts.push(descs[0]);
-                        face_verts.push(descs[k as usize]);
-                        face_verts.push(descs[k as usize + 1]);
+                if let Some(mut face) = face {
+                    face.dedup();
+                    if face.len() > 1 && face.first() == face.last() {
+                        face.pop();
                     }
-                } else {
-                    for triangle in triangles {
-                        face_verts.extend(triangle.map(|index| descs[index]));
+                    if face.len() >= 3 {
+                        objects.last_mut()?.push(face);
                     }
                 }
             }
@@ -82,133 +60,48 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
         }
     }
 
-    if positions.is_empty() || face_verts.is_empty() {
-        return None;
-    }
-
-    // Build flat (un-indexed) vertex + normal arrays.
-    let mut verts: Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
-    let mut norms: Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
-    let mut indices: Vec<u32> = Vec::with_capacity(face_verts.len());
-    let mut has_normal: Vec<bool> = Vec::with_capacity(face_verts.len());
-
-    for (vi, (pos_i, norm_i)) in face_verts.iter().enumerate() {
-        let pos = *positions.get(*pos_i).unwrap_or(&[0.0; 3]);
-        verts.push(pos);
-        let norm = norm_i
-            .and_then(|ni| normals_raw.get(ni).copied())
-            .filter(|n| {
-                n.iter().all(|value| value.is_finite())
-                    && n.iter().map(|value| value * value).sum::<f32>() > 1e-12
-            });
-        has_normal.push(norm.is_some());
-        norms.push(norm.unwrap_or([0.0, 0.0, 0.0]));
-        indices.push(vi as u32);
-    }
-
-    // A vertex the file gives no usable normal (the file lists none, the face
-    // omits its normal indices, or an index is out of range) takes its face
-    // normal instead of staying zero.
-    for tri in indices.chunks_exact(3) {
-        if tri.iter().all(|&v| has_normal[v as usize]) {
-            continue;
-        }
-        let a = verts[tri[0] as usize];
-        let b = verts[tri[1] as usize];
-        let c = verts[tri[2] as usize];
-        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-        let nx = ab[1] * ac[2] - ab[2] * ac[1];
-        let ny = ab[2] * ac[0] - ab[0] * ac[2];
-        let nz = ab[0] * ac[1] - ab[1] * ac[0];
-        let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-12);
-        let n = [nx / len, ny / len, nz / len];
-        for &v in tri {
-            if !has_normal[v as usize] {
-                norms[v as usize] = n;
+    let meshes: Vec<Mesh> = objects
+        .into_iter()
+        .filter(|faces| !faces.is_empty())
+        .map(|faces| {
+            // Each mesh keeps only the vertices its faces use.
+            let mut local = std::collections::HashMap::new();
+            let mut mesh = Mesh::new();
+            for face in faces {
+                let indices = face
+                    .into_iter()
+                    .map(|index| {
+                        *local
+                            .entry(index)
+                            .or_insert_with(|| mesh.add_vertex(positions[index]))
+                    })
+                    .collect();
+                mesh.add_face(MeshFace::new(indices));
             }
-        }
-    }
-
-    Some(MeshModel {
-        name: String::new(),
-        verts,
-        verts_low: Vec::new(),
-        normals: norms,
-        indices,
-        triangle_material_handles: Vec::new(),
-        triangle_colors: Vec::new(),
-        color,
-        selected: false,
-    })
+            mesh.compute_edges();
+            mesh
+        })
+        .collect();
+    (!meshes.is_empty()).then_some(meshes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::parse_obj;
 
-    const COLOR: [f32; 4] = [0.7, 0.7, 0.85, 1.0];
-
-    /// A unit square in the OBJ ground plane (Y-up), so it lands in world XY
-    /// with its counter-clockwise faces pointing up +Z.
-    const SQUARE: &str = "v 0 0 0\nv 1 0 0\nv 1 0 -1\nv 0 0 -1\n";
-
-    fn assert_normals(normals: &[[f32; 3]], expected: [f32; 3]) {
-        for (i, n) in normals.iter().enumerate() {
-            let close = n.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6);
-            assert!(close, "vertex {i}: expected normal {expected:?}, got {n:?}");
-        }
-    }
-
-    /// OBJ lets a face omit normal indices even when the file lists normals.
-    /// That face used to get a zero normal instead of its face normal.
     #[test]
-    fn a_face_without_normal_indices_gets_its_face_normal() {
-        let src = format!("{SQUARE}vn 0 1 0\nf 1//1 2//1 3//1\nf 1 3 4\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_eq!(mesh.normals.len(), 6);
-        assert_normals(&mesh.normals[3..], [0.0, 0.0, 1.0]);
-    }
-
-    /// A normal index past the end of the list is treated like a missing one.
-    #[test]
-    fn an_out_of_range_normal_index_gets_the_face_normal() {
-        let src = format!("{SQUARE}vn 0 1 0\nf 1//7 2//7 3//7\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_normals(&mesh.normals, [0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn a_zero_normal_gets_the_face_normal() {
-        let src = format!("{SQUARE}vn 0 0 0\nf 1//1 2//1 3//1\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_normals(&mesh.normals, [0.0, 0.0, 1.0]);
-    }
-
-    /// Only the vertex with a bad index is filled; its neighbours keep theirs.
-    #[test]
-    fn only_the_vertex_without_a_normal_is_filled() {
-        let src = format!("{SQUARE}vn 1 0 0\nf 1//1 2//9 3//1\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_normals(&mesh.normals[0..1], [1.0, 0.0, 0.0]);
-        assert_normals(&mesh.normals[1..2], [0.0, 0.0, 1.0]);
-        assert_normals(&mesh.normals[2..3], [1.0, 0.0, 0.0]);
-    }
-
-    /// Normals the file supplies are kept as written (converted to Z-up).
-    #[test]
-    fn supplied_normals_are_kept() {
-        let src = format!("{SQUARE}vn 1 0 0\nf 1//1 2//1 3//1\nf 1//1 3//1 4//1\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_normals(&mesh.normals, [1.0, 0.0, 0.0]);
-    }
-
-    /// A file without any normals still gets face normals.
-    #[test]
-    fn a_file_without_normals_gets_face_normals() {
-        let src = format!("{SQUARE}f 1 2 3 4\n");
-        let mesh = parse_obj(&src, COLOR).expect("mesh");
-        assert_eq!(mesh.normals.len(), 6);
-        assert_normals(&mesh.normals, [0.0, 0.0, 1.0]);
+    fn each_object_becomes_a_mesh_of_its_own_polygons() {
+        let src = "v 0 0 0\nv 1 0 0\nv 1 0 -1\nv 0 0 -1\nv 0 1 0\n\
+                   o Floor\nf 1//1 2//1 3//1 4//1\no Roof\nf -5 -4 -1\n";
+        let meshes = parse_obj(src).unwrap();
+        assert_eq!(meshes.len(), 2);
+        let floor = &meshes[0];
+        assert_eq!(floor.vertices.len(), 4);
+        assert_eq!(floor.faces[0].vertices, vec![0, 1, 2, 3]);
+        // OBJ Y-up lands as world Z-up.
+        assert_eq!(floor.vertices[2].y, 1.0);
+        let roof = &meshes[1];
+        assert_eq!(roof.vertices.len(), 3);
+        assert_eq!(roof.vertices[2].z, 1.0);
     }
 }

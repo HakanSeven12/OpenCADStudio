@@ -527,3 +527,74 @@ fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
         );
     }
 }
+
+#[test]
+fn associative_refresh_keeps_the_format_flag_with_the_rederived_contents() {
+    // A DWG/DGN-imported associative hatch stores its derived loop as ONE
+    // closed polyline edge and carries the path's POLYLINE format flag.
+    // Refreshing the fill after an edit of its boundary source re-derives
+    // the loop as plain Line edges; the format flag must follow the
+    // contents, because the DWG writer takes its polyline branch on the
+    // flag alone and, finding no polyline edge in the path, writes an empty
+    // loop and silently loses the fill on the next save.
+    let mut scene = Scene::new();
+
+    let mut outline = document::entities::LwPolyline::new();
+    outline.is_closed = true;
+    outline.vertices = [[0.0, 0.0], [40.0, 0.0], [40.0, 40.0], [0.0, 40.0]]
+        .iter()
+        .map(|p| document::entities::LwVertex::from_coords(p[0], p[1]))
+        .collect();
+    let source = scene
+        .document
+        .add_entity(document::EntityType::LwPolyline(outline))
+        .expect("the boundary polyline must be added");
+
+    let mut fill = Hatch::new();
+    fill.is_solid = true;
+    fill.is_associative = true;
+    let mut path =
+        BoundaryPath::with_flags(BoundaryPathFlags::from_bits(
+            BoundaryPathFlags::EXTERNAL.bits() | BoundaryPathFlags::POLYLINE.bits(),
+        ));
+    path.flags.set_polyline(true);
+    path.flags.set_derived(true);
+    path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+        [[0.0, 0.0], [40.0, 0.0], [40.0, 40.0], [0.0, 40.0]]
+            .iter()
+            .map(|p| Vector2::new(p[0], p[1]))
+            .collect(),
+        true,
+    )));
+    path.boundary_handles.push(source);
+    fill.paths.push(path);
+    let hatch_handle = scene
+        .document
+        .add_entity(document::EntityType::Hatch(Box::new(fill)))
+        .expect("the associative hatch must be added");
+
+    // A boundary-source edit refreshes the fill; the loop geometry stays a
+    // rectangle either way, and the format flag keeps meaning what the
+    // contents are on both sides.
+    let changes = vec![(source, crate::scene::ChangeKind::Modified)];
+    assert!(!scene.refresh_associative_hatches(&changes).is_empty());
+
+    let Some(document::EntityType::Hatch(stored)) = scene.document.get_entity(hatch_handle)
+    else {
+        panic!("the refreshed hatch must stay at its handle");
+    };
+    let path = &stored.paths[0];
+    assert!(
+        !path.edges.is_empty(),
+        "an associative refresh must not leave an empty loop behind"
+    );
+    assert_eq!(
+        path.flags.is_polyline(),
+        path.is_polyline(),
+        "the POLYLINE format flag must agree with the stored contents"
+    );
+    if let Some(BoundaryEdge::Polyline(polyline)) = path.edges.first() {
+        assert!(polyline.vertices.len() >= 3, "the loop must keep its shape");
+        assert!(polyline.is_closed, "re-derived rectangles close their loops");
+    }
+}

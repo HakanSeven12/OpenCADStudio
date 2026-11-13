@@ -6,7 +6,7 @@
 use document::classes::arch::ArchEntityData;
 use document::classes::arch::ArchObject;
 use document::classes::civil::{
-    parse_format, property, AlignmentPiece, AssemblyLayout, CivilKind, DisplayComponent, LabelPart, LabelText,
+    display_station, parse_format, property, AlignmentPiece, CogoPoint, AssemblyLayout, CivilKind, DisplayComponent, LabelPart, LabelText,
     ProfilePiece, ProfileViewFrame, TinSurface,
 };
 use document::objects::ObjectType;
@@ -330,6 +330,7 @@ fn marker(out: &mut Decoded, style: Option<ProxyStyle>, at: Vector2, symbol: &do
             styled(out, style, vec![p(-d, d), p(d, -d)]);
         }
         4 => styled(out, style, vec![p(0.0, 0.0), p(0.0, size)]),
+        0 => styled(out, style, vec![p(0.0, 0.0), p(0.0, 0.0)]),
         _ => {}
     }
 }
@@ -567,7 +568,7 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
             profile_view(data, document, &mut out);
         }
         CivilKind::Label => {
-            label_group(data, document, &mut out);
+            label_group(data, handle, document, &mut out);
         }
         CivilKind::SampleLineGroup => {
             let handles = data.decode().handles;
@@ -587,9 +588,76 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
             subassembly(data, handle, document, &mut out);
         }
         CivilKind::Other if data.dxf_name == "AECC_PIPE" => pipe(data, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => feature_line(data, handle, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_COGO_POINT" => cogo_point(data, document, &mut out)?,
         _ => return None,
     }
     Some(out)
+}
+
+/// Stations as Civil 3D shows them along `alignment`: past a station
+/// equation they run on from its station ahead. Without an alignment, raw.
+/// The point database entry a COGO point entity shows.
+// ponytail: decodes the whole database per point; cache it by record bytes
+// if drawings with many uncached points get slow.
+fn cogo_point_of(data: &ArchEntityData, document: &document::Document) -> Option<CogoPoint> {
+    let number = data.cogo_point_number()?;
+    document.objects.values().find_map(|o| match o {
+        ObjectType::Arch(node) if node.dxf_name == "AECC_POINT_NODE" => node.cogo_points().into_iter().find(|p| p.number == number),
+        _ => None,
+    })
+}
+
+/// Point style components (`PointDisplayStyleType`).
+const POINT_MARKER: usize = 0;
+const POINT_LABEL: usize = 1;
+
+/// A COGO point: its marker, then its label at the point.
+fn cogo_point(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let point = cogo_point_of(data, document)?;
+    let at = Vector2::new(point.position.x, point.position.y);
+    let components = style_components(document, &[point.style], "AECC_POINT_STYLE");
+    if let Some(symbol) = object_arch(document, point.style).and_then(|o| o.marker()) {
+        marker(out, component(document, components.as_deref(), POINT_MARKER), at, &symbol, drawing_scale(document));
+    }
+    if component(document, components.as_deref(), POINT_LABEL).is_some() {
+        if let Some(style) = object_arch(document, point.label_style).filter(|o| o.dxf_name == "AECC_LABEL_COLLECTOR_STYLE") {
+            let style = collector(document, style);
+            let elevation = point.position.z;
+            let value = move |field: u32, options: &[u32]| {
+                (field == property::POINT_ELEVATION).then(|| LabelPart::format_value(options, elevation))
+            };
+            place(out, document, &style, at, 0.0, &value);
+        }
+    }
+    Some(())
+}
+
+/// Number and position of a selected COGO point.
+pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
+    use crate::entities::common::ro_prop;
+    let EntityType::Extended(e) = entity else { return Vec::new() };
+    let ExtendedEntityData::Arch(data) = &e.data else { return Vec::new() };
+    let Some(point) = cogo_point_of(data, document) else { return Vec::new() };
+    vec![crate::scene::model::object::PropSection {
+        title: crate::t!("Class").into_owned(),
+        props: vec![
+            ro_prop(crate::t!("Point Number").as_ref(), "ext_civil_point_number", point.number.to_string()),
+            ro_prop(crate::t!("Easting").as_ref(), "ext_civil_easting", format!("{:.4}", point.position.x)),
+            ro_prop(crate::t!("Northing").as_ref(), "ext_civil_northing", format!("{:.4}", point.position.y)),
+            ro_prop(crate::t!("Elevation").as_ref(), "ext_civil_elevation", format!("{:.4}", point.position.z)),
+        ],
+    }]
+}
+
+fn shown_stations(alignment: Option<&ArchEntityData>) -> impl Fn(f64) -> f64 {
+    let equations = alignment.map(|a| a.alignment_station_equations()).unwrap_or_default();
+    move |raw| display_station(&equations, raw)
+}
+
+/// The alignment among `handles`.
+fn alignment_among<'a>(document: &'a document::Document, handles: &[u64]) -> Option<&'a ArchEntityData> {
+    handles.iter().find_map(|h| arch_of(document, *h, CivilKind::Alignment))
 }
 
 fn line(out: &mut Decoded, points: Vec<[f64; 3]>) {
@@ -608,6 +676,8 @@ struct LabelStyle {
     /// `(plotted length, angle to the anchor's direction)` of each line
     /// component.
     lines: Vec<(f64, f64)>,
+    /// Shown line components, whether or not their length is read.
+    shown_lines: usize,
 }
 
 /// A label's own line components draw on the label's layer.
@@ -692,13 +762,14 @@ fn label_style(document: &document::Document, handles: &[u64]) -> Option<LabelSt
 
 fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
     let handles = style.decode().handles;
+    // Layer 0 draws on the labelled object's layer, as in `component`.
     let layer = handles.iter().find_map(|h| {
         document
             .layers
             .iter()
             .position(|layer| layer.handle.value() == *h)
-            .map(|i| i as u32)
-    });
+            .map(|i| (i as u32, document.layers.iter().nth(i).is_some_and(|l| l.name == "0")))
+    }).and_then(|(i, zero)| (!zero).then_some(i));
     let mut seen = Vec::new();
     let components = handles
         .iter()
@@ -708,6 +779,16 @@ fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
             fresh
         })
         .filter_map(|h| object_arch(document, *h)?.label_text())
+        .collect::<Vec<_>>();
+    // A component whose height is not read takes its sibling's.
+    let sibling = components.iter().find_map(|c| c.height);
+    let components = components
+        .into_iter()
+        .filter(|c| c.visible)
+        .map(|mut c| {
+            c.height = c.height.or(sibling);
+            c
+        })
         .collect();
     let mut seen = Vec::new();
     let ticks = handles
@@ -727,9 +808,20 @@ fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
             seen.push(**h);
             fresh
         })
-        .filter_map(|h| object_arch(document, *h)?.label_line())
+        .filter_map(|h| object_arch(document, *h).filter(|o| o.label_component_visible())?.label_line())
         .collect();
-    LabelStyle { layer, components, ticks, lines }
+    let mut seen = Vec::new();
+    let shown_lines = handles
+        .iter()
+        .filter(|h| {
+            let fresh = !seen.contains(*h);
+            seen.push(**h);
+            fresh
+        })
+        .filter_map(|h| object_arch(document, *h))
+        .filter(|o| o.dxf_name == "AECC_LABEL_RADIAL_LINE_STYLE" && o.label_component_visible())
+        .count();
+    LabelStyle { layer, components, ticks, lines, shown_lines }
 }
 
 /// Stroke font of Civil 3D label text: the drawing's Standard text style
@@ -753,7 +845,7 @@ fn drawing_scale(document: &document::Document) -> f64 {
     let header = &document.header;
     header
         .current_annotation_scale
-        .split_once(':')
+        .split_once([':', '/'])
         .and_then(|(paper, drawing)| {
             let (paper, drawing) = (paper.trim().parse::<f64>().ok()?, drawing.trim().parse::<f64>().ok()?);
             (paper > 0.0 && drawing > 0.0).then(|| drawing / paper)
@@ -762,13 +854,40 @@ fn drawing_scale(document: &document::Document) -> f64 {
         .unwrap_or(1.0)
 }
 
+/// Label text without its MTEXT formatting: braces and `\X...;` codes
+/// go, `\{`, `\}` and `\\` stay as the character.
+fn unformatted(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' | '}' => {}
+            '\\' => match chars.next() {
+                Some(e @ ('{' | '}' | '\\')) => out.push(e),
+                // `\U+015E`: a character by its code point.
+                Some('U') if chars.clone().next() == Some('+') => {
+                    chars.next();
+                    let hex: String = chars.by_ref().take(4).collect();
+                    out.extend(u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32));
+                }
+                Some('f' | 'F' | 'H' | 'W' | 'Q' | 'T' | 'A' | 'C' | 'c' | 'p') => {
+                    chars.by_ref().find(|c| *c == ';');
+                }
+                _ => {}
+            },
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// A component's lines with every field filled from `value`; `None` when a
 /// field has no value for this label.
 fn component_lines(component: &LabelText, value: &dyn Fn(u32, &[u32]) -> Option<String>) -> Option<Vec<String>> {
     let mut lines = vec![String::new()];
     for part in &component.content {
         match part {
-            LabelPart::Text(text) => lines.last_mut().unwrap().push_str(text),
+            LabelPart::Text(text) => lines.last_mut().unwrap().push_str(&unformatted(text)),
             LabelPart::NewLine => lines.push(String::new()),
             LabelPart::Field { property, options } => {
                 lines.last_mut().unwrap().push_str(&value(*property, options)?)
@@ -806,7 +925,7 @@ fn place(
         let Some(lines) = component_lines(component, value) else {
             continue;
         };
-        let lines: Vec<String> = lines.into_iter().filter(|l| !l.trim().is_empty()).collect();
+        let lines: Vec<String> = lines.into_iter().map(|l| l.trim_end().to_string()).filter(|l| !l.trim().is_empty()).collect();
         if lines.is_empty() {
             continue;
         }
@@ -1071,6 +1190,25 @@ fn pipe(data: &ArchEntityData, document: &document::Document, out: &mut Decoded)
     Some(())
 }
 
+/// Plan component of a feature line style that draws the line.
+const FEATURE_LINE: usize = 0;
+
+/// A feature line keeps no geometry of its own: it is an edge of its site's
+/// topology, with the elevations in the nodes.
+fn feature_line(data: &ArchEntityData, handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let container = object_arch(document, data.feature_line_container()?)?;
+    let members = container.site_members();
+    let topology = container.topology()?;
+    if members.len() != topology.edges.len() {
+        return None;
+    }
+    let index = members.iter().position(|h| *h == handle)?;
+    let components = style_components(document, &data.decode().handles, "AECC_FEATURELINE_STYLE");
+    let points = topology.edge_points(index).into_iter().map(|p| [p.x, p.y, p.z]).collect();
+    styled(out, component(document, components.as_deref(), FEATURE_LINE), points);
+    Some(())
+}
+
 fn unit2(v: Vector2) -> Option<Vector2> {
     let l = v.x.hypot(v.y);
     (l > 1e-12).then(|| Vector2::new(v.x / l, v.y / l))
@@ -1078,9 +1216,9 @@ fn unit2(v: Vector2) -> Option<Vector2> {
 
 /// Point and unit direction at `distance` along a polyline.
 fn point_at(run: &[Vector2], distance: f64) -> Option<(Vector2, Vector2)> {
-    // A station the record stores may pass the polyline's end by the
-    // rounding of its curves; it still names the end.
-    const END_TOLERANCE: f64 = 1e-3;
+    // A station measured along the curves passes the end of their chords
+    // by a little (about 1e-4 of the length); it still names the end.
+    let end_tolerance = 1e-3 + 2e-4 * distance.abs();
     let mut left = distance;
     let mut last = None;
     for pair in run.windows(2) {
@@ -1096,7 +1234,7 @@ fn point_at(run: &[Vector2], distance: f64) -> Option<(Vector2, Vector2)> {
         left -= length;
         last = Some((b, d));
     }
-    last.filter(|_| left <= END_TOLERANCE)
+    last.filter(|_| left <= end_tolerance)
 }
 
 /// Reading angle that keeps text upright.
@@ -1109,7 +1247,7 @@ fn upright(angle: f64) -> f64 {
     }
 }
 
-fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
     use property as p;
     let handles = data.decode().handles;
     let name = data.dxf_name.as_str();
@@ -1126,7 +1264,22 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let run = runs.first()?;
             let scale = drawing_scale(document);
             let _ = major;
-            for station in data.label_stations() {
+            let shown = shown_stations(Some(alignment));
+            let reference = handles
+                .iter()
+                .find_map(|h| arch_of(document, *h, CivilKind::Profile))
+                .map(|p| p.profile_polylines())
+                .unwrap_or_default();
+            // The group also labels the alignment's start and end.
+            let length: f64 = run.windows(2).map(|w| w[0].distance(&w[1])).sum();
+            let mut stations = data.label_stations();
+            for edge in [start, start + length] {
+                if !stations.iter().any(|s| (s - edge).abs() < 1e-6) {
+                    stations.push(edge);
+                }
+            }
+            stations.sort_by(f64::total_cmp);
+            for station in stations {
                 let Some((at, d)) = point_at(run, station - start) else {
                     continue;
                 };
@@ -1137,8 +1290,14 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                     }
                 }
                 if let Some(style) = &style {
-                    let value = |property: u32, options: &[u32]| {
-                        (property == p::STATION).then(|| LabelPart::format_value(options, station))
+                    let value = |property: u32, options: &[u32]| match property {
+                        p::STATION => Some(LabelPart::format_value(options, shown(station))),
+                        // A reference text naming a profile: its elevation here.
+                        REFERENCE_PROFILE_ELEVATION => {
+                            elevation_at(&reference, station).map(|v| LabelPart::format_value(options, v))
+                        }
+                        REFERENCE_PROFILE_GRADE => grade_at(&reference, station).map(|v| LabelPart::format_value(options, v)),
+                        _ => None,
                     };
                     place(out, document, style, b, d.y.atan2(d.x), &value);
                 }
@@ -1152,7 +1311,19 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
             let run = runs.first()?;
             let scale = drawing_scale(document);
             let masks = alignment.alignment_masked_ranges();
-            for point in alignment.alignment_geometry_points() {
+            let shown = shown_stations(Some(alignment));
+            let name = alignment.alignment_name().unwrap_or_default();
+            // The kinds the group labels: 1 the beginning, 2 the end, 3 and
+            // up the points between (which are not told apart here).
+            let kinds = data.label_geometry_point_kinds();
+            let points = alignment.alignment_geometry_points();
+            let last = points.len().saturating_sub(1);
+            for (i, point) in points.into_iter().enumerate() {
+                let kind = if i == 0 { 1 } else if i == last { 2 } else { 0 };
+                let listed = if kind == 0 { kinds.iter().any(|k| *k >= 3) } else { kinds.contains(&kind) };
+                if !kinds.is_empty() && !listed {
+                    continue;
+                }
                 if masked(start + point.distance, &masks) {
                     continue;
                 }
@@ -1163,9 +1334,16 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 for &(block, size) in &style.ticks {
                     tick(out, document, style.layer, block, at, heading, size * scale);
                 }
-                // The text hangs from the end of the line component, in its
+                // A dragged label hangs at its offset, a leader back to the
+                // point; otherwise from the end of the line component, in its
                 // direction.
+                let dragged = data.label_dragged_offset();
                 let (tip, frame) = match style.lines.first() {
+                    _ if dragged.is_some() => {
+                        let tip = at + dragged.unwrap();
+                        styled(out, Some(label_line_style(style.layer)), vec![[at.x, at.y, 0.0], [tip.x, tip.y, 0.0]]);
+                        (tip, heading)
+                    }
                     Some(&(length, angle)) => {
                         let frame = heading + angle;
                         let tip = at + Vector2::new(frame.cos(), frame.sin()) * (length * scale);
@@ -1177,7 +1355,8 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 let station = start + point.distance;
                 let value = |property: u32, options: &[u32]| match property {
                     p::GEOMETRY_POINT => Some(point.name.to_string()),
-                    p::STATION => Some(LabelPart::format_value(options, station)),
+                    p::ALIGNMENT_NAME => Some(name.clone()),
+                    p::STATION => Some(LabelPart::format_value(options, shown(station))),
                     _ => None,
                 };
                 place(out, document, &style, tip, frame, &value);
@@ -1189,12 +1368,13 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::SampleLineGroup))?;
             let style = style?;
             let template = group.sample_line_name_template().unwrap_or_default();
+            let shown = shown_stations(alignment_among(document, &group.decode().handles));
             for (station, left, right) in sample_lines(group, document)? {
                 let name: String = template
                     .iter()
                     .map(|part| match part {
                         LabelPart::Text(text) => text.clone(),
-                        LabelPart::Field { options, .. } => LabelPart::format_value(options, station),
+                        LabelPart::Field { options, .. } => LabelPart::format_value(options, shown(station)),
                         LabelPart::NewLine => String::new(),
                     })
                     .collect();
@@ -1206,24 +1386,42 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
         "AECC_STATION_ELEVATION_LABEL" => {
             let style = style?;
             let at = data.label_anchor()?;
-            let frame = document
+            let (frame, view) = document
                 .entities()
                 .filter_map(|e| match e {
                     EntityType::Extended(x) => match &x.data {
-                        ExtendedEntityData::Arch(view) => view.profile_view_frame(),
+                        ExtendedEntityData::Arch(view) => view.profile_view_frame().map(|f| (f, view)),
                         _ => None,
                     },
                     _ => None,
                 })
-                .find(|f| {
+                .find(|(f, _)| {
                     let top = f.to_drawing(f.station_max, f.elevation_max);
                     at.x >= f.origin.x && at.y >= f.origin.y && at.x <= top.x && at.y <= top.y
                 })?;
-            let station = frame.station_min + (at.x - frame.origin.x);
+            let shown = shown_stations(alignment_among(document, &view.decode().handles));
+            let station = shown(frame.station_min + (at.x - frame.origin.x));
             let elevation = frame.elevation_min + (at.y - frame.origin.y) / frame.vertical_scale;
             let value = |property: u32, options: &[u32]| match property {
                 p::STATION => Some(LabelPart::format_value(options, station)),
                 ELEVATION => Some(LabelPart::format_value(options, elevation)),
+                _ => None,
+            };
+            place(out, document, &style, at, 0.0, &value);
+        }
+        "AECC_PROFILE_PROJECTION_LABEL" => {
+            // An object projected into a profile view, labelled at its
+            // place in the view.
+            let style = style?;
+            let at = data.label_anchor()?;
+            let view = handles.iter().find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
+            let frame = view.profile_view_frame()?;
+            let shown = shown_stations(alignment_among(document, &view.decode().handles));
+            let station = shown(frame.station_min + (at.x - frame.origin.x));
+            let elevation = frame.elevation_min + (at.y - frame.origin.y) / frame.vertical_scale;
+            let value = |property: u32, options: &[u32]| match property {
+                p::PROJECTION_STATION => Some(LabelPart::format_value(options, station)),
+                p::PROJECTION_ELEVATION => Some(LabelPart::format_value(options, elevation)),
                 _ => None,
             };
             place(out, document, &style, at, 0.0, &value);
@@ -1234,63 +1432,126 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
             let frame = view.profile_view_frame()?;
             let view_handles = view.decode().handles;
-            // The view lists each band's style, then the alignment and the
-            // band's two profiles.
-            let band_at = view_handles.iter().position(|h| {
-                object_arch(document, *h).is_some_and(|o| o.dxf_name == "AECC_PROFILE_VIEW_DATA_BAND_STYLE")
-            })?;
-            let band = object_arch(document, view_handles[band_at])?;
-            let profiles: Vec<_> = view_handles[band_at + 1..]
-                .iter()
-                .filter_map(|h| arch_of(document, *h, CivilKind::Profile))
-                .take(2)
-                .collect();
-            let eg = profiles.first().map(|p| p.profile_polylines()).unwrap_or_default();
-            let fg = profiles.get(1).map(|p| p.profile_polylines()).unwrap_or_default();
-            let style = band
+            let slot = band_slot(document, view, handle)?;
+            let band = slot.style;
+            let eg = slot.profiles.first().map(|p| p.profile_polylines()).unwrap_or_default();
+            let fg = slot.profiles.get(1).map(|p| p.profile_polylines()).unwrap_or_default();
+            let collectors: Vec<LabelStyle> = band
                 .decode()
                 .handles
                 .iter()
                 .filter_map(|h| object_arch(document, *h))
                 .filter(|o| o.dxf_name == "AECC_LABEL_COLLECTOR_STYLE")
                 .map(|o| collector(document, o))
-                .find(|s| {
-                    s.components.iter().any(|c| {
-                        c.content
-                            .iter()
-                            .any(|part| matches!(part, LabelPart::Field { property, .. } if *property == p::STATION))
-                    })
-                })?;
-            let scale = drawing_scale(document);
-            // The band hangs below the view, its top on the view's bottom.
-            let height = band.band_height().unwrap_or(0.0) * scale;
-            let top = frame.origin.y;
+                .collect();
+            let has_field = |s: &&LabelStyle, wanted: Option<u32>| {
+                s.components.iter().any(|c| {
+                    c.content.iter().any(|part| matches!(part, LabelPart::Field { property, .. } if wanted.is_none_or(|w| *property == w)))
+                })
+            };
+            // The station label when the band has one, else its first
+            // labelled field.
+            let style = collectors
+                .iter()
+                .find(|s| has_field(s, Some(p::STATION)))
+                .or_else(|| collectors.iter().find(|s| has_field(s, None)))?;
+            let (top, height) = (slot.top, slot.height);
             let band_components = band.display_components(|h| document.layers.iter().any(|l| l.handle.value() == h));
             let ticks = component(document, Some(&band_components), BAND_MAJOR_TICKS);
+            let shown = shown_stations(alignment_among(document, &view_handles));
             for station in data.label_stations() {
                 let x = frame.to_drawing(station, frame.elevation_min).x;
                 styled(out, ticks, vec![[x, top, 0.0], [x, top - height, 0.0]]);
                 let value = |property: u32, options: &[u32]| match property {
-                    p::STATION => Some(LabelPart::format_value(options, station)),
+                    p::STATION => Some(LabelPart::format_value(options, shown(station))),
                     EG_ELEVATION => elevation_at(&eg, station).map(|v| LabelPart::format_value(options, v)),
                     FG_ELEVATION => elevation_at(&fg, station).map(|v| LabelPart::format_value(options, v)),
                     _ => None,
                 };
-                // Each text hangs from the band's top, middle or bottom.
-                for text in &style.components {
-                    let y = match text.anchor_point {
-                        Some(1) => top - height / 2.0,
-                        Some(2) => top - height,
-                        _ => top,
-                    };
-                    let single = LabelStyle {
-                        layer: style.layer,
-                        components: vec![text.clone()],
-                        ticks: Vec::new(),
-                        lines: Vec::new(),
-                    };
-                    place(out, document, &single, Vector2::new(x, y), 0.0, &value);
+                band_texts(out, document, style, x, top, height, &value);
+            }
+        }
+        "AECC_HORIZONTALGEOMETRYBAND_LABELGROUP" => {
+            let view = handles.iter().find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
+            let frame = view.profile_view_frame()?;
+            let view_handles = view.decode().handles;
+            let slot = band_slot(document, view, handle)?;
+            let alignment = alignment_among(document, &view_handles)?;
+            let collectors = band_collectors(document, slot.style);
+            let shown = shown_stations(Some(alignment));
+            let mut station = alignment.alignment_start_station().unwrap_or(0.0);
+            for (piece, curvature, points) in alignment.alignment_pieces_with_curvature() {
+                // Band label kinds: curve, curve, spiral, title, tangent.
+                // A curve's radius is the one its element was solved with.
+                let radius = (curvature.abs() > 1e-12).then(|| 1.0 / curvature.abs());
+                let index = match piece {
+                    AlignmentPiece::Curve => 0,
+                    AlignmentPiece::Spiral => 2,
+                    AlignmentPiece::Line => 4,
+                };
+                // A curve's chords measured along its arc.
+                let length: f64 = points
+                    .windows(2)
+                    .map(|w| {
+                        let chord = w[0].distance(&w[1]);
+                        radius.map_or(chord, |r| 2.0 * r * (chord / (2.0 * r)).min(1.0).asin())
+                    })
+                    .sum();
+                let start = station;
+                station += length;
+                let Some(style) = collectors.get(index) else { continue };
+                let value = |property: u32, options: &[u32]| match property {
+                    PIECE_LENGTH => Some(LabelPart::format_value(options, length)),
+                    PIECE_RADIUS => radius.map(|r| LabelPart::format_value(options, r)),
+                    PIECE_START_STATION => Some(LabelPart::format_value(options, shown(start))),
+                    _ => None,
+                };
+                let at = |s: f64| frame.to_drawing(s, frame.elevation_min).x;
+                for component in &style.components {
+                    // Anchored components sit at the piece's start, the rest
+                    // at its middle.
+                    let x = if component.anchor_point.is_some() { at(start) } else { at(start + length / 2.0) };
+                    let single = LabelStyle { layer: style.layer, components: vec![component.clone()], ticks: Vec::new(), lines: Vec::new(), shown_lines: 0 };
+                    place(out, document, &single, Vector2::new(x, slot.top - slot.height / 2.0), 0.0, &value);
                 }
+            }
+        }
+        "AECC_VERTICALGEOMETRYBAND_LABELGROUP" => {
+            let view = handles.iter().find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
+            let frame = view.profile_view_frame()?;
+            let slot = band_slot(document, view, handle)?;
+            let collectors = band_collectors(document, slot.style);
+            let pvis = slot.profiles.iter().map(|p| p.profile_pvis()).find(|v| v.len() >= 2)?;
+            let at = |s: f64| frame.to_drawing(s, frame.elevation_min).x;
+            let middle = slot.top - slot.height / 2.0;
+            // Band label kinds: title, rising tangent, crest, sag, falling
+            // tangent.
+            for pair in pvis.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                let run = b.point.x - a.point.x;
+                if run <= 0.0 {
+                    continue;
+                }
+                let grade = (b.point.y - a.point.y) / run;
+                let length = run - a.curve_length / 2.0 - b.curve_length / 2.0;
+                let Some(style) = collectors.get(if grade >= 0.0 { 1 } else { 4 }) else { continue };
+                let value = |property: u32, options: &[u32]| match property {
+                    TANGENT_LENGTH => Some(LabelPart::format_value(options, length)),
+                    p::TANGENT_GRADE => Some(LabelPart::format_value(options, grade)),
+                    _ => None,
+                };
+                let x = at(a.point.x + a.curve_length / 2.0 + length / 2.0);
+                place(out, document, style, Vector2::new(x, middle), 0.0, &value);
+            }
+            for (i, pvi) in pvis.iter().enumerate().filter(|(_, v)| v.curve_length > 0.0) {
+                let (Some(before), Some(after)) = (i.checked_sub(1).and_then(|j| pvis.get(j)), pvis.get(i + 1)) else { continue };
+                let g1 = (pvi.point.y - before.point.y) / (pvi.point.x - before.point.x);
+                let g2 = (after.point.y - pvi.point.y) / (after.point.x - pvi.point.x);
+                let Some(style) = collectors.get(if g2 < g1 { 2 } else { 3 }) else { continue };
+                let value = |property: u32, options: &[u32]| {
+                    (property == p::CURVE_LENGTH).then(|| LabelPart::format_value(options, pvi.curve_length))
+                };
+                place(out, document, style, Vector2::new(at(pvi.point.x), middle), 0.0, &value);
             }
         }
         "AECC_VALIGNMENT_LINE_LABEL_GROUP"
@@ -1306,10 +1567,77 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                 .find_map(|h| arch_of(document, *h, CivilKind::ProfileView))?;
             let frame = view.profile_view_frame()?;
             let pvis = profile.profile_pvis();
-            let inside = |q: Vector2| q.x >= frame.station_min && q.x <= frame.station_max;
+            let shown = shown_stations(alignment_among(document, &profile.decode().handles));
+            // The group names the entities it labels: a tangent by its id,
+            // a curve by its id. A PVI label's record names the tangents
+            // on both sides of its PVI, or the first or last tangent for
+            // the profile's start or end.
+            let ids = data.label_entity_ids();
+            let chain = profile.profile_entity_ids();
+            let tangents: Vec<(i32, Option<f64>)> = chain.iter().filter(|e| !e.1).map(|e| (e.0, e.2)).collect();
+            let mut curve_pvi = std::collections::HashMap::new();
+            let mut seen = 0;
+            for &(id, curve, _) in &chain {
+                if curve {
+                    curve_pvi.insert(id, seen);
+                } else {
+                    seen += 1;
+                }
+            }
+            let pvi_records: Vec<Vec<i32>> = {
+                let tangent_ids: Vec<i32> = tangents.iter().map(|t| t.0).collect();
+                // A record's ids are followed within 140 bits by its
+                // `0x00FC320C`; other values read the same way are not ids.
+                const PVI_RECORD_END: i32 = 0x00FC_320C;
+                let refs = data.label_entity_refs();
+                let ends: Vec<usize> = refs.iter().filter(|r| r.1 == PVI_RECORD_END).map(|r| r.0).collect();
+                let mut records: Vec<Vec<i32>> = Vec::new();
+                let mut last_at = None;
+                for &(at, id) in &refs {
+                    if !tangent_ids.contains(&id) || !ends.iter().any(|e| *e > at && *e - at <= 140) {
+                        continue;
+                    }
+                    match (records.last_mut(), last_at) {
+                        (Some(record), Some(prev)) if at - prev < 120 => record.push(id),
+                        _ => records.push(vec![id]),
+                    }
+                    last_at = Some(at);
+                }
+                records
+            };
+            // Stations of the PVIs those records name.
+            let pvi_stations: Vec<f64> = pvi_records
+                .iter()
+                .enumerate()
+                .filter_map(|(i, record)| {
+                    let position = |id: i32| tangents.iter().position(|t| t.0 == id);
+                    let mut at: Vec<usize> = record.iter().filter_map(|id| position(*id)).collect();
+                    at.sort_unstable();
+                    match at.as_slice() {
+                        [0] if i == 0 => pvis.first().map(|p| p.point.x),
+                        [k] if *k + 1 == tangents.len() => pvis.last().map(|p| p.point.x),
+                        [k, ..] => tangents[*k].1.or_else(|| pvis.get(k + 1).map(|p| p.point.x)),
+                        [] => None,
+                    }
+                })
+                .collect();
+            let labelled = |index: usize| -> bool {
+                match name {
+                    "AECC_VALIGNMENT_LINE_LABEL_GROUP" => tangents.get(index).is_some_and(|t| ids.contains(&t.0)),
+                    // Groups written without records label every PVI.
+                    "AECC_VALIGNMENT_PVI_LABEL_GROUP" => {
+                        pvi_records.is_empty() || pvis.get(index).is_some_and(|p| pvi_stations.iter().any(|s| (s - p.point.x).abs() < 1e-6))
+                    }
+                    _ => ids.iter().any(|id| curve_pvi.get(id) == Some(&index)),
+                }
+            };
+            let inside = |q: Vector2| q.x >= frame.station_min - 1e-6 && q.x <= frame.station_max + 1e-6;
             let at = |q: Vector2| frame.to_drawing(q.x, q.y);
             let scale = drawing_scale(document);
             for (index, pvi) in pvis.iter().enumerate() {
+                if !labelled(index) {
+                    continue;
+                }
                 let grade = |a: &document::classes::civil::Pvi, b: &document::classes::civil::Pvi| {
                     (b.point.y - a.point.y) / (b.point.x - a.point.x)
                 };
@@ -1347,9 +1675,28 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         place(out, document, &style, at(mid), (b.y - a.y).atan2(b.x - a.x), &value);
                     }
                     "AECC_VALIGNMENT_PVI_LABEL_GROUP" => {
-                        if !inside(pvi.point) {
+                        // A start or end past the view is labelled where the
+                        // profile crosses the view's edge.
+                        let edge = |point: Vector2, other: Option<&document::classes::civil::Pvi>| {
+                            let station = point.x.clamp(frame.station_min, frame.station_max);
+                            match other {
+                                Some(o) if station != point.x && o.point.x != point.x => {
+                                    Vector2::new(station, point.y + (o.point.y - point.y) * (station - point.x) / (o.point.x - point.x))
+                                }
+                                _ => point,
+                            }
+                        };
+                        let point = if index == 0 {
+                            edge(pvi.point, pvis.get(1))
+                        } else if index + 1 == pvis.len() {
+                            edge(pvi.point, index.checked_sub(1).and_then(|i| pvis.get(i)))
+                        } else {
+                            pvi.point
+                        };
+                        if !inside(point) {
                             continue;
                         }
+                        let pvi = &document::classes::civil::Pvi { point, curve_length: pvi.curve_length };
                         let q = at(pvi.point);
                         let Some(&(length, angle)) = style.lines.first() else {
                             continue;
@@ -1357,7 +1704,7 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let top = q + Vector2::new(angle.cos(), angle.sin()) * (length * scale);
                         styled(out, Some(label_line_style(style.layer)), vec![[q.x, q.y, 0.0], [top.x, top.y, 0.0]]);
                         let value = |property: u32, options: &[u32]| match property {
-                            p::PVI_STATION => Some(LabelPart::format_value(options, pvi.point.x)),
+                            p::PVI_STATION => Some(LabelPart::format_value(options, shown(pvi.point.x))),
                             p::PVI_ELEVATION => Some(LabelPart::format_value(options, pvi.point.y)),
                             _ => None,
                         };
@@ -1381,13 +1728,13 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         let k = length / ((g1 - g0).abs() * 100.0);
                         let value = |property: u32, options: &[u32]| {
                             let v = match property {
-                                p::PVI_STATION => pvi.point.x,
+                                p::PVI_STATION => shown(pvi.point.x),
                                 p::PVI_ELEVATION => pvi.point.y,
-                                p::BVC_STATION => bvc.x,
+                                p::BVC_STATION => shown(bvc.x),
                                 p::BVC_ELEVATION => bvc.y,
-                                p::EVC_STATION => evc.x,
+                                p::EVC_STATION => shown(evc.x),
                                 p::EVC_ELEVATION => evc.y,
-                                p::HIGH_POINT_STATION | p::LOW_POINT_STATION => extreme.x,
+                                p::HIGH_POINT_STATION | p::LOW_POINT_STATION => shown(extreme.x),
                                 p::HIGH_POINT_ELEVATION | p::LOW_POINT_ELEVATION => extreme.y,
                                 p::K_VALUE => k,
                                 p::CURVE_LENGTH => length,
@@ -1397,14 +1744,35 @@ fn label_group(data: &ArchEntityData, document: &document::Document, out: &mut D
                         };
                         let (a, b) = (at(bvc), at(evc));
                         let dy = if sag { -0.03 } else { 0.03 } * scale;
-                        let mark = |out: &mut Decoded, q: Vector2| {
-                            line(out, vec![[q.x, q.y, 0.0], [q.x, q.y + dy, 0.0]]);
+                        // The start and end lines mark the curve's ends when
+                        // the style shows them.
+                        if style.shown_lines > 0 {
+                            for q in [a, b] {
+                                line(out, vec![[q.x, q.y, 0.0], [q.x, q.y + dy, 0.0]]);
+                            }
+                        }
+                        // A component naming the curve's start or end hangs
+                        // from that end's mark; the rest from the PVI.
+                        let names = |c: &LabelText, wanted: &[u32]| {
+                            c.content.iter().any(|part| matches!(part, LabelPart::Field { property, .. } if wanted.contains(property)))
                         };
-                        mark(out, a);
-                        mark(out, b);
-                        line(out, vec![[a.x, a.y + dy, 0.0], [b.x, b.y + dy, 0.0]]);
-                        let top = at(pvi.point) + Vector2::new(0.0, dy);
-                        place(out, document, &style, top, std::f64::consts::FRAC_PI_2, &value);
+                        for component in &style.components {
+                            let from = if names(component, &[p::BVC_STATION, p::BVC_ELEVATION]) {
+                                a
+                            } else if names(component, &[p::EVC_STATION, p::EVC_ELEVATION]) {
+                                b
+                            } else {
+                                at(pvi.point)
+                            };
+                            let single = LabelStyle {
+                                layer: style.layer,
+                                components: vec![component.clone()],
+                                ticks: Vec::new(),
+                                lines: Vec::new(),
+                                shown_lines: 0,
+                            };
+                            place(out, document, &single, from + Vector2::new(0.0, dy), std::f64::consts::FRAC_PI_2, &value);
+                        }
                     }
                 }
             }
@@ -1455,13 +1823,127 @@ fn sample_line_points(data: &ArchEntityData, document: &document::Document) -> O
     ))
 }
 
-/// Elevation of a station on station/elevation runs.
-fn elevation_at(runs: &[Vec<Vector2>], station: f64) -> Option<f64> {
+/// A band's place under its profile view.
+struct BandSlot<'a> {
+    style: &'a ArchObject,
+    /// The band's first and second profile.
+    profiles: Vec<&'a ArchEntityData>,
+    top: f64,
+    height: f64,
+}
+
+fn is_band_style(name: &str) -> bool {
+    name.starts_with("AECC_PROFILE_VIEW_") && name.ends_with("_BAND_STYLE")
+}
+
+/// The band a band label group labels. A view written from Civil 3D 2018
+/// on lists its band label groups first in its references, in band order;
+/// an older view lists none, and its only band is the group's. Each band
+/// is then `style, null, alignment, profile 1, profile 2` among the view's
+/// references. Bands hang below the view, each below the one before.
+// ponytail: no gap between bands (none in the drawings seen); read the
+// view's per-band gap once a drawing sets one.
+fn band_slot<'a>(document: &'a document::Document, view: &'a ArchEntityData, group: u64) -> Option<BandSlot<'a>> {
+    let handles = view.decode().handles;
+    let bands: Vec<usize> = (0..handles.len())
+        .filter(|&i| object_arch(document, handles[i]).is_some_and(|o| is_band_style(&o.dxf_name)))
+        .collect();
+    let index = match handles.iter().position(|h| *h == group) {
+        Some(i) => i,
+        None if bands.len() == 1 => 0,
+        None => return None,
+    };
+    let scale = drawing_scale(document);
+    let frame = view.profile_view_frame()?;
+    let mut top = frame.origin.y;
+    for (k, &at) in bands.iter().enumerate() {
+        let style = object_arch(document, handles[at])?;
+        let height = style.band_height().unwrap_or(0.0) * scale;
+        if k == index {
+            let profiles = handles
+                .get(at + 3..at + 5)?
+                .iter()
+                .filter_map(|h| arch_of(document, *h, CivilKind::Profile))
+                .collect();
+            return Some(BandSlot { style, profiles, top, height });
+        }
+        top -= height;
+    }
+    None
+}
+
+/// Label styles of a band style, one per band label kind.
+fn band_collectors(document: &document::Document, band: &ArchObject) -> Vec<LabelStyle> {
+    band.decode()
+        .handles
+        .iter()
+        .filter_map(|h| object_arch(document, *h))
+        .filter(|o| o.dxf_name == "AECC_LABEL_COLLECTOR_STYLE")
+        .map(|o| collector(document, o))
+        .collect()
+}
+
+/// A data band's texts at `x`, each hanging from the band's top, middle or
+/// bottom.
+fn band_texts(
+    out: &mut Decoded,
+    document: &document::Document,
+    style: &LabelStyle,
+    x: f64,
+    top: f64,
+    height: f64,
+    value: &dyn Fn(u32, &[u32]) -> Option<String>,
+) {
+    for text in &style.components {
+        // An anchor the style does not store reads as the band's middle.
+        let y = match text.anchor_point {
+            Some(1) | None => top - height / 2.0,
+            Some(2) => top - height,
+            _ => top,
+        };
+        let single = LabelStyle {
+            layer: style.layer,
+            components: vec![text.clone()],
+            ticks: Vec::new(),
+            lines: Vec::new(),
+            shown_lines: 0,
+        };
+        place(out, document, &single, Vector2::new(x, y), 0.0, value);
+    }
+}
+
+/// Horizontal geometry band fields: a piece's length, radius and start
+/// station.
+const PIECE_LENGTH: u32 = 33_607_936;
+const PIECE_RADIUS: u32 = 33_608_069;
+const PIECE_START_STATION: u32 = 33_607_937;
+/// Reference text field: the referenced profile's elevation at the label.
+const REFERENCE_PROFILE_ELEVATION: u32 = 33_618_432;
+/// Reference text field: the referenced profile's grade at the label.
+const REFERENCE_PROFILE_GRADE: u32 = 33_618_433;
+/// Vertical geometry band field: a tangent's horizontal length.
+const TANGENT_LENGTH: u32 = 33_616_386;
+
+/// Grade at a station on station/elevation runs: the segment's ahead of
+/// it.
+fn grade_at(runs: &[Vec<Vector2>], station: f64) -> Option<f64> {
     runs.iter().find_map(|run| {
         run.windows(2).find_map(|pair| {
             let (a, b) = (pair[0], pair[1]);
-            (a.x <= station && station <= b.x && b.x > a.x)
-                .then(|| a.y + (b.y - a.y) * (station - a.x) / (b.x - a.x))
+            (a.x <= station && station < b.x).then(|| (b.y - a.y) / (b.x - a.x))
+        })
+    })
+}
+
+/// Elevation of a station on station/elevation runs.
+fn elevation_at(runs: &[Vec<Vector2>], station: f64) -> Option<f64> {
+    // A station a rounding past a run's end still reads its end.
+    const SLACK: f64 = 1e-7;
+    runs.iter().find_map(|run| {
+        run.windows(2).find_map(|pair| {
+            let (a, b) = (pair[0], pair[1]);
+            (a.x - SLACK <= station && station <= b.x + SLACK && b.x > a.x)
+                .then(|| a.y + (b.y - a.y) * (station.clamp(a.x, b.x) - a.x) / (b.x - a.x))
         })
     })
 }
@@ -1555,6 +2037,7 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
         })
     };
     let station_options = field_options(property::STATION).unwrap_or_default();
+    let shown = shown_stations(alignment_among(document, &handles));
     let elevation_options = field_options(ELEVATION).unwrap_or_default();
     if let Some(axes) = view_style.and_then(|s| s.profile_view_axes()) {
         for elevation in multiples(e0, e1, axes.left.major_interval) {
@@ -1612,7 +2095,7 @@ fn profile_view(data: &ArchEntityData, document: &document::Document, out: &mut 
                             rotation: 0.0,
                             width_factor: 1.0,
                             oblique: 0.0,
-                            text: LabelPart::format_value(options, value),
+                            text: LabelPart::format_value(options, if along_stations { shown(value) } else { value }),
                             font: label_font(document),
                             style: text_style,
                             align,

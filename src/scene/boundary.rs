@@ -18,6 +18,14 @@ pub struct BoundarySource {
 /// Boundary welding tolerance for tessellated wires.
 const WELD_TOLERANCE: f64 = 1.0e-6;
 
+#[cfg(test)]
+thread_local! {
+    /// How many boundary sources this thread has read to find the ones near
+    /// a ring.
+    pub(crate) static SOURCES_EXAMINED: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 fn wire_segments_on_plane(wire: &WireModel, plane: WorkingPlane, tolerance: f64) -> Vec<Line> {
     let mut segments = Vec::new();
     let mut previous: Option<glam::DVec3> = None;
@@ -344,9 +352,190 @@ pub(crate) fn sources_near_rings(
     };
     sources
         .iter()
-        .filter(|(_, source)| source.segments.iter().any(reaches))
+        .filter(|(_, source)| {
+            #[cfg(test)]
+            SOURCES_EXAMINED.with(|count| count.set(count.get() + 1));
+            source.segments.iter().any(reaches)
+        })
         .map(|(handle, source)| (*handle, source.clone()))
         .collect()
+}
+
+/// Boundary sources by where their segments are, for asking which ones lie
+/// near one ring after another. [`sources_near_rings`] reads every source on
+/// each call, so a hatch over thousands of selected outlines read them all
+/// again for each outline.
+pub(crate) struct SourcesByPlace<'a> {
+    /// The sources in the order their map gives them.
+    sources: Vec<(document::Handle, &'a BoundarySource)>,
+    origin: [f64; 2],
+    cell: f64,
+    /// Positions in `sources` of the sources with a segment in each cell.
+    cells: rustc_hash::FxHashMap<(i64, i64), Vec<usize>>,
+    /// Sources that every query reads: they span too many cells to be listed
+    /// in each, or a coordinate of theirs is not finite.
+    wide: Vec<usize>,
+}
+
+impl<'a> SourcesByPlace<'a> {
+    /// A source that spans more cells than this is read by every query.
+    const MAX_CELLS: i128 = 16;
+
+    pub(crate) fn new(
+        sources: &'a rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+    ) -> Self {
+        let sources: Vec<_> = sources
+            .iter()
+            .map(|(handle, source)| (*handle, source))
+            .collect();
+        // The box of each source, or `None` when it has no finite one.
+        let boxes: Vec<Option<([f64; 2], [f64; 2])>> = sources
+            .iter()
+            .map(|(_, source)| {
+                let mut lo = [f64::INFINITY; 2];
+                let mut hi = [f64::NEG_INFINITY; 2];
+                for point in source
+                    .segments
+                    .iter()
+                    .flat_map(|line| [line.start, line.end])
+                {
+                    for axis in 0..2 {
+                        if !point[axis].is_finite() {
+                            return None;
+                        }
+                        lo[axis] = lo[axis].min(point[axis]);
+                        hi[axis] = hi[axis].max(point[axis]);
+                    }
+                }
+                Some((lo, hi))
+            })
+            .collect();
+        let mut lo = [f64::INFINITY; 2];
+        let mut hi = [f64::NEG_INFINITY; 2];
+        let mut placed = 0usize;
+        for (source_lo, source_hi) in boxes.iter().flatten() {
+            if source_lo[0] > source_hi[0] {
+                continue; // no segments
+            }
+            placed += 1;
+            for axis in 0..2 {
+                lo[axis] = lo[axis].min(source_lo[axis]);
+                hi[axis] = hi[axis].max(source_hi[axis]);
+            }
+        }
+        // About one source to a cell when they are spread evenly.
+        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        let per_side = (placed as f64).sqrt().ceil().max(1.0);
+        let cell = if span.is_finite() && span > 0.0 {
+            span / per_side
+        } else {
+            1.0
+        };
+        let origin = if placed == 0 { [0.0; 2] } else { lo };
+        let mut by_place = Self {
+            sources,
+            origin,
+            cell,
+            cells: rustc_hash::FxHashMap::default(),
+            wide: Vec::new(),
+        };
+        for (index, source_box) in boxes.into_iter().enumerate() {
+            let Some((source_lo, source_hi)) = source_box else {
+                by_place.wide.push(index);
+                continue;
+            };
+            if source_lo[0] > source_hi[0] {
+                continue; // no segments: nothing reaches it
+            }
+            let (x, y) = (
+                by_place.cell_range(source_lo[0], source_hi[0], 0),
+                by_place.cell_range(source_lo[1], source_hi[1], 1),
+            );
+            if Self::cell_count(x, y) > Self::MAX_CELLS {
+                by_place.wide.push(index);
+                continue;
+            }
+            for cell_x in x.0..=x.1 {
+                for cell_y in y.0..=y.1 {
+                    by_place
+                        .cells
+                        .entry((cell_x, cell_y))
+                        .or_default()
+                        .push(index);
+                }
+            }
+        }
+        by_place
+    }
+
+    fn cell_range(&self, lo: f64, hi: f64, axis: usize) -> (i64, i64) {
+        let cell = |value: f64| ((value - self.origin[axis]) / self.cell).floor() as i64;
+        (cell(lo), cell(hi))
+    }
+
+    fn cell_count(x: (i64, i64), y: (i64, i64)) -> i128 {
+        (i128::from(x.1) - i128::from(x.0) + 1) * (i128::from(y.1) - i128::from(y.0) + 1)
+    }
+
+    /// What [`sources_near_rings`] gives for this one ring, entry for entry
+    /// and in the same order.
+    pub(crate) fn near(
+        &self,
+        ring: &[[f64; 2]],
+        pad: f64,
+    ) -> rustc_hash::FxHashMap<document::Handle, BoundarySource> {
+        let mut lo = [f64::INFINITY; 2];
+        let mut hi = [f64::NEG_INFINITY; 2];
+        for point in ring {
+            for axis in 0..2 {
+                lo[axis] = lo[axis].min(point[axis] - pad);
+                hi[axis] = hi[axis].max(point[axis] + pad);
+            }
+        }
+        let reaches = |line: &Line| {
+            (0..2).all(|axis| {
+                line.start[axis].min(line.end[axis]) <= hi[axis]
+                    && line.start[axis].max(line.end[axis]) >= lo[axis]
+            })
+        };
+        let mut candidates = self.wide.clone();
+        if lo[0] <= hi[0] && lo[1] <= hi[1] {
+            let (x, y) = (
+                self.cell_range(lo[0], hi[0], 0),
+                self.cell_range(lo[1], hi[1], 1),
+            );
+            if Self::cell_count(x, y) > self.cells.len() as i128 {
+                // A box over most of the drawing: go by the cells there are.
+                for ((cell_x, cell_y), listed) in &self.cells {
+                    if (x.0..=x.1).contains(cell_x) && (y.0..=y.1).contains(cell_y) {
+                        candidates.extend(listed);
+                    }
+                }
+            } else {
+                for cell_x in x.0..=x.1 {
+                    for cell_y in y.0..=y.1 {
+                        if let Some(listed) = self.cells.get(&(cell_x, cell_y)) {
+                            candidates.extend(listed);
+                        }
+                    }
+                }
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
+            .into_iter()
+            .map(|index| self.sources[index])
+            // A filter, as in `sources_near_rings`, so the map is built by the
+            // same steps and gives its entries in the same order.
+            .filter(|(_, source)| {
+                #[cfg(test)]
+                SOURCES_EXAMINED.with(|count| count.set(count.get() + 1));
+                source.segments.iter().any(reaches)
+            })
+            .map(|(handle, source)| (handle, source.clone()))
+            .collect()
+    }
 }
 
 pub(crate) fn ring_source_handles(
@@ -354,7 +543,27 @@ pub(crate) fn ring_source_handles(
     sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
 ) -> Vec<document::Handle> {
     let near = sources_near_rings(&[ring.to_vec()], sources, WELD_TOLERANCE);
-    let sources = &near;
+    ring_source_handles_among(ring, &near)
+}
+
+/// [`ring_source_handles`] for each of `rings`. The sources are indexed by
+/// place once instead of being read through for every ring.
+pub(crate) fn rings_source_handles(
+    rings: &[Vec<[f64; 2]>],
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+) -> Vec<Vec<document::Handle>> {
+    let by_place = SourcesByPlace::new(sources);
+    rings
+        .iter()
+        .map(|ring| ring_source_handles_among(ring, &by_place.near(ring, WELD_TOLERANCE)))
+        .collect()
+}
+
+/// The sources an edge of `ring` lies along, among the ones near it.
+fn ring_source_handles_among(
+    ring: &[[f64; 2]],
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+) -> Vec<document::Handle> {
     let mut handles = rustc_hash::FxHashSet::default();
     for (&start, &end) in ring
         .iter()
@@ -808,18 +1017,20 @@ fn exact_hatch_paths_by_ring(
 ) -> Vec<Option<document::entities::BoundaryPath>> {
     use document::entities::{BoundaryPath, BoundaryPathFlags};
 
-    let near = sources_near_rings(rings, sources, tolerance.max(WELD_TOLERANCE));
-    let sources = &near;
+    let pad = tolerance.max(WELD_TOLERANCE);
+    let near = sources_near_rings(rings, sources, pad);
+    let by_place = SourcesByPlace::new(&near);
     rings
         .iter()
         .enumerate()
         .map(|(ring_index, ring)| {
-            let (points, curves) = refined_boundary_ring(ring, sources, tolerance);
-            let count = points.len();
-            if count < 3 {
+            if ring.len() < 3 {
                 return None;
             }
-            let handles = ring_source_handles(ring, sources);
+            let (points, curves) =
+                refined_boundary_ring_among(ring, &by_place.near(ring, pad), tolerance);
+            let count = points.len();
+            let handles = ring_source_handles_among(ring, &by_place.near(ring, WELD_TOLERANCE));
             let mut bits = 0;
             if exterior.get(ring_index).copied().unwrap_or(ring_index == 0) {
                 bits |= BoundaryPathFlags::OUTERMOST.bits();
@@ -965,12 +1176,21 @@ fn refined_boundary_ring(
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
 ) -> (Vec<[f64; 2]>, Vec<Option<Curve>>) {
-    let count = ring.len();
-    if count < 3 {
+    if ring.len() < 3 {
         return (ring.to_vec(), Vec::new());
     }
     let near = sources_near_rings(&[ring.to_vec()], sources, tolerance.max(WELD_TOLERANCE));
-    let sources = &near;
+    refined_boundary_ring_among(ring, &near, tolerance)
+}
+
+/// [`refined_boundary_ring`] for a ring of three points or more, given only
+/// the sources near it.
+fn refined_boundary_ring_among(
+    ring: &[[f64; 2]],
+    sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
+    tolerance: f64,
+) -> (Vec<[f64; 2]>, Vec<Option<Curve>>) {
+    let count = ring.len();
     let edge_curves: Vec<_> = (0..count)
         .map(|index| {
             edge_curve(
@@ -1436,6 +1656,25 @@ impl Scene {
                     .next()
                     {
                         path.edges = exact.edges;
+                        // The re-derivation replaces the loop contents with
+                        // plain Line/arc edges, while a DWG-imported path
+                        // still carries the POLYLINE format flag next to
+                        // them. The DWG writer follows the flag: finding no
+                        // polyline edge in the path, it writes an empty
+                        // polyline loop and the fill is silently lost on the
+                        // next save. Mirror the new-hatch rule — fold the
+                        // plain edges into one closed polyline edge when they
+                        // represent a loop (the shape the imported path
+                        // carried) and mark the format bit exactly from the
+                        // contents otherwise.
+                        if !path.edges.is_empty() {
+                            if let Some(edges) = polyline_form(&path.edges) {
+                                path.edges = edges;
+                                path.flags.set_polyline(true);
+                            } else {
+                                path.flags.set_polyline(false);
+                            }
+                        }
                     }
                     modified = true;
                 }
@@ -1490,32 +1729,10 @@ impl Scene {
             })
         };
         sources.retain(|handle, _| shown(handle));
-        if self.active_viewport.is_some() {
+        let Some(corners) = self.view_corners_on_plane(plane) else {
             return;
-        }
-        let (width, height) = self.selection.borrow().view.vp_size;
-        if !(width > 1.0 && height > 1.0) {
-            return;
-        }
-        let bounds = iced::Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
         };
-        let camera = self.camera.borrow();
-        let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)].map(|(x, y)| {
-            let world = camera.unproject_on_plane(
-                iced::Point::new(x, y),
-                bounds,
-                plane.z.as_vec3(),
-                plane.origin,
-            );
-            plane.to_local(world)
-        });
-        if !corners.iter().all(|corner| corner.is_finite()) {
-            return;
-        }
+        let corners = corners.map(|corner| plane.to_local(corner));
         let (min_x, max_x) = corners
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
@@ -1535,6 +1752,57 @@ impl Scene {
         sources.retain(|_, source| source.segments.iter().any(on_screen));
     }
 
+    /// The world points where the view's corners meet `plane`, for a view
+    /// drawn straight in the window (not through a layout viewport). `None`
+    /// when the view has no size yet or a corner misses the plane.
+    fn view_corners_on_plane(&self, plane: WorkingPlane) -> Option<[glam::DVec3; 4]> {
+        if self.active_viewport.is_some() {
+            return None;
+        }
+        let (width, height) = self.selection.borrow().view.vp_size;
+        if !(width > 1.0 && height > 1.0) {
+            return None;
+        }
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        };
+        let camera = self.camera.borrow();
+        let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)].map(|(x, y)| {
+            camera.unproject_on_plane(
+                iced::Point::new(x, y),
+                bounds,
+                plane.z.as_vec3(),
+                plane.origin,
+            )
+        });
+        corners.iter().all(|corner| corner.is_finite()).then_some(corners)
+    }
+
+    /// `boundary_sources_on_plane` for what the view shows, as HATCH,
+    /// GRADIENT and BOUNDARY pick among. Objects whose box misses the view
+    /// are left out before their geometry is clipped and their curves
+    /// rebuilt, so the cost follows the view rather than the drawing (#2756).
+    pub fn boundary_sources_on_screen(
+        &self,
+        plane: WorkingPlane,
+        tolerance: f64,
+    ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
+        // The view's region on the plane is the quad of its corners; its
+        // world XY box holds every point of the plane that is on screen.
+        let near = self.view_corners_on_plane(plane).map(|corners| {
+            corners.iter().fold(
+                [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+                |[x0, y0, x1, y1], c| [x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y)],
+            )
+        });
+        let mut sources = self.boundary_sources_near(plane, tolerance, near);
+        self.retain_sources_on_screen(&mut sources, plane);
+        sources
+    }
+
     /// Boundary candidates in the active working plane, with exact curves
     /// where the source entity exposes them.
     pub fn boundary_sources_on_plane(
@@ -1542,7 +1810,19 @@ impl Scene {
         plane: WorkingPlane,
         tolerance: f64,
     ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
-        let wires = if let Some(viewport) = self.active_viewport {
+        self.boundary_sources_near(plane, tolerance, None)
+    }
+
+    /// Boundary candidates whose world XY box meets `near` (all of them for
+    /// `None`).
+    fn boundary_sources_near(
+        &self,
+        plane: WorkingPlane,
+        tolerance: f64,
+        near: Option<[f64; 4]>,
+    ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
+        use crate::scene::model::instance_model::{expand_stub_near_into, expand_stubs};
+        let all = if let Some(viewport) = self.active_viewport {
             self.model_wires_for_viewport_arc(viewport, 0.0)
         } else if self.current_layout == "Model" {
             let camera = self.camera.borrow().clone();
@@ -1550,7 +1830,31 @@ impl Scene {
         } else {
             self.paper_sheet_wires_arc()
         };
-        let wires = crate::scene::model::instance_model::expand_stubs(&wires);
+        let expanded;
+        let wires: Vec<&WireModel> = match near {
+            None => {
+                expanded = expand_stubs(&all);
+                expanded.iter().collect()
+            }
+            Some(near) => {
+                let meets = |aabb: [f32; 4]| {
+                    !aabb.iter().all(|v| v.is_finite())
+                        || (aabb[0] as f64 <= near[2]
+                            && aabb[2] as f64 >= near[0]
+                            && aabb[1] as f64 <= near[3]
+                            && aabb[3] as f64 >= near[1])
+                };
+                let mut copies = Vec::new();
+                for wire in all.iter().filter(|wire| wire.stub.is_some()) {
+                    expand_stub_near_into(wire, Some(near), &mut copies);
+                }
+                expanded = std::borrow::Cow::Owned(copies);
+                all.iter()
+                    .filter(|wire| wire.stub.is_none() && meets(wire.aabb))
+                    .chain(expanded.iter())
+                    .collect()
+            }
+        };
         let wire_started = crate::perf::enabled().then(iced::time::Instant::now);
         // Clip in parallel, merge per handle in order. `filter_map` + `collect`
         // also exist on the sequential wasm32 shim; `fold`/`reduce` do not.
@@ -1584,7 +1888,9 @@ impl Scene {
         } else {
             self.current_layout_block_handle()
         };
-        for entity in self.document.entities() {
+        // A pick among what is on screen drops them again at once.
+        let hidden_layer_sources = near.is_none();
+        for entity in self.document.entities().filter(|_| hidden_layer_sources) {
             let common = entity.common();
             if common.owner_handle != space || sources.contains_key(&common.handle) {
                 continue;

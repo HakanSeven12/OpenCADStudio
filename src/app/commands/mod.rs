@@ -8,6 +8,7 @@ pub(crate) use anno_scaling::{
     anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display,
 };
 mod attdef;
+mod attout;
 mod attman;
 mod block_cmdline;
 mod blocks;
@@ -834,6 +835,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_count(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_attout(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_draw(cmd, i) {
             return Some(t);
         }
@@ -1418,6 +1422,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "ATTACH",
         "ATTDISP",
         "ATTEXT",
+        "ATTIN",
+        "ATTOUT",
         "BACKGROUND",
         "CDIMSTY",
         "CELTSCALE",
@@ -1484,6 +1490,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "LIST",
         "LTSCALE",
         "LWDISPLAY",
+        "LWEIGHT",
         "MASSPROP",
         "MLEADERSTYLE",
         "MLSTYLE",
@@ -1530,6 +1537,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SA",
         "SAVE",
         "SAVEAS",
+        "DXFOUT",
         "SCALETEXT",
         "SELECTALL",
         "SELECTSIMILAR",

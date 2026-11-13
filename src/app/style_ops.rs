@@ -318,7 +318,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         match kind {
             StyleKind::Text => self.load_textstyle_draft(i),
-            StyleKind::Dim => self.load_dimstyle_bufs(i),
+            StyleKind::Dim => {}
             StyleKind::MLeader => self.load_mleaderstyle_bufs(i),
             StyleKind::Table => self.load_tablestyle_bufs(i),
             StyleKind::MLine => self.load_mlstyle_bufs(i),
@@ -329,6 +329,11 @@ impl OpenCADStudio {
     /// Refresh anything that mirrors the style list / current style after a
     /// mutation (ribbon dropdowns, geometry that depends on the style).
     pub(super) fn after_style_change(&mut self, kind: StyleKind) {
+        // A new, renamed or deleted multileader style keeps its dictionary
+        // entry and owner, whether or not the change is applied before a save.
+        if kind == StyleKind::MLeader {
+            sync_mleaderstyle_dictionary(&mut self.tabs[self.active_tab].scene.document);
+        }
         if kind.in_ribbon() {
             self.sync_ribbon_styles();
         }
@@ -355,6 +360,7 @@ impl OpenCADStudio {
             }
             StyleKind::MLeader => {
                 let mut s = MultiLeaderStyle::new(name);
+                s.description = name.to_string();
                 s.handle = handle;
                 doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
             }
@@ -381,7 +387,13 @@ impl OpenCADStudio {
 
     /// Clone the style named `src` under `name` with a fresh `handle`.
     /// Returns false if `src` no longer exists.
-    fn clone_style_as(&mut self, kind: StyleKind, src: &str, name: &str, handle: Handle) -> bool {
+    pub(super) fn clone_style_as(
+        &mut self,
+        kind: StyleKind,
+        src: &str,
+        name: &str,
+        handle: Handle,
+    ) -> bool {
         let doc = &mut self.tabs[self.active_tab].scene.document;
         match kind {
             StyleKind::Text => {
@@ -438,6 +450,7 @@ impl OpenCADStudio {
                     _ => None,
                 }) {
                     s.name = name.to_string();
+                    s.description = name.to_string();
                     s.handle = handle;
                     doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
                     return true;
@@ -568,33 +581,70 @@ impl OpenCADStudio {
             }
             StyleKind::Dim => {
                 let doc = &mut self.tabs[i].scene.document;
-                if let Some(mut s) = doc.dim_styles.get(old).cloned() {
-                    s.name = new.to_string();
-                    if !s.handle.is_valid() {
-                        s.handle = doc.allocate_handle();
+                // The family members (`NAME$0` linear, `$2` angular, ...)
+                // follow their parent's name.
+                let renames: Vec<(String, String)> = doc
+                    .dim_styles
+                    .iter()
+                    .filter_map(|style| {
+                        if style.name.eq_ignore_ascii_case(old) {
+                            return Some((style.name.clone(), new.to_string()));
+                        }
+                        let (parent, member) = style.name.rsplit_once('$')?;
+                        (parent.eq_ignore_ascii_case(old)
+                            && !member.is_empty()
+                            && member.chars().all(|c| c.is_ascii_digit()))
+                        .then(|| (style.name.clone(), format!("{new}${member}")))
+                    })
+                    .collect();
+                for (from, to) in &renames {
+                    if let Some(mut s) = doc.dim_styles.get(from).cloned() {
+                        s.name = to.clone();
+                        if !s.handle.is_valid() {
+                            s.handle = doc.allocate_handle();
+                        }
+                        if doc.dim_styles.add(s).is_ok() {
+                            doc.dim_styles.remove(from);
+                        }
                     }
-                    let _ = doc.dim_styles.add(s);
                 }
-                doc.dim_styles.remove(old);
                 if doc.header.current_dimstyle_name.eq_ignore_ascii_case(old) {
                     doc.header.current_dimstyle_name = new.to_string();
                 }
-                for e in doc.entities_mut() {
-                    match e {
-                        document::entities::EntityType::Dimension(d)
-                            if d.base().style_name.eq_ignore_ascii_case(old) =>
-                        {
-                            d.base_mut().style_name = new.to_string();
+                // Only the objects naming the style change, each through
+                // `get_entity_mut`: a bulk `entities_mut` pass would drop the
+                // stored record of every entity in the drawing.
+                let handles: Vec<Handle> = doc
+                    .entities()
+                    .filter(|entity| match entity {
+                        document::entities::EntityType::Dimension(d) => {
+                            d.base().style_name.eq_ignore_ascii_case(old)
                         }
-                        document::entities::EntityType::Leader(l)
-                            if l.dimension_style.eq_ignore_ascii_case(old) =>
-                        {
-                            l.dimension_style = new.to_string();
+                        document::entities::EntityType::Leader(l) => {
+                            l.dimension_style.eq_ignore_ascii_case(old)
                         }
-                        document::entities::EntityType::Tolerance(t)
-                            if t.dimension_style_name.eq_ignore_ascii_case(old) =>
-                        {
-                            t.dimension_style_name = new.to_string();
+                        document::entities::EntityType::Tolerance(t) => {
+                            t.dimension_style_name.eq_ignore_ascii_case(old)
+                        }
+                        _ => false,
+                    })
+                    .map(|entity| entity.common().handle)
+                    .collect();
+                for handle in handles {
+                    if let (Some(stage), Some(before)) =
+                        (self.style_stage.as_mut(), doc.get_entity_arc(handle))
+                    {
+                        stage.entities.entry(handle).or_insert(before);
+                    }
+                    match doc.get_entity_mut(handle) {
+                        Some(document::entities::EntityType::Dimension(d)) => {
+                            d.base_mut().style_name = new.to_string()
+                        }
+                        Some(document::entities::EntityType::Leader(l)) => {
+                            l.dimension_style = new.to_string()
+                        }
+                        Some(document::entities::EntityType::Tolerance(t)) => {
+                            t.dimension_style_name = new.to_string()
                         }
                         _ => {}
                     }
@@ -623,6 +673,10 @@ impl OpenCADStudio {
                     let doc = &mut self.tabs[i].scene.document;
                     if let Some(h) = object_handle(doc, old, kind) {
                         if let Some(ObjectType::MultiLeaderStyle(s)) = doc.objects.get_mut(&h) {
+                            // The description written with the style is its name.
+                            if s.description.is_empty() || s.description == s.name {
+                                s.description = new.to_string();
+                            }
                             s.name = new.to_string();
                         }
                     }
@@ -921,6 +975,15 @@ impl OpenCADStudio {
             active_table: self.ribbon.active_table_style.clone(),
             active_mleader: self.ribbon.active_mleader_style.clone(),
             tab_active_mleader: self.tabs[i].active_mleader_style.clone(),
+            dim_overrides: self.tabs[i].scene.dim_overrides.clone(),
+            dim_style_xdata: doc
+                .dim_styles
+                .iter()
+                .filter_map(|style| {
+                    doc.object_xdata(style.handle)
+                        .map(|data| (style.handle, data.clone()))
+                })
+                .collect(),
             linetypes: linetypes.then(|| LinetypeState {
                 table: doc.line_types.clone(),
                 layer_linetypes: doc
@@ -968,6 +1031,15 @@ impl OpenCADStudio {
             self.ribbon.active_mleader_style = snap.active_mleader.clone();
         }
         self.tabs[i].active_mleader_style = snap.tab_active_mleader.clone();
+        self.tabs[i].scene.dim_overrides = snap.dim_overrides.clone();
+        // The extended data of the dimension styles (break size, jog
+        // height, DIMTALN) goes back with them.
+        let doc = &mut self.tabs[i].scene.document;
+        for (handle, data) in &snap.dim_style_xdata {
+            for record in data.records() {
+                doc.set_object_xdata_record(*handle, record.clone());
+            }
+        }
         if let Some(state) = &snap.linetypes {
             let scene = &mut self.tabs[i].scene;
             let doc = &mut scene.document;
@@ -1173,6 +1245,36 @@ impl OpenCADStudio {
         });
     }
 
+    /// A child manager's Apply: its changes stay staged in the parent's
+    /// transaction (one undo step when the parent closes) and become what
+    /// the child's Close keeps. `false` when there is no parent.
+    pub(super) fn style_stage_child_apply(&mut self) -> bool {
+        let Some(parent) = self.style_parent_stage.as_mut() else {
+            return false;
+        };
+        if let Some(child) = self.style_stage.take() {
+            // The parent keeps each entity as it was before either opened.
+            for (handle, before) in child.entities {
+                parent.entities.entry(handle).or_insert(before);
+            }
+            self.style_stage = Some(StyleStage {
+                dirty_at_open: child.dirty_at_open,
+                baseline: self.capture_style_state(child.linetypes),
+                entities: FxHashMap::default(),
+                linetypes: child.linetypes,
+            });
+        }
+        self.sync_ribbon_styles();
+        true
+    }
+
+    /// A child manager closes: what it did not apply is taken back and the
+    /// parent's transaction goes on.
+    pub(super) fn style_stage_child_close(&mut self) {
+        self.style_stage_discard();
+        self.style_stage = self.style_parent_stage.take();
+    }
+
     /// Discard staged changes (window closed without Apply): restore the
     /// snapshot taken when the manager opened.
     pub(super) fn style_stage_discard(&mut self) {
@@ -1212,6 +1314,9 @@ pub(super) struct StyleStateSnapshot {
     active_table: String,
     active_mleader: String,
     tab_active_mleader: String,
+    /// The current style's overrides for new dimensions.
+    dim_overrides: Option<(String, Vec<(i16, document::xdata::XDataValue)>)>,
+    dim_style_xdata: Vec<(Handle, document::xdata::ExtendedData)>,
     linetypes: Option<LinetypeState>,
 }
 
@@ -1470,7 +1575,28 @@ pub(crate) fn style_in_use(
 pub(crate) fn remove_style(doc: &mut document::Document, kind: StyleKind, name: &str) -> bool {
     match kind {
         StyleKind::Text => doc.text_styles.remove(name).is_some(),
-        StyleKind::Dim => doc.dim_styles.remove(name).is_some(),
+        StyleKind::Dim => {
+            // Its family members (`NAME$0`, `$2`, ...) go with it.
+            let members: Vec<String> = doc
+                .dim_styles
+                .iter()
+                .filter(|style| {
+                    style.name.rsplit_once('$').is_some_and(|(parent, member)| {
+                        parent.eq_ignore_ascii_case(name)
+                            && !member.is_empty()
+                            && member.chars().all(|c| c.is_ascii_digit())
+                    })
+                })
+                .map(|style| style.name.clone())
+                .collect();
+            let removed = doc.dim_styles.remove(name).is_some();
+            if removed {
+                for member in members {
+                    doc.dim_styles.remove(&member);
+                }
+            }
+            removed
+        }
         StyleKind::Linetype => {
             use crate::scene::linetype_service as service;
             match service::plan_delete(doc, name) {

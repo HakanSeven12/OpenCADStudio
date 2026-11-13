@@ -710,6 +710,10 @@ pub enum DashClosure {
 pub struct WireModel {
     /// Unique identifier — the handle value as a decimal string.
     pub name: String,
+    /// Fully resolved display/export layer for this occurrence. Block children
+    /// keep their own nonzero layer or inherit the nearest nonzero INSERT layer;
+    /// `None` retains the handle-based fallback for direct and synthetic wires.
+    pub effective_layer: Option<std::sync::Arc<str>>,
     /// Ordered world-space positions forming a strip of quads. Each entry is
     /// the "high" half of a double-single f32 pair; [`points_low`] carries the
     /// matching residual so the shader can reconstruct the f64 source.
@@ -947,6 +951,7 @@ impl WireModel {
             text_verts: Vec::new(),
             searchable_text: Vec::new(),
             name,
+            effective_layer: None,
             points,
             points_low: Vec::new(),
             color,
@@ -1015,6 +1020,14 @@ impl WireModel {
         // geometry, never carried on a rubber-band preview.
         out.searchable_text.clear();
         out.tangent_geoms.clear();
+        out
+    }
+
+    /// Like [`Self::mapped`], but preserves the wire's existing color and selection state.
+    pub fn mapped_preserving_style(&self, map: impl Fn(glam::DVec3) -> glam::DVec3) -> Self {
+        let mut out = self.mapped(map);
+        out.color = self.color;
+        out.selected = self.selected;
         out
     }
 
@@ -1474,6 +1487,7 @@ impl Default for WireModel {
             text_verts: Vec::new(),
             searchable_text: Vec::new(),
             name: String::new(),
+            effective_layer: None,
             points: Vec::new(),
             points_low: Vec::new(),
             color: Self::WHITE,

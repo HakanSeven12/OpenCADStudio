@@ -135,14 +135,40 @@ fn explode_entity_in_context(
         }
         // The codec's explode_from_document refuses a MINSERT; expand it cell
         // by cell from the block's entities instead.
-        EntityType::Insert(ins) => ins
-            .block_entities_from_document(document)
-            .map(|entities| ins.explode(&entities))
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entity| !crate::scene::block_construction::is_construction(entity.common()))
-            .map(normalize_insert_entity)
-            .collect(),
+        EntityType::Insert(ins) => {
+            let pieces = ins
+                .block_entities_from_document(document)
+                .map(|entities| ins.explode(&entities))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|entity| {
+                    !crate::scene::block_construction::is_construction(entity.common())
+                })
+                .map(normalize_insert_entity);
+            // An associative array explodes into copies of its source
+            // objects, not into one reference per item.
+            let source = crate::scene::assoc_array::array_of_insert(document, ins.common.handle)
+                .and_then(|array| {
+                    document
+                        .block_records
+                        .iter()
+                        .find(|record| record.handle == array.source_block)
+                        .map(|record| record.name.clone())
+                });
+            match source {
+                Some(source) => pieces
+                    .flat_map(|piece| match &piece {
+                        EntityType::Insert(item)
+                            if item.block_name.eq_ignore_ascii_case(&source) =>
+                        {
+                            explode_entity_in_context(&piece, document, annotation_scale_handle)
+                        }
+                        _ => vec![piece],
+                    })
+                    .collect(),
+                None => pieces.collect(),
+            }
+        }
         EntityType::MLine(ml) => explode_mline(ml, document),
         EntityType::Dimension(dim) => explode_dimension(dim, document),
         EntityType::Leader(leader) => explode_leader(leader, document),

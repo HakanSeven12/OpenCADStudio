@@ -253,6 +253,21 @@ impl InstanceContext {
         !self.root_handle.is_null()
     }
 
+    /// Display/export layer for one occurrence without changing the source
+    /// entity. Layer 0 defers to the nearest nonzero INSERT ancestor; every
+    /// other layer, including a dependent xref layer, remains its own.
+    pub fn effective_layer(&self, raw_layer: &str) -> String {
+        if !is_effective_layer_zero(raw_layer) {
+            return raw_layer.to_string();
+        }
+        self.insert_path
+            .iter()
+            .rev()
+            .find(|insert| !is_effective_layer_zero(&insert.common.layer))
+            .map_or(raw_layer, |insert| insert.common.layer.as_str())
+            .to_string()
+    }
+
     pub fn style_for(&self, document: &Document, entity: &EntityType) -> ResolvedStyle {
         if self
             .insert_path
@@ -1265,6 +1280,34 @@ pub fn block_contains_hatch(
     })
 }
 
+/// Whether any block definition (a block record that is not a layout)
+/// directly holds an entity of the kind. Nesting only places what some
+/// definition holds, so when none does no reference in the drawing can
+/// place such an entity: walks that look only for those leaves inside
+/// blocks can be skipped.
+pub fn any_block_definition_holds(
+    document: &Document,
+    is_kind: impl Fn(&EntityType) -> bool,
+) -> bool {
+    document
+        .block_records
+        .iter()
+        // `is_layout()` alone is not enough: an orphaned block can carry a
+        // dangling layout handle and still be inserted somewhere.
+        .filter(|record| {
+            !matches!(
+                document.objects.get(&record.layout),
+                Some(document::objects::ObjectType::Layout(_))
+            )
+        })
+        .any(|record| {
+            record
+                .entity_handles
+                .iter()
+                .any(|&handle| document.get_entity(handle).is_some_and(&is_kind))
+        })
+}
+
 /// Whether the block, or a block it nests, holds a WIPEOUT mask.
 pub fn block_contains_wipeout(
     document: &Document,
@@ -1354,6 +1397,26 @@ mod tests {
     }
 
     #[test]
+    fn effective_layer_skips_zero_inserts_and_keeps_dependent_layers() {
+        let mut context = InstanceContext::direct(0.0, None);
+        let mut outer = Insert::new("OUTER", Vector3::ZERO);
+        outer.common.layer = "OUTER_LAYER".into();
+        let mut zero = Insert::new("ZERO", Vector3::ZERO);
+        zero.common.layer = "0".into();
+        let mut inner = Insert::new("INNER", Vector3::ZERO);
+        inner.common.layer = "INNER_LAYER".into();
+
+        context.insert_path = vec![outer, zero];
+        assert_eq!(context.effective_layer("0"), "OUTER_LAYER");
+        assert_eq!(context.effective_layer("XREF|0"), "OUTER_LAYER");
+        assert_eq!(context.effective_layer("XREF|WALLS"), "XREF|WALLS");
+        context.insert_path.push(inner);
+        assert_eq!(context.effective_layer("0"), "INNER_LAYER");
+        context.insert_path.clear();
+        assert_eq!(context.effective_layer("XREF|0"), "XREF|0");
+    }
+
+    #[test]
     fn layer_zero_block_members_follow_the_reference_until_frozen() {
         use document::entities::Line;
         use document::tables::BlockRecord;
@@ -1379,6 +1442,34 @@ mod tests {
         assert_eq!(leaves(&document), 1);
         document.layers.get_mut("0").unwrap().flags.frozen = true;
         assert_eq!(leaves(&document), 0);
+    }
+
+    /// Only block definitions count: an object of the kind in model space
+    /// does not make a reference able to place one.
+    #[test]
+    fn any_block_definition_holds_ignores_layouts() {
+        use document::entities::{Circle, Line};
+        use document::tables::BlockRecord;
+        let mut document = Document::new();
+        document
+            .add_entity(EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 1.0)))
+            .unwrap();
+        let mut record = BlockRecord::new("ARROW");
+        record.handle = document.allocate_handle();
+        let block = record.handle;
+        document.block_records.add(record).unwrap();
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.owner_handle = block;
+        document.add_entity(EntityType::Line(line)).unwrap();
+
+        assert!(any_block_definition_holds(&document, |entity| matches!(
+            entity,
+            EntityType::Line(_)
+        )));
+        assert!(!any_block_definition_holds(&document, |entity| matches!(
+            entity,
+            EntityType::Circle(_)
+        )));
     }
 
     #[test]

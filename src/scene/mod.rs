@@ -64,6 +64,8 @@ mod camera_ops;
 mod reference_only_tests;
 #[cfg(test)]
 mod resident_patch_shorter_runs_tests;
+#[cfg(test)]
+mod solid_box_select_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
@@ -74,6 +76,7 @@ pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
+pub(crate) use entity::wire_thumbnail_bgra;
 pub use camera_ops::named_view_center;
 pub(crate) use entity::gradient_tint_color;
 pub(crate) use entity::normalize_block_terminators;
@@ -86,6 +89,8 @@ pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
 mod layout;
+#[cfg(test)]
+mod layout_viewport_tests;
 mod limits;
 mod modify;
 pub(crate) mod table_content;
@@ -109,11 +114,14 @@ pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
 mod parametric_solve;
 
+#[cfg(test)]
+pub(crate) use boundary::SOURCES_EXAMINED;
 pub(crate) use boundary::{
     boundary_entities, boundary_entities_from_sources, boundary_faces, boundary_faces_around,
     boundary_polyline_entities, entity_boundary_source_on_plane, exact_hatch_paths,
     hatch_boundary_rings, hatch_path_ring, live_segments_for_curves, remap_hatch_associations,
-    ring_source_handles, separated_hatch_path_groups, sources_near_rings, BoundarySource,
+    ring_source_handles, rings_source_handles, separated_hatch_path_groups, sources_near_rings,
+    BoundarySource,
 };
 pub(crate) use boundary::{drawn_hatch_path, new_hatch_paths, HatchLoopSource};
 
@@ -2471,6 +2479,7 @@ fn transform_block_mesh_lod_set(
     }
     MeshLodSet {
         lods: Vec::new(),
+        effective_layer: set.effective_layer.clone(),
         material: set.material.clone(),
         face_materials: set.face_materials.clone(),
         visual_style: set.visual_style.clone(),
@@ -2747,6 +2756,9 @@ pub struct Scene {
     /// origin grip. Kept separate from the resident hatch set so moving one
     /// pattern never re-uploads every hatch in a large drawing.
     pub preview_hatches: Arc<Vec<HatchModel>>,
+    /// Cached scoped document and last evaluated parameter preview for the
+    /// active dynamic block grip drag.
+    dynamic_preview_cache: Option<preview::block_parameter::DynamicPreviewCache>,
     /// In-progress preview SDF glyph quads (grip drag / command preview). Rides
     /// a per-frame GPU buffer separate from the epoch-cached base text so the
     /// dragged text stays visible while it's hidden from the base set (#316).
@@ -2905,6 +2917,18 @@ pub struct Scene {
             usize,
             std::sync::Weak<Vec<MeshLodSet>>,
             Arc<HashMap<Handle, Vec<u32>>>,
+        )>,
+    >,
+    /// The box around the vertices of each mesh the current renderer mesh
+    /// source draws, by the mesh's address: the references of a block share
+    /// one. The box and lasso tests tell the solids clear of a selection from
+    /// it. Guarded by the weak source like the lookup above.
+    #[allow(clippy::type_complexity)]
+    mesh_pick_boxes_cache: RefCell<
+        Option<(
+            usize,
+            std::sync::Weak<Vec<MeshLodSet>>,
+            Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>>,
         )>,
     >,
     /// Per-viewport (VP-frozen-layer) filtered fill / image / mesh sets, keyed by
@@ -3104,6 +3128,12 @@ pub struct Scene {
     pub(crate) has_underlays: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any section object exists in the
+    /// document. The live-section lookup runs on every resident patch.
+    has_section_objects: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any table exists in the document. The
+    /// table-cell pick runs on every click.
+    has_tables: std::cell::Cell<Option<bool>>,
     /// Whether the current space holds objects the drawing saves as invisible,
     /// keyed by `(geometry_epoch, space block)`. Read every frame by the
     /// isolation menus, so the entity scan runs once per edit, not per frame.
@@ -3143,7 +3173,11 @@ pub struct Scene {
     /// underlay rasters are made for, and a new step waiting for the view
     /// to settle.
     underlay_world_per_pixel: Option<f64>,
-    underlay_scale_pending: Option<(i32, iced::time::Instant)>,
+    underlay_scale_pending: Option<((i32, u64), iced::time::Instant)>,
+    /// World rectangle the zoomed-in underlay regions are drawn for (the
+    /// plan view with a margin), and whether any underlay drew one.
+    underlay_view: Option<[f64; 4]>,
+    underlay_region_used: std::cell::Cell<bool>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3379,6 +3413,90 @@ fn section_frame(
     Some((origin, tangent, vertical, viewing))
 }
 
+/// A section object entity (live or not); see `Scene::active_live_section`.
+fn is_section_object(entity: &EntityType) -> bool {
+    matches!(
+        entity,
+        EntityType::Extended(extended)
+            if matches!(
+                extended.data,
+                document::entities::ExtendedEntityData::SectionObject(_)
+            )
+    )
+}
+
+#[cfg(test)]
+mod section_hint_tests {
+    use super::*;
+    use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+    use document::types::{Color, Vector3};
+
+    fn live_section() -> EntityType {
+        EntityType::Extended(Box::new(ExtendedEntity {
+            common: EntityCommon::new(),
+            data: ExtendedEntityData::SectionObject(SectionObjectData {
+                state: 1,
+                flags: 1,
+                name: "Section Plane (1)".to_string(),
+                vertical_direction: Vector3::new(0.0, 0.0, 1.0),
+                top_height: 1.0,
+                bottom_height: 1.0,
+                indicator_alpha: 70,
+                indicator_color: Color::from_index(9),
+                vertices: vec![Vector3::ZERO, Vector3::new(0.0, 10.0, 0.0)],
+                back_line_vertices: Vec::new(),
+                settings_handle: Handle::NULL,
+            }),
+        }))
+    }
+
+    /// With no section object the lookup answers at once; adding one, or
+    /// erasing it again, is seen through the entity edit alone.
+    #[test]
+    fn live_section_follows_added_and_erased_section_objects() {
+        let mut scene = Scene::new();
+        let model = scene.model_space_block_handle();
+        scene.add_entity(EntityType::Line(document::entities::Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(1.0, 0.0, 0.0),
+        )));
+        assert!(scene.active_live_section(model).is_none());
+        assert_eq!(scene.has_section_objects.get(), Some(false));
+
+        let section = scene.add_entity(live_section());
+        assert!(scene.active_live_section(model).is_some());
+
+        scene.erase_entities(&[section]);
+        assert!(scene.active_live_section(model).is_none());
+    }
+
+    /// Without a table a click skips the cell pick; a table added by an
+    /// edit is picked at once, and none after it is erased.
+    #[test]
+    fn table_cell_pick_follows_added_and_erased_tables() {
+        let mut scene = Scene::new();
+        let inside = glam::DVec3::new(10.0, -5.0, 0.0);
+        assert!(scene.table_cell_pick(inside, 0.0).is_none());
+        assert_eq!(scene.has_tables.get(), Some(false));
+
+        let mut table = document::entities::Table::new(Vector3::ZERO, 3, 4);
+        for column in &mut table.columns {
+            column.width = 20.0;
+        }
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        let handle = scene.add_entity(EntityType::Table(Box::new(table)));
+        assert_eq!(
+            scene.table_cell_pick(inside, 0.0).map(|(table, _)| table),
+            Some(handle)
+        );
+
+        scene.erase_entities(&[handle]);
+        assert!(scene.table_cell_pick(inside, 0.0).is_none());
+    }
+}
+
 #[derive(Clone)]
 struct LiveSection {
     data: document::entities::SectionObjectData,
@@ -3501,6 +3619,7 @@ impl Scene {
             preview_wires: vec![],
             solid_history_preview_wires: HashMap::default(),
             preview_hatches: Arc::new(Vec::new()),
+            dynamic_preview_cache: None,
             preview_text: vec![],
             interim_wire: None,
             layer_table_dirty: false,
@@ -3534,6 +3653,7 @@ impl Scene {
             mesh_cache: RefCell::new(HashMap::default()),
             interaction_mesh_cache: RefCell::new(None),
             mesh_pick_lookup_cache: RefCell::new(None),
+            mesh_pick_boxes_cache: RefCell::new(None),
             frozen_hatch_cache: RefCell::new(HashMap::default()),
             frozen_wipeout_cache: RefCell::new(HashMap::default()),
             frozen_image_cache: RefCell::new(HashMap::default()),
@@ -3604,6 +3724,8 @@ impl Scene {
             dynamic_dimension_camera_gen: None,
             underlay_world_per_pixel: None,
             underlay_scale_pending: None,
+            underlay_view: None,
+            underlay_region_used: std::cell::Cell::new(false),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3614,6 +3736,8 @@ impl Scene {
             has_dimension_associations: std::cell::Cell::new(None),
             has_underlays: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
+            has_section_objects: std::cell::Cell::new(None),
+            has_tables: std::cell::Cell::new(None),
             persisted_hidden_cache: std::cell::Cell::new(None),
             document_render_env_cache: RefCell::new(None),
             background_image_cache: RefCell::new(HashMap::default()),
@@ -3681,23 +3805,30 @@ impl Scene {
         let current = self
             .underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32);
-        if current == Some(step) {
+        if current == Some(step) && !self.underlay_view_moved() {
             self.underlay_scale_pending = None;
             return;
         }
+        // Wait for the camera to rest, not only for the scale step to hold.
+        let key = (step, self.camera_generation);
         match self.underlay_scale_pending {
-            Some((pending, since)) if pending == step => {
+            Some((pending, since)) if pending == key => {
                 if now.duration_since(since) < std::time::Duration::from_millis(150) {
                     return;
                 }
             }
             _ => {
-                self.underlay_scale_pending = Some((step, now));
+                self.underlay_scale_pending = Some((key, now));
                 return;
             }
         }
         self.underlay_scale_pending = None;
         self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
+        self.underlay_view = self.plan_view_rect().map(|[x0, y0, x1, y1]| {
+            let (mx, my) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
+            [x0 - mx, y0 - my, x1 + mx, y1 + my]
+        });
+        self.underlay_region_used.set(false);
         if self
             .document
             .entities()
@@ -3708,7 +3839,8 @@ impl Scene {
     }
 
     /// The view has moved to another scale step than the underlay rasters
-    /// were made for (frames are requested until they are made again).
+    /// were made for, or out of their sharp region (frames are requested
+    /// until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
         if !self.has_underlays() {
             return false;
@@ -3720,6 +3852,46 @@ impl Scene {
         self.underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32)
             != Some(step)
+            || self.underlay_view_moved()
+    }
+
+    /// A zoomed-in underlay region was drawn and the view has left it.
+    fn underlay_view_moved(&self) -> bool {
+        if !self.underlay_region_used.get() {
+            return false;
+        }
+        match (self.underlay_view, self.plan_view_rect()) {
+            (Some(have), Some(now)) => {
+                now[0] < have[0] || now[1] < have[1] || now[2] > have[2] || now[3] > have[3]
+            }
+            _ => true,
+        }
+    }
+
+    /// World XY rectangle of the model view when it looks straight down
+    /// (orthographic plan view); `None` otherwise.
+    fn plan_view_rect(&self) -> Option<[f64; 4]> {
+        if self.current_layout != "Model" {
+            return None;
+        }
+        let cam = self.camera.borrow();
+        if !matches!(cam.projection, view::camera::Projection::Orthographic) {
+            return None;
+        }
+        if (cam.rotation * glam::Vec3::NEG_Z).z > -0.9999 {
+            return None;
+        }
+        let h = f64::from(cam.ortho_size());
+        let w = h * self.view_aspect();
+        let right = (cam.rotation * glam::Vec3::X).as_dvec3();
+        let up = (cam.rotation * glam::Vec3::Y).as_dvec3();
+        let (hx, hy) = (
+            (right.x * w).abs() + (up.x * h).abs(),
+            (right.y * w).abs() + (up.y * h).abs(),
+        );
+        let t = cam.target;
+        let rect = [t.x - hx, t.y - hy, t.x + hx, t.y + hy];
+        rect.iter().all(|v| v.is_finite()).then_some(rect)
     }
 
     /// Width over height of the view last drawn (1 before the first frame).
@@ -4404,6 +4576,29 @@ impl Scene {
         any
     }
 
+    /// Fast check for whether any section object exists in the document.
+    fn has_section_objects(&self) -> bool {
+        if let Some(known) = self.has_section_objects.get() {
+            return known;
+        }
+        let any = self.document.entities().any(is_section_object);
+        self.has_section_objects.set(Some(any));
+        any
+    }
+
+    /// Fast check for whether any table exists in the document.
+    pub(crate) fn has_tables(&self) -> bool {
+        if let Some(known) = self.has_tables.get() {
+            return known;
+        }
+        let any = self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Table(_)));
+        self.has_tables.set(Some(any));
+        any
+    }
+
     /// Fast check for whether any Face3D entities exist in the document.
     pub(crate) fn has_face3d(&self) -> bool {
         if let Some(known) = self.has_face3d.get() {
@@ -4687,6 +4882,31 @@ impl Scene {
         changes: &[(Handle, ChangeKind)],
     ) {
         self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false, None);
+    }
+
+    /// Incrementally invalidate a single block definition's cached display
+    /// and the `Insert` reference that owns it (used when switching a dynamic
+    /// block's visibility state), keeping all other blocks and entities cached.
+    pub fn bump_block_visibility(&mut self, insert_handle: Handle, block_name: &str) {
+        let from = self.block_epoch;
+        self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        let rebuilt_at_from = self
+            .block_defn_cache
+            .borrow()
+            .values()
+            .any(|(epoch, _)| *epoch == from);
+        self.block_visibility_edits = match self.block_visibility_edits.take() {
+            Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
+                names.insert(block_name.to_string());
+                Some((base, self.block_epoch, names))
+            }
+            _ => {
+                let mut names = HashSet::default();
+                names.insert(block_name.to_string());
+                Some((from, self.block_epoch, names))
+            }
+        };
+        self.bump_entities_restyled(&[(insert_handle, ChangeKind::Modified)]);
     }
 
     /// Refresh display after a restyle that moved no geometry: nothing
@@ -5017,6 +5237,47 @@ impl Scene {
         }) {
             self.has_face3d.set(Some(true));
         }
+        if let Some(true) = self.has_section_objects.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_section_objects.set(None);
+            }
+        } else if changes
+            .iter()
+            .any(|(h, _)| self.document.get_entity(*h).is_some_and(is_section_object))
+        {
+            self.has_section_objects.set(Some(true));
+        }
+        if let Some(true) = self.has_tables.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_tables.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Table(_)))
+        }) {
+            self.has_tables.set(Some(true));
+        }
+        if let Some(true) = self.has_underlays.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_underlays.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Underlay(_)))
+        }) {
+            self.has_underlays.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5142,6 +5403,8 @@ impl Scene {
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
         self.has_face3d.set(None);
+        self.has_section_objects.set(None);
+        self.has_tables.set(None);
         // Default: also invalidate block definitions. Safe for every caller;
         // operations that know blocks are untouched use `bump_geometry_no_blocks`.
         self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
@@ -5250,7 +5513,10 @@ impl Scene {
         self.lighting_cache.borrow_mut().clear();
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
+        self.has_underlays.set(None);
         self.has_face3d.set(None);
+        self.has_section_objects.set(None);
+        self.has_tables.set(None);
         self.invalidate_dependency_index();
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
@@ -5764,6 +6030,7 @@ impl Scene {
             *self.wire_cache.borrow_mut() = None;
             *self.interaction_mesh_cache.borrow_mut() = None;
             *self.mesh_pick_lookup_cache.borrow_mut() = None;
+            *self.mesh_pick_boxes_cache.borrow_mut() = None;
             *self.insert_hatch_cache.borrow_mut() = None;
         }
     }
@@ -5906,14 +6173,15 @@ impl Scene {
             _ => None,
         };
 
+        // The ordered handles put the overall sheet viewport first. Some DWGs
+        // number that viewport 2 and a model-content viewport 1, so an ID must
+        // never override the drawing's stored order. `layout.viewport` is not
+        // used here: it records the last active viewport, which can be content.
         let listed = layout
             .viewports
             .iter()
             .copied()
             .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
-        if let Some((handle, _)) = listed.clone().find(|(_, vp)| vp.id == 1) {
-            return handle;
-        }
         if let Some((handle, _)) = listed.into_iter().next() {
             return handle;
         }
@@ -5928,9 +6196,6 @@ impl Scene {
             .iter()
             .copied()
             .filter_map(|handle| owned_viewport(handle).map(|vp| (handle, vp)));
-        if let Some((handle, _)) = block_viewports.clone().find(|(_, vp)| vp.id == 1) {
-            return handle;
-        }
         if let Some((handle, _)) = block_viewports.into_iter().next() {
             return handle;
         }
@@ -5956,21 +6221,17 @@ impl Scene {
         document: &document::Document,
         vp: &document::entities::Viewport,
     ) -> bool {
-        if vp.id == 1 {
-            return true;
-        }
-        if vp.id > 1 {
-            return false;
-        }
-        document.objects.values().any(|object| {
-            matches!(
-                object,
-                ObjectType::Layout(layout)
-                    if layout.block_record == vp.common.owner_handle
-                        && Self::layout_sheet_viewport_handle(document, layout)
-                            == vp.common.handle
-            )
-        })
+        document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::Layout(layout) if layout.block_record == vp.common.owner_handle => {
+                    Some(Self::layout_sheet_viewport_handle(document, layout) == vp.common.handle)
+                }
+                _ => None,
+            })
+            // Keep the legacy classification for orphaned viewport entities.
+            .unwrap_or(vp.id == 1)
     }
 
     pub(crate) fn sheet_viewport_handles(&self) -> std::collections::HashSet<Handle> {
@@ -6312,6 +6573,8 @@ impl Scene {
         let ((x0, y0), (x1, y1)) = self.paper_limits()?;
         let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
         Some(HatchModel {
+            entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],
@@ -6605,28 +6868,44 @@ impl Scene {
                         // it. An inch-based paper space would otherwise get a
                         // 25.4× oversized sheet, shrinking the content into the
                         // corner.
-                        let f = Self::layout_unit_factor(l);
-                        let (pw, ph) = (pw * f, ph * f);
                         let (wx0, wy0, wx1, wy1) = (
                             l.plot_window_min_x,
                             l.plot_window_min_y,
                             l.plot_window_max_x,
                             l.plot_window_max_y,
                         );
+                        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
+                        // Scale type 0 is "scaled to fit" only with the
+                        // standard-scale flag; a custom scale leaves it 0 too.
+                        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
+                        let f = if window_plot && fitted {
+                            // Fitted to the paper: the plot scales the window
+                            // to the sheet, so the sheet spans the window at
+                            // that scale, not at the layout's stored one.
+                            let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                                (wx1 - wx0, wy1 - wy0),
+                                (pw, ph),
+                                crate::io::paper_catalog::PlotScale::Fit,
+                            );
+                            1.0 / mm_per_unit.max(1e-9)
+                        } else {
+                            Self::layout_unit_factor(l)
+                        };
+                        let (pw, ph) = (pw * f, ph * f);
                         // A window plot maps that window onto the sheet, so the
                         // sheet sits around it rather than at the origin.
-                        let (ox, oy) = if l.plot_type == 4 && wx1 > wx0 && wy1 > wy0 {
+                        let (ox, oy) = if window_plot {
                             if l.plot_flags.plot_centered {
                                 ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
                             } else {
                                 (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
                             }
                         } else {
-                            // Paper (0,0) is the printable area's corner, as in
-                            // the reference application: the sheet starts at
-                            // minus the stored margins (turned with the plot).
-                            // LIMMIN is not used; it goes stale when the device
-                            // or medium changes.
+                            // The printable area's corner sits at minus the
+                            // paper image origin (paper-space units, usually
+                            // 0); the sheet starts the stored margins (turned
+                            // with the plot) before it. LIMMIN is not used; it
+                            // goes stale when the device or medium changes.
                             let (left, bottom, ..) = crate::scene::rotated_margins(
                                 (
                                     l.plot_margin_left,
@@ -6636,7 +6915,10 @@ impl Scene {
                                 ),
                                 l.plot_rotation,
                             );
-                            (-left * f, -bottom * f)
+                            (
+                                -l.paper_image_origin_x - left * f,
+                                -l.paper_image_origin_y - bottom * f,
+                            )
                         };
                         return Some(((ox, oy), (ox + pw, oy + ph)));
                     }
@@ -8236,8 +8518,34 @@ impl Scene {
             self.interaction_block_handle()
         };
         if let Some((epoch, cached_space, any)) = self.persisted_hidden_cache.get() {
-            if epoch == self.geometry_epoch && cached_space == space {
-                return any;
+            if cached_space == space {
+                if epoch == self.geometry_epoch {
+                    return any;
+                }
+                // The status bar asks on every frame and the answer is a
+                // scan of every object in the space. Fold the edits since
+                // the cached answer instead where they cannot change it:
+                // with no hidden object before, only an edited object that
+                // is now hidden can make one; with one before, only adds
+                // leave it standing. Anything else scans again.
+                if let Some(changes) = self.replay_since(epoch) {
+                    let unchanged = if any {
+                        changes
+                            .iter()
+                            .all(|(_, kind)| matches!(kind, ChangeKind::Added))
+                    } else {
+                        changes.iter().all(|(handle, _)| {
+                            self.document
+                                .get_entity(*handle)
+                                .is_none_or(|entity| !entity.common().invisible)
+                        })
+                    };
+                    if unchanged {
+                        self.persisted_hidden_cache
+                            .set(Some((self.geometry_epoch, space, any)));
+                        return any;
+                    }
+                }
             }
         }
         let any = !self.persisted_hidden_objects().is_empty();
@@ -9607,19 +9915,33 @@ impl Scene {
                     .unwrap_or(handle.value())
             };
             // Hashed once: a linear `order.contains` per re-shown entity made
-            // turning a big layer back on quadratic.
-            let ordered: HashSet<Handle> = if visible_changed.is_empty() {
-                HashSet::default()
-            } else {
-                layout.order.iter().copied().collect()
+            // turning a big layer back on quadratic. A run in the set (live
+            // or blanked) is always listed in the order, so an edit of drawn
+            // entities alone (a move, its undo) needs no lookup at all.
+            let has_run = |handle: &Handle| {
+                layout.ranges.contains_key(handle) || layout.vacant.contains_key(handle)
             };
+            let needs_lookup = visible_changed.iter().any(|handle| !has_run(handle));
+            let ordered: HashSet<Handle> = if needs_lookup {
+                layout.order.iter().copied().collect()
+            } else {
+                HashSet::default()
+            };
+            debug_assert!(
+                visible_changed
+                    .iter()
+                    .filter(|handle| has_run(handle))
+                    .all(|handle| layout.order.contains(handle)),
+                "every run in the resident set is listed in its order"
+            );
+            let listed = |handle: &Handle| has_run(handle) || ordered.contains(handle);
             for &(handle, kind) in &deltas {
                 if matches!(kind, ChangeKind::Removed) {
                     // Keep the order entry as a tombstone. Undo/Redo can then
                     // restore the exact physical slot and submission position.
                     continue;
                 }
-                if visible_changed.contains(&handle) && !ordered.contains(&handle) {
+                if visible_changed.contains(&handle) && !listed(&handle) {
                     let key = effective(handle);
                     let position = layout
                         .order
@@ -11464,6 +11786,47 @@ impl Scene {
         lookup
     }
 
+    /// The box around the vertices of each mesh `meshes` draws, in the mesh's
+    /// own coordinates, by the mesh's address. A mesh with no vertices, or
+    /// with one that is not finite, has none. Measured once for a mesh list:
+    /// a selection box asked every solid of the drawing for its vertices on
+    /// every pointer move.
+    fn mesh_pick_boxes(
+        &self,
+        meshes: &Arc<Vec<MeshLodSet>>,
+    ) -> Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>> {
+        let source = Arc::as_ptr(meshes) as usize;
+        {
+            let cache = self.mesh_pick_boxes_cache.borrow();
+            if let Some((ptr, weak, boxes)) = cache.as_ref() {
+                if *ptr == source
+                    && weak
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, meshes))
+                {
+                    return Arc::clone(boxes);
+                }
+            }
+        }
+        let mut boxes = rustc_hash::FxHashMap::default();
+        let mut measured = rustc_hash::FxHashSet::default();
+        for set in meshes.iter() {
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            let address = std::ptr::from_ref(mesh) as usize;
+            if measured.insert(address) {
+                if let Some(local) = pick::hit_test::mesh_local_box(mesh) {
+                    boxes.insert(address, local);
+                }
+            }
+        }
+        let boxes = Arc::new(boxes);
+        *self.mesh_pick_boxes_cache.borrow_mut() =
+            Some((source, Arc::downgrade(meshes), Arc::clone(&boxes)));
+        boxes
+    }
+
     /// Solid-mesh set (top-level + block-instanced), optionally dropping those
     /// whose layer is frozen in a content viewport (`frozen`). `None` reproduces
     /// the full set.
@@ -11597,6 +11960,9 @@ impl Scene {
     }
 
     fn active_live_section(&self, target_block: Handle) -> Option<LiveSection> {
+        if !self.has_section_objects() {
+            return None;
+        }
         self.document
             .entities()
             .filter_map(|entity| {
@@ -12294,6 +12660,14 @@ impl Scene {
         self.reference_only.is_marked(handle) && self.document.get_entity(handle).is_some()
     }
 
+    /// API v18 selectable-custom owner-stamp flag. Unlike reference-only,
+    /// this never affects hit-testing or ordinary selection.
+    pub fn native_edit_disabled(&self, handle: Handle) -> bool {
+        self.document
+            .get_entity(handle)
+            .is_some_and(crate::plugin::entity_labels::native_edit_disabled)
+    }
+
     /// Insert or remove `handle` in the scene-scoped designation set,
     /// returning whether membership changed. Pure storage: no epoch bump, no
     /// undo bookkeeping — those belong to the callers (the plugin host API
@@ -12498,6 +12872,9 @@ impl Scene {
                     }
                 }
                 transformed.instance_handle = Some(context.root_handle);
+                transformed.effective_layer = Some(std::sync::Arc::from(
+                    context.effective_layer(&entity.common().layer),
+                ));
                 out.push(transformed);
             },
         );
@@ -12850,6 +13227,12 @@ impl Scene {
         interaction_block: Handle,
         entities: impl Iterator<Item = &'a EntityType>,
     ) -> HashMap<Handle, Vec<HatchModel>> {
+        // No block definition holds a hatch, so no reference places one.
+        if !render_graph::any_block_definition_holds(&self.document, |entity| {
+            matches!(entity, EntityType::Hatch(_))
+        }) {
+            return HashMap::default();
+        }
         let layer_hidden =
             |layer: &str| self.layer_hidden(layer) || self.interaction_layer_frozen(layer);
         let mut out: HashMap<Handle, Vec<HatchModel>> = HashMap::default();
@@ -14238,6 +14621,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14252,16 +14636,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -14421,6 +14822,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14435,15 +14837,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices
@@ -14735,6 +15152,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14749,16 +15167,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -14795,6 +15230,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14809,15 +15245,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices
@@ -14991,15 +15442,54 @@ impl Scene {
                     *slot.insert(self.document.layers.get(e.common().layer.as_str()))
                 }
             };
+        let has_temporary_hidden = self.object_isolation.is_active()
+            || !self.preview_hidden.is_empty()
+            || !self.command_preview_hidden.is_empty()
+            || !self.hidden_dynamic_dimensions.is_empty();
         let visibility_ok = |e: &'doc EntityType| {
-            self.resident_entity_visible_with_layer(
-                e,
-                block_handle,
-                frozen_layers,
-                annotation_scale_handle,
-                all_visible,
-                layer_for(e),
-            )
+            let c = e.common();
+            if c.invisible && self.display_entity_invisible(c) {
+                return false;
+            }
+            if has_temporary_hidden && self.entity_temporarily_hidden(c.handle) {
+                return false;
+            }
+            if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+                return false;
+            }
+            let layer = layer_for(e);
+            if layer
+                .map(|l| l.flags.off || l.flags.frozen)
+                .unwrap_or(false)
+            {
+                return false;
+            }
+            if self.layer_walk_hidden(layer) {
+                return false;
+            }
+            if let Some(frozen) = frozen_layers {
+                if !frozen.is_empty() {
+                    if frozen.contains(&c.handle) {
+                        return false;
+                    }
+                    if let Some(lh) = layer.map(|l| l.handle) {
+                        if frozen.contains(&lh) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            if !all_visible
+                && crate::scene::annotative::annotative_offscale_for(
+                    &self.document,
+                    c,
+                    annotation_scale_handle,
+                    all_visible,
+                )
+            {
+                return false;
+            }
+            self.belongs_to_visible_block(c.handle, c.owner_handle, block_handle)
         };
 
         let sort_cache_ms = crate::perf::elapsed_ms(t_fn);

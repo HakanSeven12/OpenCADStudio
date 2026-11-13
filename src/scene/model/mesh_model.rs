@@ -98,6 +98,9 @@ impl MeshMetrics {
 #[derive(Clone, Debug)]
 pub struct MeshLodSet {
     pub lods: Vec<MeshModel>,
+    /// Fully resolved display/export layer for this placement. Geometry and
+    /// instance sources remain shared and placement-independent.
+    pub effective_layer: Option<std::sync::Arc<str>>,
     /// Effective AcDbMaterial resolved from entity/layer/INSERT inheritance.
     /// Geometry remains usable when it is absent; the renderer then keeps the
     /// per-mesh entity colour.
@@ -239,6 +242,7 @@ impl MeshLodSet {
         let metrics = compute_mesh_metrics(&lods);
         Self {
             lods,
+            effective_layer: None,
             material: None,
             face_materials: rustc_hash::FxHashMap::default(),
             visual_style: None,

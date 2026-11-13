@@ -42,6 +42,9 @@ pub enum Face {
     /// A real compiled .SHX stroke font on disk (glyphs keyed by char code).
     Shx {
         path: String,
+        /// The drawing's legacy code page, used only by shape-file-encoded
+        /// glyphs; Unicode unifonts ignore it.
+        code_page: String,
         /// Space advance (9-unit).
         word: f32,
     },
@@ -59,6 +62,11 @@ pub enum Face {
 /// the single `font_name` string the text pipeline passes around (see
 /// [`Face::with_big_font`]); a control character no font name contains.
 pub const BIG_FONT_SEP: char = '\u{1}';
+
+/// Separator between a resolved SHX path and its drawing's legacy code page.
+/// Keeping this in the resolved font identity also keeps SDF cache entries for
+/// the same path under different drawing code pages apart.
+pub const CODE_PAGE_SEP: char = '\u{2}';
 
 /// What an SHX font shows for a character it has no glyph for: the system
 /// stand-in glyph, taking only the room of the font's own `?` (measured:
@@ -100,18 +108,27 @@ impl Face {
                 face
             };
         }
+        // TrueType styled families use the same control character as their
+        // style suffix, so only an actual SHX path introduces a code page.
+        let (font_name, code_page) = font_name
+            .split_once(CODE_PAGE_SEP)
+            .filter(|(path, _)| path.to_ascii_lowercase().ends_with(".shx"))
+            .map_or((font_name, "ANSI_1252"), |(path, page)| (path, page));
         // A resolvable on-disk .SHX font renders its real stroke glyphs; the
         // LFF substitutes only cover names we can't load.
         if font_name.to_ascii_lowercase().ends_with(".shx")
             && shx::file_on_disk(font_name)
             && shx::font_metrics(font_name).is_some()
         {
+            // Keep the sign: right-to-left fonts (SOSA, XARB) move the pen
+            // left for a space just as for their letters.
             let word = shx::font_glyph(font_name, ' ' as u16)
                 .map(|g| g.advance)
-                .filter(|a| *a > 0.0)
+                .filter(|a| *a != 0.0)
                 .unwrap_or(4.5);
             return Face::Shx {
                 path: font_name.to_string(),
+                code_page: code_page.to_string(),
                 word,
             };
         }
@@ -135,6 +152,17 @@ impl Face {
         Face::Lff(lff::get_font(font_name))
     }
 
+    /// Attach the drawing's legacy code page to an on-disk SHX face. Apply
+    /// this before [`with_big_font`](Self::with_big_font), so the paired primary
+    /// face retains it when resolved.
+    pub fn with_code_page(path: &str, code_page: &str) -> String {
+        if code_page.trim().is_empty() {
+            path.to_string()
+        } else {
+            format!("{path}{CODE_PAGE_SEP}{code_page}")
+        }
+    }
+
     /// The `font_name` string that pairs `primary` with the big font at
     /// `big_path` for [`Face::resolve`]. Every text entry point takes a font
     /// name, so the pairing rides along in that string.
@@ -155,7 +183,9 @@ impl Face {
             Face::Ttf { family, .. } => ttf_glyph::glyph(family, ch)
                 .or_else(|| ttf_glyph::fallback_glyph(ch))
                 .map(GlyphRef::Owned),
-            Face::Shx { path, .. } => shx::font_glyph(path, ch as u16)
+            Face::Shx {
+                path, code_page, ..
+            } => shx::font_char_glyph(path, ch, code_page)
                 .or_else(|| shx_missing_glyph(path, ch))
                 .map(GlyphRef::Owned)
                 .or_else(|| ttf_glyph::fallback_glyph(ch).map(GlyphRef::Owned)),
@@ -176,7 +206,9 @@ impl Face {
         match self {
             Face::Lff(f) => f.glyph(ch).map(GlyphRef::Borrowed),
             Face::Ttf { family, .. } => ttf_glyph::glyph(family, ch).map(GlyphRef::Owned),
-            Face::Shx { path, .. } => shx::font_glyph(path, ch as u16).map(GlyphRef::Owned),
+            Face::Shx {
+                path, code_page, ..
+            } => shx::font_char_glyph(path, ch, code_page).map(GlyphRef::Owned),
             Face::WithBig { primary, .. } => primary.own_glyph(ch),
         }
     }
@@ -196,8 +228,12 @@ impl Face {
                 Some(_) => ttf_glyph::glyph_source(family, ch),
                 None => ttf_glyph::fallback_source(ch),
             },
-            Face::Shx { path, .. } => {
-                match shx::font_glyph(path, ch as u16).or_else(|| shx_missing_glyph(path, ch)) {
+            Face::Shx {
+                path, code_page, ..
+            } => {
+                match shx::font_char_glyph(path, ch, code_page)
+                    .or_else(|| shx_missing_glyph(path, ch))
+                {
                     Some(_) => None,
                     None => ttf_glyph::fallback_source(ch),
                 }
@@ -415,6 +451,22 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn styled_ttf_names_keep_their_style_suffix() {
+        let Some(styled) = sysfont::families().into_iter().find_map(|family| {
+            let styled = format!("{family}{}bi", sysfont::STYLE_SEP);
+            sysfont::has_family(&styled).then_some(styled)
+        }) else {
+            eprintln!("no styled system font; skipping");
+            return;
+        };
+        let Face::Ttf { family, .. } = Face::resolve(&styled) else {
+            panic!("styled system family must remain a TrueType face");
+        };
+        let (_, bold, italic) = sysfont::split_style(&family);
+        assert!(bold && italic, "style suffix lost from {family:?}");
     }
 
     #[test]

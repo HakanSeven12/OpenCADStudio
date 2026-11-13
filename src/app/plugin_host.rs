@@ -3647,6 +3647,15 @@ impl<'a> HostSession<'a> {
                     instance.design_record.clone(),
                 ));
             }
+            if instance.selectable_custom {
+                // Flags have a fixed third slot, even without record linkage.
+                if instance.design_record.is_empty() {
+                    stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::String(
+                        String::new(),
+                    ));
+                }
+                stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::Integer32(1));
+            }
             self.write_record(*handle, stamp);
             // Designation inside the SAME scope, the before-image
             // pending-scoped the way set_reference_only does.
@@ -3658,7 +3667,7 @@ impl<'a> HostSession<'a> {
                 .record_reference_designation_before_pending(self.tab, *handle, before);
             self.app.tabs[self.tab]
                 .scene
-                .set_reference_only_membership(*handle, true);
+                .set_reference_only_membership(*handle, !instance.selectable_custom);
         }
         self.bump_geometry();
         self.set_dirty();
@@ -4885,10 +4894,21 @@ impl HostApi for HostSession<'_> {
         panel_id: &str,
         values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
     ) -> bool {
-        let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) else {
-            return false;
-        };
-        self.update_panel(&panel_id, values)
+        if let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) {
+            return self.update_panel(&panel_id, values);
+        }
+        // A modal dialog the plugin opened is updated in place; it is never
+        // routed through `update_panel`, whose side-panel lookup by name
+        // could reach another plugin's panel with the same title.
+        if let Some(state) = &mut self.app.plugin_dialog_state {
+            if state.plugin_id.as_deref() == Some(plugin_id)
+                && (panel_id.is_empty() || state.def.title.eq_ignore_ascii_case(panel_id))
+            {
+                state.update_values(values);
+                return true;
+            }
+        }
+        false
     }
 
     fn toggle_panel_for_plugin(
@@ -16622,6 +16642,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             tolerance: 1e-3,
             layer: "PLUGIN_PROFILE".to_string(),
             design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
+            selectable_custom: false,
         }
     }
 
@@ -16700,6 +16721,63 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             .expect("the class outlives its declaring session");
         assert!(!handles.is_empty());
         assert!(host.app.tabs[0].scene.is_reference_only(handles[0]));
+        assert!(!host.app.tabs[0].scene.native_edit_disabled(handles[0]));
+        let stamp = host
+            .read_record(handles[0], "PLUGIN_ALIGN_DISPLAY")
+            .expect("legacy owner stamp");
+        assert_eq!(stamp.values.len(), 2, "unflagged staging is unchanged");
+    }
+
+    #[test]
+    fn selectable_custom_instances_are_selectable_but_native_edit_disabled() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        install_class_owner();
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(host
+            .register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok());
+        let mut instance = traverse_instance();
+        instance.selectable_custom = true;
+        instance.design_record.clear();
+        let handles = host
+            .stage_plugin_class_instance("PLUGIN", &instance)
+            .expect("the selectable custom instance stages");
+        assert!(!handles.is_empty());
+        for &handle in &handles {
+            assert!(!host.app.tabs[0].scene.is_reference_only(handle));
+            assert!(host.app.tabs[0].scene.native_edit_disabled(handle));
+            let stamp = host
+                .read_record(handle, "PLUGIN_ALIGN_DISPLAY")
+                .expect("selectable custom owner stamp");
+            assert_eq!(stamp.values.len(), 3);
+            assert!(matches!(
+                &stamp.values[1],
+                document::xdata::XDataValue::String(value) if value.is_empty()
+            ));
+            assert!(matches!(
+                stamp.values[2],
+                document::xdata::XDataValue::Integer32(1)
+            ));
+            assert!(host.entity_grips(handle).expect("grip read").is_empty());
+
+            let original = host.document().get_entity(handle).unwrap().clone();
+            assert!(!host.app.tabs[0].scene.update_entity(original.clone()));
+            host.app.tabs[0].scene.erase_entities(&[handle]);
+            assert!(host.document().get_entity(handle).is_some());
+        }
+
+        let handle = handles[0];
+        host.app.tabs[0].scene.select_entity(handle, true);
+        assert!(host.app.tabs[0].scene.selected.contains(&handle));
+        assert!(host.app.property_target_handles(0).is_empty());
+        let original = host.document().get_entity(handle).unwrap().clone();
+        assert!(
+            host.update_entity(original),
+            "plugin updates remain allowed"
+        );
+        assert!(host.remove_entity(handle), "plugin erases remain allowed");
+        assert!(host.document().get_entity(handle).is_none());
     }
 
     #[test]
@@ -16780,7 +16858,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // The stamp's file-level law: the identity stamp (the XDATA record
         // under the auto-registered APPID) and the staged display set
         // survive BOTH file formats with empty loss rows; the stamp values
-        // (schema version + record linkage) stay byte-identical.
+        // (schema version + record linkage + selectable-custom flags) stay
+        // byte-identical.
         use document::{Dwg, Dxf, Format};
 
         let mut app = OpenCADStudio::new_for_test();
@@ -16792,9 +16871,11 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             assert!(host
                 .register_plugin_class("PLUGIN", &traverse_class())
                 .is_ok());
+            let mut instance = traverse_instance();
+            instance.selectable_custom = true;
             handles = host
-                .stage_plugin_class_instance("PLUGIN", &traverse_instance())
-                .expect("the class instance stages");
+                .stage_plugin_class_instance("PLUGIN", &instance)
+                .expect("the selectable custom class instance stages");
         }
         let read_stamp = |document: &document::Document, handle: document::Handle| {
             let entity = document
@@ -16834,6 +16915,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     stamp(&back, *handle),
                     expected,
                     "{name}: the class stamp must be byte-identical"
+                );
+                assert!(
+                    crate::plugin::entity_labels::native_edit_disabled(
+                        back.get_entity(*handle).expect("flagged entity survives"),
+                    ),
+                    "{name}: the selectable-custom flag survives"
                 );
             }
         }
@@ -17819,5 +17906,86 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(!host.app.plugin_panels["cvifc.ifc_v_properties"].visible);
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
         assert!(host.app.tabs[0].history.pending.is_none());
+    }
+
+    #[test]
+    fn plugin_panels_toggle_like_graphic_attributes_including_clean_screen() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        app.clean_screen = true;
+        let graphic_id = crate::ui::dock::PanelId::GraphicAttributes;
+        assert!(!app.dock_panel_visible(graphic_id));
+        let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
+        assert!(app.show_graphic_attributes);
+        assert!(!app.dock_panel_visible(graphic_id));
+        let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
+        assert!(!app.show_graphic_attributes);
+        assert!(!app.dock_panel_visible(graphic_id));
+        let _ = app.update(crate::app::Message::ToggleGraphicAttributes);
+        assert!(app.show_graphic_attributes);
+        assert!(!app.dock_panel_visible(graphic_id));
+
+        let mut host = HostSession::new(&mut app, 0);
+        let panel_id = crate::ui::dock::PanelId::Plugin(1);
+        assert!(host.register_panel_for_plugin("opencad.civil_ifc", api16_text_panel()));
+        // Like Graphic Attributes, the panel stays hidden in Clean Screen;
+        // opening it still binds its values without a document edit.
+        app.clean_screen = false;
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(!host.app.dock_panel_visible(panel_id));
+        assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
+        assert!(host.app.dock_panel_visible(panel_id));
+        assert!(host.app.dock_panel_on_screen(panel_id));
+        assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
+        assert!(!host.app.dock_panel_visible(panel_id));
+        assert!(!host.app.plugin_panels["panel"].visible);
+        assert!(host.toggle_panel_for_plugin("opencad.civil_ifc", "panel", None));
+        assert!(host.app.dock_panel_visible(panel_id));
+        assert!(host.app.plugin_panels["panel"].visible);
+        assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
+        assert!(host.app.tabs[0].history.pending.is_none());
+    }
+
+    #[test]
+    fn api17_update_panel_for_plugin_allows_owned_modal_dialog() {
+        use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let dlg = DialogDef::new("Test Dialog")
+            .with_control(DialogControl::Text {
+                id: "field1".into(),
+                label: "Field 1".into(),
+                default: "initial".into(),
+            });
+        app.open_plugin_dialog_on_tab(0, dlg, Some("MY_PLUGIN".to_string()));
+
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Foreign plugin cannot update the dialog
+        assert!(!host.update_panel_for_plugin(
+            "OTHER_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("hacked".into()))]),
+        ));
+
+        // Owner plugin can update by title
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("updated".into()))]),
+        ));
+        let field1 = |host: &HostSession| {
+            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").cloned()
+        };
+        assert_eq!(field1(&host).as_deref(), Some("updated"));
+
+        // Owner plugin can also update with empty panel_id (active dialog convention)
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("empty_id_update".into()))]),
+        ));
+        assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 }

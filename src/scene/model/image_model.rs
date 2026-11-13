@@ -294,7 +294,21 @@ impl ImageModel {
         background: [f32; 4],
         world_per_pixel: Option<f64>,
     ) -> Option<Self> {
-        Self::underlay(u, def, background, world_per_pixel, false)
+        Self::underlay(u, def, background, world_per_pixel, None, false).map(|(m, _)| m)
+    }
+
+    /// [`Self::from_underlay`] for a plan view showing the world rectangle
+    /// `view` (min x, min y, max x, max y): zoomed in past the whole-page
+    /// raster, the part of the page inside `view` is drawn again at screen
+    /// resolution (#2934). The flag tells whether it was.
+    pub fn from_underlay_in_view(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        background: [f32; 4],
+        world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
+    ) -> Option<(Self, bool)> {
+        Self::underlay(u, def, background, world_per_pixel, view, false)
     }
 
     /// [`Self::from_underlay`] for a plot: a PDF page at print resolution, not
@@ -304,7 +318,7 @@ impl ImageModel {
         def: &document::entities::UnderlayDefinition,
         background: [f32; 4],
     ) -> Option<Self> {
-        Self::underlay(u, def, background, None, true)
+        Self::underlay(u, def, background, None, None, true).map(|(m, _)| m)
     }
 
     fn underlay(
@@ -312,8 +326,9 @@ impl ImageModel {
         def: &document::entities::UnderlayDefinition,
         background: [f32; 4],
         world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
         print: bool,
-    ) -> Option<Self> {
+    ) -> Option<(Self, bool)> {
         use super::pdf_raster;
         use document::entities::{UnderlayDisplayFlags, UnderlayType};
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
@@ -332,11 +347,11 @@ impl ImageModel {
             let h = (rect[3] - rect[1]) * u.y_scale.abs();
             w.max(h) / wpp
         });
+        let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
         let (source, raster) = match def.underlay_type {
             UnderlayType::Pdf => {
                 // Hidden PDF layers come from the underlay's layer overrides.
                 let source = super::pdf_layers::underlay_source(u, &def.file_path);
-                let inches = (rect[2] - rect[0]).max(rect[3] - rect[1]);
                 let print_raster = print
                     .then(|| pdf_raster::rasterize_page_print(&source, page))
                     .flatten();
@@ -359,12 +374,29 @@ impl ImageModel {
             // (`underlay_vector::display_wires`).
             _ => return None,
         };
-        let pixels = pdf_raster::adjusted_pixels(
-            &source,
-            page,
-            &raster,
-            underlay_adjust(u, def, background),
-        );
+        let adjust = underlay_adjust(u, def, background);
+        let pixels = pdf_raster::adjusted_pixels(&source, page, &raster, adjust);
+        // Zoomed in past the whole-page raster: the visible part of the page
+        // again at screen resolution, as page UV and its raster.
+        let region = match (view, screen_side) {
+            (Some(view), Some(side)) if !print && inches > 0.0 => {
+                let dpi = side / inches;
+                underlay_view_uv(u, rect, view)
+                    .filter(|_| dpi > f64::from(raster.dpi) * 1.2)
+                    .and_then(|uv| {
+                        let (pw, ph) = (rect[2] - rect[0], rect[3] - rect[1]);
+                        let (w_in, h_in) = ((uv[2] - uv[0]) * pw, (uv[3] - uv[1]) * ph);
+                        let dpi = dpi.min(pdf_raster::REGION_SIDE / w_in.max(h_in));
+                        if dpi <= f64::from(raster.dpi) * 1.2 {
+                            return None;
+                        }
+                        let inches = [uv[0] * pw, uv[1] * ph, uv[2] * pw, uv[3] * ph];
+                        pdf_raster::rasterize_page_region(&source, page, inches, dpi as f32)
+                            .map(|r| (uv, r))
+                    })
+            }
+            _ => None,
+        };
 
         // The page rectangle in drawing units (1 unit per PDF inch, or per
         // DWF/DGN sheet unit), entity scale applied, from its lower-left
@@ -397,24 +429,89 @@ impl ImageModel {
         let corners_low = [[oxl, oyl, ozl]; 4];
 
         let tris_uv = underlay_visible_uv(u, rect);
-        let verts: Vec<ImageQuadVertex> = tris_uv
-            .iter()
-            .map(|&[fu, fv]| {
-                let (fu, fv) = (fu as f32, fv as f32);
-                ImageQuadVertex {
-                    pos: [ox + ux * fu + vx * fv, oy + uy * fu + vy * fv, oz],
-                    uv: [fu, 1.0 - fv],
-                    pos_low: [oxl, oyl, ozl],
+        let vertex = |[fu, fv]: [f64; 2], tex: [f32; 2]| {
+            let (fu, fv) = (fu as f32, fv as f32);
+            ImageQuadVertex {
+                pos: [ox + ux * fu + vx * fv, oy + uy * fu + vy * fv, oz],
+                uv: tex,
+                pos_low: [oxl, oyl, ozl],
+            }
+        };
+        let (pixels, width, height, verts) = match region {
+            None => {
+                let verts = tris_uv
+                    .iter()
+                    .map(|&p| vertex(p, [p[0] as f32, 1.0 - p[1] as f32]))
+                    .collect();
+                (pixels, raster.width, raster.height, verts)
+            }
+            Some((r, sharp)) => {
+                // One texture: the whole page on top, a transparent gap row
+                // pair, the region below it. The region is cut out of the
+                // whole page's triangles so the two never draw over each other.
+                let sharp_pixels = pdf_raster::adjusted_pixels_uncached(&sharp, adjust);
+                let (fw, fh) = (raster.width as usize, raster.height as usize);
+                let (rw, rh) = (sharp.width as usize, sharp.height as usize);
+                let (w, h) = (fw.max(rw), fh + 2 + rh);
+                let mut atlas = vec![0u8; w * h * 4];
+                for y in 0..fh {
+                    atlas[y * w * 4..][..fw * 4].copy_from_slice(&pixels[y * fw * 4..][..fw * 4]);
                 }
-            })
-            .collect();
+                for y in 0..rh {
+                    atlas[(fh + 2 + y) * w * 4..][..rw * 4]
+                        .copy_from_slice(&sharp_pixels[y * rw * 4..][..rw * 4]);
+                }
+                let (wf, hf) = (w as f64, h as f64);
+                let whole = |p: [f64; 2]| {
+                    [
+                        (p[0] * fw as f64 / wf) as f32,
+                        ((1.0 - p[1]) * fh as f64 / hf) as f32,
+                    ]
+                };
+                let inside = |p: [f64; 2]| {
+                    let x = (p[0] - r[0]) / (r[2] - r[0]);
+                    let y = (p[1] - r[1]) / (r[3] - r[1]);
+                    [
+                        (x * rw as f64 / wf) as f32,
+                        ((fh + 2) as f64 + (1.0 - y) * rh as f64) as f32 / hf as f32,
+                    ]
+                };
+                let rect_ccw = |x0: f64, y0: f64, x1: f64, y1: f64| {
+                    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+                };
+                let outside = [
+                    rect_ccw(-1.0, -1.0, r[0], 2.0),
+                    rect_ccw(r[2], -1.0, 2.0, 2.0),
+                    rect_ccw(r[0], -1.0, r[2], r[1]),
+                    rect_ccw(r[0], r[3], r[2], 2.0),
+                ];
+                let region_rect = rect_ccw(r[0], r[1], r[2], r[3]);
+                let mut verts = Vec::new();
+                for tri in tris_uv.chunks_exact(3) {
+                    let mut fan = |clip: &[[f64; 2]], tex: &dyn Fn([f64; 2]) -> [f32; 2]| {
+                        let poly = super::pdf_vector::clip_to_convex(tri, clip);
+                        for k in 1..poly.len().saturating_sub(1) {
+                            for p in [poly[0], poly[k], poly[k + 1]] {
+                                verts.push(vertex(p, tex(p)));
+                            }
+                        }
+                    };
+                    for strip in &outside {
+                        fan(strip, &whole);
+                    }
+                    fan(&region_rect, &inside);
+                }
+                (Arc::new(atlas), w as u32, h as u32, verts)
+            }
+        };
+        let sharpened = width != raster.width || height != raster.height;
 
-        Some(Self {
+        Some((Self {
             render_instance: None,
             file_path: def.file_path.clone(),
             pixels,
-            width: raster.width,
-            height: raster.height,
+            width,
+            height,
             opacity: 1.0 - u.fade.min(100) as f32 / 100.0,
             corners,
             corners_low,
@@ -422,8 +519,39 @@ impl ImageModel {
             verts,
             pixelated: false,
             use_alpha: true,
-        })
+        }, sharpened))
     }
+}
+
+/// The part of an underlay's page inside the world rectangle `view`, as page
+/// UV (min u, min v, max u, max v); `None` when they do not overlap.
+fn underlay_view_uv(
+    u: &document::entities::Underlay,
+    rect: [f64; 4],
+    view: [f64; 4],
+) -> Option<[f64; 4]> {
+    let (c, s) = (u.rotation.cos(), u.rotation.sin());
+    let o = &u.insertion_point;
+    if u.x_scale == 0.0 || u.y_scale == 0.0 {
+        return None;
+    }
+    let (pw, ph) = (rect[2] - rect[0], rect[3] - rect[1]);
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for (x, y) in [
+        (view[0], view[1]),
+        (view[2], view[1]),
+        (view[2], view[3]),
+        (view[0], view[3]),
+    ] {
+        let (dx, dy) = (x - o.x, y - o.y);
+        let lx = (dx * c + dy * s) / u.x_scale;
+        let ly = (-dx * s + dy * c) / u.y_scale;
+        let p = [(lx - rect[0]) / pw, (ly - rect[1]) / ph];
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+    }
+    let uv = [lo[0].max(0.0), lo[1].max(0.0), hi[0].min(1.0), hi[1].min(1.0)];
+    (uv[2] > uv[0] && uv[3] > uv[1] && uv.iter().all(|v| v.is_finite())).then_some(uv)
 }
 
 /// Visible region of an underlay page as triangles in page UV (0..1, y up):

@@ -55,7 +55,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Native dock panels are driven through `panel_input` and `panel_button`:
 /// form-only input, then the declared synchronous document-bound command.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "4da57afbf120096feffe6a4407469cc7650fcff6f38b5de751a44fda1d30a3b3";
+const TOOL_SCHEMA_DIGEST: &str = "99bc4906b90c5076dcf1dd42fb2dd8e461e2c09a8a06295359d1b2b358908d88";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -4774,7 +4774,7 @@ mod tests {
             .unwrap()
         };
         let catalog = call("entity_schema", json!({}));
-        assert_eq!(catalog["types"].as_array().unwrap().len(), 11);
+        assert_eq!(catalog["types"].as_array().unwrap().len(), 13);
         assert!(catalog.get("schema").is_none());
         let circle = call("entity_schema", json!({"type":"Circle"}));
         assert_eq!(

@@ -148,8 +148,7 @@ pub fn shx_file_missing(file: &str, base: Option<&Path>) -> bool {
         || !file.to_ascii_lowercase().ends_with(".shx")
         || crate::io::linetypes::is_bundled_shape_file(file)
         || crate::scene::text::lff::is_builtin(file)
-        || crate::io::resolve_image_file(file, base).is_some()
-        || local_font_file(file).is_some())
+        || crate::io::linetypes::find_shape_file(file, base).is_some())
 }
 
 /// The `.shx` files in the downloaded-fonts folder and the support folder,
@@ -192,6 +191,17 @@ pub fn local_font_file(name: &str) -> Option<PathBuf> {
         })
 }
 
+/// AutoCAD-style transmittal font folders visible to a drawing at `base`.
+/// Drawing-local `Fonts/` wins, followed by ancestor `Fonts/` folders up to the
+/// package root. This covers flat `xref/` and arbitrary preserved hierarchies;
+/// no ancestor's ordinary files are searched, only its `Fonts` directory.
+pub(crate) fn packaged_font_dirs(base: Option<&Path>) -> Vec<PathBuf> {
+    base.into_iter()
+        .flat_map(Path::ancestors)
+        .map(|dir| dir.join("Fonts"))
+        .collect()
+}
+
 /// How long a font file lookup is remembered.
 const FONT_PATH_MEMORY: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -222,8 +232,7 @@ pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
             return found.clone();
         }
     }
-    let found = crate::io::resolve_image_file(name, base)
-        .or_else(|| local_font_file(name).map(|path| path.to_string_lossy().into_owned()));
+    let found = crate::io::linetypes::find_shape_file(name, base);
     font_paths()
         .write()
         .unwrap_or_else(|e| e.into_inner())
@@ -233,11 +242,19 @@ pub fn font_file_path(name: &str, base: Option<&Path>) -> Option<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn forget_font_paths() {
+    #[cfg(test)]
+    let _not_counting = KEEP_FONT_PATHS.read().unwrap_or_else(|e| e.into_inner());
     font_paths()
         .write()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
 }
+
+/// Held by a test while it counts font folder searches. Every test that
+/// builds an app applies its settings, which set the font folders and forget
+/// the lookups; they wait here so the count sees only the test's own work.
+#[cfg(test)]
+pub(crate) static KEEP_FONT_PATHS: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 #[cfg(test)]
 thread_local! {
@@ -436,6 +453,8 @@ mod tests {
         let _ = doc.text_styles.add(mk("A", "MISSING1.shx"));
         let _ = doc.text_styles.add(mk("B", "missing1.SHX"));
         let _ = doc.text_styles.add(mk("C", "exists.shx"));
+        // A differently-cased reference resolves to that same sibling (#2804).
+        let _ = doc.text_styles.add(mk("F", "EXISTS.SHX"));
         doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
         // Fonts with a built-in stroke equivalent are not missing (#2156).
         let _ = doc.text_styles.add(mk("D", "romans.shx"));
@@ -443,5 +462,41 @@ mod tests {
         let missing = missing_shx_fonts(&doc);
         assert_eq!(missing, vec!["MISSING1.shx".to_string()]);
         let _ = std::fs::remove_file(dir.join("exists.shx"));
+    }
+
+    #[test]
+    fn transmittal_fonts_resolve_from_root_and_xref_drawings() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmittal-font-lookup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let fonts = dir.join("Fonts");
+        let xrefs = dir.join("xref/discipline");
+        std::fs::create_dir_all(&fonts).unwrap();
+        std::fs::create_dir_all(&xrefs).unwrap();
+        std::fs::write(fonts.join("Package-Custom.shx"), b"shape").unwrap();
+
+        let resolved = font_file_path("package-custom.SHX", Some(&dir)).unwrap();
+        let expected = fonts
+            .join("Package-Custom.shx")
+            .to_string_lossy()
+            .into_owned();
+        // Windows resolves the direct path with the query's casing, while the
+        // Linux fallback scan returns the directory entry's casing.
+        assert!(resolved.eq_ignore_ascii_case(&expected), "{resolved}");
+        assert_eq!(
+            font_file_path("Package-Custom.shx", Some(&xrefs)),
+            Some(
+                fonts
+                    .join("Package-Custom.shx")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

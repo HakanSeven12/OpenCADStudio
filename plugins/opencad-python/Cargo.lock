@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=741642d#741642d59c791ccfb2ad363bb8073b847adceaf5"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=d6ee5a9#d6ee5a90f8381b3ef86e3f8277028d259999af10"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -1287,7 +1287,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "opencad-python"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ocs_plugin_api",
  "rustpython-vm",
@@ -1298,7 +1298,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=0d75bd2#0d75bd2c3660b281cccb3777f316af770f46358f"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=8d06335#8d0633550ffa965bbe37cb3f34ac2c658e78adae"
 dependencies = [
  "acadrust",
  "serde",

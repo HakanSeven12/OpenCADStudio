@@ -721,6 +721,44 @@ impl OpenCADStudio {
         }
     }
 
+    /// Rebuild the automation-visible reference report (`state.xrefs`) from
+    /// the live drawing: the same entries, session sets and stat baselines
+    /// the Reference Manager scans, so a status query after an unload, a
+    /// reload or a source file disappearing reports what the palette would
+    /// show. Returns the entries so a caller that needs them (the `XREF ?`
+    /// list) does not stat the same files twice.
+    pub(crate) fn refresh_xref_report(
+        &mut self,
+        i: usize,
+    ) -> Vec<crate::io::xref_model::ReferenceEntry> {
+        let base_dir: std::path::PathBuf = self.tabs[i]
+            .current_path
+            .as_ref()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let entries = crate::io::xref::collect_entries_with_prev(
+            &self.tabs[i].scene.document,
+            &base_dir,
+            self.tabs[i].xref_unloaded.as_set(),
+            &self.tabs[i].xref_stat_cache.0,
+        );
+        self.tabs[i].xref_report = entries
+            .iter()
+            .map(|e| {
+                (
+                    e.name.clone(),
+                    e.saved_path.clone(),
+                    crate::app::control::ref_status_name(e.status),
+                )
+            })
+            .collect();
+        self.tabs[i].xref_missing = entries
+            .iter()
+            .filter(|e| e.status == crate::io::xref_model::RefStatus::NotFound)
+            .count();
+        entries
+    }
+
     /// Shared post-mutation sequence for reference ops (CLI + palette):
     /// repopulate scene caches, mirror xref layers into the Layers panel,
     /// and mark the tab dirty. Both call sites use it so the 5-line
@@ -760,6 +798,11 @@ impl OpenCADStudio {
         self.tabs[i].scene.populate_meshes_from_document();
         self.refresh_layer_panel();
         self.tabs[i].dirty = true;
+        // The reference report the automation surface reads must follow the
+        // mutation: an unload, reload, detach or bind changes reference
+        // status, and a stale report would answer a status query with the
+        // open-time snapshot.
+        self.refresh_xref_report(i);
         if i == self.active_tab {
             // The selection often survives these edits — a transform, an
             // attribute change, an erase of other handles — so both surfaces

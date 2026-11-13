@@ -78,6 +78,8 @@ pub(crate) mod node_graph;
 #[cfg(test)]
 mod object_isolation_tests;
 mod options_session;
+#[cfg(test)]
+mod paste_special_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
@@ -154,13 +156,15 @@ use crate::scene::CubeRegion;
 
 /// Which UCS-icon grip is being dragged. `Origin` slides the UCS origin within
 /// its own plane; `XAxis`/`YAxis` rotate the UCS so that axis points at the
-/// cursor (the other in-plane axis follows, Z fixed). The cursor is mapped onto
-/// the UCS plane every move, so no extra drag-start state is needed.
+/// cursor (the other in-plane axis follows, Z fixed); `ZAxis` turns Z to the
+/// cursor, keeping X as close to where it was as it can. The cursor is mapped
+/// onto the UCS plane every move, so no extra drag-start state is needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UcsGripKind {
     Origin,
     XAxis,
     YAxis,
+    ZAxis,
 }
 
 /// Cursor dwelling over a grip. When `started.elapsed() >=` the popup
@@ -630,7 +634,6 @@ pub(crate) enum FindMatchKey {
 use crate::snap::Snapper;
 use crate::ui::{CommandLine, Ribbon, StatusBar};
 use document::types::{Color as AcadColor, LineWeight};
-use document::Document;
 
 use iced::time::Instant;
 use iced::window;
@@ -1876,6 +1879,8 @@ pub(super) struct OpenCADStudio {
     font_source_url: String,
     /// Template a new drawing starts from (QNEW); empty = blank.
     qnew_template: String,
+    /// Source-relative, type-structured, or flat ETRANSMIT/ARCHIVE package.
+    transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// The start page's template list, while it is open: the drawing
     /// templates beside the default one.
     start_templates: Option<Vec<std::path::PathBuf>>,
@@ -2021,8 +2026,8 @@ pub(super) struct OpenCADStudio {
 
     // ── MLeaderStyle Dialog ───────────────────────────────────────────────
     mleaderstyle_selected: String,
-    mleaderstyle_tab: u8,
-    mleaderstyle_compare: String,
+    /// The manager's faces and choosers (New, Modify, Delete, notices).
+    mls: crate::ui::style::mleaderstyle::Dialog,
     /// Colour field whose expanded palette is open (line/text/block).
     mls_color_open: Option<&'static str>,
     mls_landing_distance: String,
@@ -2031,19 +2036,12 @@ pub(super) struct OpenCADStudio {
     mls_text_height: String,
     mls_scale_factor: String,
     mls_break_gap: String,
-    mls_first_seg_angle: String,
-    mls_second_seg_angle: String,
     mls_max_points: String,
     mls_default_text: String,
     mls_line_color: String,
     mls_text_color: String,
-    mls_description: String,
-    mls_align_space: String,
     mls_block_color: String,
-    mls_block_rotation: String,
-    mls_block_scale_x: String,
-    mls_block_scale_y: String,
-    mls_block_scale_z: String,
+    mls_block_scale: String,
 
     // ── TableStyle Dialog ─────────────────────────────────────────────────
     tablestyle_selected: String,
@@ -2081,6 +2079,10 @@ pub(super) struct OpenCADStudio {
     /// in-dialog preview but only persist on Apply; closing without Apply
     /// restores this snapshot. `None` when no style manager is staging.
     style_stage: Option<style_ops::StyleStage>,
+    /// The transaction of the manager a child manager was opened from (the
+    /// Text Style manager from the multileader style window): it goes on
+    /// when the child closes.
+    style_parent_stage: Option<style_ops::StyleStage>,
     style_import: Option<update::style_import::StyleImportDraft>,
 
     // ── TextStyle Font Browser ────────────────────────────────────────────
@@ -2335,97 +2337,13 @@ pub(super) struct OpenCADStudio {
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     /// Name of the style currently shown in the dialog.
     dimstyle_selected: String,
-    /// The arrowhead field whose User Arrow block list is open.
-    dimstyle_user_arrow: Option<&'static str>,
+    /// The dimension style window's faces and drafts.
+    dsd: crate::ui::style::dimstyle::Dialog,
     /// The next EnterViewport moves to another viewport within a running
     /// command (Ctrl+R) and must not cancel it.
     viewport_switch_keeps_command: bool,
     /// CHSPACE from paper space waiting for its target viewport: the objects.
     chspace_pending: Option<Vec<document::Handle>>,
-    /// Which colour field currently has its expanded palette open (if any).
-    ds_color_open: Option<DsField>,
-    /// Active property group in the dimension style manager.
-    dimstyle_tab: u8,
-    /// Style used by the manager's comparison summary.
-    dimstyle_compare: String,
-    // Edit buffers (strings while typing):
-    ds_dimdle: String,
-    ds_dimdli: String,
-    ds_dimgap: String,
-    ds_dimexe: String,
-    ds_dimexo: String,
-    ds_dimsd1: bool,
-    ds_dimsd2: bool,
-    ds_dimse1: bool,
-    ds_dimse2: bool,
-    ds_dimasz: String,
-    ds_dimcen: String,
-    ds_dimtsz: String,
-    ds_dimtxt: String,
-    ds_dimtxsty: String,
-    ds_dimtad: String,
-    ds_dimtih: bool,
-    ds_dimtoh: bool,
-    ds_dimscale: String,
-    ds_dimlfac: String,
-    ds_dimlunit: String,
-    ds_dimdec: String,
-    ds_dimpost: String,
-    ds_dimtol: bool,
-    ds_dimlim: bool,
-    ds_dimtp: String,
-    ds_dimtm: String,
-    ds_dimtdec: String,
-    ds_dimtfac: String,
-    ds_annotative: bool,
-    // Lines (colors / lineweights / fixed-length extension)
-    ds_dimclrd: String,
-    ds_dimlwd: String,
-    ds_dimclre: String,
-    ds_dimlwe: String,
-    ds_dimfxl: String,
-    ds_dimfxlon: bool,
-    // Symbols & Arrows
-    ds_dimsah: bool,
-    ds_dimarcsym: String,
-    ds_dimjogang: String,
-    // Text
-    ds_dimclrt: String,
-    ds_dimjust: String,
-    ds_dimtvp: String,
-    ds_dimtfill: String,
-    ds_dimtfillclr: String,
-    ds_dimtxtdirection: bool,
-    // Fit
-    ds_dimatfit: String,
-    ds_dimtix: bool,
-    ds_dimsoxd: bool,
-    ds_dimtmove: String,
-    ds_dimupt: bool,
-    ds_dimtofl: bool,
-    ds_dimfit: String,
-    // Primary units
-    ds_dimdsep: String,
-    ds_dimrnd: String,
-    ds_dimzin: String,
-    ds_dimfrac: String,
-    ds_dimaunit: String,
-    ds_dimadec: String,
-    ds_dimunit: String,
-    ds_dimazin: String,
-    // Alternate units
-    ds_dimalt: bool,
-    ds_dimaltf: String,
-    ds_dimaltd: String,
-    ds_dimaltu: String,
-    ds_dimalttd: String,
-    ds_dimaltrnd: String,
-    ds_dimapost: String,
-    ds_dimaltz: String,
-    ds_dimalttz: String,
-    // Tolerances (extra)
-    ds_dimtolj: String,
-    ds_dimtzin: String,
 }
 
 /// What triggered the "unsaved changes" dialog.
@@ -2611,7 +2529,7 @@ pub enum ColorPickTarget {
     Gradient(u8),
     GraphicAttributesLine,
     GraphicAttributesSolid,
-    DimStyle(DsField),
+    DimStyle(&'static str),
     MLeader(&'static str),
     Table(&'static str),
     /// Plot-style colour override for the currently selected ACI entry.
@@ -3465,81 +3383,6 @@ pub enum LayerStateLayerFlag {
     NewViewport,
 }
 
-/// Identifies a DimStyle field that can be edited in the dialog.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DsField {
-    Dimdle,
-    Dimdli,
-    Dimgap,
-    Dimexe,
-    Dimexo,
-    Dimsd1,
-    Dimsd2,
-    Dimse1,
-    Dimse2,
-    Dimasz,
-    Dimcen,
-    Dimtsz,
-    Dimtxt,
-    Dimtxsty,
-    Dimtad,
-    Dimtih,
-    Dimtoh,
-    Dimscale,
-    Dimlfac,
-    Dimlunit,
-    Dimdec,
-    Dimpost,
-    Dimtol,
-    Dimlim,
-    Dimtp,
-    Dimtm,
-    Dimtdec,
-    Dimtfac,
-    Annotative,
-    Dimclrd,
-    Dimlwd,
-    Dimclre,
-    Dimlwe,
-    Dimfxl,
-    Dimfxlon,
-    Dimsah,
-    Dimarcsym,
-    Dimjogang,
-    Dimclrt,
-    Dimjust,
-    Dimtvp,
-    Dimtfill,
-    Dimtfillclr,
-    Dimtxtdirection,
-    Dimatfit,
-    Dimtix,
-    Dimsoxd,
-    Dimtmove,
-    Dimupt,
-    Dimtofl,
-    Dimfit,
-    Dimdsep,
-    Dimrnd,
-    Dimzin,
-    Dimfrac,
-    Dimaunit,
-    Dimadec,
-    Dimunit,
-    Dimazin,
-    Dimalt,
-    Dimaltf,
-    Dimaltd,
-    Dimaltu,
-    Dimalttd,
-    Dimaltrnd,
-    Dimapost,
-    Dimaltz,
-    Dimalttz,
-    Dimtolj,
-    Dimtzin,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum ArrowKey {
     Up,
@@ -3620,8 +3463,9 @@ pub enum Message {
     PasteShortcut,
     /// Which text input held focus when `PasteShortcut` arrived.
     PasteShortcutResolved(PasteFocus),
-    /// Completion of the system text clipboard read PASTESPEC starts.
-    PasteSpecial(Option<String>),
+    /// Completion of the system clipboard read PASTESPEC starts: its text
+    /// and its picture.
+    PasteSpecial(Option<String>, Option<crate::io::ole_embed::EmbeddedImage>),
     /// Completion of the system text clipboard read PASTEASHYPERLINK starts.
     PasteAsHyperlink(Option<String>),
     /// Completion of a system text clipboard read requested by PASTECLIP.
@@ -3712,7 +3556,7 @@ pub enum Message {
     WebFileCached(u64, crate::io::WebOpenOutcome, Result<(), String>),
     FileOpened(
         u64,
-        Result<(String, PathBuf, Document, crate::scene::DerivedCaches), crate::io::OpenLoadError>,
+        Result<crate::io::OpenedDrawing, crate::io::OpenLoadError>,
     ),
     RecoveryClose,
     RecoveryAttempt,
@@ -3798,6 +3642,8 @@ pub enum Message {
     /// Options → Files: the default template for new drawings.
     QnewTemplateChanged(String),
     QnewTemplateBrowse,
+    /// Options → Open and Save: preserve, structured-by-type, or flat packages.
+    TransmittalLayoutChanged(crate::io::transmit::TransmittalLayout),
     /// NEW: the picked template a new drawing starts from (`None` = cancelled).
     NewFromTemplate(Option<std::path::PathBuf>),
     /// Open (true) or close the start page's template list.
@@ -4275,6 +4121,7 @@ pub enum Message {
         filename: String,
         deps: Vec<(String, Vec<u8>)>,
         skipped: Vec<String>,
+        warnings: Vec<String>,
         result: Result<Vec<u8>, String>,
     },
     /// Retry the failed save after the other application releases the file.
@@ -5958,15 +5805,8 @@ pub enum Message {
     MlStyleElementDelete(usize),
     // ── MLeaderStyle Dialog ───────────────────────────────────────────────
     MLeaderStyleDialogOpen,
-    #[allow(dead_code)]
-    MLeaderStyleDialogClose,
-    MLeaderStyleDialogSelect(String),
-    MLeaderStyleDialogTab(u8),
-    MLeaderStyleDialogCompare(String),
-    MLeaderStyleDialogSetCurrent,
-    MLeaderStyleDialogNew,
-    MLeaderStyleDialogCopy,
-    MLeaderStyleDialogDelete,
+    /// The manager's list, faces and choosers.
+    MLeaderStyleDlg(crate::ui::style::mleaderstyle::MlsMsg),
     MLeaderStyleEdit {
         field: &'static str,
         value: String,
@@ -5985,38 +5825,10 @@ pub enum Message {
         field: &'static str,
         value: String,
     },
-    MLeaderStyleApply,
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     DimStyleDialogOpen,
-    DimStyleDialogClose,
-    /// Apply edits to the selected style.
-    DimStyleDialogApply,
-    /// Select a different style in the dialog list.
-    DimStyleDialogSelect(String),
-    /// Switch the active tab.
-    DimStyleDialogTab(u8),
-    /// Change the style used by the comparison summary.
-    DimStyleDialogCompare(String),
-    /// Create a new empty style (prompts via command line).
-    DimStyleDialogNew,
-    DimStyleDialogCopy,
-    /// Set the selected style as the document's current dim style.
-    DimStyleDialogSetCurrent,
-    /// Delete the selected style.
-    DimStyleDialogDelete,
-    // Field edit messages:
-    DsEdit(DsField, String),
-    DsToggle(DsField),
-    /// Select the mutually-exclusive tolerance presentation.
-    DsToleranceMode(String),
-    /// Change the feet/inches mode in a zero-suppression bit field.
-    DsZeroBase(DsField, i16),
-    /// Toggle leading/trailing suppression in a zero-suppression bit field.
-    DsZeroFlag(DsField, i16),
-    /// Select no center mark, a mark, or centerlines.
-    DsCenterMarkMode(String),
-    /// Toggle the expanded colour palette for a DimStyle colour field.
-    DsColorMore(DsField),
+    /// Interaction in the dimension style window.
+    DimStyleDlg(crate::ui::style::dimstyle::DsMsg),
     /// Open the shared CAD colour picker for a field and its current colour.
     OpenColorWindow(ColorPickTarget, AcadColor),
     /// Interaction inside the Select Color panel.
@@ -6029,12 +5841,6 @@ pub enum Message {
     /// An `.acb` file was read (and, on desktop, copied into the first
     /// colour book folder).
     ColorBookLoaded(Result<crate::ui::color_select::book::ColorBook, String>),
-    /// Set a block/linetype Handle field on the selected dim style from a
-    /// dropdown of available block-records / linetypes (by name).
-    DsSetHandle {
-        field: &'static str,
-        value: String,
-    },
     // ── Raster Image ──────────────────────────────────────────────────────
     /// Open file-picker dialog for IMAGE command (async).
     ImagePick,
@@ -6181,6 +5987,10 @@ pub enum Message {
     DataExtractionSave(String),
     /// Path chosen (or None = cancelled).
     DataExtractionSaveResult(String, Option<std::path::PathBuf>),
+    /// ATTOUT text and the picked output file.
+    AttOutSave(String, Option<std::path::PathBuf>),
+    /// ATTIN file contents, `None` when the picker was cancelled.
+    AttInPicked(Option<String>),
     // ── STL export ────────────────────────────────────────────────────────
     /// Trigger STL export: collect meshes and show save dialog.
     StlExport,
@@ -6209,7 +6019,7 @@ pub enum Message {
     ObjImportFinished(
         u64,
         std::path::PathBuf,
-        Result<crate::scene::model::mesh_model::MeshModel, String>,
+        Result<Vec<document::entities::mesh::Mesh>, String>,
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),
@@ -6744,6 +6554,7 @@ impl OpenCADStudio {
             check_missing_fonts: true,
             font_source_url: String::new(),
             qnew_template: String::new(),
+            transmittal_layout: crate::io::transmit::TransmittalLayout::Structured,
             start_templates: None,
             font_source_input: String::new(),
             donation_prompt_version: String::new(),
@@ -6905,6 +6716,7 @@ impl OpenCADStudio {
             style_rename_buf: String::new(),
             style_rename_kind: None,
             style_stage: None,
+            style_parent_stage: None,
             style_import: None,
             textstyle_selected: "Standard".to_string(),
             textstyle_counts: Default::default(),
@@ -6948,8 +6760,7 @@ impl OpenCADStudio {
             mln_elements: Vec::new(),
             // MLeaderStyle dialog
             mleaderstyle_selected: "Standard".to_string(),
-            mleaderstyle_tab: 0,
-            mleaderstyle_compare: String::new(),
+            mls: Default::default(),
             mls_color_open: None,
             mls_landing_distance: String::new(),
             mls_landing_gap: String::new(),
@@ -6957,97 +6768,17 @@ impl OpenCADStudio {
             mls_text_height: String::new(),
             mls_scale_factor: String::new(),
             mls_break_gap: String::new(),
-            mls_first_seg_angle: String::new(),
-            mls_second_seg_angle: String::new(),
             mls_max_points: String::new(),
             mls_default_text: String::new(),
             mls_line_color: String::new(),
             mls_text_color: String::new(),
-            mls_description: String::new(),
-            mls_align_space: String::new(),
             mls_block_color: String::new(),
-            mls_block_rotation: String::new(),
-            mls_block_scale_x: String::new(),
-            mls_block_scale_y: String::new(),
-            mls_block_scale_z: String::new(),
+            mls_block_scale: String::new(),
             // DimStyle dialog
             dimstyle_selected: "Standard".to_string(),
-            dimstyle_user_arrow: None,
+            dsd: Default::default(),
             viewport_switch_keeps_command: false,
             chspace_pending: None,
-            ds_color_open: None,
-            dimstyle_tab: 0,
-            dimstyle_compare: String::new(),
-            ds_dimdle: "0".to_string(),
-            ds_dimdli: "3.75".to_string(),
-            ds_dimgap: "0.625".to_string(),
-            ds_dimexe: "1.25".to_string(),
-            ds_dimexo: "0.625".to_string(),
-            ds_dimsd1: false,
-            ds_dimsd2: false,
-            ds_dimse1: false,
-            ds_dimse2: false,
-            ds_dimasz: "0.18".to_string(),
-            ds_dimcen: "0.09".to_string(),
-            ds_dimtsz: "0".to_string(),
-            ds_dimtxt: "0.18".to_string(),
-            ds_dimtxsty: "Standard".to_string(),
-            ds_dimtad: "1".to_string(),
-            ds_dimtih: false,
-            ds_dimtoh: false,
-            ds_dimscale: "1".to_string(),
-            ds_dimlfac: "1".to_string(),
-            ds_dimlunit: "2".to_string(),
-            ds_dimdec: "2".to_string(),
-            ds_dimpost: "<>".to_string(),
-            ds_dimtol: false,
-            ds_dimlim: false,
-            ds_dimtp: "0".to_string(),
-            ds_dimtm: "0".to_string(),
-            ds_dimtdec: "2".to_string(),
-            ds_dimtfac: "1".to_string(),
-            ds_annotative: false,
-            ds_dimclrd: "0".to_string(),
-            ds_dimlwd: "-2".to_string(),
-            ds_dimclre: "0".to_string(),
-            ds_dimlwe: "-2".to_string(),
-            ds_dimfxl: "1".to_string(),
-            ds_dimfxlon: false,
-            ds_dimsah: false,
-            ds_dimarcsym: "0".to_string(),
-            ds_dimjogang: "45".to_string(),
-            ds_dimclrt: "0".to_string(),
-            ds_dimjust: "0".to_string(),
-            ds_dimtvp: "0".to_string(),
-            ds_dimtfill: "0".to_string(),
-            ds_dimtfillclr: "0".to_string(),
-            ds_dimtxtdirection: false,
-            ds_dimatfit: "3".to_string(),
-            ds_dimtix: false,
-            ds_dimsoxd: false,
-            ds_dimtmove: "0".to_string(),
-            ds_dimupt: false,
-            ds_dimtofl: false,
-            ds_dimfit: "3".to_string(),
-            ds_dimdsep: "46".to_string(),
-            ds_dimrnd: "0".to_string(),
-            ds_dimzin: "0".to_string(),
-            ds_dimfrac: "0".to_string(),
-            ds_dimaunit: "0".to_string(),
-            ds_dimadec: "0".to_string(),
-            ds_dimunit: "2".to_string(),
-            ds_dimazin: "0".to_string(),
-            ds_dimalt: false,
-            ds_dimaltf: "25.4".to_string(),
-            ds_dimaltd: "2".to_string(),
-            ds_dimaltu: "2".to_string(),
-            ds_dimalttd: "2".to_string(),
-            ds_dimaltrnd: "0".to_string(),
-            ds_dimapost: String::new(),
-            ds_dimaltz: "0".to_string(),
-            ds_dimalttz: "0".to_string(),
-            ds_dimtolj: "1".to_string(),
-            ds_dimtzin: "0".to_string(),
         };
         crate::sys::startup_times::mark("App::new: struct built");
         // Restore the consolidated user config (settings.json) into live state

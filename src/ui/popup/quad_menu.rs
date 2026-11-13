@@ -302,6 +302,7 @@ fn command_group(command: &str) -> &'static str {
         | "ARC"
         | "ARC_3P"
         | "ELLIPSE"
+        | "ELLIPSE_CENTER"
         | "RECT"
         | "RECTANG"
         | "POLY"

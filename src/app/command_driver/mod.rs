@@ -796,12 +796,6 @@ impl OpenCADStudio {
             result @ CmdResult::PlaceBlockSingleParameter { .. } => {
                 return self.handle_place_block_single_parameter(result);
             }
-            CmdResult::StartBlockLookupAction {
-                document,
-                definition,
-            } => {
-                return self.start_block_lookup_action(document, definition);
-            }
             CmdResult::OpenBlockLookupTable {
                 document,
                 definition,
@@ -1194,6 +1188,13 @@ impl OpenCADStudio {
             }
             CmdResult::PasteClipboard { base_pt } => {
                 self.handle_paste_clipboard(base_pt);
+            }
+            CmdResult::PlacePastedImage { image, embedded } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                dispatched = self.place_pasted_image(image, embedded);
             }
             CmdResult::CreateGroup { handles, name } => {
                 if let Some(task) = self.handle_create_group(handles, name) {
@@ -2313,6 +2314,24 @@ fn entity_at_typed_point(
                         .max(0.0);
                     let dy = (bounds.min.y - point.y)
                         .max(point.y - bounds.max.y)
+                        .max(0.0);
+                    dx.hypot(dy)
+                }
+                // An insert answers by the box of its expanded definition, the
+                // way a click on its box picks it.
+                None if matches!(entity, document::EntityType::Insert(_)) => {
+                    let document::EntityType::Insert(insert) = entity else {
+                        continue;
+                    };
+                    let Some(world) = crate::app::helpers::insert_world_bounds(document, insert)
+                    else {
+                        continue;
+                    };
+                    let dx = (world.min.x - point.x)
+                        .max(point.x - world.max.x)
+                        .max(0.0);
+                    let dy = (world.min.y - point.y)
+                        .max(point.y - world.max.y)
                         .max(0.0);
                     dx.hypot(dy)
                 }

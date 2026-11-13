@@ -331,9 +331,6 @@ fn apply_stretched(
                     strokes.push(vec![p, p], Vec::new());
                     elem_idx += 1;
                     elem_consumed = 0.0;
-                    if pos < 1e-6 {
-                        break;
-                    }
                 }
 
                 LtSeg::Shape {
@@ -370,9 +367,6 @@ fn apply_stretched(
 
                     elem_idx += 1;
                     elem_consumed = 0.0;
-                    if pos < 1e-6 {
-                        break;
-                    }
                 }
                 LtSeg::Text {
                     text,
@@ -458,9 +452,6 @@ fn apply_stretched(
 
                     elem_idx += 1;
                     elem_consumed = 0.0;
-                    if pos < 1e-6 {
-                        break;
-                    }
                 }
             }
         }
@@ -550,6 +541,7 @@ fn apply_stretched(
             text_verts,
             searchable_text: searchable,
             name: name.to_string(),
+            effective_layer: None,
             points: Vec::new(),
             points_low: Vec::new(),
             color,
@@ -866,5 +858,45 @@ mod upright_tests {
             text_xs(rightward, LtRotation::Upright),
             text_xs(rightward, LtRotation::Relative)
         );
+    }
+
+    #[test]
+    fn a_shape_at_a_segment_start_does_not_skip_the_rest_of_that_segment() {
+        // Issue #2804's XX-WERKGRENS is a zero-length shape followed by a gap.
+        // Both polyline segments must carry that pattern, not just the first
+        // shape at the start followed by the gap on the next segment.
+        let lt = ComplexLt {
+            segments: vec![
+                LtSegment::Shape {
+                    name: "TRACK1".into(),
+                    shx_file: String::new(),
+                    number: 0,
+                    x: 0.0,
+                    y: 0.0,
+                    scale: 1.0,
+                    rot_deg: 0.0,
+                    rot_mode: LtRotation::Relative,
+                },
+                LtSegment::Space(1.0),
+            ],
+        };
+        let path = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let wires = apply_along(
+            "shape-first",
+            &path,
+            &lt,
+            1.0,
+            [1.0; 4],
+            false,
+            1.0,
+            Some(2.0),
+            None,
+        );
+        assert_eq!(wires.len(), 2, "{wires:?}");
+        for (wire, x) in wires.iter().zip([0.0, 1.0]) {
+            assert_eq!(wire.points.len(), 2);
+            assert!((wire.points[0][0] - x).abs() < 1.0e-6, "{wire:?}");
+            assert!((wire.points[1][0] - x).abs() < 1.0e-6, "{wire:?}");
+        }
     }
 }

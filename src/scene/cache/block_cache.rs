@@ -136,6 +136,9 @@ pub struct LocalWire {
     pub region_boundary_click: bool,
     pub plot_visible: bool,
     pub plot_l0: bool,
+    /// Raw source layer, retained separately from the outer INSERT handle so
+    /// expansion can resolve placement-specific display/export attribution.
+    pub source_layer: Arc<str>,
     pub hide_unselected: bool,
     /// Set at construction; used to discriminate fill-only GPU batches from
     /// stroke batches in [`StyleKey`]. Derived from
@@ -252,6 +255,7 @@ pub struct NestedRef {
     pub instance_offsets: Vec<[f64; 3]>,
     pub plot_visible: bool,
     pub plot_l0: bool,
+    pub source_layer: Arc<str>,
     /// True when this nested INSERT is itself on a locked layer.
     pub layer_locked: bool,
     /// XCLIP boundary for this nested insert, in the parent defn's local frame
@@ -317,6 +321,8 @@ struct ExpansionPrototypeKey {
     block_name: String,
     linear: [u64; 9],
     insert_style: Vec<u32>,
+    /// Layer-0 attribution is placement metadata, not geometry or style.
+    inherited_layer: Option<Arc<str>>,
     selected: bool,
     is_xref: bool,
     suppress_root_points: bool,
@@ -526,12 +532,19 @@ impl BlockCache {
         cache.viewport = self.viewport;
         cache.prototype_blocks = self.prototype_blocks.clone();
         cache.defns = self.defns.clone();
-        let rebuilt: Vec<String> = cache
+        let mut rebuilt: Vec<String> = cache
             .defns
             .keys()
             .filter(|name| changed.iter().any(|c| c.eq_ignore_ascii_case(name)))
             .cloned()
             .collect();
+        for name in changed {
+            if !rebuilt.iter().any(|r| r.eq_ignore_ascii_case(name))
+                && doc.block_records.get(name).is_some()
+            {
+                rebuilt.push(name.clone());
+            }
+        }
         let defns: Vec<(String, Arc<BlockDefn>)> = rebuilt
             .par_iter()
             .map(|name| {
@@ -1059,6 +1072,7 @@ fn build_nested_ref(
         instance_offsets: crate::scene::render_graph::array_offsets(nested_ins),
         plot_visible,
         plot_l0,
+        source_layer: Arc::from(nested_ins.common.layer.as_str()),
         layer_locked: crate::scene::view::render::layer_locked(
             doc,
             &EntityType::Insert(nested_ins.clone()),
@@ -1210,6 +1224,7 @@ fn tessellate_sub_local(
     let walks_whole_path = polyline_path.is_some();
     let complex_lt_scale = (doc.header.linetype_scale * sub.common().linetype_scale) as f32;
 
+    let source_layer: Arc<str> = Arc::from(sub.common().layer.as_str());
     let mut result = Vec::with_capacity(wires_out.len());
     for wire in wires_out {
         // Per-wire point-count cap: a single wire that exceeds this is skipped
@@ -1239,7 +1254,7 @@ fn tessellate_sub_local(
         let is_fill_only = wire.points.is_empty() && !wire.fill_tris.is_empty();
         let mtext_has_background = matches!(
             sub,
-            EntityType::MText(text) if text.background_fill_flags & 0x03 != 0
+            EntityType::MText(text) if text.background_fill_flags & 0x01 != 0
         );
         let preserve_color = mtext_has_background && is_fill_only;
         let canvas_color = is_fill_only
@@ -1375,6 +1390,7 @@ fn tessellate_sub_local(
                 && frame_mode.is_none_or(|mode| mode == 1)
                 && (on_l0 || layer_plottable),
             plot_l0: on_l0,
+            source_layer: Arc::clone(&source_layer),
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
             color_is_byblock: wire_color_is_byblock,
@@ -1687,6 +1703,8 @@ pub fn expand_insert(
         l0: ins_layer,
         l0_aci: ins_layer_aci,
         l0_plottable: ins_layer_plottable,
+        inherited_layer: (!crate::scene::view::render::is_effective_layer_zero(&ins.common.layer))
+            .then(|| Arc::from(ins.common.layer.as_str())),
         plot_visible: ins_layer_plottable,
         selected,
         pslt_factor,
@@ -1862,6 +1880,8 @@ fn expansion_prototype_key(
         block_name: ins.block_name.clone(),
         linear,
         insert_style,
+        inherited_layer: (!crate::scene::view::render::is_effective_layer_zero(&ins.common.layer))
+            .then(|| Arc::from(ins.common.layer.as_str())),
         selected,
         is_xref,
         suppress_root_points,
@@ -1995,6 +2015,8 @@ struct ExpandCtx<'a> {
     l0: crate::scene::view::render::InheritStyle,
     l0_aci: u8,
     l0_plottable: bool,
+    /// Nearest nonzero INSERT layer inherited by Layer-0 descendants.
+    inherited_layer: Option<Arc<str>>,
     plot_visible: bool,
     selected: bool,
     pslt_factor: f32,
@@ -2059,6 +2081,7 @@ fn nested_prototype_key(
         block_name: block_name.to_string(),
         linear,
         style,
+        inherited_layer: ctx.inherited_layer.clone(),
         selected: ctx.selected,
         is_xref: ctx.is_xref,
         depth_scale: depth_scale.to_bits(),
@@ -2129,6 +2152,9 @@ pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StyleKey {
+    /// Keep identical geometry on different effective layers in distinct
+    /// batches; a finalized WireModel has only one layer attribution.
+    effective_layer: Option<Arc<str>>,
     color: [u32; 4],
     contrast_bg: Option<[u32; 4]>,
     preserve_color: bool,
@@ -2175,6 +2201,7 @@ struct PointMarkerKey {
 
 #[derive(Default, Debug)]
 struct BatchEntry {
+    effective_layer: Option<Arc<str>>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
     preserve_color: bool,
@@ -2233,6 +2260,7 @@ struct NestedPrototypeKey {
     block_name: String,
     linear: [u64; 9],
     style: Vec<u32>,
+    inherited_layer: Option<Arc<str>>,
     selected: bool,
     is_xref: bool,
     depth_scale: u32,
@@ -2271,6 +2299,7 @@ struct Batches {
 
 impl BatchEntry {
     fn new(
+        effective_layer: Arc<str>,
         color: [f32; 4],
         contrast_bg: Option<[f32; 4]>,
         preserve_color: bool,
@@ -2295,6 +2324,7 @@ impl BatchEntry {
         // the face3d-dim discriminator). It isn't stored on the entry
         // itself — the empty `points` field is enough at finalize time.
         Self {
+            effective_layer: Some(effective_layer),
             color,
             contrast_bg,
             preserve_color,
@@ -2414,6 +2444,7 @@ impl Batches {
                     text_verts: b.text_verts,
                     searchable_text: b.searchable_text,
                     name: name.to_string(),
+                    effective_layer: b.effective_layer,
                     points: b.points,
                     points_low: b.points_low,
                     color,
@@ -2444,6 +2475,7 @@ impl Batches {
 }
 
 fn style_key(
+    effective_layer: Arc<str>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
     preserve_color: bool,
@@ -2464,6 +2496,7 @@ fn style_key(
     local_depth: Option<f32>,
 ) -> StyleKey {
     StyleKey {
+        effective_layer: Some(effective_layer),
         color: [
             color[0].to_bits(),
             color[1].to_bits(),
@@ -2588,6 +2621,11 @@ fn expand_defn(
                     l0: nested_style.layer0,
                     l0_aci: nested_style.layer0_aci,
                     l0_plottable: nested_layer_plottable,
+                    inherited_layer: if nref.plot_l0 {
+                        ctx.inherited_layer.clone()
+                    } else {
+                        Some(Arc::clone(&nref.source_layer))
+                    },
                     plot_visible: ctx.plot_visible && nested_layer_plottable,
                     selected: ctx.selected,
                     pslt_factor: ctx.pslt_factor,
@@ -3262,6 +3300,219 @@ fn band_scale(accum_xform: &Transform) -> f32 {
     ((sx + sy) * 0.5) as f32
 }
 
+/// How an insert that does not keep shapes widens a wide polyline. A band's
+/// edges run beside each segment, so the insert takes them to lines beside the
+/// segment's image at the plane's area scale over the segment's length scale:
+/// stretched only along a segment its band keeps its width, stretched only
+/// across it the band takes the whole scale.
+enum DirectionalBand {
+    /// Every segment widens by this one factor.
+    Uniform(f32),
+    /// The segments widen differently. The wire is split at every joint where
+    /// the width changes and carries each point's drawn width in
+    /// `taper_widths`; `corners` are the drawing-space triangles that close
+    /// the outer corner of each turn, which the split leaves unmitred.
+    Split {
+        wire: LocalWire,
+        corners: Vec<[f64; 3]>,
+    },
+}
+
+/// The band's own widening under `accum_xform`, or `None` when the insert
+/// keeps shapes on the band's plane (any scale with rotation or mirror),
+/// where `band_scale` widens every direction alike.
+fn directional_band(lw: &LocalWire, accum_xform: &Transform) -> Option<DirectionalBand> {
+    use glam::DVec3;
+    let count = lw.points.len();
+    if lw.world_width <= 0.0
+        || lw.point_marker.is_some()
+        || !lw.pattern_stations.is_empty()
+        || count < 2
+    {
+        return None;
+    }
+    let at = |index: usize| -> Option<DVec3> {
+        let point = lw.points[index];
+        let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        point[0].is_finite().then(|| {
+            DVec3::new(
+                point[0] as f64 + low[0] as f64,
+                point[1] as f64 + low[1] as f64,
+                point[2] as f64 + low[2] as f64,
+            )
+        })
+    };
+    let linear = |v: DVec3| {
+        let image = accum_xform.apply_rotation(Vector3::new(v.x, v.y, v.z));
+        DVec3::new(image.x, image.y, image.z)
+    };
+    let normal = local_band_normal(lw, &at);
+    let u = normal.any_orthonormal_vector();
+    let (mu, mv) = (linear(u), linear(normal.cross(u)));
+    let plane_image = mu.cross(mv);
+    let area = plane_image.length();
+    let largest = mu.length().max(mv.length());
+    if area <= 1e-12 * largest * largest {
+        return None;
+    }
+    if (mu.length() - mv.length()).abs() <= 1e-9 * largest
+        && mu.dot(mv).abs() <= 1e-9 * largest * largest
+    {
+        return None;
+    }
+
+    // Each segment that has a length: where it starts, its direction, and
+    // how much the insert widens it.
+    let segments: Vec<(usize, DVec3, f64)> = (0..count - 1)
+        .filter_map(|index| {
+            let direction = (at(index + 1)? - at(index)?).try_normalize()?;
+            Some((index, direction, area / linear(direction).length()))
+        })
+        .collect();
+    let first = segments.first()?.2;
+    let same = |a: f64, b: f64| (a - b).abs() <= 1e-6 * a.max(b);
+    if segments.iter().all(|&(_, _, factor)| same(factor, first)) {
+        return Some(DirectionalBand::Uniform(first as f32));
+    }
+
+    // The factor of the segment leaving each point; a zero-length one takes
+    // its neighbour's, a NaN break has none.
+    let mut factors: Vec<Option<f64>> = vec![None; count - 1];
+    for &(index, _, factor) in &segments {
+        factors[index] = Some(factor);
+    }
+    let joined = |index: usize| at(index).is_some() && at(index + 1).is_some();
+    for index in 1..count - 1 {
+        if factors[index].is_none() && joined(index) {
+            factors[index] = factors[index - 1];
+        }
+    }
+    for index in (0..count - 2).rev() {
+        if factors[index].is_none() && joined(index) {
+            factors[index] = factors[index + 1];
+        }
+    }
+
+    let local_width =
+        |index: usize| f64::from(lw.taper_widths.get(index).copied().unwrap_or(lw.world_width));
+    let mut wire = lw.clone();
+    wire.points = Vec::with_capacity(count * 2);
+    wire.points_low = Vec::with_capacity(count * 2);
+    wire.taper_widths = Vec::with_capacity(count * 2);
+    let push = |wire: &mut LocalWire, point: [f32; 3], low: [f32; 3], width: f64| {
+        wire.points.push(point);
+        wire.points_low.push(low);
+        wire.taper_widths.push(width as f32);
+    };
+    for index in 0..count {
+        let point = lw.points[index];
+        if !point[0].is_finite() {
+            push(&mut wire, [f32::NAN; 3], [0.0; 3], 0.0);
+            continue;
+        }
+        let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let width = local_width(index);
+        let arriving = index.checked_sub(1).and_then(|before| factors[before]);
+        let leaving = factors.get(index).copied().flatten();
+        match (arriving, leaving) {
+            (Some(before), Some(after)) if !same(before, after) => {
+                push(&mut wire, point, low, width * before);
+                push(&mut wire, [f32::NAN; 3], [0.0; 3], 0.0);
+                push(&mut wire, point, low, width * after);
+            }
+            (Some(factor), _) | (None, Some(factor)) => push(&mut wire, point, low, width * factor),
+            (None, None) => push(&mut wire, point, low, width * first),
+        }
+    }
+
+    // A constant band is mitred at its joints; a tapered one meets them
+    // square, inside the block and out.
+    let mut corners = Vec::new();
+    if lw.taper_widths.is_empty() {
+        let world_normal = plane_image / area;
+        let half = 0.5 * f64::from(lw.world_width);
+        let same_point = |a: DVec3, b: DVec3| a.distance(b) <= 1e-9 * (1.0 + a.length());
+        let mut corner = |arriving: (usize, DVec3, f64), leaving: (usize, DVec3, f64)| {
+            let (Some(end), Some(start)) = (at(arriving.0 + 1), at(leaving.0)) else {
+                return;
+            };
+            if !same_point(end, start) {
+                return;
+            }
+            let (e1, e2) = (linear(arriving.1).normalize(), linear(leaving.1).normalize());
+            let cos = e1.dot(e2);
+            let turn = world_normal.dot(e1.cross(e2));
+            let half_turn = turn / (1.0 + cos);
+            if cos <= -1.0 + 1e-9
+                || half_turn.abs() < 1e-9
+                || half_turn.abs() > crate::scene::pipeline::wire_gpu::MITER_LIMIT
+            {
+                return;
+            }
+            // The outer side is right of a left turn; its two edges meet
+            // where the shader's mitre would have put the corner.
+            let side = -half_turn.signum();
+            let joint = accum_xform.apply(Vector3::new(end.x, end.y, end.z));
+            let joint = DVec3::new(joint.x, joint.y, joint.z);
+            let a = joint + world_normal.cross(e1) * (side * half * arriving.2);
+            let b = joint + world_normal.cross(e2) * (side * half * leaving.2);
+            let tip = a + e1 * (world_normal.dot((b - a).cross(e2)) / turn);
+            for vertex in [joint, a, tip, joint, tip, b] {
+                corners.push(vertex.to_array());
+            }
+        };
+        for pair in segments.windows(2) {
+            corner(pair[0], pair[1]);
+        }
+        if segments.len() > 2 {
+            corner(segments[segments.len() - 1], segments[0]);
+        }
+    }
+    Some(DirectionalBand::Split { wire, corners })
+}
+
+/// The block-local plane of a band: its arcs' plane, else the plane through
+/// its first turn, else the XY plane.
+fn local_band_normal(
+    lw: &LocalWire,
+    at: &impl Fn(usize) -> Option<glam::DVec3>,
+) -> glam::DVec3 {
+    use glam::DVec3;
+    for tangent in &lw.tangent_geoms {
+        let normal = match tangent {
+            TangentGeom::Arc { axis_x, axis_y, .. }
+            | TangentGeom::PlanarCircle { axis_x, axis_y, .. } => {
+                DVec3::from_array(*axis_x).cross(DVec3::from_array(*axis_y))
+            }
+            TangentGeom::PlanarEllipse { normal, .. } => DVec3::from_array(*normal),
+            _ => continue,
+        };
+        if let Some(normal) = normal.try_normalize() {
+            return normal;
+        }
+    }
+    let mut points = (0..lw.points.len()).filter_map(at);
+    if let Some(origin) = points.next() {
+        let mut reference: Option<DVec3> = None;
+        for point in points {
+            let offset = point - origin;
+            match reference {
+                None if offset.length() > 0.0 => reference = Some(offset),
+                Some(reference) => {
+                    let cross = reference.cross(offset);
+                    if cross.length() > 1e-9 * reference.length() * offset.length() {
+                        if let Some(normal) = cross.try_normalize() {
+                            return normal;
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    DVec3::Z
+}
+
 fn emit_wire(
     lw: &LocalWire,
     accum_xform: &Transform,
@@ -3310,8 +3561,15 @@ fn emit_wire(
         }
     }
 
-    // Resolve final style for this LocalWire against the outer Insert ctx
-    // before we hash it into a batch.
+    // Resolve final style and occurrence layer against the outer Insert ctx
+    // before we hash this child into a batch.
+    let effective_layer = if lw.plot_l0 {
+        ctx.inherited_layer
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&lw.source_layer))
+    } else {
+        Arc::clone(&lw.source_layer)
+    };
     let final_color = resolve_wire_color(lw, ctx);
     let final_aci = if lw.color_is_byblock {
         ctx.ins_aci
@@ -3474,6 +3732,7 @@ fn emit_wire(
                     dash_closure: lw.dash_closure,
                     text_verts: Vec::new(),
                     name: String::new(),
+                    effective_layer: Some(Arc::clone(&effective_layer)),
                     points,
                     points_low,
                     color,
@@ -3497,6 +3756,25 @@ fn emit_wire(
             }
         }
     }
+
+    // A band the insert stretches unevenly takes its width from the insert's
+    // scale across each segment, not from the mean of its two axes.
+    let split;
+    let mut band_corners = Vec::new();
+    let (lw, final_world_width, final_taper_widths) = match directional_band(lw, accum_xform) {
+        None => (lw, final_world_width, final_taper_widths),
+        Some(DirectionalBand::Uniform(factor)) => (
+            lw,
+            lw.world_width * factor,
+            lw.taper_widths.iter().map(|width| width * factor).collect(),
+        ),
+        Some(DirectionalBand::Split { wire, corners }) => {
+            band_corners = corners;
+            split = wire;
+            let widest = split.taper_widths.iter().copied().fold(0.0, f32::max);
+            (&split, widest, split.taper_widths.clone())
+        }
+    };
 
     let station_values = pattern_station_values(&lw.pattern_stations, lw.points.len());
     let station_map = decode_pattern_station_map(&lw.pattern_stations, lw.points.len());
@@ -3571,6 +3849,7 @@ fn emit_wire(
             || transformed_stations.is_some()
             || lw.points.iter().any(|point| point[0].is_nan()));
     let mut key = style_key(
+        Arc::clone(&effective_layer),
         final_color,
         lw.contrast_bg,
         lw.preserve_color,
@@ -3620,6 +3899,7 @@ fn emit_wire(
     }
     let entry = out.by_style.entry(key).or_insert_with(|| {
         BatchEntry::new(
+            Arc::clone(&effective_layer),
             final_color,
             lw.contrast_bg,
             lw.preserve_color,
@@ -3800,6 +4080,15 @@ fn emit_wire(
         let (hx, lx) = WireModel::split_ds(v.x);
         let (hy, ly) = WireModel::split_ds(v.y);
         let (hz, lz) = WireModel::split_ds(v.z);
+        entry.fill_tris.push([hx, hy, hz]);
+        entry.fill_tris_low.push([lx, ly, lz]);
+    }
+    // A band split at its joints has its turns' outer corners closed here,
+    // already in drawing space.
+    for corner in &band_corners {
+        let (hx, lx) = WireModel::split_ds(corner[0]);
+        let (hy, ly) = WireModel::split_ds(corner[1]);
+        let (hz, lz) = WireModel::split_ds(corner[2]);
         entry.fill_tris.push([hx, hy, hz]);
         entry.fill_tris_low.push([lx, ly, lz]);
     }
@@ -4061,6 +4350,7 @@ mod bg_resolution_tests {
         canvas_color: bool,
     ) -> BatchEntry {
         let mut e = BatchEntry::new(
+            Arc::from("0"),
             color,
             contrast_bg,
             preserve_color,

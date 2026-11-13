@@ -134,6 +134,8 @@ pub(in crate::app) mod linetype_manager;
 mod file;
 mod graphic_attributes;
 mod keytips;
+pub(in crate::app) mod mleader_style;
+mod dimstyle_dialog;
 pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
@@ -217,6 +219,24 @@ impl OpenCADStudio {
                 self.active_modal = Some(parent);
                 return;
             }
+        }
+        // The Text Style manager opened from the multileader style window
+        // returns to it.
+        if self.active_modal == Some(TextStyle) && self.style_parent_stage.is_some() {
+            if self.dsd.edit.is_some() {
+                self.dim_style_back_from_text_styles();
+            } else {
+                self.mleader_style_back_from_text_styles();
+            }
+            return;
+        }
+        // The multileader and dimension style windows keep what they changed
+        // as one step.
+        if self.active_modal == Some(MLeaderStyle) {
+            self.mleader_style_close();
+        }
+        if self.active_modal == Some(DimStyle) {
+            self.dim_style_close();
         }
         if self.active_modal == Some(TableStyle)
             && std::mem::take(&mut self.tablestyle_parent_table)
@@ -1050,6 +1070,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            // A step with nothing to ask yet keeps no line.
+            .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         // In Remove mode a selection step asks "Remove objects:" in place of
@@ -2053,11 +2075,11 @@ impl OpenCADStudio {
                 Task::batch([recent_task, opened_task])
             }
 
-            Message::FileOpened(open_id, Ok((name, path, doc, caches))) => {
+            Message::FileOpened(open_id, Ok((name, path, doc, caches, ifccad_session))) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
                 }
-                let task = self.on_file_opened(name, path, doc, caches);
+                let task = self.on_file_opened(name, path, doc, caches, ifccad_session);
                 // DXEVAL: an open compares the drawing's extraction tables.
                 let task = match self.evaluate_extraction_tables(
                     self.active_tab,
@@ -2667,6 +2689,16 @@ impl OpenCADStudio {
 
             Message::DataExtractionSaveResult(_, None) => Task::none(),
 
+            Message::AttOutSave(text, Some(path)) => {
+                self.on_attout_save(text, path);
+                Task::none()
+            }
+            Message::AttOutSave(_, None) | Message::AttInPicked(None) => Task::none(),
+            Message::AttInPicked(Some(text)) => {
+                self.on_attin_text(text);
+                Task::none()
+            }
+
             Message::StlExport => {
                 let i = self.active_tab;
                 if self.tabs[i].scene.meshes.is_empty() {
@@ -2869,11 +2901,8 @@ impl OpenCADStudio {
                             .await?;
                         let path = crate::sys::handle_path(&handle);
                         let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(
-                            &String::from_utf8_lossy(&bytes),
-                            [0.7, 0.7, 0.85, 1.0],
-                        )
-                        .ok_or_else(|| "no usable geometry in file".to_string());
+                        let result = crate::io::obj::parse_obj(&String::from_utf8_lossy(&bytes))
+                            .ok_or_else(|| "no usable geometry in file".to_string());
                         Some((tab_id, path, result))
                     },
                     |picked| match picked {
@@ -2894,7 +2923,7 @@ impl OpenCADStudio {
                     Err(error) => self
                         .command_line
                         .push_error(crate::tf!("IMPORTOBJ: {error}").as_ref()),
-                    Ok(mut mesh) => {
+                    Ok(meshes) => {
                         let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                             self.command_line.push_info(
                                 crate::t!("IMPORTOBJ: target drawing was closed.").as_ref(),
@@ -2905,15 +2934,15 @@ impl OpenCADStudio {
                             .file_stem()
                             .map(|s| s.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "obj_mesh".into());
-                        mesh.name = file_stem.clone();
                         self.push_undo_snapshot(i, "IMPORTOBJ");
-                        let entity = crate::modules::insert::solid3d_cmds::empty_solid3d();
-                        let handle = self.tabs[i].scene.add_entity(entity);
-                        if !handle.is_null() {
-                            self.tabs[i]
-                                .scene
-                                .meshes
-                                .insert(handle, crate::scene::MeshLodSet::from_single(mesh));
+                        let count = meshes
+                            .into_iter()
+                            .map(|mesh| {
+                                self.tabs[i].scene.add_entity(document::EntityType::Mesh(mesh))
+                            })
+                            .filter(|handle| !handle.is_null())
+                            .count();
+                        if count > 0 {
                             self.tabs[i].dirty = true;
                             self.command_line.push_output(
                                 crate::tf!("IMPORTOBJ: imported \"{file_stem}\" as mesh.").as_ref(),
@@ -2967,6 +2996,12 @@ impl OpenCADStudio {
 
             Message::ClearScene => {
                 let i = self.active_tab;
+                if self.tabs[i].ifccad_session.is_some() {
+                    self.command_line.push_info(
+                        crate::t!("This drawing has retained IFCCAD content. Create a new drawing instead.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 self.push_undo_snapshot(i, "CLEAR");
                 self.tabs[i].scene.reset_to_new_drawing();
                 self.tabs[i].properties = PropertiesPanel::empty();
@@ -9364,7 +9399,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text) => {
+            Message::PasteSpecial(text, picture) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd
@@ -9373,20 +9408,20 @@ impl OpenCADStudio {
                 if !waiting {
                     return Task::none();
                 }
-                match text.filter(|text| !text.trim().is_empty()) {
-                    Some(text) => {
-                        // Same prompt, one more option: swap without echoing it.
-                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
-                        self.push_ucs_to_cmd(i);
-                        Task::none()
-                    }
-                    // Nothing but maybe an image: paste it as one.
-                    None if self.clipboard.is_empty() => {
-                        self.tabs[i].active_cmd = None;
-                        self.read_system_clipboard_image()
-                    }
-                    None => Task::none(),
+                let text = text.filter(|text| !text.trim().is_empty());
+                if text.is_none() && picture.is_none() && self.clipboard.is_empty() {
+                    // Nothing to paste in any format.
+                    self.tabs[i].active_cmd = None;
+                    self.command_line
+                        .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                    return Task::none();
                 }
+                // Every format is known now: ask for one of them.
+                let command = self.paste_special_command(i, text.as_deref(), picture);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(command);
+                self.push_ucs_to_cmd(i);
+                Task::none()
             }
 
             Message::SystemClipboardPaste(result) => {
@@ -9906,8 +9941,17 @@ impl OpenCADStudio {
                     return task;
                 }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                    if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {
+                    let document = &mut app.tabs[i].scene.document;
+                    let layer_handle = document
+                        .layers
+                        .get(&layer)
+                        .map(|entry| entry.handle)
+                        .filter(|handle| !handle.is_null());
+                    if let Some(entity) = document.get_entity_mut(handle) {
                         crate::scene::view::dispatch::apply_common_prop(entity, "layer", &layer);
+                        if entity.common().layer == layer {
+                            entity.common_mut().layer_handle = layer_handle;
+                        }
                     }
                 });
                 Task::none()
@@ -11791,6 +11835,11 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::TransmittalLayoutChanged(layout) => {
+                self.transmittal_layout = layout;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::StartTemplates(open) => {
                 self.start_templates = open.then(|| self.template_folder_files());
                 if self.start_templates.as_ref().is_some_and(Vec::is_empty) {
@@ -12534,6 +12583,17 @@ impl OpenCADStudio {
                 )
             }
             Message::CloseModal => {
+                // The multileader style window's ✕ closes its topmost face.
+                if self.active_modal == Some(super::ModalKind::MLeaderStyle)
+                    && self.mleader_style_close_face()
+                {
+                    return Task::none();
+                }
+                if self.active_modal == Some(super::ModalKind::DimStyle)
+                    && self.dim_style_close_face()
+                {
+                    return Task::none();
+                }
                 if self.active_modal == Some(super::ModalKind::BlockLookup) {
                     self.block_lookup = None;
                 }
@@ -14139,8 +14199,11 @@ impl OpenCADStudio {
                 filename,
                 deps,
                 skipped,
+                warnings,
                 result,
-            } => self.on_web_archive_serialized(cmd, zip_name, filename, deps, skipped, result),
+            } => self.on_web_archive_serialized(
+                cmd, zip_name, filename, deps, skipped, warnings, result,
+            ),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),
@@ -14485,15 +14548,6 @@ impl OpenCADStudio {
                 Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
             }
             Message::PlotStyleLoaded(Ok(Some(table))) => {
-                if table.is_stb {
-                    self.command_line.push_error(
-                        crate::t!(
-                            "Named plot style tables are not supported by the vector plotter."
-                        )
-                        .as_ref(),
-                    );
-                    return Task::none();
-                }
                 self.plot_dialog.style_name = table.name.clone();
                 self.plot_dialog.style_missing = false;
                 self.plot_dialog.style_error = None;
@@ -14551,7 +14605,12 @@ impl OpenCADStudio {
                         .is_none_or(|table| !table.name.eq_ignore_ascii_case(&selected_style));
 
                     if needs_load {
-                        match crate::io::plot_style::PlotStyleTable::load_named(&selected_style) {
+                        let base =
+                            crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+                        match crate::io::plot_style::PlotStyleTable::load_named_at(
+                            &selected_style,
+                            base,
+                        ) {
                             Ok(table) => {
                                 self.report_plot_style_warnings(&table);
                                 self.active_plot_style = Some(table);
@@ -15197,51 +15256,9 @@ impl OpenCADStudio {
 
             // ── MLeaderStyle Dialog ───────────────────────────────────────────
             Message::MLeaderStyleDialogOpen => self.on_mleader_style_dialog_open(),
-            Message::MLeaderStyleDialogClose => {
-                self.close_active_modal();
-                Task::none()
-            }
-            Message::MLeaderStyleDialogSelect(name) => {
-                self.stage_mleaderstyle_bufs();
-                self.mleaderstyle_selected = name;
-                let i = self.active_tab;
-                self.load_mleaderstyle_bufs(i);
-                Task::none()
-            }
-            Message::MLeaderStyleDialogTab(tab) => {
-                self.mleaderstyle_tab = tab;
-                Task::none()
-            }
-            Message::MLeaderStyleDialogCompare(name) => {
-                self.mleaderstyle_compare = name;
-                Task::none()
-            }
-            Message::MLeaderStyleDialogSetCurrent => self.on_mleader_style_dialog_set_current(),
-            Message::MLeaderStyleDialogNew => self.style_new(crate::app::StyleKind::MLeader),
-            Message::MLeaderStyleDialogCopy => self.style_copy(crate::app::StyleKind::MLeader),
-            Message::MLeaderStyleDialogDelete => {
-                self.style_delete(crate::app::StyleKind::MLeader);
-                Task::none()
-            }
+            Message::MLeaderStyleDlg(message) => self.on_mleader_style_dlg(message),
             Message::MLeaderStyleEdit { field, value } => self.on_mleader_style_edit(field, value),
-            Message::MLeaderStyleToggle(field) => {
-                let i = self.active_tab;
-                if let Some(s) = self.mleaderstyle_mut(i) {
-                    match field {
-                        "enable_landing" => s.enable_landing = !s.enable_landing,
-                        "enable_dogleg" => s.enable_dogleg = !s.enable_dogleg,
-                        "text_frame" => s.text_frame = !s.text_frame,
-                        "text_always_left" => s.text_always_left = !s.text_always_left,
-                        "annotative" => s.is_annotative = !s.is_annotative,
-                        "enable_block_scale" => s.enable_block_scale = !s.enable_block_scale,
-                        "enable_block_rotation" => {
-                            s.enable_block_rotation = !s.enable_block_rotation
-                        }
-                        _ => {}
-                    }
-                }
-                Task::none()
-            }
+            Message::MLeaderStyleToggle(field) => self.on_mleader_style_toggle(field),
             Message::MLeaderColorMore(field) => {
                 self.mls_color_open = if self.mls_color_open == Some(field) {
                     None
@@ -15254,6 +15271,7 @@ impl OpenCADStudio {
                 self.on_mleader_style_set_enum(field, value)
             }
             Message::MLeaderStyleLineWeightChanged(line_weight) => {
+                self.mls_color_open = None;
                 let i = self.active_tab;
                 if let Some(s) = self.mleaderstyle_mut(i) {
                     s.line_weight = line_weight;
@@ -15263,162 +15281,10 @@ impl OpenCADStudio {
             Message::MLeaderStyleSetHandle { field, value } => {
                 self.on_mleader_style_set_handle(field, value)
             }
-            Message::MLeaderStyleApply => self.on_mleader_style_apply(),
 
             // ── DimStyle Dialog ───────────────────────────────────────────────
             Message::DimStyleDialogOpen => self.on_dim_style_dialog_open(),
-            Message::DimStyleDialogClose => {
-                self.close_active_modal();
-                Task::none()
-            }
-            Message::DimStyleDialogApply => {
-                let i = self.active_tab;
-                self.apply_dimstyle_bufs(i);
-                if !self.selected_dimstyle_is_read_only() {
-                    self.style_stage_commit();
-                }
-                Task::none()
-            }
-            Message::DimStyleDialogSelect(name) => {
-                let i = self.active_tab;
-                // Stage the current edits before switching so they aren't lost.
-                self.apply_dimstyle_bufs(i);
-                self.dimstyle_selected = name;
-                self.load_dimstyle_bufs(i);
-                Task::none()
-            }
-            Message::DimStyleDialogTab(tab) => {
-                self.dimstyle_tab = tab;
-                Task::none()
-            }
-            Message::DimStyleDialogCompare(name) => {
-                self.dimstyle_compare = name;
-                Task::none()
-            }
-            Message::DimStyleDialogNew => self.style_new(crate::app::StyleKind::Dim),
-            Message::DimStyleDialogCopy => self.style_copy(crate::app::StyleKind::Dim),
-            Message::DimStyleDialogSetCurrent => {
-                // Staged: persists on Apply.
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let i = self.active_tab;
-
-                self.tabs[i].scene.document.header.current_dimstyle_name =
-                    self.dimstyle_selected.clone();
-                self.sync_ribbon_styles();
-                self.command_line.push_output(
-                    crate::tf!("Current dim style set to '{}'.", self.dimstyle_selected).as_ref(),
-                );
-                Task::none()
-            }
-            Message::DimStyleDialogDelete => {
-                self.style_delete(crate::app::StyleKind::Dim);
-                Task::none()
-            }
-            Message::DsEdit(field, val) => {
-                self.apply_ds_edit(field, val);
-                self.ds_color_open = None;
-                Task::none()
-            }
-            Message::DsToggle(field) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let separate_arrows = field == crate::app::DsField::Dimsah;
-                self.apply_ds_toggle(field);
-                if separate_arrows && self.ds_dimsah {
-                    let i = self.active_tab;
-                    if let Some(style) = self.tabs[i]
-                        .scene
-                        .document
-                        .dim_styles
-                        .get_mut(&self.dimstyle_selected)
-                    {
-                        if style.dimblk1.is_null() {
-                            style.dimblk1 = style.dimblk;
-                        }
-                        if style.dimblk2.is_null() {
-                            style.dimblk2 = style.dimblk1;
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::DsToleranceMode(mode) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                self.ds_dimlim = mode == "limits";
-                self.ds_dimtol = matches!(mode.as_str(), "symmetrical" | "deviation");
-                if mode == "symmetrical" {
-                    self.ds_dimtm = self.ds_dimtp.clone();
-                }
-                let gap = self.ds_dimgap.trim().parse::<f64>().unwrap_or(0.625).abs();
-                self.ds_dimgap = if mode == "basic" {
-                    format!("-{}", gap.max(f64::EPSILON))
-                } else {
-                    format!("{}", gap)
-                };
-                Task::none()
-            }
-            Message::DsZeroBase(field, base) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let current = match &field {
-                    crate::app::DsField::Dimzin => &self.ds_dimzin,
-                    crate::app::DsField::Dimaltz => &self.ds_dimaltz,
-                    crate::app::DsField::Dimalttz => &self.ds_dimalttz,
-                    crate::app::DsField::Dimtzin => &self.ds_dimtzin,
-                    _ => return Task::none(),
-                }
-                .trim()
-                .parse::<i16>()
-                .unwrap_or(0);
-                self.apply_ds_edit(field, ((current & !3) | (base & 3)).to_string());
-                Task::none()
-            }
-            Message::DsZeroFlag(field, bit) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let current = match &field {
-                    crate::app::DsField::Dimzin => &self.ds_dimzin,
-                    crate::app::DsField::Dimaltz => &self.ds_dimaltz,
-                    crate::app::DsField::Dimalttz => &self.ds_dimalttz,
-                    crate::app::DsField::Dimtzin => &self.ds_dimtzin,
-                    _ => return Task::none(),
-                }
-                .trim()
-                .parse::<i16>()
-                .unwrap_or(0);
-                self.apply_ds_edit(field, (current ^ bit).to_string());
-                Task::none()
-            }
-            Message::DsCenterMarkMode(mode) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                let size = self.ds_dimcen.trim().parse::<f64>().unwrap_or(0.09).abs();
-                self.ds_dimcen = match mode.as_str() {
-                    "mark" => size.max(f64::EPSILON).to_string(),
-                    "lines" => format!("-{}", size.max(f64::EPSILON)),
-                    _ => "0".to_string(),
-                };
-                Task::none()
-            }
-            Message::DsColorMore(field) => {
-                if self.selected_dimstyle_is_read_only() {
-                    return Task::none();
-                }
-                self.ds_color_open = if self.ds_color_open.as_ref() == Some(&field) {
-                    None
-                } else {
-                    Some(field)
-                };
-                Task::none()
-            }
+            Message::DimStyleDlg(message) => self.on_dim_style_dlg(message),
             Message::OpenColorWindow(target, color) => {
                 if matches!(
                     target,
@@ -15443,7 +15309,7 @@ impl OpenCADStudio {
                 }
                 self.color_picker = Some(picker);
                 self.modal_offset = iced::Vector::ZERO;
-                self.ds_color_open = None;
+                self.dsd.open_list = None;
                 self.mls_color_open = None;
                 self.ts_color_open = None;
                 self.ribbon.close_dropdown();
@@ -15521,7 +15387,6 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::DsSetHandle { field, value } => self.on_ds_set_handle(field, value),
         }
     }
 

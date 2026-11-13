@@ -1373,6 +1373,10 @@ impl OpenCADStudio {
             }
 
             // ── MLeader Style management ──────────────────────────────────
+            // The multi-line editor opened by the style window's Default text.
+            "_MLEADERSTYLE_TEXT" => {
+                return Some(self.mleader_style_text_back());
+            }
             cmd if cmd == "MLEADERSTYLE" || cmd.starts_with("MLEADERSTYLE ") => {
                 use document::objects::{MultiLeaderStyle, ObjectType};
                 let raw_rest = cmd.trim_start_matches("MLEADERSTYLE").trim();
@@ -1471,12 +1475,16 @@ impl OpenCADStudio {
                             } else {
                                 let handle = self.tabs[i].scene.document.allocate_handle();
                                 let mut style = MultiLeaderStyle::new(&name);
+                                style.description = name.clone();
                                 style.handle = handle;
                                 self.tabs[i]
                                     .scene
                                     .document
                                     .objects
                                     .insert(handle, ObjectType::MultiLeaderStyle(style));
+                                crate::app::style_ops::sync_mleaderstyle_dictionary(
+                                    &mut self.tabs[i].scene.document,
+                                );
                                 self.push_undo_snapshot(i, "MLEADERSTYLE NEW");
                                 let mut applied_options = Vec::new();
                                 for (prop, value) in &options {

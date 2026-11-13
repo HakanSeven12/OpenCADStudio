@@ -74,6 +74,7 @@ enum Route {
     Wmf,
     Svg,
     Tds,
+    Obj,
 }
 
 /// The importer for `path` chosen as `format` (an index of [`FORMATS`]; `None`
@@ -87,6 +88,10 @@ fn route(path: &str, format: Option<usize>) -> Result<Route, String> {
     }
     let ext = extension(path);
     let by_extension = f.is_none_or(|f| f.support == Support::ByExtension);
+    // Wavefront OBJ is not among the listed types; All Files still reads it.
+    if by_extension && ext == "obj" {
+        return Ok(Route::Obj);
+    }
     // The chosen format, or the one whose patterns name the extension.
     let named = if by_extension {
         FORMATS
@@ -294,6 +299,10 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Ok(Route::Obj) => {
+                self.remember_import(path);
+                self.on_obj_import_path_some(path.into())
+            }
             Err(error) => {
                 self.command_line.push_error(&error);
                 Task::none()
@@ -429,6 +438,11 @@ impl OpenCADStudio {
                         if let Err(error) = self.open_tds_import_dialog(&path) {
                             self.command_line.push_error(&error);
                         }
+                    }
+                    Ok(Route::Obj) => {
+                        self.remember_import(&path);
+                        self.close_active_modal();
+                        return self.on_obj_import_path_some(path.into());
                     }
                 }
             }
@@ -1103,6 +1117,7 @@ mod dgn_dialog_tests {
     #[test]
     fn dialog_code_page_choice_stores_the_v7_page() {
         use crate::modules::insert::dgn_import::DgnImportSettings;
+        let _own = crate::modules::insert::dgn_import::OwnSettings::take();
         // The checkbox must win over the stored code page for this window
         // even when a command-line import earlier kept 1250.
         dgn_import::set_settings(DgnImportSettings {

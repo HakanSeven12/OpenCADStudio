@@ -12,7 +12,7 @@ pub(in crate::app) struct ParameterPreview {
 
 impl OpenCADStudio {
     pub(in crate::app) fn block_parameter_geometry_preview(
-        &self,
+        &mut self,
         i: usize,
         cursor: DVec3,
     ) -> Option<ParameterPreview> {
@@ -32,13 +32,14 @@ impl OpenCADStudio {
         if tab.id != document || !cursor.is_finite() || tab.active_block_edit_session().is_some() {
             return empty();
         }
-        let (handle, source) = if let Some(insert) = insert {
+        let handle = if let Some(insert_handle) = insert {
             if tab.block_test.is_some()
-                || actions::instance::definition(&tab.scene.document, insert) != Some(definition)
+                || actions::instance::definition(&tab.scene.document, insert_handle)
+                    != Some(definition)
             {
                 return empty();
             }
-            (insert, &tab.scene.document)
+            insert_handle
         } else {
             let Some(test) = tab
                 .block_test
@@ -47,7 +48,12 @@ impl OpenCADStudio {
             else {
                 return empty();
             };
-            (test.insert, test.baseline.as_ref())
+            test.insert
+        };
+        let source = if insert.is_some() {
+            &tab.scene.document
+        } else {
+            tab.block_test.as_ref()?.baseline.as_ref()
         };
         if tab.selected_handle != Some(handle)
             || !tab.scene.selected.contains(&handle)
@@ -76,31 +82,43 @@ impl OpenCADStudio {
             return empty();
         };
         let local = value.map_points(|point| actions::v(inverse.apply(actions::native(point))));
-        let evaluated = if insert.is_some() {
-            actions::instance::evaluate_value(&tab.scene.document, handle, parameter, local)
+        if insert.is_some() {
+            let Some((wires, hatches)) = self
+                .tabs[i]
+                .scene
+                .dynamic_block_parameter_preview(handle, definition, parameter, local)
+            else {
+                return empty();
+            };
+            Some(ParameterPreview {
+                wires,
+                hatches,
+                hidden: vec![handle],
+            })
         } else {
-            actions::instance::evaluate_test_value(
+            let tab = &self.tabs[i];
+            let source = tab.block_test.as_ref()?.baseline.as_ref();
+            let Ok(staged) = actions::instance::evaluate_test_value(
                 &tab.scene.document,
                 source,
                 definition,
                 handle,
                 parameter,
                 local,
-            )
-        };
-        let Ok(staged) = evaluated else {
-            return empty();
-        };
-        let Some((wires, hatches)) = tab
-            .scene
-            .reference_document_preview(staged.as_ref().unwrap_or(&tab.scene.document), handle)
-        else {
-            return empty();
-        };
-        Some(ParameterPreview {
-            wires,
-            hatches,
-            hidden: vec![handle],
-        })
+            ) else {
+                return empty();
+            };
+            let Some((wires, hatches)) = tab
+                .scene
+                .reference_document_preview(staged.as_ref().unwrap_or(&tab.scene.document), handle)
+            else {
+                return empty();
+            };
+            Some(ParameterPreview {
+                wires,
+                hatches,
+                hidden: vec![handle],
+            })
+        }
     }
 }

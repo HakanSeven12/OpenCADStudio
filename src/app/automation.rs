@@ -346,15 +346,15 @@ pub(crate) fn entity_type_matches(entity: &document::EntityType, requested: &str
 /// through a block definition so a reference reports what it draws rather than
 /// where it was placed.
 ///
-/// `custom_label` is the plugin-declared class label for the entity's XDATA
-/// class identity, if a live declaring plugin provides one; it surfaces as
-/// `display_type` ("`<Label>` (`<Native>`)"), while `type` stays the raw
-/// native name so existing scripts and filters keep working.
+/// `custom_label` is the plugin-declared class façade for the entity's XDATA
+/// identity, if a live declaring plugin provides one; it surfaces as
+/// `display_type`, while `type` stays the raw native name so existing scripts
+/// and filters keep working.
 pub(crate) fn entity_json(
     document: &document::Document,
     e: &document::EntityType,
     detail: &str,
-    custom_label: Option<String>,
+    custom_label: Option<crate::plugin::entity_labels::CustomEntityClassLabel>,
 ) -> Value {
     use document::EntityType as E;
     let c = e.common();
@@ -476,6 +476,24 @@ pub(crate) fn entity_json(
                 })
                 .collect();
             map.insert("attribute_children".into(), Value::Array(children));
+        }
+        E::MultiLeader(multileader) => {
+            let leaders: Vec<Value> = multileader
+                .context
+                .leader_roots
+                .iter()
+                .flat_map(|root| {
+                    root.lines.iter().map(move |line| {
+                        json!({
+                            "index": line.index,
+                            "root": root.leader_index,
+                            "points": line.points.iter().map(|point| v3(*point)).collect::<Vec<_>>(),
+                        })
+                    })
+                })
+                .collect();
+            map.insert("leader_count".into(), json!(leaders.len()));
+            map.insert("leaders".into(), json!(leaders));
         }
         _ => {}
     }
@@ -722,6 +740,11 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
     // Only a record's first 5/105 is its own handle; SORTENTSTABLE stores its
     // sort handles under 5 as well (#2211).
     let mut record_has_handle = false;
+    // A reactor only notifies its target; one left pointing at an erased
+    // object (common in drawings from other CAD) is an AUDIT warning there,
+    // not a broken file, so it is reported apart and does not fail the save.
+    let mut in_reactors = false;
+    let mut reactors = Vec::new();
     for pair in lines.chunks_exact(2) {
         let Ok(code) = pair[0].trim().parse::<i32>() else {
             return Ok(
@@ -736,8 +759,14 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
             version = Some(value.clone());
             variable = None;
         }
+        if code == 102 {
+            in_reactors = value == "{ACAD_REACTORS";
+        }
         if code == 0 {
             record_has_handle = false;
+            in_reactors = false;
+        } else if code == 330 && in_reactors {
+            reactors.push(value);
         } else if code == 5 || code == 105 {
             if !std::mem::replace(&mut record_has_handle, true) && !declared.insert(value.clone()) {
                 duplicate.insert(value.clone());
@@ -747,6 +776,10 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
         }
     }
     let dangling: std::collections::BTreeSet<String> = references
+        .into_iter()
+        .filter(|handle| !declared.contains(handle))
+        .collect();
+    let dangling_reactors: std::collections::BTreeSet<String> = reactors
         .into_iter()
         .filter(|handle| !declared.contains(handle))
         .collect();
@@ -841,6 +874,7 @@ fn audit_ascii_dxf_references(path: &std::path::Path) -> Result<Value, String> {
         "declared_handles":declared.len() - 1,
         "duplicate_handles":duplicate,
         "dangling_handles":dangling,
+        "dangling_reactors":dangling_reactors,
         "orphaned_objects":orphaned_objects,
         "declared_version":version,
     }))
@@ -950,7 +984,7 @@ impl OpenCADStudio {
                 self.tabs[i].is_start = false;
                 // A fresh document became resident (API v9): the post-op
                 // boundary announces `DocumentOpened`.
-                self.tabs[i].note_document_loaded();
+                self.tabs[i].note_document_loaded(None);
                 self.entity_summary()
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -995,7 +1029,7 @@ impl OpenCADStudio {
                         self.tabs[i].scene.rebuild_derived_caches();
                         // The opened document settled (API v9): the post-op
                         // boundary announces `DocumentOpened` once for this load.
-                        self.tabs[i].note_document_loaded();
+                        self.tabs[i].note_document_loaded(None);
                         // DXEVAL: an open through automation compares the
                         // extraction tables as an open from the GUI does.
                         let _ = self.evaluate_extraction_tables(
@@ -1272,6 +1306,13 @@ impl OpenCADStudio {
                 let Some(path) = path else {
                     return err("save: no \"path\" and the document has none");
                 };
+                if let Some(session) = &self.tabs[i].ifccad_session {
+                    if let Err(error) = session.check_destination(
+                        path.extension().and_then(|ext| ext.to_str()).unwrap_or_default(),
+                    ) {
+                        return err(format!("save: {error}"));
+                    }
+                }
                 // A .dwt target is written as DWG bytes through a hidden
                 // scratch file and renamed afterwards — DWT is a DWG-family
                 // file, and the plain io path keeps no locks on the scratch.
@@ -1862,6 +1903,12 @@ impl OpenCADStudio {
                 json!({"ok":false,"code":"temporary_document","error":"Test Block is temporary and cannot be saved."}),
             );
         }
+        if self.tabs[i].ifccad_session.is_some() {
+            return Err(json!({
+                "ok": false, "status": "failed", "code": "unsupported_format",
+                "error": "This drawing has retained IFCCAD content. Use Save as .ifccad.",
+            }));
+        }
         let Some(raw_path) = req["path"].as_str() else {
             return Err(
                 json!({"ok":false,"status":"failed","code":"path_required","error":"save_verified requires an explicit absolute path"}),
@@ -2234,6 +2281,7 @@ mod tests {
                 path.clone(),
                 document,
                 caches,
+                None,
             )),
         ));
 
@@ -2612,6 +2660,69 @@ mod tests {
         assert_eq!(audit["ok"], false, "{audit}");
         assert_eq!(audit["dangling_handles"], serde_json::json!(["2"]));
         let _ = std::fs::remove_file(path);
+    }
+
+    /// A reactor naming an object that is gone (as drawings from other CAD
+    /// carry) is reported, but the file is sound; an owner that is gone is not.
+    #[test]
+    fn raw_dxf_audit_reports_dangling_reactors_without_failing() {
+        let path =
+            std::env::temp_dir().join(format!("ocs_dangling_reactor_{}.dxf", std::process::id()));
+        std::fs::write(
+            &path,
+            "  0
+LINE
+  5
+1
+102
+{ACAD_REACTORS
+330
+DEAD
+102
+}
+330
+1
+",
+        )
+        .unwrap();
+        let audit = super::audit_ascii_dxf_references(&path).unwrap();
+        assert_eq!(audit["ok"], true, "{audit}");
+        assert_eq!(audit["dangling_reactors"], serde_json::json!(["DEAD"]));
+        assert_eq!(audit["dangling_handles"], serde_json::json!([]));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The same through save_verified: a line whose reactor names a missing
+    /// object saves as DXF, as it already did as DWG.
+    #[test]
+    fn save_verified_dxf_tolerates_a_dangling_entity_reactor() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        {
+            let document = &mut app.tabs[app.active_tab].scene.document;
+            let handle = document.entities().next().unwrap().common().handle;
+            document
+                .get_entity_mut(handle)
+                .unwrap()
+                .common_mut()
+                .reactors
+                .push(document::Handle::new(0xDEAD0));
+        }
+        for format in ["dwg", "dxf"] {
+            let path = std::env::temp_dir().join(format!(
+                "ocs_dangling_reactor_save_{}.{format}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let result = app
+                .save_verified_request(&serde_json::json!({
+                    "path":path,"target_format":format,"target_version":"AC1027","overwrite":true,
+                }))
+                .unwrap_or_else(|error| panic!("{format}: {error}"));
+            assert_eq!(result["verified"], true, "{format}: {result}");
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// SORTENTSTABLE keeps its sort handles under code 5 after its own; they
@@ -5005,7 +5116,7 @@ mod tests {
             let caches = crate::scene::build_derived_caches_with_progress(&doc, &|_| {}, None);
             app.update_root(Message::FileOpened(
                 id,
-                Ok(("x".into(), path.to_path_buf(), doc, caches)),
+                Ok(("x".into(), path.to_path_buf(), doc, caches, None)),
             ))
         };
         let prompt_open = |app: &OpenCADStudio| {
@@ -5790,7 +5901,10 @@ mod tests {
             &document::Document::new(),
             &entity,
             "summary",
-            Some("Survey Point".to_string()),
+            Some(crate::plugin::entity_labels::CustomEntityClassLabel {
+                label: "Survey Point".to_string(),
+                class_only: false,
+            }),
         );
         assert_eq!(json["type"], "Point");
         assert_eq!(json["display_type"], "Survey Point (Point)");

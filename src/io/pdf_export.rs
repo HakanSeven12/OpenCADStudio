@@ -465,6 +465,22 @@ pub(crate) fn render_pdf_bytes(
     // for a CAD sheet — went out uncompressed: a 16-sheet set weighed 280 MB.
     // Serialise through lopdf ourselves and Flate-compress the streams.
     let mut lo = printpdf::to_lopdf_doc(&doc, &PdfSaveOptions::default(), &mut warnings);
+    // printpdf writes page boxes rounded to whole points (an A3 sheet came
+    // out 1191 x 842 instead of 1190.55 x 841.89); write the exact size.
+    for (page, id) in pages.iter().zip(lo.get_pages().into_values()) {
+        let size = [page.paper_w, page.paper_h].map(|mm| (mm * 72.0 / 25.4) as f32);
+        let Some(dict) = lo.get_object_mut(id).ok().and_then(|o| o.as_dict_mut().ok()) else {
+            continue;
+        };
+        for key in [&b"MediaBox"[..], b"TrimBox", b"CropBox"] {
+            if let Some(rect) = dict.get_mut(key).ok().and_then(|o| o.as_array_mut().ok()) {
+                if rect.len() == 4 {
+                    rect[2] = size[0].into();
+                    rect[3] = size[1].into();
+                }
+            }
+        }
+    }
     lo.compress();
     let mut bytes = Vec::new();
     lo.save_to(&mut bytes)
@@ -499,12 +515,8 @@ fn append_pdf_page(
         images,
         group_splits,
         entity_layers,
+        entity_plot_styles,
     } = &page.content;
-    let layer_of = |name: &str| {
-        crate::scene::Scene::handle_from_wire_name(name)
-            .and_then(|handle| entity_layers.get(&handle))
-            .map(String::as_str)
-    };
     let (paper_w, paper_h) = (page.paper_w as f32, page.paper_h as f32);
     let (ox, oy) = (page.offset_x, page.offset_y);
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
@@ -512,6 +524,8 @@ fn append_pdf_page(
     let options = page.options;
     let line_step = vector_step(options);
     let mut ops: Vec<Op> = Vec::new();
+    let mut named_styles: std::collections::HashMap<String, Option<PlotStyleTable>> =
+        std::collections::HashMap::new();
 
     // White page background.
     ops.push(Op::SetFillColor {
@@ -723,10 +737,31 @@ fn append_pdf_page(
             }
             let layer = match &item {
                 DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
-                    layer_of(&wire.name)
+                    super::plot::wire_layer(&wire.wire, entity_layers)
                 }
-                DrawItem::Hatch(hatch) => layer_of(&hatch.name),
+                DrawItem::Hatch(hatch) => super::plot::hatch_layer(hatch, entity_layers),
                 DrawItem::Image(_) => None,
+            };
+            // A named (STB) table plots each entity with its own object style.
+            let item_name = match &item {
+                DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
+                    Some(wire.name.as_str())
+                }
+                DrawItem::Hatch(hatch) => Some(hatch.name.as_str()),
+                DrawItem::Image(_) => None,
+            };
+            let object_style = item_name
+                .and_then(crate::scene::Scene::handle_from_wire_name)
+                .and_then(|handle| entity_plot_styles.get(&handle));
+            let plot_style = match (plot_style, object_style) {
+                (Some(table), Some(style)) if table.is_stb => {
+                    if !named_styles.contains_key(style) {
+                        let narrowed = crate::io::plot_style::with_object_style(table, style);
+                        named_styles.insert(style.clone(), narrowed);
+                    }
+                    named_styles[style].as_ref().or(Some(table))
+                }
+                (table, _) => table,
             };
             if layer != open_layer {
                 if open_layer.is_some() {
@@ -1051,6 +1086,19 @@ fn append_pdf_page(
             // along northing — which is exactly the distortion the plot showed while
             // low-coordinate drawings came out clean. The result is a sheet-mm value
             // in single digits, so f32 is lossless from here.
+            // A circle or arc is drawn as its curve, not as chords.
+            if let Some(spans) = crate::io::plot::wire_arc_beziers(wire, page_h) {
+                let mm = |p: glam::DVec2, bezier: bool| LinePoint {
+                    p: Point::new(Mm((p.x + ox) as f32), Mm((p.y + oy) as f32)),
+                    bezier,
+                };
+                let mut curve = vec![mm(spans[0][0], false)];
+                for [_, c1, c2, end] in spans {
+                    curve.extend([mm(c1, true), mm(c2, true), mm(end, false)]);
+                }
+                flush_line(&mut ops, &curve, None, line_step);
+                continue;
+            }
             let mut segment: Vec<LinePoint> = Vec::new();
             let dot_radius = (wire.name == "viewport_hatch_pattern")
                 .then_some(Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6))));
@@ -1533,6 +1581,8 @@ fn emit_wire_fills(
                 }
                 boundary.push(boundary[0]);
                 let hatch = HatchModel {
+                    entity: None,
+                    effective_layer: wire.effective_layer.clone(),
                     pattern_origin: None,
                     render_instance: wire.render_instance,
                     world_origin: [0.0, 0.0],
@@ -2928,6 +2978,32 @@ mod tests {
     }
 
     #[test]
+    fn optional_content_uses_per_occurrence_layers_before_handle_fallback() {
+        let wire = |layer: &str, depth| {
+            let mut wire = WireModel::solid(
+                "126".into(),
+                vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                WireModel::WHITE,
+                false,
+            );
+            wire.effective_layer = Some(std::sync::Arc::from(layer));
+            PlotWire {
+                wire,
+                draw_depth: depth,
+            }
+        };
+        let mut page = test_page(vec![wire("FIRST_LAYER", 0.4), wire("SECOND_LAYER", 0.5)]);
+        page.content.entity_layers = std::collections::HashMap::from([(
+            crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+            "OUTER_INSERT".to_string(),
+        )]);
+        let text = pdf_stream_text(&render_pdf_bytes(&[page], None).unwrap());
+        assert!(text.contains("FIRST_LAYER"), "{text}");
+        assert!(text.contains("SECOND_LAYER"), "{text}");
+        assert!(!text.contains("OUTER_INSERT"), "{text}");
+    }
+
+    #[test]
     fn short_aligned_dashes_plot_the_complete_run() {
         let mut missing = Vec::new();
         for stationed in [false, true] {
@@ -3185,6 +3261,51 @@ mod tests {
             !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
             "STB Normal (black) must recolor the wire"
         );
+    }
+
+    #[test]
+    fn stb_plots_each_entity_with_its_own_named_style() {
+        // Two red wires: entity 10 takes the "Blue" named style, entity 11
+        // has a style the table lacks and falls back to Normal (green).
+        let entry = |name: &str, rgb: [u8; 3]| {
+            let mut e = crate::io::plot_style::PlotStyleEntry::default();
+            e.name = name.to_string();
+            e.color = Some(rgb);
+            e.screening = 100;
+            e
+        };
+        let mut named = PlotStyleTable::identity("Named.stb");
+        named.is_stb = true;
+        named
+            .named_entries
+            .insert("Normal".to_string(), entry("Normal", [0, 255, 0]));
+        named
+            .named_entries
+            .insert("Blue".to_string(), entry("Blue", [0, 0, 255]));
+        let wire = |handle: &str| {
+            let mut w = PlotWire {
+                wire: WireModel::solid(
+                    handle.into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            w.wire.aci = 1;
+            w
+        };
+        let mut page = test_page(vec![wire("10"), wire("11")]);
+        page.content.entity_plot_styles = [
+            (document::Handle::new(10), "blue".to_string()),
+            (document::Handle::new(11), "Missing".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
+        assert!(text.contains("0 0 1 RG"), "named style Blue applies: {text}");
+        assert!(text.contains("0 1 0 RG"), "unknown style falls back to Normal");
+        assert!(!text.contains("1 0 0 RG"), "no wire keeps its object colour");
     }
 
     #[test]

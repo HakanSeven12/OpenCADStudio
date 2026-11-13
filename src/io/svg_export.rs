@@ -21,8 +21,8 @@ use std::path::Path;
 use crate::io::pdf_export::adapt_to_paper;
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::WireModel;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 
 /// Screen pixels (96 dpi) to millimetres.
 const PX_TO_MM: f64 = 25.4 / 96.0;
@@ -341,16 +341,34 @@ fn emit_page_content(
                 .then_with(|| a.1.cmp(&b.1))
                 .then_with(|| a.2.cmp(&b.2))
         });
+        let mut open_layer: Option<&str> = None;
         for (_, _, _, item) in items {
+            let layer = if options.layer_attributes {
+                match &item {
+                    DrawItem::WireFill(w) | DrawItem::Wire(w) | DrawItem::Text(w) => {
+                        crate::io::plot::wire_layer(&w.wire, &content.entity_layers)
+                    }
+                    DrawItem::Hatch(h) => crate::io::plot::hatch_layer(h, &content.entity_layers),
+                    DrawItem::Image(_) => None,
+                }
+            } else {
+                None
+            };
+
+            // Emit into a scratch string so the item can go into its drawing
+            // layer's group; items in a row on one layer share a group.
+            let mut rendered = String::new();
             match item {
                 DrawItem::WireFill(wire) => {
-                    emit_wire_fills(out, &wire.wire, ox, oy, plot_style, options, map)
+                    emit_wire_fills(&mut rendered, &wire.wire, ox, oy, plot_style, options, map);
                 }
-                DrawItem::Hatch(hatch) => emit_hatch(out, hatch, ox, oy, plot_style, options, map),
+                DrawItem::Hatch(hatch) => {
+                    emit_hatch(&mut rendered, hatch, ox, oy, plot_style, options, map)
+                }
                 DrawItem::Text(wire) => {
                     let outlined = glyphs.is_some_and(|glyphs| {
                         emit_text_outlines(
-                            out,
+                            &mut rendered,
                             &wire.wire,
                             OutlineContext {
                                 ox,
@@ -363,20 +381,51 @@ fn emit_page_content(
                         )
                     });
                     if !outlined {
-                        emit_searchable_text(out, &wire.wire, ox, oy, plot_style, options, map);
+                        emit_searchable_text(
+                            &mut rendered,
+                            &wire.wire,
+                            ox,
+                            oy,
+                            plot_style,
+                            options,
+                            map,
+                        );
                     }
                 }
                 DrawItem::Wire(wire) => {
-                    emit_wire(out, &wire.wire, ox, oy, plot_style, options, map)
+                    emit_wire(&mut rendered, &wire.wire, ox, oy, plot_style, options, map)
                 }
-                DrawItem::Image(image) => emit_image(out, image, ox, oy, options, map)?,
+                DrawItem::Image(image) => emit_image(&mut rendered, image, ox, oy, options, map)?,
+            };
+
+            if layer != open_layer {
+                if open_layer.is_some() {
+                    out.push_str("</g>\n");
+                }
+                if let Some(layer) = layer {
+                    out.push_str(&format!("<g data-layer=\"{}\">\n", xml_attr(layer)));
+                }
+                open_layer = layer;
             }
+            out.push_str(&rendered);
+        }
+        if open_layer.is_some() {
+            out.push_str("</g>\n");
         }
     }
     Ok(())
 }
 
-// ── Wires ──────────────────────────────────────────────────────────────────
+// ── Wires ────────────────────────────────────────────────────────────────────
+
+/// Escapes a value for use inside an XML attribute (layer names are free-form
+/// drawing text).
+fn xml_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('"', "&quot;")
+}
 
 #[allow(clippy::too_many_arguments)]
 fn emit_wire(
@@ -458,7 +507,26 @@ fn emit_wire(
     let mut d = String::new();
     let mut pen_down = false;
     let mut any = false;
-    for (pi, &[x, y, _]) in wire.points.iter().enumerate() {
+    // A circle or arc is drawn as its curve, not as chords.
+    let spans = crate::io::plot::wire_arc_beziers(wire, view_h).unwrap_or_default();
+    for (index, span) in spans.iter().enumerate() {
+        let [p0, c1, c2, p3] = span.map(|p| map.apply(p.x + ox, p.y + oy));
+        if index == 0 {
+            d.push_str(&format!("M {} {} ", fmt(p0.0), fmt(p0.1)));
+        }
+        d.push_str(&format!(
+            "C {} {} {} {} {} {} ",
+            fmt(c1.0),
+            fmt(c1.1),
+            fmt(c2.0),
+            fmt(c2.1),
+            fmt(p3.0),
+            fmt(p3.1)
+        ));
+        any = true;
+    }
+    let chords = if spans.is_empty() { wire.points.as_slice() } else { &[] };
+    for (pi, &[x, y, _]) in chords.iter().enumerate() {
         if x.is_nan() || y.is_nan() {
             pen_down = false;
             continue;
@@ -1048,6 +1116,16 @@ fn emit_searchable_text(
 
 fn svg_font_family(name: &str) -> String {
     let trimmed = name.trim();
+    // Resolved SHX identities can carry a legacy code page and a big-font
+    // path; neither belongs in an SVG font-family attribute.
+    let trimmed = trimmed
+        .split([
+            crate::scene::text::font_face::BIG_FONT_SEP,
+            crate::scene::text::font_face::CODE_PAGE_SEP,
+        ])
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
     if trimmed.is_empty() {
         return "sans-serif".to_string();
     }
@@ -1329,6 +1407,7 @@ fn xml_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::plot::PlotContent;
 
     fn page_with(content: crate::io::plot::PlotContent, w: f64, h: f64) -> PlotPage {
         PlotPage {
@@ -1357,6 +1436,15 @@ mod tests {
     }
 
     #[test]
+    fn svg_font_family_omits_resolved_shx_metadata() {
+        let font =
+            crate::scene::text::font_face::Face::with_code_page("cs_ENGINEERING.shx", "ANSI_1250");
+        let paired = crate::scene::text::font_face::Face::with_big_font(&font, "chineset.shx");
+        assert_eq!(svg_font_family(&font), "cs_ENGINEERING.shx, sans-serif");
+        assert_eq!(svg_font_family(&paired), "cs_ENGINEERING.shx, sans-serif");
+    }
+
+    #[test]
     fn y_flip_puts_bottom_left_geometry_at_the_svg_bottom() {
         // A wire point at paper y=0 (sheet bottom) must land at y=paper_h in SVG.
         let map = PageMap {
@@ -1367,6 +1455,180 @@ mod tests {
         };
         assert_eq!(map.apply(10.0, 0.0), (10.0, 297.0));
         assert_eq!(map.apply(0.0, 297.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn wires_land_in_data_layer_groups_when_the_option_is_on() {
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire: WireModel::solid(
+                    "126".to_string(),
+                    vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.5,
+            }]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+                "Parcels".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        // Default: no layer groups, output unchanged.
+        let mut page = page_with(Default::default(), 210.0, 297.0);
+        page.content = content;
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            !svg.contains("data-layer"),
+            "default output must carry no layer markup: {svg}"
+        );
+
+        // Opt-in: every drawn item sits in its drawing-layer group.
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"Parcels\">"),
+            "the wire must sit in its layer group: {svg}"
+        );
+    }
+
+    #[test]
+    fn data_layer_groups_escape_the_layer_name() {
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![PlotWire {
+                wire: WireModel::solid(
+                    "127".to_string(),
+                    vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.5,
+            }]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("127").expect("handle parses"),
+                "a\"b<&c".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let mut page = page_with(Default::default(), 210.0, 297.0);
+        page.content = content;
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"a&quot;b&lt;&amp;c\">"),
+            "attribute escaping: {svg}"
+        );
+    }
+
+    #[test]
+    fn per_occurrence_layers_override_a_shared_insert_handle() {
+        let wire = |layer: &str, depth| {
+            let mut wire = WireModel::solid(
+                "126".to_string(),
+                vec![[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]],
+                [1.0, 0.0, 0.0, 1.0],
+                false,
+            );
+            wire.effective_layer = Some(std::sync::Arc::from(layer));
+            PlotWire {
+                wire,
+                draw_depth: depth,
+            }
+        };
+        let content = PlotContent {
+            wires: std::sync::Arc::new(vec![wire("FIRST", 0.4), wire("SECOND", 0.5)]),
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("126").expect("handle parses"),
+                "OUTER_INSERT".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let mut page = page_with(content, 210.0, 297.0);
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(svg.contains("<g data-layer=\"FIRST\">"), "{svg}");
+        assert!(svg.contains("<g data-layer=\"SECOND\">"), "{svg}");
+        assert!(!svg.contains("data-layer=\"OUTER_INSERT\""), "{svg}");
+    }
+
+    #[test]
+    fn hatches_land_in_layer_groups_through_their_plotted_entity() {
+        // Hatch models name their fill pattern in `name` — `SOLID`, `ANSI31`,
+        // … — which parses to nothing. The layer attribution must come from
+        // the entity the model plots for instead.
+        let mut tagged = HatchModel {
+            entity: None,
+            effective_layer: None,
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![[20.0, 20.0], [40.0, 20.0], [40.0, 40.0]]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Solid,
+            name: "SOLID".into(),
+            color: [1.0, 1.0, 0.0, 1.0],
+            aci: 0,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: 0.3,
+        };
+        let content_for = |hatch: HatchModel| crate::io::plot::PlotContent {
+            hatches: vec![hatch],
+            entity_layers: std::collections::HashMap::from([(
+                crate::scene::Scene::handle_from_wire_name("128").expect("handle parses"),
+                "Parcels".to_string(),
+            )]),
+            ..Default::default()
+        };
+        let mut page = page_with(Default::default(), 210.0, 297.0);
+        page.options = PlotOptions {
+            layer_attributes: true,
+            ..Default::default()
+        };
+
+        // A hatch whose entity is unknown carries no layer markup.
+        page.content = content_for(tagged.clone());
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            !svg.contains("data-layer=\"Parcels\""),
+            "no entity set: {svg}"
+        );
+
+        // With the plotted entity recorded, the fill sits in its layer group.
+        tagged.entity = Some(crate::scene::Scene::handle_from_wire_name("128").expect("handle"));
+        page.content = content_for(tagged.clone());
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"Parcels\">"),
+            "the hatch fill must sit in its layer group: {svg}"
+        );
+
+        tagged.effective_layer = Some(std::sync::Arc::from("INHERITED_PLACEMENT"));
+        page.content = content_for(tagged);
+        let svg = build_svg(&page, None).expect("builds");
+        assert!(
+            svg.contains("<g data-layer=\"INHERITED_PLACEMENT\">"),
+            "placement metadata must beat the raw entity fallback: {svg}"
+        );
+        assert!(!svg.contains("data-layer=\"Parcels\""), "{svg}");
     }
 
     #[test]
@@ -1393,6 +1655,8 @@ mod tests {
             },
         ]);
         let hatch = |pattern, color| HatchModel {
+            entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: [0.0, 0.0],
@@ -1593,7 +1857,7 @@ mod tests {
 
     #[test]
     fn mtext_canvas_mask_is_white_on_paper_but_explicit_fill_keeps_its_color() {
-        for (flags, expected_fill) in [(0x02, "#ffffff"), (0x01, "#ff0000")] {
+        for (flags, expected_fill) in [(0x03, "#ffffff"), (0x01, "#ff0000")] {
             let mut text = document::entities::MText::with_value(
                 "MASK",
                 document::types::Vector3::new(10.0, 10.0, 0.0),

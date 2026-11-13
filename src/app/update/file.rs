@@ -608,6 +608,8 @@ fn plot_scene_content(
         };
         let entity_layers =
             plot_entity_layers(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
+        let entity_plot_styles =
+            plot_entity_styles(scene, &paper_wires, &paper_hatches, &paper_wipeouts);
         return PlotContent {
             wires: std::sync::Arc::new(paper_wires),
             hatches: paper_hatches,
@@ -615,6 +617,7 @@ fn plot_scene_content(
             images: paper_images,
             group_splits: splits,
             entity_layers,
+            entity_plot_styles,
         };
     }
     let (mut model_pattern_wires, model_hatches, model_wipeouts, model_images) =
@@ -664,6 +667,7 @@ fn plot_scene_content(
         (wires, hatches, wipeouts, images, splits)
     };
     let entity_layers = plot_entity_layers(scene, &wires, &hatches, &wipeouts);
+    let entity_plot_styles = plot_entity_styles(scene, &wires, &hatches, &wipeouts);
     PlotContent {
         wires: std::sync::Arc::new(wires),
         hatches,
@@ -671,29 +675,83 @@ fn plot_scene_content(
         images,
         group_splits: splits,
         entity_layers,
+        entity_plot_styles,
     }
 }
 
-/// Drawing layer of every entity the plot draws, keyed by the handle in its
-/// wire or hatch name.
-// ponytail: expanded block geometry carries its INSERT's handle, so a block's
-// children all land on the INSERT's layer; per-child layers need BlockCache to
-// keep the child handle on each wire.
-fn plot_entity_layers(
+/// Named plot style of every entity the plot draws, keyed like
+/// `plot_entity_layers`: the object's own style, its layer's for ByLayer, and
+/// `Normal` for ByBlock at the top level or a layer without one.
+// shortcut: block children plot with their INSERT's style (wires carry the
+// INSERT handle), like `plot_entity_layers`; per-child needs BlockCache handles.
+fn plot_entity_styles(
     scene: &crate::scene::Scene,
     wires: &[crate::io::pdf_export::PlotWire],
     hatches: &[crate::scene::model::hatch_model::HatchModel],
     wipeouts: &[crate::scene::model::hatch_model::HatchModel],
 ) -> std::collections::HashMap<document::Handle, String> {
+    let doc = &scene.document;
     let names = wires.iter().map(|wire| wire.name.as_str()).chain(
         hatches
             .iter()
             .chain(wipeouts)
             .map(|hatch| hatch.name.as_str()),
     );
+    let mut styles = std::collections::HashMap::new();
+    for name in names {
+        let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if styles.contains_key(&handle) {
+            continue;
+        }
+        let Some(entity) = doc.get_entity(handle) else {
+            continue;
+        };
+        let common = entity.common();
+        let style = match common.plotstyle_flags {
+            0 => doc
+                .layers
+                .get(&common.layer)
+                .map(|layer| layer.plotstyle_handle)
+                .filter(|h| !h.is_null())
+                .map(|h| crate::app::properties::plot_style_name(doc, 3, Some(h)))
+                .filter(|name| name != "ByLayer")
+                .unwrap_or_else(|| "Normal".to_string()),
+            1 => "Normal".to_string(),
+            flags => crate::app::properties::plot_style_name(doc, flags, common.plotstyle_handle),
+        };
+        styles.insert(handle, style);
+    }
+    styles
+}
+
+/// Legacy handle-based layer fallback for direct and synthetic plot items.
+/// Expanded block items carry their placement-specific `effective_layer`;
+/// this map cannot represent one definition inserted on several layers.
+fn plot_entity_layers(
+    scene: &crate::scene::Scene,
+    wires: &[crate::io::pdf_export::PlotWire],
+    hatches: &[crate::scene::model::hatch_model::HatchModel],
+    wipeouts: &[crate::scene::model::hatch_model::HatchModel],
+) -> std::collections::HashMap<document::Handle, String> {
+    let names = wires.iter().map(|wire| wire.name.as_str());
     let mut layers = std::collections::HashMap::new();
     for name in names {
         let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
+            continue;
+        };
+        if layers.contains_key(&handle) {
+            continue;
+        }
+        if let Some(entity) = scene.document.get_entity(handle) {
+            layers.insert(handle, entity.common().layer.clone());
+        }
+    }
+    // Hatch models carry the pattern name (not a handle) in `name`; their
+    // drawing layer comes from the entity the model plots for.
+    for hatch in hatches.iter().chain(wipeouts) {
+        let Some(handle) = hatch.entity else {
             continue;
         };
         if layers.contains_key(&handle) {
@@ -923,6 +981,7 @@ impl OpenCADStudio {
             check_missing_fonts: self.check_missing_fonts,
             font_source_url: self.font_source_url.clone(),
             qnew_template: self.qnew_template.clone(),
+            transmittal_layout: self.transmittal_layout,
             donation_prompt_version: self.donation_prompt_version.clone(),
             gpu_warning_silenced: self.gpu_warning_silenced.clone(),
             disabled_plugins: {
@@ -1166,6 +1225,7 @@ impl OpenCADStudio {
         self.check_missing_fonts = s.check_missing_fonts;
         self.font_source_url = s.font_source_url.clone();
         self.qnew_template = s.qnew_template.clone();
+        self.transmittal_layout = s.transmittal_layout;
         self.font_source_input = s.font_source_url.clone();
         self.donation_prompt_version = s.donation_prompt_version.clone();
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
@@ -2043,6 +2103,84 @@ impl OpenCADStudio {
             None => self.install_native_edit_guard(i, path, None),
         }
         self.tabs[i].disk_fingerprint = crate::io::edit_lock::FileFingerprint::capture(path).ok();
+        #[cfg(not(target_arch = "wasm32"))]
+        // Any other open drawing that references `path` re-reads it, the
+        // same as an external reload: a source edited and saved in this
+        // session is not allowed to go stale in its hosts.
+        self.reload_xrefs_pointing_at(i, path);
+    }
+
+    /// Reload, in every other tab that references `path`, the definitions
+    /// the save refreshed. `resolve_xrefs_for_keys` does the merge; this
+    /// finds the matching records, refreshes the stat cache and marks the
+    /// host dirty.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn reload_xrefs_pointing_at(
+        &mut self,
+        saved: usize,
+        path: &std::path::Path,
+    ) {
+        let mut matches: Vec<(usize, rustc_hash::FxHashSet<document::Handle>)> = Vec::new();
+        for (j, tab) in self.tabs.iter().enumerate() {
+            if j == saved || tab.block_test.is_some() {
+                continue;
+            }
+            let base_dir = tab
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let keys: rustc_hash::FxHashSet<document::Handle> = tab
+                .scene
+                .document
+                .block_records
+                .iter()
+                .filter(|br| {
+                    (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty()
+                })
+                .filter_map(|br| {
+                    crate::io::xref::resolve_path(&br.xref_path, &base_dir)
+                        .filter(|resolved| native_paths_match(resolved, path))
+                        .map(|_| br.handle)
+                })
+                .collect();
+            if !keys.is_empty() {
+                matches.push((j, keys));
+            }
+        }
+        for (j, keys) in matches {
+            let base_dir = self.tabs[j]
+                .current_path
+                .as_deref()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                &mut self.tabs[j].scene.document,
+                &base_dir,
+                &keys,
+            );
+            if infos.is_empty() {
+                continue;
+            }
+            // The stat cache reports the saved file as current again.
+            let fresh = crate::io::xref::collect_entries_with_prev(
+                &self.tabs[j].scene.document,
+                &base_dir,
+                self.tabs[j].xref_unloaded.as_set(),
+                &self.tabs[j].xref_stat_cache.0,
+            );
+            for entry in &fresh {
+                if let Some(modified) = entry.modified {
+                    self.tabs[j].xref_stat_cache.insert(entry.key, modified);
+                }
+            }
+            self.tabs[j].dirty = true;
+            self.tabs[j].scene.bump_geometry_no_blocks();
+            self.post_ref_op(j);
+            self.command_line.push_info(
+                crate::tf!("XREF: references to the saved source were reloaded.").as_ref(),
+            );
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2141,6 +2279,7 @@ impl OpenCADStudio {
             false,
             require_new_destination,
             (!path_changed).then_some(path.as_path()),
+            self.tabs[i].ifccad_session.as_ref(),
         )?;
 
         if set_current_path {
@@ -2229,6 +2368,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
         doc: document::Document,
         mut caches: crate::scene::DerivedCaches,
+        ifccad_session: Option<ocs_save::IfccadSession>,
     ) -> Task<Message> {
         // If the user clicked Cancel while the parser was running, the
         // overlay state was cleared and we silently drop the result.
@@ -2380,7 +2520,13 @@ impl OpenCADStudio {
         self.tabs[i].xref_report = caches
             .xrefs
             .iter()
-            .map(|item| (item.name.clone(), item.path.clone(), item.status.clone()))
+            .map(|item| {
+                (
+                    item.name.clone(),
+                    item.path.clone(),
+                    crate::app::control::xref_status_name(&item.status),
+                )
+            })
             .collect();
         if missing > 0 {
             self.command_line.push_output(
@@ -2422,6 +2568,16 @@ impl OpenCADStudio {
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
         self.tabs[i].ifccad_alpha_acknowledged = false;
+        if let Some(session) = &ifccad_session {
+            for (id, reason) in session.blocked_entities() {
+                self.command_line.push_info(
+                    crate::tf!("IFCCAD entity {id} retained without geometry: {reason}").as_ref(),
+                );
+            }
+            self.command_line.push_info(
+                crate::t!("Autosave is disabled for this drawing because it contains retained IFCCAD entities. Save as IFCCAD to keep them.").as_ref(),
+            );
+        }
         // A walk belongs to the drawing it was opened on. Loading a document
         // into this tab ends any walk it still held, so the new drawing can
         // never render under the previous one's hide.
@@ -2611,7 +2767,7 @@ impl OpenCADStudio {
         // The document and its derived caches have settled: the next message
         // boundary announces `DocumentOpened` to native plugins exactly once
         // for this load (API v9).
-        self.tabs[i].note_document_loaded();
+        self.tabs[i].note_document_loaded(ifccad_session);
         // The tab list just changed (and the active tab with it): remember
         // it for the next boot's restore flow (web session memory).
         #[cfg(target_arch = "wasm32")]
@@ -2686,7 +2842,53 @@ impl OpenCADStudio {
         if path.extension().is_none() {
             path.set_extension("dwg");
         }
+        let ifccad_session = if matches!(
+            &source,
+            crate::modules::insert::block_cmdline::WblockSource::Drawing
+        ) {
+            self.tabs[i].ifccad_session.clone()
+        } else {
+            None
+        };
+        if let Some(session) = &ifccad_session {
+            let ext = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default();
+            if let Err(error) = session.check_destination(ext) {
+                return Task::done(Message::WblockWriteFinished("*".into(), path, Err(error)));
+            }
+        }
         let document = self.tabs[i].scene.document_for_save();
+        #[cfg(target_arch = "wasm32")]
+        if let Some(session) = ifccad_session {
+            let ext = path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let mut document = document;
+            document.header.insertion_units = unit;
+            let version = document.version;
+            let prepared = crate::io::prepare_document_for_save(document, version);
+            return Task::perform(
+                async move {
+                    crate::io::serialize_prepared_document(&prepared, &ext, false, Some(&session))
+                        .await
+                },
+                move |result| Message::WebWblockSerialized {
+                    block_name: "*".into(),
+                    path,
+                    filename,
+                    result,
+                },
+            );
+        }
         if let crate::modules::insert::block_cmdline::WblockSource::Objects {
             handles,
             base,
@@ -2764,7 +2966,14 @@ impl OpenCADStudio {
                     )
                     .map_err(|e| e.to_string())?,
                 };
-                crate::io::save(&out_doc, &worker_path).map_err(|e| e.to_string())
+                #[cfg(not(target_arch = "wasm32"))]
+                return crate::io::save_wblock_snapshot(
+                    out_doc,
+                    &worker_path,
+                    ifccad_session.as_ref(),
+                );
+                #[cfg(target_arch = "wasm32")]
+                crate::io::save(&out_doc, &worker_path)
             },
             move |result| Message::WblockWriteFinished(display, path, result),
         )
@@ -2837,7 +3046,9 @@ impl OpenCADStudio {
             let version = document.version;
             let prepared = crate::io::prepare_document_for_save(document, version);
             Task::perform(
-                async move { crate::io::serialize_prepared_document(&prepared, &ext, false).await },
+                async move {
+                    crate::io::serialize_prepared_document(&prepared, &ext, false, None).await
+                },
                 move |result| Message::WebWblockSerialized {
                     block_name,
                     path,
@@ -2877,7 +3088,7 @@ impl OpenCADStudio {
             return Task::none();
         }
         let mut skipped = 0usize;
-        let mut pending: Vec<(crate::app::WebSaveallEntry, document::Document)> = Vec::new();
+        let mut pending = Vec::new();
         for t in 0..self.tabs.len() {
             if self.tabs[t].is_start || self.tabs[t].block_test.is_some() {
                 continue;
@@ -2925,6 +3136,7 @@ impl OpenCADStudio {
             pending.push((
                 entry,
                 crate::io::prepare_document_for_save(tab.scene.document_for_save(), version),
+                tab.ifccad_session.clone(),
             ));
         }
         if pending.is_empty() {
@@ -2934,9 +3146,14 @@ impl OpenCADStudio {
         Task::perform(
             async move {
                 let mut results = Vec::with_capacity(pending.len());
-                for (mut entry, prepared) in pending {
-                    entry.result =
-                        crate::io::serialize_prepared_document(&prepared, &entry.ext, false).await;
+                for (mut entry, prepared, session) in pending {
+                    entry.result = crate::io::serialize_prepared_document(
+                        &prepared,
+                        &entry.ext,
+                        false,
+                        session.as_ref(),
+                    )
+                    .await;
                     results.push(entry);
                 }
                 results
@@ -3085,14 +3302,14 @@ impl OpenCADStudio {
         )
     }
 
-    pub(super) fn on_obj_import_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
+    pub(in crate::app) fn on_obj_import_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
         background_task(
             crate::t!("OBJ import"),
             move || {
                 let src = std::fs::read_to_string(&worker_path).map_err(|e| e.to_string())?;
-                crate::io::obj::parse_obj(&src, [0.7, 0.7, 0.85, 1.0])
+                crate::io::obj::parse_obj(&src)
                     .ok_or_else(|| "no usable geometry in file".to_string())
             },
             move |result| Message::ObjImportFinished(tab_id, path, result),
@@ -3262,8 +3479,17 @@ impl OpenCADStudio {
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         let allow_loss = std::mem::take(&mut self.conversion_loss_allowed);
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
-            async move { crate::io::serialize_prepared_document(&prepared, &ext, allow_loss).await },
+            async move {
+                crate::io::serialize_prepared_document(
+                    &prepared,
+                    &ext,
+                    allow_loss,
+                    ifccad_session.as_ref(),
+                )
+                .await
+            },
             move |result| Message::WebSaveSerialized {
                 tab_id,
                 filename,
@@ -3828,6 +4054,7 @@ impl OpenCADStudio {
             path.clone()
         };
         let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
+        let ifccad_session = self.tabs[i].ifccad_session.clone();
         let mut work = Some((
             snapshot,
             thumbnail,
@@ -3839,6 +4066,7 @@ impl OpenCADStudio {
             previous_autosave,
         ));
         let mut run_save = move |screenshot: Option<iced::window::Screenshot>| {
+            let ifccad_session = ifccad_session.clone();
             let (
                 mut snapshot,
                 thumbnail,
@@ -3884,6 +4112,7 @@ impl OpenCADStudio {
                             allow_conversion_loss,
                             purpose == crate::app::SavePurpose::SaveAsNew,
                             logical_path.as_deref(),
+                            ifccad_session.as_ref(),
                         );
                         (result, refreshed_preview)
                     })
@@ -3956,7 +4185,10 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn on_save_finished(&mut self, mut outcome: crate::app::SaveOutcome) -> Task<Message> {
+    pub(super) fn on_save_finished(
+        &mut self,
+        mut outcome: crate::app::SaveOutcome,
+    ) -> Task<Message> {
         let latest = self.active_save_jobs.get(&outcome.tab_id).copied() == Some(outcome.job_id);
         if latest {
             self.active_save_jobs.remove(&outcome.tab_id);
@@ -4777,7 +5009,12 @@ impl OpenCADStudio {
         let prepared =
             crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
         // A write that fails outright is reported by the save itself.
-        let losses = ocs_save::external_losses(&prepared, format).ok()?;
+        let losses = ocs_save::external_losses_for_edit(
+            &prepared,
+            format,
+            self.tabs[i].ifccad_session.as_ref(),
+        )
+        .ok()?;
         (!losses.is_empty()).then_some(losses)
     }
 
@@ -5050,6 +5287,7 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
+                || self.tabs[i].ifccad_session.is_some()
                 || self.active_save_jobs.contains_key(&self.tabs[i].id)
             {
                 continue;
@@ -5086,7 +5324,10 @@ impl OpenCADStudio {
         }
         let mut pending = Vec::new();
         for i in 0..self.tabs.len() {
-            if self.tabs[i].block_test.is_some() || !self.tabs[i].dirty {
+            if self.tabs[i].block_test.is_some()
+                || !self.tabs[i].dirty
+                || self.tabs[i].ifccad_session.is_some()
+            {
                 continue;
             }
             // Same pre-serialize state sync the web Save flow performs
@@ -5121,7 +5362,8 @@ impl OpenCADStudio {
                 for (name, ext, prepared) in pending {
                     // Autosave exists to recover geometry, not pretty recents:
                     // no thumbnail capture, just bytes into OPFS.
-                    match crate::io::serialize_prepared_document(&prepared, &ext, false).await {
+                    match crate::io::serialize_prepared_document(&prepared, &ext, false, None).await
+                    {
                         Ok(bytes) => {
                             if let Err(error) =
                                 crate::io::web_autosave::snapshot(&name, &bytes, None).await
@@ -7394,6 +7636,9 @@ impl OpenCADStudio {
                     PlotFlag::TextAsOutlines if d.to_file && d.file_svg => {
                         d.text_as_outlines = !d.text_as_outlines;
                     }
+                    PlotFlag::LayerAttributes if d.to_file && d.file_svg => {
+                        d.layer_attributes = !d.layer_attributes;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -7409,7 +7654,8 @@ impl OpenCADStudio {
                     self.plot_dialog.style_missing = false;
                     self.plot_dialog.style_error = None;
                 } else {
-                    match crate::io::plot_style::PlotStyleTable::load_named(&name) {
+                    let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+                    match crate::io::plot_style::PlotStyleTable::load_named_at(&name, base) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
@@ -7737,13 +7983,17 @@ impl OpenCADStudio {
             self.plot_dialog.window = self.plot_window;
         }
         let mut style_error = None;
+        let drawing_base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
                 .as_ref()
                 .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
         {
-            match crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet) {
+            match crate::io::plot_style::PlotStyleTable::load_named_at(
+                &ps.current_style_sheet,
+                drawing_base,
+            ) {
                 Ok(table) => {
                     self.report_plot_style_warnings(&table);
                     self.active_plot_style = Some(table);
@@ -8123,6 +8373,7 @@ impl OpenCADStudio {
             vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
             text_as_outlines: d.text_as_outlines,
             non_scaling_stroke: d.non_scaling_stroke,
+            layer_attributes: d.layer_attributes,
         }
     }
 
@@ -8147,7 +8398,8 @@ impl OpenCADStudio {
         // object. After reopening a drawing the name may be correct while the
         // in-memory table is still the previous/default one. Plotting must not
         // silently ignore the selected CTB in that state.
-        crate::io::plot_style::PlotStyleTable::load_named(&d.style_name).ok()
+        let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+        crate::io::plot_style::PlotStyleTable::load_named_at(&d.style_name, base).ok()
     }
 
     pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {
@@ -9065,6 +9317,41 @@ mod plot_paper_tests {
         }
     }
 
+    /// A layout whose paper image origin (DXF 148/149) is not zero has its
+    /// printable corner at minus that origin: a sheet border drawn there
+    /// plots at the paper corner instead of shifted by it (#2864).
+    #[test]
+    fn layout_sheet_origin_follows_the_paper_image_origin() {
+        use document::objects::PlotRotation;
+        let mut app =
+            layout_with_margins_and_stale_limmin((2.0, 3.0, 0.0, 0.0), PlotRotation::None);
+        let i = app.active_tab;
+        for object in app.tabs[i].scene.document.objects.values_mut() {
+            if let document::objects::ObjectType::Layout(layout) = object {
+                if layout.name == "Layout1" {
+                    layout.paper_image_origin_x = -40.0;
+                    layout.paper_image_origin_y = -25.0;
+                }
+            }
+        }
+        app.tabs[i].scene.geometry_epoch += 1;
+        let ((x0, y0), _) = app.tabs[i].scene.paper_limits().unwrap();
+        assert!(
+            (x0 - 38.0).abs() < 1e-9 && (y0 - 22.0).abs() < 1e-9,
+            "sheet origin {x0} {y0}"
+        );
+        let ((px, py), _) = app.tabs[i].scene.printable_area_limits().unwrap();
+        assert!((px - 40.0).abs() < 1e-9 && (py - 25.0).abs() < 1e-9, "{px} {py}");
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        let scale = page.scale as f64;
+        let at = ((40.0 + page.offset_x) * scale, (25.0 + page.offset_y) * scale);
+        assert!(
+            (at.0 - 2.0).abs() < 1e-6 && (at.1 - 3.0).abs() < 1e-6,
+            "printable corner plots at {at:?}"
+        );
+    }
+
     /// Open the metric page-setup fixture written by the commercial
     /// application (see `tests/fixtures/plot/README.md`).
     #[cfg(not(target_arch = "wasm32"))]
@@ -9259,6 +9546,45 @@ mod plot_paper_tests {
         let size = |((x0, y0), (x1, y1)): ((f64, f64), (f64, f64))| (x1 - x0, y1 - y0);
         let (before, after) = (size(sheet_before), size(sheet_after));
         assert!((before.0 - after.0).abs() < 1e-9 && (before.1 - after.1).abs() < 1e-9);
+    }
+
+    /// The sheet a window plot leaves on the layout is the page that plot
+    /// makes: page (0, 0) and (width, height) taken back to paper space.
+    fn page_of_window_plot(app: &OpenCADStudio) -> ((f64, f64), (f64, f64)) {
+        let job = app.window_plot_job().expect("a window plot job");
+        let scale = f64::from(job.scale);
+        (
+            (-job.offset_x, -job.offset_y),
+            (
+                job.paper_w / scale - job.offset_x,
+                job.paper_h / scale - job.offset_y,
+            ),
+        )
+    }
+
+    #[test]
+    fn a_fitted_window_plot_leaves_the_sheet_it_plotted() {
+        let mut app = app_with_printer_named_sheet();
+        let _ = app.on_plot_dialog_open();
+        let _ = app.on_plot_dlg(PlotDlgMsg::Area("Window".into()));
+        // A window away from the sheet's centre, smaller than the sheet.
+        app.plot_window = Some((20.0, 120.0, 170.0, 200.0));
+        app.plot_dialog.window = app.plot_window;
+        app.plot_dialog.fit_to_paper = true;
+        app.plot_dialog.center = true;
+        let _ = app.on_plot_dlg(PlotDlgMsg::SetCurrent);
+        assert_eq!(
+            layout_settings(&app).scale_type,
+            document::objects::ScaledType::ScaleToFit
+        );
+        let ((px0, py0), (px1, py1)) = page_of_window_plot(&app);
+        let ((sx0, sy0), (sx1, sy1)) = app.tabs[app.active_tab].scene.paper_limits().unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            near(sx0, px0) && near(sy0, py0) && near(sx1, px1) && near(sy1, py1),
+            "the sheet ({sx0:.2}, {sy0:.2})-({sx1:.2}, {sy1:.2}) must be the page the \
+             plot made ({px0:.2}, {py0:.2})-({px1:.2}, {py1:.2})"
+        );
     }
 
     #[test]
@@ -9913,7 +10239,6 @@ cupsPrintQuality/Print Quality: *Normal High\n";
         assert!(!app.plot_dialog.center);
         assert_eq!(app.plot_dialog.offset_x, "12.0");
     }
-
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use crate::t;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
-use crate::entities::common::{format_length, unit_context, without_negative_zero};
+use crate::entities::common::{format_angle, format_length, unit_context};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 pub struct DistCommand {
@@ -62,18 +62,15 @@ impl CadCommand for DistCommand {
         if let Some(p1) = self.first {
             let m = measure(self.plane, p1, pt);
             let (dist, dx, dy, dz) = (m.distance, m.delta.x, m.delta.y, m.delta.z);
-            let angle_xy = m.angle_xy.to_degrees();
-            let angle_z = m.angle_z.to_degrees();
-
-            let aprec = unit_context().auprec.max(0) as usize;
+            // `angle_xy` is already counted from ANGBASE the way ANGDIR runs.
             let dist_s = format_length(dist);
-            let angle_xy_s = without_negative_zero(format!("{angle_xy:.aprec$}"));
-            let angle_z_s = without_negative_zero(format!("{angle_z:.aprec$}"));
+            let angle_xy_s = format_angle(m.angle_xy);
+            let angle_z_s = format_angle(m.angle_z);
             let dx_s = format_length(dx);
             let dy_s = format_length(dy);
             let dz_s = format_length(dz);
             let msg = t!(
-                "Distance = %{dist},  Angle in XY Plane = %{angle_xy}°,  Angle from XY Plane = %{angle_z}°\n  Delta X = %{dx},  Delta Y = %{dy},  Delta Z = %{dz}",
+                "Distance = %{dist},  Angle in XY Plane = %{angle_xy},  Angle from XY Plane = %{angle_z}\n  Delta X = %{dx},  Delta Y = %{dy},  Delta Z = %{dz}",
                 dist = dist_s,
                 angle_xy = angle_xy_s,
                 angle_z = angle_z_s,
@@ -212,8 +209,8 @@ mod tests {
                     "Expected 'Delta Z = 0' in '{msg}'"
                 );
                 assert!(
-                    msg.contains("Angle in XY Plane = 0°"),
-                    "Expected 'Angle in XY Plane = 0°' in '{msg}'"
+                    msg.contains("Angle in XY Plane = 0"),
+                    "Expected 'Angle in XY Plane = 0' in '{msg}'"
                 );
             }
             _ => panic!("Expected CmdResult::Measurement"),
@@ -253,8 +250,8 @@ mod tests {
                     "Expected 'Delta Y = 5.0000' in '{msg}'"
                 );
                 assert!(
-                    msg.contains("Angle in XY Plane = 26.57°"),
-                    "Expected 'Angle in XY Plane = 26.57°' in '{msg}'"
+                    msg.contains("Angle in XY Plane = 26.57"),
+                    "Expected 'Angle in XY Plane = 26.57' in '{msg}'"
                 );
             }
             _ => panic!("Expected CmdResult::Measurement"),

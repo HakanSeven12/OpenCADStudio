@@ -581,6 +581,17 @@ pub(crate) fn main_window_event(
                     }
                 }
             }
+            // With an input method open (Bopomofo, Pinyin, ...) a character key
+            // arrives without text and the method hands what it composes to the
+            // focused field; it is not a shortcut, so the field keeps focus (#2835).
+            #[cfg(not(target_arch = "wasm32"))]
+            if status == Status::Ignored
+                && !shortcut_modifier
+                && text.as_deref().is_none_or(str::is_empty)
+                && matches!(key, keyboard::Key::Character(_))
+            {
+                return None;
+            }
             let shortcut = shortcut_key_name(&key, modifiers)?;
             if shortcut == "ESCAPE"
                 && status == Status::Captured
@@ -3824,9 +3835,10 @@ impl OpenCADStudio {
         // the one full-quality frame that re-renders hatches — this tick does,
         // then the scene-render cache holds it and the subscription auto-stops.
         // Underlay rasters follow the zoom once it settles; tick until then.
-        let nav_settle = if self.tabs[self.active_tab].scene.is_settling()
-            || self.tabs[self.active_tab].scene.underlay_resolution_stale()
-        {
+        let nav_settle = if self.tabs[self.active_tab].scene.underlay_resolution_stale() {
+            // A still view requests no frames; a timer lets the rasters catch up.
+            iced::time::every(std::time::Duration::from_millis(50)).map(Message::Tick)
+        } else if self.tabs[self.active_tab].scene.is_settling() {
             crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {
             Subscription::none()

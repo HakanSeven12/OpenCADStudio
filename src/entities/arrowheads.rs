@@ -6,7 +6,7 @@
 //! standard names itself; the block still needs its geometry so other
 //! programs draw the same arrow. It is created the first time it is picked.
 
-use document::entities::{Circle, Line, LwPolyline, LwVertex, Solid};
+use document::entities::{Arc, Circle, Line, LwPolyline, LwVertex, Solid};
 use document::types::{Color, LineWeight, Vector3};
 use document::{Document, EntityType, Handle};
 
@@ -26,10 +26,11 @@ pub(crate) const STANDARD: &[(&str, &str)] = &[
     ("Dot small", "_DotSmall"),
     ("Dot blank", "_DotBlank"),
     ("Dot small blank", "_Small"),
-    ("Box blank", "_BoxBlank"),
+    ("Box", "_BoxBlank"),
     ("Box filled", "_BoxFilled"),
     ("Datum triangle", "_DatumBlank"),
     ("Datum triangle filled", "_DatumFilled"),
+    ("Integral", "_Integral"),
     ("None", "_None"),
 ];
 
@@ -212,6 +213,19 @@ fn standard_geometry(name: &str) -> Option<Vec<EntityType>> {
             line(0.0, -d, 0.0, d),
         ],
         "_DatumFilled" => vec![solid([[0.0, d], [-1.0, 0.0], [0.0, -d], [0.0, -d]])],
+        // Two quarter arcs crossing at the tip, the integral sign laid on its
+        // side.
+        "_Integral" => {
+            let arc = |cx: f64, start: f64, end: f64| {
+                EntityType::Arc(Arc::from_center_radius_angles(
+                    Vector3::new(cx, 0.0, 0.0),
+                    0.4445,
+                    start.to_radians(),
+                    end.to_radians(),
+                ))
+            };
+            vec![arc(-0.4445, 0.0, 90.0), arc(0.4445, 180.0, 270.0)]
+        }
         "_None" => Vec::new(),
         _ => return None,
     };

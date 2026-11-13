@@ -101,80 +101,76 @@ impl DataLinkPlaceCommand {
     }
 
     fn preview(&self, point: DVec3) -> WireModel {
-        let point = self.plane.to_local(point);
-        let mut points = Vec::new();
-        let mut x = 0.0;
-        for column in 0..=self.table.column_count() {
-            if column > 0 {
-                x += self.table.columns[column - 1].width;
-            }
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::X * x)
-                    .as_vec3()
-                    .to_array(),
-            );
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::new(x, -self.table.total_height(), 0.0))
-                    .as_vec3()
-                    .to_array(),
-            );
-        }
-        let mut y = 0.0;
-        for row in 0..=self.table.row_count() {
-            if row > 0 {
-                y -= self.table.rows[row - 1].height;
-            }
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::Y * y)
-                    .as_vec3()
-                    .to_array(),
-            );
-            points.push(
-                self.plane
-                    .to_world(point + DVec3::new(self.table.total_width(), y, 0.0))
-                    .as_vec3()
-                    .to_array(),
-            );
-        }
-        WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            text_verts: Vec::new(),
-            name: "data_link_preview".into(),
-            points,
-            points_low: Vec::new(),
-            color: WireModel::CYAN,
-            selected: false,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
-            line_weight_px: 1.0,
-            snap_pts: Vec::new(),
-            tangent_geoms: Vec::new(),
-            aci: 0,
-            key_vertices: Vec::new(),
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            fill_tris: Vec::new(),
-            fill_tris_low: Vec::new(),
+        table_grid_preview(&self.table, &self.plane, point)
+    }
+}
 
-            ..Default::default()
+/// The grid of `table` with its insertion point at `point`, to show where a
+/// prepared table lands while its insertion point is picked.
+pub fn table_grid_preview(table: &Table, plane: &WorkingPlane, point: DVec3) -> WireModel {
+    let point = plane.to_local(point);
+    let mut points = Vec::new();
+    let mut x = 0.0;
+    for column in 0..=table.column_count() {
+        if column > 0 {
+            x += table.columns[column - 1].width;
         }
+        points.push(plane.to_world(point + DVec3::X * x).as_vec3().to_array());
+        points.push(
+            plane
+                .to_world(point + DVec3::new(x, -table.total_height(), 0.0))
+                .as_vec3()
+                .to_array(),
+        );
+    }
+    let mut y = 0.0;
+    for row in 0..=table.row_count() {
+        if row > 0 {
+            y -= table.rows[row - 1].height;
+        }
+        points.push(plane.to_world(point + DVec3::Y * y).as_vec3().to_array());
+        points.push(
+            plane
+                .to_world(point + DVec3::new(table.total_width(), y, 0.0))
+                .as_vec3()
+                .to_array(),
+        );
+    }
+    WireModel {
+        bg_adapt: None,
+        point_marker: None,
+        taper_widths: Vec::new(),
+        pattern_stations: Vec::new(),
+        world_width: 0.0,
+        depth_override: None,
+        display_visible: true,
+        snap_only: false,
+        plot_visible: true,
+        fill_is_3d: false,
+        fill_is_2d_solid: false,
+        render_instance: None,
+        pick_tris: Vec::new(),
+        pick_tris_low: Vec::new(),
+        dash_from_start: false,
+        text_verts: Vec::new(),
+        name: "data_link_preview".into(),
+        points,
+        points_low: Vec::new(),
+        color: WireModel::CYAN,
+        selected: false,
+        pattern_length: 0.0,
+        pattern: [0.0; 8],
+        line_weight_px: 1.0,
+        snap_pts: Vec::new(),
+        tangent_geoms: Vec::new(),
+        aci: 0,
+        key_vertices: Vec::new(),
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        fill_tris: Vec::new(),
+        fill_tris_low: Vec::new(),
+
+        ..Default::default()
     }
 }
 

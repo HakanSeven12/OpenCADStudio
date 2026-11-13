@@ -297,14 +297,14 @@ where
     Ok(clamp_quad_hover_delay_ms(raw.max(0) as u64))
 }
 
-/// Hold a ZOOMFACTOR inside the range the application can store, wherever it
-/// arrives from — the slider, the Options field, or a configuration file
-/// written by hand or by an older build.
-/// Interface scale in percent, kept to the range the Options slider offers.
+/// Interface scale in percent, kept to the range the Options list offers.
 pub fn clamp_ui_scale(percent: u16) -> u16 {
     percent.clamp(75, 200)
 }
 
+/// Hold a ZOOMFACTOR inside the range the application can store, wherever it
+/// arrives from — the slider, the Options field, or a configuration file
+/// written by hand or by an older build.
 pub fn clamp_zoom_factor(v: i32) -> i32 {
     v.clamp(ZOOM_FACTOR_MIN, ZOOM_FACTOR_MAX)
 }
@@ -1054,6 +1054,9 @@ pub struct UserSettings {
     /// Drawing new tabs start from (QNEW template); empty = a blank drawing.
     #[serde(default)]
     pub qnew_template: String,
+    /// Preserve source paths, group resources by type, or keep every file flat.
+    #[serde(default)]
+    pub transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// App version whose donation prompt has been displayed.
     pub donation_prompt_version: String,
     /// The graphics verdict (`GpuStatus::identity()`) whose warning popup the
@@ -1559,6 +1562,7 @@ impl Default for UserSettings {
             check_missing_fonts: true,
             font_source_url: String::new(),
             qnew_template: String::new(),
+            transmittal_layout: crate::io::transmit::TransmittalLayout::Structured,
             donation_prompt_version: String::new(),
             gpu_warning_silenced: String::new(),
             disabled_plugins: Vec::new(),
@@ -1868,6 +1872,28 @@ mod tests {
         assert_eq!(clamp_quad_hover_delay_ms(0), 0);
         assert_eq!(clamp_quad_hover_delay_ms(300), 300);
         assert_eq!(clamp_quad_hover_delay_ms(9999), 2000);
+    }
+
+    #[test]
+    fn transmittal_layout_defaults_and_round_trips() {
+        use crate::io::transmit::TransmittalLayout;
+
+        let old: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert_eq!(old.transmittal_layout, TransmittalLayout::Structured);
+        for (layout, encoded) in [
+            (TransmittalLayout::Preserve, "\"preserve\""),
+            (TransmittalLayout::Structured, "\"structured\""),
+            (TransmittalLayout::Flat, "\"flat\""),
+        ] {
+            assert_eq!(serde_json::to_string(&layout).unwrap(), encoded);
+            let settings = UserSettings {
+                transmittal_layout: layout,
+                ..UserSettings::default()
+            };
+            let json = serde_json::to_string(&settings).unwrap();
+            let back: UserSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.transmittal_layout, layout);
+        }
     }
 
     #[test]

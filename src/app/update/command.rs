@@ -158,6 +158,39 @@ impl iced::advanced::widget::Operation<crate::app::PasteFocus> for PasteFocusPro
     }
 }
 
+/// The pixels read off the system clipboard (RGBA, row by row) as a PNG.
+#[cfg(not(target_arch = "wasm32"))]
+fn clipboard_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    let pixels = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    pixels.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(png.into_inner())
+}
+
+/// The file name, without its extension, of a picture pasted now.
+#[cfg(not(target_arch = "wasm32"))]
+fn pasted_image_stem() -> String {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis());
+    format!("pasted-{stamp}")
+}
+
+/// Write a pasted picture into `folder` as `stem.png`, or under the next
+/// name not taken there, and give the file's path.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_pasted_png(
+    folder: &std::path::Path,
+    stem: &str,
+    png: &[u8],
+) -> std::io::Result<std::path::PathBuf> {
+    let name = crate::sys::unique_pasted_image_name(stem, "png", |name| folder.join(name).exists());
+    let path = folder.join(name);
+    std::fs::create_dir_all(folder)?;
+    std::fs::write(&path, png)?;
+    Ok(path)
+}
+
 impl OpenCADStudio {
     pub(super) fn begin_tab_close_queue(&mut self, tab_ids: Vec<u64>) -> Task<Message> {
         self.pending_tab_closes.clear();
@@ -3377,6 +3410,88 @@ impl OpenCADStudio {
         }
     }
 
+    /// Read the system clipboard for PASTESPEC — its text, then its picture
+    /// — and report both at once, so the prompt lists every format on hand.
+    /// The web gets the picture's encoded file from the Clipboard API; native
+    /// gets pixels, kept as a PNG.
+    pub(in crate::app) fn read_system_clipboard_formats(&self) -> Task<Message> {
+        use crate::io::ole_embed::EmbeddedImage;
+        #[cfg(target_arch = "wasm32")]
+        {
+            Task::perform(
+                async {
+                    let text = crate::sys::read_clipboard_text().await;
+                    let picture = crate::sys::read_clipboard_image()
+                        .await
+                        .and_then(|(name, bytes)| EmbeddedImage::from_bytes(name, bytes).ok());
+                    (text, picture)
+                },
+                |(text, picture)| Message::PasteSpecial(text, picture),
+            )
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            iced::clipboard::read_text().then(|text| {
+                let text = text.ok().map(|text| (*text).clone());
+                iced::clipboard::read_image().map(move |picture| {
+                    let picture = picture.ok().and_then(|picture| {
+                        let (width, height) = (picture.size.width, picture.size.height);
+                        Some(EmbeddedImage {
+                            bytes: clipboard_png(width, height, &picture.rgba)?,
+                            pixel_width: width,
+                            pixel_height: height,
+                            name: format!("{}.png", pasted_image_stem()),
+                        })
+                    });
+                    Message::PasteSpecial(text.clone(), picture)
+                })
+            })
+        }
+    }
+
+    /// PASTESPEC's Image formats: place the picture read off the clipboard
+    /// as IMAGEEMBED places a picked file, inside the drawing, or as IMAGE
+    /// does, a file the drawing points at. For that the picture is saved
+    /// where a plain paste saves it: beside the drawing, or in the config
+    /// folder for a drawing never saved.
+    pub(in crate::app) fn place_pasted_image(
+        &mut self,
+        image: crate::io::ole_embed::EmbeddedImage,
+        embedded: bool,
+    ) -> Task<Message> {
+        if embedded {
+            return self.update(Message::ImageEmbedPickResult(Ok(image)));
+        }
+        // The web has no folder to save in: the read left the picture in
+        // the image registry under its name.
+        #[cfg(target_arch = "wasm32")]
+        let saved: Result<std::path::PathBuf, String> = Ok(std::path::PathBuf::from(&image.name));
+        #[cfg(not(target_arch = "wasm32"))]
+        let saved = self
+            .pasted_image_folder()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+            .and_then(|folder| {
+                let stem = image.name.strip_suffix(".png").unwrap_or(&image.name);
+                save_pasted_png(&folder, stem, &image.bytes)
+            })
+            .map_err(|error| error.to_string());
+        self.update(Message::ImagePickResult(
+            saved.map(|path| (path, image.pixel_width, image.pixel_height)),
+        ))
+    }
+
+    /// Where a pasted picture is saved: beside the drawing, or in the config
+    /// folder for a drawing never saved.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pasted_image_folder(&self) -> Option<std::path::PathBuf> {
+        self.tabs[self.active_tab]
+            .current_path
+            .as_ref()
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .filter(|folder| !folder.as_os_str().is_empty())
+            .or_else(|| crate::config::config_dir().map(|dir| dir.join("pasted")))
+    }
+
     /// Read an image off the system clipboard for a paste that found no
     /// text. The web gets the encoded file from the Clipboard API; native
     /// gets pixels, which are written as a PNG beside the drawing (or, for a
@@ -3392,33 +3507,12 @@ impl OpenCADStudio {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let folder = self.tabs[self.active_tab]
-                .current_path
-                .as_ref()
-                .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
-                .filter(|folder| !folder.as_os_str().is_empty())
-                .or_else(|| crate::config::config_dir().map(|dir| dir.join("pasted")));
+            let folder = self.pasted_image_folder();
             iced::clipboard::read_image().map(move |image| {
                 let saved = image.ok().zip(folder.clone()).and_then(|(image, folder)| {
-                    let pixels = image::RgbaImage::from_raw(
-                        image.size.width,
-                        image.size.height,
-                        image.rgba.to_vec(),
-                    )?;
-                    let mut png = std::io::Cursor::new(Vec::new());
-                    pixels.write_to(&mut png, image::ImageFormat::Png).ok()?;
-                    let stamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |elapsed| elapsed.as_millis());
-                    let name = crate::sys::unique_pasted_image_name(
-                        &format!("pasted-{stamp}"),
-                        "png",
-                        |name| folder.join(name).exists(),
-                    );
-                    let path = folder.join(name);
-                    std::fs::create_dir_all(&folder).ok()?;
-                    std::fs::write(&path, png.get_ref()).ok()?;
-                    Some((path.to_string_lossy().into_owned(), png.into_inner()))
+                    let png = clipboard_png(image.size.width, image.size.height, &image.rgba)?;
+                    let path = save_pasted_png(&folder, &pasted_image_stem(), &png).ok()?;
+                    Some((path.to_string_lossy().into_owned(), png))
                 });
                 Message::SystemClipboardPasteImage(saved)
             })
@@ -3865,6 +3959,9 @@ impl OpenCADStudio {
         };
         if field == "authoring_alignment_type" {
             return self.set_authoring_alignment_type(&value);
+        }
+        if field == "authoring_base_location" {
+            return self.set_authoring_base_location(&value);
         }
         if field.starts_with("bedit_") {
             return self.set_block_property(field, &value);
@@ -4794,14 +4891,9 @@ impl OpenCADStudio {
                 // Named plot-style pick: ByLayer / ByBlock clear the
                 // handle; a named style resolves through the drawing's
                 // ACAD_PLOTSTYLENAME dictionary to its placeholder handle.
-                let dict_h = self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .acad_plotstylename_dict_handle;
                 let ph: Option<document::Handle> =
-                    crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
-                        .and_then(|d| d.entries.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
+                    crate::app::properties::plot_style_entries(&self.tabs[i].scene.document)
+                        .and_then(|e| e.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
                 for &handle in &handles {
                     if self.tabs[i].scene.is_layer_locked(handle) {
                         continue;

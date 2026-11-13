@@ -1170,7 +1170,7 @@ fn claim_path(seen: &mut HashSet<(String, String)>, saved_path: &str, name: &str
 
 // ── Text helpers ──────────────────────────────────────────────────────────
 
-fn status_text(status: RefStatus) -> std::borrow::Cow<'static, str> {
+pub(crate) fn status_text(status: RefStatus) -> std::borrow::Cow<'static, str> {
     match status {
         RefStatus::Loaded => crate::t!("Loaded"),
         RefStatus::Unloaded => crate::t!("Unloaded"),
@@ -1643,6 +1643,26 @@ fn menu_row(label: String, msg: Message) -> Element<'static, Message> {
     .into()
 }
 
+/// A greyed menu row: shown, but takes no click.
+fn disabled_menu_row(label: String, keep_flyout: bool) -> Element<'static, Message> {
+    mouse_area(
+        container(text(label).size(12).style(|theme: &Theme| {
+            iced::widget::text::Style {
+                color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
+            }
+        }))
+        .padding([4, 12])
+        .height(Length::Fixed(MENU_ROW_H))
+        .width(Fill),
+    )
+    .on_enter(if keep_flyout {
+        Message::XrefRowChangePathEnter
+    } else {
+        Message::XrefRowChangePathLeave
+    })
+    .into()
+}
+
 /// One flyout submenu row: does not close the flyout on hover. Same
 /// single-`mouse_area` rule as [`menu_row`] — no nested `button`.
 fn submenu_row(label: String, msg: Message) -> Element<'static, Message> {
@@ -1681,49 +1701,75 @@ fn menu_separator() -> Element<'static, Message> {
 /// Width of the Change Path Type flyout.
 const XREF_FLYOUT_W: f32 = 180.0;
 
-fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Message> {
+/// `nested` greys everything but Open: a nested reference is changed in its
+/// host drawing. `current` is the path type the reference already has, which
+/// its flyout greys.
+fn row_menu_for(
+    id: XrefRowId,
+    change_path_open: bool,
+    nested: bool,
+    current: Pathtype,
+) -> Element<'static, Message> {
+    let change_path_open = change_path_open && !nested;
     let item = |label: &str, op: XrefPaletteOp| -> Element<'static, Message> {
+        if nested && !matches!(op, XrefPaletteOp::Open) {
+            return disabled_menu_row(label.to_string(), false);
+        }
         menu_row(label.to_string(), Message::XrefRowOp(id.clone(), op))
     };
     let pathtype_item = |label: &str, pt: Pathtype| -> Element<'static, Message> {
+        if pt == current {
+            return disabled_menu_row(label.to_string(), true);
+        }
         submenu_row(
             label.to_string(),
             Message::XrefRowOp(id.clone(), XrefPaletteOp::Pathtype(pt)),
         )
     };
-    let change_path_row: Element<'static, Message> = mouse_area(
-        container(
-            row![
-                text(crate::t!("Change Path Type").into_owned())
-                    .size(12)
-                    .width(Fill),
-                crate::ui::icons::themed_arrow_right(10.0),
-            ]
-            .align_y(iced::Center)
-            .spacing(8),
-        )
-        .style(move |theme: &Theme| {
-            let palette = theme.palette();
-            let bg = if change_path_open {
-                Some(Background::Color(palette.background.weak.color))
-            } else {
-                None
-            };
-            container::Style {
-                background: bg,
-                border: Border {
-                    radius: 2.0.into(),
+    let path_row = |label: String, msg: Message| -> Element<'static, Message> {
+        if nested {
+            disabled_menu_row(label, false)
+        } else {
+            menu_row(label, msg)
+        }
+    };
+    let change_path_row: Element<'static, Message> = if nested {
+        disabled_menu_row(crate::t!("Change Path Type").into_owned(), false)
+    } else {
+        mouse_area(
+            container(
+                row![
+                    text(crate::t!("Change Path Type").into_owned())
+                        .size(12)
+                        .width(Fill),
+                    crate::ui::icons::themed_arrow_right(10.0),
+                ]
+                .align_y(iced::Center)
+                .spacing(8),
+            )
+            .style(move |theme: &Theme| {
+                let palette = theme.palette();
+                let bg = if change_path_open {
+                    Some(Background::Color(palette.background.weak.color))
+                } else {
+                    None
+                };
+                container::Style {
+                    background: bg,
+                    border: Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .padding([4, 12])
-        .height(Length::Fixed(MENU_ROW_H))
-        .width(Fill),
-    )
-    .on_enter(Message::XrefRowChangePathEnter)
-    .into();
+                }
+            })
+            .padding([4, 12])
+            .height(Length::Fixed(MENU_ROW_H))
+            .width(Fill),
+        )
+        .on_enter(Message::XrefRowChangePathEnter)
+        .into()
+    };
 
     let main: Element<'static, Message> = container(
         column![
@@ -1735,11 +1781,11 @@ fn row_menu_for(id: XrefRowId, change_path_open: bool) -> Element<'static, Messa
             menu_separator(),
             change_path_row,
             menu_separator(),
-            menu_row(
+            path_row(
                 crate::t!("Select New Path").into_owned(),
                 Message::XrefRowPathPick(id.clone()),
             ),
-            menu_row(
+            path_row(
                 crate::t!("Find and Replace...").into_owned(),
                 Message::XrefRowFindReplacePrompt(id.clone()),
             ),
@@ -1912,9 +1958,13 @@ fn xref_row<'a>(
             .width(Fill),
     )
     .on_press(Message::XrefManagerSelect(row_id.clone()));
+    let (nested, current) = (
+        display.is_nested,
+        crate::io::xref_model::pathtype_of(&entry.saved_path),
+    );
     let cm = iced_aw::ContextMenu::new(row, {
         let row_id = row_id.clone();
-        move || row_menu_for(row_id.clone(), change_path_open)
+        move || row_menu_for(row_id.clone(), change_path_open, nested, current)
     });
     RightClickArea::new(cm, Message::XrefRowRightClick(row_id)).into()
 }
@@ -1981,9 +2031,13 @@ fn tree_row(
             .width(Fill),
     )
     .on_press(Message::XrefManagerSelect(row_id.clone()));
+    let (nested, current) = (
+        display.is_nested,
+        crate::io::xref_model::pathtype_of(&entry.saved_path),
+    );
     let cm = iced_aw::ContextMenu::new(row, {
         let row_id = row_id.clone();
-        move || row_menu_for(row_id.clone(), change_path_open)
+        move || row_menu_for(row_id.clone(), change_path_open, nested, current)
     });
     RightClickArea::new(cm, Message::XrefRowRightClick(row_id)).into()
 }
@@ -2661,7 +2715,7 @@ mod tests {
     fn open_row_menu(change_path_open: bool) -> MenuSimulator {
         let row_id = XrefRowId::of(0, "");
         let mut ui = iced_test::simulator(iced_aw::ContextMenu::new(text("anchor"), move || {
-            row_menu_for(row_id.clone(), change_path_open)
+            row_menu_for(row_id.clone(), change_path_open, false, Pathtype::Relative)
         }));
         let anchor = ui.find("anchor").expect("anchor underlay present");
         let center = anchor.visible_bounds().expect("anchor visible").center();
@@ -2758,7 +2812,7 @@ mod tests {
         use iced_core::Widget;
 
         let mut menu =
-            iced_aw::ContextMenu::new(text("anchor"), || row_menu_for(XrefRowId::of(0, ""), false));
+            iced_aw::ContextMenu::new(text("anchor"), || row_menu_for(XrefRowId::of(0, ""), false, false, Pathtype::Relative));
         let mut tree = iced_core::widget::Tree::new(
             &menu as &dyn Widget<Message, iced::Theme, iced::Renderer>,
         );

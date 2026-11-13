@@ -728,10 +728,17 @@ pub(crate) fn plan(method: &str, rest: &[&str], request: &HttpRequest) -> Plan {
             fields: body,
             created: 201,
         },
-        ("POST", ["commands"]) => Plan::Run {
-            request: json!({"op":"run","cmd":body["cmd"]}),
-            created: 200,
-        },
+        ("POST", ["commands"]) => {
+            // The GUI channel refuses `run` without the tab's document_id.
+            let mut request = json!({"op":"run","cmd":body["cmd"]});
+            if let Some(id) = body["document_id"].as_u64() {
+                request["document_id"] = json!(id);
+            }
+            Plan::Run {
+                request,
+                created: 200,
+            }
+        }
         ("POST", ["undo"]) | ("POST", ["redo"]) => {
             let op = if rest == ["undo"] { "undo" } else { "redo" };
             let mut request = json!({"op":op});
@@ -1034,6 +1041,22 @@ mod tests {
         // Anything else on the machine that finds the port is turned away.
         assert!(status("").contains("401"));
         assert!(status("Authorization: Bearer guess\r\n").contains("401"));
+    }
+
+    #[test]
+    fn commands_forward_document_id() {
+        let plan_for =
+            |body: &str| match plan("POST", &["commands"], &request("POST", "/commands", body)) {
+                Plan::Run { request, .. } => request,
+                _ => panic!("commands must plan a run"),
+            };
+        assert_eq!(
+            plan_for(r#"{"cmd":"LINE 0,0 1,1 ","document_id":2}"#)["document_id"],
+            2
+        );
+        assert!(plan_for(r#"{"cmd":"AUDIT N"}"#)
+            .get("document_id")
+            .is_none());
     }
 
     #[test]

@@ -14,8 +14,43 @@
 // been removed, or whose process has died contributes nothing — its entities
 // display as their bare native type. No snapshot of declarations is cached.
 
+use document::xdata::{ExtendedDataRecord, XDataValue};
 use document::EntityType;
 use rustc_hash::FxHashSet;
+
+const OWNER_STAMP_FLAGS_INDEX: usize = 2;
+const SELECTABLE_CUSTOM_FLAG: i32 = 1;
+
+/// A resolved custom type label and the façade requested by its owner stamp.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CustomEntityClassLabel {
+    pub label: String,
+    pub class_only: bool,
+}
+
+fn selectable_custom_record(record: &ExtendedDataRecord) -> bool {
+    matches!(
+        record.values.get(OWNER_STAMP_FLAGS_INDEX),
+        Some(XDataValue::Integer32(flags)) if flags & SELECTABLE_CUSTOM_FLAG != 0
+    )
+}
+
+/// Native geometry editing is disabled by the persisted owner-stamp flag,
+/// independently of plugin liveness and the legacy reference-only set.
+pub(crate) fn native_edit_disabled(entity: &EntityType) -> bool {
+    entity
+        .common()
+        .extended_data
+        .records()
+        .iter()
+        .any(|record| {
+            let owner_stamp_shape = matches!(record.values.first(), Some(XDataValue::Integer32(_)))
+                || record.values.iter().any(
+                    |value| matches!(value, XDataValue::String(text) if text.contains("-CLASS:")),
+                );
+            owner_stamp_shape && selectable_custom_record(record)
+        })
+}
 
 // The wire declaration type and the resolution core exist only where the
 // out-of-process plugin runtime does; the web build has no plugins at all.
@@ -38,7 +73,7 @@ use ocs_plugin_api::ribbon::owned::OwnedEntityClasses;
 pub(crate) fn custom_entity_class_label(
     disabled: &FxHashSet<String>,
     entity: &EntityType,
-) -> Option<String> {
+) -> Option<CustomEntityClassLabel> {
     let xdata = &entity.common().extended_data;
     if xdata.records().is_empty() {
         return None;
@@ -54,43 +89,68 @@ pub(crate) fn custom_entity_class_label(
         let declarations = crate::plugin::external::with_manager(|manager| {
             manager.entity_class_declarations(|id| disabled.contains(id))
         });
-        resolve_class_label(&declarations, xdata)
+        resolve_class_facade(&declarations, xdata)
     }
 }
 
 /// Pure resolution core over a set of live `(plugin id, declaration)` pairs,
-/// in load order. Kept separate from the live-manager plumbing so the
-/// semantics test without spawning plugin processes.
+/// in load order. Civil writes `CVIFC` → `CVIFC-CLASS:<key>` directly; staged
+/// owner stamps carry `<prefix><key>` as the application name. Only the fixed
+/// third flags value opts into the class-only façade.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn resolve_class_label(
+pub(crate) fn resolve_class_facade(
     declarations: &[(String, OwnedEntityClasses)],
     xdata: &ExtendedData,
-) -> Option<String> {
-    use document::xdata::XDataValue;
+) -> Option<CustomEntityClassLabel> {
+    fn labelled(
+        declaration: &OwnedEntityClasses,
+        key: &str,
+        record: &ExtendedDataRecord,
+    ) -> Option<CustomEntityClassLabel> {
+        if key.is_empty() {
+            return None;
+        }
+        match declaration.labels.get(key) {
+            Some(label) if !label.is_empty() => Some(CustomEntityClassLabel {
+                label: label.clone(),
+                class_only: selectable_custom_record(record),
+            }),
+            _ => None,
+        }
+    }
 
     for record in xdata.records() {
-        let Some(declaration) = declaration_for(declarations, &record.application_name) else {
-            continue; // Foreign application — ignored.
-        };
-        for value in &record.values {
-            let XDataValue::String(text) = value else {
-                continue;
-            };
-            let Some(key) = text.strip_prefix(&declaration.class_prefix) else {
-                continue;
-            };
-            // First class-identity value decides; an empty remainder (prefix
-            // only), unknown key, or empty label all mean the native type.
-            if key.is_empty() {
-                return None;
+        if let Some(declaration) = declaration_for(declarations, &record.application_name) {
+            for value in &record.values {
+                let XDataValue::String(text) = value else {
+                    continue;
+                };
+                let Some(key) = text.strip_prefix(&declaration.class_prefix) else {
+                    continue;
+                };
+                // First class-identity value decides; an empty remainder,
+                // unknown key, or empty label all mean the native type.
+                return labelled(declaration, key, record);
             }
-            return match declaration.labels.get(key) {
-                Some(label) if !label.is_empty() => Some(label.clone()),
-                _ => None,
-            };
+        }
+        if let Some((declaration, key)) = declarations.iter().find_map(|(_, declaration)| {
+            record
+                .application_name
+                .strip_prefix(&declaration.class_prefix)
+                .map(|key| (declaration, key))
+        }) {
+            return labelled(declaration, key, record);
         }
     }
     None
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn resolve_class_label(
+    declarations: &[(String, OwnedEntityClasses)],
+    xdata: &ExtendedData,
+) -> Option<String> {
+    resolve_class_facade(declarations, xdata).map(|class| class.label)
 }
 
 /// The first declaration (load order) claiming `app_id`. Later duplicates are
@@ -118,14 +178,16 @@ fn declaration_for<'a>(
     found
 }
 
-/// Display form: `"<Label> (<Native>)"` when a plugin class label matched,
-/// the native title unchanged otherwise. One rule for every surface — the
-/// Properties panel title (native = translated `ui_name_or_class`), the
-/// records API `display_type`, and the automation entity summary (native =
-/// `ui_name`).
-pub(crate) fn display_type_title(custom_label: Option<String>, native_title: String) -> String {
+/// Display form: a selectable-custom class label alone, otherwise
+/// `"<Label> (<Native>)"`, with the native title unchanged when no class
+/// matched. One rule for Properties, records, and automation surfaces.
+pub(crate) fn display_type_title(
+    custom_label: Option<CustomEntityClassLabel>,
+    native_title: String,
+) -> String {
     match custom_label {
-        Some(label) => format!("{label} ({native_title})"),
+        Some(class) if class.class_only => class.label,
+        Some(class) => format!("{} ({native_title})", class.label),
         None => native_title,
     }
 }
@@ -294,9 +356,62 @@ mod tests {
     #[test]
     fn display_title_qualifies_native_with_label() {
         assert_eq!(
-            display_type_title(Some("Linear Element".to_string()), "Line".to_string()),
+            display_type_title(
+                Some(CustomEntityClassLabel {
+                    label: "Linear Element".to_string(),
+                    class_only: false,
+                }),
+                "Line".to_string(),
+            ),
             "Linear Element (Line)"
         );
         assert_eq!(display_type_title(None, "Line".to_string()), "Line");
+    }
+
+    #[test]
+    fn selectable_custom_stamps_resolve_class_only_for_both_stamp_forms() {
+        let declarations = [declaration("opencad.civil_ifc", "CVIFC")];
+        let mut direct = ExtendedDataRecord::new("CVIFC");
+        direct.add_value(XDataValue::String("CVIFC-CLASS:LINE".to_string()));
+        direct.add_value(XDataValue::String(String::new()));
+        direct.add_value(XDataValue::Integer32(1));
+        let mut direct_entity = EntityType::Line(Line::new());
+        direct_entity.common_mut().extended_data.add_record(direct);
+
+        let direct_facade =
+            resolve_class_facade(&declarations, &direct_entity.common().extended_data)
+                .expect("the direct CVIFC class stamp resolves");
+        assert!(direct_facade.class_only);
+        assert!(native_edit_disabled(&direct_entity));
+        assert_eq!(
+            display_type_title(Some(direct_facade), "Line".to_string()),
+            "Linear Element"
+        );
+
+        let mut staged = ExtendedDataRecord::new("CVIFC-CLASS:LINE");
+        staged.add_value(XDataValue::Integer32(1));
+        staged.add_value(XDataValue::String(String::new()));
+        staged.add_value(XDataValue::Integer32(1));
+        let mut staged_entity = EntityType::Line(Line::new());
+        staged_entity.common_mut().extended_data.add_record(staged);
+        let staged_facade =
+            resolve_class_facade(&declarations, &staged_entity.common().extended_data)
+                .expect("the application-name class stamp resolves");
+        assert!(staged_facade.class_only);
+        assert!(native_edit_disabled(&staged_entity));
+
+        let mut legacy = ExtendedDataRecord::new("CVIFC-CLASS:LINE");
+        legacy.add_value(XDataValue::Integer32(1));
+        let mut legacy_entity = EntityType::Line(Line::new());
+        legacy_entity.common_mut().extended_data.add_record(legacy);
+        let legacy_facade =
+            resolve_class_facade(&declarations, &legacy_entity.common().extended_data)
+                .expect("an unflagged application-name stamp still resolves");
+        assert!(!legacy_facade.class_only);
+        assert!(!native_edit_disabled(&legacy_entity));
+        assert_eq!(
+            display_type_title(Some(legacy_facade), "Line".to_string()),
+            "Linear Element (Line)"
+        );
     }
 }

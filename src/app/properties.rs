@@ -119,6 +119,7 @@ impl OpenCADStudio {
             &self.tabs[i].scene.document,
             handle,
         ));
+        sections.extend(crate::entities::civil::properties(entity, &self.tabs[i].scene.document));
 
         // Turn the Material row into an editable picker: the source
         // options (ByLayer / ByBlock) plus every named material the
@@ -499,15 +500,14 @@ impl OpenCADStudio {
 
         if !self.tabs[i].scene.document.header.plotstyle_mode {
             let doc = &self.tabs[i].scene.document;
-            let dict_h = doc.header.acad_plotstylename_dict_handle;
             let common = entity.common();
             let mut options = vec![
                 "ByLayer".to_string(),
                 "ByBlock".to_string(),
                 "Normal".to_string(),
             ];
-            if let Some(dict) = crate::scene::annotative::as_dict(doc, dict_h) {
-                for (n, _) in &dict.entries {
+            if let Some(entries) = plot_style_entries(doc) {
+                for (n, _) in entries {
                     if !options.contains(n) {
                         options.push(n.clone());
                     }
@@ -3313,16 +3313,46 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         self.authoring_parameter_properties(item.handle)
                     {
                         if let Some(chain_actions) = chaining {
+                            let mut props = vec![Property {
+                                label: crate::t!("Chain actions").into_owned(),
+                                field: "authoring_chain_actions",
+                                value: PropValue::BoolToggle {
+                                    field: "authoring_chain_actions",
+                                    value: chain_actions,
+                                },
+                            }];
+                            if let Some(document::objects::ObjectType::DynamicBlock(object)) =
+                                self.tabs[i].scene.document.objects.get(&item.handle)
+                            {
+                                if let document::objects::DynamicBlockData::LinearParameter(
+                                    parameter,
+                                ) = &object.data
+                                {
+                                    props.push(Property {
+                                        label: crate::t!("Base location").into_owned(),
+                                        field: "authoring_base_location",
+                                        value: PropValue::Choice {
+                                            selected: crate::t!(if parameter
+                                                .parameter
+                                                .parameter_base_location
+                                                != 0
+                                            {
+                                                "Midpoint"
+                                            } else {
+                                                "Startpoint"
+                                            })
+                                            .into_owned(),
+                                            options: vec![
+                                                crate::t!("Startpoint").into_owned(),
+                                                crate::t!("Midpoint").into_owned(),
+                                            ],
+                                        },
+                                    });
+                                }
+                            }
                             panel.sections.push(PropSection {
                                 title: crate::t!("Behavior").into_owned(),
-                                props: vec![Property {
-                                    label: crate::t!("Chain actions").into_owned(),
-                                    field: "authoring_chain_actions",
-                                    value: PropValue::BoolToggle {
-                                        field: "authoring_chain_actions",
-                                        value: chain_actions,
-                                    },
-                                }],
+                                props,
                             });
                         }
                         if !value_sets.is_empty() {
@@ -3808,6 +3838,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             grip.targets.iter().any(|target| {
                 self.tabs[i].scene.is_layer_locked(target.handle)
                     || self.tabs[i].scene.is_reference_only(target.handle)
+                    || self.tabs[i].scene.native_edit_disabled(target.handle)
             })
         });
         if locked_active_grip {
@@ -3841,7 +3872,8 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             let selected = self.tabs[i].scene.selected_entities();
             let single_handle = (selected.len() == 1
                 && !self.tabs[i].scene.is_layer_locked(selected[0].0)
-                && !self.tabs[i].scene.is_reference_only(selected[0].0))
+                && !self.tabs[i].scene.is_reference_only(selected[0].0)
+                && !self.tabs[i].scene.native_edit_disabled(selected[0].0))
             .then(|| selected[0].0);
             let mut grips = Vec::new();
             let mut handles = Vec::new();
@@ -3870,7 +3902,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             for (members, min, max) in &whole_groups {
                 let centre = (*min + *max) * 0.5;
                 for &member in members {
-                    if self.tabs[i].scene.is_layer_locked(member) {
+                    if self.tabs[i].scene.is_layer_locked(member)
+                        || self.tabs[i].scene.native_edit_disabled(member)
+                    {
                         continue;
                     }
                     handles.push(member);
@@ -3892,6 +3926,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             // A table whose cells are picked shows no table grips.
             let picked_table = self.tabs[i].scene.table_cells_handle();
             for (handle, entity) in selected {
+                if self.tabs[i].scene.native_edit_disabled(handle) {
+                    continue;
+                }
                 if group_members.contains(&handle) {
                     continue;
                 }
@@ -4055,6 +4092,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         };
         if self.tabs[i].scene.is_layer_locked(handle)
             || self.tabs[i].scene.is_reference_only(handle)
+            || self.tabs[i].scene.native_edit_disabled(handle)
         {
             return Ok(Vec::new());
         }
@@ -4189,7 +4227,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     pub(super) fn property_target_handles(&self, i: usize) -> Vec<Handle> {
         // The node graph edits its own node's entity through the panel's
         // handlers, independent of the drawing selection.
-        self.resolve_property_targets(i, true, |scene, handle| !scene.is_layer_locked(handle))
+        self.resolve_property_targets(i, true, |scene, handle| {
+            !scene.is_layer_locked(handle) && !scene.native_edit_disabled(handle)
+        })
     }
 
     /// The point clouds the Locked row applies to: locked ones too, unless
@@ -5628,16 +5668,36 @@ pub(crate) fn plot_style_name(
         2 => "Normal".to_string(),
         _ => handle
             .and_then(|ph| {
-                crate::scene::annotative::as_dict(doc, doc.header.acad_plotstylename_dict_handle)
-                    .and_then(|dict| {
-                        dict.entries
-                            .iter()
-                            .find(|(_, h)| *h == ph)
-                            .map(|(n, _)| n.clone())
-                    })
+                plot_style_entries(doc)?
+                    .iter()
+                    .find(|(_, h)| *h == ph)
+                    .map(|(n, _)| n.clone())
             })
             .unwrap_or_else(|| "ByLayer".to_string()),
     }
+}
+
+/// Entries of the drawing's ACAD_PLOTSTYLENAME dictionary. Drawings keep it
+/// as a dictionary with default (Normal). The root dictionary's entry wins:
+/// a DXF read leaves the header pointer empty or on the new document's own
+/// dictionary, not the file's.
+pub(crate) fn plot_style_entries(
+    doc: &document::Document,
+) -> Option<&[(String, document::Handle)]> {
+    use document::objects::ObjectType;
+    let entries = |handle: document::Handle| match doc.objects.get(&handle)? {
+        ObjectType::DictionaryWithDefault(d) => Some(&d.entries[..]),
+        ObjectType::Dictionary(d) => Some(&d.entries[..]),
+        _ => None,
+    };
+    crate::scene::annotative::as_dict(doc, doc.header.named_objects_dict_handle)
+        .and_then(|root| {
+            root.entries
+                .iter()
+                .find(|(name, _)| name == "ACAD_PLOTSTYLENAME")
+        })
+        .and_then(|(_, handle)| entries(*handle))
+        .or_else(|| entries(doc.header.acad_plotstylename_dict_handle))
 }
 
 pub(crate) fn lineweight_options() -> Vec<String> {
@@ -5937,6 +5997,56 @@ pub(crate) fn field_moves_geometry(field: &str) -> bool {
     ) || (PREFIXES.iter().any(|prefix| field.starts_with(prefix))
         && !field.ends_with("_count")
         && !matches!(field, "pl2_ltype_gen" | "pl2_current_vertex"))
+}
+
+#[cfg(test)]
+mod plot_style_name_tests {
+    use super::plot_style_name;
+    use document::objects::ObjectType;
+
+    /// A drawing whose ACAD_PLOTSTYLENAME dictionary holds `name`. Drawings
+    /// keep it as a dictionary with default (Normal), as new documents do.
+    fn drawing_with_style(name: &str) -> (document::Document, document::Handle) {
+        let mut doc = document::Document::new();
+        let placeholder = doc.allocate_handle();
+        let dict = doc.header.acad_plotstylename_dict_handle;
+        match doc.objects.get_mut(&dict) {
+            Some(ObjectType::DictionaryWithDefault(d)) => {
+                d.entries.push((name.to_string(), placeholder))
+            }
+            _ => panic!("premise: ACAD_PLOTSTYLENAME is a dictionary with default"),
+        }
+        (doc, placeholder)
+    }
+
+    #[test]
+    fn an_object_style_is_named_from_the_dictionary_with_default() {
+        let (doc, placeholder) = drawing_with_style("Black");
+        assert_eq!(plot_style_name(&doc, 3, Some(placeholder)), "Black");
+    }
+
+    /// A DXF read leaves the header pointer empty; the root dictionary's
+    /// ACAD_PLOTSTYLENAME entry still names the style.
+    #[test]
+    fn without_the_header_pointer_the_root_dictionary_names_the_style() {
+        let (mut doc, placeholder) = drawing_with_style("Black");
+        doc.header.acad_plotstylename_dict_handle = document::Handle::NULL;
+        assert_eq!(plot_style_name(&doc, 3, Some(placeholder)), "Black");
+    }
+
+    /// A header pointer left on another (empty) dictionary does not hide the
+    /// root dictionary's ACAD_PLOTSTYLENAME.
+    #[test]
+    fn a_stale_header_pointer_does_not_hide_the_root_entry() {
+        let (mut doc, placeholder) = drawing_with_style("Black");
+        let stale = doc.allocate_handle();
+        let mut empty = document::objects::DictionaryWithDefault::new();
+        empty.handle = stale;
+        doc.objects
+            .insert(stale, ObjectType::DictionaryWithDefault(empty));
+        doc.header.acad_plotstylename_dict_handle = stale;
+        assert_eq!(plot_style_name(&doc, 3, Some(placeholder)), "Black");
+    }
 }
 
 #[cfg(test)]

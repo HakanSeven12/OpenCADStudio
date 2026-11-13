@@ -1168,6 +1168,10 @@ pub struct PluginGrip {
     pub point: [f64; 3],
     #[serde(default)]
     pub axis: Option<[f64; 3]>,
+    /// API v21: constrain every custom-grip event to the original world-XY
+    /// plane. `false` preserves the legacy camera-target-plane behavior.
+    #[serde(default)]
+    pub xy_plane: bool,
     #[serde(default)]
     pub shape: PluginGripShape,
 }
@@ -2447,6 +2451,15 @@ pub struct PluginClassParameterRow {
     pub value: Option<String>,
 }
 
+fn deserialize_selectable_custom<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // bincode 1 reports UnexpectedEof instead of a missing sequence element
+    // for a v17 payload ending immediately before this trailing field.
+    bool::deserialize(deserializer).or(Ok(false))
+}
+
 /// One staged instance of a registered plugin class (API v14): identity plus
 /// a host-evaluated design descriptor. Records carry the truth; the host
 /// never re-interprets anything the plugin does not declare here.
@@ -2474,6 +2487,13 @@ pub struct PluginClassInstance {
     /// handles-to-records linkage the plugin maintains).
     #[serde(default)]
     pub design_record: String,
+    /// Keep this staged display set selectable for plugin custom grips/panels,
+    /// while suppressing native vertex editing and native property updates.
+    ///
+    /// API v18 additive. Absent v17 payloads decode as `false`, preserving the
+    /// legacy reference-only staging behavior byte-for-byte.
+    #[serde(default, deserialize_with = "deserialize_selectable_custom")]
+    pub selectable_custom: bool,
 }
 
 /// Host-evaluated display descriptor kinds (API v14, additive).

@@ -673,11 +673,15 @@ impl Scene {
                     }
                     if !points.is_empty() {
                         let mut wire = WireModel::solid(
-                            "viewport_hatch_pattern".into(),
+                            hatch
+                                .entity
+                                .map(|handle| handle.value().to_string())
+                                .unwrap_or_else(|| "viewport_hatch_pattern".to_string()),
                             points,
                             hatch.color,
                             false,
                         );
+                        wire.effective_layer = hatch.effective_layer.clone();
                         wire.aci = hatch.aci;
                         wire.line_weight_px = hatch.line_weight_px;
                         wire.aabb = aabb;
@@ -871,6 +875,7 @@ impl Scene {
             }
             let color = set.display_color().unwrap_or([0.0, 0.0, 0.0, 1.0]);
             let mut wire = WireModel::solid_f64(handle.value().to_string(), points, color, false);
+            wire.effective_layer = set.effective_layer.clone();
             if let Some(entity) = self.document.get_entity(handle) {
                 wire.line_weight_px =
                     view::render::render_style_for_viewport(&self.document, entity, viewport).3;

@@ -3,7 +3,7 @@ use super::*;
 use crate::command::{AreaPreviewRegion, AreaPreviewSource};
 use crate::scene::model::hatch_model::HatchPattern;
 
-mod block_parameter;
+pub(super) mod block_parameter;
 
 #[cfg(test)]
 mod transform_tests;
@@ -280,6 +280,8 @@ impl Scene {
             return None;
         }
         let mut model = HatchModel {
+            entity: None,
+            effective_layer: None,
             pattern_origin: None,
             render_instance: None,
             world_origin: origin,

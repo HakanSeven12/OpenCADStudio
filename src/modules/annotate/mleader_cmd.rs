@@ -179,7 +179,12 @@ impl MLeaderCommand {
             path_type: (style.path_type as i16).into(),
             enable_landing: style.enable_landing,
             landing_length: style.landing_distance,
-            max_points: style.max_leader_points.max(2) as usize,
+            // No maximum (0) lets the leader take any number of points.
+            max_points: if style.max_leader_points <= 0 {
+                0
+            } else {
+                style.max_leader_points.max(2) as usize
+            },
             first_angle: (style.first_segment_angle.abs() > 1.0e-12)
                 .then_some(style.first_segment_angle),
             second_angle: (style.second_segment_angle.abs() > 1.0e-12)
@@ -289,7 +294,7 @@ impl MLeaderCommand {
         ml.path_type = self.path_type;
         // New multileaders reach their text and keep no wrap width unless
         // the content-first box gave one; the text flows by its style.
-        ml.extend_leader_to_text = true;
+        ml.extend_leader_to_text = self.style.as_ref().is_none_or(|s| s.unknown_flag_298);
         ml.context.text_width = self.box_width.unwrap_or(0.0);
         ml.context.text_flow_direction =
             document::entities::multileader::FlowDirectionType::ByStyle;

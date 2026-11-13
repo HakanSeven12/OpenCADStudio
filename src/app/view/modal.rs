@@ -120,8 +120,10 @@ impl OpenCADStudio {
             Some(K::MlStyle) => crate::tr!("modal", "multiline-style-manager"),
             Some(K::LinetypeManager) => crate::tr!("modal", "linetype-manager"),
             Some(K::TableStyle) => crate::tr!("modal", "table-style-manager"),
-            Some(K::MLeaderStyle) => crate::tr!("modal", "multileader-style-manager"),
-            Some(K::DimStyle) => crate::tr!("modal", "dimension-style-manager"),
+            Some(K::MLeaderStyle) => {
+                crate::ui::style::mleaderstyle::title(&self.mls, &self.mleaderstyle_selected)
+            }
+            Some(K::DimStyle) => crate::ui::style::dimstyle::title(&self.dsd),
             Some(K::AssocPrompt) => crate::tr!("modal", "default-application"),
             Some(K::AecDropWarning) => crate::tr!("modal", "save-warning"),
             Some(K::ConversionLoss) => crate::tr!("modal", "save-warning"),
@@ -245,6 +247,7 @@ impl OpenCADStudio {
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,
                             backup_on_save: self.backup_on_save,
+                            transmittal_layout: self.transmittal_layout,
                             page_setup_on_new_layout: self.plot_dialog.page_setup_on_new_layout,
                             textfill: crate::scene::text::sdf_atlas::textfill(),
                             cliprompt_lines: self.cliprompt_lines,
@@ -1407,608 +1410,146 @@ impl OpenCADStudio {
             super::super::ModalKind::MLeaderStyle => {
                 use document::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
-                let styles: Vec<String> = tab
-                    .scene
-                    .document
+                let doc = &tab.scene.document;
+                let mut styles: Vec<(String, bool)> = doc
                     .objects
                     .values()
                     .filter_map(|o| match o {
-                        ObjectType::MultiLeaderStyle(s) => Some(s.name.clone()),
+                        ObjectType::MultiLeaderStyle(s) => Some((s.name.clone(), s.is_annotative)),
                         _ => None,
                     })
                     .collect();
-                let selected_style = tab.scene.document.objects.values().find_map(|o| match o {
+                styles.sort_by_key(|(name, _)| name.to_lowercase());
+                let used: Vec<document::Handle> = doc
+                    .entities()
+                    .filter_map(|entity| match entity {
+                        document::EntityType::MultiLeader(leader) => leader.style_handle,
+                        _ => None,
+                    })
+                    .collect();
+                let in_use: Vec<String> = doc
+                    .objects
+                    .iter()
+                    .filter_map(|(handle, o)| match o {
+                        ObjectType::MultiLeaderStyle(s) if used.contains(handle) => {
+                            Some(s.name.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let style = doc.objects.values().find_map(|o| match o {
                     ObjectType::MultiLeaderStyle(s) if s.name == self.mleaderstyle_selected => {
                         Some(s)
                     }
                     _ => None,
                 });
-                let doc = &tab.scene.document;
-                let mut block_opts: Vec<String> = vec!["None".to_string()];
-                block_opts.extend(doc.block_records.iter().map(|b| b.name.clone()));
-                let arrow_opts = crate::entities::arrowheads::options(
-                    selected_style
-                        .and_then(|s| s.arrowhead_handle)
-                        .map(|h| crate::entities::arrowheads::label(doc, h))
-                        .as_deref(),
-                );
-                let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
-                lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
-                let mut textstyle_opts: Vec<String> = vec!["None".to_string()];
-                textstyle_opts.extend(
-                    doc.text_styles
+                // ByLayer and ByBlock first, then the drawing's linetypes.
+                let mut linetype_opts = vec!["ByLayer".to_string(), "ByBlock".to_string()];
+                linetype_opts.extend(
+                    doc.line_types
                         .iter()
-                        .filter(|t| !t.is_shape_file)
-                        .map(|t| t.name.clone()),
+                        .map(|lt| lt.name.clone())
+                        .filter(|name| {
+                            !name.eq_ignore_ascii_case("ByLayer")
+                                && !name.eq_ignore_ascii_case("ByBlock")
+                        }),
                 );
-                let opt_block = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .block_records
-                            .iter()
-                            .find(|b| b.handle == h)
-                            .map(|b| b.name.clone())
-                            .unwrap_or_else(|| "None".to_string()),
-                        None => "None".to_string(),
-                    }
+                let linetype_rows = || -> Vec<crate::ui::style::mleaderstyle::LinetypeRow> {
+                    linetype_opts
+                        .iter()
+                        .map(|name| {
+                            let record = doc.line_types.get(name);
+                            crate::ui::style::mleaderstyle::LinetypeRow {
+                                name: name.clone(),
+                                description: record
+                                    .map(|lt| lt.description.clone())
+                                    .unwrap_or_default(),
+                                pattern: record
+                                    .map(|lt| lt.elements.iter().map(|e| e.length).collect())
+                                    .unwrap_or_default(),
+                            }
+                        })
+                        .collect()
                 };
-                let opt_lt = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .line_types
-                            .iter()
-                            .find(|lt| lt.handle == h)
-                            .map(|lt| lt.name.clone())
-                            .unwrap_or_else(|| "ByBlock".to_string()),
-                        None => "ByBlock".to_string(),
-                    }
-                };
-                let opt_ts = |h: Option<document::types::Handle>| -> String {
-                    match h {
-                        Some(h) => doc
-                            .text_styles
-                            .iter()
-                            .find(|t| t.handle == h)
-                            .map(|t| t.name.clone())
-                            .unwrap_or_else(|| "None".to_string()),
-                        None => "None".to_string(),
-                    }
-                };
-                let (line_type_name, arrowhead_name, text_style_name, block_content_name) =
-                    match selected_style {
-                        Some(s) => (
-                            opt_lt(s.line_type_handle),
-                            crate::entities::arrowheads::label(
-                                doc,
-                                s.arrowhead_handle.unwrap_or(document::types::Handle::NULL),
-                            ),
-                            opt_ts(s.text_style_handle),
-                            opt_block(s.block_content_handle),
-                        ),
-                        None => Default::default(),
-                    };
-                let compare_opts: Vec<String> = styles
+                // A style without a linetype draws ByBlock.
+                let line_type_name = style
+                    .and_then(|s| s.line_type_handle)
+                    .and_then(|h| doc.line_types.iter().find(|lt| lt.handle == h))
+                    .map(|lt| lt.name.clone())
+                    .unwrap_or_else(|| "ByBlock".to_string());
+                let arrowhead_name = crate::entities::arrowheads::label(
+                    doc,
+                    style
+                        .and_then(|s| s.arrowhead_handle)
+                        .unwrap_or(document::types::Handle::NULL),
+                );
+                let arrow_opts =
+                    crate::entities::arrowheads::options(std::iter::once(arrowhead_name.as_str()));
+                let mut textstyle_opts: Vec<String> = doc
+                    .text_styles
                     .iter()
-                    .filter(|name| !name.eq_ignore_ascii_case(&self.mleaderstyle_selected))
-                    .cloned()
+                    .filter(|t| !t.is_shape_file && !t.name.is_empty())
+                    .map(|t| t.name.clone())
                     .collect();
-                let compare_name = compare_opts
+                textstyle_opts.sort_by_key(|name| name.to_lowercase());
+                let text_style_name = style
+                    .and_then(|s| s.text_style_handle)
+                    .and_then(|h| doc.text_styles.iter().find(|t| t.handle == h))
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "Standard".to_string());
+                let block_name = crate::entities::leader_blocks::label(
+                    doc,
+                    style.and_then(|s| s.block_content_handle),
+                );
+                let mut block_opts: Vec<String> = crate::entities::leader_blocks::STANDARD
                     .iter()
-                    .find(|name| name.eq_ignore_ascii_case(&self.mleaderstyle_compare))
-                    .cloned()
-                    .or_else(|| compare_opts.first().cloned())
-                    .unwrap_or_default();
-                let compare_style = doc.objects.values().find_map(|object| match object {
-                    ObjectType::MultiLeaderStyle(style) if style.name == compare_name => {
-                        Some(style)
-                    }
-                    _ => None,
-                });
-                let mut comparison_sections = Vec::new();
-                if let (Some(a), Some(b)) = (selected_style, compare_style) {
-                    if (
-                        &a.description,
-                        a.path_type,
-                        a.line_color,
-                        a.line_type_handle,
-                        a.line_weight,
-                        a.arrowhead_handle,
-                        a.arrowhead_size,
-                        a.break_gap_size,
-                    ) != (
-                        &b.description,
-                        b.path_type,
-                        b.line_color,
-                        b.line_type_handle,
-                        b.line_weight,
-                        b.arrowhead_handle,
-                        b.arrowhead_size,
-                        b.break_gap_size,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Leader Format").into_owned());
-                    }
-                    if (
-                        a.enable_landing,
-                        a.enable_dogleg,
-                        a.landing_distance,
-                        a.landing_gap,
-                        a.scale_factor,
-                        a.align_space,
-                        a.max_leader_points,
-                        a.first_segment_angle,
-                        a.second_segment_angle,
-                        a.leader_draw_order,
-                        a.multileader_draw_order,
-                        a.is_annotative,
-                    ) != (
-                        b.enable_landing,
-                        b.enable_dogleg,
-                        b.landing_distance,
-                        b.landing_gap,
-                        b.scale_factor,
-                        b.align_space,
-                        b.max_leader_points,
-                        b.first_segment_angle,
-                        b.second_segment_angle,
-                        b.leader_draw_order,
-                        b.multileader_draw_order,
-                        b.is_annotative,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Leader Structure").into_owned());
-                    }
-                    if (
-                        a.content_type,
-                        &a.default_text,
-                        a.text_style_handle,
-                        a.text_height,
-                        a.text_color,
-                        a.text_angle_type,
-                        a.text_alignment,
-                    ) != (
-                        b.content_type,
-                        &b.default_text,
-                        b.text_style_handle,
-                        b.text_height,
-                        b.text_color,
-                        b.text_angle_type,
-                        b.text_alignment,
-                    ) || (
-                        a.text_left_attachment,
-                        a.text_right_attachment,
-                        a.text_top_attachment,
-                        a.text_bottom_attachment,
-                        a.text_attachment_direction,
-                        a.text_frame,
-                        a.text_always_left,
-                    ) != (
-                        b.text_left_attachment,
-                        b.text_right_attachment,
-                        b.text_top_attachment,
-                        b.text_bottom_attachment,
-                        b.text_attachment_direction,
-                        b.text_frame,
-                        b.text_always_left,
-                    ) {
-                        comparison_sections.push(crate::i18n::translate("Content").into_owned());
-                    }
-                    if (
-                        a.block_content_handle,
-                        a.block_content_color,
-                        a.block_content_connection,
-                        a.block_content_rotation,
-                        a.block_content_scale_x,
-                        a.block_content_scale_y,
-                        a.block_content_scale_z,
-                        a.enable_block_scale,
-                        a.enable_block_rotation,
-                    ) != (
-                        b.block_content_handle,
-                        b.block_content_color,
-                        b.block_content_connection,
-                        b.block_content_rotation,
-                        b.block_content_scale_x,
-                        b.block_content_scale_y,
-                        b.block_content_scale_z,
-                        b.enable_block_scale,
-                        b.enable_block_rotation,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Block Content").into_owned());
-                    }
+                    .map(|(name, _)| name.to_string())
+                    .collect();
+                if !block_opts.contains(&block_name) {
+                    block_opts.push(block_name.clone());
                 }
-                let in_use =
-                    self.style_in_use(crate::app::StyleKind::MLeader, &self.mleaderstyle_selected);
-                sized_flow(ex, 960, 680, |flow| {
+                let user_blocks = super::super::update::mleader_style::user_blocks(doc);
+                sized_flow(ex, 880, 600, |flow| {
                     crate::ui::style::mleaderstyle::view_window(
-                        crate::ui::style::mleaderstyle::MLeaderStyleView {
+                        crate::ui::style::mleaderstyle::View {
+                            dialog: &self.mls,
                             styles: styles.clone(),
+                            in_use: in_use.clone(),
                             selected: &self.mleaderstyle_selected,
-                            style: selected_style,
-                            current: tab.active_mleader_style.clone(),
-                            tab: self.mleaderstyle_tab,
-                            compare_name: compare_name.clone(),
-                            compare_opts: compare_opts.clone(),
-                            comparison_sections: comparison_sections.clone(),
-                            in_use,
+                            current: &tab.active_mleader_style,
+                            style,
                             landing_distance: &self.mls_landing_distance,
                             landing_gap: &self.mls_landing_gap,
                             arrowhead_size: &self.mls_arrowhead_size,
                             text_height: &self.mls_text_height,
                             scale_factor: &self.mls_scale_factor,
                             break_gap: &self.mls_break_gap,
-                            first_seg_angle: &self.mls_first_seg_angle,
-                            second_seg_angle: &self.mls_second_seg_angle,
                             max_points: &self.mls_max_points,
                             default_text: &self.mls_default_text,
                             line_color: &self.mls_line_color,
                             text_color: &self.mls_text_color,
-                            description: &self.mls_description,
-                            align_space: &self.mls_align_space,
                             block_color: &self.mls_block_color,
-                            block_rotation: &self.mls_block_rotation,
-                            block_scale_x: &self.mls_block_scale_x,
-                            block_scale_y: &self.mls_block_scale_y,
-                            block_scale_z: &self.mls_block_scale_z,
-                            block_opts: block_opts.clone(),
-                            arrow_opts: arrow_opts.clone(),
-                            lt_opts: lt_opts.clone(),
-                            textstyle_opts: textstyle_opts.clone(),
-                            line_type_name: line_type_name.clone(),
-                            arrowhead_name: arrowhead_name.clone(),
-                            text_style_name: text_style_name.clone(),
-                            block_content_name: block_content_name.clone(),
-                            rename_active: self.style_rename.as_deref(),
-                            rename_buf: &self.style_rename_buf,
+                            block_scale: &self.mls_block_scale,
                             color_open: self.mls_color_open,
-                        },
-                        flow,
-                    )
-                })
-            }
-            super::super::ModalKind::DimStyle => {
-                let tab = &self.tabs[self.active_tab];
-                let styles: Vec<String> = tab
-                    .scene
-                    .document
-                    .dim_styles
-                    .iter()
-                    .map(|s| s.name.clone())
-                    .collect();
-                let doc = &tab.scene.document;
-                // Dropdown options (names must match the records exactly so the
-                // selection can be resolved back to a handle on the update side).
-                // The standard arrowheads, then the user arrow blocks the
-                // selected style uses; not every block of the drawing. (#1820)
-                let block_opts = crate::entities::arrowheads::options(
-                    doc.dim_styles
-                        .get(&self.dimstyle_selected)
-                        .iter()
-                        .flat_map(|d| [d.dimblk, d.dimblk1, d.dimblk2, d.dimldrblk])
-                        .map(|h| crate::entities::arrowheads::label(doc, h))
-                        .collect::<Vec<_>>()
-                        .iter()
-                        .map(String::as_str),
-                );
-                // User Arrow… offers the drawing's own blocks on demand.
-                let mut block_opts = block_opts;
-                block_opts.push(crate::tr!("dimstyle", "user-arrow"));
-                let user_arrow_blocks: Vec<String> = doc
-                    .block_records
-                    .iter()
-                    .filter(|record| {
-                        !record.name.starts_with('*')
-                            && !record.name.contains('|')
-                            && !record.flags.is_xref
-                            && !record.flags.is_xref_overlay
-                    })
-                    .map(|record| record.name.clone())
-                    .collect();
-                let mut lt_opts: Vec<String> = vec!["ByBlock".to_string()];
-                lt_opts.extend(doc.line_types.iter().map(|lt| lt.name.clone()));
-                let text_style_opts: Vec<String> = doc
-                    .text_styles
-                    .iter()
-                    .filter(|style| !style.is_shape_file)
-                    .map(|style| style.name.clone())
-                    .collect();
-                let text_style_fixed_height = doc
-                    .text_styles
-                    .get(&self.ds_dimtxsty)
-                    .map(|style| style.height)
-                    .filter(|height| *height > 0.0);
-                let blk_name =
-                    |h: document::types::Handle| crate::entities::arrowheads::label(doc, h);
-                let lt_name = |h: document::types::Handle| -> String {
-                    if h.is_null() {
-                        "ByBlock".to_string()
-                    } else {
-                        doc.line_types
-                            .iter()
-                            .find(|lt| lt.handle == h)
-                            .map(|lt| lt.name.clone())
-                            .unwrap_or_else(|| "ByBlock".to_string())
-                    }
-                };
-                let ds_sel = doc.dim_styles.get(&self.dimstyle_selected);
-                let read_only =
-                    ds_sel.is_none_or(|style| style.xref_dependent || style.name.contains('|'));
-                let in_use = doc.entities().any(|entity| {
-                    matches!(entity, document::EntityType::Dimension(dimension)
-                    if dimension.base().style_name.eq_ignore_ascii_case(&self.dimstyle_selected))
-                });
-                let compare_opts: Vec<String> = styles
-                    .iter()
-                    .filter(|name| !name.eq_ignore_ascii_case(&self.dimstyle_selected))
-                    .cloned()
-                    .collect();
-                let compare_name = compare_opts
-                    .iter()
-                    .find(|name| name.eq_ignore_ascii_case(&self.dimstyle_compare))
-                    .cloned()
-                    .or_else(|| compare_opts.first().cloned())
-                    .unwrap_or_default();
-                let mut comparison_sections = Vec::new();
-                if let (Some(a), Some(b)) = (ds_sel, doc.dim_styles.get(&compare_name)) {
-                    if (
-                        a.dimdle, a.dimdli, a.dimgap, a.dimclrd, a.dimlwd, a.dimsd1, a.dimsd2,
-                    ) != (
-                        b.dimdle, b.dimdli, b.dimgap, b.dimclrd, b.dimlwd, b.dimsd1, b.dimsd2,
-                    ) || (
-                        a.dimexe, a.dimexo, a.dimclre, a.dimlwe, a.dimse1, a.dimse2, a.dimfxl,
-                        a.dimfxlon,
-                    ) != (
-                        b.dimexe, b.dimexo, b.dimclre, b.dimlwe, b.dimse1, b.dimse2, b.dimfxl,
-                        b.dimfxlon,
-                    ) || (a.dimltex_handle, a.dimltex1_handle, a.dimltex2_handle)
-                        != (b.dimltex_handle, b.dimltex1_handle, b.dimltex2_handle)
-                    {
-                        comparison_sections.push(crate::i18n::translate("Lines").into_owned());
-                    }
-                    if (
-                        a.dimasz,
-                        a.dimblk,
-                        a.dimblk1,
-                        a.dimblk2,
-                        a.dimldrblk,
-                        a.dimsah,
-                        a.dimcen,
-                        a.dimtsz,
-                    ) != (
-                        b.dimasz,
-                        b.dimblk,
-                        b.dimblk1,
-                        b.dimblk2,
-                        b.dimldrblk,
-                        b.dimsah,
-                        b.dimcen,
-                        b.dimtsz,
-                    ) || (a.dimarcsym, a.dimjogang) != (b.dimarcsym, b.dimjogang)
-                    {
-                        comparison_sections
-                            .push(crate::i18n::translate("Symbols and Arrows").into_owned());
-                    }
-                    if (
-                        a.dimclrt,
-                        a.dimtxt,
-                        &a.dimtxsty,
-                        a.dimjust,
-                        a.dimtad,
-                        a.dimtvp,
-                    ) != (
-                        b.dimclrt,
-                        b.dimtxt,
-                        &b.dimtxsty,
-                        b.dimjust,
-                        b.dimtad,
-                        b.dimtvp,
-                    ) || (
-                        a.dimtih,
-                        a.dimtoh,
-                        a.dimtfill,
-                        a.dimtfillclr,
-                        a.dimtxtdirection,
-                    ) != (
-                        b.dimtih,
-                        b.dimtoh,
-                        b.dimtfill,
-                        b.dimtfillclr,
-                        b.dimtxtdirection,
-                    ) {
-                        comparison_sections.push(crate::i18n::translate("Text").into_owned());
-                    }
-                    if (
-                        a.dimatfit,
-                        a.dimtix,
-                        a.dimsoxd,
-                        a.dimtmove,
-                        a.dimupt,
-                        a.dimtofl,
-                        a.dimscale,
-                        a.annotative,
-                    ) != (
-                        b.dimatfit,
-                        b.dimtix,
-                        b.dimsoxd,
-                        b.dimtmove,
-                        b.dimupt,
-                        b.dimtofl,
-                        b.dimscale,
-                        b.annotative,
-                    ) {
-                        comparison_sections.push(crate::i18n::translate("Fit").into_owned());
-                    }
-                    if (
-                        a.dimlfac, a.dimlunit, a.dimdec, &a.dimpost, a.dimdsep, a.dimrnd, a.dimzin,
-                        a.dimfrac,
-                    ) != (
-                        b.dimlfac, b.dimlunit, b.dimdec, &b.dimpost, b.dimdsep, b.dimrnd, b.dimzin,
-                        b.dimfrac,
-                    ) || (a.dimaunit, a.dimadec, a.dimazin) != (b.dimaunit, b.dimadec, b.dimazin)
-                    {
-                        comparison_sections
-                            .push(crate::i18n::translate("Primary Units").into_owned());
-                    }
-                    if (
-                        a.dimalt,
-                        a.dimaltf,
-                        a.dimaltd,
-                        a.dimaltu,
-                        a.dimalttd,
-                        a.dimaltrnd,
-                        &a.dimapost,
-                        a.dimaltz,
-                        a.dimalttz,
-                    ) != (
-                        b.dimalt,
-                        b.dimaltf,
-                        b.dimaltd,
-                        b.dimaltu,
-                        b.dimalttd,
-                        b.dimaltrnd,
-                        &b.dimapost,
-                        b.dimaltz,
-                        b.dimalttz,
-                    ) {
-                        comparison_sections
-                            .push(crate::i18n::translate("Alternate Units").into_owned());
-                    }
-                    if (
-                        a.dimtol, a.dimlim, a.dimtp, a.dimtm, a.dimtdec, a.dimtfac, a.dimtolj,
-                        a.dimtzin,
-                    ) != (
-                        b.dimtol, b.dimlim, b.dimtp, b.dimtm, b.dimtdec, b.dimtfac, b.dimtolj,
-                        b.dimtzin,
-                    ) {
-                        comparison_sections.push(crate::i18n::translate("Tolerances").into_owned());
-                    }
-                }
-                let (
-                    dimblk_name,
-                    dimblk1_name,
-                    dimblk2_name,
-                    dimldrblk_name,
-                    dimltex_name,
-                    dimltex1_name,
-                    dimltex2_name,
-                ) = match ds_sel {
-                    Some(d) => (
-                        blk_name(d.dimblk),
-                        blk_name(d.dimblk1),
-                        blk_name(d.dimblk2),
-                        blk_name(d.dimldrblk),
-                        lt_name(d.dimltex_handle),
-                        lt_name(d.dimltex1_handle),
-                        lt_name(d.dimltex2_handle),
-                    ),
-                    None => Default::default(),
-                };
-                sized_flow(ex, 960, 680, |flow| {
-                    crate::ui::style::dimstyle::view_window(
-                        styles.clone(),
-                        &self.dimstyle_selected,
-                        &self.tabs[self.active_tab]
-                            .scene
-                            .document
-                            .header
-                            .current_dimstyle_name,
-                        self.dimstyle_tab,
-                        crate::ui::style::dimstyle::DimStyleValues {
-                            dimdle: &self.ds_dimdle,
-                            dimdli: &self.ds_dimdli,
-                            dimgap: &self.ds_dimgap,
-                            dimexe: &self.ds_dimexe,
-                            dimexo: &self.ds_dimexo,
-                            dimsd1: self.ds_dimsd1,
-                            dimsd2: self.ds_dimsd2,
-                            dimse1: self.ds_dimse1,
-                            dimse2: self.ds_dimse2,
-                            dimasz: &self.ds_dimasz,
-                            dimcen: &self.ds_dimcen,
-                            dimtsz: &self.ds_dimtsz,
-                            dimtxt: &self.ds_dimtxt,
-                            dimtxsty: &self.ds_dimtxsty,
-                            dimtad: &self.ds_dimtad,
-                            dimtih: self.ds_dimtih,
-                            dimtoh: self.ds_dimtoh,
-                            dimscale: &self.ds_dimscale,
-                            dimlfac: &self.ds_dimlfac,
-                            dimlunit: &self.ds_dimlunit,
-                            dimdec: &self.ds_dimdec,
-                            dimpost: &self.ds_dimpost,
-                            dimtol: self.ds_dimtol,
-                            dimlim: self.ds_dimlim,
-                            dimtp: &self.ds_dimtp,
-                            dimtm: &self.ds_dimtm,
-                            dimtdec: &self.ds_dimtdec,
-                            dimtfac: &self.ds_dimtfac,
-                            annotative: self.ds_annotative,
-                            dimclrd: &self.ds_dimclrd,
-                            dimlwd: &self.ds_dimlwd,
-                            dimclre: &self.ds_dimclre,
-                            dimlwe: &self.ds_dimlwe,
-                            dimfxl: &self.ds_dimfxl,
-                            dimfxlon: self.ds_dimfxlon,
-                            dimsah: self.ds_dimsah,
-                            dimarcsym: &self.ds_dimarcsym,
-                            dimjogang: &self.ds_dimjogang,
-                            dimclrt: &self.ds_dimclrt,
-                            dimjust: &self.ds_dimjust,
-                            dimtvp: &self.ds_dimtvp,
-                            dimtfill: &self.ds_dimtfill,
-                            dimtfillclr: &self.ds_dimtfillclr,
-                            dimtxtdirection: self.ds_dimtxtdirection,
-                            dimatfit: &self.ds_dimatfit,
-                            dimtix: self.ds_dimtix,
-                            dimsoxd: self.ds_dimsoxd,
-                            dimtmove: &self.ds_dimtmove,
-                            dimupt: self.ds_dimupt,
-                            dimtofl: self.ds_dimtofl,
-                            dimdsep: &self.ds_dimdsep,
-                            dimrnd: &self.ds_dimrnd,
-                            dimzin: &self.ds_dimzin,
-                            dimfrac: &self.ds_dimfrac,
-                            dimaunit: &self.ds_dimaunit,
-                            dimadec: &self.ds_dimadec,
-                            dimazin: &self.ds_dimazin,
-                            dimalt: self.ds_dimalt,
-                            dimaltf: &self.ds_dimaltf,
-                            dimaltd: &self.ds_dimaltd,
-                            dimaltu: &self.ds_dimaltu,
-                            dimalttd: &self.ds_dimalttd,
-                            dimaltrnd: &self.ds_dimaltrnd,
-                            dimapost: &self.ds_dimapost,
-                            dimaltz: &self.ds_dimaltz,
-                            dimalttz: &self.ds_dimalttz,
-                            dimtolj: &self.ds_dimtolj,
-                            dimtzin: &self.ds_dimtzin,
-                            dimblk_name: dimblk_name.clone(),
-                            dimblk1_name: dimblk1_name.clone(),
-                            dimblk2_name: dimblk2_name.clone(),
-                            dimldrblk_name: dimldrblk_name.clone(),
-                            dimltex_name: dimltex_name.clone(),
-                            dimltex1_name: dimltex1_name.clone(),
-                            dimltex2_name: dimltex2_name.clone(),
+                            line_type_name: line_type_name.clone(),
+                            linetype_opts: linetype_opts.clone(),
+                            linetypes: linetype_rows(),
+                            arrowhead_name: arrowhead_name.clone(),
+                            arrow_opts: arrow_opts.clone(),
+                            text_style_name: text_style_name.clone(),
+                            textstyle_opts: textstyle_opts.clone(),
+                            block_name: block_name.clone(),
                             block_opts: block_opts.clone(),
-                            user_arrow_blocks: user_arrow_blocks.clone(),
-                            user_arrow_field: self.dimstyle_user_arrow,
-                            lt_opts: lt_opts.clone(),
-                            text_style_opts: text_style_opts.clone(),
-                            text_style_fixed_height,
-                            compare_name: compare_name.clone(),
-                            compare_opts: compare_opts.clone(),
-                            comparison_sections: comparison_sections.clone(),
-                            read_only,
-                            in_use,
-                            color_open: self.ds_color_open.clone(),
+                            user_blocks: user_blocks.clone(),
+                            unit: if doc.header.measurement == 1 { 4.0 } else { 0.18 },
                         },
-                        self.style_rename.as_deref(),
-                        &self.style_rename_buf,
                         flow,
                     )
                 })
             }
+            super::super::ModalKind::DimStyle => sized_flow(ex, 980, 660, |flow| {
+                crate::ui::style::dimstyle::view_window(self.dim_style_view(), flow)
+            }),
             super::super::ModalKind::AssocPrompt => automatic_flow(ex, default_assoc_dialog_window),
             super::super::ModalKind::DonationPrompt => {
                 sized_flow(ex, 540, 360, donation_dialog_window)

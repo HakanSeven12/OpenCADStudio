@@ -243,12 +243,7 @@ pub fn document_lt_segments(document: &Document, name: &str) -> Option<ComplexLt
                         .map(std::path::Path::new)
                         .and_then(|p| p.parent());
                     let resolved = (!font.is_empty())
-                        .then(|| {
-                            crate::io::resolve_image_file(&font, base).or_else(|| {
-                                crate::io::font_repo::local_font_file(&font)
-                                    .map(|path| path.to_string_lossy().into_owned())
-                            })
-                        })
+                        .then(|| find_shape_file(&font, base))
                         .flatten();
                     // The standard ltypeshp.shx numbers (and the bundled
                     // catalog's own) map to the LFF substitute shapes, so the
@@ -399,6 +394,41 @@ pub fn ensure_catalog_linetype(doc: &mut Document, name: &str) -> bool {
         }) > 0
 }
 
+/// The program's linetype definitions (the bundled ones and the user's own
+/// `.lin` files), as a `.lin` source.
+pub fn catalog_source() -> String {
+    catalog().source.clone()
+}
+
+/// The linetypes a `.lin` source defines, in file order, the first
+/// definition of a name only: name, description and dash lengths.
+pub fn source_entries(source: &str) -> Vec<(String, String, Vec<f64>)> {
+    let mut seen = std::collections::HashSet::new();
+    parse(source)
+        .into_iter()
+        .filter(|lt| seen.insert(lt.name.to_ascii_uppercase()))
+        .map(|lt| {
+            let lengths = lt.elements.iter().map(|e| e.length).collect();
+            (lt.name, lt.description, lengths)
+        })
+        .collect()
+}
+
+/// Add the linetypes `names` of a `.lin` source the drawing does not have
+/// yet (see [`populate_document_from_source`]). Returns how many were added.
+pub fn populate_document_named(
+    doc: &mut Document,
+    source: &str,
+    lin_dir: Option<&std::path::Path>,
+    names: &[String],
+) -> usize {
+    populate_matching(doc, source, lin_dir, |candidate| {
+        names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(candidate))
+    })
+}
+
 /// Add the linetypes of a caller-supplied `.lin` source, embedded shapes and
 /// text included, so the drawing draws them and a saved file carries them.
 /// Returns the number of definitions newly registered in the drawing.
@@ -517,26 +547,37 @@ pub fn is_bundled_shape_file(file: &str) -> bool {
     BUNDLED_SHAPES.iter().any(|(f, _, _)| *f == stem)
 }
 
-/// The shape file a `.lin` names, found as written, next to the `.lin`
-/// (in any letter case, as the names in a `.lin` rarely match the files'),
-/// or in the fonts folder.
-fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<String> {
+fn file_named(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let direct = dir.join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+}
+
+/// A shape file found as written, next to its drawing or `.lin` catalog (in
+/// any letter case, as stored references rarely match the files' case), in an
+/// AutoCAD-style transmittal `Fonts` folder, or in the configured font folders.
+pub(crate) fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<String> {
     if let Some(found) = crate::io::resolve_image_file(file, lin_dir) {
         return Some(found);
     }
     let name = file.rsplit(['/', '\\']).next()?;
     lin_dir
-        .and_then(|dir| {
-            std::fs::read_dir(dir)
-                .ok()?
-                .filter_map(Result::ok)
-                .find(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .eq_ignore_ascii_case(name)
-                })
-                .map(|entry| entry.path())
+        .and_then(|dir| file_named(dir, name))
+        .or_else(|| {
+            crate::io::font_repo::packaged_font_dirs(lin_dir)
+                .into_iter()
+                .find_map(|dir| file_named(&dir, name))
         })
         .or_else(|| crate::io::font_repo::local_font_file(name))
         .map(|path| path.to_string_lossy().into_owned())
@@ -1040,6 +1081,10 @@ mod rotation_tests {
 #[cfg(test)]
 mod shape_file_tests {
     use super::{document_complex_lt, populate_document_from_source, LtSegment};
+    use document::tables::linetype::{
+        LineType, LineTypeComplexContent, LineTypeComplexData, LineTypeElement,
+    };
+    use document::tables::TextStyle;
     use document::Document;
 
     /// A `.lin` shape from its own shape file (not one of the bundled
@@ -1072,5 +1117,48 @@ mod shape_file_tests {
         let (number, file) = shape.expect("no shape segment");
         assert_eq!(number, 7);
         assert!(file.to_ascii_lowercase().ends_with("tst.shx"), "{file}");
+    }
+
+    /// A document linetype uses the same case-insensitive sibling lookup as a
+    /// `.lin` catalog (#2804's `NLCS.SHX` reference and `NLCS.shx` file).
+    #[test]
+    fn a_document_shape_is_found_next_to_the_drawing_in_any_letter_case() {
+        let dir = std::env::temp_dir().join(format!("ocs-dwg-lt-shx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("NLCS.shx"), b"shape file").unwrap();
+
+        let mut doc = Document::new();
+        doc.source_path = Some(dir.join("drawing.dwg").to_string_lossy().into_owned());
+        let mut style = TextStyle::new("");
+        style.handle = doc.allocate_handle();
+        style.is_shape_file = true;
+        style.font_file = "NLCS.SHX".into();
+        let style_handle = style.handle;
+        doc.text_styles.add(style).unwrap();
+        let mut lt = LineType::new("XX-WERKGRENS");
+        lt.handle = doc.allocate_handle();
+        lt.add_element(LineTypeElement {
+            length: 0.0,
+            complex: Some(LineTypeComplexData {
+                content: LineTypeComplexContent::Shape { shape_number: 137 },
+                style_handle,
+                scale: 0.5,
+                ..Default::default()
+            }),
+        });
+        lt.add_element(LineTypeElement::space(30.0));
+        doc.line_types.add(lt).unwrap();
+
+        let lt = document_complex_lt(&doc, "XX-WERKGRENS").expect("complex linetype");
+        let file = lt.segments.iter().find_map(|segment| match segment {
+            LtSegment::Shape { shx_file, .. } => Some(shx_file.clone()),
+            _ => None,
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            file.as_ref()
+                .is_some_and(|file| file.to_ascii_lowercase().ends_with("nlcs.shx")),
+            "{file:?}"
+        );
     }
 }

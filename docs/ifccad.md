@@ -27,6 +27,16 @@ does not establish compatibility. See the
 [IFCCAD project](https://github.com/OpenAEC-Foundation/ifccad) for profile contracts
 and versioned source releases.
 
+## Retained MLINEs
+
+ModelSpace MLINEs that cannot be reconstructed appear as retained entities
+without geometry in the command line. Save as IFCCAD to carry their records
+forward. WBLOCK of the entire drawing uses the same restriction and preserves
+the retained records in IFCCAD output. Exporting a selected block or set of
+objects still exports the selection. When the drawing opens with retained
+entities, OCS reports that autosave is disabled for that drawing. Use a manual
+IFCCAD save to keep recent edits.
+
 ## Alpha compatibility
 
 **For testing only.** The profile is under active development. A later OCS release

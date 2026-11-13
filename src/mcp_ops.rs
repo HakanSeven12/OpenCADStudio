@@ -457,6 +457,7 @@ pub static PLOT: OpDef = OpDef {
         opt("apply_plot_styles", Ty::Bool, "Enable/disable the selected or requested plot style; explicit false wins."),
         opt("merge_lines", Ty::Bool, "Merge overlapping lines."),
         opt("text_as_outlines", Ty::Bool, "SVG only: emit font-independent glyph paths instead of text elements."),
+        opt("layer_attributes", Ty::Bool, "SVG only: tag each drawn item with its drawing layer as data-layer groups the consumer can toggle."),
         opt("non_scaling_stroke", Ty::Bool, "SVG only: keep stroke widths constant under downstream SVG transforms (web maps)."),
         opt("stamp", Ty::Bool, "Print plot stamp."),
         opt("per_page", Ty::Bool, "When layout='all', write one output file per layout as <stem>-<Layout>.<ext>."),

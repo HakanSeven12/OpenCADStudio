@@ -70,20 +70,22 @@ fn wires_at(document: &Document, handle: Handle, anno: f32, paper_space: bool) -
 
 /// The dashes, as absolute XY points.
 fn strokes(wires: &[WireModel]) -> Vec<Vec<[f64; 2]>> {
-    wires
-        .iter()
-        .filter(|wire| wire.points.len() >= 2)
-        .map(|wire| {
-            wire.points
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
-                    [p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]
-                })
-                .collect()
-        })
-        .collect()
+    // Hairline strokes share a wire, a NaN point between each two.
+    let mut out = Vec::new();
+    for wire in wires {
+        let mut stroke: Vec<[f64; 2]> = Vec::new();
+        for (i, p) in wire.points.iter().enumerate() {
+            if p[0].is_nan() {
+                out.push(std::mem::take(&mut stroke));
+                continue;
+            }
+            let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            stroke.push([p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]);
+        }
+        out.push(stroke);
+    }
+    out.retain(|stroke| stroke.len() >= 2);
+    out
 }
 
 /// The centre of each "X", from the glyph quads (glyphs sit at least a dash

@@ -917,11 +917,16 @@ mod upright_tests {
             Some(2.0),
             None,
         );
-        assert_eq!(wires.len(), 2, "{wires:?}");
-        for (wire, x) in wires.iter().zip([0.0, 1.0]) {
-            assert_eq!(wire.points.len(), 2);
-            assert!((wire.points[0][0] - x).abs() < 1.0e-6, "{wire:?}");
-            assert!((wire.points[1][0] - x).abs() < 1.0e-6, "{wire:?}");
+        // The shape strokes share one wire, a NaN point between them.
+        let strokes: Vec<&[[f32; 3]]> = wires
+            .iter()
+            .flat_map(|wire| wire.points.split(|p| p[0].is_nan()))
+            .collect();
+        assert_eq!(strokes.len(), 2, "{wires:?}");
+        for (stroke, x) in strokes.iter().zip([0.0, 1.0]) {
+            assert_eq!(stroke.len(), 2);
+            assert!((stroke[0][0] - x).abs() < 1.0e-6, "{wires:?}");
+            assert!((stroke[1][0] - x).abs() < 1.0e-6, "{wires:?}");
         }
     }
 }

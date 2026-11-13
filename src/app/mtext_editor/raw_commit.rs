@@ -409,6 +409,7 @@ impl crate::app::OpenCADStudio {
             ));
             mt.insertion_point = Vector3::new(position.x, position.y, position.z);
             self.push_undo_snapshot(i, "MTEXT");
+            let style_name = mt.style.clone();
             let Some(h) = self.commit_new_text(plane.place_entity(EntityType::MText(Box::new(mt))))
             else {
                 self.mtext_commit_error("MTEXT: creation failed; the draft was retained.");
@@ -422,6 +423,12 @@ impl crate::app::OpenCADStudio {
                         scale,
                     );
                 }
+                // A style that matches orientation to the layout passes it on.
+                crate::scene::annotative::apply_style_orientation(
+                    &mut self.tabs[i].scene.document,
+                    h,
+                    &style_name,
+                );
             }
             self.tabs[i].dirty = true;
             h

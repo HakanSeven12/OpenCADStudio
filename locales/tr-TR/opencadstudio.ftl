@@ -9736,3 +9736,10 @@ text-style =
     .yes-or-no = Lütfen Evet ya da Hayır.
     .numeric-value = Sayısal değer gerekli.
     .angle-two-points = Geçerli sayısal açı ya da iki nokta gerekli.
+    .info-new = -STYLE  Yeni stil.
+    .info-existing = -STYLE  Var olan stil.
+    .info-full-font = {" "}Tam yazı tipi adı = { $font }
+    .cmd-press-enter = -STYLE  Devam etmek için ENTER'a basın:
+    .menu-set-current = Geçerli yap
+    .menu-rename = Yeniden adlandır
+    .menu-delete = Sil

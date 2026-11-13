@@ -14902,6 +14902,18 @@ impl OpenCADStudio {
                 self.text_style_go_on(crate::ui::style::textstyle::Pending::Delete)
             }
             Message::TextStyleCard(message) => self.on_text_style_card(message),
+            Message::TextStyleContext(name) => {
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                let task = if name == self.textstyle_selected {
+                    Task::none()
+                } else {
+                    self.text_style_go_on(crate::ui::style::textstyle::Pending::Select(name.clone()))
+                };
+                self.textstyle_context = Some(name);
+                task
+            }
             // ── Shared inline rename (all style managers) ─────────────────
             Message::StyleRenameStart(crate::app::StyleKind::Text, name)
                 if self.active_modal == Some(super::ModalKind::TextStyle) =>
@@ -14965,7 +14977,29 @@ impl OpenCADStudio {
                     "orientation" => {
                         self.textstyle_draft.orientation = !self.textstyle_draft.orientation
                     }
-                    "use_big_font" => self.textstyle_draft.toggle_big_font(),
+                    "use_big_font" => {
+                        self.textstyle_draft.toggle_big_font();
+                        // Turned on with no big font named, the first big
+                        // font of the list is taken.
+                        if self.textstyle_draft.big_font_on
+                            && self.textstyle_draft.style.big_font_file.trim().is_empty()
+                        {
+                            let mut big_fonts: Vec<String> =
+                                crate::io::font_repo::folder_shx_fonts()
+                                    .into_iter()
+                                    .filter(|file| {
+                                        crate::io::font_repo::font_file_path(file, None)
+                                            .is_some_and(|path| {
+                                                crate::scene::text::shx::is_bigfont(&path)
+                                            })
+                                    })
+                                    .collect();
+                            big_fonts.sort_by_key(|file| file.to_ascii_lowercase());
+                            if let Some(first) = big_fonts.into_iter().next() {
+                                self.textstyle_draft.style.big_font_file = first;
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 Task::none()

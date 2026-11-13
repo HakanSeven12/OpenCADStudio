@@ -3164,6 +3164,7 @@ impl OpenCADStudio {
             // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
             // The Text Style window, one step per call: "select=<name>",
+            // "context=<name>" (right click),
             // "in_use=0|1", "set_current", "new", "name=<text>", "new_ok",
             // "new_cancel", "notice_close", "delete", "delete_yes",
             // "delete_no", "modified_yes", "modified_no", "rename=<old>:<new>",
@@ -3189,6 +3190,7 @@ impl OpenCADStudio {
                 ];
                 match key {
                     "select" => Message::TextStyleDialogSelect(value.to_string()),
+                    "context" => Message::TextStyleContext(value.to_string()),
                     "in_use" => Message::TextStyleInUseFilter(value == "1"),
                     "set_current" => Message::TextStyleDialogSetCurrent,
                     "new" => Message::TextStyleDialogNew,

@@ -1145,6 +1145,7 @@ impl OpenCADStudio {
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
                             card: self.textstyle_card.as_ref(),
+                            context: self.textstyle_context.as_deref(),
                         },
                         flow,
                     )

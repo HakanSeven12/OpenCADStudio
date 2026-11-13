@@ -74,6 +74,10 @@ pub struct Scaffold<'a, 'b> {
     /// Delete stays on for a style objects use; the manager answers why it
     /// stays instead.
     pub delete_in_use: bool,
+    /// A right click on a style (the text style list's actions).
+    pub on_context: Option<fn(String) -> Message>,
+    /// The style whose actions show under it, and those actions.
+    pub context_menu: Option<(&'b str, Vec<(Cow<'static, str>, Option<Message>)>)>,
     pub editor: Element<'a, Message>,
 }
 
@@ -187,7 +191,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .map(|(index, name)| {
             let is_sel = name.as_str() == s.selected;
             let is_current = s.current == Some(name.as_str());
-            crate::ui::style::style_list::item(
+            let entry = crate::ui::style::style_list::item(
                 name,
                 is_current,
                 is_sel,
@@ -197,7 +201,30 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
                 s.rename_buf,
                 !(s.read_only && is_sel),
                 s.rows.and_then(|rows| rows.get(index).copied()),
-            )
+                s.on_context.map(|on_context| on_context(name.clone())),
+            );
+            match &s.context_menu {
+                Some((target, actions)) if *target == name.as_str() => {
+                    let buttons: Vec<Element<'_, Message>> = actions
+                        .iter()
+                        .map(|(caption, message)| {
+                            crate::ui::style::form::dialog_button_styled_opt(
+                                caption.to_string(),
+                                message.clone(),
+                                iced::widget::button::secondary,
+                            )
+                            .into()
+                        })
+                        .collect();
+                    iced::widget::column![
+                        entry,
+                        container(iced::widget::row(buttons).spacing(4).wrap())
+                            .padding([4, 20])
+                    ]
+                    .into()
+                }
+                _ => entry,
+            }
         })
         .collect();
 

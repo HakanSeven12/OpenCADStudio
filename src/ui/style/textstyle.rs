@@ -71,6 +71,8 @@ pub struct TextStyleView<'a> {
     pub rename_buf: &'a str,
     /// A question or notice over the window.
     pub card: Option<&'a Card>,
+    /// The style whose actions (right click) show under it.
+    pub context: Option<&'a str>,
 }
 
 /// What a question about unsaved changes was asked for.
@@ -1016,6 +1018,32 @@ fn layout<'a>(
         compact: narrow,
         apply_pending: v.modified,
         delete_in_use: true,
+        on_context: Some(Message::TextStyleContext),
+        context_menu: v.context.map(|name| {
+            // Standard and the current style cannot be deleted.
+            let deletable =
+                !name.eq_ignore_ascii_case("Standard") && name != v.current && !v.read_only;
+            (
+                name,
+                vec![
+                    (
+                        std::borrow::Cow::Owned(crate::tr!("text-style", "menu-set-current")),
+                        Some(Message::TextStyleDialogSetCurrent),
+                    ),
+                    (
+                        std::borrow::Cow::Owned(crate::tr!("text-style", "menu-rename")),
+                        Some(Message::StyleRenameStart(
+                            crate::app::StyleKind::Text,
+                            name.to_string(),
+                        )),
+                    ),
+                    (
+                        std::borrow::Cow::Owned(crate::tr!("text-style", "menu-delete")),
+                        deletable.then_some(Message::TextStyleDialogDelete),
+                    ),
+                ],
+            )
+        }),
         editor,
     })
 }

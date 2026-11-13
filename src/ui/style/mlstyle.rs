@@ -455,6 +455,8 @@ pub fn view_window<'a>(
         compact: false,
         apply_pending: true,
         delete_in_use: false,
+        on_context: None,
+        context_menu: None,
         editor,
     })
 }

@@ -9790,3 +9790,10 @@ text-style =
     .yes-or-no = Yes or No, please.
     .numeric-value = Requires numeric value.
     .angle-two-points = Requires valid numeric angle or two points.
+    .info-new = -STYLE  New style.
+    .info-existing = -STYLE  Existing style.
+    .info-full-font = {" "}Full font name = { $font }
+    .cmd-press-enter = -STYLE  Press ENTER to continue:
+    .menu-set-current = Set current
+    .menu-rename = Rename
+    .menu-delete = Delete

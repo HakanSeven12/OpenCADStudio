@@ -364,6 +364,8 @@ struct StyleDefaults {
     oblique: f64,
     annotative: bool,
     orientation: bool,
+    /// The font is a TrueType family.
+    true_type: bool,
 }
 
 /// What -STYLE knows before it asks: the styles, the fonts it can find and
@@ -421,9 +423,25 @@ fn style_flow(context: StyleFlowContext) -> PromptFlow {
             oblique: 0.0,
             annotative: false,
             orientation: false,
+            true_type: false,
         });
+        // The name's answer: a new style, or an existing one with its
+        // TrueType face named.
+        let info = match &existing {
+            None => trp!("text-style", "info-new"),
+            Some(style) if style.true_type => format!(
+                "{}{}",
+                trp!("text-style", "info-existing"),
+                trp!("text-style", "info-full-font", font = style.font.clone())
+            ),
+            Some(_) => trp!("text-style", "info-existing"),
+        };
         let font = q.text(
-            trp!("text-style", "cmd-font", font = base.font.clone()),
+            format!(
+                "{info}
+{}",
+                trp!("text-style", "cmd-font", font = base.font.clone())
+            ),
             Some(base.font.clone()),
         )?;
         if !style_font_available(&context.fonts, &font) {
@@ -1080,6 +1098,7 @@ impl OpenCADStudio {
                         width: style.width_factor,
                         oblique: style.oblique_angle.to_degrees(),
                         annotative: style.annotative,
+                        true_type: !style.true_type_font.trim().is_empty(),
                         orientation: crate::scene::annotative::text_style_orientation(
                             doc,
                             style.handle,
@@ -1685,7 +1704,7 @@ impl OpenCADStudio {
         let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
         match arg(0).as_str() {
             "?" => {
-                self.list_text_styles(i, &arg(1));
+                self.list_text_styles(i, &arg(1), arg(2).parse().unwrap_or(0));
                 return;
             }
             "FONT_MISSING" => {
@@ -1755,8 +1774,10 @@ impl OpenCADStudio {
             .push_output(&trp!("text-style", "now-current", name = name));
     }
 
-    /// -STYLE `?`: the styles matching `pattern`, then the current style.
-    fn list_text_styles(&mut self, i: usize, pattern: &str) {
+    /// -STYLE `?`: the styles matching `pattern`, then the current style,
+    /// from line `from` on. The list stops every 22 lines (even inside a
+    /// style's lines) at "Press ENTER to continue:", whose answer lists on.
+    fn list_text_styles(&mut self, i: usize, pattern: &str, from: usize) {
         let doc = &self.tabs[i].scene.document;
         let mut styles: Vec<&document::tables::TextStyle> = doc
             .text_styles
@@ -1815,8 +1836,24 @@ impl OpenCADStudio {
             "current",
             name = doc.header.current_text_style_name.clone()
         ));
-        for line in lines {
-            self.command_line.push_output(&line);
+        const PAGE: usize = 22;
+        let end = (from + PAGE).min(lines.len());
+        for line in lines.get(from..end).unwrap_or_default() {
+            self.command_line.push_output(line);
+        }
+        if end < lines.len() {
+            let pattern = pattern.to_string();
+            let next = end.to_string();
+            let command = ScriptPromptCommand::new(
+                "-STYLE",
+                flow(move |q| {
+                    q.text(trp!("text-style", "cmd-press-enter"), Some(String::new()))?;
+                    run("-STYLE", &["?", &pattern, &next])
+                }),
+            );
+            self.command_line.push_info(&command.prompt());
+            self.command_line.set_step_options(command.options());
+            self.tabs[i].active_cmd = Some(Box::new(command));
         }
     }
 

@@ -290,6 +290,7 @@ impl OpenCADStudio {
             .refresh_bigfont(&self.tabs[i].scene.document);
         self.active_modal = Some(crate::app::ModalKind::TextStyle);
         self.textstyle_card = None;
+        self.textstyle_context = None;
         self.style_stage_begin();
         // The window's session (Apply, New, Delete, Rename, Set Current) is
         // one undo step.
@@ -336,7 +337,10 @@ impl OpenCADStudio {
         &mut self,
         pending: crate::ui::style::textstyle::Pending,
     ) -> Task<Message> {
-        if self.textstyle_modified() {
+        use crate::ui::style::textstyle::Pending;
+        self.textstyle_context = None;
+        // Delete and Rename go ahead with the change still pending.
+        if self.textstyle_modified() && !matches!(pending, Pending::Delete | Pending::Rename(_)) {
             self.textstyle_card = Some(crate::ui::style::textstyle::Card::Modified(pending));
             return Task::none();
         }
@@ -452,13 +456,19 @@ impl OpenCADStudio {
                 if !self.clone_style_as(StyleKind::Text, &source, &name, handle) {
                     return Task::none();
                 }
-                // The copy matches its orientation to the layout as its source does.
+                // The copy takes the values the window shows for the source,
+                // changes not yet applied included.
+                let mut copy = self.textstyle_draft.resolved();
+                let orientation = copy.annotative && self.textstyle_draft.orientation;
                 let doc = &mut self.tabs[i].scene.document;
-                let source_orientation = doc
-                    .text_styles
-                    .get(&source)
-                    .is_some_and(|style| crate::scene::annotative::text_style_orientation(doc, style.handle));
-                crate::scene::annotative::set_text_style_orientation(doc, handle, source_orientation);
+                if let Some(style) = doc.text_styles.get_mut(&name) {
+                    copy.name = style.name.clone();
+                    copy.handle = style.handle;
+                    copy.xref_dependent = false;
+                    copy.xref_block_record_handle = style.xref_block_record_handle;
+                    *style = copy;
+                }
+                crate::scene::annotative::set_text_style_orientation(doc, handle, orientation);
                 // A new style is the current one.
                 doc.header.current_text_style_name = name.clone();
                 self.textstyle_card = None;
@@ -491,7 +501,8 @@ impl OpenCADStudio {
                 };
                 if yes {
                     let _ = self.on_text_style_apply();
-                } else {
+                } else if !matches!(pending, crate::ui::style::textstyle::Pending::New) {
+                    // No drops the change; a new style still starts from it.
                     self.load_textstyle_draft(i);
                 }
                 self.text_style_continue(pending)

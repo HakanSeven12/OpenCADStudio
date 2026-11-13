@@ -3157,7 +3157,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "PAPER" => Some(("ui", "paper")),
         "PAPER: double-click viewport to enter MSPACE\nMODEL: click to switch to Model Space" => Some(("ui", "paper-double-click-viewport-to-enter-mspace-mo")),
         "PASTEBLOCK: clipboard is empty." => Some(("insert", "pasteblock-clipboard-is-empty")),
-        "PASTESPEC  Paste as [Objects/Block/Text]:" => Some(("insert", "pastespec-paste-as")),
+        "PASTESPEC  Paste as [%{formats}]:" => Some(("insert", "pastespec-paste-as")),
         "PASTESPEC  Specify insertion point:" => Some(("insert", "pastespec-specify-insertion-point")),
         "PASTEBLOCK: {e}" => Some(("insert", "pasteblock-e")),
         "PASTECLIP  Pick insertion point:" => Some(("clipboard", "pasteclip-pick-insertion-point")),

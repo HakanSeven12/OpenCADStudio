@@ -4225,7 +4225,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC Chỉ định điểm chèn:
-    .pastespec-paste-as = PASTESPEC Dán dưới dạng [Đối tượng/Khối/Văn bản]:
+    .pastespec-paste-as = PASTESPEC Dán dưới dạng [__ocs_arg_formats__]:
     .pdfui-pdf-scale = Tỷ lệ PDF: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Chỉ định điểm chèn:
     .pdfui-no-pdf-underlays = Không tìm thấy lớp nền PDF.

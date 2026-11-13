@@ -768,6 +768,23 @@ fn table_style_choices(doc: &Document) -> Vec<crate::modules::annotate::table_cm
     styles
 }
 
+/// The drawing's current table style, or its first one when the current
+/// name picks none.
+pub(in crate::app) fn current_table_style(
+    doc: &Document,
+) -> Option<crate::modules::annotate::table_cmd::StyleChoice> {
+    let mut styles = table_style_choices(doc);
+    let current = styles
+        .iter()
+        .position(|choice| {
+            choice
+                .name
+                .eq_ignore_ascii_case(&doc.header.current_table_style_name)
+        })
+        .unwrap_or(0);
+    (current < styles.len()).then(|| styles.swap_remove(current))
+}
+
 fn table_style_handle(doc: &Document, name: &str) -> Option<Handle> {
     doc.objects
         .iter()

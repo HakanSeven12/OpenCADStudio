@@ -4217,7 +4217,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  삽입점 지정:
-    .pastespec-paste-as = PASTESPEC  붙여넣기 형식 [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  붙여넣기 형식 [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF scale: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Specify insertion point:
     .pdfui-no-pdf-underlays = No PDF underlays found.

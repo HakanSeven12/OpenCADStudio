@@ -1189,6 +1189,13 @@ impl OpenCADStudio {
             CmdResult::PasteClipboard { base_pt } => {
                 self.handle_paste_clipboard(base_pt);
             }
+            CmdResult::PlacePastedImage { image, embedded } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                dispatched = self.place_pasted_image(image, embedded);
+            }
             CmdResult::CreateGroup { handles, name } => {
                 if let Some(task) = self.handle_create_group(handles, name) {
                     return task;

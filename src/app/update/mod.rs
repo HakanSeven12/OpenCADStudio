@@ -1070,6 +1070,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            // A step with nothing to ask yet keeps no line.
+            .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         // In Remove mode a selection step asks "Remove objects:" in place of
@@ -9387,7 +9389,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text) => {
+            Message::PasteSpecial(text, picture) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd
@@ -9396,20 +9398,20 @@ impl OpenCADStudio {
                 if !waiting {
                     return Task::none();
                 }
-                match text.filter(|text| !text.trim().is_empty()) {
-                    Some(text) => {
-                        // Same prompt, one more option: swap without echoing it.
-                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
-                        self.push_ucs_to_cmd(i);
-                        Task::none()
-                    }
-                    // Nothing but maybe an image: paste it as one.
-                    None if self.clipboard.is_empty() => {
-                        self.tabs[i].active_cmd = None;
-                        self.read_system_clipboard_image()
-                    }
-                    None => Task::none(),
+                let text = text.filter(|text| !text.trim().is_empty());
+                if text.is_none() && picture.is_none() && self.clipboard.is_empty() {
+                    // Nothing to paste in any format.
+                    self.tabs[i].active_cmd = None;
+                    self.command_line
+                        .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                    return Task::none();
                 }
+                // Every format is known now: ask for one of them.
+                let command = self.paste_special_command(i, text.as_deref(), picture);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(command);
+                self.push_ucs_to_cmd(i);
+                Task::none()
             }
 
             Message::SystemClipboardPaste(result) => {

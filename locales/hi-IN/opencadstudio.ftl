@@ -4206,7 +4206,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  सम्मिलन बिंदु निर्दिष्ट करें:
-    .pastespec-paste-as = PASTESPEC  इस रूप में चिपकाएँ [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  इस रूप में चिपकाएँ [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF scale: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Specify insertion point:
     .pdfui-no-pdf-underlays = No PDF underlays found.

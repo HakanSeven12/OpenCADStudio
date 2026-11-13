@@ -4217,7 +4217,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Määritä lisäyspiste:
-    .pastespec-paste-as = PASTESPEC  Liitä muodossa [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  Liitä muodossa [__ocs_arg_formats__]:
     .pdfui-pdf-scale = PDF scale: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = Specify insertion point:
     .pdfui-no-pdf-underlays = No PDF underlays found.

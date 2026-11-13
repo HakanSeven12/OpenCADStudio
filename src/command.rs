@@ -2508,6 +2508,13 @@ pub enum CmdResult {
     PasteClipboard {
         base_pt: DVec3,
     },
+    /// PASTESPEC's Image formats: place the picture read off the system
+    /// clipboard inside the drawing as IMAGEEMBED places one (`embedded`),
+    /// or as a file the drawing points at, as IMAGE does; end command.
+    PlacePastedImage {
+        image: crate::io::ole_embed::EmbeddedImage,
+        embedded: bool,
+    },
     /// Set the view's twist about its line of sight (radians,
     /// counter-clockwise); the command stays active.
     TwistView(f64),

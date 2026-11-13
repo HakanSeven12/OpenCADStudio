@@ -4219,7 +4219,7 @@ annotate =
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  ກຳນົດຈຸດແຊກ:
-    .pastespec-paste-as = PASTESPEC  ວາງເປັນ [Objects/Block/Text]:
+    .pastespec-paste-as = PASTESPEC  ວາງເປັນ [__ocs_arg_formats__]:
     .xref-unresolved-external-references = XREF  ການອ້າງອີງພາຍນອກທີ່ບໍ່ພົບ: __ocs_fmt_0__ — ລາກໄຟລ໌ DWG/DXF ທີ່ອ້າງອີງມາວາງໃສ່ໜ້າເພື່ອລົງທະບຽນ, ຈາກນັ້ນເປີດແບບແຕ້ມນີ້ຄືນ ຫຼື ເອີ້ນໃຊ້ XRELOAD.
     .pdfui-pdf-scale = ມາດຕາສ່ວນ PDF: __ocs_fmt_0__:1
     .pdfui-specify-insertion-point = ກໍານົດຈຸດແຊກ:

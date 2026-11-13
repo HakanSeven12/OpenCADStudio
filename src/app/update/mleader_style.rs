@@ -793,12 +793,16 @@ impl OpenCADStudio {
             load.dir.as_deref(),
             &load.picked,
         );
-        crate::io::linetypes::reload_document_named(
+        let reloaded = crate::io::linetypes::reload_document_named(
             doc,
             &load.source,
             load.dir.as_deref(),
             &reload,
         );
+        // Entities drawn with a reloaded linetype take its new pattern.
+        if reloaded > 0 {
+            self.tabs[self.active_tab].scene.bump_geometry();
+        }
     }
 
     fn mleader_style_create(&mut self) -> Task<Message> {

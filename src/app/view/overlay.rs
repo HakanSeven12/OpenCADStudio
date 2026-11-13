@@ -398,11 +398,10 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         if state.width_drag.is_some() || point.is_some_and(|p| self.on_handle(p)) {
             return iced::mouse::Interaction::ResizingHorizontally;
         }
-        if self.inplace && point.is_some_and(|p| self.cell.is_some_and(|cell| cell.contains(p))) {
-            return iced::mouse::Interaction::Text;
-        }
-        // Leave table-cell pointer handling unchanged so wheel zoom still reaches
-        // the drawing; the fallback preview has its own scroll container.
+        // No pointer of its own over the text being edited, in place or in a
+        // table cell: any would hide the drawing under it from the wheel, so
+        // zoom would stop there. The fallback preview has its own scroll
+        // container.
         iced::mouse::Interaction::default()
     }
 
@@ -2963,6 +2962,15 @@ mod cell_editor_wheel_tests {
     use super::*;
     #[test]
     fn wheel_over_the_typed_in_cell_still_zooms_the_drawing() {
+        wheel_zooms_over_editor(false);
+    }
+
+    #[test]
+    fn wheel_over_the_inplace_text_editor_still_zooms_the_drawing() {
+        wheel_zooms_over_editor(true);
+    }
+
+    fn wheel_zooms_over_editor(inplace: bool) {
         let p = |x, y| iced::Point::new(x, y);
         let cell = crate::app::table_cell_edit::CellCanvas {
             origin: p(100.0, 100.0),
@@ -2989,7 +2997,7 @@ mod cell_editor_wheel_tests {
             ruler: None,
             rotation: (1.0, 0.0),
             cell: Some(cell),
-            inplace: false,
+            inplace,
             translucent: false,
         };
         let drawing =

@@ -56,7 +56,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// form-only input, then the declared synchronous document-bound command.
 /// The attribute form pages fifteen rows at a time: `dialog_page`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "99bc4906b90c5076dcf1dd42fb2dd8e461e2c09a8a06295359d1b2b358908d88";
+const TOOL_SCHEMA_DIGEST: &str = "7fa0dd513a563a90f06fa2c7eea4c1350db509d16354d10099bb659b1c8bf7b7";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

@@ -14,7 +14,10 @@ fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
-pub fn open_document_view_v4(tab_id: u64, doc: &document::Document) -> Option<DocumentViewInfo> {
+pub fn open_document_view_v4(
+    tab_id: u64,
+    doc: &document::Document,
+) -> Result<DocumentViewInfo, String> {
     mgr().open(tab_id, doc)
 }
 
@@ -24,22 +27,24 @@ pub fn close_document_view_v4(tab_id: u64) {
 }
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
-/// a change notification when successful. The `Err` betrays the failure to the
-/// caller so dirty-region/epoch claims are never broadcast on top of a
-/// snapshot that did not actually update.
+/// a change notification when successful.
+///
+/// `Ok(())` covers BOTH a real publication and the legitimate no-op (no V4
+/// consumer has opened a snapshot for this tab — nothing to publish, no
+/// notification to send, and the mutation boundary still settles).
+/// `Err` is a real failure the caller must report instead of claiming a
+/// boundary that plugins cannot observe.
 pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) -> Result<(), String> {
-    let info = mgr().publish(tab_id, doc);
-    match info {
-        Some(info) => {
+    match mgr().publish(tab_id, doc) {
+        Ok(Some(info)) => {
             broadcast(HostNotification::DocumentChangedV4 {
                 tab_id,
                 version: info.version,
             });
             Ok(())
         }
-        None => Err(format!(
-            "failed to publish the V4 document view for tab {tab_id}"
-        )),
+        Ok(None) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 

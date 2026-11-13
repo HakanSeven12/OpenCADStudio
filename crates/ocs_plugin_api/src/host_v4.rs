@@ -43,14 +43,25 @@ impl HostV4SnapshotManager {
         }
     }
 
-    /// Open (or refresh) the V4 snapshot for `tab_id` and return the view info.
-    pub fn open(&mut self, tab_id: u64, doc: &Document) -> Option<DocumentViewInfo> {
-        self.publish_document(tab_id, doc, true)
+    /// Open (or refresh) the V4 snapshot for `tab_id`. Creates the store when
+    /// missing; `Err` reports a real failure, `Ok` the fresh view info.
+    pub fn open(&mut self, tab_id: u64, doc: &Document) -> Result<DocumentViewInfo, String> {
+        match self.publish_document(tab_id, doc, true) {
+            Ok(Some(info)) => Ok(info),
+            Ok(None) => Err(format!("the V4 view for tab {tab_id} did not publish")),
+            Err(e) => Err(e),
+        }
     }
-
     /// Publish the latest document to the existing V4 snapshot for `tab_id`.
-    /// Returns the updated view info if the snapshot exists.
-    pub fn publish(&mut self, tab_id: u64, doc: &Document) -> Option<DocumentViewInfo> {
+    /// `Ok(None)`: the tab has no open store yet — a legitimate no-op (no V4
+    /// consumer), NOT failure; `Ok(Some(info))`: published; `Err`: a real
+    /// publication failure the caller must report instead of claiming a
+    /// boundary.
+    pub fn publish(
+        &mut self,
+        tab_id: u64,
+        doc: &Document,
+    ) -> Result<Option<DocumentViewInfo>, String> {
         self.publish_document(tab_id, doc, false)
     }
 
@@ -65,16 +76,19 @@ impl HostV4SnapshotManager {
         tab_id: u64,
         doc: &Document,
         create: bool,
-    ) -> Option<DocumentViewInfo> {
+    ) -> Result<Option<DocumentViewInfo>, String> {
         if !create && !self.stores.contains_key(&tab_id) {
-            return None;
+            return Ok(None);
         }
         let data: DocumentViewDataV4 = doc.into();
         let bytes = match data.to_rkyv_bytes() {
             Ok(bytes) => bytes,
             Err(e) => {
-                eprintln!("[host] failed to serialize V4 document view for tab {tab_id}: {e}");
-                return None;
+                let msg = format!(
+                    "failed to serialize V4 document view for tab {tab_id}: {e}"
+                );
+                eprintln!("[host] {msg}");
+                return Err(msg);
             }
         };
         let fits = self
@@ -94,10 +108,11 @@ impl HostV4SnapshotManager {
                     // then retire the old store (keep its file alive) instead
                     // of deleting it out from under existing readers.
                     if let Err(e) = store.publish_bytes(&bytes) {
-                        eprintln!(
-                            "[host] failed to publish V4 document view for tab {tab_id}: {e}"
+                        let msg = format!(
+                            "failed to publish V4 document view for tab {tab_id}: {e}"
                         );
-                        return None;
+                        eprintln!("[host] {msg}");
+                        return Err(msg);
                     }
                     let info = DocumentViewInfo {
                         path: store.path().to_string_lossy().into_owned(),
@@ -106,27 +121,35 @@ impl HostV4SnapshotManager {
                     if let Some(old) = self.stores.insert(tab_id, store) {
                         self.retired.push(old);
                     }
-                    return Some(info);
+                    return Ok(Some(info));
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[host] cannot share the V4 document view for tab {tab_id} ({} bytes): {e}",
+                    let msg = format!(
+                        "cannot share the V4 document view for tab {tab_id} ({} bytes): {e}",
                         bytes.len()
                     );
+                    eprintln!("[host] {msg}");
                     self.stores.remove(&tab_id);
-                    return None;
+                    return Err(msg);
                 }
             }
         }
-        let store = self.stores.get_mut(&tab_id)?;
+        // The store must exist here: the `!create` early-return handled the
+        // no-store case above, and the resize branch inserts one otherwise.
+        let Some(store) = self.stores.get_mut(&tab_id) else {
+            let msg = format!("V4 document view for tab {tab_id} vanished mid-publish");
+            eprintln!("[host] {msg}");
+            return Err(msg);
+        };
         if let Err(e) = store.publish_bytes(&bytes) {
-            eprintln!("[host] failed to publish V4 document view for tab {tab_id}: {e}");
-            return None;
+            let msg = format!("failed to publish V4 document view for tab {tab_id}: {e}");
+            eprintln!("[host] {msg}");
+            return Err(msg);
         }
-        Some(DocumentViewInfo {
+        Ok(Some(DocumentViewInfo {
             path: store.path().to_string_lossy().into_owned(),
             version: store.version(),
-        })
+        }))
     }
 
     /// Close the V4 snapshot for `tab_id`.

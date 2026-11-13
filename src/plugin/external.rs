@@ -1055,6 +1055,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
             &path,
             &mut host,
             v4_support::notification_handler(),
+            None,
         )
         .expect("spawn test plugin");
         assert_eq!(process.id(), "opencad.my_plugin");
@@ -1122,6 +1123,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
                 &path,
                 &mut host,
                 v4_support::notification_handler(),
+                None,
             )
             .unwrap_or_else(|e| panic!("fresh boot {boot}: spawn failed: {e}"));
             let handled = process

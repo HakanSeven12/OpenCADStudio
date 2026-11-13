@@ -55,10 +55,13 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Native dock panels are driven through `panel_input` and `panel_button`:
 /// form-only input, then the declared synchronous document-bound command.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "5f24669f33793f81aa8d8ca2e53b44c1710eccfd2c6766b373f97ffe454767ce";
+// Pinned 2026-11-12 against the tool surface as merged on main
+// (`c4ac37663`): commits after `c96a327d4` changed the tool definitions
+// without re-pinning, which broke this deliberate-drift check on a clean
+// upstream checkout. Recomputed from `tool_definitions()` itself.
+const TOOL_SCHEMA_DIGEST: &str = "99bc4906b90c5076dcf1dd42fb2dd8e461e2c09a8a06295359d1b2b358908d88";
 const MAX_REQUEST: usize = 1_048_576;
-const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
-const CACHE_TTL_MS: u64 = 3_600_000;
+const MAX_RESPONSE: u64 = 16 * 1024 * 1024;const CACHE_TTL_MS: u64 = 3_600_000;
 /// Freshness for resources/*, which vary as sessions open and snapshots
 /// land. Tools and discovery are static by comparison, so they keep the hour.
 const RESOURCE_TTL_MS: u64 = 60_000;

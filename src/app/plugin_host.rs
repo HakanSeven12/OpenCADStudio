@@ -110,7 +110,10 @@ impl<'a> HostSession<'a> {
         if tab_id != self.tab_id() {
             return None;
         }
-        v4_support::open_document_view_v4(tab_id, self.document())
+        // A failed open is honest: the error lands in the plugin error queue
+        // surface (stderr log) and the caller sees None instead of a path
+        // that cannot be served.
+        v4_support::open_document_view_v4(tab_id, self.document()).ok()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -402,6 +405,17 @@ impl<'a> HostSession<'a> {
         Ok(())
     }
 
+    /// True when `entity` (not yet in the document) targets a locked layer.
+    /// Additions apply the same lock refusal as stamps and edits (P1-10).
+    fn new_entity_layer_locked(&self, entity: &EntityType) -> bool {
+        self.app.tabs[self.tab]
+            .scene
+            .document
+            .layers
+            .get(&entity.common().layer)
+            .is_some_and(|layer| layer.is_locked())
+    }
+
     pub fn add_entity(&mut self, mut entity: EntityType) -> Handle {
         if self.prepare_scripted_raster_image(&mut entity).is_err() {
             return Handle::NULL;
@@ -441,6 +455,12 @@ impl<'a> HostSession<'a> {
             self.publish_document_view();
             return handle;
         }
+        // Locked layers refuse additions like every other mutation path
+        // (attributes ride their owning insert, which the scene refuses).
+        if self.new_entity_layer_locked(&entity) {
+            eprintln!("[plugin] add_entity refused: the target layer is locked");
+            return Handle::NULL;
+        }
         let handle = self.app.tabs[self.tab].scene.add_entity(entity);
         self.app.sync_registered_layers(self.tab);
         self.app.tabs[self.tab].mark_plugin_entity_dirty(handle, epoch);
@@ -449,19 +469,49 @@ impl<'a> HostSession<'a> {
     }
 
     pub fn add_entities(&mut self, mut entities: Vec<EntityType>) -> Vec<Handle> {
+        // P1-10: preparation/normalization/locked-layer failures are no
+        // longer ignored. A refused item keeps its result slot as NULL (the
+        // legacy positional contract holds) instead of entering the document
+        // unprepared, unnormalized, or on a locked layer; the valid remainder
+        // proceeds.
+        let mut flags = Vec::with_capacity(entities.len());
         for entity in &mut entities {
-            let _ = self.prepare_scripted_raster_image(entity);
-            // Creation input was validated by the caller; a degenerate MLine
-            // simply keeps its supplied (unnormalized) vertices.
-            let _ = self.normalize_scripted_entity(None, entity);
+            flags.push(
+                self.prepare_scripted_raster_image(entity).is_ok()
+                    && self.normalize_scripted_entity(None, entity).is_ok()
+                    && !self.new_entity_layer_locked(entity),
+            );
+        }
+        let mut prepared = Vec::with_capacity(entities.len());
+        let mut slots: Vec<Option<usize>> = Vec::with_capacity(entities.len());
+        for (entity, ok) in entities.drain(..).zip(flags.iter().copied()) {
+            if ok {
+                slots.push(Some(prepared.len()));
+                prepared.push(entity);
+            } else {
+                slots.push(None);
+            }
         }
         let epoch = self.geometry_epoch();
-        let handles = self.app.tabs[self.tab].scene.add_entities(entities);
+        let added = self.app.tabs[self.tab].scene.add_entities(prepared);
         self.app.sync_registered_layers(self.tab);
-        for handle in &handles {
-            self.app.tabs[self.tab].mark_plugin_entity_dirty(*handle, epoch);
+        let mut added_iter = added.into_iter();
+        let mut handles = Vec::with_capacity(slots.len());
+        let mut any_added = false;
+        for slot in slots {
+            match slot {
+                Some(_) => {
+                    let handle = added_iter.next().expect("one added handle per prepared item");
+                    self.app.tabs[self.tab].mark_plugin_entity_dirty(handle, epoch);
+                    handles.push(handle);
+                    any_added = true;
+                }
+                None => handles.push(Handle::NULL),
+            }
         }
-        self.publish_document_view();
+        if any_added {
+            self.publish_document_view();
+        }
         handles
     }
 
@@ -483,6 +533,25 @@ impl<'a> HostSession<'a> {
 
     fn update_entity_inner(&mut self, mut entity: EntityType) -> bool {
         let old = self.document().get_entity(entity.common().handle).cloned();
+        // P1-10 route consistency: a direct update runs the same
+        // reference-coverage validation as the transaction route (attributes
+        // keep their nested replace path, which the scene validates).
+        if !matches!(entity, EntityType::AttributeEntity(_)) {
+            let Some(existing) = old.as_ref() else {
+                return false;
+            };
+            let bound = ocs_plugin_api::entity_coverage::bind_canvas_entity_references(
+                self.document(),
+                &mut entity,
+            )
+            .is_ok();
+            let valid = bound
+                && ocs_plugin_api::entity_coverage::validate_entity_mutation(existing, &entity)
+                    .is_ok();
+            if !valid {
+                return false;
+            }
+        }
         if self
             .normalize_scripted_entity(old.as_ref(), &mut entity)
             .is_err()
@@ -562,28 +631,87 @@ impl<'a> HostSession<'a> {
         // Nested attributes keep their special replace path (they are not
         // scene-model entities).
         let mut plain = Vec::with_capacity(entities.len());
+        // Before-images for a defensive rollback. Validation above makes the
+        // commit effectively infallible while the session owns the document
+        // exclusively, but the host must never PANIC on plugin input: a late
+        // refusal (locked layer re-locked mid-batch, hash miss, memory
+        // pressure) previously aborted the process AFTER earlier entries had
+        // already mutated. The applied writes are rolled back through the
+        // same plugin-write paths, so caches, undo deltas and the geometry
+        // bump see a coherent restored state and the caller gets an honest
+        // error.
+        let mut rollback_nested: Vec<EntityType> = Vec::new();
+        let mut rollback_plain: Vec<EntityType> = Vec::new();
         for entity in entities {
             match entity {
                 EntityType::AttributeEntity(attribute) => {
-                    // Validation above makes this infallible while the
-                    // session owns the document exclusively.
-                    assert!(self.replace_nested_attribute(attribute));
+                    let owner = attribute.common.owner_handle;
+                    if let Some(before) = self.host_model_entity(owner) {
+                        rollback_nested.push(before);
+                    }
+                    if !self.replace_nested_attribute(attribute) {
+                        self.rollback_transaction_writes(
+                            &mut rollback_nested,
+                            &mut rollback_plain,
+                            usize::MAX,
+                        );
+                        return Err("transaction commit refused a nested attribute write after \
+                                    validation; applied writes were rolled back"
+                            .into());
+                    }
                 }
                 entity => plain.push(entity),
             }
         }
         if !plain.is_empty() {
+        rollback_plain = plain
+            .iter()
+            .filter_map(|entity| self.host_model_entity(entity.common().handle))
+            .collect();
             let expected = plain.len();
             let moved = self.app.tabs[self.tab].scene.update_entities_plugin(plain);
-            // Validation above makes the batch infallible while the session
-            // owns the document exclusively.
-            assert_eq!(moved, expected);
+            if moved != expected {
+                // Only the first `moved` entries were applied — restore those.
+                self.rollback_transaction_writes(
+                    &mut rollback_nested,
+                    &mut rollback_plain,
+                    moved,
+                );
+                return Err(format!(
+                    "transaction commit wrote {moved} of {expected} entities after \
+                     validation; applied writes were rolled back"
+                ));
+            }
         }
         self.app.sync_registered_layers(self.tab);
         self.set_dirty();
         self.publish_document_view();
         self.refresh_grips_of_active_tab();
         Ok(())
+    }
+
+    /// Restore the before-images of a partially applied transaction commit.
+    /// `plain_applied` bounds how many plain before-images to restore
+    /// (usize::MAX = all nested images and the whole plain set).
+    fn rollback_transaction_writes(
+        &mut self,
+        nested: &mut Vec<EntityType>,
+        plain: &mut Vec<EntityType>,
+        plain_applied: usize,
+    ) {
+        // Reversed order: later before-images restore first, so writes that
+        // touched the same insert compose back to the original state.
+        for before in nested.drain(..).rev() {
+            let _ = self.app.tabs[self.tab].scene.update_entity_plugin(before);
+        }
+        if !plain.is_empty() {
+            let applied = plain.len().min(plain_applied);
+            let _ = self.app.tabs[self.tab]
+                .scene
+                .update_entities_plugin(plain.drain(..applied).collect());
+        }
+        self.app.sync_registered_layers(self.tab);
+        self.publish_document_view();
     }
 
     pub fn selection(&self) -> Vec<Handle> {
@@ -645,13 +773,18 @@ impl<'a> HostSession<'a> {
 
     /// Delete the entity with `handle`, keeping the scene's render caches in
     /// sync. Returns `false` when the entity is absent or on a locked layer
-    /// (which `erase_entities` refuses to remove).
+    /// (which `erase_entities` refuses to remove). A failed removal no longer
+    /// marks the entity dirty (P1-17): the dirty-region claim follows the
+    /// actual outcome.
     pub fn remove_entity(&mut self, handle: Handle) -> bool {
-        // API v13 dirty regions: mark before the boundary publish; a removed
-        // handle still rides the set (consumers detect its absence).
+        self.remove_entity_inner(handle)
+    }
+
+    /// Dirty-region mark for a successful removal: a removed handle still
+    /// rides the set — consumers detect its absence.
+    fn mark_removed_entity_dirty(&mut self, handle: Handle) {
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_entity_dirty(handle, epoch);
-        self.remove_entity_inner(handle)
     }
 
     fn remove_entity_inner(&mut self, handle: Handle) -> bool {
@@ -671,6 +804,7 @@ impl<'a> HostSession<'a> {
                 .scene
                 .update_entity(EntityType::Insert(insert));
             if removed {
+                self.mark_removed_entity_dirty(handle);
                 self.publish_document_view();
                 self.refresh_grips_of_active_tab();
             }
@@ -696,6 +830,7 @@ impl<'a> HostSession<'a> {
                     record.entity_handles.retain(|member| *member != handle);
                 }
             }
+            self.mark_removed_entity_dirty(handle);
             self.publish_document_view();
             self.refresh_grips_of_active_tab();
         }
@@ -721,6 +856,19 @@ impl<'a> HostSession<'a> {
     /// missing so the file stays valid for other CAD apps. Returns `false` when
     /// the entity does not exist.
     pub fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
+        if !self.write_record_quiet(handle, record) {
+            return false;
+        }
+        self.bump_geometry();
+        self.set_dirty();
+        self.publish_document_view();
+        true
+    }
+
+    /// [`Self::write_record`] without the boundary publish/bump: batch paths
+    /// that stamp many records publish ONCE at the end (P1-17). The dirty
+    /// (entity, app) mark still runs so the final boundary carries it.
+    fn write_record_quiet(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
         if self.app.tabs[self.tab].scene.is_layer_locked(handle) {
             return false;
         }
@@ -754,9 +902,6 @@ impl<'a> HostSession<'a> {
         // boundary notification — marked BEFORE the publish that carries it.
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_record_dirty(handle, app, epoch);
-        self.bump_geometry();
-        self.set_dirty();
-        self.publish_document_view();
         true
     }
 
@@ -2711,6 +2856,10 @@ impl<'a> HostSession<'a> {
             }
             TableOperation::StyleSetCurrent { kind, name } => {
                 let (name, handle) = stored(self.document(), kind, name.trim())?;
+                // P1-16 route consistency: the "set current" arm runs the same
+                // undo scope + finish path as the rename/delete arms above
+                // (it used to bypass both).
+                self.push_undo("Set current style");
                 let header = &mut self.document_mut().header;
                 match kind {
                     TableStyleKind::Text => {
@@ -2724,7 +2873,7 @@ impl<'a> HostSession<'a> {
                         self.app.ribbon.active_dim_style = name;
                     }
                 }
-                self.app.tabs[self.tab].dirty = true;
+                self.finish_style_change(kind_of(kind));
                 Ok(handle)
             }
             _ => Err("unsupported table operation".to_owned()),
@@ -2761,8 +2910,20 @@ impl<'a> HostSession<'a> {
             None => None,
         };
 
+        if self.document().layers.get(trimmed).is_none() {
+            return false;
+        }
+        // P1-16 route consistency: the direct route opens its own undo scope
+        // exactly like the table route, so a plugin-driven layer edit is one
+        // undoable step instead of landing outside history. Refusals above
+        // never touch the scope.
+        let own_scope = self.ensure_xrecord_undo_scope("Modify layer");
         let doc = self.document_mut();
         let Some(existing) = doc.layers.get_mut(trimmed) else {
+            // Checked above; an empty scope is closed to keep the contract.
+            if own_scope {
+                self.app.finish_pending_history(self.tab);
+            }
             return false;
         };
 
@@ -2806,6 +2967,9 @@ impl<'a> HostSession<'a> {
             .invalidate_layer_dependencies(&[trimmed.to_string()]);
         self.app.refresh_layer_panel();
         self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
         true
     }
 
@@ -3148,6 +3312,23 @@ impl<'a> HostSession<'a> {
         name: &str,
         entries: Vec<document::objects::XRecordEntry>,
     ) -> Result<Handle, String> {
+        let handle = self.update_xrecord_quiet(dictionary_path, name, entries)?;
+        self.set_dirty();
+        self.publish_document_view();
+        Ok(handle)
+    }
+
+    /// [`Self::update_xrecord`] without the boundary publish/settle — the
+    /// batch route publishes once for the whole set (P1-17). The undo-scope
+    /// handling matches the visible variant: a mutation inside a plugin-opened
+    /// `push_undo` scope joins it; a scope-less call opens its own and the
+    /// visible wrapper finishes it.
+    fn update_xrecord_quiet(
+        &mut self,
+        dictionary_path: &[&str],
+        name: &str,
+        entries: Vec<document::objects::XRecordEntry>,
+    ) -> Result<Handle, String> {
         use document::objects::ObjectType;
         validated_xrecord_entries(&entries)?;
         let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
@@ -3167,11 +3348,9 @@ impl<'a> HostSession<'a> {
         record.raw_dwg_data = None;
         record.raw_dwg_handle_bits = 0;
         record.raw_dwg_version = None;
-        self.set_dirty();
         // API v13 dirty regions — before the publish that carries them.
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_record_dirty(handle, "NOD".to_string(), epoch);
-        self.publish_document_view();
         if own_scope {
             self.app.finish_pending_history(self.tab);
         }
@@ -3638,9 +3817,28 @@ impl<'a> HostSession<'a> {
             // Zero-geometry designs record nothing, like zero-length chains.
             return Ok(Vec::new());
         }
+        // P1-11 preflight: every staged entity's layer is checked BEFORE any
+        // insertion, so a locked layer refuses the whole instance instead of
+        // leaving entities without their identity stamp (the old behavior
+        // staged first and stamped after — a refusal mid-way left a
+        // partially-staged instance no re-stage could complete).
+        if let Some(entity) = entities
+            .iter()
+            .find(|entity| self.new_entity_layer_locked(entity))
+        {
+            return Err(format!(
+                "instance of class {:?} targets locked layer {:?}; refusing the whole instance",
+                instance.class_id,
+                entity.common().layer
+            ));
+        }
         let own_scope = self.ensure_xrecord_undo_scope("Stage plugin class instance");
         let handles = self.add_entities(entities);
-        for handle in &handles {
+        // All-or-nothing stamping: after the preflight a stamp refusal can
+        // only mean an unexpected condition — the staged entities are erased
+        // again so no half-staged instance survives (P1-11).
+        let mut stamp_failed: Option<usize> = None;
+        for (index, handle) in handles.iter().enumerate() {
             // Identity stamp: the class key as the XDATA application on every
             // staged entity (write_record registers the APPID so the stamp
             // survives the file), carrying the schema version and the record
@@ -3667,7 +3865,10 @@ impl<'a> HostSession<'a> {
                 }
                 stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::Integer32(1));
             }
-            self.write_record(*handle, stamp);
+            if !self.write_record_quiet(*handle, stamp) {
+                stamp_failed = Some(index);
+                break;
+            }
             // Designation inside the SAME scope, the before-image
             // pending-scoped the way set_reference_only does.
             let before = self.app.tabs[self.tab]
@@ -3679,6 +3880,20 @@ impl<'a> HostSession<'a> {
             self.app.tabs[self.tab]
                 .scene
                 .set_reference_only_membership(*handle, !instance.selectable_custom);
+        }
+        if let Some(index) = stamp_failed {
+            self.app.tabs[self.tab]
+                .scene
+                .erase_entities_plugin(&handles);
+            self.app.sync_registered_layers(self.tab);
+            self.bump_geometry();
+            self.set_dirty();
+            self.publish_document_view();
+            return Err(format!(
+                "stamping the staged instance of class {:?} failed at entity {:?}; the whole \
+                 staged instance was rolled back",
+                instance.class_id, handles[index]
+            ));
         }
         self.bump_geometry();
         self.set_dirty();
@@ -3774,13 +3989,21 @@ impl<'a> HostSession<'a> {
         &mut self,
         updates: &[ocs_plugin_api::host::XRecordUpdate],
     ) -> Result<Vec<Result<Handle, String>>, String> {
-        Ok(updates
+        // P1-17: the batch publishes ONCE for the whole set instead of once
+        // per record — a 100-record batch no longer fans out into 100
+        // publication passes.
+        let results: Vec<Result<Handle, String>> = updates
             .iter()
             .map(|update| {
                 let path: Vec<&str> = update.dictionary_path.iter().map(|s| s.as_str()).collect();
-                self.update_xrecord(&path, &update.name, update.entries.clone())
+                self.update_xrecord_quiet(&path, &update.name, update.entries.clone())
             })
-            .collect())
+            .collect();
+        if results.iter().any(|result| result.is_ok()) {
+            self.set_dirty();
+            self.publish_document_view();
+        }
+        Ok(results)
     }
 
     /// List a dictionary's XRecords WITH their entries in one call (API v13):
@@ -4236,24 +4459,43 @@ fn parse_parameter_value(
 }
 
 /// True when block `outer` (transitively) contains an insert of `target`.
-fn block_nests(doc: &Document, outer: &str, target: &str, depth: usize) -> bool {
-    if depth > 64 {
-        return true;
+fn block_nests(doc: &Document, outer: &str, target: &str, _depth: usize) -> bool {
+    // Visited-set traversal (P1-13): the depth-capped recursion re-explored
+    // shared sub-blocks once per referencing instance, so a document with N
+    // shared instances of one block multiplied the whole subtree N times —
+    // exponential on deep, heavily-shared block trees. Every block is now
+    // visited at most once per top-level check (linear in the block count);
+    // the depth cap stays as a belt-and-braces guard with its old
+    // conservative `true`.
+    fn walk(
+        doc: &Document,
+        outer: &str,
+        target: &str,
+        visited: &mut std::collections::HashSet<String>,
+        depth: usize,
+    ) -> bool {
+        if depth > 64 {
+            return true;
+        }
+        if !visited.insert(outer.to_ascii_uppercase()) {
+            return false;
+        }
+        let Some(record) = doc.block_records.get(outer) else {
+            return false;
+        };
+        record
+            .entity_handles
+            .iter()
+            .filter_map(|h| doc.get_entity(*h))
+            .any(|entity| match entity {
+                EntityType::Insert(insert) => {
+                    insert.block_name.eq_ignore_ascii_case(target)
+                        || walk(doc, &insert.block_name, target, visited, depth + 1)
+                }
+                _ => false,
+            })
     }
-    let Some(record) = doc.block_records.get(outer) else {
-        return false;
-    };
-    record
-        .entity_handles
-        .iter()
-        .filter_map(|h| doc.get_entity(*h))
-        .any(|entity| match entity {
-            EntityType::Insert(insert) => {
-                insert.block_name.eq_ignore_ascii_case(target)
-                    || block_nests(doc, &insert.block_name, target, depth + 1)
-            }
-            _ => false,
-        })
+    walk(doc, outer, target, &mut std::collections::HashSet::new(), 0)
 }
 
 /// A layer name AutoCAD would accept: 1-255 characters, none of `<>/\":;?*|=\``.
@@ -14633,6 +14875,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     std::path::Path::new(&plugin_path),
                     &mut host,
                     crate::plugin::v4_support::notification_handler(),
+                    None,
                 )
                 .expect("spawn staged Python plugin"),
             )
@@ -14778,6 +15021,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     std::path::Path::new(&plugin_path),
                     &mut host,
                     crate::plugin::v4_support::notification_handler(),
+                    None,
                 )
                 .expect("spawn staged Python plugin"),
             )

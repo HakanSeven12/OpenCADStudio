@@ -568,7 +568,9 @@ impl OpenCADStudio {
                 format!("Layout '{layout}' vanished"),
             ));
         }
-        if layout != "Model" {
+        // Only a layout that was never opened gets its first viewport; one
+        // whose viewports the user erased stays as it is.
+        if layout != "Model" && self.tabs[i].scene.unopened_layouts.remove(&layout) {
             self.tabs[i].scene.initialize_layout_default_viewport(&layout);
         }
         self.tabs[i].dirty = true;

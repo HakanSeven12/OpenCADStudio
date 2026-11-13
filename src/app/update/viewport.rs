@@ -10014,9 +10014,7 @@ properties={:.1}ms picked={}",
         // periodic sync only fires on a tick, which may not have run
         // since the last pan/zoom).
         let perf_phase = Instant::now();
-        if initialize_layout {
-            self.tabs[i].scene.sync_camera_to_document();
-        }
+        self.tabs[i].scene.sync_camera_to_document();
         self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
         let sync_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
         // Cancel any pending rename and active viewport when switching.

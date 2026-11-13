@@ -6532,6 +6532,36 @@ impl Scene {
             .collect()
     }
 
+    /// The handles an edit command may act on: layout sheet viewports are
+    /// not user-editable. Model space has no sheet viewport.
+    pub(crate) fn without_sheet_viewports(&self, handles: &[Handle]) -> Vec<Handle> {
+        let any_viewport = handles.iter().any(|handle| {
+            matches!(
+                self.document.get_entity(*handle),
+                Some(EntityType::Viewport(_))
+            )
+        });
+        if !any_viewport {
+            return handles.to_vec();
+        }
+        let sheets: std::collections::HashSet<Handle> = self
+            .document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                ObjectType::Layout(layout) if layout.name != "Model" => {
+                    Some(Self::layout_sheet_viewport_handle(&self.document, layout))
+                }
+                _ => None,
+            })
+            .collect();
+        handles
+            .iter()
+            .copied()
+            .filter(|handle| !sheets.contains(handle))
+            .collect()
+    }
+
     fn current_layout_sheet_viewport_handle(&self) -> Handle {
         self.document
             .objects

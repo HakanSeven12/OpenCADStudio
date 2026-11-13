@@ -140,6 +140,9 @@ impl OpenCADStudio {
             Some(K::Rename) => crate::tr!("rename-dialog", "title"),
             Some(K::Purge) => crate::tr!("purge-dialog", "title"),
             Some(K::DrawingProperties) => crate::tr!("dwgprops-dialog", "title"),
+            Some(K::GeographicLocation) => {
+                crate::tr!("geographic-location-dialog", "title")
+            }
             Some(K::SelectSimilarSettings) => crate::tr!("select-similar", "title"),
             Some(K::BlockVisibility) => crate::t!("Visibility States").into_owned(),
             Some(K::BlockLookup) => crate::t!("Property Lookup Table").into_owned(),
@@ -499,6 +502,12 @@ impl OpenCADStudio {
                 let state = self.drawing_properties.as_ref()?;
                 sized_flow(ex, 560, 440, |flow| {
                     crate::ui::window::drawing_properties::view(state, flow)
+                })
+            }
+            super::super::ModalKind::GeographicLocation => {
+                let state = self.geographic_location.as_ref()?;
+                sized_flow(ex, 600, 250, |flow| {
+                    crate::ui::window::geographic_location::view(state, flow)
                 })
             }
             super::super::ModalKind::Purge => {

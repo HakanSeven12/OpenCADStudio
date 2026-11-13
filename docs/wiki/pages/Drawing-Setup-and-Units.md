@@ -52,4 +52,8 @@ A template (`.dwt`) is a drawing kept as a starting point: units, layers, text a
 
 ## Geographic location
 
-When a drawing carries geographic data (a coordinate system and a location on the earth), the status bar shows the coordinate system's name; hover it for the details. Georeferenced images (with geo tags or a world file) can be attached at their own location; see [References and Underlays](References-and-Underlays).
+`GEOGRAPHICLOCATION` sets the root drawing's coordinate reference system (CRS) in native `GEODATA`, using an EPSG code such as `EPSG:5514` or a WKT definition. It preserves the other geographic metadata, works as one undo step, and persists in DWG and DXF.
+
+This declaration does not reproject geometry or change drawing units. In particular, an EPSG:5514 drawing already containing Krovak east/north metres keeps those coordinates, including negative values. Missing or unreadable CRS metadata must be chosen explicitly; OCS does not infer it from coordinates or `INSUNITS`.
+
+When a drawing carries geographic data, the status bar shows the coordinate system's name; hover it for the details. Georeferenced images (with geo tags or a world file) can be attached at their own location; see [References and Underlays](References-and-Underlays).

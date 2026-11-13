@@ -56,6 +56,11 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
 hayro = "0.7.1"
 kurbo = "0.13"
+# Pure-Rust CRS resolution and projection for document GEODATA. Keep the
+# embedded EPSG data and WKT parser on the same native/wasm path.
+proj4rs = { version = "0.3", default-features = false, features = ["crs-definitions", "wasm-strict"] }
+proj4wkt = { version = "0.2", default-features = false, features = ["wasm-strict"] }
+crs-definitions = "0.6"
 # DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
 zip = { version = "8", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"

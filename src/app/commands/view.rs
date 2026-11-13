@@ -164,6 +164,9 @@ impl OpenCADStudio {
             "DWGPROPS" | "DWGPROP" => {
                 self.open_drawing_properties();
             }
+            "GEOGRAPHICLOCATION" => {
+                self.open_geographic_location();
+            }
 
             // Edit a USERI1..USERI5 / USERR1..USERR5 slot. Lets the user
             // store drawing-scoped scalars (and save them through round-trip)

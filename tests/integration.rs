@@ -36,6 +36,9 @@ mod explode_regression;
 #[path = "flatten_regression.rs"]
 mod flatten_regression;
 
+#[path = "geodata_roundtrip.rs"]
+mod geodata_roundtrip;
+
 #[path = "hatch_shader_lod.rs"]
 mod hatch_shader_lod;
 

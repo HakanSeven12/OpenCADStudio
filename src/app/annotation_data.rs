@@ -3341,11 +3341,6 @@ mod tests {
         );
     }
 
-    /// `column_index` only checks `checked_mul(26)`, so a range like
-    /// `A1:ZZZZZZ1` parses fine — and `(c0..=c1)` then collects one `String`
-    /// per column: ~308 M slots (~7 GB) for 6 Z's, and a `capacity overflow`
-    /// panic at 13 Z's. Columns past the widest row are empty in *every*
-    /// row, so the window must be clamped to the data width.
     #[test]
     fn a_cell_range_reads_its_own_cells_when_the_sheet_starts_below_a1() {
         // Nothing in row 1 or in column A: the sheet's cells start at B2.
@@ -3383,6 +3378,11 @@ mod tests {
         assert_eq!(wider, Ok(vec![vec![cell("Mark")], vec![cell("B1")]]));
     }
 
+    /// `column_index` only checks `checked_mul(26)`, so a range like
+    /// `A1:ZZZZZZ1` parses fine — and `(c0..=c1)` then collects one `String`
+    /// per column: ~308 M slots (~7 GB) for 6 Z's, and a `capacity overflow`
+    /// panic at 13 Z's. Columns past the widest row are empty in *every*
+    /// row, so the window must be clamped to the data width.
     #[test]
     fn crop_range_bounds_oversized_column_spans() {
         let rows = vec![vec!["x".to_string()]];

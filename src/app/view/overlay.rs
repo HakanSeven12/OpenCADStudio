@@ -2984,6 +2984,8 @@ mod cell_editor_wheel_tests {
             ruler: None,
             rotation: (1.0, 0.0),
             cell: Some(cell),
+            inplace: false,
+            translucent: false,
         };
         let drawing =
             mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);

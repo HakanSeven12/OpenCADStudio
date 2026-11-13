@@ -1070,6 +1070,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            // A step with nothing to ask yet keeps no line.
+            .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         // In Remove mode a selection step asks "Remove objects:" in place of

@@ -36,11 +36,31 @@ pub struct PasteSpecCommand {
     picture: Option<EmbeddedImage>,
     style: String,
     height: f64,
+    /// The system clipboard has been read, so every format is known.
+    read: bool,
     step: Step,
     plane: WorkingPlane,
 }
 
 impl PasteSpecCommand {
+    /// PASTESPEC while the system clipboard is being read: the copied
+    /// objects can be asked for already, and the prompt waits for the
+    /// formats the clipboard adds.
+    pub fn reading(objects: bool) -> Self {
+        Self {
+            objects,
+            text: None,
+            table: None,
+            picture: None,
+            style: String::new(),
+            height: 0.0,
+            read: false,
+            step: Step::Format,
+            plane: WorkingPlane::default(),
+        }
+    }
+
+    /// PASTESPEC with every format on hand, the system clipboard read.
     pub fn new(
         objects: bool,
         text: Option<&str>,
@@ -56,6 +76,7 @@ impl PasteSpecCommand {
             picture,
             style,
             height,
+            read: true,
             step: Step::Format,
             plane: WorkingPlane::default(),
         }
@@ -169,15 +190,17 @@ impl CadCommand for PasteSpecCommand {
         if self.step != Step::Format {
             return t!("PASTESPEC  Specify insertion point:").into_owned();
         }
-        // Only the formats on hand; none until the clipboard has been read.
+        // Nothing to ask until the clipboard has been read: a prompt shown
+        // now would be followed by the one that lists every format.
+        if !self.read {
+            return String::new();
+        }
+        // Only the formats on hand.
         let formats: Vec<String> = self
             .options()
             .into_iter()
             .map(|option| option.label)
             .collect();
-        if formats.is_empty() {
-            return self.name().to_string();
-        }
         t!(
             "PASTESPEC  Paste as [%{formats}]:",
             formats = formats.join("/")

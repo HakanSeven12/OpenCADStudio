@@ -531,9 +531,11 @@ impl OpenCADStudio {
             // (Message::PasteSpecial), and the prompt that lists them is
             // shown then.
             "PASTESPEC" => {
-                let command = self.paste_special_command(i, None, None);
+                let command = crate::modules::draw::clipboard::pastespec::PasteSpecCommand::reading(
+                    !self.clipboard.is_empty(),
+                );
                 self.reset_command_start_state(i);
-                self.tabs[i].active_cmd = Some(command);
+                self.tabs[i].active_cmd = Some(Box::new(command));
                 self.push_ucs_to_cmd(i);
                 self.sync_dyn_fields();
                 let started = self.focus_cmd_input();

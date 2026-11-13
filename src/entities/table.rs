@@ -4465,10 +4465,14 @@ pub fn table_indicator(
     let mut text_height = f64::MAX;
     let mut style_handle = None;
     for (ri, row) in tab.rows.iter().enumerate() {
-        let legacy = table_style.map(|ts| match (title_suppressed, header_suppressed, ri) {
-            (false, _, 0) => &ts.title_row_style,
-            (false, false, 1) | (true, false, 0) => &ts.header_row_style,
-            _ => &ts.data_row_style,
+        // The style the row's first cell draws with: the role its ids
+        // name, else the one the row's place gives it.
+        let legacy = table_style.map(|ts| {
+            match cell_role_kind(tab, title_suppressed, header_suppressed, ri, 0) {
+                0 => &ts.title_row_style,
+                1 => &ts.header_row_style,
+                _ => &ts.data_row_style,
+            }
         });
         let height = row
             .cells

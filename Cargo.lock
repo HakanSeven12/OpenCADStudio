@@ -102,7 +102,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/ramox81/cadcodec.git?rev=e7236b1b#e7236b1be75239ed82121ff70d72ffeab3bb9f6b"
+source = "git+https://github.com/ramox81/cadcodec.git?rev=6f671b33#6f671b33ba5a21d44852129697e0a77ec62dc1b1"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",

@@ -117,7 +117,7 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch."https://github.com/hakanaktt/acadrust.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "e7236b1b" }
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "6f671b33" }
 
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

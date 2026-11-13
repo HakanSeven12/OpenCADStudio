@@ -193,6 +193,8 @@ pub(super) const NAMES: &[&str] = &[
     "keytips",
     "dialog_ok",
     "dialog_answer",
+    // The attribute form's page steppers: `page=next|previous`.
+    "dialog_page",
     "dialog_discard",
     "dialog_cancel",
     "block_def_dialog",
@@ -1591,6 +1593,7 @@ impl OpenCADStudio {
             name,
             "dialog_ok"
                 | "dialog_answer"
+                | "dialog_page"
                 | "dialog_discard"
                 | "dialog_cancel"
                 | "pdf_dialog_ok"
@@ -4286,6 +4289,16 @@ impl OpenCADStudio {
                         value.to_string(),
                     ),
                 )
+            }
+            "dialog_page" if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) => {
+                Message::InsertAttrDialog(match string(req, "page")? {
+                    "next" => crate::ui::window::insert_attr_dialog::InsertAttrMsg::Next,
+                    "previous" => crate::ui::window::insert_attr_dialog::InsertAttrMsg::Previous,
+                    _ => return Err(failure("invalid_value", "page is next or previous")),
+                })
+            }
+            "dialog_page" => {
+                return Err(failure("no_dialog", "The attribute form is not open"));
             }
             // The attribute form's Cancel is the plain decline of the parked
             // placement, so it is the modal closing itself.

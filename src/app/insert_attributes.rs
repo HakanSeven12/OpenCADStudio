@@ -27,6 +27,7 @@ impl OpenCADStudio {
                     value: ad.default_value.clone(),
                 })
                 .collect(),
+            first: 0,
         });
         self.active_modal = Some(ModalKind::InsertAttributes);
     }
@@ -96,6 +97,16 @@ impl OpenCADStudio {
                 if let Some(dialog) = self.insert_attr_dialog.as_mut() {
                     if let Some(row) = dialog.rows.get_mut(index) {
                         row.value = value;
+                    }
+                }
+                Task::none()
+            }
+            InsertAttrMsg::Previous | InsertAttrMsg::Next => {
+                if let Some(dialog) = self.insert_attr_dialog.as_mut() {
+                    if matches!(message, InsertAttrMsg::Next) {
+                        dialog.next_page();
+                    } else {
+                        dialog.previous_page();
                     }
                 }
                 Task::none()

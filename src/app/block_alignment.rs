@@ -89,8 +89,7 @@ impl OpenCADStudio {
                 );
                 let mut staged = self.tabs[i].scene.document.clone();
                 *staged.get_entity_mut(insert).unwrap() = entity;
-                self.apply_action_document(i, staged);
-                self.tabs[i].scene.bump_geometry();
+                self.apply_action_document_and_bump(i, staged);
                 self.tabs[i].dirty = true;
                 self.finish_pending_history(i);
             }

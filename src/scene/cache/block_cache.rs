@@ -354,6 +354,13 @@ impl Default for BlockCache {
     }
 }
 
+#[cfg(test)]
+impl BlockCache {
+    pub(crate) fn defn_ptr(&self, name: &str) -> Option<usize> {
+        self.defns.get(name).map(|arc| Arc::as_ptr(arc) as usize)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct ProtoNumericKey {
     linear: [u64; 9],
@@ -748,12 +755,22 @@ impl BlockCache {
         cache.viewport = self.viewport;
         cache.prototypes_enabled = self.prototypes_enabled;
         cache.defns = self.defns.clone();
-        let mut rebuilt: Vec<String> = cache
+        let mut touched: Vec<String> = cache
             .defns
             .keys()
             .filter(|name| changed.iter().any(|c| c.eq_ignore_ascii_case(name)))
             .cloned()
             .collect();
+        let mut rebuilt = Vec::new();
+        let mut removed = Vec::new();
+        for name in touched.drain(..) {
+            if doc.block_records.get(&name).is_some() {
+                rebuilt.push(name);
+            } else {
+                cache.defns.remove(&name);
+                removed.push(name);
+            }
+        }
         for name in changed {
             if !rebuilt.iter().any(|r| r.eq_ignore_ascii_case(name))
                 && doc.block_records.get(name).is_some()
@@ -788,8 +805,8 @@ impl BlockCache {
             })
             .collect();
         cache.defns.extend(defns);
-        // Every definition that reaches a rebuilt one through its nesting.
-        let mut affected: HashSet<String> = rebuilt.into_iter().collect();
+        // Every definition that reaches a rebuilt or removed one through its nesting.
+        let mut affected: HashSet<String> = rebuilt.into_iter().chain(removed).collect();
         loop {
             let more: Vec<String> = cache
                 .defns

@@ -583,24 +583,41 @@ fn owner_definition(document: &Document, parameter: Handle) -> Option<Handle> {
 
 /// Show the definition's objects as state `index` does.
 pub fn apply_state(document: &mut Document, parameter: Handle, index: usize) {
+    let _ = apply_state_changes(document, parameter, index);
+}
+
+/// Apply visibility state `index` and return the handles of entities whose
+/// `invisible` flag changed.
+pub fn apply_state_changes(
+    document: &mut Document,
+    parameter: Handle,
+    index: usize,
+) -> Vec<Handle> {
     let Some(ObjectType::BlockVisibilityParameter(current)) = document.objects.get(&parameter)
     else {
-        return;
+        return Vec::new();
     };
     let Some(state) = current.states.get(index) else {
-        return;
+        return Vec::new();
     };
     let shown: Vec<(Handle, bool)> = current
         .all_blocks
         .iter()
         .map(|handle| (*handle, state.visible_blocks.contains(handle)))
         .collect();
+    let mut changed = Vec::new();
     for (handle, visible) in shown {
         if let Some(entity) = document.get_entity_mut(handle) {
-            entity.common_mut().invisible =
+            let next_invisible =
                 !visible || super::block_construction::is_construction(entity.common());
+            let common = entity.common_mut();
+            if common.invisible != next_invisible {
+                common.invisible = next_invisible;
+                changed.push(handle);
+            }
         }
     }
+    changed
 }
 
 /// Per-member rule of state `index`, in definition member order. A member the

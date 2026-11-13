@@ -112,8 +112,7 @@ impl OpenCADStudio {
                 i,
                 super::tab_document::HistoryLabel::Message("Reset block references"),
             );
-            self.apply_action_document(i, staged);
-            self.tabs[i].scene.bump_geometry();
+            self.apply_action_document_and_bump(i, staged);
             self.tabs[i].dirty = true;
             self.finish_pending_history(i);
             self.refresh_properties();
@@ -180,7 +179,15 @@ impl OpenCADStudio {
         self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
         Task::none()
     }
-    pub(super) fn apply_action_document(&mut self, i: usize, mut staged: document::Document) {
+    fn apply_action_document_diff(
+        &mut self,
+        i: usize,
+        mut staged: document::Document,
+    ) -> (
+        Vec<(document::Handle, crate::scene::ChangeKind)>,
+        Vec<String>,
+    ) {
+        use crate::scene::ChangeKind;
         let doc = &mut self.tabs[i].scene.document;
         // Drawable entity iteration omits BLOCK and ENDBLK. Their records
         // still carry evaluated origins and delimit the published body.
@@ -191,6 +198,8 @@ impl OpenCADStudio {
             .flat_map(|record| [record.block_entity_handle, record.block_end_handle])
             .filter(|handle| !handle.is_null())
             .collect::<rustc_hash::FxHashSet<_>>();
+        let mut seen_handles = rustc_hash::FxHashSet::default();
+        let mut delta_changes = Vec::new();
         let changes = staged
             .entities()
             .chain(
@@ -198,15 +207,40 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|&handle| staged.get_entity(handle)),
             )
+            .filter(|e| seen_handles.insert(e.common().handle))
             .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
-            .cloned()
+            .map(|e| {
+                let handle = e.common().handle;
+                let kind = if doc.get_entity(handle).is_some() {
+                    ChangeKind::Modified
+                } else {
+                    ChangeKind::Added
+                };
+                delta_changes.push((handle, kind));
+                e.clone()
+            })
             .collect::<Vec<_>>();
+        seen_handles.clear();
         let removed = doc
             .entities()
             .chain(markers.iter().filter_map(|&handle| doc.get_entity(handle)))
             .map(|e| e.common().handle)
-            .filter(|h| staged.get_entity(*h).is_none())
+            .filter(|h| seen_handles.insert(*h) && staged.get_entity(*h).is_none())
             .collect::<Vec<_>>();
+        for &handle in &removed {
+            delta_changes.push((handle, ChangeKind::Removed));
+        }
+        let mut touched_blocks = Vec::new();
+        for next in staged.block_records.iter() {
+            if doc.block_records.get(&next.name) != Some(next) {
+                touched_blocks.push(next.name.clone());
+            }
+        }
+        for prev in doc.block_records.iter() {
+            if staged.block_records.get(&prev.name).is_none() {
+                touched_blocks.push(prev.name.clone());
+            }
+        }
         doc.swap_structure(staged.snapshot_structure());
         for handle in removed {
             doc.remove_entity_arc(handle);
@@ -219,6 +253,30 @@ impl OpenCADStudio {
                 doc.restore_entity_arc(std::sync::Arc::new(entity));
             }
         }
+        (delta_changes, touched_blocks)
+    }
+
+    pub(super) fn apply_action_document(&mut self, i: usize, staged: document::Document) {
+        let _ = self.apply_action_document_diff(i, staged);
+    }
+
+    pub(super) fn apply_action_document_and_bump(
+        &mut self,
+        i: usize,
+        staged: document::Document,
+    ) {
+        let (delta_changes, touched_blocks) = self.apply_action_document_diff(i, staged);
+        let scene = &mut self.tabs[i].scene;
+        for &(handle, _) in &delta_changes {
+            scene.reseed_derived_caches(handle);
+        }
+        if delta_changes.is_empty() && touched_blocks.is_empty() {
+            if let Some(edited) = scene.block_edit_block {
+                scene.bump_block_definition(edited);
+            }
+            return;
+        }
+        scene.bump_entities_with_block_deps(&delta_changes, &[], &touched_blocks, false);
     }
     /// Lookup has no geometry action of its own: choose the parameter whose
     /// property table the new action edits.
@@ -432,8 +490,7 @@ impl OpenCADStudio {
                                     "Associate block action",
                                 ),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -515,8 +572,7 @@ impl OpenCADStudio {
                                 i,
                                 super::tab_document::HistoryLabel::Message("Action selection set"),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -620,8 +676,7 @@ impl OpenCADStudio {
                                 super::tab_document::HistoryLabel::Message(kind.name()),
                             ),
                         );
-                        self.apply_action_document(i, staged);
-                        self.tabs[i].scene.bump_geometry();
+                        self.apply_action_document_and_bump(i, staged);
                         self.tabs[i].dirty = true;
                         self.tabs[i].active_cmd = None;
                         self.tabs[i].scene.clear_preview_wire();
@@ -749,8 +804,7 @@ impl OpenCADStudio {
                                 i,
                                 super::tab_document::HistoryLabel::Message("Test block parameter"),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -1172,8 +1226,7 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Block reference parameter"),
                     );
-                    self.apply_action_document(i, staged);
-                    self.tabs[i].scene.bump_geometry();
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }

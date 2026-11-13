@@ -1344,6 +1344,7 @@ impl OpenCADStudio {
         i: usize,
         d: &mut DeltaSnapshot,
         undo: bool,
+        touched_visibility_blocks: &mut Vec<Handle>,
     ) -> Vec<(Handle, crate::scene::ChangeKind)> {
         if let Some(graph) = &d.graph {
             self.tabs[i]
@@ -1391,8 +1392,12 @@ impl OpenCADStudio {
             *scene.parametric_constraint_set_mut(entry.scope) = value.clone();
         }
         if let Some((before, after)) = &d.visibility_states {
+            for &k in before.keys().chain(after.keys()) {
+                if before.get(&k) != after.get(&k) {
+                    touched_visibility_blocks.push(k);
+                }
+            }
             scene.visibility_states = if undo { before } else { after }.clone();
-            scene.bump_geometry();
         }
         if let Some((before, after)) = &d.named_parameters {
             scene.named_parameters = if undo { before } else { after }.clone();
@@ -1473,6 +1478,7 @@ impl OpenCADStudio {
         layer_panel_changed: bool,
         native_graph_changed: bool,
         changes: &[(Handle, crate::scene::ChangeKind)],
+        touched_visibility_blocks: &[Handle],
     ) {
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
         // The step's entity delta is the only account of what it changed when
@@ -1486,19 +1492,16 @@ impl OpenCADStudio {
                 // for the final state. Unlike the old path, decoded images stay
                 // cached instead of being immediately cleared.
                 scene.rebuild_derived_caches();
-            } else if !net_changes.is_empty() {
+            } else if !net_changes.is_empty() || !touched_visibility_blocks.is_empty() {
                 for &(handle, _) in &net_changes {
                     scene.reseed_derived_caches(handle);
                 }
-                if scene.changes_touch_block_definition(&net_changes) {
-                    // A block-local delta changes the assembled definition
-                    // consumed by every INSERT (including nested blocks).
-                    // Replaying only the child handle leaves those cached
-                    // references visually stale after BEDIT closes.
-                    scene.bump_geometry();
-                } else {
-                    scene.bump_entities_after_parametric_solve(&net_changes);
-                }
+                scene.bump_entities_with_block_deps(
+                    &net_changes,
+                    touched_visibility_blocks,
+                    &[],
+                    false,
+                );
             }
             // Geometry or visibility replay does not change the constraint
             // model. Rebuilding its graph would replace imported networks.
@@ -1561,6 +1564,7 @@ impl OpenCADStudio {
         let mut layer_panel_changed = false;
         let mut native_graph_changed = false;
         let mut changes = Vec::new();
+        let mut touched_visibility_blocks = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
             let Some(snapshot) = self.tabs[i].history.undo_stack.pop() else {
@@ -1587,7 +1591,12 @@ impl OpenCADStudio {
                                     .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
                         });
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
-                    changes.extend(self.apply_delta_state(i, &mut d, true));
+                    changes.extend(self.apply_delta_state(
+                        i,
+                        &mut d,
+                        true,
+                        &mut touched_visibility_blocks,
+                    ));
                     step_view = d
                         .view
                         .clone()
@@ -1613,6 +1622,7 @@ impl OpenCADStudio {
             layer_panel_changed,
             native_graph_changed,
             &changes,
+            &touched_visibility_blocks,
         );
         self.restore_history_view(i, step_view);
         if report {
@@ -1666,6 +1676,7 @@ impl OpenCADStudio {
         let mut layer_panel_changed = false;
         let mut native_graph_changed = false;
         let mut changes = Vec::new();
+        let mut touched_visibility_blocks = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
             let Some(snapshot) = self.tabs[i].history.redo_stack.pop() else {
@@ -1689,7 +1700,12 @@ impl OpenCADStudio {
                                     .is_some_and(|entity| matches!(entity, EntityType::Viewport(_)))
                         });
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
-                    changes.extend(self.apply_delta_state(i, &mut d, false));
+                    changes.extend(self.apply_delta_state(
+                        i,
+                        &mut d,
+                        false,
+                        &mut touched_visibility_blocks,
+                    ));
                     step_view = d
                         .view
                         .clone()
@@ -1715,6 +1731,7 @@ impl OpenCADStudio {
             layer_panel_changed,
             native_graph_changed,
             &changes,
+            &touched_visibility_blocks,
         );
         self.restore_history_view(i, step_view);
         self.command_line
@@ -1761,3 +1778,94 @@ pub(super) fn history_dropdown_labels(stack: &[HistorySnapshot]) -> Vec<String> 
 
 /// How many layer-property changes LAYERP can go back through.
 const LAYER_PREVIOUS_LIMIT: usize = 50;
+
+#[cfg(test)]
+mod block_history_tests {
+    use super::*;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn block_definition_undo_redo_is_incremental() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let bg_line = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(100.0, 0.0, 0.0),
+            Vector3::new(110.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.define_block_raw(
+            "KeepDef",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(4.0, 0.0, 0.0),
+            ))],
+        );
+        let mut ins_keep = Insert::new("KeepDef", Vector3::new(30.0, 0.0, 0.0));
+        ins_keep.common.handle = Handle::NULL;
+        let keep_insert = app.tabs[i].scene.add_entity(EntityType::Insert(ins_keep));
+
+        app.tabs[i].scene.define_block_raw(
+            "EditDef",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            ))],
+        );
+        let edit_line = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EditDef")
+            .unwrap()
+            .entity_handles[0];
+        let mut ins_edit = Insert::new("EditDef", Vector3::new(10.0, 0.0, 0.0));
+        ins_edit.common.handle = Handle::NULL;
+        let edit_insert = app.tabs[i].scene.add_entity(EntityType::Insert(ins_edit));
+
+        let _ = app.tabs[i].scene.entity_wires();
+        let cache_before = app.tabs[i].scene.active_block_cache_arc();
+        let keep_defn_before = cache_before.defn_ptr("KeepDef").unwrap();
+
+        app.push_undo_snapshot(i, HistoryLabel::Message("Edit block line"));
+        if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(edit_line)
+        {
+            line.end.x = 8.0;
+        }
+        app.tabs[i]
+            .scene
+            .bump_entities_with_block_deps(&[(edit_line, crate::scene::ChangeKind::Modified)], &[], &[], false);
+        app.finish_pending_history(i);
+
+        let _ = app.tabs[i].scene.entity_wires();
+        let epoch_before_undo = app.tabs[i].scene.geometry_epoch;
+
+        app.undo_active_tab();
+        let undo_delta = app.tabs[i]
+            .scene
+            .replay_since(epoch_before_undo)
+            .expect("undoing a block-definition edit must emit an incremental delta");
+        let undo_handles: HashSet<Handle> = undo_delta.into_iter().map(|(h, _)| h).collect();
+        assert!(undo_handles.contains(&edit_line));
+        assert!(undo_handles.contains(&edit_insert));
+        assert!(!undo_handles.contains(&bg_line));
+        assert!(!undo_handles.contains(&keep_insert));
+        assert!(app.tabs[i].scene.has_resident_tess_memo(bg_line));
+        assert!(app.tabs[i].scene.has_resident_tess_memo(keep_insert));
+        let _ = app.tabs[i].scene.entity_wires();
+        let cache_after_undo = app.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_defn_before, cache_after_undo.defn_ptr("KeepDef").unwrap());
+
+        let epoch_before_redo = app.tabs[i].scene.geometry_epoch;
+        app.redo_active_tab();
+        let redo_delta = app.tabs[i]
+            .scene
+            .replay_since(epoch_before_redo)
+            .expect("redoing a block-definition edit must emit an incremental delta");
+        let redo_handles: HashSet<Handle> = redo_delta.into_iter().map(|(h, _)| h).collect();
+        assert!(redo_handles.contains(&edit_line));
+        assert!(redo_handles.contains(&edit_insert));
+        assert!(!redo_handles.contains(&bg_line));
+    }
+}

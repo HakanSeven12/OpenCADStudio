@@ -4799,8 +4799,7 @@ impl OpenCADStudio {
                     };
                     match result {
                         Ok(Some(staged)) => {
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             changed = true;
                         }

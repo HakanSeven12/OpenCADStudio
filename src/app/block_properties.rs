@@ -74,7 +74,7 @@ impl OpenCADStudio {
                     &next.1,
                 );
                 self.tabs[i].dirty = true;
-                self.tabs[i].scene.bump_geometry();
+                self.tabs[i].scene.bump_block_definition(definition);
                 self.finish_pending_history(i);
                 self.refresh_properties();
             }
@@ -241,7 +241,7 @@ impl OpenCADStudio {
             _ => return Task::none(),
         }
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.finish_pending_history(i);
         self.refresh_properties();
         // Only this block's definition changed.

@@ -127,7 +127,7 @@ impl OpenCADStudio {
         if let Some(error) = option_error {
             self.command_line.push_error(crate::t!(error).as_ref());
         }
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].scene.clear_preview_wire();
@@ -356,8 +356,7 @@ impl OpenCADStudio {
                 i,
                 super::tab_document::HistoryLabel::Message("Lookup tables"),
             );
-            self.tabs[i].scene.document = working;
-            self.tabs[i].scene.bump_geometry();
+            self.apply_action_document_and_bump(i, working);
             self.tabs[i].dirty = true;
             self.finish_pending_history(i);
             self.refresh_properties();

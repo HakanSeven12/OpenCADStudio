@@ -4896,29 +4896,111 @@ impl Scene {
         self.bump_entities_with_solve_policy(changes, &[], false, &[], &[], false, false, None);
     }
 
-    /// Incrementally invalidate a single block definition's cached display
-    /// and the `Insert` reference that owns it (used when switching a dynamic
-    /// block's visibility state), keeping all other blocks and entities cached.
-    pub fn bump_block_visibility(&mut self, insert_handle: Handle, block_name: &str) {
+    /// Mark a set of block definition names dirty so the next `BlockCache`
+    /// rebuild refreshes only those definitions (and drops removed ones)
+    /// while keeping all unrelated cached blocks warm.
+    fn mark_block_definitions_dirty<I: IntoIterator<Item = String>>(&mut self, names: I) {
+        let touched: HashSet<String> = names.into_iter().filter(|n| !n.is_empty()).collect();
+        if touched.is_empty() {
+            return;
+        }
         let from = self.block_epoch;
         self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        // Switches made before the cache is rebuilt add up into one edit
+        // from the cache's epoch. Once a cache was rebuilt at `from`, the
+        // edit starts there: carrying the older base along made every
+        // later switch miss it and rebuild all the definitions.
         let rebuilt_at_from = self
             .block_defn_cache
             .borrow()
             .values()
             .any(|(epoch, _)| *epoch == from);
         self.block_visibility_edits = match self.block_visibility_edits.take() {
-            Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
-                names.insert(block_name.to_string());
-                Some((base, self.block_epoch, names))
+            Some((base, to, mut existing)) if to == from && !rebuilt_at_from => {
+                existing.extend(touched);
+                Some((base, self.block_epoch, existing))
             }
-            _ => {
-                let mut names = HashSet::default();
-                names.insert(block_name.to_string());
-                Some((from, self.block_epoch, names))
-            }
+            _ => Some((from, self.block_epoch, touched)),
         };
+    }
+
+    /// Incrementally invalidate a single block definition's cached display
+    /// and the `Insert` reference that owns it (used when switching a dynamic
+    /// block's visibility state), keeping all other blocks and entities cached.
+    pub fn bump_block_visibility(&mut self, insert_handle: Handle, block_name: &str) {
+        self.mark_block_definitions_dirty([block_name.to_string()]);
         self.bump_entities_restyled(&[(insert_handle, ChangeKind::Modified)]);
+    }
+
+    /// Incrementally invalidate changed entities together with any block
+    /// definitions they belong to (plus `extra_block_handles` / `extra_block_names`)
+    /// and all dependent root `Insert` references (including transitive nesting
+    /// parents and open-BEDIT nested references), keeping unrelated block
+    /// definitions, tessellation memos, and resident caches warm.
+    pub(crate) fn bump_entities_with_block_deps(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+        solve_parametric: bool,
+    ) {
+        let touched_names =
+            self.touched_block_definition_names(changes, extra_block_handles, extra_block_names);
+        if touched_names.is_empty() {
+            if !changes.is_empty() {
+                self.bump_entities_with_solve_policy(
+                    changes,
+                    &[],
+                    false,
+                    &[],
+                    &[],
+                    solve_parametric,
+                    false,
+                    None,
+                );
+            }
+            return;
+        }
+        let dependent_handles = self.collect_block_dependent_handles(&touched_names);
+        let mut all_changes = changes.to_vec();
+        let mut seen: HashSet<Handle> = all_changes.iter().map(|(h, _)| *h).collect();
+        for dep_handle in dependent_handles {
+            if seen.insert(dep_handle) && self.document.get_entity(dep_handle).is_some() {
+                all_changes.push((dep_handle, ChangeKind::Modified));
+            }
+        }
+        self.mark_block_definitions_dirty(touched_names);
+        self.bump_entities_with_solve_policy(
+            &all_changes,
+            &[],
+            false,
+            &[],
+            &[],
+            solve_parametric,
+            false,
+            None,
+        );
+    }
+
+    /// Incrementally invalidate a single block definition record (e.g., after
+    /// placing or editing dynamic-block parameters inside BEDIT) along with any
+    /// root `Insert` references to it.
+    pub(crate) fn bump_block_definition(&mut self, block_handle: Handle) {
+        self.bump_entities_with_block_deps(&[], &[block_handle], &[], false);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_resident_tess_memo(&self, handle: Handle) -> bool {
+        self.resident_tess_memo.borrow().contains_key(&handle)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_block_cache_arc(&self) -> Arc<cache::block_cache::BlockCache> {
+        let scale = crate::scene::annotative::scale_handle_by_name(
+            &self.document,
+            &self.document.header.current_annotation_scale,
+        );
+        self.block_cache_arc_for(scale, self.annotation_all_visible(), self.active_viewport)
     }
 
     /// Refresh display after a restyle that moved no geometry: nothing
@@ -5367,12 +5449,8 @@ impl Scene {
     /// restoring a block-local entity must invalidate the assembled definition
     /// and every INSERT that consumes it, not only that entity's direct wire.
     ///
-    /// Removed entities may no longer have a live slot, so fall back to the
-    /// BlockRecord membership list, which deliberately retains their handles
-    /// for symmetric undo/redo restoration.
-    pub(crate) fn changes_touch_block_definition(&self, changes: &[(Handle, ChangeKind)]) -> bool {
-        let layout_blocks: HashSet<Handle> = self
-            .document
+    fn layout_block_handles(&self) -> HashSet<Handle> {
+        self.document
             .objects
             .values()
             .filter_map(|object| match object {
@@ -5381,21 +5459,200 @@ impl Scene {
                 }
                 _ => None,
             })
-            .collect();
-        let is_definition = |record: &document::tables::BlockRecord| {
-            let name = record.name.to_ascii_uppercase();
-            !layout_blocks.contains(&record.handle)
-                && !name.starts_with("*MODEL_SPACE")
-                && !name.starts_with("*PAPER_SPACE")
-        };
+            .collect()
+    }
 
+    fn is_block_definition_record(
+        record: &document::tables::BlockRecord,
+        layout_blocks: &HashSet<Handle>,
+    ) -> bool {
+        let name = record.name.to_ascii_uppercase();
+        !layout_blocks.contains(&record.handle)
+            && !name.starts_with("*MODEL_SPACE")
+            && !name.starts_with("*PAPER_SPACE")
+    }
+
+    fn touched_block_definition_names(
+        &self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+    ) -> Vec<String> {
+        let layout_blocks = self.layout_block_handles();
+        let mut def_by_handle: HashMap<Handle, &str> = HashMap::default();
+        let mut def_by_marker: HashMap<Handle, &str> = HashMap::default();
+        let mut def_records = Vec::new();
+        let mut layout_names: HashSet<String> = HashSet::default();
+        for record in self.document.block_records.iter() {
+            if !Self::is_block_definition_record(record, &layout_blocks) {
+                layout_names.insert(normalize_name(&record.name));
+                continue;
+            }
+            let name = record.name.as_str();
+            def_by_handle.insert(record.handle, name);
+            if !record.block_entity_handle.is_null() {
+                def_by_marker.insert(record.block_entity_handle, name);
+            }
+            if !record.block_end_handle.is_null() {
+                def_by_marker.insert(record.block_end_handle, name);
+            }
+            def_records.push(record);
+        }
+        let mut seen: HashSet<String> = HashSet::default();
+        let mut names = Vec::new();
+        let mut push_name = |name: &str| {
+            if !name.is_empty() && seen.insert(name.to_string()) {
+                names.push(name.to_string());
+            }
+        };
+        for &handle in extra_block_handles {
+            if let Some(&name) = def_by_handle.get(&handle) {
+                push_name(name);
+            }
+        }
+        for name in extra_block_names {
+            if !layout_names.contains(&normalize_name(name)) {
+                push_name(name);
+            }
+        }
+        for (handle, _) in changes {
+            let mut matched_marker = false;
+            if let Some(&name) = def_by_marker.get(handle) {
+                push_name(name);
+                matched_marker = true;
+            }
+            let owner = self
+                .document
+                .get_entity(*handle)
+                .map(|entity| entity.common().owner_handle);
+            if let Some(oh) = owner {
+                if let Some(&name) = def_by_handle.get(&oh) {
+                    push_name(name);
+                    continue;
+                }
+                if !matched_marker && !oh.is_null() && layout_blocks.contains(&oh) {
+                    continue;
+                }
+            }
+            if !matched_marker {
+                for record in &def_records {
+                    if record.entity_handles.contains(handle) {
+                        push_name(&record.name);
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    fn collect_block_dependent_handles(&self, touched_names: &[String]) -> Vec<Handle> {
+        let touched_norm: HashSet<String> = touched_names
+            .iter()
+            .map(|name| normalize_name(name))
+            .filter(|name| !name.is_empty())
+            .collect();
+        if touched_norm.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if self.dependency_index_cache.borrow().is_none() {
+            *self.dependency_index_cache.borrow_mut() =
+                Some(Arc::new(self.rebuild_dependency_index()));
+        }
+        if let Some(index) = self.dependency_index_cache.borrow().as_ref() {
+            for norm in &touched_norm {
+                if let Some(roots) = index.block_roots.get(norm) {
+                    out.extend(roots.iter().copied());
+                }
+            }
+        }
+        if let Some(edited_handle) = self.block_edit_block {
+            if let Some(record) = self
+                .document
+                .block_records
+                .iter()
+                .find(|r| r.handle == edited_handle)
+            {
+                let mut reaches_cache: HashMap<String, bool> = HashMap::default();
+                let mut visiting: HashSet<String> = HashSet::default();
+                for &entity_handle in &record.entity_handles {
+                    let Some(entity) = self.document.get_entity(entity_handle) else {
+                        continue;
+                    };
+                    let uses = render_graph::entity_block_uses(&self.document, entity, 1.0);
+                    if uses.iter().any(|u| {
+                        self.block_name_reaches_any(
+                            &u.insert.block_name,
+                            &touched_norm,
+                            &mut reaches_cache,
+                            &mut visiting,
+                        )
+                    }) {
+                        out.push(entity_handle);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn block_name_reaches_any(
+        &self,
+        name: &str,
+        targets: &HashSet<String>,
+        cache: &mut HashMap<String, bool>,
+        visiting: &mut HashSet<String>,
+    ) -> bool {
+        let norm = normalize_name(name);
+        if norm.is_empty() {
+            return false;
+        }
+        if targets.contains(&norm) {
+            return true;
+        }
+        if let Some(&cached) = cache.get(&norm) {
+            return cached;
+        }
+        if !visiting.insert(norm.clone()) {
+            return false;
+        }
+        let mut found = false;
+        if let Some(record) = self.document.block_records.get(name) {
+            for &entity_handle in &record.entity_handles {
+                if let Some(entity) = self.document.get_entity(entity_handle) {
+                    let uses = render_graph::entity_block_uses(&self.document, entity, 1.0);
+                    if uses.iter().any(|u| {
+                        self.block_name_reaches_any(
+                            &u.insert.block_name,
+                            targets,
+                            cache,
+                            visiting,
+                        )
+                    }) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+        visiting.remove(&norm);
+        cache.insert(norm, found);
+        found
+    }
+
+    /// Removed entities may no longer have a live slot, so fall back to the
+    /// BlockRecord membership list, which deliberately retains their handles
+    /// for symmetric undo/redo restoration.
+    #[allow(dead_code)]
+    pub(crate) fn changes_touch_block_definition(&self, changes: &[(Handle, ChangeKind)]) -> bool {
+        let layout_blocks = self.layout_block_handles();
         changes.iter().any(|(handle, _)| {
             let owner = self
                 .document
                 .get_entity(*handle)
                 .map(|entity| entity.common().owner_handle);
             self.document.block_records.iter().any(|record| {
-                is_definition(record)
+                Self::is_block_definition_record(record, &layout_blocks)
                     && (owner == Some(record.handle)
                         || record.block_entity_handle == *handle
                         || record.block_end_handle == *handle
@@ -16974,37 +17231,20 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             return;
         }
         if targets.touches_block_definition {
-            let from = self.block_epoch;
-            self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
             let records: HashMap<Handle, &str> = self
                 .document
                 .block_records
                 .iter()
                 .map(|record| (record.handle, record.name.as_str()))
                 .collect();
-            let touched: HashSet<String> = targets
+            let touched: Vec<String> = targets
                 .source_handles
                 .iter()
                 .filter_map(|handle| self.document.get_entity(*handle))
                 .filter_map(|entity| records.get(&entity.common().owner_handle))
                 .map(|name| name.to_string())
                 .collect();
-            // Switches made before the cache is rebuilt add up into one edit
-            // from the cache's epoch. Once a cache was rebuilt at `from`, the
-            // edit starts there: carrying the older base along made every
-            // later switch miss it and rebuild all the definitions.
-            let rebuilt_at_from = self
-                .block_defn_cache
-                .borrow()
-                .values()
-                .any(|(epoch, _)| *epoch == from);
-            self.block_visibility_edits = match self.block_visibility_edits.take() {
-                Some((base, to, mut names)) if to == from && !rebuilt_at_from => {
-                    names.extend(touched);
-                    Some((base, self.block_epoch, names))
-                }
-                _ => Some((from, self.block_epoch, touched)),
-            };
+            self.mark_block_definitions_dirty(touched);
         }
         let kept: Vec<_> = {
             let mut tm = self.tess_memo.borrow_mut();
@@ -20878,5 +21118,151 @@ mod wipeout_viewport_cache_tests {
             "holding the cache through a WIPEOUT edit would draw a stale mask"
         );
         assert_eq!(second.len(), 2, "both masks belong in the rebuilt set");
+    }
+}
+
+#[cfg(test)]
+mod block_incremental_invalidation {
+    use super::*;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn bump_entities_with_block_deps_preserves_unrelated_caches() {
+        let mut scene = Scene::new();
+        let bg_line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(100.0, 0.0, 0.0),
+            Vector3::new(110.0, 0.0, 0.0),
+        )));
+
+        scene.define_block_raw(
+            "Unrelated",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(5.0, 0.0, 0.0),
+            ))],
+        );
+        let mut ins_unrelated = Insert::new("Unrelated", Vector3::new(50.0, 0.0, 0.0));
+        ins_unrelated.common.handle = Handle::NULL;
+        let unrelated_insert = scene.add_entity(EntityType::Insert(ins_unrelated));
+
+        scene.define_block_raw(
+            "Child",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(3.0, 0.0, 0.0),
+            ))],
+        );
+        let child_line = scene
+            .document
+            .block_records
+            .get("Child")
+            .unwrap()
+            .entity_handles[0];
+
+        let mut nested_child = Insert::new("Child", Vector3::new(1.0, 0.0, 0.0));
+        nested_child.common.handle = Handle::NULL;
+        scene.define_block_raw("Parent", Vector3::ZERO, vec![EntityType::Insert(nested_child)]);
+
+        let mut ins_child = Insert::new("Child", Vector3::new(10.0, 0.0, 0.0));
+        ins_child.common.handle = Handle::NULL;
+        let child_insert = scene.add_entity(EntityType::Insert(ins_child));
+
+        let mut ins_parent = Insert::new("Parent", Vector3::new(20.0, 0.0, 0.0));
+        ins_parent.common.handle = Handle::NULL;
+        let parent_insert = scene.add_entity(EntityType::Insert(ins_parent));
+
+        let _ = scene.entity_wires();
+        assert!(scene.resident_tess_memo.borrow().contains_key(&bg_line));
+        assert!(scene
+            .resident_tess_memo
+            .borrow()
+            .contains_key(&unrelated_insert));
+
+        let before_cache = scene.active_block_cache_arc();
+        let unrelated_defn_before = before_cache.defn_ptr("Unrelated").unwrap();
+        let child_defn_before = before_cache.defn_ptr("Child").unwrap();
+        let epoch_before = scene.geometry_epoch;
+
+        if let Some(EntityType::Line(line)) = scene.document.get_entity_mut(child_line) {
+            line.end.x = 6.0;
+        }
+        scene.bump_entities_with_block_deps(
+            &[(child_line, ChangeKind::Modified)],
+            &[],
+            &[],
+            false,
+        );
+
+        let delta = scene
+            .replay_since(epoch_before)
+            .expect("scoped block edit must emit an incremental delta, not a full reset");
+        let changed_handles: HashSet<Handle> = delta.into_iter().map(|(h, _)| h).collect();
+        assert!(changed_handles.contains(&child_line));
+        assert!(changed_handles.contains(&child_insert));
+        assert!(changed_handles.contains(&parent_insert));
+        assert!(!changed_handles.contains(&bg_line));
+        assert!(!changed_handles.contains(&unrelated_insert));
+
+        assert!(scene.has_resident_tess_memo(bg_line));
+        assert!(scene.has_resident_tess_memo(unrelated_insert));
+
+        let _ = scene.entity_wires();
+        let after_cache = scene.active_block_cache_arc();
+        assert_eq!(
+            unrelated_defn_before,
+            after_cache.defn_ptr("Unrelated").unwrap()
+        );
+        assert_ne!(child_defn_before, after_cache.defn_ptr("Child").unwrap());
+    }
+
+    #[test]
+    fn with_rebuilt_blocks_drops_deleted_block_definitions() {
+        let mut scene = Scene::new();
+        scene.define_block_raw(
+            "KeepBlock",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            ))],
+        );
+        scene.define_block_raw(
+            "TempBlock",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(4.0, 0.0, 0.0),
+            ))],
+        );
+        let mut ins_keep = Insert::new("KeepBlock", Vector3::ZERO);
+        ins_keep.common.handle = Handle::NULL;
+        scene.add_entity(EntityType::Insert(ins_keep));
+        let mut ins_temp = Insert::new("TempBlock", Vector3::new(10.0, 0.0, 0.0));
+        ins_temp.common.handle = Handle::NULL;
+        let temp_ins = scene.add_entity(EntityType::Insert(ins_temp));
+
+        let _ = scene.entity_wires();
+        let before_cache = scene.active_block_cache_arc();
+        let keep_before = before_cache.defn_ptr("KeepBlock").unwrap();
+        assert!(before_cache.defn_ptr("TempBlock").is_some());
+
+        scene.document.block_records.remove("TempBlock");
+        if let Some(EntityType::Insert(ins)) = scene.document.get_entity_mut(temp_ins) {
+            ins.block_name = "KeepBlock".to_string();
+        }
+        scene.bump_entities_with_block_deps(
+            &[(temp_ins, ChangeKind::Modified)],
+            &[],
+            &["TempBlock".to_string()],
+            false,
+        );
+
+        let _ = scene.entity_wires();
+        let after_cache = scene.active_block_cache_arc();
+        assert!(after_cache.defn_ptr("TempBlock").is_none());
+        assert_eq!(keep_before, after_cache.defn_ptr("KeepBlock").unwrap());
     }
 }

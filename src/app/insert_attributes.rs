@@ -63,6 +63,17 @@ impl OpenCADStudio {
         self.apply_cmd_result(result)
     }
 
+    /// Cancel on a form that only declines the values: every attribute keeps
+    /// its default and the command goes on.
+    pub(super) fn keep_insert_attr_defaults(&mut self) -> Task<Message> {
+        if let Some(dialog) = self.insert_attr_dialog.as_mut() {
+            for row in &mut dialog.rows {
+                row.value.clear();
+            }
+        }
+        self.apply_insert_attr_dialog()
+    }
+
     /// Drop the parked insert without committing it.
     pub(super) fn cancel_insert_attr_dialog(&mut self) {
         self.insert_attr_dialog = None;

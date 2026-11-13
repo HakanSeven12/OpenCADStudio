@@ -1060,6 +1060,10 @@ impl CadCommand for MLeaderCommand {
             .then(|| "Enter attribute values".to_string())
     }
 
+    fn attreq_cancel_keeps_defaults(&self) -> bool {
+        true
+    }
+
     fn attreq_take_insert(&mut self) -> Option<EntityType> {
         self.advance_attributes()
     }

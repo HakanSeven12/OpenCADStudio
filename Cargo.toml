@@ -408,3 +408,6 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[patch."https://github.com/HakanSeven12/opencaddocument.git"]
+opencaddocument = { git = "https://github.com/ramox81/opencaddocument.git", rev = "062a159" }

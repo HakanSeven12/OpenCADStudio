@@ -538,7 +538,8 @@ impl OpenCADStudio {
     ) -> (Vec<String>, Vec<crate::ui::style::style_manager::StyleRow>) {
         let doc = &self.tabs[self.active_tab].scene.document;
         let current = &doc.header.current_text_style_name;
-        doc.text_styles
+        let mut rows: Vec<(String, crate::ui::style::style_manager::StyleRow)> = doc
+            .text_styles
             .iter()
             .filter(|s| !s.is_shape_file)
             .map(|s| {
@@ -561,7 +562,10 @@ impl OpenCADStudio {
                     || name.eq_ignore_ascii_case(current)
                     || name.eq_ignore_ascii_case(&self.textstyle_selected)
             })
-            .unzip()
+            .collect();
+        // The list is in name order, letter case aside.
+        rows.sort_by_key(|(name, _)| name.to_lowercase());
+        rows.into_iter().unzip()
     }
 
     /// What the text style manager's preview draws: `edited` resolved as the

@@ -95,6 +95,8 @@ fn geometry(name: &str, text_style: &str) -> Option<Vec<EntityType>> {
         a.height = 0.09375;
         a.text_style = text_style.to_string();
         a.set_alignment(HorizontalAlignment::Center, VerticalAlignment::Baseline);
+        // The first point is where the centred tag starts in its text style.
+        a.insertion_point = crate::entities::attribute::definition_text_start(&a);
         EntityType::AttributeDefinition(a)
     };
     let tag = || attribute("TAGNUMBER", "Enter tag number", -0.046875);

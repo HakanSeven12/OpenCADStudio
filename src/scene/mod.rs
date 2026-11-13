@@ -111,6 +111,8 @@ mod selection;
 pub use selection::TableCellSelection;
 pub use selection::SELECT_SIMILAR_DEFAULT;
 pub mod viewport_dimension_pick;
+#[cfg(test)]
+mod viewport_depth_tests;
 pub mod viewport_ref;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;

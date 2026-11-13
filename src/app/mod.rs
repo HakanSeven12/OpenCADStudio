@@ -11,6 +11,8 @@ mod annotation_data;
 mod array_grips;
 mod block_action_bars;
 mod block_actions;
+#[doc(hidden)]
+pub use block_actions::BlockBenchHarness;
 mod block_alignment;
 mod block_authoring_edit;
 mod block_constraint_status;

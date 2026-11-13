@@ -386,6 +386,10 @@ name = "dynamic_block_visibility_switch"
 harness = false
 
 [[bench]]
+name = "block_incremental_perf"
+harness = false
+
+[[bench]]
 name = "wires_build_visible"
 harness = false
 

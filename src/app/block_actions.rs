@@ -1217,3 +1217,181 @@ impl OpenCADStudio {
         true
     }
 }
+
+#[doc(hidden)]
+pub struct BlockBenchHarness(OpenCADStudio);
+
+impl BlockBenchHarness {
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new();
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
+    }
+
+    pub fn setup_block_edit_undo(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        for k in 0..bg_lines {
+            let y = (k as f64) * 2.0;
+            app.tabs[i]
+                .scene
+                .add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(100.0, y, 0.0),
+                    Vector3::new(200.0, y, 0.0),
+                )));
+        }
+        for b in 0..other_blocks {
+            let name = format!("OtherBlock_{b}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(5.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            app.tabs[i].scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        }
+        let edit_ents = (0..entities_per_block)
+            .map(|j| {
+                EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                    Vector3::new(8.0, (j as f64) * 0.5, 0.0),
+                ))
+            })
+            .collect();
+        app.tabs[i]
+            .scene
+            .define_block_raw("EditBenchBlock", Vector3::ZERO, edit_ents);
+        let edit_line = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EditBenchBlock")
+            .unwrap()
+            .entity_handles[0];
+        let mut ins_edit = Insert::new("EditBenchBlock", Vector3::new(10.0, 20.0, 0.0));
+        ins_edit.common.handle = Handle::NULL;
+        app.tabs[i].scene.add_entity(EntityType::Insert(ins_edit));
+        let _ = app.tabs[i].scene.entity_wires();
+
+        app.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Edit block geometry"),
+        );
+        if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(edit_line)
+        {
+            line.end.x = 16.0;
+        }
+        app.tabs[i].scene.bump_geometry();
+        app.finish_pending_history(i);
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn undo_redo_cycle(&mut self) -> usize {
+        let i = self.0.active_tab;
+        self.0.undo_active_tab();
+        let a = self.0.tabs[i].scene.entity_wires().len();
+        self.0.redo_active_tab();
+        let b = self.0.tabs[i].scene.entity_wires().len();
+        a.wrapping_add(b)
+    }
+
+    pub fn setup_visibility(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle, Handle) {
+        let (scene, _insert, def, param) = crate::scene::Scene::bench_setup_visibility_scene(
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+        );
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        app.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Visibility state"),
+        );
+        app.show_visibility_state(i, def, param, 1);
+        app.finish_pending_history(i);
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), def, param)
+    }
+
+    pub fn show_visibility_state(
+        &mut self,
+        def_block: Handle,
+        param: Handle,
+        state_idx: usize,
+    ) -> usize {
+        let i = self.0.active_tab;
+        self.0.show_visibility_state(i, def_block, param, state_idx);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_dynamic_action(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle, Handle, Handle) {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let (mut scene, insert, stretch_param, _flip_param) =
+            crate::scene::Scene::bench_setup_dynamic_block_scene(bg_lines, 0, entities_per_block);
+        for b in 0..other_blocks {
+            let name = format!("ActionOtherBlock_{b}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(5.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            scene.add_entity(EntityType::Insert(ins));
+        }
+        let def = actions::instance::definition(&scene.document, insert).expect("dynamic def");
+        let _ = scene.entity_wires();
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), insert, def, stretch_param)
+    }
+
+    pub fn evaluate_dynamic_action(
+        &mut self,
+        insert: Handle,
+        definition: Handle,
+        parameter: Handle,
+        stretch_x: f64,
+    ) -> usize {
+        let _ = self.0.evaluate_reference_parameter(
+            insert,
+            definition,
+            parameter,
+            actions::Value::Point(glam::DVec3::new(stretch_x, 0.0, 0.0)),
+        );
+        let i = self.0.active_tab;
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+}

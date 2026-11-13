@@ -67,6 +67,30 @@ fn atype_segments(scaled: &[LtSeg], align_end: f32, total: f32) -> Option<Vec<Lt
     Some(segs)
 }
 
+/// The most pattern repeats one complex-linetype run, or one entity's whole
+/// path, may have. Every repeat becomes real wire geometry on the CPU, and a
+/// model-space annotation factor of 0.001 shrinks the pattern by the same
+/// amount, so millions of repeats (millions of wires) came from a handful of
+/// curves and slowed every pan frame. 20 000 still draws a 10 km fence at a
+/// 0.5 unit pattern; anything denser is below a pixel at any practical zoom and
+/// is drawn as the plain solid stroke instead.
+pub(crate) const MAX_PATTERN_REPEATS: f32 = 20_000.0;
+
+/// Whether `length` of path under `lt` at `scale` would pass
+/// `MAX_PATTERN_REPEATS`. A polyline walks one run per segment, each of which
+/// may be under the cap alone, so the walk checks the entity's total too.
+pub(crate) fn exceeds_repeat_budget(lt: &ComplexLt, scale: f32, length: f64) -> bool {
+    let period: f32 = lt
+        .segments
+        .iter()
+        .map(|s| match s {
+            LtSegment::Dash(l) | LtSegment::Space(l) => (l * scale).abs(),
+            _ => 0.0,
+        })
+        .sum();
+    period > 1e-10 && length / period as f64 > MAX_PATTERN_REPEATS as f64
+}
+
 pub fn apply_along(
     name: &str,
     path_pts: &[[f32; 3]],
@@ -201,7 +225,6 @@ fn apply_stretched(
     // single-threaded, before the drawing ever finishes loading. Past a sane
     // repeat count the dashes are sub-pixel anyway, so render the base wire
     // solid: returning empty here makes the caller fall back to the solid base.
-    const MAX_PATTERN_REPEATS: f32 = 1_000_000.0;
     let path_len: f32 = path_pts
         .windows(2)
         .map(|w| {

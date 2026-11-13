@@ -480,15 +480,14 @@ mod tests {
         std::fs::create_dir_all(&xrefs).unwrap();
         std::fs::write(fonts.join("Package-Custom.shx"), b"shape").unwrap();
 
-        assert_eq!(
-            font_file_path("package-custom.SHX", Some(&dir)),
-            Some(
-                fonts
-                    .join("Package-Custom.shx")
-                    .to_string_lossy()
-                    .into_owned()
-            )
-        );
+        let resolved = font_file_path("package-custom.SHX", Some(&dir)).unwrap();
+        let expected = fonts
+            .join("Package-Custom.shx")
+            .to_string_lossy()
+            .into_owned();
+        // Windows resolves the direct path with the query's casing, while the
+        // Linux fallback scan returns the directory entry's casing.
+        assert!(resolved.eq_ignore_ascii_case(&expected), "{resolved}");
         assert_eq!(
             font_file_path("Package-Custom.shx", Some(&xrefs)),
             Some(

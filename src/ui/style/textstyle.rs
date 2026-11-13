@@ -12,9 +12,10 @@ use crate::ui::style::editor_table::{danger_input_style, danger_text_style};
 use crate::ui::style::form::field_style;
 use crate::ui::style::style_manager::{EditorComparison, StyleRow};
 use iced::widget::{
-    canvas, checkbox, column, container, responsive, row, scrollable, text, text_input, Space,
+    canvas, checkbox, column, container, mouse_area, responsive, row, scrollable, stack, text,
+    text_input, Space,
 };
-use iced::{mouse, Element, Length, Point, Rectangle, Theme};
+use iced::{mouse, Background, Element, Length, Point, Rectangle, Theme};
 use std::borrow::Cow;
 use std::rc::Rc;
 
@@ -62,8 +63,88 @@ pub struct TextStyleView<'a> {
     pub upside_down: bool,
     pub vertical: bool,
     pub annotative: bool,
+    /// "Match text orientation to layout", offered with Annotative on.
+    pub orientation: bool,
+    /// The window holds a change Apply would write.
+    pub modified: bool,
     pub rename_active: Option<&'a str>,
     pub rename_buf: &'a str,
+    /// A question or notice over the window.
+    pub card: Option<&'a Card>,
+}
+
+/// What a question about unsaved changes was asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pending {
+    Select(String),
+    SetCurrent,
+    New,
+    Copy,
+    Delete,
+    Rename(String),
+    Close,
+}
+
+/// Why a name was refused.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NameNotice {
+    Empty,
+    Exists(String),
+    UnsupportedCharacters,
+}
+
+/// A card over the text style window.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Card {
+    /// New: the name being typed, and a refusal over it.
+    New {
+        name: String,
+        notice: Option<NameNotice>,
+    },
+    /// A refused rename.
+    Name(NameNotice),
+    /// Delete the named style?
+    DeleteAsk(String),
+    /// The selected style is used by texts and stays.
+    InUse,
+    /// The selected style changed: keep the changes before going on?
+    Modified(Pending),
+}
+
+/// What a card's controls send.
+#[derive(Debug, Clone)]
+pub enum CardMsg {
+    NewName(String),
+    NewOk,
+    NewCancel,
+    NoticeClose,
+    DeleteAnswer(bool),
+    ModifiedAnswer(bool),
+}
+
+/// The characters a style name may not hold.
+pub const UNSUPPORTED_NAME_CHARACTERS: &str = "\\ < > / ? \" : ; * | , = `";
+
+/// Why `name` (as typed) cannot name a style; `exists` tells whether the
+/// trimmed name is taken.
+pub fn name_notice(name: &str, exists: impl Fn(&str) -> bool) -> Option<NameNotice> {
+    let trimmed = name.trim();
+    if name.is_empty() {
+        Some(NameNotice::Empty)
+    } else if trimmed.is_empty()
+        || trimmed.chars().any(|c| {
+            matches!(
+                c,
+                '\\' | '<' | '>' | '/' | '?' | '"' | ':' | ';' | '*' | '|' | ',' | '=' | '`'
+            )
+        })
+    {
+        Some(NameNotice::UnsupportedCharacters)
+    } else if exists(trimmed) {
+        Some(NameNotice::Exists(trimmed.to_string()))
+    } else {
+        None
+    }
 }
 
 /// What Apply changes: each changed style's name with its lines, and how many
@@ -433,6 +514,16 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
             ),
             hint(t!("0 = the height is asked for when the text is placed.")),
             toggle(t!("Annotative"), v.annotative, "annotative", v.read_only),
+            row![
+                Space::new().width(18),
+                toggle(
+                    crate::tr!("text-style", "orientation").into(),
+                    v.orientation,
+                    "orientation",
+                    v.read_only || !v.annotative,
+                ),
+            ]
+            .into(),
             hint(t!("On: the height above is the paper height.")),
         ],
     );
@@ -663,8 +754,200 @@ pub fn view_window<'a>(
     v: TextStyleView<'a>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
-    responsive(move |size| layout(&v, sizing, size)).into()
+    let card = v.card.cloned();
+    let window: Element<'a, Message> = responsive(move |size| layout(&v, sizing, size)).into();
+    let Some(card) = card else {
+        return window;
+    };
+    let (panel, dismiss) = card_view(card);
+    stack([
+        window,
+        mouse_area(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(
+                        theme.palette().background.strongest.color.scale_alpha(0.55),
+                    )),
+                    ..Default::default()
+                }),
+        )
+        .on_press(dismiss)
+        .into(),
+        container(panel)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into(),
+    ])
+    .into()
 }
+
+fn card_msg(message: CardMsg) -> Message {
+    Message::TextStyleCard(message)
+}
+
+const WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
+
+/// A warning icon beside a title and its detail.
+fn notice_lines<'a>(title: String, detail: Option<String>) -> Element<'a, Message> {
+    let mut lines = column![text(title).size(13)].spacing(6);
+    if let Some(detail) = detail {
+        lines = lines.push(text(detail).size(11).style(muted_style));
+    }
+    row![crate::ui::icons::semantic(WARN, 20.0), lines]
+        .spacing(12)
+        .align_y(iced::Alignment::Start)
+        .into()
+}
+
+fn name_notice_lines<'a>(notice: &NameNotice) -> Element<'a, Message> {
+    let (title, detail) = match notice {
+        NameNotice::Empty => (crate::tr!("text-style", "name-empty"), None),
+        NameNotice::Exists(name) => (
+            crate::i18n::plain(crate::tr!("text-style", "name-exists", name = name.clone())),
+            Some(crate::tr!("text-style", "name-exists-detail")),
+        ),
+        NameNotice::UnsupportedCharacters => (
+            crate::tr!("text-style", "name-chars"),
+            Some(format!(
+                "{}\n{UNSUPPORTED_NAME_CHARACTERS}",
+                crate::tr!("text-style", "name-chars-detail")
+            )),
+        ),
+    };
+    notice_lines(title, detail)
+}
+
+fn close_row<'a>() -> Element<'a, Message> {
+    row![
+        Space::new().width(Length::Fill),
+        crate::ui::style::form::dialog_button(
+            crate::tr!("text-style", "close"),
+            card_msg(CardMsg::NoticeClose),
+            true
+        ),
+    ]
+    .into()
+}
+
+/// The card's panel and what a click beside it does.
+fn card_view<'a>(card: Card) -> (Element<'a, Message>, Message) {
+    use crate::ui::style::form::dialog_button;
+    use crate::ui::style::mleaderstyle::panel;
+    match card {
+        Card::New { name, notice } => {
+            if let Some(notice) = notice {
+                let body = column![name_notice_lines(&notice), close_row()].spacing(14);
+                return (panel(body.into(), 420.0), card_msg(CardMsg::NoticeClose));
+            }
+            let field = text_input("", &name)
+                .id(iced::widget::Id::new(NEW_NAME_ID))
+                .on_input(|value| card_msg(CardMsg::NewName(value)))
+                .on_submit(card_msg(CardMsg::NewOk))
+                .size(12)
+                .padding([5, 8])
+                .style(field_style)
+                .width(Length::Fill);
+            let body = column![
+                text(crate::tr!("text-style", "new-title"))
+                    .size(13)
+                    .style(crate::ui::window::pdf_dialogs::accent_text),
+                column![
+                    text(crate::tr!("text-style", "style-name"))
+                        .size(11)
+                        .style(muted_style),
+                    field
+                ]
+                .spacing(4),
+                row![
+                    Space::new().width(Length::Fill),
+                    dialog_button(
+                        crate::tr!("text-style", "cancel"),
+                        card_msg(CardMsg::NewCancel),
+                        false
+                    ),
+                    dialog_button(crate::tr!("text-style", "ok"), card_msg(CardMsg::NewOk), true),
+                ]
+                .spacing(6),
+            ]
+            .spacing(12);
+            (panel(body.into(), 380.0), card_msg(CardMsg::NewCancel))
+        }
+        Card::Name(notice) => {
+            let body = column![name_notice_lines(&notice), close_row()].spacing(14);
+            (panel(body.into(), 420.0), card_msg(CardMsg::NoticeClose))
+        }
+        Card::InUse => {
+            let body = column![
+                notice_lines(crate::tr!("text-style", "in-use"), None),
+                close_row()
+            ]
+            .spacing(14);
+            (panel(body.into(), 380.0), card_msg(CardMsg::NoticeClose))
+        }
+        Card::DeleteAsk(name) => {
+            let body = column![
+                text(crate::tr!("text-style", "delete-title"))
+                    .size(13)
+                    .style(crate::ui::window::pdf_dialogs::accent_text),
+                notice_lines(crate::i18n::plain(crate::tr!("text-style", "delete-ask", name = name)), None),
+                row![
+                    Space::new().width(Length::Fill),
+                    dialog_button(
+                        crate::tr!("text-style", "cancel"),
+                        card_msg(CardMsg::DeleteAnswer(false)),
+                        false
+                    ),
+                    dialog_button(
+                        crate::tr!("text-style", "ok"),
+                        card_msg(CardMsg::DeleteAnswer(true)),
+                        true
+                    ),
+                ]
+                .spacing(6),
+            ]
+            .spacing(14);
+            (
+                panel(body.into(), 380.0),
+                card_msg(CardMsg::DeleteAnswer(false)),
+            )
+        }
+        Card::Modified(_) => {
+            let body = column![
+                notice_lines(
+                    crate::tr!("text-style", "modified"),
+                    Some(crate::tr!("text-style", "modified-ask"))
+                ),
+                row![
+                    Space::new().width(Length::Fill),
+                    dialog_button(
+                        crate::tr!("text-style", "yes"),
+                        card_msg(CardMsg::ModifiedAnswer(true)),
+                        true
+                    ),
+                    dialog_button(
+                        crate::tr!("text-style", "no"),
+                        card_msg(CardMsg::ModifiedAnswer(false)),
+                        false
+                    ),
+                ]
+                .spacing(6),
+            ]
+            .spacing(14);
+            (
+                panel(body.into(), 400.0),
+                card_msg(CardMsg::NoticeClose),
+            )
+        }
+    }
+}
+
+/// The New card's name field, focused and selected when it opens.
+pub const NEW_NAME_ID: &str = "text-style-new-name";
+
 
 /// The tallest the Apply summary's list of styles grows before it scrolls,
 /// for a window `height` tall: the preview and "Where used" keep their room.
@@ -731,6 +1014,8 @@ fn layout<'a>(
         },
         rows: Some(&v.rows),
         compact: narrow,
+        apply_pending: v.modified,
+        delete_in_use: true,
         editor,
     })
 }

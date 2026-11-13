@@ -895,8 +895,19 @@ impl OpenCADStudio {
         let Some(old) = self.style_rename.take() else {
             return;
         };
-        let new = self.style_rename_buf.trim().to_string();
-        self.style_rename_buf.clear();
+        let typed = std::mem::take(&mut self.style_rename_buf);
+        let new = typed.trim().to_string();
+        // A text style name follows the window's naming rules; a refusal is
+        // shown on a card and the style keeps its name.
+        if kind == StyleKind::Text && !new.eq_ignore_ascii_case(&old) {
+            let notice = crate::ui::style::textstyle::name_notice(&typed, |trimmed| {
+                self.style_exists(kind, trimmed)
+            });
+            if let Some(notice) = notice {
+                self.textstyle_card = Some(crate::ui::style::textstyle::Card::Name(notice));
+                return;
+            }
+        }
         if new.is_empty() || new.eq_ignore_ascii_case(&old) {
             return;
         }
@@ -929,8 +940,12 @@ impl OpenCADStudio {
         }
         self.load_style_bufs(kind);
         self.after_style_change(kind);
-        self.command_line
-            .push_output(crate::tf!("Renamed '{old}' → '{new}'.").as_ref());
+        // The text style window renames without a line, as it creates and
+        // deletes.
+        if kind != StyleKind::Text {
+            self.command_line
+                .push_output(crate::tf!("Renamed '{old}' → '{new}'.").as_ref());
+        }
     }
 
     pub(super) fn style_rename_cancel(&mut self) {
@@ -985,6 +1000,12 @@ impl OpenCADStudio {
                     doc.object_xdata(style.handle)
                         .map(|data| (style.handle, data.clone()))
                 })
+                .collect(),
+            text_orientation: doc
+                .text_styles
+                .iter()
+                .filter(|style| crate::scene::annotative::text_style_orientation(doc, style.handle))
+                .map(|style| style.handle)
                 .collect(),
             linetypes: linetypes.then(|| LinetypeState {
                 table: doc.line_types.clone(),
@@ -1041,6 +1062,14 @@ impl OpenCADStudio {
             for record in data.records() {
                 doc.set_object_xdata_record(*handle, record.clone());
             }
+        }
+        let handles: Vec<Handle> = doc.text_styles.iter().map(|style| style.handle).collect();
+        for handle in handles {
+            crate::scene::annotative::set_text_style_orientation(
+                doc,
+                handle,
+                snap.text_orientation.contains(&handle),
+            );
         }
         if let Some(state) = &snap.linetypes {
             let scene = &mut self.tabs[i].scene;
@@ -1109,6 +1138,8 @@ impl OpenCADStudio {
             baseline,
             entities: FxHashMap::default(),
             linetypes,
+            one_step: false,
+            merge_at: None,
         });
     }
 
@@ -1224,7 +1255,16 @@ impl OpenCADStudio {
                 .map(|(handle, _, _)| (*handle, crate::scene::ChangeKind::Modified))
                 .collect();
             self.tabs[i].scene.bump_entities(&renamed);
-            self.commit_style_undo(i, stage.baseline, edited, entities, stage.dirty_at_open);
+            let merge_at = stage.merge_at.filter(|_| stage.one_step);
+            self.commit_style_undo(
+                i,
+                stage.baseline,
+                edited,
+                entities,
+                stage.dirty_at_open,
+                merge_at,
+            );
+            stage.merge_at = Some(self.tabs[i].history.undo_stack.len());
         } else {
             self.tabs[i].dirty = stage.dirty_at_open;
         }
@@ -1244,6 +1284,8 @@ impl OpenCADStudio {
             baseline: self.capture_style_state(linetypes),
             entities: FxHashMap::default(),
             linetypes,
+            one_step: stage.one_step,
+            merge_at: stage.merge_at,
         });
     }
 
@@ -1264,6 +1306,8 @@ impl OpenCADStudio {
                 baseline: self.capture_style_state(child.linetypes),
                 entities: FxHashMap::default(),
                 linetypes: child.linetypes,
+                one_step: child.one_step,
+                merge_at: child.merge_at,
             });
         }
         self.sync_ribbon_styles();
@@ -1319,6 +1363,8 @@ pub(super) struct StyleStateSnapshot {
     /// The current style's overrides for new dimensions.
     dim_overrides: Option<(String, Vec<(i16, document::xdata::XDataValue)>)>,
     dim_style_xdata: Vec<(Handle, document::xdata::ExtendedData)>,
+    /// The text styles that match their text orientation to the layout.
+    text_orientation: Vec<Handle>,
     linetypes: Option<LinetypeState>,
 }
 
@@ -1408,6 +1454,11 @@ pub(super) struct StyleStage {
     entities: FxHashMap<Handle, Arc<document::EntityType>>,
     /// Whether this is the Linetype Manager's transaction.
     linetypes: bool,
+    /// The window's whole session is one undo step: a later Apply folds into
+    /// the step an earlier one made.
+    pub(super) one_step: bool,
+    /// The undo stack's height right after this session's last step.
+    merge_at: Option<usize>,
 }
 
 /// True when the entity, or one of an insert's attributes, names the text style.

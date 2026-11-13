@@ -1841,6 +1841,56 @@ pub fn text_style_is_annotative(doc: &Document, name: &str) -> bool {
         .is_some_and(|s| s.annotative)
 }
 
+/// Whether the text style with this handle matches its text orientation to
+/// the layout: its `AcadAnnoPO` flag.
+pub fn text_style_orientation(doc: &Document, handle: Handle) -> bool {
+    doc.object_xdata(handle)
+        .and_then(|data| data.get_record("AcadAnnoPO"))
+        .is_some_and(|record| {
+            record.values.iter().any(|value| {
+                matches!(value, document::xdata::XDataValue::Integer16(n) if *n != 0)
+            })
+        })
+}
+
+/// Set or clear the text style's `AcadAnnoPO` flag.
+pub fn set_text_style_orientation(doc: &mut Document, handle: Handle, on: bool) {
+    if on == text_style_orientation(doc, handle) {
+        return;
+    }
+    if on {
+        crate::scene::block_metadata::ensure_application(doc, "AcadAnnoPO");
+        let mut record = document::xdata::ExtendedDataRecord::new("AcadAnnoPO");
+        record.values = vec![document::xdata::XDataValue::Integer16(1)];
+        doc.set_object_xdata_record(handle, record);
+    } else {
+        doc.remove_object_xdata_record(handle, "AcadAnnoPO");
+    }
+}
+
+/// A new text of the annotative style `name` that matches its orientation to
+/// the layout takes the same `AcadAnnoPO` flag.
+pub fn apply_style_orientation(doc: &mut Document, handle: Handle, style: &str) {
+    let Some(style) = doc
+        .text_styles
+        .iter()
+        .find(|s| name_matches(&s.name, style))
+        .filter(|s| s.annotative)
+        .map(|s| s.handle)
+    else {
+        return;
+    };
+    if text_style_orientation(doc, style) {
+        crate::scene::block_metadata::ensure_application(doc, "AcadAnnoPO");
+        crate::scene::view::dispatch::set_entity_xdata(
+            doc,
+            handle,
+            "AcadAnnoPO",
+            Some(vec![document::xdata::XDataValue::Integer16(1)]),
+        );
+    }
+}
+
 pub fn dim_style_is_annotative(doc: &Document, name: &str) -> bool {
     doc.dim_styles
         .iter()

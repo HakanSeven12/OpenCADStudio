@@ -453,6 +453,8 @@ pub fn view_window<'a>(
         apply_blocked: None,
         rows: None,
         compact: false,
+        apply_pending: true,
+        delete_in_use: false,
         editor,
     })
 }

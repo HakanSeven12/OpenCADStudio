@@ -931,13 +931,49 @@ impl OpenCADStudio {
         i: usize,
         before: super::style_ops::StyleStateSnapshot,
         after: super::style_ops::StyleStateSnapshot,
-        entities: Vec<(Handle, Option<Arc<EntityType>>, Option<Arc<EntityType>>)>,
-        dirty_before: bool,
+        mut entities: Vec<(Handle, Option<Arc<EntityType>>, Option<Arc<EntityType>>)>,
+        mut dirty_before: bool,
+        merge_at: Option<usize>,
     ) {
         if before == after && entities.is_empty() {
             return;
         }
         self.finish_pending_history(i);
+        let mut before = before;
+        // A window that is one undo step (the text style manager) folds a
+        // further Apply into the step its first one made, as long as nothing
+        // else was done in between.
+        if merge_at == Some(self.tabs[i].history.undo_stack.len()) {
+            let merges = matches!(
+                self.tabs[i].history.undo_stack.last(),
+                Some(HistorySnapshot::Delta(delta))
+                    if matches!(delta.structure, Some(StructureSnapshot::Styles { .. }))
+            );
+            if merges {
+                if let Some(HistorySnapshot::Delta(previous)) =
+                    self.tabs[i].history.undo_stack.pop()
+                {
+                    let previous = *previous;
+                    dirty_before = previous.dirty_before;
+                    if let Some(StructureSnapshot::Styles {
+                        before: first, ..
+                    }) = previous.structure
+                    {
+                        before = first;
+                    }
+                    // Each entity goes back to how the first step found it.
+                    for (handle, earlier, _) in previous.entities {
+                        match entities.iter_mut().find(|(h, ..)| *h == handle) {
+                            Some(entry) => entry.1 = earlier,
+                            None => {
+                                let now = self.tabs[i].scene.document.get_entity_arc(handle);
+                                entities.push((handle, earlier, now));
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let (text_names, dim_names, object_handles) = after.changed_keys(&before);
         let delta = DeltaSnapshot {
             visibility_states: None,

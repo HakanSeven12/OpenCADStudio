@@ -142,6 +142,7 @@ impl OpenCADStudio {
                     StyleRow {
                         count,
                         locked: is_locked(linetype),
+                        annotative: false,
                     },
                 ))
             })

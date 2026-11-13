@@ -213,7 +213,11 @@ impl OpenCADStudio {
             .map(|(name, texts)| (name.clone(), texts.len()))
             .collect();
         if let Some(s) = doc.text_styles.get(&self.textstyle_selected) {
-            self.textstyle_draft = crate::app::text_style_draft::TextStyleDraft::load(s);
+            // The oblique angle shows the drawing's angular precision ("0").
+            let places = doc.header.angular_unit_precision.clamp(0, 8) as usize;
+            let orientation = crate::scene::annotative::text_style_orientation(doc, s.handle);
+            self.textstyle_draft =
+                crate::app::text_style_draft::TextStyleDraft::load_with(s, places, orientation);
         }
         self.textstyle_font_picker.open = false;
         self.textstyle_bigfont_picker.open = false;
@@ -285,7 +289,13 @@ impl OpenCADStudio {
         self.textstyle_bigfont_picker
             .refresh_bigfont(&self.tabs[i].scene.document);
         self.active_modal = Some(crate::app::ModalKind::TextStyle);
+        self.textstyle_card = None;
         self.style_stage_begin();
+        // The window's session (Apply, New, Delete, Rename, Set Current) is
+        // one undo step.
+        if let Some(stage) = self.style_stage.as_mut() {
+            stage.one_step = true;
+        }
         Task::none()
     }
 
@@ -298,16 +308,215 @@ impl OpenCADStudio {
         }
         let i = self.active_tab;
         let edited = self.textstyle_draft.resolved();
-        if let Some(s) = self.tabs[i]
-            .scene
-            .document
-            .text_styles
-            .get_mut(&self.textstyle_selected)
-        {
+        let orientation = edited.annotative && self.textstyle_draft.orientation;
+        let doc = &mut self.tabs[i].scene.document;
+        if let Some(s) = doc.text_styles.get_mut(&self.textstyle_selected) {
             if *s != edited {
                 *s = edited;
             }
+            let handle = s.handle;
+            crate::scene::annotative::set_text_style_orientation(doc, handle, orientation);
         }
+    }
+
+    /// The text style window holds a change Apply would write.
+    pub(in crate::app) fn textstyle_modified(&self) -> bool {
+        !self.selected_textstyle_is_read_only()
+            && self.tabs[self.active_tab]
+                .scene
+                .document
+                .text_styles
+                .get(&self.textstyle_selected)
+                .is_some_and(|stored| self.textstyle_draft.is_modified(stored))
+    }
+
+    /// Leave the selected style for `pending`: with unwritten changes the
+    /// window first asks whether to keep them.
+    pub(super) fn text_style_go_on(
+        &mut self,
+        pending: crate::ui::style::textstyle::Pending,
+    ) -> Task<Message> {
+        if self.textstyle_modified() {
+            self.textstyle_card = Some(crate::ui::style::textstyle::Card::Modified(pending));
+            return Task::none();
+        }
+        self.text_style_continue(pending)
+    }
+
+    /// Carry out what the window was asked to do once the selected style has
+    /// nothing left unwritten.
+    fn text_style_continue(&mut self, pending: crate::ui::style::textstyle::Pending) -> Task<Message> {
+        use crate::app::StyleKind;
+        use crate::ui::style::textstyle::{Card, Pending};
+        let i = self.active_tab;
+        match pending {
+            Pending::Select(name) => {
+                self.textstyle_selected = name;
+                self.load_textstyle_draft(i);
+                Task::none()
+            }
+            Pending::SetCurrent => {
+                if !self.selected_textstyle_is_read_only() {
+                    self.tabs[i].scene.document.header.current_text_style_name =
+                        self.textstyle_selected.clone();
+                    self.sync_ribbon_styles();
+                }
+                Task::none()
+            }
+            Pending::New => {
+                self.textstyle_card = Some(Card::New {
+                    name: self.text_style_new_name(),
+                    notice: None,
+                });
+                let id = iced::widget::Id::new(crate::ui::style::textstyle::NEW_NAME_ID);
+                Task::batch([
+                    iced::widget::operation::focus(id.clone()),
+                    iced::widget::operation::select_all(id),
+                ])
+            }
+            Pending::Copy => self.style_copy(StyleKind::Text),
+            Pending::Delete => {
+                let name = self.textstyle_selected.clone();
+                // Standard and the current style cannot be deleted at all.
+                if name.eq_ignore_ascii_case("Standard")
+                    || name == self.tabs[i].scene.document.header.current_text_style_name
+                {
+                    return Task::none();
+                }
+                self.textstyle_card = Some(if self.style_in_use(StyleKind::Text, &name) {
+                    Card::InUse
+                } else {
+                    Card::DeleteAsk(name)
+                });
+                Task::none()
+            }
+            Pending::Rename(name) => {
+                // Standard keeps its name: the rename does not start.
+                if name.eq_ignore_ascii_case("Standard") {
+                    return Task::none();
+                }
+                self.style_rename_start(StyleKind::Text, name);
+                iced::widget::operation::focus(crate::ui::style::style_list::rename_input_id())
+            }
+            Pending::Close => {
+                self.close_active_modal();
+                Task::none()
+            }
+        }
+    }
+
+    /// The first free `style<n>` name the New card offers.
+    fn text_style_new_name(&self) -> String {
+        (1u32..)
+            .map(|n| format!("style{n}"))
+            .find(|name| !self.style_exists(crate::app::StyleKind::Text, name))
+            .unwrap_or_default()
+    }
+
+    /// A text style card's button.
+    pub(super) fn on_text_style_card(
+        &mut self,
+        message: crate::ui::style::textstyle::CardMsg,
+    ) -> Task<Message> {
+        use crate::app::StyleKind;
+        use crate::ui::style::textstyle::{Card, CardMsg};
+        let i = self.active_tab;
+        match message {
+            CardMsg::NewName(value) => {
+                if let Some(Card::New { name, .. }) = self.textstyle_card.as_mut() {
+                    *name = value;
+                }
+                Task::none()
+            }
+            CardMsg::NewCancel => {
+                self.textstyle_card = None;
+                Task::none()
+            }
+            CardMsg::NewOk => {
+                let Some(Card::New { name, .. }) = self.textstyle_card.clone() else {
+                    return Task::none();
+                };
+                let notice = crate::ui::style::textstyle::name_notice(&name, |trimmed| {
+                    self.style_exists(StyleKind::Text, trimmed)
+                });
+                if let Some(notice) = notice {
+                    self.textstyle_card = Some(Card::New {
+                        name,
+                        notice: Some(notice),
+                    });
+                    return Task::none();
+                }
+                let name = name.trim().to_string();
+                let source = self.textstyle_selected.clone();
+                let handle = self.tabs[i].scene.document.allocate_handle();
+                if !self.clone_style_as(StyleKind::Text, &source, &name, handle) {
+                    return Task::none();
+                }
+                // The copy matches its orientation to the layout as its source does.
+                let doc = &mut self.tabs[i].scene.document;
+                let source_orientation = doc
+                    .text_styles
+                    .get(&source)
+                    .is_some_and(|style| crate::scene::annotative::text_style_orientation(doc, style.handle));
+                crate::scene::annotative::set_text_style_orientation(doc, handle, source_orientation);
+                // A new style is the current one.
+                doc.header.current_text_style_name = name.clone();
+                self.textstyle_card = None;
+                self.textstyle_selected = name;
+                self.load_textstyle_draft(i);
+                self.after_style_change(StyleKind::Text);
+                Task::none()
+            }
+            CardMsg::NoticeClose => {
+                self.textstyle_card = match self.textstyle_card.take() {
+                    // A refused name goes back to the name being typed.
+                    Some(Card::New {
+                        name,
+                        notice: Some(_),
+                    }) => Some(Card::New { name, notice: None }),
+                    _ => None,
+                };
+                Task::none()
+            }
+            CardMsg::DeleteAnswer(yes) => {
+                let card = self.textstyle_card.take();
+                if let (true, Some(Card::DeleteAsk(name))) = (yes, card) {
+                    self.text_style_delete(&name);
+                }
+                Task::none()
+            }
+            CardMsg::ModifiedAnswer(yes) => {
+                let Some(Card::Modified(pending)) = self.textstyle_card.take() else {
+                    return Task::none();
+                };
+                if yes {
+                    let _ = self.on_text_style_apply();
+                } else {
+                    self.load_textstyle_draft(i);
+                }
+                self.text_style_continue(pending)
+            }
+        }
+    }
+
+    /// Delete the text style `name`; the style that takes its place in the
+    /// list is selected.
+    fn text_style_delete(&mut self, name: &str) {
+        use crate::app::StyleKind;
+        let (listed, _) = self.textstyle_list();
+        let index = listed.iter().position(|listed| listed == name).unwrap_or(0);
+        if !self.remove_style_storage(StyleKind::Text, name) {
+            return;
+        }
+        let (listed, _) = self.textstyle_list();
+        let next = listed
+            .get(index)
+            .or_else(|| listed.last())
+            .cloned()
+            .unwrap_or_else(|| "Standard".to_string());
+        self.textstyle_selected = next;
+        self.load_textstyle_draft(self.active_tab);
+        self.after_style_change(StyleKind::Text);
     }
 
     /// The text style manager's list: each style's text count and lock.
@@ -330,12 +539,14 @@ impl OpenCADStudio {
                 let row = crate::ui::style::style_manager::StyleRow {
                     count,
                     locked: s.xref_dependent || s.name.contains('|'),
+                    annotative: s.annotative,
                 };
                 (s.name.clone(), row)
             })
             .filter(|(name, row)| {
                 !self.textstyle_in_use_only
                     || row.count > 0
+                    || name.eq_ignore_ascii_case("Standard")
                     || name.eq_ignore_ascii_case(current)
                     || name.eq_ignore_ascii_case(&self.textstyle_selected)
             })

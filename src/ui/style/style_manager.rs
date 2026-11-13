@@ -69,6 +69,11 @@ pub struct Scaffold<'a, 'b> {
     /// A narrow window: the toolbar shows its icons only, each name as a
     /// hint.
     pub compact: bool,
+    /// Apply has something to write; off, the button waits for a change.
+    pub apply_pending: bool,
+    /// Delete stays on for a style objects use; the manager answers why it
+    /// stays instead.
+    pub delete_in_use: bool,
     pub editor: Element<'a, Message>,
 }
 
@@ -78,6 +83,8 @@ pub struct Scaffold<'a, 'b> {
 pub struct StyleRow {
     pub count: usize,
     pub locked: bool,
+    /// An annotative style, marked in the list.
+    pub annotative: bool,
 }
 
 const NEW: &[u8] = include_bytes!("../../../assets/icons/ui/doc_new.svg");
@@ -108,7 +115,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .is_some_and(|row| row.count > 0);
     let can_delete = editable
         && !s.read_only
-        && !in_use
+        && (s.delete_in_use || !in_use)
         && !s.selected.eq_ignore_ascii_case("Standard")
         && s.current != Some(s.selected);
     // ── Toolbar: New / Copy / Delete | … | Set Current / Apply ────────────
@@ -157,7 +164,8 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .push(tool_button(
             APPLY,
             t!("Apply"),
-            ((!s.read_only || s.locked_keeps_actions) && editable).then_some(s.on_apply),
+            ((!s.read_only || s.locked_keeps_actions) && editable && s.apply_pending)
+                .then_some(s.on_apply),
             true,
             compact,
         ))

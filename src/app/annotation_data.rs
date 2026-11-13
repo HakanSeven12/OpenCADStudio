@@ -546,6 +546,17 @@ fn cell_ref(text: &str) -> Option<(usize, usize)> {
 }
 
 fn crop_range(rows: Vec<Vec<String>>, range: &str) -> Result<Vec<Vec<String>>, String> {
+    crop_range_at(rows, range, (0, 0))
+}
+
+/// The cells of `range` out of `rows`, whose first cell is the cell of the
+/// sheet at `first` (row and column, from 0): the rows read from a workbook
+/// sheet start at its first used cell, which need not be A1.
+fn crop_range_at(
+    rows: Vec<Vec<String>>,
+    range: &str,
+    first: (usize, usize),
+) -> Result<Vec<Vec<String>>, String> {
     let (start, end) = range.split_once(':').unwrap_or((range, range));
     let (Some((r0, c0)), Some((r1, c1))) = (cell_ref(start), cell_ref(end)) else {
         return Err(crate::t!("Enter a valid cell range such as A1:D10.").into_owned());
@@ -556,14 +567,20 @@ fn crop_range(rows: Vec<Vec<String>>, range: &str) -> Result<Vec<Vec<String>>, S
     // column axis was not — `A1:ZZZZZZ1` parses fine and then collected one
     // String per column (~308 M slots per row, OOM). Columns past the widest
     // row are empty in every row, so clamp the window to the data width.
+    // Rows and columns before the sheet's first cell are empty in every row
+    // too: the window starts at that cell at the earliest.
     let widest = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let c1 = c1.min(widest.saturating_sub(1));
+    let (top, left) = first;
+    let rows_from = r0.saturating_sub(top);
+    let rows_to = (r1 + 1).saturating_sub(top);
+    let columns_from = c0.saturating_sub(left);
+    let columns_to = (c1 + 1).saturating_sub(left).min(widest);
     Ok(rows
         .into_iter()
-        .skip(r0)
-        .take(r1 - r0 + 1)
+        .skip(rows_from)
+        .take(rows_to.saturating_sub(rows_from))
         .map(|row| {
-            (c0..=c1)
+            (columns_from..columns_to)
                 .map(|column| row.get(column).cloned().unwrap_or_default())
                 .collect()
         })
@@ -676,12 +693,19 @@ fn workbook_rows<RS: std::io::Read + std::io::Seek>(
     let data = workbook
         .worksheet_range(&selected_sheet)
         .map_err(|error| error.to_string())?;
-    Ok((
-        data.rows()
-            .map(|row| row.iter().map(ToString::to_string).collect())
-            .collect(),
-        (!cell_range.is_empty()).then_some(cell_range),
-    ))
+    let rows: Vec<Vec<String>> = data
+        .rows()
+        .map(|row| row.iter().map(ToString::to_string).collect())
+        .collect();
+    if cell_range.is_empty() {
+        return Ok((rows, None));
+    }
+    // The sheet's rows start at its first used cell, which need not be A1:
+    // the range is taken from where the cells are on the sheet.
+    let first = data
+        .start()
+        .map_or((0, 0), |(row, column)| (row as usize, column as usize));
+    Ok((crop_range_at(rows, &cell_range, first)?, None))
 }
 
 pub(crate) fn read_tabular_file(

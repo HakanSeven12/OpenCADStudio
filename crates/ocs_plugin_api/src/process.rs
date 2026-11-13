@@ -185,6 +185,11 @@ macro_rules! vlog {
 /// `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` overrides it.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// Granularity of the spawn wait's exit watch: within one tick after a runner
+/// exits, the spawn fails fast with the child's status instead of waiting the
+/// rest of the budget (see the accept loop below).
+const SPAWN_EXIT_POLL: Duration = Duration::from_millis(500);
+
 fn spawn_timeout() -> Duration {
     std::env::var("OCS_PLUGIN_SPAWN_TIMEOUT_SECS")
         .ok()
@@ -386,36 +391,76 @@ impl PluginProcess {
         let child = Mutex::new(Some(child));
 
         // Accept the runner connection with a timeout so a hung/crashed runner
-        // does not block the host indefinitely.
+        // does not block the host indefinitely. The wait is a POLL loop that
+        // also watches the runner itself: a runner that exits while connecting
+        // (stale wire schema, unloadable library, crash) ends the wait within
+        // one poll tick instead of burning the whole spawn budget — a
+        // start-of-day worse case of 90 s per dead plugin had every launch
+        // freeze for a minute and a half with a perfectly healthy host.
+        let accept_deadline = Instant::now() + spawn_timeout();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(listener.accept());
         });
-        let stream = match rx.recv_timeout(spawn_timeout()) {
-            Ok(Ok(stream)) => {
-                vlog!("[plugin] runner connected");
-                Mutex::new(Some(stream))
+        let stream = loop {
+            let remaining = accept_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break match rx.recv_timeout(Duration::ZERO) {
+                    Ok(Ok(stream)) => {
+                        vlog!("[plugin] runner connected");
+                        Mutex::new(Some(stream))
+                    }
+                    Ok(Err(e)) => return Err(e.into()),
+                    Err(_) => {
+                        let status = spawn_failure_status(&child, &last_stderr);
+                        if let Some(child) =
+                            child.lock().unwrap_or_else(|e| e.into_inner()).take()
+                        {
+                            reap(child);
+                        }
+                        return Err(PluginError::RunnerCrashed {
+                            request: "spawn/accept",
+                            status,
+                        });
+                    }
+                };
             }
-            Ok(Err(e)) => return Err(e.into()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                let status = spawn_failure_status(&child, &last_stderr);
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+            match rx.recv_timeout(remaining.min(SPAWN_EXIT_POLL)) {
+                Ok(Ok(stream)) => {
+                    vlog!("[plugin] runner connected");
+                    break Mutex::new(Some(stream));
                 }
-                return Err(PluginError::RunnerCrashed {
-                    request: "spawn/accept",
-                    status,
-                });
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let status = spawn_failure_status(&child, &last_stderr);
-                if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    reap(child);
+                Ok(Err(e)) => return Err(e.into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // The runner may have EXITED without ever connecting; its
+                    // exit status ends the wait immediately (one poll tick of
+                    // slack covers races between the exit and the poll).
+                    match child_status(&child) {
+                        Some(_) => {
+                            let status = spawn_failure_status(&child, &last_stderr);
+                            if let Some(child) =
+                                child.lock().unwrap_or_else(|e| e.into_inner()).take()
+                            {
+                                reap(child);
+                            }
+                            return Err(PluginError::RunnerCrashed {
+                                request: "spawn/accept",
+                                status,
+                            });
+                        }
+                        None => continue,
+                    }
                 }
-                return Err(PluginError::RunnerCrashed {
-                    request: "spawn/accept",
-                    status,
-                });
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let status = spawn_failure_status(&child, &last_stderr);
+                    if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                        reap(child);
+                    }
+                    return Err(PluginError::RunnerCrashed {
+                        request: "spawn/accept",
+                        status,
+                    });
+                }
             }
         };
 

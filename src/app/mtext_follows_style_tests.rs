@@ -28,6 +28,7 @@ fn editing(raw: &str, height: f64) -> OpenCADStudio {
     tall.handle = doc.allocate_handle();
     doc.text_styles.add(tall).unwrap();
     doc.header.current_text_style_name = "Notes".to_string();
+    app.tabs[1].scene.selection.borrow_mut().view.vp_size = (1280.0, 650.0);
     app.open_mtext_editor(DVec3::ZERO, None, raw, height, None);
     app
 }
@@ -126,6 +127,7 @@ fn a_right_click_on_a_custom_field_offers_reset_to_style() {
     );
     let caption = crate::t!("Oblique").into_owned();
     let bounds = ui.find(caption).unwrap().visible_bounds().unwrap();
+    assert!(bounds.width > 0.0 && bounds.height > 0.0, "{bounds:?}");
     ui.point_at(bounds.center());
     ui.simulate([
         iced::Event::Mouse(MouseEvent::ButtonPressed(Button::Right)),

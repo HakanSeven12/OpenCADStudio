@@ -715,7 +715,9 @@ pub(super) fn mtext_inplace_overlay<'a>(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     );
-    let toolbar_width = size.0.min(760.0).max(1.0);
+    // Keep the commonly edited fields visible together on a normal viewport.
+    // The first row still scrolls horizontally when the viewport is narrow.
+    let toolbar_width = size.0.min(1000.0).max(1.0);
     let drag_handle = mouse_area(
         container(text("⋮⋮").size(15)).height(58).center_y(58).padding([2, 3])
     ).on_press(Message::MTextToolbarGrab).interaction(iced::mouse::Interaction::Grab);
@@ -849,12 +851,6 @@ fn mtext_editor_content<'a>(
                     control: Element<'a, Message>|
      -> Element<'a, Message> {
         use super::super::mtext_editor::ValueOrigin;
-        if toolbar_only {
-            return row![text(name).size(10), control]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into();
-        }
         let mark: Element<'a, Message> = match origin {
             Some(origin) => {
                 let (label, accent): (_, fn(&Theme) -> iced::Color) = match origin {
@@ -890,6 +886,15 @@ fn mtext_editor_content<'a>(
             }
             None => iced::widget::Space::new().into(),
         };
+        if toolbar_only {
+            return row![
+                column![text(name).size(10), container(mark).height(13)].spacing(0),
+                control
+            ]
+            .spacing(3)
+            .align_y(iced::Alignment::Center)
+            .into();
+        }
         // The mark keeps its line when there is none, and every control sits
         // in a band of one height: the labels, the marks and the controls
         // each share one line whatever the control's own height.

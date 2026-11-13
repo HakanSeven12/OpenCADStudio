@@ -97,6 +97,7 @@ impl BlockTextInstance {
     }
 }
 
+#[derive(Clone)]
 pub struct TextGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub vertex_count: u32,
@@ -106,6 +107,7 @@ pub struct TextGpu {
 /// one source: the range of its glyph vertices and the range of instances that
 /// place it. A drawing with thousands of text-bearing blocks otherwise paid
 /// two buffer allocations per source on every upload.
+#[derive(Clone)]
 pub struct BlockTextGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub instance_buffer: wgpu::Buffer,

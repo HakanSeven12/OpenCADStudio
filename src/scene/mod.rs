@@ -2619,6 +2619,8 @@ pub struct Scene {
     /// stay outside the resident wire set so rollover and selection never
     /// invalidate normal geometry, picking, or snapping caches.
     annotation_highlight_cache: RefCell<HashMap<u64, Arc<Vec<WireModel>>>>,
+    // The selected part is independent of box/rollover hover changes.
+    annotation_selected_cache: RefCell<HashMap<u64, (HashSet<Handle>, HashMap<Handle, std::collections::BTreeSet<usize>>, Arc<Vec<WireModel>>)>>,
     /// Per wire-source `(geometry_epoch, gathered text)` of the most recent
     /// SDF-text build. When a new content id misses the cache but the journal
     /// shows no text-bearing entity changed since that epoch, the same glyphs
@@ -3581,6 +3583,7 @@ impl Scene {
             active_model_tile: std::cell::Cell::new(0),
             sdf_text_cache: RefCell::new(HashMap::default()),
             annotation_highlight_cache: RefCell::new(HashMap::default()),
+            annotation_selected_cache: RefCell::new(HashMap::default()),
             last_sdf_text: RefCell::new(HashMap::default()),
             // One pane mapped to tile 0 — matches the single default tile above.
             model_panes: iced::widget::pane_grid::State::new(0).0,

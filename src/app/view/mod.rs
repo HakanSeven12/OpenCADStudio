@@ -3837,7 +3837,8 @@ impl OpenCADStudio {
         // Underlay rasters follow the zoom once it settles; tick until then.
         let nav_settle = if self.tabs[self.active_tab].scene.underlay_resolution_stale() {
             // A still view requests no frames; a timer lets the rasters catch up.
-            iced::time::every(std::time::Duration::from_millis(50)).map(Message::Tick)
+            iced::time::every(std::time::Duration::from_millis(50))
+                .map(|_| Message::Tick(iced::time::Instant::now()))
         } else if self.tabs[self.active_tab].scene.is_settling() {
             crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {

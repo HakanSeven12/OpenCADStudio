@@ -4057,4 +4057,58 @@ mod tests {
             assert_eq!(wires(value, 0x10).len(), bare.len() + 1, "{value}: frame");
         }
     }
+
+    /// The window's colour is a choice of colour, not a mask: bit 0 of the
+    /// background setting turns the fill on, and bit 1 only says that the
+    /// fill takes the window's colour. A text that keeps the choice with its
+    /// mask turned off stores 2 and draws no fill, as the text of a
+    /// multileader does with the same two settings (codes 292 and 291).
+    #[test]
+    fn mtext_with_the_window_colour_chosen_and_its_mask_off_draws_no_fill() {
+        let fills = |flags: i32| {
+            let mut text = document::entities::MText::with_value(
+                "MASK",
+                document::types::Vector3::new(0., 0., 0.),
+            );
+            text.height = 2.5;
+            text.background_fill_flags = flags;
+            text.background_color = document::types::Color::Index(1);
+            tessellate(
+                &document::Document::new(),
+                Handle::new(123),
+                &EntityType::MText(Box::new(text)),
+                false,
+                [1.0; 4],
+                0.0,
+                [0.0; 8],
+                1.0,
+                1.0,
+                None,
+                None,
+                [0.0; 4],
+                false,
+            )
+            .into_iter()
+            .filter(|wire| !wire.fill_tris.is_empty() && wire.points.is_empty())
+            .collect::<Vec<_>>()
+        };
+        assert!(fills(0x00).is_empty(), "no background");
+        let own = fills(0x01);
+        assert_eq!(own.len(), 1, "a fill of its own colour");
+        assert!(own[0].bg_adapt.is_none(), "its own colour is not the canvas");
+        let window = fills(0x03);
+        assert_eq!(window.len(), 1, "a fill of the window's colour");
+        assert!(
+            window[0]
+                .bg_adapt
+                .as_ref()
+                .is_some_and(|adapt| adapt.canvas_color),
+            "the window's colour follows the canvas"
+        );
+        assert_eq!(
+            fills(0x02).len(),
+            0,
+            "the window's colour chosen with the mask off must draw no fill"
+        );
+    }
 }

@@ -1374,7 +1374,7 @@ fn append_defn_entity(
     }
     // A sub-entity on a layer that is off or frozen must not render, same
     // as a top-level entity on that layer — except that layer 0 being off
-    // leaves its members to the insert's layer. The defn cache is rebuilt on
+    // or frozen leaves its members to the insert's layer. The defn cache is rebuilt on
     // every layer off/freeze toggle (bump_geometry bumps block_epoch), so
     // baking the visibility here stays in sync.
     // The defn cache is space-shared: a session LAYWALK never enters

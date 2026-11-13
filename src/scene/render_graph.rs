@@ -693,23 +693,25 @@ impl<'a> RenderSceneGraph<'a> {
     }
 }
 
-/// Whether a block member on `layer` is hidden by its layer. Frozen layers
-/// hide it; layer 0 being off does not, since a member on layer 0 shows on the
-/// layer of the reference that places it, which the caller has checked.
-/// (#1916) `walk` is the session LAYWALK visible set of the space being
-/// rendered; outside layers hide like frozen ones, but layer 0 defers with the
-/// same exemption the off flag gets — the reference's layer was already
-/// checked against the walk by the caller.
+/// Whether a block member on `layer` is hidden by its layer. An off or frozen
+/// layer hides it, except layer 0: a member on layer 0 shows on the layer of
+/// the reference that places it, which the caller has checked (#1916), so
+/// layer 0 being off or frozen leaves it to that layer. `walk` is the session
+/// LAYWALK visible set of the space being rendered; outside layers hide like
+/// frozen ones, and layer 0 defers there too — the reference's layer was
+/// already checked against the walk by the caller.
 pub(crate) fn block_member_layer_hidden(
     document: &Document,
     layer: &str,
     walk: Option<&FxHashSet<Handle>>,
 ) -> bool {
+    if crate::scene::view::render::is_effective_layer_zero(layer) {
+        return false;
+    }
     document.layers.get(layer).is_some_and(|record| {
-        let layer_zero = crate::scene::view::render::is_effective_layer_zero(layer);
         record.flags.frozen
-            || (record.flags.off && !layer_zero)
-            || (walk.is_some_and(|walk| !walk.contains(&record.handle)) && !layer_zero)
+            || record.flags.off
+            || walk.is_some_and(|walk| !walk.contains(&record.handle))
     })
 }
 

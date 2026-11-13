@@ -424,3 +424,60 @@ fn with_nothing_to_paste_the_command_says_so_and_ends() {
         "the command line says the clipboard holds nothing to paste"
     );
 }
+
+/// The prompts PASTESPEC has left in the command history.
+fn prompts_shown(app: &OpenCADStudio) -> Vec<String> {
+    app.command_line
+        .history
+        .iter()
+        .filter(|entry| {
+            matches!(entry.kind, crate::ui::command_line::EntryKind::Info)
+                && entry.text.contains("PASTESPEC")
+        })
+        .map(|entry| entry.text.clone())
+        .collect()
+}
+
+#[test]
+fn the_prompt_is_shown_once_when_the_clipboard_has_been_read() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    // As the command line runs it: after every message the prompt of the
+    // running step is kept in the command history.
+    let _ = app.update(Message::Command("PASTESPEC".to_string()));
+    assert_eq!(
+        prompts_shown(&app),
+        Vec::<String>::new(),
+        "there is nothing to ask while the clipboard is being read"
+    );
+    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None));
+    let shown = prompts_shown(&app);
+    assert_eq!(shown.len(), 1, "one prompt, with every format: {shown:?}");
+}
+
+#[test]
+fn copied_objects_can_be_asked_for_while_the_clipboard_is_read() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    let line = app.tabs[i]
+        .scene
+        .add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        )));
+    app.tabs[i].scene.select_entity(line, true);
+    let _ = app.dispatch_command("COPYCLIP");
+    let _ = app.update(Message::Command("PASTESPEC".to_string()));
+    // A line such as `PASTESPEC O` is answered before the read is back.
+    assert_eq!(keywords(&app), ["O", "B"]);
+    assert_eq!(
+        prompts_shown(&app),
+        Vec::<String>::new(),
+        "the prompt waits for the formats of the system clipboard"
+    );
+    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None));
+    assert_eq!(keywords(&app), ["O", "B", "T", "TA"]);
+    let shown = prompts_shown(&app);
+    assert_eq!(shown.len(), 1, "one prompt, with every format: {shown:?}");
+}

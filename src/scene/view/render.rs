@@ -3568,10 +3568,18 @@ impl Scene {
         if let Some(style) = self.display_plot_style_cache.borrow().get(&key) {
             return style.clone();
         }
-        let style =
-            crate::io::plot_style::PlotStyleTable::load_named(&settings.current_style_sheet)
-                .ok()
-                .map(Arc::new);
+        let base = self
+            .document
+            .source_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(std::path::Path::parent);
+        let style = crate::io::plot_style::PlotStyleTable::load_named_at(
+            &settings.current_style_sheet,
+            base,
+        )
+        .ok()
+        .map(Arc::new);
         self.display_plot_style_cache
             .borrow_mut()
             .insert(key, style.clone());

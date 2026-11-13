@@ -16,15 +16,26 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+#[derive(Clone)]
+struct FileFace {
+    id: fontdb::ID,
+    family: String,
+}
+
 struct SysFonts {
     db: Mutex<fontdb::Database>,
     /// Sorted, de-duplicated family names for the picker and name resolution.
     families: Mutex<Vec<String>>,
-    /// Installed face file name (lower-case) → the family that face holds.
+    /// Installed face file name (lower-case) → its exact face and family.
     /// A drawing references a TrueType style by *file* name, so this is what
     /// makes such a style resolve — see [`family_for_reference`]. Files a host
-    /// registers at run time join it ([`register_font_file`]).
-    by_file: Mutex<HashMap<String, String>>,
+    /// registers at run time join it ([`register_font_file`]). Retaining the ID
+    /// also lets ETRANSMIT distinguish two faces that share a family.
+    by_file: Mutex<HashMap<String, FileFace>>,
+    /// Drawing-relative resolved path → exact face, preventing preserved
+    /// same-named fonts in different folders from replacing one another.
+    #[cfg(not(target_arch = "wasm32"))]
+    by_path: Mutex<HashMap<std::path::PathBuf, FileFace>>,
 }
 
 static FONTS: OnceLock<SysFonts> = OnceLock::new();
@@ -50,7 +61,7 @@ fn fonts() -> &'static SysFonts {
         #[cfg(target_arch = "wasm32")]
         let db = fontdb::Database::new();
 
-        let mut by_file: HashMap<String, String> = HashMap::new();
+        let mut by_file: HashMap<String, FileFace> = HashMap::new();
         for face in db.faces() {
             let Some((family, _)) = face.families.first() else {
                 continue;
@@ -62,7 +73,10 @@ fn fonts() -> &'static SysFonts {
                 if let Some(name) = path.file_name() {
                     by_file
                         .entry(name.to_string_lossy().to_ascii_lowercase())
-                        .or_insert_with(|| face_family(face, family));
+                        .or_insert_with(|| FileFace {
+                            id: face.id,
+                            family: face_family(face, family),
+                        });
                 }
             }
         }
@@ -71,6 +85,8 @@ fn fonts() -> &'static SysFonts {
             db: Mutex::new(db),
             families: Mutex::new(families),
             by_file: Mutex::new(by_file),
+            #[cfg(not(target_arch = "wasm32"))]
+            by_path: Mutex::new(HashMap::new()),
         }
     })
 }
@@ -457,9 +473,65 @@ pub fn with_face_data_weighted<T>(
     fonts().db.lock().unwrap().with_face_data(id, f)
 }
 
+/// Original bytes and file name of an explicitly resolved TrueType/OpenType
+/// face for ETRANSMIT. A file-name reference is preferred; a family reference
+/// must match exactly, never one of the renderer's metric-compatible aliases.
+/// On the web only host-registered file bytes qualify, so a fetched Noto
+/// substitute is never mislabeled as the drawing's original proprietary font.
+pub(crate) fn transmittal_face(
+    reference: &str,
+    bold: bool,
+    italic: bool,
+) -> Option<(String, Vec<u8>)> {
+    let explicit = file_face(reference);
+    #[cfg(target_arch = "wasm32")]
+    if explicit.is_none() {
+        return None;
+    }
+    let family = explicit.as_ref().map(|face| face.family.clone());
+    #[cfg(not(target_arch = "wasm32"))]
+    let family = family.or_else(|| {
+        canonical_family_name(reference).filter(|family| family.eq_ignore_ascii_case(reference))
+    });
+    let id = if let Some(face) = explicit {
+        // A file reference identifies these exact bytes, even when another
+        // installed face has the same family and weight.
+        face.id
+    } else {
+        let family = family?;
+        let (base, was_bold, was_italic) = split_style(&family);
+        fonts().db.lock().unwrap().query(&fontdb::Query {
+            families: &[fontdb::Family::Name(base)],
+            weight: if bold || was_bold {
+                fontdb::Weight::BOLD
+            } else {
+                fontdb::Weight::NORMAL
+            },
+            style: if italic || was_italic {
+                fontdb::Style::Italic
+            } else {
+                fontdb::Style::Normal
+            },
+            ..Default::default()
+        })?
+    };
+    let db = fonts().db.lock().unwrap();
+    let face = db.face(id)?;
+    let file_name = match &face.source {
+        fontdb::Source::File(path) => path.file_name()?.to_string_lossy().into_owned(),
+        _ => reference
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| name.contains('.'))?
+            .to_string(),
+    };
+    let bytes = db.with_face_data(id, |data, _| data.to_vec())?;
+    Some((file_name, bytes))
+}
+
 /// The family of the installed face whose file is named `name` — a bare file
 /// name or any path to one, matched case-insensitively.
-pub(crate) fn family_for_file(name: &str) -> Option<String> {
+fn file_face(name: &str) -> Option<FileFace> {
     let file = name.rsplit(['/', '\\']).next()?.trim();
     if file.is_empty() {
         return None;
@@ -470,6 +542,10 @@ pub(crate) fn family_for_file(name: &str) -> Option<String> {
         .unwrap()
         .get(&file.to_ascii_lowercase())
         .cloned()
+}
+
+pub(crate) fn family_for_file(name: &str) -> Option<String> {
+    file_face(name).map(|face| face.family)
 }
 
 /// The installed family a drawing's font reference names, or `None` when
@@ -488,6 +564,23 @@ pub fn family_for_reference(reference: &str) -> Option<String> {
     // that a longer file name loses to (`ISOCPEUI.TTF` would take `ISOCP`), so
     // an installed face file answers first.
     family_for_file(reference).or_else(|| canonical_family_name(reference))
+}
+
+/// Resolve a file-valued font reference against its owning drawing before the
+/// global basename/family fallback. This is what lets Preserve packages carry
+/// same-named TrueType files in different source-relative folders.
+pub fn family_for_reference_at(reference: &str, base: Option<&std::path::Path>) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = crate::io::font_repo::font_file_path(reference, base) {
+        let path = std::path::PathBuf::from(path);
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        if let Some(face) = fonts().by_path.lock().unwrap().get(&path).cloned() {
+            return Some(face.family);
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = base;
+    family_for_reference(reference)
 }
 
 /// Whether `family` matches an installed system font (case-insensitive via
@@ -533,25 +626,131 @@ pub fn register_font_file(file_name: &str, bytes: &[u8]) -> Option<(String, usiz
         return None;
     }
     let sys = fonts();
-    let (family, faces, names) = {
+    let (id, family, faces, names) = {
         let mut db = sys.db.lock().unwrap();
         let before: std::collections::HashSet<fontdb::ID> = db.faces().map(|f| f.id).collect();
         db.load_font_data(bytes.to_vec());
-        let added: Vec<String> = db
+        let added: Vec<(fontdb::ID, String)> = db
             .faces()
             .filter(|face| !before.contains(&face.id))
-            .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+            .filter_map(|face| {
+                face.families
+                    .first()
+                    .map(|(name, _)| (face.id, name.clone()))
+            })
             .collect();
-        let family = added.first()?.clone();
-        (family, added.len(), family_names(&db))
+        let (id, family) = added.first()?.clone();
+        (id, family, added.len(), family_names(&db))
     };
-    sys.by_file
-        .lock()
-        .unwrap()
-        .insert(file.to_ascii_lowercase(), family.clone());
+    sys.by_file.lock().unwrap().insert(
+        file.to_ascii_lowercase(),
+        FileFace {
+            id,
+            family: family.clone(),
+        },
+    );
     *sys.families.lock().unwrap() = names;
     canonical_cache().lock().unwrap().clear();
     Some((family, faces))
+}
+
+/// Register TrueType/OpenType files referenced by a drawing, beside it, and in
+/// ancestor `Fonts` folders. Source-relative Preserve paths are included, not
+/// just the flat and Structured package defaults.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn load_drawing_fonts(base: Option<&std::path::Path>, doc: &document::Document) {
+    static LOADED: OnceLock<Mutex<std::collections::HashSet<std::path::PathBuf>>> = OnceLock::new();
+
+    let mut dirs: Vec<_> = base
+        .into_iter()
+        .map(std::path::Path::to_path_buf)
+        .chain(crate::io::font_repo::packaged_font_dirs(base))
+        .collect();
+    for style in doc.text_styles.iter() {
+        for reference in [&style.font_file, &style.true_type_font] {
+            let is_face_file = std::path::Path::new(reference)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    ["ttf", "otf", "ttc"]
+                        .iter()
+                        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+                });
+            if !is_face_file {
+                continue;
+            }
+            if let Some(parent) = crate::io::resolve_image_file(reference, base)
+                .map(std::path::PathBuf::from)
+                .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            {
+                dirs.push(parent);
+            }
+        }
+    }
+    let dirs: Vec<_> = dirs
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+        .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir))
+        .collect();
+    if dirs.is_empty() {
+        return;
+    }
+    let loaded = LOADED.get_or_init(Default::default);
+    let mut loaded = loaded.lock().unwrap();
+    let dirs: Vec<_> = dirs
+        .into_iter()
+        .filter(|dir| loaded.insert(dir.clone()))
+        .collect();
+    if dirs.is_empty() {
+        return;
+    }
+
+    let sys = fonts();
+    let (added, names) = {
+        let mut db = sys.db.lock().unwrap();
+        let before: std::collections::HashSet<fontdb::ID> =
+            db.faces().map(|face| face.id).collect();
+        for dir in dirs {
+            db.load_fonts_dir(dir);
+        }
+        let added: Vec<(String, std::path::PathBuf, FileFace)> = db
+            .faces()
+            .filter(|face| !before.contains(&face.id))
+            .filter_map(|face| {
+                let fontdb::Source::File(path) = &face.source else {
+                    return None;
+                };
+                let file = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+                let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                let (family, _) = face.families.first()?;
+                Some((
+                    file,
+                    resolved,
+                    FileFace {
+                        id: face.id,
+                        family: face_family(face, family),
+                    },
+                ))
+            })
+            .collect();
+        (added, family_names(&db))
+    };
+    if added.is_empty() {
+        return;
+    }
+    {
+        let mut by_file = sys.by_file.lock().unwrap();
+        for (file, path, face) in added {
+            // A drawing's own font file wins over an installed file with the
+            // same name, just as drawing-relative SHX lookup wins. The exact
+            // resolved path remains available for owner-relative resolution.
+            by_file.insert(file, face.clone());
+            sys.by_path.lock().unwrap().insert(path, face);
+        }
+        *sys.families.lock().unwrap() = names;
+    }
+    canonical_cache().lock().unwrap().clear();
+    crate::scene::text::ttf_glyph::clear_fallback_cache();
 }
 
 #[cfg(test)]
@@ -578,6 +777,10 @@ mod tests {
             Some(family.as_str())
         );
         assert!(has_family(&family));
+        let (file_name, packaged) =
+            transmittal_face("fonts/HostRegistered-Test.ttf", false, false).unwrap();
+        assert_eq!(file_name, "HostRegistered-Test.ttf");
+        assert_eq!(packaged, bytes);
 
         assert_eq!(register_font_file("Broken-Test.ttf", b"not a font"), None);
         assert_eq!(family_for_reference("Broken-Test.ttf"), None);
@@ -688,6 +891,92 @@ mod tests {
         assert_eq!(alias_resolution("txt", |_| true), None);
         assert_eq!(alias_resolution("isocp", |_| true), None);
         assert_eq!(alias_resolution("monospace", |_| true), None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn transmittal_font_dirs_register_exact_truetype_files() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
+            .expect("bundled web font");
+        for (tag, nested, structured) in [
+            ("root", false, true),
+            ("xref", true, true),
+            ("flat", false, false),
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "ocs-sysfont-transmittal-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let fonts = if structured {
+                dir.join("Fonts")
+            } else {
+                dir.clone()
+            };
+            let base = if nested {
+                dir.join("xref/discipline")
+            } else {
+                dir.clone()
+            };
+            std::fs::create_dir_all(&fonts).unwrap();
+            std::fs::create_dir_all(&base).unwrap();
+            let file = format!("Packaged-{tag}-{}.ttf", std::process::id());
+            std::fs::write(fonts.join(&file), &bytes).unwrap();
+
+            load_drawing_fonts(Some(&base), &document::Document::new());
+
+            let (_, packaged) = transmittal_face(&file, false, false)
+                .unwrap_or_else(|| panic!("{file} was not registered from {}", fonts.display()));
+            assert_eq!(packaged, bytes);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn preserved_relative_fonts_resolve_by_owning_drawing() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-sysfont-preserved-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for (folder, source) in [("first", "greek.ttf"), ("second", "latin.ttf")] {
+            let base = dir.join(folder);
+            std::fs::create_dir_all(base.join("assets")).unwrap();
+            std::fs::write(
+                base.join("assets/shared.ttf"),
+                std::fs::read(
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/").to_owned() + source,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let mut doc = document::Document::new();
+            let mut style = document::tables::TextStyle::new("Preserved");
+            style.font_file = "assets/shared.ttf".into();
+            doc.text_styles.add(style).unwrap();
+            load_drawing_fonts(Some(&base), &doc);
+        }
+
+        let mut ids = Vec::new();
+        for folder in ["first", "second"] {
+            let base = dir.join(folder);
+            let path = std::fs::canonicalize(base.join("assets/shared.ttf")).unwrap();
+            let expected = fonts().by_path.lock().unwrap().get(&path).cloned().unwrap();
+            assert_eq!(
+                family_for_reference_at("assets/shared.ttf", Some(&base)),
+                Some(expected.family)
+            );
+            ids.push(expected.id);
+        }
+        assert_ne!(ids[0], ids[1]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

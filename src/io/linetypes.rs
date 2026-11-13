@@ -423,7 +423,9 @@ pub fn populate_document_named(
     names: &[String],
 ) -> usize {
     populate_matching(doc, source, lin_dir, |candidate| {
-        names.iter().any(|name| name.eq_ignore_ascii_case(candidate))
+        names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(candidate))
     })
 }
 
@@ -545,26 +547,37 @@ pub fn is_bundled_shape_file(file: &str) -> bool {
     BUNDLED_SHAPES.iter().any(|(f, _, _)| *f == stem)
 }
 
+fn file_named(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let direct = dir.join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+}
+
 /// A shape file found as written, next to its drawing or `.lin` catalog (in
-/// any letter case, as stored references rarely match the files' case), or in
-/// the fonts folder.
+/// any letter case, as stored references rarely match the files' case), in an
+/// AutoCAD-style transmittal `Fonts` folder, or in the configured font folders.
 pub(crate) fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<String> {
     if let Some(found) = crate::io::resolve_image_file(file, lin_dir) {
         return Some(found);
     }
     let name = file.rsplit(['/', '\\']).next()?;
     lin_dir
-        .and_then(|dir| {
-            std::fs::read_dir(dir)
-                .ok()?
-                .filter_map(Result::ok)
-                .find(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .eq_ignore_ascii_case(name)
-                })
-                .map(|entry| entry.path())
+        .and_then(|dir| file_named(dir, name))
+        .or_else(|| {
+            crate::io::font_repo::packaged_font_dirs(lin_dir)
+                .into_iter()
+                .find_map(|dir| file_named(&dir, name))
         })
         .or_else(|| crate::io::font_repo::local_font_file(name))
         .map(|path| path.to_string_lossy().into_owned())

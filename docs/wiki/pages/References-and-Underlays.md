@@ -75,4 +75,4 @@ The **Point Cloud Manager** (`POINTCLOUDMANAGER`) lists the scans and regions of
 
 - `INSERTOBJ` embeds or links an OLE object; `OLELINKS` manages the links.
 - `HYPERLINK` (**Ctrl+K**) attaches a link to a web page or file to objects.
-- `ETRANSMIT` packs the drawing together with every file it references into one ZIP file to send.
+- `ETRANSMIT` packs the drawing and its resolvable external resources into one ZIP file, with Preserve, Structured-by-type, or Flat layout and rewritten references. The included report lists missing resources; same-name files receive unique names instead of being overwritten.

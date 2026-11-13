@@ -2125,12 +2125,16 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 // An automation open has nobody to answer the recovery
-                // prompt, so it fails like any other unreadable drawing
-                // instead of holding the request open behind the modal.
-                if e.recovery_available && !crate::app::control::controlled_open_pending(self) {
+                // prompt, so it takes the recovery read straight away, as a
+                // headless read does.
+                let controlled = crate::app::control::controlled_open_pending(self);
+                if e.recovery_available {
                     if let Some(opening) = self.opening.as_mut() {
                         opening.recovery_error = Some(e.message);
                         opening.recovery_read_stats = e.read_stats;
+                        if controlled {
+                            return self.update(Message::RecoveryAttempt);
+                        }
                         self.active_modal = Some(super::ModalKind::RecoveryPrompt);
                         return Task::none();
                     }
@@ -2161,8 +2165,13 @@ impl OpenCADStudio {
                     );
                     report.persist();
                     self.recovery_report = Some(report);
-                    self.active_modal = Some(super::ModalKind::Recovery);
-                    return Task::none();
+                    // The report modal holds the open queue; an automation
+                    // client already has the error and must be able to open
+                    // the next drawing.
+                    if !controlled {
+                        self.active_modal = Some(super::ModalKind::Recovery);
+                        return Task::none();
+                    }
                 }
                 // A drawing that fails to parse must not strand the ones queued
                 // behind it.
@@ -12794,8 +12803,14 @@ impl OpenCADStudio {
                 };
                 let initial_stats = opening.recovery_read_stats.take();
                 let Some(path) = opening.source_path.clone() else {
+                    // Nothing on disk to read again: the open fails with the
+                    // strict read's error.
+                    self.opening = None;
+                    let e = initial_error;
+                    self.command_line
+                        .push_error(crate::tf!("Open failed: {e}").as_ref());
                     self.close_active_modal();
-                    return Task::none();
+                    return self.drain_pending_open();
                 };
                 let progress = std::sync::Arc::new(crate::io::OpenProgressState::new(
                     super::OPEN_PHASE_READING,

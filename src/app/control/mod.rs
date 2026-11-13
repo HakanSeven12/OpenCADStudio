@@ -4692,7 +4692,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_open_fails_instead_of_waiting_on_the_recovery_prompt() {
+    fn controlled_open_recovers_instead_of_waiting_on_the_recovery_prompt() {
         let mut app = OpenCADStudio::new_for_test();
         let errors = app.command_line.error_revision;
         app.control.pending = Some(Operation {

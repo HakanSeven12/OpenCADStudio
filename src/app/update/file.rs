@@ -2783,9 +2783,12 @@ impl OpenCADStudio {
         // it for the next boot's restore flow (web session memory).
         #[cfg(target_arch = "wasm32")]
         self.persist_web_session();
-        // A running script does not stop at the recovery dialog; the
-        // report is already written and the repairs were on the command line.
-        let recovery_report = recovery_report.filter(|_| !self.script_running);
+        // A running script or an automation open does not stop at the
+        // recovery dialog; the report is already written and the repairs
+        // were on the command line.
+        let recovery_report = recovery_report.filter(|_| {
+            !self.script_running && !crate::app::control::controlled_open_pending(self)
+        });
         let pending_open_task = if let Some(report) = recovery_report {
             self.recovery_report = Some(report);
             self.active_modal = Some(crate::app::ModalKind::Recovery);

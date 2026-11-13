@@ -1798,16 +1798,17 @@ pub fn tessellate_table(
 
     let normal = v3(&tab.normal).normalize_or(Vec3::Z);
     // Each row's named cell style: the one its id names, else the title,
-    // header or data style its place gives it.
+    // header or data style of its role — the one its id names (1 to 3),
+    // else the one its place gives it.
     let row_cells: Vec<Option<&document::objects::NamedTableCellStyle>> = tab
         .rows
         .iter()
         .enumerate()
         .map(|(ri, row)| {
             let ts = table_style?;
-            let kind = match (title_suppressed, header_suppressed, ri) {
-                (false, _, 0) => document::objects::TITLE_CELL_STYLE,
-                (false, false, 1) | (true, false, 0) => document::objects::HEADER_CELL_STYLE,
+            let kind = match row_role_kind(tab, title_suppressed, header_suppressed, ri) {
+                0 => document::objects::TITLE_CELL_STYLE,
+                1 => document::objects::HEADER_CELL_STYLE,
                 _ => document::objects::DATA_CELL_STYLE,
             };
             (row.style_id != 0)
@@ -1823,14 +1824,10 @@ pub fn tessellate_table(
     let column_count = tab.columns.len();
     let line_types = &document.line_types;
     for (ri, row) in tab.rows.iter().enumerate() {
+        // A table style with its three row styles only has no cell style
+        // for a row's id to name: the row's role still picks among them.
         let legacy_row_style: Option<&document::objects::RowCellStyle> = table_style.map(|ts| {
-            let kind = match (title_suppressed, header_suppressed, ri) {
-                (false, _, 0) => 0,
-                (false, false, 1) => 1,
-                (true, false, 0) => 1,
-                _ => 2,
-            };
-            match kind {
+            match row_role_kind(tab, title_suppressed, header_suppressed, ri) {
                 0 => &ts.title_row_style,
                 1 => &ts.header_row_style,
                 _ => &ts.data_row_style,

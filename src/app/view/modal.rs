@@ -743,7 +743,7 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::InsertAttributes => {
                 let state = self.insert_attr_dialog.as_ref()?;
-                sized_flow(ex, 500, 640, |flow| {
+                sized_flow(ex, 500, 740, |flow| {
                     crate::ui::window::insert_attr_dialog::view(state, flow)
                 })
             }

@@ -1090,6 +1090,7 @@ impl OpenCADStudio {
             && matches!(
                 req["name"].as_str(),
                 Some("dialog_answer")
+                    | Some("dialog_page")
                     | Some("dialog_ok")
                     | Some("dialog_cancel")
                     | Some("close_modal")

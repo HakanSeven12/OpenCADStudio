@@ -1141,20 +1141,6 @@ impl MemoHit {
             MemoHit::Slice(set, start, len) => &set[*start..*start + *len],
         }
     }
-
-    /// The wire at `ordinal` as a shared run reference — the run `Arc` plus
-    /// the wire's index inside it — so an overlay gather can share
-    /// memoized geometry instead of cloning it per query.
-    fn shared_at(&self, ordinal: usize) -> Option<(Arc<Vec<WireModel>>, u32)> {
-        match self {
-            MemoHit::Owned(wires) => wires
-                .get(ordinal)
-                .map(|_| (Arc::clone(wires), ordinal as u32)),
-            MemoHit::Slice(set, start, len) => {
-                (ordinal < *len).then(|| (Arc::clone(set), (start + ordinal) as u32))
-            }
-        }
-    }
 }
 
 /// Hands the set an abandoned resident patch was taking apart back to the
@@ -13709,27 +13695,75 @@ impl Scene {
         changes: &[(Handle, ChangeKind)],
         changed_wires: &Arc<Vec<WireModel>>,
     ) -> OverlayGather {
+        enum MemoSliceRef<'a> {
+            Owned(&'a Arc<Vec<WireModel>>),
+            Slice(&'a Arc<Vec<WireModel>>, usize, usize),
+        }
+        impl<'a> MemoSliceRef<'a> {
+            #[inline]
+            fn shared_at(&self, ordinal: usize) -> Option<(&'a Arc<Vec<WireModel>>, u32)> {
+                match *self {
+                    Self::Owned(wires) => {
+                        (ordinal < wires.len()).then_some((wires, ordinal as u32))
+                    }
+                    Self::Slice(set, start, len) => {
+                        (ordinal < len).then_some((set, (start + ordinal) as u32))
+                    }
+                }
+            }
+        }
+
         let changed: HashSet<Handle> = changes.iter().map(|(handle, _)| *handle).collect();
         let memo = self.resident_tess_memo.borrow();
-        let mut wires = crate::scene::pick::interaction_index::SharedWireRuns::default();
-        let mut base_slots = HashMap::default();
+        let backing_ref = self.resident_memo_backing.borrow();
+        let backing_set = backing_ref.set.upgrade();
+        let base_iter = base_keys.into_iter();
+        let base_hint = base_iter.size_hint().0;
+        let mut wires =
+            crate::scene::pick::interaction_index::SharedWireRuns::with_capacity(base_hint);
+        let mut base_slots = HashMap::with_capacity_and_hasher(base_hint, Default::default());
         let mut misses: HashMap<Handle, Vec<u32>> = HashMap::default();
-        for (handle_value, ordinal) in base_keys {
+        let mut prev_handle = Handle::NULL;
+        let mut prev_hit: Option<MemoSliceRef<'_>> = None;
+        let mut prev_valid = false;
+        for (handle_value, ordinal) in base_iter {
             let handle = Handle::new(handle_value);
-            if changed.contains(&handle) || self.document.get_entity(handle).is_none() {
+            if handle != prev_handle {
+                prev_handle = handle;
+                if changed.contains(&handle) || self.document.get_entity(handle).is_none() {
+                    prev_valid = false;
+                    prev_hit = None;
+                } else {
+                    prev_valid = true;
+                    prev_hit = match memo.get(&handle) {
+                        Some(MemoRun::Owned(w)) => Some(MemoSliceRef::Owned(w)),
+                        Some(MemoRun::InSet) => {
+                            if let (Some(set), Some(&(start, len))) =
+                                (backing_set.as_ref(), backing_ref.ranges.get(&handle))
+                            {
+                                (start + len <= set.len())
+                                    .then_some(MemoSliceRef::Slice(set, start, len))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                }
+            }
+            if !prev_valid {
                 continue;
             }
-            let hit = memo
-                .get(&handle)
-                .and_then(|run| self.resolve_memo_run(handle, run));
-            if let Some((run, index)) = hit.as_ref().and_then(|hit| hit.shared_at(ordinal as usize))
+            if let Some((run, index)) =
+                prev_hit.as_ref().and_then(|hit| hit.shared_at(ordinal as usize))
             {
                 base_slots.insert((handle_value, ordinal), wires.len() as u32);
-                wires.push(&run, index);
+                wires.push(run, index);
             } else {
                 misses.entry(handle).or_default().push(ordinal);
             }
         }
+        drop(backing_ref);
         drop(memo);
         // A memo miss is uncommon (guard change / legacy source). Preserve
         // correctness without expanding every nearby entity: regenerate that

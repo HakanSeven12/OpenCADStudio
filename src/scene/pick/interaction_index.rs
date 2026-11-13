@@ -1342,34 +1342,35 @@ impl InteractionIndex {
         aabb: [f64; 4],
         category: SnapQueryCategory,
     ) -> InteractionCandidates {
+        let mut cache = self.slot_remap_cache(slots);
         let parts = SnapCandidateParts {
             wire_indices: self.remap_wire_indices(
                 parts.wire_indices,
-                slots,
+                &mut cache,
                 category.includes_general_wires(),
                 false,
             ),
-            segments: self.remap_refs(
+            segments: Self::remap_refs(
                 parts.segments,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            snap_points: self.remap_refs(
+            snap_points: Self::remap_refs(
                 parts.snap_points,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            key_vertices: self.remap_refs(
+            key_vertices: Self::remap_refs(
                 parts.key_vertices,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            key_segments: self.remap_refs(
+            key_segments: Self::remap_refs(
                 parts.key_segments,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
@@ -1405,34 +1406,35 @@ impl InteractionIndex {
         bounds: Rectangle,
         category: SnapQueryCategory,
     ) -> InteractionCandidates {
+        let mut cache = self.slot_remap_cache(slots);
         let parts = SnapCandidateParts {
             wire_indices: self.remap_wire_indices(
                 parts.wire_indices,
-                slots,
+                &mut cache,
                 category.includes_general_wires(),
                 category.includes_general_wires(),
             ),
-            segments: self.remap_refs(
+            segments: Self::remap_refs(
                 parts.segments,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            snap_points: self.remap_refs(
+            snap_points: Self::remap_refs(
                 parts.snap_points,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            key_vertices: self.remap_refs(
+            key_vertices: Self::remap_refs(
                 parts.key_vertices,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
-            key_segments: self.remap_refs(
+            key_segments: Self::remap_refs(
                 parts.key_segments,
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             ),
@@ -1443,6 +1445,13 @@ impl InteractionIndex {
             None,
             Some((screen_rect, view_rot, eye, bounds)),
         )
+    }
+
+    fn slot_remap_cache<'a>(
+        &'a self,
+        slots: &'a rustc_hash::FxHashMap<(u64, u32), u32>,
+    ) -> SlotRemapCache<'a> {
+        SlotRemapCache::new(self, slots)
     }
 
     fn remap_wire_index(
@@ -1458,7 +1467,7 @@ impl InteractionIndex {
     fn remap_wire_indices(
         &self,
         mut indices: Vec<u32>,
-        slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
+        cache: &mut SlotRemapCache<'_>,
         include_unbounded: bool,
         include_screen_unbounded: bool,
     ) -> Vec<u32> {
@@ -1468,30 +1477,33 @@ impl InteractionIndex {
         if include_screen_unbounded {
             indices.extend_from_slice(&self.screen_unbounded_wires);
         }
-        let mut local: Vec<u32> = indices
-            .into_iter()
-            .filter_map(|index| self.remap_wire_index(index, slots))
-            .collect();
-        local.sort_unstable();
-        local.dedup();
-        local
+        let mut write = 0usize;
+        for read in 0..indices.len() {
+            if let Some(mapped) = cache.resolve(indices[read]) {
+                indices[write] = mapped;
+                write += 1;
+            }
+        }
+        indices.truncate(write);
+        indices.sort_unstable();
+        indices.dedup();
+        indices
     }
 
     fn remap_refs<T>(
-        &self,
-        values: Vec<T>,
-        slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
+        mut values: Vec<T>,
+        cache: &mut SlotRemapCache<'_>,
         wire_of: impl Fn(&T) -> u32,
         set_wire: impl Fn(&mut T, u32),
     ) -> Vec<T> {
+        values.retain_mut(|value| {
+            let Some(wire) = cache.resolve(wire_of(value)) else {
+                return false;
+            };
+            set_wire(value, wire);
+            true
+        });
         values
-            .into_iter()
-            .filter_map(|mut value| {
-                let wire = self.remap_wire_index(wire_of(&value), slots)?;
-                set_wire(&mut value, wire);
-                Some(value)
-            })
-            .collect()
     }
 
     pub(crate) fn query_remapped_xy_area(
@@ -1501,38 +1513,39 @@ impl InteractionIndex {
         aabb: [f64; 4],
         include_point_markers: bool,
     ) -> InteractionCandidates {
+        let mut cache = self.slot_remap_cache(slots);
         InteractionCandidates {
             wires: CandidateWires::Shared(wires),
             wire_indices: Some(self.remap_wire_indices(
                 self.wires.query_xy_unordered(aabb),
-                slots,
+                &mut cache,
                 true,
                 include_point_markers,
             )),
-            segments: Some(self.remap_refs(
+            segments: Some(Self::remap_refs(
                 self.segments.query_xy_selection(aabb, include_point_markers),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
             snap_points: None,
             key_vertices: None,
             key_segments: None,
-            fill_triangles: Some(self.remap_refs(
+            fill_triangles: Some(Self::remap_refs(
                 self.fill_triangles.query_xy_selection(aabb, include_point_markers),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            pick_triangles: Some(self.remap_refs(
+            pick_triangles: Some(Self::remap_refs(
                 self.pick_triangles.query_xy_selection(aabb, include_point_markers),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            glyphs: Some(self.remap_refs(
+            glyphs: Some(Self::remap_refs(
                 self.glyphs.query_xy_selection(aabb, include_point_markers),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
@@ -1548,53 +1561,54 @@ impl InteractionIndex {
         slots: &rustc_hash::FxHashMap<(u64, u32), u32>,
         aabb: [f64; 4],
     ) -> InteractionCandidates {
+        let mut cache = self.slot_remap_cache(slots);
         InteractionCandidates {
             wires: CandidateWires::Shared(wires),
             wire_indices: Some(self.remap_wire_indices(
                 self.wires.query_xy(aabb),
-                slots,
+                &mut cache,
                 true,
                 false,
             )),
-            segments: Some(self.remap_refs(
+            segments: Some(Self::remap_refs(
                 self.segments.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            snap_points: Some(self.remap_refs(
+            snap_points: Some(Self::remap_refs(
                 self.snap_points.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            key_vertices: Some(self.remap_refs(
+            key_vertices: Some(Self::remap_refs(
                 self.key_vertices.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            key_segments: Some(self.remap_refs(
+            key_segments: Some(Self::remap_refs(
                 self.key_segments.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            fill_triangles: Some(self.remap_refs(
+            fill_triangles: Some(Self::remap_refs(
                 self.fill_triangles.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            pick_triangles: Some(self.remap_refs(
+            pick_triangles: Some(Self::remap_refs(
                 self.pick_triangles.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
-            glyphs: Some(self.remap_refs(
+            glyphs: Some(Self::remap_refs(
                 self.glyphs.query_xy(aabb),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
@@ -1613,71 +1627,60 @@ impl InteractionIndex {
         eye: DVec3,
         bounds: Rectangle,
     ) -> InteractionCandidates {
+        let mut cache = self.slot_remap_cache(slots);
         InteractionCandidates {
             wires: CandidateWires::Shared(wires),
             wire_indices: Some(self.remap_wire_indices(
                 self.wires.query_screen(screen_rect, view_rot, eye, bounds),
-                slots,
+                &mut cache,
                 true,
                 true,
             )),
-            segments: Some(
-                self.remap_refs(
-                    self.segments
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            snap_points: Some(
-                self.remap_refs(
-                    self.snap_points
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            key_vertices: Some(
-                self.remap_refs(
-                    self.key_vertices
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            key_segments: Some(
-                self.remap_refs(
-                    self.key_segments
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            fill_triangles: Some(
-                self.remap_refs(
-                    self.fill_triangles
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            pick_triangles: Some(
-                self.remap_refs(
-                    self.pick_triangles
-                        .query_screen(screen_rect, view_rot, eye, bounds),
-                    slots,
-                    |value| value.wire,
-                    |value, wire| value.wire = wire,
-                ),
-            ),
-            glyphs: Some(self.remap_refs(
+            segments: Some(Self::remap_refs(
+                self.segments
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            snap_points: Some(Self::remap_refs(
+                self.snap_points
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            key_vertices: Some(Self::remap_refs(
+                self.key_vertices
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            key_segments: Some(Self::remap_refs(
+                self.key_segments
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            fill_triangles: Some(Self::remap_refs(
+                self.fill_triangles
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            pick_triangles: Some(Self::remap_refs(
+                self.pick_triangles
+                    .query_screen(screen_rect, view_rot, eye, bounds),
+                &mut cache,
+                |value| value.wire,
+                |value, wire| value.wire = wire,
+            )),
+            glyphs: Some(Self::remap_refs(
                 self.glyphs.query_screen(screen_rect, view_rot, eye, bounds),
-                slots,
+                &mut cache,
                 |value| value.wire,
                 |value, wire| value.wire = wire,
             )),
@@ -1878,10 +1881,69 @@ impl std::fmt::Debug for InteractionIndex {
 /// Zero-copy wire backing for post-edit overlay candidate sets: slot `i`
 /// resolves through a shared memoized run at a stored offset instead of a
 /// private deep clone, so a query never copies candidate geometry.
+const REMAP_UNSET: u32 = u32::MAX;
+const REMAP_MISSING: u32 = u32::MAX - 1;
+
+/// Lazily memoizes `wire_index -> local_slot` across all primitive lists in a single
+/// `query_remapped_*` call so each wire's `(handle, ordinal)` hash lookup runs at most once.
+struct SlotRemapCache<'a> {
+    index: &'a InteractionIndex,
+    slots: &'a rustc_hash::FxHashMap<(u64, u32), u32>,
+    wire_cache: Vec<u32>,
+}
+
+impl<'a> SlotRemapCache<'a> {
+    fn new(
+        index: &'a InteractionIndex,
+        slots: &'a rustc_hash::FxHashMap<(u64, u32), u32>,
+    ) -> Self {
+        const CACHE_THRESHOLD: usize = 64;
+        let wire_cache = if slots.len() >= CACHE_THRESHOLD {
+            vec![REMAP_UNSET; index.wire_handles.len()]
+        } else {
+            Vec::new()
+        };
+        Self {
+            index,
+            slots,
+            wire_cache,
+        }
+    }
+
+    #[inline]
+    fn resolve(&mut self, wire_idx: u32) -> Option<u32> {
+        if let Some(entry) = self.wire_cache.get_mut(wire_idx as usize) {
+            let cached = *entry;
+            if cached < REMAP_MISSING {
+                return Some(cached);
+            }
+            if cached == REMAP_MISSING {
+                return None;
+            }
+            let resolved = self.index.remap_wire_index(wire_idx, self.slots);
+            if let Some(slot) = resolved {
+                if slot < REMAP_MISSING {
+                    *entry = slot;
+                }
+                Some(slot)
+            } else {
+                *entry = REMAP_MISSING;
+                None
+            }
+        } else {
+            self.index.remap_wire_index(wire_idx, self.slots)
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SharedWireRuns(Vec<(Arc<Vec<WireModel>>, u32)>);
 
 impl SharedWireRuns {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
+
     pub(crate) fn push(&mut self, run: &Arc<Vec<WireModel>>, index: u32) {
         self.0.push((Arc::clone(run), index));
     }

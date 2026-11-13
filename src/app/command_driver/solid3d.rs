@@ -40,6 +40,7 @@ impl OpenCADStudio {
             self.tabs[i].active_cmd = None;
             return Some(Task::none());
         }
+        let ucs_z = self.tabs[i].ucs_xform().axes().3.to_array();
         let pending = self.begin_undo(i, "EXTRUDE", handles.len(), true);
         let mut created_handles = Vec::new();
         let mut associative_sources = Vec::new();
@@ -55,9 +56,8 @@ impl OpenCADStudio {
                 continue;
             };
             let direction = match extent {
-                ExtrudeExtent::Height(height) => profile.plane.normal().map(|normal| {
-                    glam::DVec3::new(normal[0] * height, normal[1] * height, normal[2] * height)
-                }),
+                ExtrudeExtent::Height(height) => sweep_model::extrusion_axis(&entity, ucs_z)
+                    .map(|normal| glam::DVec3::from_array(normal) * height),
                 ExtrudeExtent::Direction(direction) => Some(direction),
                 ExtrudeExtent::Path(_) => None,
             };
@@ -902,3 +902,4 @@ impl OpenCADStudio {
         task
     }
 }
+

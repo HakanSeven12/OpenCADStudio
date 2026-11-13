@@ -933,17 +933,23 @@ impl OpenCADStudio {
                 // the interactive command gathers any number of profiles.
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let ucs = self.tabs[i].ucs_xform().working_plane();
                 if !selected.is_empty() {
                     let mut cmd = ExtrudeCommand::new_named(cmd, color);
-                    let first_curve = selected
+                    cmd.set_working_plane(ucs);
+                    let anchor = selected
                         .iter()
-                        .find_map(|(_, entity)| crate::entities::curve::entity_curve(entity));
-                    let anchor = first_curve
-                        .as_ref()
+                        .find_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
                         .map(|curve| glam::DVec3::from_array(curve.plane.origin))
                         .unwrap_or(glam::DVec3::ZERO);
-                    let direction = first_curve
-                        .and_then(|curve| curve.plane.normal())
+                    let direction = selected
+                        .iter()
+                        .find_map(|(_, entity)| {
+                            crate::scene::model::sweep_model::extrusion_axis(
+                                entity,
+                                ucs.z.to_array(),
+                            )
+                        })
                         .map(glam::DVec3::from_array);
                     cmd.set_preselection(
                         selected
@@ -961,7 +967,8 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let cmd = ExtrudeCommand::new_named(cmd, color);
+                    let mut cmd = ExtrudeCommand::new_named(cmd, color);
+                    cmd.set_working_plane(ucs);
                     self.command_line.push_info(&cmd.wire_density_line(
                         crate::entities::solid3d::clamp_header_isolines(
                             self.tabs[i].scene.document.header.isolines,

@@ -407,6 +407,8 @@ fn ucs_grip_under(p: Point, h: &crate::ui::overlay::UcsIconHit) -> Option<crate:
         Some(crate::app::UcsGripKind::XAxis)
     } else if pt_pt_d2(p, h.tips[1]) <= r2 {
         Some(crate::app::UcsGripKind::YAxis)
+    } else if pt_pt_d2(p, h.tips[2]) <= r2 {
+        Some(crate::app::UcsGripKind::ZAxis)
     } else {
         None
     }
@@ -5196,7 +5198,24 @@ impl OpenCADStudio {
             width: tile_b.width,
             height: tile_b.height,
         };
-        let raw = self.cursor_model_point(i, &edit_cam, p, bounds);
+        // The Z grip turns the UCS plane itself, so its cursor lies on a
+        // plane through the origin facing the view instead.
+        let raw = if kind == crate::app::UcsGripKind::ZAxis {
+            let origin = self.tabs[i].ucs_origin_world();
+            let pick = |cam: &crate::scene::view::camera::Camera| {
+                let facing = (cam.eye() - cam.target).as_vec3();
+                cam.pick_on_plane(p, bounds, facing, origin)
+            };
+            match &edit_cam {
+                Some(cam) => pick(cam),
+                None => {
+                    let paper = pick(&self.tabs[i].scene.camera.borrow());
+                    self.tabs[i].scene.paper_to_model(paper)
+                }
+            }
+        } else {
+            self.cursor_model_point(i, &edit_cam, p, bounds)
+        };
 
         // Object/grid snap, same path as an entity grip or command drag: the
         // dragged UCS point sticks to endpoints/midpoints/grid under the cursor,
@@ -5292,6 +5311,24 @@ impl OpenCADStudio {
                     };
                     ucs.x_axis = v3(nx);
                     ucs.y_axis = v3(ny);
+                }
+                crate::app::UcsGripKind::ZAxis => {
+                    let o = glam::dvec3(ucs.origin.x, ucs.origin.y, ucs.origin.z);
+                    let x = glam::dvec3(ucs.x_axis.x, ucs.x_axis.y, ucs.x_axis.z);
+                    let y = glam::dvec3(ucs.y_axis.x, ucs.y_axis.y, ucs.y_axis.z);
+                    let Some(nz) = (world - o).try_normalize() else {
+                        return;
+                    };
+                    // X keeps what it can of itself; when Z turns onto it,
+                    // the old Y takes its place.
+                    let Some(nx) = (x - nz * x.dot(nz))
+                        .try_normalize()
+                        .or_else(|| (y - nz * y.dot(nz)).try_normalize())
+                    else {
+                        return;
+                    };
+                    ucs.x_axis = v3(nx);
+                    ucs.y_axis = v3(nz.cross(nx));
                 }
             }
         }
@@ -7147,8 +7184,12 @@ impl OpenCADStudio {
                                     .scene
                                     .document
                                     .get_entity(handle)
-                                    .and_then(crate::entities::curve::entity_curve)
-                                    .and_then(|curve| curve.plane.normal())
+                                    .and_then(|entity| {
+                                        crate::scene::model::sweep_model::extrusion_axis(
+                                            entity,
+                                            self.tabs[i].ucs_xform().axes().3.to_array(),
+                                        )
+                                    })
                                     .map(glam::DVec3::from_array)
                             }
                         } else {

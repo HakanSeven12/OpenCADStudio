@@ -154,13 +154,15 @@ use crate::scene::CubeRegion;
 
 /// Which UCS-icon grip is being dragged. `Origin` slides the UCS origin within
 /// its own plane; `XAxis`/`YAxis` rotate the UCS so that axis points at the
-/// cursor (the other in-plane axis follows, Z fixed). The cursor is mapped onto
-/// the UCS plane every move, so no extra drag-start state is needed.
+/// cursor (the other in-plane axis follows, Z fixed); `ZAxis` turns Z to the
+/// cursor, keeping X as close to where it was as it can. The cursor is mapped
+/// onto the UCS plane every move, so no extra drag-start state is needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UcsGripKind {
     Origin,
     XAxis,
     YAxis,
+    ZAxis,
 }
 
 /// Cursor dwelling over a grip. When `started.elapsed() >=` the popup

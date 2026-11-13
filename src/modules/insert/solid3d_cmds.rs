@@ -33,6 +33,8 @@ pub struct ExtrudeCommand {
     injected_profile: Option<EntityType>,
     anchor: DVec3,
     profile_direction: Option<DVec3>,
+    /// The UCS Z axis, which a height extrudes a lone line along.
+    ucs_z: DVec3,
     direction_start: Option<DVec3>,
     mode: ExtrudeMode,
     taper_angle: f64,
@@ -94,6 +96,7 @@ impl ExtrudeCommand {
             injected_profile: None,
             anchor: DVec3::ZERO,
             profile_direction: None,
+            ucs_z: DVec3::Z,
             direction_start: None,
             mode: defaults.mode,
             taper_angle: 0.0,
@@ -154,12 +157,12 @@ impl ExtrudeCommand {
         self.preview_profiles
             .iter()
             .flat_map(|(_, entity)| {
-                let Some((profile, closed)) =
-                    crate::scene::model::sweep_model::extrusion_profile_of(entity)
-                else {
+                use crate::scene::model::sweep_model;
+                let Some((_, closed)) = sweep_model::extrusion_profile_of(entity) else {
                     return Vec::new();
                 };
-                let Some(normal) = profile.plane.normal() else {
+                let Some(normal) = sweep_model::extrusion_axis(entity, self.ucs_z.to_array())
+                else {
                     return Vec::new();
                 };
                 let direction = [normal[0] * height, normal[1] * height, normal[2] * height];
@@ -506,6 +509,9 @@ impl CadCommand for ExtrudeCommand {
     fn selection_forces_add(&self) -> bool {
         self.step == ExtrudeStep::Pick
     }
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.ucs_z = plane.z;
+    }
     fn inject_selection_entities(&mut self, entities: Vec<SelectionEntity>) {
         if self.step != ExtrudeStep::Pick {
             return;
@@ -520,10 +526,11 @@ impl CadCommand for ExtrudeCommand {
             .find_map(|entry| crate::entities::curve::entity_curve(&entry.entity))
         {
             self.anchor = DVec3::from_array(curve.plane.origin);
-            self.profile_direction = curve.plane.normal().map(DVec3::from_array);
-        } else {
-            self.profile_direction = None;
         }
+        self.profile_direction = entities.iter().find_map(|entry| {
+            crate::scene::model::sweep_model::extrusion_axis(&entry.entity, self.ucs_z.to_array())
+                .map(DVec3::from_array)
+        });
     }
     fn on_selection_complete(&mut self, _handles: Vec<Handle>) -> CmdResult {
         CmdResult::NeedPoint

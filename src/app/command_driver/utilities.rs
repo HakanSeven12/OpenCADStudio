@@ -1018,8 +1018,12 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(*handle)
-                    .and_then(crate::entities::curve::entity_curve)
-                    .and_then(|curve| curve.plane.normal())
+                    .and_then(|entity| {
+                        crate::scene::model::sweep_model::extrusion_axis(
+                            entity,
+                            self.tabs[i].ucs_xform().axes().3.to_array(),
+                        )
+                    })
                     .map(glam::DVec3::from_array)
             };
             if let Some(command) = self.tabs[i].active_cmd.as_mut() {

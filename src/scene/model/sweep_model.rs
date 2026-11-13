@@ -69,6 +69,27 @@ pub fn extrusion_profile_of(entity: &EntityType) -> Option<(Profile, bool)> {
     ))
 }
 
+/// The axis a height extrudes `entity` along: its profile plane's normal,
+/// except that a line holds no plane of its own, so one lying in the UCS XY
+/// plane goes along the UCS Z axis, the plane it was drawn in.
+pub fn extrusion_axis(entity: &EntityType, ucs_z: [f64; 3]) -> Option<[f64; 3]> {
+    if let EntityType::Line(line) = entity {
+        let along = [
+            line.end.x - line.start.x,
+            line.end.y - line.start.y,
+            line.end.z - line.start.z,
+        ];
+        let length = along.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let dot = along.iter().zip(ucs_z).map(|(a, z)| a * z).sum::<f64>();
+        if length > 0.0 && (dot / length).abs() < 1e-6 {
+            return Some(ucs_z);
+        }
+    }
+    entity_curve(entity)
+        .and_then(|curve| curve.plane.normal())
+        .or_else(|| extrusion_profile_of(entity)?.0.plane.normal())
+}
+
 /// A region of one boundary loop as that loop, read from the region's exact
 /// edges (its display wires hold one wire per edge), a lone closed edge split
 /// as a closed curve is.

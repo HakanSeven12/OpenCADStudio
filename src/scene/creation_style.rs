@@ -453,8 +453,6 @@ pub fn write_header_dim_vars(doc: &mut Document, style: &DimStyle) {
         linetype(style.dimltex2_handle),
     );
     let h = &mut doc.header;
-    // Every dimension variable is now the drawing's own.
-    h.dxf_dim_variables = None;
     h.dim_scale = style.dimscale;
     h.dim_arrow_size = style.dimasz;
     h.dim_ext_line_offset = style.dimexo;
@@ -549,8 +547,6 @@ pub fn write_header_dim_vars(doc: &mut Document, style: &DimStyle) {
 pub fn header_dim_style(doc: &Document, base: &DimStyle) -> DimStyle {
     let h = &doc.header;
     let mut s = base.clone();
-    // A variable a DXF left out stands for the style's own value.
-    let has = |name: &str| h.dxf_dim_variables.as_ref().is_none_or(|read| read.contains(name));
     // A value the file wrote with less precision is still the style's.
     let near = |value: f64, style: f64| {
         if (value - style).abs() <= 1e-9 * (1.0 + style.abs()) {
@@ -559,216 +555,76 @@ pub fn header_dim_style(doc: &Document, base: &DimStyle) -> DimStyle {
             value
         }
     };
-    if has("$DIMSCALE") {
-        s.dimscale = near(h.dim_scale, s.dimscale);
-    }
-    if has("$DIMASZ") {
-        s.dimasz = near(h.dim_arrow_size, s.dimasz);
-    }
-    if has("$DIMEXO") {
-        s.dimexo = near(h.dim_ext_line_offset, s.dimexo);
-    }
-    if has("$DIMDLI") {
-        s.dimdli = near(h.dim_line_increment, s.dimdli);
-    }
-    if has("$DIMEXE") {
-        s.dimexe = near(h.dim_ext_line_extension, s.dimexe);
-    }
-    if has("$DIMRND") {
-        s.dimrnd = near(h.dim_rounding, s.dimrnd);
-    }
-    if has("$DIMDLE") {
-        s.dimdle = near(h.dim_line_extension, s.dimdle);
-    }
-    if has("$DIMTP") {
-        s.dimtp = near(h.dim_tolerance_plus, s.dimtp);
-    }
-    if has("$DIMTM") {
-        s.dimtm = near(h.dim_tolerance_minus, s.dimtm);
-    }
-    if has("$DIMTXT") {
-        s.dimtxt = near(h.dim_text_height, s.dimtxt);
-    }
-    if has("$DIMCEN") {
-        s.dimcen = near(h.dim_center_mark, s.dimcen);
-    }
-    if has("$DIMTSZ") {
-        s.dimtsz = near(h.dim_tick_size, s.dimtsz);
-    }
-    if has("$DIMALTF") {
-        s.dimaltf = near(h.dim_alt_scale, s.dimaltf);
-    }
-    if has("$DIMLFAC") {
-        s.dimlfac = near(h.dim_linear_scale, s.dimlfac);
-    }
-    if has("$DIMTVP") {
-        s.dimtvp = near(h.dim_text_vertical_pos, s.dimtvp);
-    }
-    if has("$DIMTFAC") {
-        s.dimtfac = near(h.dim_tolerance_scale, s.dimtfac);
-    }
-    if has("$DIMGAP") {
-        s.dimgap = near(h.dim_line_gap, s.dimgap);
-    }
-    if has("$DIMALTRND") {
-        s.dimaltrnd = near(h.dim_alt_rounding, s.dimaltrnd);
-    }
-    if has("$DIMTOL") {
-        s.dimtol = h.dim_tolerance;
-    }
-    if has("$DIMLIM") {
-        s.dimlim = h.dim_limits;
-    }
-    if has("$DIMTIH") {
-        s.dimtih = h.dim_text_inside_horizontal;
-    }
-    if has("$DIMTOH") {
-        s.dimtoh = h.dim_text_outside_horizontal;
-    }
-    if has("$DIMSE1") {
-        s.dimse1 = h.dim_suppress_ext1;
-    }
-    if has("$DIMSE2") {
-        s.dimse2 = h.dim_suppress_ext2;
-    }
-    if has("$DIMTAD") {
-        s.dimtad = h.dim_text_above;
-    }
-    if has("$DIMZIN") {
-        s.dimzin = h.dim_zero_suppression;
-    }
-    if has("$DIMAZIN") {
-        s.dimazin = h.dim_alt_zero_suppression;
-    }
-    if has("$DIMALT") {
-        s.dimalt = h.dim_alternate_units;
-    }
-    if has("$DIMALTD") {
-        s.dimaltd = h.dim_alt_decimal_places;
-    }
-    if has("$DIMTOFL") {
-        s.dimtofl = h.dim_force_line_inside;
-    }
-    if has("$DIMSAH") {
-        s.dimsah = h.dim_separate_arrows;
-    }
-    if has("$DIMTIX") {
-        s.dimtix = h.dim_force_text_inside;
-    }
-    if has("$DIMSOXD") {
-        s.dimsoxd = h.dim_suppress_outside_ext;
-    }
-    if has("$DIMCLRD") {
-        (s.dimclrd, s.dimclrd_true_color) = style_color(h.dim_line_color);
-    }
-    if has("$DIMCLRE") {
-        (s.dimclre, s.dimclre_true_color) = style_color(h.dim_ext_line_color);
-    }
-    if has("$DIMCLRT") {
-        (s.dimclrt, s.dimclrt_true_color) = style_color(h.dim_text_color);
-    }
-    if has("$DIMADEC") {
-        s.dimadec = h.dim_angular_decimal_places;
-    }
-    if has("$DIMDEC") {
-        s.dimdec = h.dim_decimal_places;
-    }
-    if has("$DIMTDEC") {
-        s.dimtdec = h.dim_tolerance_decimal_places;
-    }
-    if has("$DIMALTU") {
-        s.dimaltu = h.dim_alt_units_format;
-    }
-    if has("$DIMALTTD") {
-        s.dimalttd = h.dim_alt_tolerance_decimal_places;
-    }
-    if has("$DIMAUNIT") {
-        s.dimaunit = h.dim_angular_units;
-    }
-    if has("$DIMFRAC") {
-        s.dimfrac = h.dim_fraction_format;
-    }
-    if has("$DIMLUNIT") {
-        s.dimlunit = h.dim_linear_unit_format;
-    }
-    if has("$DIMDSEP") {
-        s.dimdsep = h.dim_decimal_separator as i16;
-    }
-    if has("$DIMTMOVE") {
-        s.dimtmove = h.dim_text_movement;
-    }
-    if has("$DIMJUST") {
-        s.dimjust = h.dim_horizontal_justification;
-    }
-    if has("$DIMSD1") {
-        s.dimsd1 = h.dim_suppress_line1;
-    }
-    if has("$DIMSD2") {
-        s.dimsd2 = h.dim_suppress_line2;
-    }
-    if has("$DIMTOLJ") {
-        s.dimtolj = h.dim_tolerance_justification;
-    }
-    if has("$DIMTZIN") {
-        s.dimtzin = h.dim_tolerance_zero_suppression;
-    }
-    if has("$DIMALTZ") {
-        s.dimaltz = h.dim_alt_tolerance_zero_suppression;
-    }
-    if has("$DIMALTTZ") {
-        s.dimalttz = h.dim_alt_tolerance_zero_tight;
-    }
-    if has("$DIMATFIT") {
-        s.dimatfit = h.dim_fit;
-    }
-    if has("$DIMUPT") {
-        s.dimupt = h.dim_user_positioned_text;
-    }
-    if has("$DIMPOST") {
-        s.dimpost = h.dim_post.clone();
-    }
-    if has("$DIMAPOST") {
-        s.dimapost = h.dim_alt_post.clone();
-    }
-    if has("$DIMFXL") {
-        s.dimfxl = near(h.dim_fixed_ext_line_length, s.dimfxl);
-    }
-    if has("$DIMFXLON") {
-        s.dimfxlon = h.dim_fixed_ext_line_on;
-    }
-    if has("$DIMARCSYM") {
-        s.dimarcsym = h.dim_arc_symbol;
-    }
-    if has("$DIMJOGANG") {
-        s.dimjogang = near(h.dim_jog_angle, s.dimjogang);
-    }
-    if has("$DIMTFILL") {
-        s.dimtfill = h.dim_text_fill;
-    }
-    if has("$DIMTFILLCLR") {
-        (s.dimtfillclr, s.dimtfillclr_true_color) = style_color(h.dim_text_fill_color);
-    }
-    if has("$DIMTXTDIRECTION") {
-        s.dimtxtdirection = h.dim_text_direction;
-    }
-    if has("$DIMALTMZF") {
-        s.dimaltmzf = near(h.dim_alt_mzf, s.dimaltmzf);
-    }
-    if has("$DIMALTMZS") {
-        s.dimaltmzs = h.dim_alt_mzs.clone();
-    }
-    if has("$DIMMZF") {
-        s.dimmzf = near(h.dim_mzf, s.dimmzf);
-    }
-    if has("$DIMMZS") {
-        s.dimmzs = h.dim_mzs.clone();
-    }
-    if has("$DIMLWD") {
-        s.dimlwd = h.dim_line_weight;
-    }
-    if has("$DIMLWE") {
-        s.dimlwe = h.dim_ext_line_weight;
-    }
+    s.dimscale = near(h.dim_scale, s.dimscale);
+    s.dimasz = near(h.dim_arrow_size, s.dimasz);
+    s.dimexo = near(h.dim_ext_line_offset, s.dimexo);
+    s.dimdli = near(h.dim_line_increment, s.dimdli);
+    s.dimexe = near(h.dim_ext_line_extension, s.dimexe);
+    s.dimrnd = near(h.dim_rounding, s.dimrnd);
+    s.dimdle = near(h.dim_line_extension, s.dimdle);
+    s.dimtp = near(h.dim_tolerance_plus, s.dimtp);
+    s.dimtm = near(h.dim_tolerance_minus, s.dimtm);
+    s.dimtxt = near(h.dim_text_height, s.dimtxt);
+    s.dimcen = near(h.dim_center_mark, s.dimcen);
+    s.dimtsz = near(h.dim_tick_size, s.dimtsz);
+    s.dimaltf = near(h.dim_alt_scale, s.dimaltf);
+    s.dimlfac = near(h.dim_linear_scale, s.dimlfac);
+    s.dimtvp = near(h.dim_text_vertical_pos, s.dimtvp);
+    s.dimtfac = near(h.dim_tolerance_scale, s.dimtfac);
+    s.dimgap = near(h.dim_line_gap, s.dimgap);
+    s.dimaltrnd = near(h.dim_alt_rounding, s.dimaltrnd);
+    s.dimtol = h.dim_tolerance;
+    s.dimlim = h.dim_limits;
+    s.dimtih = h.dim_text_inside_horizontal;
+    s.dimtoh = h.dim_text_outside_horizontal;
+    s.dimse1 = h.dim_suppress_ext1;
+    s.dimse2 = h.dim_suppress_ext2;
+    s.dimtad = h.dim_text_above;
+    s.dimzin = h.dim_zero_suppression;
+    s.dimazin = h.dim_alt_zero_suppression;
+    s.dimalt = h.dim_alternate_units;
+    s.dimaltd = h.dim_alt_decimal_places;
+    s.dimtofl = h.dim_force_line_inside;
+    s.dimsah = h.dim_separate_arrows;
+    s.dimtix = h.dim_force_text_inside;
+    s.dimsoxd = h.dim_suppress_outside_ext;
+    (s.dimclrd, s.dimclrd_true_color) = style_color(h.dim_line_color);
+    (s.dimclre, s.dimclre_true_color) = style_color(h.dim_ext_line_color);
+    (s.dimclrt, s.dimclrt_true_color) = style_color(h.dim_text_color);
+    s.dimadec = h.dim_angular_decimal_places;
+    s.dimdec = h.dim_decimal_places;
+    s.dimtdec = h.dim_tolerance_decimal_places;
+    s.dimaltu = h.dim_alt_units_format;
+    s.dimalttd = h.dim_alt_tolerance_decimal_places;
+    s.dimaunit = h.dim_angular_units;
+    s.dimfrac = h.dim_fraction_format;
+    s.dimlunit = h.dim_linear_unit_format;
+    s.dimdsep = h.dim_decimal_separator as i16;
+    s.dimtmove = h.dim_text_movement;
+    s.dimjust = h.dim_horizontal_justification;
+    s.dimsd1 = h.dim_suppress_line1;
+    s.dimsd2 = h.dim_suppress_line2;
+    s.dimtolj = h.dim_tolerance_justification;
+    s.dimtzin = h.dim_tolerance_zero_suppression;
+    s.dimaltz = h.dim_alt_tolerance_zero_suppression;
+    s.dimalttz = h.dim_alt_tolerance_zero_tight;
+    s.dimatfit = h.dim_fit;
+    s.dimupt = h.dim_user_positioned_text;
+    s.dimpost = h.dim_post.clone();
+    s.dimapost = h.dim_alt_post.clone();
+    s.dimfxl = near(h.dim_fixed_ext_line_length, s.dimfxl);
+    s.dimfxlon = h.dim_fixed_ext_line_on;
+    s.dimarcsym = h.dim_arc_symbol;
+    s.dimjogang = near(h.dim_jog_angle, s.dimjogang);
+    s.dimtfill = h.dim_text_fill;
+    (s.dimtfillclr, s.dimtfillclr_true_color) = style_color(h.dim_text_fill_color);
+    s.dimtxtdirection = h.dim_text_direction;
+    s.dimaltmzf = near(h.dim_alt_mzf, s.dimaltmzf);
+    s.dimaltmzs = h.dim_alt_mzs.clone();
+    s.dimmzf = near(h.dim_mzf, s.dimmzf);
+    s.dimmzs = h.dim_mzs.clone();
+    s.dimlwd = h.dim_line_weight;
+    s.dimlwe = h.dim_ext_line_weight;
     // A DXF header names these; a DWG gives their handles.
     let named = |handle: Handle, name: &str, find: &dyn Fn(&str) -> Option<Handle>| {
         if !handle.is_null() {
@@ -797,36 +653,28 @@ pub fn header_dim_style(doc: &Document, base: &DimStyle) -> DimStyle {
             .find(|b| b.name.eq_ignore_ascii_case(name))
             .map(|b| b.handle)
     };
-    if !has("$DIMTXSTY") {
-        // keep the style's text style
-    } else if let Some(handle) = named(h.dim_text_style_handle, &h.dim_text_style_name, &text_style) {
+    if let Some(handle) = named(h.dim_text_style_handle, &h.dim_text_style_name, &text_style) {
         s.dimtxsty_handle = handle;
         if let Some(t) = doc.text_styles.iter().find(|t| t.handle == handle) {
             s.dimtxsty = t.name.clone();
         }
     }
-    for (variable, slot, handle, name) in [
-        ("$DIMLTYPE", &mut s.dimltex_handle, h.dim_linetype_handle, &h.dim_linetype_name),
-        ("$DIMLTEX1", &mut s.dimltex1_handle, h.dim_linetype1_handle, &h.dim_linetype1_name),
-        ("$DIMLTEX2", &mut s.dimltex2_handle, h.dim_linetype2_handle, &h.dim_linetype2_name),
+    for (slot, handle, name) in [
+        (&mut s.dimltex_handle, h.dim_linetype_handle, &h.dim_linetype_name),
+        (&mut s.dimltex1_handle, h.dim_linetype1_handle, &h.dim_linetype1_name),
+        (&mut s.dimltex2_handle, h.dim_linetype2_handle, &h.dim_linetype2_name),
     ] {
-        if !has(variable) {
-            continue;
-        }
         if let Some(found) = named(handle, name, &linetype) {
             *slot = found;
         }
     }
     // An empty arrow name is the default closed filled arrowhead.
-    for (variable, slot, handle, name) in [
-        ("$DIMBLK", &mut s.dimblk, h.dim_arrow_block_handle, &h.dim_arrow_block),
-        ("$DIMBLK1", &mut s.dimblk1, h.dim_arrow_block1_handle, &h.dim_arrow_block1),
-        ("$DIMBLK2", &mut s.dimblk2, h.dim_arrow_block2_handle, &h.dim_arrow_block2),
-        ("$DIMLDRBLK", &mut s.dimldrblk, h.dim_leader_arrow_block_handle, &h.dim_leader_arrow_block),
+    for (slot, handle, name) in [
+        (&mut s.dimblk, h.dim_arrow_block_handle, &h.dim_arrow_block),
+        (&mut s.dimblk1, h.dim_arrow_block1_handle, &h.dim_arrow_block1),
+        (&mut s.dimblk2, h.dim_arrow_block2_handle, &h.dim_arrow_block2),
+        (&mut s.dimldrblk, h.dim_leader_arrow_block_handle, &h.dim_leader_arrow_block),
     ] {
-        if !has(variable) {
-            continue;
-        }
         *slot = named(handle, name, &block).unwrap_or(Handle::NULL);
     }
     s

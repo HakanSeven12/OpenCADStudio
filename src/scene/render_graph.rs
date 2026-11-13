@@ -1444,6 +1444,61 @@ mod tests {
         assert_eq!(leaves(&document), 0);
     }
 
+    /// A viewport that freezes layer 0 hides what is drawn on layer 0 in its
+    /// space, not the members of a block on layer 0: those show on the layer
+    /// of the reference that places them. A fill in a block placed on layer 0
+    /// inside another reference kept vanishing from such viewports.
+    #[test]
+    fn a_viewport_freezing_layer_zero_keeps_a_nested_reference_on_layer_zero() {
+        use document::entities::Line;
+        use document::tables::{BlockRecord, Layer};
+        let mut document = Document::new();
+        document.layers.add(Layer::new("REF")).unwrap();
+        document.layers.add(Layer::new("GREEN")).unwrap();
+        let mut add_block = |name: &str| {
+            let mut record = BlockRecord::new(name);
+            record.handle = document.allocate_handle();
+            let handle = record.handle;
+            document.block_records.add(record).unwrap();
+            handle
+        };
+        let inner = add_block("INNER");
+        let outer = add_block("OUTER");
+        let mut fill_edge = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        fill_edge.common.owner_handle = inner;
+        fill_edge.common.layer = "GREEN".into();
+        document.add_entity(EntityType::Line(fill_edge)).unwrap();
+        let mut nested = Insert::new("INNER", Vector3::ZERO);
+        nested.common.owner_handle = outer;
+        nested.common.layer = "0".into();
+        document.add_entity(EntityType::Insert(nested)).unwrap();
+        let mut placed = Insert::new("OUTER", Vector3::ZERO);
+        placed.common.layer = "REF".into();
+        document.add_entity(EntityType::Insert(placed)).unwrap();
+        let model = document.header.model_space_block_handle;
+
+        let leaves = |frozen_layer: &str| {
+            let frozen: FxHashSet<Handle> =
+                std::iter::once(document.layers.get(frozen_layer).unwrap().handle).collect();
+            let depths = FxHashMap::default();
+            let graph = RenderSceneGraph::new(&document, Some(&frozen), None, true, &depths);
+            let mut count = 0;
+            graph.walk_root(
+                SceneRoot::Block(BlockRoot {
+                    record: model,
+                    role: BlockRootRole::ModelSpace,
+                }),
+                |_, _| true,
+                |_, _| count += 1,
+            );
+            count
+        };
+
+        assert_eq!(leaves("0"), 1, "the viewport froze layer 0 only");
+        assert_eq!(leaves("GREEN"), 0, "the member's own layer is frozen");
+        assert_eq!(leaves("REF"), 0, "the reference's layer is frozen");
+    }
+
     /// Only block definitions count: an object of the kind in model space
     /// does not make a reference able to place one.
     #[test]

@@ -9,5 +9,5 @@ publish = false
 # file format and the drawing model needs no geometry kernel.
 
 [dependencies]
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c54e39b" }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "8d06335" }
 kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "353ffb2", features = ["brep"] }

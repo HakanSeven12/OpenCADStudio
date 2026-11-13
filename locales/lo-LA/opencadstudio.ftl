@@ -4247,6 +4247,7 @@ insert =
     .pdfui-total-count = ທັງໝົດ: __ocs_fmt_0__
     .pdfui-pages = ໜ້າ
     .pdfui-placement = ການວາງຕໍາແໜ່ງ
+    .pdfui-place-automatically-geopdf = ວາງໂດຍອັດຕະໂນມັດ (GeoPDF)
     .pdfui-on-screen = ເທິງໜ້າຈໍ
     .pdfui-file-details = ລາຍລະອຽດໄຟລ໌
     .pdfui-page-count = __ocs_fmt_0__ ໜ້າ

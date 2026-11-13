@@ -4237,6 +4237,7 @@ insert =
     .pdfui-total-count = Összesen: __ocs_fmt_0__
     .pdfui-pages = Oldalak
     .pdfui-placement = Elhelyezés
+    .pdfui-place-automatically-geopdf = Automatikus elhelyezés (GeoPDF)
     .pdfui-on-screen = Képernyőn
     .pdfui-file-details = Fájl adatai
     .pdfui-page-count = __ocs_fmt_0__ oldal

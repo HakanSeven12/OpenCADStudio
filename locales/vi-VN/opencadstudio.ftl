@@ -4252,6 +4252,7 @@ insert =
     .pdfui-total-count = Tổng cộng: __ocs_fmt_0__
     .pdfui-pages = Trang
     .pdfui-placement = Vị trí
+    .pdfui-place-automatically-geopdf = Đặt tự động (GeoPDF)
     .pdfui-on-screen = Trên màn hình
     .pdfui-file-details = Chi tiết tập tin
     .pdfui-page-count = __ocs_fmt_0__ trang

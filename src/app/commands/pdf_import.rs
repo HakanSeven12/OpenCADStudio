@@ -265,11 +265,7 @@ impl OpenCADStudio {
             if let document::EntityType::Underlay(underlay) = &mut entity {
                 underlay.definition_handle = definition;
                 if let Some(Some(placement)) = placements.get(index) {
-                    underlay.insertion_point.x = placement.insertion[0];
-                    underlay.insertion_point.y = placement.insertion[1];
-                    underlay.x_scale = placement.x_scale;
-                    underlay.y_scale = placement.y_scale;
-                    underlay.rotation = placement.rotation;
+                    apply_geo_placement(underlay, *placement);
                 }
             }
             self.commit_entity_handle(entity);
@@ -279,6 +275,51 @@ impl OpenCADStudio {
             self.commit_undo_delta(i, pd);
         }
     }
+}
+
+fn apply_geo_placement(
+    underlay: &mut document::entities::Underlay,
+    placement: crate::io::geopdf::GeoPlacement,
+) {
+    underlay.insertion_point.x = placement.insertion[0];
+    underlay.insertion_point.y = placement.insertion[1];
+    underlay.x_scale = placement.x_scale;
+    underlay.y_scale = placement.y_scale;
+    underlay.rotation = placement.rotation;
+}
+
+/// Build final underlays without manual placement prompts only when every
+/// selected PDF page has an unambiguous transform in the current host context.
+pub(super) fn fully_georeferenced_pdf_pages(
+    scene: &crate::scene::Scene,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    page_names: &[String],
+    plane: crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>> {
+    if kind != document::entities::UnderlayType::Pdf || page_names.is_empty() {
+        return None;
+    }
+    let mut pages = crate::modules::insert::pdf_attach::underlays_for_pages(
+        kind,
+        page_names,
+        glam::DVec3::ZERO,
+        1.0,
+        0.0,
+    )
+    .into_iter()
+    .map(|(page, entity)| (page, plane.place_entity(entity)))
+    .collect::<Vec<_>>();
+    let placements = auto_pdf_placements(scene, kind, path, &pages, true);
+    if placements.iter().any(Option::is_none) {
+        return None;
+    }
+    for ((_, entity), placement) in pages.iter_mut().zip(placements) {
+        if let document::EntityType::Underlay(underlay) = entity {
+            apply_geo_placement(underlay, placement.expect("checked above"));
+        }
+    }
+    Some(pages)
 }
 
 fn auto_pdf_placements(
@@ -468,6 +509,120 @@ mod geo_attach_tests {
     }
 
     #[test]
+    fn dialog_geopdf_skips_placement_prompts_and_uses_georeferencing() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let selected = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(document::entities::Line::new()));
+        app.tabs[i].scene.selected.insert(selected);
+        let path = "/virtual/dialog-geopdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let _ = app.open_pdf_attach_dialog(path);
+        let state = app.pdf_attach.as_mut().expect("attach dialog");
+        state.path_type =
+            crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::None);
+        state.insert_on_screen = true;
+        state.scale_on_screen = true;
+        state.rotation_on_screen = true;
+        assert!(state.geopdf_available);
+        assert!(state.geopdf_auto);
+
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+        ));
+
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert!(app.pdf_attach.is_none());
+        assert!(app.tabs[i].scene.selected.is_empty());
+        let placed = attached(&app);
+        assert_eq!(placed.len(), 1);
+        close(placed[0].1.insertion_point.x, -742_925.271_389_167_2);
+        close(placed[0].1.insertion_point.y, -1_043_020.310_123_933_5);
+        close(placed[0].1.x_scale, 144.0);
+        close(placed[0].1.y_scale, 216.0);
+        close(placed[0].1.rotation, 0.0);
+        let definition =
+            crate::entities::underlay::definition(&placed[0].1, &app.tabs[i].scene.document)
+                .expect("attached definition");
+        assert_eq!(definition.file_path, "dialog-geopdf.pdf");
+    }
+
+    #[test]
+    fn dialog_geopdf_can_be_unchecked_for_manual_placement() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "dialog-manual-geopdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let _ = app.open_pdf_attach_dialog(path);
+        assert!(app.pdf_attach.as_ref().unwrap().geopdf_auto);
+
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachGeoPdfAuto(false),
+        ));
+        let state = app.pdf_attach.as_mut().expect("attach dialog");
+        assert!(!state.geopdf_auto);
+        state.path_type =
+            crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::Full);
+        state.insert_on_screen = false;
+        state.insert = ["10".into(), "20".into(), "30".into()];
+        state.scale_on_screen = false;
+        state.scale = "4".into();
+        state.rotation_on_screen = false;
+        state.rotation = "0".into();
+
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+        ));
+
+        assert!(app.tabs[i].active_cmd.is_none());
+        let placed = attached(&app);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].1.insertion_point.x, 10.0);
+        assert_eq!(placed[0].1.insertion_point.y, 20.0);
+        assert_eq!(placed[0].1.insertion_point.z, 30.0);
+        assert_eq!(placed[0].1.x_scale, 4.0);
+        assert_eq!(placed[0].1.y_scale, 4.0);
+        assert_eq!(placed[0].1.rotation, 0.0);
+    }
+
+    #[test]
+    fn dialog_mixed_geopdf_selection_keeps_manual_fallback_prompt() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "dialog-mixed-geopdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let _ = app.open_pdf_attach_dialog(path);
+        app.ctrl_down = true;
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPage(1),
+        ));
+        app.ctrl_down = false;
+        let state = app.pdf_attach.as_mut().expect("attach dialog");
+        assert_eq!(state.selected, vec![0, 1]);
+        assert!(!state.geopdf_available);
+        assert!(!state.geopdf_auto);
+        state.insert_on_screen = true;
+        state.scale_on_screen = false;
+        state.rotation_on_screen = false;
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachGeoPdfAuto(true),
+        ));
+        assert!(!app.pdf_attach.as_ref().unwrap().geopdf_auto);
+
+        let _ = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+        ));
+
+        assert!(attached(&app).is_empty());
+        let command = app.tabs[i].active_cmd.as_ref().expect("manual fallback");
+        assert_eq!(command.prompt(), "Specify insertion point:");
+    }
+
+    #[test]
     fn manual_mode_and_ineligible_hosts_keep_authored_values() {
         let mut app = app();
         let i = app.active_tab;
@@ -530,5 +685,15 @@ mod geo_attach_tests {
         let placements = auto_pdf_placements(scene, UnderlayType::Pdf, path, &tilted, true);
         assert!(placements[0].is_none());
         assert!(placements[1].is_none());
+        let tilted_plane =
+            crate::command::WorkingPlane::new(DVec3::ZERO, DVec3::X, DVec3::new(0.0, 1.0, 1.0));
+        assert!(fully_georeferenced_pdf_pages(
+            scene,
+            UnderlayType::Pdf,
+            path,
+            &["1".to_string()],
+            tilted_plane,
+        )
+        .is_none());
     }
 }

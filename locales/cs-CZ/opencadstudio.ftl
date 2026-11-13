@@ -4247,6 +4247,7 @@ insert =
     .pdfui-total-count = Celkem: __ocs_fmt_0__
     .pdfui-pages = Stránky
     .pdfui-placement = Umístění
+    .pdfui-place-automatically-geopdf = Umístit automaticky (GeoPDF)
     .pdfui-on-screen = Na obrazovce
     .pdfui-file-details = Podrobnosti souboru
     .pdfui-page-count = Počet stránek: __ocs_fmt_0__

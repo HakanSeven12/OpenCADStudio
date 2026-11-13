@@ -4244,6 +4244,7 @@ insert =
     .pdfui-total-count = 總計: __ocs_fmt_0__
     .pdfui-pages = 頁面
     .pdfui-placement = 放置位置
+    .pdfui-place-automatically-geopdf = 自動放置 (GeoPDF)
     .pdfui-on-screen = 螢幕上
     .pdfui-file-details = 檔案詳細資訊
     .pdfui-page-count = __ocs_fmt_0__ 頁

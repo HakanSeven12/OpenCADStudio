@@ -6,8 +6,8 @@
 use std::fmt;
 
 use iced::widget::{
-    button, column, combo_box, container, image, pick_list, row, scrollable, text, text_input,
-    Space,
+    button, checkbox, column, combo_box, container, image, pick_list, row, scrollable, text,
+    text_input, Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
@@ -28,6 +28,7 @@ pub enum PdfDialogMsg {
     /// DGN conversion units: sub (true) or master.
     AttachSubUnits(bool),
     AttachPathType(PathTypeChoice),
+    AttachGeoPdfAuto(bool),
     AttachInsertOnScreen(bool),
     AttachInsert(usize, String),
     AttachScaleOnScreen(bool),
@@ -365,6 +366,15 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(
 
 /// A switch shown as a chip: filled with a tick while on.
 pub(crate) fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a, Message> {
+    chip_enabled(label, on, message, true)
+}
+
+fn chip_enabled<'a>(
+    label: String,
+    on: bool,
+    message: Message,
+    enabled: bool,
+) -> Element<'a, Message> {
     // The tick is an SVG: the web build's font has no check-mark glyph.
     let mut content = row![].spacing(4).align_y(iced::Center);
     if on {
@@ -374,11 +384,14 @@ pub(crate) fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a,
             |theme: &Theme| theme.palette().primary.base.text,
         ));
     }
-    button(content.push(text(label).size(11)))
-        .on_press(message)
+    let chip = button(content.push(text(label).size(11)))
         .style(button_style(on))
-        .padding([4, 10])
-        .into()
+        .padding([4, 10]);
+    if enabled {
+        chip.on_press(message).into()
+    } else {
+        chip.into()
+    }
 }
 
 /// A labelled field on one row; read-only while `enabled` is false.
@@ -577,6 +590,10 @@ pub struct PdfAttachState {
     pub selected: Vec<usize>,
     pub anchor: usize,
     pub path_type: PathTypeChoice,
+    /// Every selected page supports GeoPDF placement in the current drawing.
+    pub geopdf_available: bool,
+    /// Use those transforms instead of the manual placement controls.
+    pub geopdf_auto: bool,
     pub insert_on_screen: bool,
     pub insert: [String; 3],
     pub scale_on_screen: bool,
@@ -609,6 +626,8 @@ impl PdfAttachState {
             selected: vec![0],
             anchor: 0,
             path_type: memory.path_type,
+            geopdf_available: false,
+            geopdf_auto: false,
             insert_on_screen: memory.insert_on_screen,
             insert: ["0.0000".into(), "0.0000".into(), "0.0000".into()],
             scale_on_screen: memory.scale_on_screen,
@@ -714,10 +733,19 @@ pub fn view_attach<'a>(
         .spacing(6),
     );
 
-    // Placement: insertion point, scale and rotation, each with an
-    // "On screen" chip that leaves the value to the command line.
+    // Placement: GeoPDF can provide the complete transform. Otherwise the
+    // insertion point, scale and rotation each have an "On screen" chip.
+    let geopdf_auto = state.geopdf_available && state.geopdf_auto;
+    let mut automatic = checkbox(geopdf_auto)
+        .label(crate::tr!("insert", "pdfui-place-automatically-geopdf"))
+        .size(14)
+        .text_size(11);
+    if state.geopdf_available {
+        automatic = automatic.on_toggle(|on| msg(PdfDialogMsg::AttachGeoPdfAuto(on)));
+    }
     let on_screen = t!("On screen").into_owned();
-    let insert_enabled = !state.insert_on_screen;
+    let manual_enabled = !geopdf_auto;
+    let insert_enabled = manual_enabled && !state.insert_on_screen;
     let xyz = row![
         field("X".into(), &state.insert[0], insert_enabled, 12.0, |v| msg(
             PdfDialogMsg::AttachInsert(0, v)
@@ -730,31 +758,40 @@ pub fn view_attach<'a>(
         )),
     ]
     .spacing(8);
-    let heading = |label: std::borrow::Cow<'static, str>, on: bool, message: Message| {
-        row![
-            text(label).size(11).width(Fill),
-            chip(on_screen.clone(), on, message)
-        ]
-        .align_y(iced::Center)
-    };
+    let heading =
+        |label: std::borrow::Cow<'static, str>, on: bool, message: Message, enabled: bool| {
+            let label = text(label).size(11).width(Fill);
+            row![
+                if enabled {
+                    label
+                } else {
+                    label.style(muted_style)
+                },
+                chip_enabled(on_screen.clone(), on, message, enabled)
+            ]
+            .align_y(iced::Center)
+        };
     let placement = card(
         t!("Placement").into_owned(),
         column![
+            automatic,
             heading(
                 t!("Insertion point"),
                 state.insert_on_screen,
-                msg(PdfDialogMsg::AttachInsertOnScreen(!state.insert_on_screen))
+                msg(PdfDialogMsg::AttachInsertOnScreen(!state.insert_on_screen)),
+                manual_enabled
             ),
             xyz,
             heading(
                 t!("Scale"),
                 state.scale_on_screen,
-                msg(PdfDialogMsg::AttachScaleOnScreen(!state.scale_on_screen))
+                msg(PdfDialogMsg::AttachScaleOnScreen(!state.scale_on_screen)),
+                manual_enabled
             ),
             field(
                 String::new(),
                 &state.scale,
-                !state.scale_on_screen,
+                manual_enabled && !state.scale_on_screen,
                 0.0,
                 |v| msg(PdfDialogMsg::AttachScale(v))
             ),
@@ -763,12 +800,13 @@ pub fn view_attach<'a>(
                 state.rotation_on_screen,
                 msg(PdfDialogMsg::AttachRotationOnScreen(
                     !state.rotation_on_screen
-                ))
+                )),
+                manual_enabled
             ),
             field(
                 String::new(),
                 &state.rotation,
-                !state.rotation_on_screen,
+                manual_enabled && !state.rotation_on_screen,
                 0.0,
                 |v| msg(PdfDialogMsg::AttachRotation(v))
             ),
@@ -3365,4 +3403,66 @@ pub fn image_adjust<'a>(
     .padding([10, 12])
     .width(sizing.width)
     .into()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod attach_auto_tests {
+    use super::*;
+
+    fn click_text(state: &PdfAttachState, label: &'static str) -> Vec<Message> {
+        let _lock = crate::headless_ui_lock();
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (1100.0, 700.0),
+            view_attach(state, crate::ui::modal::ModalSizing::FILL),
+        );
+        ui.click(label).expect("dialog control is drawn");
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn automatic_checkbox_toggles_only_when_geopdf_is_available() {
+        let mut state = PdfAttachState::new(Vec::new());
+        state.geopdf_available = true;
+        state.geopdf_auto = true;
+        let messages = click_text(&state, "Place automatically (GeoPDF)");
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            Message::PdfDialog(PdfDialogMsg::AttachGeoPdfAuto(false))
+        )));
+
+        state.geopdf_auto = false;
+        let messages = click_text(&state, "Place automatically (GeoPDF)");
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            Message::PdfDialog(PdfDialogMsg::AttachGeoPdfAuto(true))
+        )));
+
+        state.geopdf_available = false;
+        let messages = click_text(&state, "Place automatically (GeoPDF)");
+        assert!(!messages.iter().any(|message| matches!(
+            message,
+            Message::PdfDialog(PdfDialogMsg::AttachGeoPdfAuto(_))
+        )));
+    }
+
+    #[test]
+    fn automatic_mode_disables_manual_on_screen_controls() {
+        let mut state = PdfAttachState::new(Vec::new());
+        state.geopdf_available = true;
+        state.geopdf_auto = true;
+        state.insert_on_screen = true;
+        let messages = click_text(&state, "On screen");
+        assert!(!messages.iter().any(|message| matches!(
+            message,
+            Message::PdfDialog(PdfDialogMsg::AttachInsertOnScreen(_))
+        )));
+
+        state.geopdf_auto = false;
+        let messages = click_text(&state, "On screen");
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            Message::PdfDialog(PdfDialogMsg::AttachInsertOnScreen(false))
+        )));
+    }
 }

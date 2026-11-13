@@ -2157,6 +2157,8 @@ pub enum CmdResult {
         kind: document::entities::UnderlayType,
         path: String,
         pages: Vec<(String, EntityType)>,
+        /// Whether eligible pages may replace the authored manual transform.
+        auto_place: bool,
     },
     /// Import the vector content of a PDF underlay (PDFIMPORT); ends the command.
     PdfImport(crate::modules::insert::pdf_import::PdfImportRequest),

@@ -4233,6 +4233,7 @@ insert =
     .pdfui-total-count = Total: __ocs_fmt_0__
     .pdfui-pages = Pages
     .pdfui-placement = Placement
+    .pdfui-place-automatically-geopdf = स्वचालित रूप से रखें (GeoPDF)
     .pdfui-on-screen = On screen
     .pdfui-file-details = File details
     .pdfui-page-count = __ocs_fmt_0__ pages

@@ -4219,6 +4219,7 @@ insert =
     .pdfui-total-count = Toplam: __ocs_fmt_0__
     .pdfui-pages = Sayfalar
     .pdfui-placement = Yerleşim
+    .pdfui-place-automatically-geopdf = Otomatik yerleştir (GeoPDF)
     .pdfui-on-screen = Ekranda
     .pdfui-file-details = Dosya bilgisi
     .pdfui-page-count = __ocs_fmt_0__ sayfa

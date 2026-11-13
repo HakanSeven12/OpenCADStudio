@@ -923,12 +923,17 @@ impl OpenCADStudio {
                 self.attach_point_cloud(i, label, placement);
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::AttachPdfPages { kind, path, pages } => {
+            CmdResult::AttachPdfPages {
+                kind,
+                path,
+                pages,
+                auto_place,
+            } => {
                 let label = self.history_label_from_active_cmd(i, "PDFATTACH");
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.attach_pdf_pages(i, label, kind, &path, pages, true);
+                self.attach_pdf_pages(i, label, kind, &path, pages, auto_place);
                 self.restore_pre_cmd_tangent();
             }
             CmdResult::PdfImport(request) => {

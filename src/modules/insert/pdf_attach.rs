@@ -113,6 +113,8 @@ pub struct PdfAttachCommand {
     /// Scale and rotation fixed in the dialog: their prompts are skipped.
     preset_scale: Option<f64>,
     preset_rotation: Option<f64>,
+    /// The dialog's GeoPDF choice; command-line attaches retain auto-placement.
+    auto_place: bool,
     page: String,
     page_count: usize,
     /// DWF sheet or DGN model names of the file.
@@ -150,6 +152,7 @@ impl PdfAttachCommand {
             extra_pages: Vec::new(),
             preset_scale: None,
             preset_rotation: None,
+            auto_place: true,
             page: "1".to_string(),
             page_count: 0,
             items: Vec::new(),
@@ -241,6 +244,11 @@ impl PdfAttachCommand {
         command.preset_rotation = rotation_deg;
         command.step = Step::Insertion;
         command
+    }
+
+    /// Keep the dialog's manual override through the final host commit.
+    pub fn set_auto_place(&mut self, auto_place: bool) {
+        self.auto_place = auto_place;
     }
 
     /// After the insertion point or the scale: the next prompt, or the
@@ -452,6 +460,7 @@ impl PdfAttachCommand {
                 .clone()
                 .unwrap_or_else(|| self.path.clone()),
             pages: placed,
+            auto_place: self.auto_place,
         }
     }
 

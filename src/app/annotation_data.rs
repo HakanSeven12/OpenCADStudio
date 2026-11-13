@@ -3323,6 +3323,43 @@ mod tests {
     /// panic at 13 Z's. Columns past the widest row are empty in *every*
     /// row, so the window must be clamped to the data width.
     #[test]
+    fn a_cell_range_reads_its_own_cells_when_the_sheet_starts_below_a1() {
+        // Nothing in row 1 or in column A: the sheet's cells start at B2.
+        let cell = |text: &str| text.to_string();
+        let sheet = vec![
+            Vec::new(),
+            vec![cell(""), cell("Mark"), cell("Qty")],
+            vec![cell(""), cell("B1"), cell("4")],
+            vec![cell(""), cell("C1"), cell("6")],
+        ];
+        let path = std::env::temp_dir().join(format!(
+            "ocs-range-first-cell-{}-{}.xlsx",
+            std::process::id(),
+            line!()
+        ));
+        write_extraction_file(&path, &sheet).unwrap();
+        let read = |cells: &str| {
+            read_tabular_file(&path, Some("Sheet1"), LinkRange::CellRange, Some(cells))
+        };
+        let whole = read("B2:C4");
+        let lower = read("C3:C4");
+        // A range that starts above and left of the sheet's cells holds
+        // the cells it reaches.
+        let wider = read("A1:B3");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            whole,
+            Ok(vec![
+                vec![cell("Mark"), cell("Qty")],
+                vec![cell("B1"), cell("4")],
+                vec![cell("C1"), cell("6")],
+            ])
+        );
+        assert_eq!(lower, Ok(vec![vec![cell("4")], vec![cell("6")]]));
+        assert_eq!(wider, Ok(vec![vec![cell("Mark")], vec![cell("B1")]]));
+    }
+
+    #[test]
     fn crop_range_bounds_oversized_column_spans() {
         let rows = vec![vec!["x".to_string()]];
         // 13 Z's: pre-fix, size_hint × size_of::<String>() exceeds isize::MAX

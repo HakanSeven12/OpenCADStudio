@@ -1231,6 +1231,8 @@ fn place_block_content(
         Some(c) => {
             let content_base = Vector3::new(c.x + ex, c.y + ey, c.z);
             ml.context.content_base_point = content_base;
+            // The picked point is also the content's base point (group 110).
+            ml.context.base_point = c;
             if let Some(root) = ml.context.leader_roots.first_mut() {
                 root.connection_point = Vector3::new(
                     content_base.x - dir.x * landing,

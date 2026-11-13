@@ -177,6 +177,18 @@ fn file_name_only(path: &str) -> String {
     base.to_string()
 }
 
+/// The path type a stored reference path already has: a rooted path is
+/// `Full`, a bare file name `None`, anything else `Relative`.
+pub fn pathtype_of(path: &str) -> Pathtype {
+    if !is_relative_path(&normalize_display(path)) {
+        Pathtype::Full
+    } else if path.contains(['/', '\\']) {
+        Pathtype::Relative
+    } else {
+        Pathtype::None
+    }
+}
+
 /// Fallible pathtype conversion. `Full` and `None` always succeed;
 /// `Relative` fails with [`PathtypeError::AcrossDrives`] when drive letters
 /// or UNC hosts differ (UNC vs drive-letter counts as different), and with

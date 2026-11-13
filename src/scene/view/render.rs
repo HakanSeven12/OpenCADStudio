@@ -3798,14 +3798,18 @@ impl Scene {
     }
 }
 
+/// Whether a named layer is currently locked (safe from parallel tessellation).
+pub(in crate::scene) fn layer_locked_by_name(document: &Document, layer: &str) -> bool {
+    document
+        .layers
+        .get(layer)
+        .is_some_and(|l| l.is_locked())
+}
+
 /// Whether an entity sits on a locked layer (via the document's layer table).
 /// Document-only so it is safe from the parallel tessellation path.
 pub(in crate::scene) fn layer_locked(document: &Document, e: &EntityType) -> bool {
-    document
-        .layers
-        .get(&e.common().layer)
-        .map(|l| l.is_locked())
-        .unwrap_or(false)
+    layer_locked_by_name(document, &e.common().layer)
 }
 
 // ── Document-only render-style helpers (no &self, safe to call from parallel contexts) ──
@@ -3906,18 +3910,56 @@ pub(crate) fn pack_layer_override_color(color: &AcadColor) -> Option<i32> {
     Some(packed as i32)
 }
 
+fn viewport_override_for_layer(
+    document: &Document,
+    layer: Option<&document::tables::Layer>,
+    viewport: Option<Handle>,
+    kind: document::objects::KnownXRecordKind,
+) -> Option<document::objects::XRecordValue> {
+    let viewport = viewport.filter(|handle| handle.is_valid())?;
+    let layer = layer?;
+    document
+        .layer_viewport_overrides(layer.handle, kind)
+        .into_iter()
+        .find_map(|(handle, value)| (handle == viewport).then_some(value))
+}
+
 fn viewport_override(
     document: &Document,
     layer_name: &str,
     viewport: Option<Handle>,
     kind: document::objects::KnownXRecordKind,
 ) -> Option<document::objects::XRecordValue> {
-    let viewport = viewport.filter(|handle| handle.is_valid())?;
-    let layer = document.layers.get(layer_name)?;
-    document
-        .layer_viewport_overrides(layer.handle, kind)
-        .into_iter()
-        .find_map(|(handle, value)| (handle == viewport).then_some(value))
+    viewport.filter(|handle| handle.is_valid())?;
+    viewport_override_for_layer(document, document.layers.get(layer_name), viewport, kind)
+}
+
+fn layer_linetype_for_layer<'a>(
+    document: &'a Document,
+    layer: Option<&'a document::tables::Layer>,
+    viewport: Option<Handle>,
+) -> &'a str {
+    if viewport.is_some() {
+        if let Some(handle) = viewport_override_for_layer(
+            document,
+            layer,
+            viewport,
+            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        )
+        .and_then(|value| value.as_handle())
+        {
+            if let Some(line_type) = document
+                .line_types
+                .iter()
+                .find(|line_type| line_type.handle == handle)
+            {
+                return line_type.name.as_str();
+            }
+        }
+    }
+    layer
+        .map(|l| l.line_type.as_str())
+        .unwrap_or("Continuous")
 }
 
 pub(crate) fn render_style_for_common_viewport(
@@ -3929,6 +3971,7 @@ pub(crate) fn render_style_for_common_viewport(
         return crate::scene::block_construction::display_style();
     }
     let layer_name = &common.layer;
+    let layer = document.layers.get(layer_name);
     let (entity_color, aci) = {
         let book_color = common
             .color_book_handle
@@ -3942,9 +3985,9 @@ pub(crate) fn render_style_for_common_viewport(
         let viewport_color =
             (book_color.is_none() && *ec == AcadColor::ByLayer && viewport.is_some())
                 .then(|| {
-                    viewport_override(
+                    viewport_override_for_layer(
                         document,
-                        layer_name,
+                        layer,
                         viewport,
                         document::objects::KnownXRecordKind::LayerViewportColorOverride,
                     )
@@ -3953,13 +3996,9 @@ pub(crate) fn render_style_for_common_viewport(
                 })
                 .flatten();
         let resolved = if *ec == AcadColor::ByLayer {
-            viewport_color.as_ref().unwrap_or_else(|| {
-                document
-                    .layers
-                    .get(layer_name)
-                    .map(|l| &l.color)
-                    .unwrap_or(&AcadColor::WHITE)
-            })
+            viewport_color
+                .as_ref()
+                .unwrap_or_else(|| layer.map(|l| &l.color).unwrap_or(&AcadColor::WHITE))
         } else {
             ec
         };
@@ -3970,9 +4009,9 @@ pub(crate) fn render_style_for_common_viewport(
         let [r, g, b, _] = tess_util::aci_to_rgba(resolved);
         let transparency = if common.transparency.is_by_layer() {
             let vp_trans = if viewport.is_some() {
-                viewport_override(
+                viewport_override_for_layer(
                     document,
-                    layer_name,
+                    layer,
                     viewport,
                     document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
                 )
@@ -3982,12 +4021,7 @@ pub(crate) fn render_style_for_common_viewport(
                 None
             };
             vp_trans
-                .or_else(|| {
-                    document
-                        .layers
-                        .get(layer_name)
-                        .map(|layer| layer.transparency)
-                })
+                .or_else(|| layer.map(|l| l.transparency))
                 .unwrap_or(common.transparency)
         } else {
             common.transparency
@@ -3996,7 +4030,12 @@ pub(crate) fn render_style_for_common_viewport(
         ([r, g, b, alpha], aci)
     };
 
-    let lt_name = linetype_name_for_common_viewport(document, common, viewport);
+    let elt = &common.linetype;
+    let lt_name = if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
+        layer_linetype_for_layer(document, layer, viewport)
+    } else {
+        elt.as_str()
+    };
     // Effective scale = global LTSCALE × per-entity scale (both default to 1.0).
     let lt_scale = document.header.linetype_scale as f32 * common.linetype_scale as f32;
     let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
@@ -4006,9 +4045,9 @@ pub(crate) fn render_style_for_common_viewport(
         let viewport_lineweight = (viewport.is_some()
             && matches!(ew, LineWeight::ByLayer | LineWeight::Default))
         .then(|| {
-            viewport_override(
+            viewport_override_for_layer(
                 document,
-                layer_name,
+                layer,
                 viewport,
                 document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
             )
@@ -4019,7 +4058,7 @@ pub(crate) fn render_style_for_common_viewport(
         let resolved = match ew {
             LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => viewport_lineweight
                 .as_ref()
-                .or_else(|| document.layers.get(layer_name).map(|l| &l.line_weight))
+                .or_else(|| layer.map(|l| &l.line_weight))
                 .unwrap_or(&LineWeight::Default),
             _ => ew,
         };

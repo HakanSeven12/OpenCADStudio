@@ -10641,11 +10641,15 @@ impl Scene {
                 .unwrap_or(hv);
             by_block.entry(block).or_default().push((hv, eff));
         }
-        let mut depth_map: HashMap<u64, [f32; 2]> = HashMap::default();
-        let mut owners: HashMap<u64, Handle> = HashMap::default();
-        let mut blocks: HashMap<Handle, Vec<DrawDepthEntry>> = HashMap::default();
+        let total_entries: usize = by_block.values().map(Vec::len).sum();
+        let mut depth_map: HashMap<u64, [f32; 2]> =
+            HashMap::with_capacity_and_hasher(total_entries, Default::default());
+        let mut owners: HashMap<u64, Handle> =
+            HashMap::with_capacity_and_hasher(total_entries, Default::default());
+        let mut blocks: HashMap<Handle, Vec<DrawDepthEntry>> =
+            HashMap::with_capacity_and_hasher(by_block.len(), Default::default());
         for (block, mut order) in by_block {
-            order.sort_by_key(|(handle, effective)| (*effective, *handle));
+            order.sort_unstable_by_key(|(handle, effective)| (*effective, *handle));
             let entries = seed_draw_depth_entries(order);
             for entry in &entries {
                 depth_map.insert(

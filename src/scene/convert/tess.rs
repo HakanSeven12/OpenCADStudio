@@ -340,32 +340,30 @@ fn block_object_style(
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
 ) -> BlockObjectStyle {
-    let entity = EntityType::Insert(insert.clone());
+    let common = &insert.common;
     let (color, pattern_length, pattern, line_weight_px, aci) =
-        view::render::render_style_for_viewport(document, &entity, active_viewport);
+        view::render::render_style_for_common_viewport(document, common, active_viewport);
     let (pattern_length, pattern) =
-        view::render::insert_pattern_for_children(&insert.common, pattern_length, pattern);
+        view::render::insert_pattern_for_children(common, pattern_length, pattern);
     let mut layer =
-        view::render::layer_render_style_viewport(document, &insert.common.layer, active_viewport);
+        view::render::layer_render_style_viewport(document, &common.layer, active_viewport);
+    let layer_record = document.layers.get(&common.layer);
+    let locked = layer_record.is_some_and(|l| l.is_locked());
     layer.color = view::render::adapt_to_bg(layer.color, bg_color);
-    if view::render::layer_locked(document, &entity) {
+    if locked {
         layer.color = crate::scene::cache::block_cache::fade_toward_bg(layer.color, bg_color);
     }
-    let layer_aci = document
-        .layers
-        .get(&insert.common.layer)
+    let layer_aci = layer_record
         .and_then(|layer| match &layer.color {
             document::types::Color::Index(index) => Some(*index),
             _ => None,
         })
         .unwrap_or(0);
-    let layer_plottable = document
-        .layers
-        .get(&insert.common.layer)
-        .map(|layer| layer.is_plottable)
-        .unwrap_or(true);
-    let color = view::render::adapt_to_bg(color, bg_color);
-    let color = fade_if_locked(document, &entity, color, bg_color);
+    let layer_plottable = layer_record.map(|layer| layer.is_plottable).unwrap_or(true);
+    let mut color = view::render::adapt_to_bg(color, bg_color);
+    if locked {
+        color = crate::scene::cache::block_cache::fade_toward_bg(color, bg_color);
+    }
     BlockObjectStyle {
         color,
         aci,
@@ -396,11 +394,12 @@ pub(crate) fn expand_block_object(
 ) -> ExpandedBlockObject {
     let style = block_object_style(document, insert, active_viewport, bg_color);
     let fallback_depths = rustc_hash::FxHashMap::default();
-    let fallback_cache;
-    let cache = match block_cache {
-        Some(cache) if cache.defn(&insert.block_name).is_some() => cache,
-        _ => {
-            fallback_cache = cache::block_cache::BlockCache::build_for_block(
+    let mut fallback_cache = None;
+    let resolved = block_cache.and_then(|cache| cache.defn(&insert.block_name).map(|d| (cache, d)));
+    let (cache, defn) = match resolved {
+        Some(pair) => pair,
+        None => {
+            let built = cache::block_cache::BlockCache::build_for_block(
                 document,
                 &insert.block_name,
                 anno_scale,
@@ -410,17 +409,22 @@ pub(crate) fn expand_block_object(
                 active_viewport,
                 &fallback_depths,
             );
-            &fallback_cache
+            let cache_ref = fallback_cache.insert(built);
+            let Some(defn) = cache_ref.defn(&insert.block_name) else {
+                return ExpandedBlockObject {
+                    wires: Vec::new(),
+                    style,
+                    is_xref: false,
+                };
+            };
+            (cache_ref as &cache::block_cache::BlockCache, defn)
         }
     };
-    let is_xref = document
-        .block_records
-        .get(&insert.block_name)
-        .map(|record| record.flags.is_xref || record.flags.is_xref_overlay)
-        .unwrap_or(false);
-    let mut wires = cache::block_cache::expand_insert(
+    let is_xref = defn.is_xref;
+    let mut wires = cache::block_cache::expand_insert_with_defn(
         document,
         cache,
+        defn,
         insert,
         owner,
         style.color,

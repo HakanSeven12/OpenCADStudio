@@ -424,6 +424,9 @@ pub(crate) fn append_insert_attribute_wires(
         annotation_scale_handle,
         crate::scene::BlockScalePolicy::FromInsert,
     );
+    if attributes.is_empty() {
+        return;
+    }
     for offset in crate::scene::render_graph::array_offsets(ins) {
         let delta = crate::scene::render_graph::insert_instance_translation_delta(
             document,

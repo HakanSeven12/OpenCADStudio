@@ -2923,6 +2923,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: die Zeichnung kann nicht gepackt werden (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: verpackte __ocs_fmt_1__ Datei(en) in __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: __ocs_fmt_1__ referenzierte Datei(en) nicht gefunden: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: __ocs_fmt_1__ referenzierte Datei(en) übersprungen, die in dieser Sitzung nicht geladen wurden: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Externe Wechselprüfungen bleiben aktiv.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Externe Wechselprüfungen bleiben aktiv.

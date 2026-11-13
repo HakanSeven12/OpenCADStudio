@@ -4881,6 +4881,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "{cmd}: no text or dimension objects." => Some(("view", "cmd-no-text-or-dimension-objects")),
         "{cmd}: not yet implemented." => Some(("view", "cmd-not-yet-implemented")),
         "{cmd}: packaged {copied} file(s) into {}" => Some(("file", "cmd-packaged-copied-file-s-into")),
+        "{cmd}: {n} referenced file(s) missing or conflicting: {names}" => Some(("file", "cmd-n-referenced-file-s-missing-or-conflicting")),
         "{cmd}: {n} referenced file(s) not found: {names}" => Some(("file", "cmd-n-referenced-file-s-not-found")),
         "{cmd}: skipped {n} referenced file(s) not loaded in this session: {names}" => Some(("file", "cmd-skipped-n-referenced-file-s-not-loaded-in")),
         "{count} object(s) added to selection." => Some(("common", "count-object-s-added-to-selection")),

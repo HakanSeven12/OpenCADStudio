@@ -2922,6 +2922,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: 도면을 패키지할 수 없습니다(__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: __ocs_fmt_1__ 파일을 __ocs_fmt_2__로 패키징했습니다.
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: 참조 파일 __ocs_fmt_1__개를 찾을 수 없습니다: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: 이 세션에서 로드되지 않은 참조 파일 __ocs_fmt_1__개를 건너뛰었습니다: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. 외부 변경 검사는 활성 상태로 유지됩니다.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. 외부 변경 검사는 활성 상태로 유지됩니다.

@@ -216,6 +216,17 @@ fn read_registered_outcome(
     Ok(outcome)
 }
 
+/// Parse a registered drawing for transmittal dependency discovery without
+/// consuming the one-shot parse cache used by XREF resolution.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn registered_document(key: &str) -> Result<Document, String> {
+    let bytes =
+        registered_bytes(key).ok_or_else(|| format!("no registered bytes for xref \"{key}\""))?;
+    let mut outcome = read_outcome_from_bytes(key, bytes, None)?;
+    finalize_xref_outcome(&mut outcome);
+    Ok(outcome.document)
+}
+
 /// Apply the same post-parse fixups the file-open tail applies, so merged
 /// xref content behaves like natively loaded content.
 #[cfg(target_arch = "wasm32")]

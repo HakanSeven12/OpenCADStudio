@@ -2927,6 +2927,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: không thể đóng gói bản vẽ (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: đã đóng gói __ocs_fmt_1__ tệp vào __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: không tìm thấy __ocs_fmt_1__ tệp tham chiếu: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: đã bỏ qua __ocs_fmt_1__ tệp tham chiếu chưa được tải trong phiên này: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Vẫn kiểm tra thay đổi từ bên ngoài.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Vẫn kiểm tra thay đổi từ bên ngoài.

@@ -84,9 +84,20 @@ pub fn write_linetypes<'a>(
     doc: &Document,
     linetypes: impl IntoIterator<Item = &'a LineType>,
 ) -> LinOutput {
+    write_linetypes_at(doc, linetypes, None)
+}
+
+/// Write linetypes, resolving custom shape names relative to their drawing.
+/// The drawing itself remains the authoritative copy; this `.lin` is a portable
+/// source for reloading the definitions on another installation.
+pub(crate) fn write_linetypes_at<'a>(
+    doc: &Document,
+    linetypes: impl IntoIterator<Item = &'a LineType>,
+    base: Option<&Path>,
+) -> LinOutput {
     let mut output = LinOutput::default();
     for linetype in linetypes {
-        match definition(doc, linetype) {
+        match definition(doc, linetype, base) {
             Ok((text, warnings)) => {
                 output.text.push_str(&text);
                 output.written.push(linetype.name.clone());
@@ -106,6 +117,7 @@ pub fn write_linetypes<'a>(
 fn definition(
     doc: &Document,
     linetype: &LineType,
+    base: Option<&Path>,
 ) -> Result<(String, Vec<LinWarning>), SkipReason> {
     if linetype.elements.is_empty() {
         return Err(SkipReason::NoPattern);
@@ -127,7 +139,7 @@ fn definition(
         pattern.push_str(&number(element.length));
         if let Some(extra) = element.complex.as_ref().filter(|data| is_real(data)) {
             pattern.push(',');
-            pattern.push_str(&complex_element(doc, extra)?);
+            pattern.push_str(&complex_element(doc, extra, base)?);
         }
     }
     let mut warnings = Vec::new();
@@ -170,7 +182,11 @@ fn number(value: f64) -> String {
     }
 }
 
-fn complex_element(doc: &Document, data: &LineTypeComplexData) -> Result<String, SkipReason> {
+fn complex_element(
+    doc: &Document,
+    data: &LineTypeComplexData,
+    base: Option<&Path>,
+) -> Result<String, SkipReason> {
     let head = match &data.content {
         LineTypeComplexContent::Text { text } => {
             if text
@@ -183,7 +199,7 @@ fn complex_element(doc: &Document, data: &LineTypeComplexData) -> Result<String,
             format!("\"{text}\",{style}")
         }
         LineTypeComplexContent::Shape { shape_number } => {
-            shape_reference(doc, data.style_handle, *shape_number)?
+            shape_reference(doc, data.style_handle, *shape_number, base)?
         }
     };
     let mut element = format!("[{head}");
@@ -225,7 +241,12 @@ fn text_style_name(doc: &Document, handle: Handle) -> Result<String, SkipReason>
 }
 
 /// `NAME,file.shx` for a shape stored by number under a shape-file style.
-fn shape_reference(doc: &Document, handle: Handle, number: i16) -> Result<String, SkipReason> {
+fn shape_reference(
+    doc: &Document,
+    handle: Handle,
+    number: i16,
+    base: Option<&Path>,
+) -> Result<String, SkipReason> {
     let file = doc
         .text_styles
         .iter()
@@ -235,7 +256,7 @@ fn shape_reference(doc: &Document, handle: Handle, number: i16) -> Result<String
     let name = bundled_shape_name(&file, number)
         .map(str::to_owned)
         .or_else(|| {
-            let path = find_shape_file(&file, None).filter(|_| !file.is_empty())?;
+            let path = find_shape_file(&file, base).filter(|_| !file.is_empty())?;
             crate::scene::text::shx::shape_name(&path, u16::try_from(number).ok()?)
         })
         .filter(|name| usable_in_element(name))
@@ -594,6 +615,35 @@ mod tests {
         let back = copy.line_types.get("ROW").unwrap();
         let extra = back.elements[1].complex.as_ref().expect("shape kept");
         assert_eq!(extra.shape_number(), Some(132));
+    }
+
+    #[test]
+    fn transmittal_writer_resolves_custom_shapes_beside_the_drawing() {
+        let dir = temp_dir("transmit-custom-shape");
+        // `shapes 1.0`: first, last, count, then the shape's number and
+        // length; a NUL-terminated name, one vector east, and the end code.
+        let mut shx = b"shapes 1.0\r\n\x1a".to_vec();
+        for word in [7u16, 7, 1, 7, 7] {
+            shx.extend_from_slice(&word.to_le_bytes());
+        }
+        shx.extend_from_slice(b"TICK\0\x10\0");
+        std::fs::write(dir.join("tst.shx"), shx).unwrap();
+
+        let mut doc = Document::new();
+        let style = shape_style(&mut doc, "TST.SHX");
+        let mut linetype = simple("TICKS", "", &[1.0, -1.0]);
+        linetype.add_element(LineTypeElement {
+            length: 0.0,
+            complex: Some(LineTypeComplexData {
+                content: LineTypeComplexContent::Shape { shape_number: 7 },
+                style_handle: style,
+                ..Default::default()
+            }),
+        });
+        let output = write_linetypes_at(&doc, [&linetype], Some(&dir));
+        assert_eq!(output.text, "*TICKS\nA,1,-1,0,[TICK,TST.SHX]\n");
+        assert!(output.skipped.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

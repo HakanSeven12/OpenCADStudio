@@ -2922,6 +2922,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: nie można spakować rysunku (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: spakowane pliki __ocs_fmt_1__ do __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: nie znaleziono __ocs_fmt_1__ przywołanych plików: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: pominięto __ocs_fmt_1__ przywołanych plików, niezaładowanych w tej sesji: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Kontrole zmian zewnętrznych pozostają aktywne.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Kontrole zmian zewnętrznych pozostają aktywne.

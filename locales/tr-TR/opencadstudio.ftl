@@ -2906,6 +2906,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: çizim paketlenemiyor (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: __ocs_fmt_1__ dosya __ocs_fmt_2__ içine paketlendi
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: __ocs_fmt_1__ başvurulan dosya bulunamadı: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: bu oturumda yüklenmemiş __ocs_fmt_1__ başvurulan dosya atlandı: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Dış değişiklik denetimleri etkin kalır.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Dış değişiklik denetimleri etkin kalır.

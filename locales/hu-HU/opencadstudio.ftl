@@ -2916,6 +2916,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: a rajz nem csomagolható (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: __ocs_fmt_1__ fájl becsomagolva ide: __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: __ocs_fmt_1__ hivatkozott fájl nem található: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: __ocs_fmt_1__ hivatkozott fájl kihagyva, mert nincs betöltve ebben a munkamenetben: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. A külső változásellenőrzések aktívak maradnak.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. A külső változásellenőrzések aktívak maradnak.

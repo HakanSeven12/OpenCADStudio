@@ -4117,6 +4117,7 @@ pub enum Message {
         filename: String,
         deps: Vec<(String, Vec<u8>)>,
         skipped: Vec<String>,
+        warnings: Vec<String>,
         result: Result<Vec<u8>, String>,
     },
     /// Retry the failed save after the other application releases the file.

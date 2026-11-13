@@ -2910,6 +2910,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: 无法打包图形（__ocs_fmt_1__）。
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__:已将 __ocs_fmt_1__文件打包入 __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: 未找到 __ocs_fmt_1__ 个参照文件: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: 已跳过 __ocs_fmt_1__ 个本次会话中未加载的参照文件: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. 对外变更检查仍在进行中。
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. 对外变更检查仍在进行中。

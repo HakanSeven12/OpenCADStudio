@@ -2922,6 +2922,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__：無法打包圖面（__ocs_fmt_1__）。
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__：已將 __ocs_fmt_1__ 個檔案打包至 __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__：找不到 __ocs_fmt_1__ 個參考檔案：__ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__：已略過 __ocs_fmt_1__ 個本次工作階段中未載入的參考檔案：__ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__。外部變更檢查仍在進行中。
     .warning-external-change-checks-remain-active = __ocs_fmt_0__。外部變更檢查仍在進行中。

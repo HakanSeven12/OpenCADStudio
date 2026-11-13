@@ -2913,6 +2913,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: 図面をパッケージ化できません（__ocs_fmt_1__）。
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: __ocs_fmt_1__ 個のファイルを __ocs_fmt_2__ にパッケージ化しました
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: 参照ファイル __ocs_fmt_1__ 個が見つかりません: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: このセッションで読み込まれていない参照ファイル __ocs_fmt_1__ 個をスキップしました: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__。外部変更の確認は引き続き有効です。
     .warning-external-change-checks-remain-active = __ocs_fmt_0__。外部変更の確認は引き続き有効です。

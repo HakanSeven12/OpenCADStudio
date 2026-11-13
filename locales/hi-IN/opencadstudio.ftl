@@ -2911,6 +2911,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: चित्र को पैकेज नहीं किया जा सकता (__ocs_fmt_1__)।
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: __ocs_fmt_1__ फ़ाइल (s) को __ocs_fmt_2__ में पैक किया गया
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: __ocs_fmt_1__ संदर्भित फ़ाइलें नहीं मिलीं: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: __ocs_fmt_1__ संदर्भित फ़ाइलें छोड़ दी गईं जो इस सत्र में लोड नहीं हुईं: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. बाहरी परिवर्तन की जाँच सक्रिय रहती है।
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. बाहरी परिवर्तन की जाँच सक्रिय रहती है।

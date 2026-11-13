@@ -40,6 +40,8 @@ pub mod svg_import;
 pub mod tds_import;
 pub mod tds_legacy;
 pub mod thumbnail;
+pub(crate) mod transmit;
+pub(crate) mod transmit_zip;
 pub mod update_check;
 pub mod visual_styles;
 #[cfg(target_arch = "wasm32")]

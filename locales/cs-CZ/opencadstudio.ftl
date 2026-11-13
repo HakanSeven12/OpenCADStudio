@@ -2927,6 +2927,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: výkres nelze zabalit (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: do __ocs_fmt_2__ zabaleno souborů: __ocs_fmt_1__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: nenalezeno odkazovaných souborů (__ocs_fmt_1__): __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: přeskočeno odkazovaných souborů, které nebyly v této relaci načteny (__ocs_fmt_1__): __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Kontroly externích změn zůstávají aktivní.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Kontroly externích změn zůstávají aktivní.

@@ -14184,8 +14184,11 @@ impl OpenCADStudio {
                 filename,
                 deps,
                 skipped,
+                warnings,
                 result,
-            } => self.on_web_archive_serialized(cmd, zip_name, filename, deps, skipped, result),
+            } => self.on_web_archive_serialized(
+                cmd, zip_name, filename, deps, skipped, warnings, result,
+            ),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),

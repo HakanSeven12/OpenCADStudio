@@ -629,7 +629,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `DBLIST` | — | List data for every entity in the drawing (LIST over the whole database rather than the current selection). |
 | `DSETTINGS` | `DS` | Menu: Drafting Settings.... |
 | `DWGPROPS` | — | Sets and displays file properties (Title, Subject, Author, Keywords, Custom fields) of the current drawing. *Tip:* Custom fields can be dynamically referenced by fields in title blocks and Sheet Sets. |
-| `ETRANSMIT` | `ZIP` | Packages a drawing and all its associated external references, fonts, plot styles (CTB), and images into a single zip file. *Tip:* The standard protocol before emailing drawings to clients or contractors to ensure no missing Xrefs or fonts. |
+| `ETRANSMIT` | `ZIP` | Packages the drawing, recursive xrefs, images, underlays, point clouds, fonts, SHX shapes, custom plot tables, and generated linetypes into one ZIP. The included report identifies missing files and name conflicts. |
 | `EXIT` | — | Exits the application window after confirming unsaved changes. |
 | `FILEASSOC` | — | Registers the app as the handler of DWG/DXF files. † |
 | `FINDNONPURGEABLE` | — | Ribbon: Find Non-\nPurgeable Items. |
@@ -740,7 +740,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `-WB` | — | Command-line (no dialog) form of WB. |
 | `ADDSELECTED` | — | Starts the creation command corresponding to selected object with matching layer and properties. |
 | `AFLAGS` | — | Sets the attribute display flags (invisible, constant, verify, preset). † |
-| `ARCHIVE` | — | Package the drawing and its referenced files (xrefs + raster images) into a sibling "<name>_archive" folder. Web: there is no folder to copy into — the same dependency set is collected from the session's bytes registries and delivered as a "<name>_transmit.zip" download (`archive_web` below). |
+| `ARCHIVE` | — | Packages the drawing and its resolvable dependencies into a sibling `<name>_archive` folder on desktop, or a downloaded ZIP on the web. Includes an itemized dependency report. |
 | `ARRAY3D` | — | Multi-tier 3D arraying. Synonym for 3DARRAY command. |
 | `ARRAYPATH` | — | Menu: Path Array. |
 | `ARRAYPOLAR` | — | Menu: Polar Array. |

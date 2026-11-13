@@ -2922,6 +2922,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: piirustuksen paketointi epäonnistui (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: pakattu __ocs_fmt_1__-tiedosto(t) kohteeseen __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: __ocs_fmt_1__ viitattua tiedostoa ei löytynyt: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: ohitettiin __ocs_fmt_1__ viitattua tiedostoa, joita ei ladattu tässä istunnossa: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. Ulkoiset muutostarkastukset pysyvät aktiivisina.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. Ulkoiset muutostarkastukset pysyvät aktiivisina.

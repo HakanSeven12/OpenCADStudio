@@ -2935,6 +2935,7 @@ file =
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: لا يمكن حزم الرسم (__ocs_fmt_1__).
     .cmd-packaged-copied-file-s-into = __ocs_fmt_0__: جُمّع __ocs_fmt_1__ ملف في __ocs_fmt_2__
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: لم يتم العثور على __ocs_fmt_1__ ملف(ات) مرجعية: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: تم تخطي __ocs_fmt_1__ ملفًا مرجعيًا غير محمّل في هذه الجلسة: __ocs_fmt_2__
     .error-external-change-checks-remain-active = __ocs_fmt_0__. تظل فحوص التغيير الخارجي نشطة.
     .warning-external-change-checks-remain-active = __ocs_fmt_0__. تظل فحوص التغيير الخارجي نشطة.

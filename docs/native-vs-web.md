@@ -63,6 +63,12 @@ text, images) draws normally.
   browser download (a Blob + a programmatic `<a download>` click — no
   intermediate "click to download" link). The unsaved-changes prompt's *Save*
   routes through the same dialog on the web.
+- **Archive / eTransmit**: desktop `ARCHIVE` copies the last-saved drawing and
+  its dependencies into a folder; desktop `ETRANSMIT` writes a ZIP beside it.
+  Both web commands serialize the current document and download a ZIP. Browser
+  packages use only original dependency bytes registered in that session and
+  report unavailable resources in `ETRANSMIT.txt`; custom SHX/big-font and
+  point-cloud bytes are not currently retained on the web.
 - There is no persistent filesystem path on the web, so a name-only path stands
   in for document tracking.
 

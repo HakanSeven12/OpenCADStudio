@@ -2851,6 +2851,7 @@ file =
     .adding-folders-is-not-available-in-the-browser = ບໍ່ສາມາດເພີ່ມໂຟນເດີໃນໂປຣແກຣມທ່ອງເວັບໄດ້. ກະລຸນາເພີ່ມໄຟລ໌ແບບແຕ້ມແທນ.
     .pick-the-file-again-to-load-its-contents = ເລືອກໄຟລ໌ອີກຄັ້ງເພື່ອໂຫຼດເນື້ອຫາໃນໂປຣແກຣມທ່ອງເວັບ.
     .cmd-n-referenced-file-s-not-found = __ocs_fmt_0__: ບໍ່ພົບ __ocs_fmt_1__ ໄຟລ໌ອ້າງອີງ: __ocs_fmt_2__
+    .cmd-n-referenced-file-s-missing-or-conflicting = __ocs_fmt_0__: __ocs_fmt_1__ referenced file(s) missing or conflicting: __ocs_fmt_2__
     .cmd-skipped-n-referenced-file-s-not-loaded-in = __ocs_fmt_0__: ຂ້າມ __ocs_fmt_1__ ໄຟລ໌ອ້າງອີງທີ່ບໍ່ໄດ້ໂຫຼດໃນເຊສຊັນນີ້: __ocs_fmt_2__
     .cmd-cannot-package-the-drawing-e = __ocs_fmt_0__: ບໍ່ສາມາດຫຸ້ມຫໍ່ແບບແຕ້ມໄດ້ (__ocs_fmt_1__).
     .cmd-cannot-build-the-transmittal-zip-e = __ocs_fmt_0__: ບໍ່ສາມາດສ້າງ ZIP ສົ່ງຕໍ່ໄດ້ (__ocs_fmt_1__).

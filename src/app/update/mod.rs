@@ -1432,6 +1432,15 @@ impl OpenCADStudio {
                 self.control.enabled = !self.control.enabled;
                 Task::none()
             }
+            Message::ControlCopySetup => {
+                let (config, add_line) = mcp_client_setup();
+                self.command_line
+                    .push_info(crate::t!("MCP client setup copied to the clipboard").as_ref());
+                for line in add_line.lines().chain(config.lines()) {
+                    self.command_line.push_info(line);
+                }
+                iced::clipboard::write(config).discard()
+            }
             // Drain plugin-to-host requests that arrived outside of a host call.
             // This runs on a periodic timer so long-lived plugin sessions such
             // as the Python REPL can mutate the document without requiring a
@@ -16262,4 +16271,31 @@ mod point_style_dialog_tests {
             -5.0
         );
     }
+}
+
+/// The MCP client config (`mcpServers` JSON) and the matching
+/// `claude mcp add` line for this install. AppImage and Flatpak builds are
+/// started through their launcher, not the binary inside the bundle.
+fn mcp_client_setup() -> (String, String) {
+    let (command, mut args): (String, Vec<String>) = if let Ok(id) = std::env::var("FLATPAK_ID") {
+        ("flatpak".into(), vec!["run".into(), id])
+    } else if let Ok(appimage) = std::env::var("APPIMAGE") {
+        (appimage, Vec::new())
+    } else {
+        let exe = std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "OpenCADStudio".into());
+        (exe, Vec::new())
+    };
+    args.push("--mcp".into());
+    let config = serde_json::json!({
+        "mcpServers": { "opencadstudio": { "command": command, "args": args } }
+    });
+    let config = serde_json::to_string_pretty(&config).unwrap_or_default();
+    let quoted: Vec<String> = std::iter::once(&command)
+        .chain(&args)
+        .map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() })
+        .collect();
+    let add_line = format!("claude mcp add opencadstudio -- {}", quoted.join(" "));
+    (config, add_line)
 }

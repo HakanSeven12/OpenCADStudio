@@ -6130,6 +6130,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MCP control is off" => Some(("common", "mcp-control-is-off")),
         "MCP is handling a request" => Some(("common", "mcp-is-handling-a-request")),
         "MCP control is ready" => Some(("common", "mcp-control-is-ready")),
+        "Copy MCP client setup" => Some(("common", "copy-mcp-client-setup")),
+        "MCP client setup copied to the clipboard" => Some(("common", "mcp-client-setup-copied")),
         "Save All" => Some(("common", "save-all")),
         "Close All" => Some(("common", "close-all")),
         "Close All Other Drawings" => Some(("common", "close-all-other-drawings")),

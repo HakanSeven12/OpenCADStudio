@@ -5982,6 +5982,10 @@ pub enum Message {
     DataExtractionSave(String),
     /// Path chosen (or None = cancelled).
     DataExtractionSaveResult(String, Option<std::path::PathBuf>),
+    /// ATTOUT text and the picked output file.
+    AttOutSave(String, Option<std::path::PathBuf>),
+    /// ATTIN file contents, `None` when the picker was cancelled.
+    AttInPicked(Option<String>),
     // ── STL export ────────────────────────────────────────────────────────
     /// Trigger STL export: collect meshes and show save dialog.
     StlExport,

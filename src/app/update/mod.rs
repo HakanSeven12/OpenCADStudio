@@ -2689,6 +2689,16 @@ impl OpenCADStudio {
 
             Message::DataExtractionSaveResult(_, None) => Task::none(),
 
+            Message::AttOutSave(text, Some(path)) => {
+                self.on_attout_save(text, path);
+                Task::none()
+            }
+            Message::AttOutSave(_, None) | Message::AttInPicked(None) => Task::none(),
+            Message::AttInPicked(Some(text)) => {
+                self.on_attin_text(text);
+                Task::none()
+            }
+
             Message::StlExport => {
                 let i = self.active_tab;
                 if self.tabs[i].scene.meshes.is_empty() {

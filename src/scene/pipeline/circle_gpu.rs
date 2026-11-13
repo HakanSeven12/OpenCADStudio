@@ -77,6 +77,7 @@ impl CircleInstance {
     }
 }
 
+#[derive(Clone)]
 pub struct CircleGpu {
     pub instance_buffer: wgpu::Buffer,
     pub instance_count: u32,

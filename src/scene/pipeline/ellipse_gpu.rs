@@ -77,6 +77,7 @@ impl EllipseInstance {
     }
 }
 
+#[derive(Clone)]
 pub struct EllipseGpu {
     pub instance_buffer: wgpu::Buffer,
     pub instance_count: u32,

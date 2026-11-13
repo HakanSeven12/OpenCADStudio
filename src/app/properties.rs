@@ -2475,7 +2475,12 @@ impl OpenCADStudio {
 
         let annotation_scale_handle = self.tabs[i].scene.displayed_annotation_scale_handle();
         let mut new_panel = {
-            let selected = self.tabs[i].scene.selected_entities();
+            // `cur_handles` is already ordered and filtered to live entities
+            // above. Reusing it avoids rebuilding that entire selection again.
+            let selected: Vec<_> = cur_handles
+                .iter()
+                .filter_map(|&handle| self.tabs[i].scene.document.get_entity(handle).map(|entity| (handle, entity)))
+                .collect();
             let mut panel = match selected.len() {
                 0 => {
                     use crate::scene::model::object::{PropSection, PropValue, Property};
@@ -3869,7 +3874,19 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         let wo = if is_paper { [0.0f64; 3] } else { [0.0_f64; 3] };
         let group_boxes;
         let (new_handle, new_grips, new_grip_handles) = {
-            let selected = self.tabs[i].scene.selected_entities();
+            let limit = self.grip_object_limit;
+            // The limit is based on live entities, not raw handles. Count only
+            // up to the threshold before allocating or ordering the full set.
+            let over_limit = limit > 0
+                && self.tabs[i].scene.selected.iter()
+                    .filter(|handle| self.tabs[i].scene.document.get_entity(**handle).is_some())
+                    .take(limit as usize + 1)
+                    .count() > limit as usize;
+            let selected = if over_limit {
+                Vec::new()
+            } else {
+                self.tabs[i].scene.selected_entities()
+            };
             let single_handle = (selected.len() == 1
                 && !self.tabs[i].scene.is_layer_locked(selected[0].0)
                 && !self.tabs[i].scene.is_reference_only(selected[0].0)
@@ -3879,12 +3896,6 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             let mut handles = Vec::new();
             // Avoid rebuilding every entity's grip markers above the configured
             // limit. Zero disables the limit.
-            let limit = self.grip_object_limit;
-            let selected = if limit > 0 && selected.len() > limit as usize {
-                Vec::new()
-            } else {
-                selected
-            };
             // A group picked whole shows one grip at the centre of its
             // extents (GROUPDISPLAYMODE 1, 2) in place of its members' own,
             // and a box round them (2) 2.5 % of their size out on each side.

@@ -3347,6 +3347,11 @@ pub struct Scene {
             Arc<Vec<WireModel>>,
         )>,
     >,
+    /// Viewport wire sets with the block lines on their frozen layers left
+    /// out, per frozen-set signature: the resident set they were made from
+    /// (held weakly) and the result.
+    viewport_frozen_member_cache:
+        RefCell<HashMap<u64, (std::sync::Weak<Vec<WireModel>>, Arc<Vec<WireModel>>)>>,
     /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// The resident set `resident_tess_memo`'s `InSet` runs read from.
@@ -3781,6 +3786,7 @@ impl Scene {
             tess_memo: RefCell::new(HashMap::default()),
             tess_memo_guard: std::cell::Cell::new(0),
             stub_expansion_cache: RefCell::new(None),
+            viewport_frozen_member_cache: RefCell::new(HashMap::default()),
             resident_tess_memo: RefCell::new(HashMap::default()),
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),

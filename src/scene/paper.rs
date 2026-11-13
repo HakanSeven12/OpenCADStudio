@@ -890,7 +890,49 @@ impl Scene {
             Some(vp_handle),
         );
         self.viewport_complex_lt.set(None);
-        wires
+        self.without_viewport_frozen_members(wires, &frozen)
+    }
+
+    /// `wires` without the block lines on a layer the viewport freezes.
+    ///
+    /// The resident set leaves out the objects on those layers, but a block
+    /// reference is drawn from definitions shared by every viewport, so the
+    /// lines its members draw on a frozen layer came along. Each such line
+    /// knows the layer it shows on (`effective_layer`); a copy of a block
+    /// drawn as a stub is expanded only when its definition holds one.
+    fn without_viewport_frozen_members(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        frozen: &rustc_hash::FxHashSet<Handle>,
+    ) -> Arc<Vec<WireModel>> {
+        if frozen.is_empty() {
+            return wires;
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        if let Some((source, kept)) = self.viewport_frozen_member_cache.borrow().get(&sig) {
+            if source
+                .upgrade()
+                .is_some_and(|source| Arc::ptr_eq(&source, &wires))
+            {
+                return Arc::clone(kept);
+            }
+        }
+        let layer_frozen = |layer: &str| {
+            !crate::scene::view::render::is_effective_layer_zero(layer)
+                && self
+                    .document
+                    .layers
+                    .get(layer)
+                    .is_some_and(|record| frozen.contains(&record.handle))
+        };
+        let kept = match crate::scene::model::instance_model::without_layers(&wires, layer_frozen) {
+            Some(kept) => Arc::new(kept),
+            None => Arc::clone(&wires),
+        };
+        self.viewport_frozen_member_cache
+            .borrow_mut()
+            .insert(sig, (Arc::downgrade(&wires), Arc::clone(&kept)));
+        kept
     }
 
     /// PSLTSCALE's factor on linetypes in a viewport: 1 / viewport scale, which

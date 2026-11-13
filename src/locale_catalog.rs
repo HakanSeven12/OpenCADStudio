@@ -998,6 +998,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Display All Attributes" => Some(("insert", "attdef-attmode-all")),
         "Hide All Attributes" => Some(("insert", "attdef-attmode-none")),
         "Edit Attribute" => Some(("insert", "attdef-edit-attribute")),
+        "Edit Attributes" => Some(("insert", "insert-attr-title")),
+        "Each value entered here becomes the value of the attribute on the block being placed." => Some(("insert", "insert-attr-help")),
         "Multiline editor" => Some(("insert", "attdef-multiline-editor")),
         "The tag cannot be empty." => Some(("insert", "attdef-tag-empty")),
         "The tag may not contain spaces." => Some(("insert", "attdef-tag-spaces")),

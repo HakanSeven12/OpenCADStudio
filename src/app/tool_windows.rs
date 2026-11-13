@@ -1011,17 +1011,28 @@ impl OpenCADStudio {
         let known = main_w > 0.0 && main_h > 0.0;
         let fits = |w: f32, h: f32| !known || (w < main_w && h < main_h);
         for (kind, size, resize, opener) in tools {
+            // Whole pixels and a little slack: text laid out a fraction
+            // narrower than measured wraps a line lower.
+            let natural_w = size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK;
+            let natural_h = size.height.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK;
             let placement = self
                 .dock
                 .tool_windows
                 .get(&tool_key(kind))
                 .copied()
-                .filter(|placement| placement.is_usable() && fits(placement.w, placement.h))
+                .filter(|placement| placement.is_usable())
+                // A remembered size never makes the dialog smaller than its
+                // content needs: one saved before the dialog grew would hide
+                // what the dialog has added since (its buttons, a full page).
+                .map(|placement| WindowPlacement {
+                    w: placement.w.max(natural_w),
+                    h: placement.h.max(natural_h),
+                    ..placement
+                })
+                .filter(|placement| fits(placement.w, placement.h))
                 .unwrap_or_else(|| {
-                    // Whole pixels and a little slack: text laid out a
-                    // fraction narrower than measured wraps a line lower.
-                    let w = size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.x;
-                    let h = size.height.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.y;
+                    let w = natural_w + resize.x;
+                    let h = natural_h + resize.y;
                     let (w, h) = if fits(w, h) {
                         (w, h)
                     } else {

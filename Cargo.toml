@@ -397,6 +397,10 @@ harness = false
 name = "stub_materialize"
 harness = false
 
+[[bench]]
+name = "blk_cache_wires_build"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

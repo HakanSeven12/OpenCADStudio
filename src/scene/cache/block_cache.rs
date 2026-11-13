@@ -1254,7 +1254,7 @@ fn tessellate_sub_local(
         let is_fill_only = wire.points.is_empty() && !wire.fill_tris.is_empty();
         let mtext_has_background = matches!(
             sub,
-            EntityType::MText(text) if text.background_fill_flags & 0x03 != 0
+            EntityType::MText(text) if text.background_fill_flags & 0x01 != 0
         );
         let preserve_color = mtext_has_background && is_fill_only;
         let canvas_color = is_fill_only

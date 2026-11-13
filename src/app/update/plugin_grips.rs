@@ -748,8 +748,7 @@ impl OpenCADStudio {
                             .is_none_or(|(_, _, alive)| alive)
                     })
             });
-            for i in 0..self.tabs.len() {
-                self.tabs[i]
+            for i in 0..self.tabs.len() {                self.tabs[i]
                     .plugin_grips
                     .retain_alive(|plugin| visible(plugin));
                 // API v14: the class registry reaps with the same liveness —
@@ -758,6 +757,18 @@ impl OpenCADStudio {
                     .plugin_classes
                     .retain_alive(|plugin| visible(plugin));
             }
+            // P2-8: dock panels reap with the same owner liveness — a dead
+            // plugin's plugin_panels entry no longer keeps a dead process's
+            // registered form alive; the plugin re-registers (fresh panels
+            // and states) when it re-attaches. Host-side registrations
+            // (owner None) are kept.
+            self.plugin_panels.retain(|_panel_id, panel| {
+                panel
+                    .owner_plugin_id
+                    .as_deref()
+                    .map(|owner| visible(owner))
+                    .unwrap_or(true)
+            });
             let dying_drag = self
                 .active_plugin_grip()
                 .map(|active| !visible(&active.plugin))

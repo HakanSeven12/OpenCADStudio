@@ -1838,7 +1838,7 @@ mod tests {
 
     #[test]
     fn mtext_canvas_mask_is_white_on_paper_but_explicit_fill_keeps_its_color() {
-        for (flags, expected_fill) in [(0x02, "#ffffff"), (0x01, "#ff0000")] {
+        for (flags, expected_fill) in [(0x03, "#ffffff"), (0x01, "#ff0000")] {
             let mut text = document::entities::MText::with_value(
                 "MASK",
                 document::types::Vector3::new(10.0, 10.0, 0.0),

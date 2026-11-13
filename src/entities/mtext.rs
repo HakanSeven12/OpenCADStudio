@@ -523,7 +523,7 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                     label: t!("Background mask").into_owned(),
                     field: "background_mask",
                     value: PropValue::Choice {
-                        selected: if t.background_fill_flags & 0x03 != 0 {
+                        selected: if t.background_fill_flags & 0x01 != 0 {
                             t!("Yes")
                         } else {
                             t!("No")
@@ -596,18 +596,23 @@ fn apply_geom_prop(t: &mut MText, field: &str, value: &str) {
             let on = value == t!("Yes").as_ref() || value.eq_ignore_ascii_case("yes");
             if !on {
                 t.background_fill_flags &= !0x03;
-            } else if t.background_fill_flags & 0x03 == 0 {
+            } else if t.background_fill_flags & 0x01 == 0 {
                 // Measured: turning the mask on uses the drawing background
                 // colour (flags 3), a 1.5 border and the grey fill colour.
+                // A text that kept the window's colour with its mask off (2)
+                // keeps its border and colour and only gets the fill bit.
+                let fresh = t.background_fill_flags & 0x02 == 0;
                 t.background_fill_flags |= 0x03;
-                if t.background_scale < 1.0 {
-                    t.background_scale = 1.5;
+                if fresh {
+                    if t.background_scale < 1.0 {
+                        t.background_scale = 1.5;
+                    }
+                    t.background_color = document::types::Color::Rgb {
+                        r: 200,
+                        g: 200,
+                        b: 200,
+                    };
                 }
-                t.background_color = document::types::Color::Rgb {
-                    r: 200,
-                    g: 200,
-                    b: 200,
-                };
             }
             return;
         }

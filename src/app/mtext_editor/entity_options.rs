@@ -44,7 +44,7 @@ impl MTextEditorState {
                 )
             });
         MaskDraft {
-            on: flags & (FILL | WINDOW) != 0,
+            on: flags & FILL != 0,
             window: flags & FILL == 0 || flags & WINDOW != 0,
             color,
             scale: super::raw_span::number(scale),

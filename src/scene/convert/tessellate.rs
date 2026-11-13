@@ -1673,7 +1673,10 @@ fn tessellate_wires(
                     // MTEXT background mask and frame follow the glyph bounds.
                     if text_aabb != WireModel::UNBOUNDED_AABB {
                         if let EntityType::MText(m) = entity {
-                            let has_fill = m.background_fill_flags & 0x03 != 0;
+                            // Bit 0 turns the fill on; bit 1 only says that
+                            // it takes the window's colour, and a text keeps
+                            // that choice with its mask turned off (2).
+                            let has_fill = m.background_fill_flags & 0x01 != 0;
                             let has_frame = m.background_fill_flags & 0x10 != 0;
                             if has_fill || has_frame {
                                 let text_rotation = stroke_groups
@@ -4053,7 +4056,7 @@ mod tests {
                     .any(|w| !w.fill_tris.is_empty() && w.points.is_empty()),
                 "{value}: the fill is a filled wire"
             );
-            assert_eq!(wires(value, 0x02).len(), bare.len() + 1, "{value}: mask");
+            assert_eq!(wires(value, 0x03).len(), bare.len() + 1, "{value}: mask");
             assert_eq!(wires(value, 0x10).len(), bare.len() + 1, "{value}: frame");
         }
     }

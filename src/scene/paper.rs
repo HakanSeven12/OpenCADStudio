@@ -720,6 +720,22 @@ impl Scene {
     /// Used by `active_viewports` to render model-space content through each
     /// content viewport's own view direction and scale.
     pub(super) fn camera_for_viewport(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
+        let mut camera = self.viewport_view_camera(vp_handle)?;
+        // The view decides where the camera looks; its depth range must still
+        // hold the whole model. Sized from the view height alone (64 times
+        // it, around the target), a viewport whose target sits far above or
+        // below the geometry lost it: a top view with its target 808 above
+        // the drawing and a view height under 12.6 showed nothing, although
+        // a view straight down sees the drawing wherever the target is.
+        if let Some((min, max)) = self.model_space_extents() {
+            camera.fit_depth_to_bounds_f64(min.as_dvec3(), max.as_dvec3());
+        }
+        Some(camera)
+    }
+
+    /// The camera a floating viewport's view (or its auto-fit) aims, before
+    /// its depth range is sized to the model.
+    fn viewport_view_camera(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
         let vp = match self.document.get_entity(vp_handle) {
             Some(EntityType::Viewport(vp)) => vp,
             _ => return None,

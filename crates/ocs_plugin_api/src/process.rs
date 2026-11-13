@@ -69,16 +69,15 @@ impl RunnerChild {
     fn new(child: Child) -> Self {
         #[cfg(windows)]
         {
-            Self {
-                child,
-                job: create_kill_on_close_job(&child),
-            }
+            // Bind the job BEFORE taking ownership of the child in the
+            // struct: the job assignment needs the child's raw handle.
+            let job = create_kill_on_close_job(&child);
+            Self { child, job }
         }
         #[cfg(unix)]
         {
             // `setsid` ran in the child's pre-exec hook: its pgid is its own
             // pid, and the kill signaling uses `-pid` below.
-            let _ = 0;
             Self { child }
         }
         #[cfg(not(any(windows, unix)))]

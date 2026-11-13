@@ -13,17 +13,21 @@
 // compared with a small tolerance, so last-bit differences between the
 // platforms' maths libraries don't fail the test.
 //
-// The other tests check the snapshot against independent math, so the golden
-// file can't quietly record a wrong answer for the simple cases.
+// The other tests check results against independent math: every point an
+// entity stores in world coordinates, plus circle and arc in their own plane.
+// For those, the golden file can't quietly record a wrong answer.
 
 use std::f64::consts::FRAC_PI_2;
 use std::fmt::Write as _;
 
 use document::entities::{
-    Arc, BoundaryEdge, BoundaryPath, Circle, CircularArcEdge, Dimension, DimensionAligned,
-    DimensionAngular3Pt, DimensionBase, DimensionLinear, DimensionRadius, Ellipse, Hatch,
-    HatchPatternLine, Insert, Line, LineEdge, LwPolyline, LwVertex, MText, Point, Polyline2D,
-    PolylineEdge, Ray, Solid, Spline, Text, Vertex2D, XLine,
+    Arc, AttributeDefinition, BoundaryEdge, BoundaryPath, Circle, CircularArcEdge, Dimension,
+    DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionArc, DimensionBase,
+    DimensionDiameter, DimensionLargeRadial, DimensionLinear, DimensionOrdinate, DimensionRadius,
+    Ellipse, Face3D, Hatch, HatchPatternLine, Helix, Insert, Leader, Light, Line, LineEdge,
+    LwPolyline, LwVertex, MText, Mesh, Point, PolyfaceMesh, PolygonMeshEntity, PolygonMeshVertex,
+    Polyline2D, Polyline3D, PolylineEdge, Ray, Shape, Solid, Spline, Text, Tolerance, Vertex2D,
+    XLine,
 };
 use document::types::{Vector2, Vector3};
 use document::EntityType;
@@ -92,6 +96,27 @@ fn transforms() -> Vec<(&'static str, EntityTransform)> {
         (
             "affine_tilted",
             EntityTransform::Affine(tilted_plane().to_world_transform()),
+        ),
+        (
+            // The mirror above passes through the origin, where reflecting a
+            // point and reflecting a direction give the same answer. This one
+            // doesn't, so a field treated as the wrong kind shows up.
+            "mirror_offset",
+            EntityTransform::Mirror {
+                p1: DVec3::new(3.0, 1.0, 0.0),
+                p2: DVec3::new(5.0, 4.0, 0.0),
+                working_normal: DVec3::Z,
+            },
+        ),
+        (
+            // A mirror drawn in a UCS that isn't parallel to world XY takes a
+            // different code path from the Z-normal mirror above.
+            "mirror_tilted",
+            EntityTransform::Mirror {
+                p1: DVec3::new(100.0, -50.0, 25.0),
+                p2: DVec3::new(100.0, -49.0, 27.0),
+                working_normal: tilted_plane().z,
+            },
         ),
     ]
 }
@@ -212,7 +237,144 @@ fn entities() -> Vec<(&'static str, EntityType)> {
     angular.base.definition_point = angular.definition_point;
     angular.base.text_middle_point = v3(4.0, 2.5, 0.0);
 
+    let mut diameter = DimensionDiameter::new(v3(2.0, 2.0, 0.0), v3(8.0, 6.0, 0.0));
+    diameter.base.text_middle_point = v3(9.0, 7.0, 0.0);
+    diameter.base.text_rotation = 0.2;
+    diameter.leader_length = 1.5;
+
+    let mut ordinate = DimensionOrdinate::new(v3(4.0, 3.0, 0.0), v3(4.0, 9.0, 0.0), true);
+    ordinate.base.definition_point = v3(0.0, 0.0, 0.0);
+    ordinate.base.text_middle_point = v3(4.0, 9.5, 0.0);
+
+    let mut arc_length = DimensionArc {
+        center_point: v3(1.0, 1.0, 0.0),
+        first_extension_point: v3(5.0, 1.0, 0.0),
+        second_extension_point: v3(1.0, 5.0, 0.0),
+        definition_point: v3(4.5, 4.5, 0.0),
+        arc_start_parameter: 0.0,
+        arc_end_parameter: FRAC_PI_2,
+        ..Default::default()
+    };
+    arc_length.base.definition_point = arc_length.definition_point;
+    arc_length.base.text_middle_point = v3(4.8, 4.8, 0.0);
+
+    let mut angular2 =
+        DimensionAngular2Ln::new(v3(0.0, 0.0, 0.0), v3(5.0, 1.0, 0.0), v3(1.0, 5.0, 0.0));
+    angular2.dimension_arc = v3(3.0, 3.0, 0.0);
+    angular2.base.definition_point = angular2.definition_point;
+    angular2.base.text_middle_point = v3(3.2, 3.2, 0.0);
+    angular2.base.text_rotation = 0.35;
+
+    let mut jogged = DimensionLargeRadial {
+        chord_point: v3(10.0, 0.0, 0.0),
+        override_center: v3(4.0, -6.0, 0.0),
+        jog_point: v3(6.0, -3.0, 0.0),
+        jog_angle: 0.8,
+        definition_point: v3(0.0, 0.0, 0.0),
+        ..Default::default()
+    };
+    jogged.base.definition_point = jogged.definition_point;
+    jogged.base.text_middle_point = v3(5.0, -2.0, 0.0);
+
     let dimension = |d: Dimension| EntityType::Dimension(Box::new(d));
+
+    let polyline3d = Polyline3D::from_points(vec![
+        v3(0.0, 0.0, 0.0),
+        v3(3.0, 1.0, 2.0),
+        v3(6.0, -1.0, 4.0),
+        v3(8.0, 2.0, 1.0),
+    ]);
+
+    let mut polyface = PolyfaceMesh::new();
+    for (x, y, z) in [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.0),
+        (4.0, 3.0, 1.0),
+        (0.0, 3.0, 1.0),
+    ] {
+        polyface.add_vertex_xyz(x, y, z);
+    }
+
+    let mut polygon_mesh = PolygonMeshEntity::new();
+    polygon_mesh.m_vertex_count = 2;
+    polygon_mesh.n_vertex_count = 2;
+    for (x, y, z) in [
+        (0.0, 0.0, 0.0),
+        (0.0, 4.0, 1.0),
+        (5.0, 0.0, 2.0),
+        (5.0, 4.0, 3.0),
+    ] {
+        polygon_mesh
+            .vertices
+            .push(PolygonMeshVertex::at(v3(x, y, z)));
+    }
+
+    let mesh = Mesh::from_triangles(
+        vec![
+            v3(0.0, 0.0, 0.0),
+            v3(3.0, 0.0, 0.0),
+            v3(3.0, 2.0, 1.0),
+            v3(0.0, 2.0, 1.0),
+        ],
+        &[(0, 1, 2), (0, 2, 3)],
+    );
+
+    let mut helix = Helix::new();
+    helix.axis_base_point = v3(2.0, 3.0, 0.0);
+    helix.start_point = v3(5.0, 3.0, 0.0);
+    helix.axis_vector = v3(0.0, 0.0, 1.0);
+    helix.radius = 3.0;
+    helix.turns = 2.5;
+    helix.turn_height = 1.5;
+    // The HELIX command builds the curve with the geometry kernel. Any control
+    // points will do here: they must move with the helix like everything else.
+    helix.spline = Spline::from_control_points(
+        3,
+        vec![
+            v3(5.0, 3.0, 0.0),
+            v3(2.0, 6.0, 0.5),
+            v3(-1.0, 3.0, 1.0),
+            v3(2.0, 0.0, 1.5),
+        ],
+    );
+
+    let mut leader = Leader::from_vertices(vec![
+        v3(0.0, 0.0, 0.0),
+        v3(3.0, 2.0, 0.0),
+        v3(6.0, 2.0, 0.0),
+    ]);
+    leader.text_height = 1.2;
+    leader.text_width = 5.0;
+    leader.horizontal_direction = v3(1.0, 0.0, 0.0);
+    leader.block_offset = v3(0.5, 0.25, 0.0);
+    leader.annotation_offset = v3(0.75, -0.5, 0.0);
+
+    let mut tolerance = Tolerance::new();
+    tolerance.insertion_point = v3(3.0, 4.0, 0.0);
+    tolerance.direction = v3(0.8, 0.6, 0.0);
+    tolerance.text = "{\\Fgdt;j}%%v0.5".into();
+    tolerance.text_height = 0.5;
+
+    let mut shape = Shape::new();
+    shape.insertion_point = v3(-2.0, 3.0, 0.0);
+    shape.size = 2.0;
+    shape.rotation = 0.3;
+    shape.relative_x_scale = 1.5;
+    shape.oblique_angle = 0.2;
+
+    let mut attdef = AttributeDefinition::new("TAG".into(), "Prompt".into(), "Value".into());
+    attdef.insertion_point = v3(1.0, -2.0, 0.0);
+    attdef.alignment_point = v3(4.0, -2.0, 0.0);
+    attdef.height = 0.8;
+    attdef.rotation = 0.45;
+    attdef.width_factor = 0.9;
+    attdef.oblique_angle = 0.15;
+
+    let mut light = Light::new();
+    light.position = v3(4.0, 4.0, 6.0);
+    light.target = v3(4.0, 2.0, 0.0);
+    light.hotspot_angle = 0.5;
+    light.falloff_angle = 0.7;
 
     vec![
         (
@@ -262,6 +424,36 @@ fn entities() -> Vec<(&'static str, EntityType)> {
         ("dim_aligned", dimension(Dimension::Aligned(aligned))),
         ("dim_radius", dimension(Dimension::Radius(radius))),
         ("dim_angular3pt", dimension(Dimension::Angular3Pt(angular))),
+        ("dim_diameter", dimension(Dimension::Diameter(diameter))),
+        ("dim_ordinate", dimension(Dimension::Ordinate(ordinate))),
+        ("dim_arc_length", dimension(Dimension::Arc(arc_length))),
+        ("dim_angular2ln", dimension(Dimension::Angular2Ln(angular2))),
+        (
+            "dim_jogged_radius",
+            dimension(Dimension::LargeRadial(jogged)),
+        ),
+        ("polyline3d", EntityType::Polyline3D(polyline3d)),
+        ("polyface_mesh", EntityType::PolyfaceMesh(polyface)),
+        ("polygon_mesh", EntityType::PolygonMesh(polygon_mesh)),
+        ("mesh", EntityType::Mesh(mesh)),
+        (
+            "face3d",
+            EntityType::Face3D(Face3D::new(
+                v3(0.0, 0.0, 0.0),
+                v3(4.0, 0.0, 1.0),
+                v3(4.0, 3.0, 2.0),
+                v3(0.0, 3.0, 1.0),
+            )),
+        ),
+        ("helix", EntityType::Helix(Box::new(helix))),
+        ("leader", EntityType::Leader(leader)),
+        ("tolerance", EntityType::Tolerance(tolerance)),
+        ("shape", EntityType::Shape(shape)),
+        (
+            "attribute_definition",
+            EntityType::AttributeDefinition(attdef),
+        ),
+        ("light", EntityType::Light(Box::new(light))),
     ]
 }
 
@@ -486,8 +678,126 @@ fn describe(entity: &EntityType) -> String {
                     field("second_point", pt(e.second_point));
                     field("angle_vertex", pt(e.angle_vertex));
                 }
-                other => panic!("describe() has no case for {other:?}"),
+                Dimension::Diameter(e) => {
+                    field("definition_point", pt(e.definition_point));
+                    field("angle_vertex", pt(e.angle_vertex));
+                    field("leader_length", num(e.leader_length));
+                }
+                Dimension::Ordinate(e) => {
+                    field("definition_point", pt(e.definition_point));
+                    field("feature_location", pt(e.feature_location));
+                    field("leader_endpoint", pt(e.leader_endpoint));
+                    field("is_ordinate_type_x", e.is_ordinate_type_x.to_string());
+                }
+                Dimension::Arc(e) => {
+                    field("definition_point", pt(e.definition_point));
+                    field("first_extension_point", pt(e.first_extension_point));
+                    field("second_extension_point", pt(e.second_extension_point));
+                    field("center_point", pt(e.center_point));
+                    field(
+                        "arc_parameters",
+                        format!(
+                            "{} {}",
+                            num(e.arc_start_parameter),
+                            num(e.arc_end_parameter)
+                        ),
+                    );
+                }
+                Dimension::Angular2Ln(e) => {
+                    field("dimension_arc", pt(e.dimension_arc));
+                    field("first_point", pt(e.first_point));
+                    field("second_point", pt(e.second_point));
+                    field("angle_vertex", pt(e.angle_vertex));
+                    field("definition_point", pt(e.definition_point));
+                }
+                Dimension::LargeRadial(e) => {
+                    field("definition_point", pt(e.definition_point));
+                    field("chord_point", pt(e.chord_point));
+                    field("override_center", pt(e.override_center));
+                    field("jog_point", pt(e.jog_point));
+                    field("jog_angle", num(e.jog_angle));
+                }
             }
+        }
+        EntityType::Polyline3D(e) => {
+            let points: Vec<Vector3> = e.vertices.iter().map(|v| v.position).collect();
+            field("vertices", pts(&points));
+            field("elevation", num(e.elevation));
+            field("normal", pt(e.normal));
+        }
+        EntityType::PolyfaceMesh(e) => {
+            let points: Vec<Vector3> = e.vertices.iter().map(|v| v.location).collect();
+            field("vertices", pts(&points));
+            field("elevation", num(e.elevation));
+            field("normal", pt(e.normal));
+        }
+        EntityType::PolygonMesh(e) => {
+            let points: Vec<Vector3> = e.vertices.iter().map(|v| v.location).collect();
+            field("vertices", pts(&points));
+            field("elevation", num(e.elevation));
+            field("normal", pt(e.normal));
+        }
+        EntityType::Mesh(e) => {
+            field("vertices", pts(&e.vertices));
+        }
+        EntityType::Face3D(e) => {
+            field(
+                "corners",
+                pts(&[
+                    e.first_corner,
+                    e.second_corner,
+                    e.third_corner,
+                    e.fourth_corner,
+                ]),
+            );
+        }
+        EntityType::Helix(e) => {
+            field("axis_base_point", pt(e.axis_base_point));
+            field("start_point", pt(e.start_point));
+            field("axis_vector", pt(e.axis_vector));
+            field("radius", num(e.radius));
+            field("turns", num(e.turns));
+            field("turn_height", num(e.turn_height));
+            field("handedness", e.handedness.to_string());
+            field("spline.control_points", pts(&e.spline.control_points));
+        }
+        EntityType::Leader(e) => {
+            field("vertices", pts(&e.vertices));
+            field("normal", pt(e.normal));
+            field("horizontal_direction", pt(e.horizontal_direction));
+            field("block_offset", pt(e.block_offset));
+            field("annotation_offset", pt(e.annotation_offset));
+            field("text_height", num(e.text_height));
+            field("text_width", num(e.text_width));
+        }
+        EntityType::Tolerance(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field("direction", pt(e.direction));
+            field("normal", pt(e.normal));
+            field("text_height", num(e.text_height));
+        }
+        EntityType::Shape(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field("size", num(e.size));
+            field("rotation", num(e.rotation));
+            field("relative_x_scale", num(e.relative_x_scale));
+            field("oblique_angle", num(e.oblique_angle));
+            field("normal", pt(e.normal));
+        }
+        EntityType::AttributeDefinition(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field("alignment_point", pt(e.alignment_point));
+            field("height", num(e.height));
+            field("rotation", num(e.rotation));
+            field("width_factor", num(e.width_factor));
+            field("oblique_angle", num(e.oblique_angle));
+            field("normal", pt(e.normal));
+        }
+        EntityType::Light(e) => {
+            field("position", pt(e.position));
+            field("target", pt(e.target));
+            field("hotspot_angle", num(e.hotspot_angle));
+            field("falloff_angle", num(e.falloff_angle));
         }
         other => panic!("describe() has no case for {other:?}"),
     }
@@ -726,6 +1036,110 @@ fn line_and_point_follow_point_math() {
     }
 }
 
+/// The points an entity stores in world coordinates. Empty for entities that
+/// store their geometry in their own plane (circle, arc, text, insert, ...):
+/// those are pinned by the golden file.
+fn world_points(entity: &EntityType) -> Vec<Vector3> {
+    match entity {
+        EntityType::Line(e) => vec![e.start, e.end],
+        EntityType::Ray(e) => vec![e.base_point],
+        EntityType::XLine(e) => vec![e.base_point],
+        EntityType::Ellipse(e) => vec![e.center],
+        EntityType::MText(e) => vec![e.insertion_point],
+        EntityType::Tolerance(e) => vec![e.insertion_point],
+        EntityType::Light(e) => vec![e.position, e.target],
+        EntityType::Spline(e) => [e.control_points.clone(), e.fit_points.clone()].concat(),
+        EntityType::Polyline3D(e) => e.vertices.iter().map(|v| v.position).collect(),
+        EntityType::PolyfaceMesh(e) => e.vertices.iter().map(|v| v.location).collect(),
+        EntityType::PolygonMesh(e) => e.vertices.iter().map(|v| v.location).collect(),
+        EntityType::Mesh(e) => e.vertices.clone(),
+        EntityType::Face3D(e) => vec![
+            e.first_corner,
+            e.second_corner,
+            e.third_corner,
+            e.fourth_corner,
+        ],
+        EntityType::Helix(e) => {
+            let mut points = vec![e.axis_base_point, e.start_point];
+            points.extend(&e.spline.control_points);
+            points
+        }
+        EntityType::Leader(e) => e.vertices.clone(),
+        EntityType::Dimension(d) => {
+            let mut points = vec![d.base().text_middle_point];
+            match d.as_ref() {
+                Dimension::Linear(e) => {
+                    points.extend([e.first_point, e.second_point, e.definition_point])
+                }
+                Dimension::Aligned(e) => {
+                    points.extend([e.first_point, e.second_point, e.definition_point])
+                }
+                Dimension::Radius(e) => points.extend([e.definition_point, e.angle_vertex]),
+                Dimension::Diameter(e) => points.extend([e.definition_point, e.angle_vertex]),
+                Dimension::Angular3Pt(e) => points.extend([
+                    e.definition_point,
+                    e.first_point,
+                    e.second_point,
+                    e.angle_vertex,
+                ]),
+                Dimension::Angular2Ln(e) => points.extend([
+                    e.dimension_arc,
+                    e.first_point,
+                    e.second_point,
+                    e.angle_vertex,
+                    e.definition_point,
+                ]),
+                Dimension::Ordinate(e) => {
+                    points.extend([e.definition_point, e.feature_location, e.leader_endpoint])
+                }
+                Dimension::Arc(e) => points.extend([
+                    e.definition_point,
+                    e.first_extension_point,
+                    e.second_extension_point,
+                    e.center_point,
+                ]),
+                Dimension::LargeRadial(e) => points.extend([
+                    e.definition_point,
+                    e.chord_point,
+                    e.override_center,
+                    e.jog_point,
+                ]),
+            }
+            points
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Every point an entity stores in world coordinates must land where plain
+/// point math puts it, for every transform. This holds whatever the golden
+/// file says, so regenerating the file can't record a wrong position.
+#[test]
+fn world_stored_points_follow_point_math() {
+    let mut checked = 0;
+    for (entity_name, entity) in entities() {
+        let before = world_points(&entity);
+        for (transform_name, transform) in transforms() {
+            let after = world_points(&transformed(&entity, &transform));
+            assert_eq!(
+                before.len(),
+                after.len(),
+                "{entity_name} / {transform_name}"
+            );
+            for (i, (b, a)) in before.iter().zip(&after).enumerate() {
+                assert_close(
+                    *a,
+                    expected_point(&transform, dv(*b)),
+                    &format!("{entity_name} / {transform_name} / point {i}"),
+                );
+                checked += 1;
+            }
+        }
+    }
+    // Guards against the list above silently matching nothing.
+    assert!(checked > 500, "only {checked} points were checked");
+}
+
 /// For transforms that keep the drawing plane, a circle's centre moves like a
 /// point and its radius scales with the transform.
 #[test]
@@ -734,7 +1148,8 @@ fn circle_center_and_radius_follow_point_math() {
     for (name, transform) in transforms() {
         let factor = match &transform {
             EntityTransform::Scale { factor, .. } => *factor,
-            EntityTransform::Translate(_) | EntityTransform::Mirror { .. } => 1.0,
+            EntityTransform::Translate(_) => 1.0,
+            EntityTransform::Mirror { working_normal, .. } if *working_normal == DVec3::Z => 1.0,
             EntityTransform::Rotate { axis, .. } if *axis == DVec3::Z => 1.0,
             // Out-of-plane cases are pinned by the golden file instead.
             _ => continue,
@@ -768,13 +1183,13 @@ fn arc_end_points_follow_point_math_in_plane() {
     let (center, radius, start, end) = (DVec3::new(-2.0, 1.0, 0.0), 3.0, 0.3_f64, 2.2_f64);
     let at = |c: DVec3, r: f64, a: f64| c + DVec3::new(r * a.cos(), r * a.sin(), 0.0);
     for (name, transform) in transforms() {
-        if !matches!(
-            &transform,
-            EntityTransform::Translate(_)
-                | EntityTransform::Scale { .. }
-                | EntityTransform::Mirror { .. }
-        ) && !matches!(&transform, EntityTransform::Rotate { axis, .. } if *axis == DVec3::Z)
-        {
+        let in_plane = match &transform {
+            EntityTransform::Translate(_) | EntityTransform::Scale { .. } => true,
+            EntityTransform::Mirror { working_normal, .. } => *working_normal == DVec3::Z,
+            EntityTransform::Rotate { axis, .. } => *axis == DVec3::Z,
+            EntityTransform::Affine(_) => false,
+        };
+        if !in_plane {
             continue;
         }
         let EntityType::Arc(arc) = transformed(

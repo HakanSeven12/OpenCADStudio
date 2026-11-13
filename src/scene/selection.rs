@@ -466,7 +466,7 @@ impl Scene {
         let matches: Vec<Handle> = self
             .current_layout_entity_handles()
             .into_iter()
-            .filter(|h| !self.selected.contains(h))
+            .filter(|h| !self.selected.contains(h) && self.entity_pickable(*h))
             .filter(|h| {
                 self.document.get_entity(*h).is_some_and(|e| {
                     keys.get(entity_type_name(e))

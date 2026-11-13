@@ -12519,6 +12519,46 @@ impl Scene {
         Some(planes)
     }
 
+    /// Whether a top-level object in the current space can be picked right
+    /// now. Mirrors the visibility predicate the resident wire build uses, so
+    /// a selection command can never add an object the canvas does not draw.
+    pub fn entity_pickable(&self, handle: Handle) -> bool {
+        let Some(entity) = self.document.get_entity(handle) else {
+            return false;
+        };
+        let c = entity.common();
+        if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+            return false;
+        }
+        if self.display_entity_invisible(c) || self.entity_temporarily_hidden(handle) {
+            return false;
+        }
+        let layer = self.document.layers.get(&c.layer);
+        if layer.map(|l| l.flags.off || l.flags.frozen).unwrap_or(false)
+            || self.layer_walk_hidden(layer)
+        {
+            return false;
+        }
+        if let Some(frozen) = self.interaction_viewport_frozen_layers() {
+            if frozen.contains(&c.handle)
+                || layer.is_some_and(|l| frozen.contains(&l.handle))
+            {
+                return false;
+            }
+        }
+        let scale = if self.current_layout == "Model" {
+            self.displayed_annotation_scale_handle()
+        } else {
+            self.paper_annotation_scale_handle()
+        };
+        !crate::scene::annotative::annotative_offscale_for(
+            &self.document,
+            c,
+            scale,
+            self.annotation_all_visible(),
+        )
+    }
+
     /// True when `layer` is turned off or frozen — entities on it never render.
     /// Also true when the current space's LAYWALK set omits it: every hatch /
     /// fill / mesh consumer funnels through here, so the walk hides them too.

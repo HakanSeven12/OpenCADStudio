@@ -53,5 +53,10 @@
     "repo": "Macchecaspita/opencad-rilievo-plugin",
     "name": "Rilievo",
     "description": "Architectural survey from tape and laser measures: draw rooms by eye as closed polylines, type the measured sides, diagonals and wall thicknesses, and a least-squares adjustment recomputes the true shape with the residual of every measure. Dimensions, a table and a CSV measure book. English and Italian."
+  },
+  {
+    "repo": "AwayZz20/Property-Lines",
+    "name": "Property Lines",
+    "description": "Property boundaries from survey distances, quadrant bearings, arcs, and sketching, with segment tags, area labels, North block, and Rumbos y Distancias tables."
   }
 ]

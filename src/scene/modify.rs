@@ -206,9 +206,9 @@ impl Scene {
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
         // Never transform objects on a locked layer (defense-in-depth: the pick
         // path already excludes them, but programmatic callers may not).
-        let handles: Vec<Handle> = handles
-            .iter()
-            .copied()
+        let handles: Vec<Handle> = self
+            .without_sheet_viewports(handles)
+            .into_iter()
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
@@ -1226,7 +1226,8 @@ impl Scene {
     }
 
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
-        let copy_handles = self.handles_expanded_for_leader_annotations(handles);
+        let handles = self.without_sheet_viewports(handles);
+        let copy_handles = self.handles_expanded_for_leader_annotations(&handles);
 
         // Objects on a locked layer can be selected but not copied.
         let clones: Vec<(Handle, EntityType, Vec<Handle>, Option<Handle>)> = copy_handles

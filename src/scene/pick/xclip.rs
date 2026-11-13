@@ -435,6 +435,14 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
     if poly.len() < 3 {
         return;
     }
+    // A repeated block copy arrives as a stub over the shared prototype with no
+    // points of its own; it has to become real geometry before it can be cut,
+    // or the clipped copy shows nothing at all.
+    if let std::borrow::Cow::Owned(expanded) =
+        crate::scene::model::instance_model::expand_stubs(wires)
+    {
+        *wires = expanded;
+    }
     // Clip in a frame relative to the boundary's first vertex: the wire points
     // arrive as absolute coordinates (double-single high+low), which at UTM
     // scale are ~5.7e6 and lose ~0.5 m in f32. Subtracting the f64 reference
@@ -685,6 +693,7 @@ pub fn clip_hatch_boundary(
         return boundary.to_vec();
     }
     let (ox, oy) = (world_origin[0] as f32, world_origin[1] as f32);
+    let pieces = convex_pieces(poly);
     let mut out: Vec<[f32; 2]> = Vec::new();
     let mut i = 0;
     while i < boundary.len() {
@@ -701,23 +710,84 @@ pub fn clip_hatch_boundary(
             .iter()
             .map(|p| [p[0] + ox, p[1] + oy])
             .collect();
-        let clipped = clip_polygon_2d(&loop_abs, poly);
-        if clipped.len() >= 3 {
-            if !out.is_empty() {
-                out.push([f32::NAN, f32::NAN]);
-            }
-            // Lower back into the loop's `world_origin`-relative space so the
-            // result keeps the same f32-precision anchor the renderer adds back.
-            for p in clipped {
-                out.push([p[0] - ox, p[1] - oy]);
+        // A concave clip is cut into convex pieces with disjoint interiors, so
+        // the even-odd count of every point still comes from one piece.
+        for piece in &pieces {
+            let clipped = clip_polygon_2d(&loop_abs, piece);
+            if clipped.len() >= 3 {
+                if !out.is_empty() {
+                    out.push([f32::NAN, f32::NAN]);
+                }
+                // Lower back into the loop's `world_origin`-relative space so the
+                // result keeps the same f32-precision anchor the renderer adds back.
+                for p in clipped {
+                    out.push([p[0] - ox, p[1] - oy]);
+                }
             }
         }
     }
     out
 }
 
+/// Split a closed ring into convex pieces with disjoint interiors: the ring
+/// itself when it is convex, otherwise its ear-clipped triangles. The
+/// Sutherland–Hodgman clips below are exact only against a convex clip.
+fn convex_pieces(poly: &[[f32; 2]]) -> Vec<Vec<[f32; 2]>> {
+    let n = poly.len();
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let area2: f32 = (0..n)
+        .map(|i| {
+            let (a, b) = (poly[i], poly[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let sign = if area2 >= 0.0 { 1.0 } else { -1.0 };
+    let turn = |i: usize| sign * cross(poly[(i + n - 1) % n], poly[i], poly[(i + 1) % n]);
+    if (0..n).all(|i| turn(i) >= 0.0) {
+        return vec![poly.to_vec()];
+    }
+    // Ear clipping on a counter-clockwise index ring.
+    let mut ring: Vec<usize> = (0..n).collect();
+    if sign < 0.0 {
+        ring.reverse();
+    }
+    let mut pieces = Vec::with_capacity(n.saturating_sub(2));
+    while ring.len() > 3 {
+        let m = ring.len();
+        let ear = (0..m).find(|&k| {
+            let a = poly[ring[(k + m - 1) % m]];
+            let (b, c) = (poly[ring[k]], poly[ring[(k + 1) % m]]);
+            let inside = |p: [f32; 2]| {
+                cross(a, b, p) >= 0.0 && cross(b, c, p) >= 0.0 && cross(c, a, p) >= 0.0
+            };
+            cross(a, b, c) > 0.0
+                && ring.iter().all(|&v| {
+                    let p = poly[v];
+                    p == a || p == b || p == c || !inside(p)
+                })
+        });
+        // A degenerate ring (self-touching, all collinear) has no clean ear:
+        // drop a vertex and keep going rather than loop forever.
+        let k = ear.unwrap_or(0);
+        if ear.is_some() {
+            pieces.push(vec![
+                poly[ring[(k + m - 1) % m]],
+                poly[ring[k]],
+                poly[ring[(k + 1) % m]],
+            ]);
+        }
+        ring.remove(k);
+    }
+    if ring.len() == 3 {
+        pieces.push(ring.iter().map(|&v| poly[v]).collect());
+    }
+    pieces
+}
+
 /// Sutherland–Hodgman clip of a closed 2D polygon `subject` against the convex
-/// polygon `clip`.
+/// polygon `clip` (see [`convex_pieces`] for a concave one).
 fn clip_polygon_2d(subject: &[[f32; 2]], clip: &[[f32; 2]]) -> Vec<[f32; 2]> {
     let n = clip.len();
     let mut area2 = 0.0f32;
@@ -940,17 +1010,19 @@ fn seg_cross_t(p0: [f32; 3], p1: [f32; 3], a: [f32; 2], b: [f32; 2]) -> Option<f
     }
 }
 
-/// Clip a flat triangle list against `poly` (Sutherland–Hodgman per triangle,
-/// fan-triangulating the clipped convex result). Exact for convex boundaries;
-/// approximate for concave ones.
+/// Clip a flat triangle list against `poly` (Sutherland–Hodgman per triangle
+/// and convex piece of the boundary, fan-triangulating each convex result).
 fn clip_triangles(tris: &[[f32; 3]], poly: &[[f32; 2]]) -> Vec<[f32; 3]> {
+    let pieces = convex_pieces(poly);
     let mut out = Vec::new();
     for tri in tris.chunks_exact(3) {
-        let clipped = sutherland_hodgman(tri, poly);
-        for k in 1..clipped.len().saturating_sub(1) {
-            out.push(clipped[0]);
-            out.push(clipped[k]);
-            out.push(clipped[k + 1]);
+        for piece in &pieces {
+            let clipped = sutherland_hodgman(tri, piece);
+            for k in 1..clipped.len().saturating_sub(1) {
+                out.push(clipped[0]);
+                out.push(clipped[k]);
+                out.push(clipped[k + 1]);
+            }
         }
     }
     out

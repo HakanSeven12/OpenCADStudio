@@ -3780,6 +3780,9 @@ impl OpenCADStudio {
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.close_table_cell_editor();
                 // Preserve the outgoing drawing's Ortho / running OSNAP.
                 self.stamp_header_sysvars(self.active_tab);
@@ -3828,6 +3831,9 @@ impl OpenCADStudio {
                 }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
+                }
+                if idx < self.tabs.len() && idx != self.active_tab && self.mtext_editor.is_some() {
+                    self.mtext_cancel();
                 }
                 self.layout_list_open = false;
                 self.layout_rename_state = None;
@@ -9151,6 +9157,21 @@ impl OpenCADStudio {
                 self.mtext_rect_width_field(value);
                 Task::none()
             }
+            Message::MTextHeightDrag(height) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    if let Some(height) = height.filter(|h| h.is_finite() && *h > 0.0) {
+                        if !ed.height_dragging {
+                            ed.record_undo();
+                            ed.height_dragging = true;
+                        }
+                        ed.rect_height = height.to_string();
+                    } else {
+                        ed.height_dragging = false;
+                    }
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
             Message::MTextBoxDrag(width) => {
                 self.mtext_box_drag(width);
                 Task::none()
@@ -13047,6 +13068,29 @@ impl OpenCADStudio {
             | Message::OsWindowResized(..)
             | Message::OsWindowMoved(..)
             | Message::OsWindowScale(..) => Task::none(),
+            Message::MTextToolbarGrab => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.toolbar_dragging = true;
+                    ed.toolbar_drag_last = None;
+                }
+                Task::none()
+            }
+            Message::MTextToolbarMove(p) => {
+                if let Some(ed) = self.mtext_editor.as_mut().filter(|ed| ed.toolbar_dragging) {
+                    if let Some(last) = ed.toolbar_drag_last {
+                        ed.toolbar_offset += p - last;
+                    }
+                    ed.toolbar_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::MTextToolbarRelease => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.toolbar_dragging = false;
+                    ed.toolbar_drag_last = None;
+                }
+                Task::none()
+            }
             Message::ModalGrab => {
                 // Start a drag; the first ModalDragMove seeds the reference.
                 self.modal_dragging = true;
@@ -13838,6 +13882,9 @@ impl OpenCADStudio {
                     self.mtext_undo();
                     return Task::none();
                 }
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 // Mid-command Ctrl+Z: a drawing command steps itself back
                 // (PLINE pops the last vertex) instead of the document undo
                 // swallowing the whole in-progress object.
@@ -13857,17 +13904,26 @@ impl OpenCADStudio {
                     self.mtext_redo();
                     return Task::none();
                 }
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.redo_active_tab();
                 Task::none()
             }
 
             Message::UndoMany(steps) => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.ribbon.close_dropdown();
                 self.undo_steps(steps);
                 Task::none()
             }
 
             Message::RedoMany(steps) => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.ribbon.close_dropdown();
                 self.redo_steps(steps);
                 Task::none()

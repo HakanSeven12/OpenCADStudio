@@ -2694,6 +2694,8 @@ pub struct Scene {
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
+    /// Existing MTEXT replaced by an in-place editor draft.
+    mtext_editor_hidden: Option<Handle>,
     /// During in-place block edit (REFEDIT), the handles of the entities being
     /// edited. Everything else is rendered faded toward the background so the
     /// edited geometry stands out while the surrounding drawing stays visible
@@ -3588,6 +3590,7 @@ impl Scene {
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
             command_preview_hidden: HashSet::default(),
+            mtext_editor_hidden: None,
             refedit_keep: None,
             refedit_lock: false,
             count_display: None,
@@ -8243,6 +8246,7 @@ impl Scene {
         self.object_isolation.hides(handle)
             || self.preview_hidden.contains(&handle)
             || self.command_preview_hidden.contains(&handle)
+            || self.mtext_editor_hidden == Some(handle)
             || self.hidden_dynamic_dimensions.contains(&handle)
     }
 
@@ -8269,6 +8273,24 @@ impl Scene {
             for (handle, _) in &changes {
                 self.tess_memo.borrow_mut().remove(handle);
                 self.resident_tess_memo.borrow_mut().remove(handle);
+            }
+            self.push_geometry_delta(epoch, changes, false);
+        }
+    }
+
+    /// Hide only the source replaced by the MTEXT editor, independently from
+    /// command previews and table-cell previews.
+    pub(crate) fn set_mtext_editor_hidden(&mut self, handle: Option<Handle>) {
+        if self.mtext_editor_hidden == handle { return; }
+        let old = std::mem::replace(&mut self.mtext_editor_hidden, handle);
+        let changes: Vec<_> = old.into_iter().chain(handle).map(|h| (h, ChangeKind::Modified)).collect();
+        if !changes.is_empty() {
+            let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            self.geometry_epoch = epoch;
+            self.invalidate_projection_bounds();
+            for (h, _) in &changes {
+                self.tess_memo.borrow_mut().remove(h);
+                self.resident_tess_memo.borrow_mut().remove(h);
             }
             self.push_geometry_delta(epoch, changes, false);
         }
@@ -8582,6 +8604,7 @@ impl Scene {
         self.layer_walk = LayerWalkState::default();
         self.preview_hidden.clear();
         self.command_preview_hidden.clear();
+        self.mtext_editor_hidden = None;
     }
 
     /// True if any currently selected entity is a Viewport.

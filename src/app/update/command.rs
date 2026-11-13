@@ -281,6 +281,10 @@ impl OpenCADStudio {
             self.pending_close = Some(crate::app::PendingClose::Tab(self.tabs[idx].id));
             return self.open_unsaved_dialog_window();
         }
+        // A draft belongs to its original tab and cannot survive its closure.
+        if idx == self.active_tab && self.mtext_editor.is_some() {
+            self.mtext_cancel();
+        }
         // Pending client interactive requests pinned to this drawing
         // can never be answered once the tab is gone — cancel them.
         let closing_tab_id = self.tabs.get(idx).map(|t| t.id);

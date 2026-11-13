@@ -1769,8 +1769,8 @@ impl<'a> HostSession<'a> {
                 if !editor_before {
                     self.app.text_inline = None;
                 }
-                if !mtext_before {
-                    self.app.mtext_editor = None;
+                if !mtext_before && self.app.mtext_editor.is_some() {
+                    self.app.mtext_cancel();
                 }
                 if !modal_before {
                     self.app.active_modal = None;

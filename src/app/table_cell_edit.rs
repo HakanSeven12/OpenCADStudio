@@ -189,7 +189,7 @@ impl OpenCADStudio {
             tab.scene.set_preview_wires(Vec::new());
             tab.snap_result = None;
         }
-        self.mtext_editor = None;
+        self.close_mtext_editor();
     }
 
     pub(in crate::app) fn commit_table_cell_editor(&mut self) -> bool {

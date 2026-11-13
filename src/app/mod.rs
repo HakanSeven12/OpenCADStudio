@@ -5265,6 +5265,9 @@ pub enum Message {
     ModalDragMove(Point),
     /// Title-bar released: stop dragging.
     ModalDragRelease,
+    MTextToolbarGrab,
+    MTextToolbarMove(Point),
+    MTextToolbarRelease,
     AboutCopyInfo,
     // ── Plugin Manager window ───────────────────────────────────────────
     PluginManagerOpen,
@@ -5420,6 +5423,7 @@ pub enum Message {
     MTextRectWidthField(String),
     /// A ruler drag: the width while it moves, `None` when it ends.
     MTextBoxDrag(Option<f64>),
+    MTextHeightDrag(Option<f64>),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),

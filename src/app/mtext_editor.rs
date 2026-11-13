@@ -188,6 +188,7 @@ pub struct MTextEditorState {
     pub rect_width_draft: Option<String>,
     /// A ruler drag is under way: the whole drag is one undo step.
     pub(super) box_dragging: bool,
+    pub(super) height_dragging: bool,
     pub rect_height: String,
     pub annotative: bool,
     pub column_type: i16,
@@ -250,12 +251,18 @@ pub struct MTextEditorState {
     /// Canvas-space anchor where the toolbar + text area are drawn (the
     /// insertion-point click position).
     pub screen_anchor: iced::Point,
+    /// Displacement and pointer state of the floating formatting bar.
+    pub toolbar_offset: iced::Vector,
+    pub toolbar_drag_last: Option<iced::Point>,
+    pub toolbar_dragging: bool,
     /// The entity as it was opened, when editing an existing MText. `build_mtext`
     /// starts from this so every field the toolbar doesn't touch — columns,
     /// rotation, normal, background fill, defined height, annotative flag —
     /// survives the edit instead of resetting to `MText::default()`. `None` for
     /// a freshly created MText, which has nothing to preserve.
     pub original: Option<MText>,
+    /// Tab owning the existing MTEXT hidden while its draft is displayed.
+    pub(super) hidden_source_tab: Option<u64>,
 }
 
 impl MTextEditorState {
@@ -308,6 +315,7 @@ impl MTextEditorState {
             keep_width: false,
             rect_width_draft: None,
             box_dragging: false,
+            height_dragging: false,
             rect_height: "0".to_string(),
             annotative: false,
             column_type: 0,
@@ -327,7 +335,11 @@ impl MTextEditorState {
             redo: Vec::new(),
             editing,
             screen_anchor: iced::Point::new(60.0, 90.0),
+            toolbar_offset: iced::Vector::ZERO,
+            toolbar_drag_last: None,
+            toolbar_dragging: false,
             original: None,
+            hidden_source_tab: None,
         }
     }
 
@@ -731,6 +743,9 @@ impl super::OpenCADStudio {
         if handle.is_some_and(|h| self.tabs[self.active_tab].scene.is_layer_locked(h)) {
             return;
         }
+        if self.mtext_editor.is_some() {
+            self.mtext_cancel();
+        }
         let mut state = MTextEditorState::new(pos, initial, height, handle);
         if let Some(p) = self.tabs[self.active_tab]
             .scene
@@ -792,6 +807,14 @@ impl super::OpenCADStudio {
                 .working_plane()
                 .z
                 .abs_diff_eq(DVec3::Z, 1e-12);
+        }
+        // Render the draft instead of the original MTEXT so the original
+        // doesn't show through the translucent editor or duplicate its text.
+        if let Some(h) = handle.filter(|&h| matches!(
+            self.tabs[self.active_tab].scene.document.get_entity(h), Some(EntityType::MText(_))
+        )) {
+            state.hidden_source_tab = Some(self.tabs[self.active_tab].id);
+            self.tabs[self.active_tab].scene.set_mtext_editor_hidden(Some(h));
         }
         self.mtext_editor = Some(state);
         // Open centred at the editor's natural size: it renders through the
@@ -1262,10 +1285,24 @@ impl super::OpenCADStudio {
         self.commit_mtext_draft(true);
     }
 
+    /// Restore only the source hidden by this editor, even after a tab change.
+    pub(super) fn restore_mtext_editor_source(&mut self) {
+        let tab_id = self.mtext_editor.as_mut().and_then(|ed| ed.hidden_source_tab.take());
+        if let Some(tab) = tab_id.and_then(|id| self.tabs.iter_mut().find(|tab| tab.id == id)) {
+            tab.scene.set_mtext_editor_hidden(None);
+        }
+    }
+
+    /// Drop the draft only after restoring the source in its owning tab.
+    pub(in crate::app) fn close_mtext_editor(&mut self) {
+        self.restore_mtext_editor_source();
+        self.mtext_editor = None;
+    }
+
     /// Discard the editor without changing the drawing.
     pub(super) fn mtext_cancel(&mut self) {
         self.close_table_cell_editor();
-        self.mtext_editor = None;
+        self.close_mtext_editor();
         self.command_mtext_input = false;
         self.pending_command_editor_text = None;
         self.reset_modal_geometry();

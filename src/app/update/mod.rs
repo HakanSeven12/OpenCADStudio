@@ -499,7 +499,14 @@ impl OpenCADStudio {
         }
         self.last_plugin_document = Some(key);
         crate::plugin::v4_support::publish_drawing_changed(tab.id, tab.scene.geometry_epoch);
-        crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document);
+        if let Err(e) =
+            crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document)
+        {
+            // P1-18: a failed publication is logged, not ignored — the epoch
+            // still reaches native plugins, but the snapshot side named its
+            // failure on stderr instead of silently going stale.
+            eprintln!("[host] V4 document view failed to publish: {e}");
+        }
         // Same guarded boundary, second surface (API v9): the plain
         // `DocumentChanged` carries the settled geometry epoch to every
         // loaded native plugin through `BuiltinPlugin::on_notification`.

@@ -31,6 +31,19 @@ use crate::ipc::transport::{recv, send};
 use crate::ipc::v4::client::{RunnerFrame, V4Client};
 use crate::ribbon::owned::{OwnedEntityClasses, OwnedPluginManifest, OwnedRibbonGroup};
 
+/// Bounds ONE notification-drain pass in `run_v4` (P1-20): callbacks run
+/// inline on the runner's read loop, so a chain of slow panel actions used to
+/// delay host requests for the whole queue length. The queue itself stays
+/// count-bounded; the remainder waits for the next pass.
+const DRAIN_WALL_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Maximum interactive commands a command-less `PanelAction` fans out to
+/// (P1-20): the whole registry was enumerated and each target received a
+/// full clone of the event and value maps inline. Beyond the cap the
+/// remainder is dropped with a loud notice — a plugin that needs broadcast
+/// semantics for its panel actions registers its owning command id.
+const MAX_PANEL_ACTION_TARGETS: usize = 16;
+
 /// Entry point for the plugin runner child process.
 ///
 /// Connects back to the host on `socket_name`, loads the cdylib at
@@ -146,8 +159,16 @@ fn run_v4(
     loop {
         // Drain any host notifications and dispatch them to the plugin's
         // state-only callback. Panics are caught so a bad callback does not
-        // tear down the connection.
+        // tear down the connection. One drain pass is bounded in wall time
+        // (P1-20): an on_dialog_action / on_notification callback that loops
+        // or stalls cannot monopolize the read loop and starve host requests;
+        // the rest of the queue waits for the next pass (the queue itself is
+        // count-bounded by the transport layer).
+        let drain_deadline = std::time::Instant::now() + DRAIN_WALL_BUDGET;
         while let Some((command_id, notification)) = client.try_recv_notification() {
+            if std::time::Instant::now() >= drain_deadline {
+                break;
+            }
             if notification_api_version(&notification) > api_version {
                 continue;
             }
@@ -164,11 +185,19 @@ fn run_v4(
                 )> = Vec::new();
                 if api_version >= 17 {
                     let mut registry = interactive.borrow_mut();
-                    let target_ids: Vec<u64> = if let Some(cid) = command_id {
+                    let mut target_ids: Vec<u64> = if let Some(cid) = command_id {
                         vec![cid]
                     } else {
                         registry.keys().copied().collect()
                     };
+                    if target_ids.len() > MAX_PANEL_ACTION_TARGETS {
+                        eprintln!(
+                            "[runner] panel action fan-out to {} interactive commands exceeds \
+                             the {MAX_PANEL_ACTION_TARGETS} budget; the remainder is dropped",
+                            target_ids.len()
+                        );
+                        target_ids.truncate(MAX_PANEL_ACTION_TARGETS);
+                    }
                     let (event_val, current_vals) = match value {
                         Some(crate::dialog::DialogValue::Fields(map)) => {
                             let mut map = map.clone();
@@ -203,11 +232,19 @@ fn run_v4(
                 }));
                 if api_version >= 7 {
                     let mut registry = interactive.borrow_mut();
-                    let target_ids: Vec<u64> = if let Some(cid) = command_id {
+                    let mut target_ids: Vec<u64> = if let Some(cid) = command_id {
                         vec![cid]
                     } else {
                         registry.keys().copied().collect()
                     };
+                    if target_ids.len() > MAX_PANEL_ACTION_TARGETS {
+                        eprintln!(
+                            "[runner] panel update fan-out to {} interactive commands exceeds \
+                             the {MAX_PANEL_ACTION_TARGETS} budget; the remainder is dropped",
+                            target_ids.len()
+                        );
+                        target_ids.truncate(MAX_PANEL_ACTION_TARGETS);
+                    }
                     for cid in target_ids {
                         if let Some(cmd) = registry.get_mut(&cid) {
                             if let Ok(pending) =

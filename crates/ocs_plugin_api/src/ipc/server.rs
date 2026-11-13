@@ -3,6 +3,21 @@
 use crate::host::HostApi;
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
+/// Per-variant batch budgets. Each width is far above legitimate use but
+/// below pathological input, so a runaway batch fails fast with an honest
+/// error instead of committing the host to full-document work (the frame size
+/// envelope already bounds memory; these bound COUNT-dependent CPU passes).
+const MAX_BATCH_ENTITIES: usize = 100_000;
+const MAX_BATCH_HANDLES: usize = 1_000_000;
+const MAX_XRECORD_BATCH: usize = 10_000;
+const MAX_QUAD_PANELS: usize = 512;
+
+fn batch_budget_error(name: &str, len: usize, cap: usize) -> PluginResponse {
+    PluginResponse::Error(format!(
+        "{name} batch of {len} exceeds the host budget ({cap})"
+    ))
+}
+
 fn addressable_document_snapshot(host: &dyn HostApi) -> document::Document {
     let mut snapshot = host.document().clone();
     let attributes = host
@@ -63,7 +78,13 @@ pub fn handle_plugin_request(
             PluginResponse::Ok
         }
         AddEntity(entity) => PluginResponse::Handle(host.add_entity(entity)),
-        AddEntities(entities) => PluginResponse::Handles(host.add_entities(entities)),
+        AddEntities(entities) => {
+            if entities.len() > MAX_BATCH_ENTITIES {
+                batch_budget_error("add_entities", entities.len(), MAX_BATCH_ENTITIES)
+            } else {
+                PluginResponse::Handles(host.add_entities(entities))
+            }
+        }
         UpdateEntity(entity) => PluginResponse::Bool(host.update_entity(entity)),
         RemoveEntity { handle } => PluginResponse::Bool(host.remove_entity(handle)),
         BumpGeometry => {
@@ -142,12 +163,23 @@ pub fn handle_plugin_request(
         SetSystemVariable { name, value } => {
             PluginResponse::SystemVariableResult(host.set_system_variable(&name, value))
         }
-        UpdateEntitiesTransaction { label, entities } => PluginResponse::EntityTransactionResult(
-            host.update_entities_transaction(&label, entities),
-        ),
+        UpdateEntitiesTransaction { label, entities } => {
+            if entities.len() > MAX_BATCH_ENTITIES {
+                batch_budget_error("update_entities_transaction", entities.len(), MAX_BATCH_ENTITIES)
+            } else {
+                PluginResponse::EntityTransactionResult(
+                    host.update_entities_transaction(&label, entities),
+                )
+            }
+        }
         GetSelection => PluginResponse::Selection(host.selection()),
-        SetSelection { handles } => PluginResponse::SelectionResult(host.set_selection(&handles)),
-        SolidOperation { operation } => {
+        SetSelection { handles } => {
+            if handles.len() > MAX_BATCH_HANDLES {
+                batch_budget_error("set_selection", handles.len(), MAX_BATCH_HANDLES)
+            } else {
+                PluginResponse::SelectionResult(host.set_selection(&handles))
+            }
+        }        SolidOperation { operation } => {
             PluginResponse::SolidResult(host.solid_operation(operation))
         }
         TableOperation { operation } => {
@@ -219,14 +251,37 @@ pub fn handle_plugin_request(
             PluginResponse::SetPluginGripsResult(host.set_plugin_grips(plugin_id, grips))
         }
         GetEntitiesBatch { handles } => {
-            PluginResponse::GetEntitiesBatchResult(host.entities_batch(&handles))
+            if handles.len() > MAX_BATCH_HANDLES {
+                PluginResponse::GetEntitiesBatchResult(Err(format!(
+                    "get_entities_batch of {} handles exceeds the host budget ({MAX_BATCH_HANDLES})",
+                    handles.len()
+                )))
+            } else {
+                PluginResponse::GetEntitiesBatchResult(host.entities_batch(&handles))
+            }
         }
         CreateConstraint { constraint } => {
             PluginResponse::CreateConstraintResult(host.constraint_create(constraint))
         }
-        ReadXRecords { reads } => PluginResponse::ReadXRecordsResult(host.read_xrecords(&reads)),
+        ReadXRecords { reads } => {
+            if reads.len() > MAX_XRECORD_BATCH {
+                PluginResponse::ReadXRecordsResult(Err(format!(
+                    "read_xrecords batch of {} exceeds the host budget ({MAX_XRECORD_BATCH})",
+                    reads.len()
+                )))
+            } else {
+                PluginResponse::ReadXRecordsResult(host.read_xrecords(&reads))
+            }
+        }
         UpdateXRecords { updates } => {
-            PluginResponse::UpdateXRecordsResult(host.update_xrecords(&updates))
+            if updates.len() > MAX_XRECORD_BATCH {
+                PluginResponse::UpdateXRecordsResult(Err(format!(
+                    "update_xrecords batch of {} exceeds the host budget ({MAX_XRECORD_BATCH})",
+                    updates.len()
+                )))
+            } else {
+                PluginResponse::UpdateXRecordsResult(host.update_xrecords(&updates))
+            }
         }
         ListXRecordsWithEntries { dictionary_path } => {
             let path: Vec<&str> = dictionary_path.iter().map(|s| s.as_str()).collect();
@@ -283,6 +338,13 @@ pub fn handle_plugin_request(
             host.toggle_panel_for_plugin(plugin_id, &panel_id, show)
         }),
         RegisterQuadPanels { panels } => {
+            if panels.len() > MAX_QUAD_PANELS {
+                return batch_budget_error(
+                    "register_quad_panels",
+                    panels.len(),
+                    MAX_QUAD_PANELS,
+                );
+            }
             // API v15: the owning plugin's id is transport identity (see
             // handle_plugin_request's doc), so one plugin's registration can
             // never rewrite another plugin's panel. The outcome shape is one
@@ -303,6 +365,13 @@ pub fn handle_plugin_request(
             PluginResponse::QuadPanelsRegistered { ok, errors }
         }
         UnregisterQuadPanels { panel_ids } => {
+            if panel_ids.len() > MAX_QUAD_PANELS {
+                return batch_budget_error(
+                    "unregister_quad_panels",
+                    panel_ids.len(),
+                    MAX_QUAD_PANELS,
+                );
+            }
             // API v15: the ownership law runs both ways — the transport's
             // plugin id scopes the removal exactly like RegisterQuadPanels
             // scopes the registration, so one plugin can never remove

@@ -4381,6 +4381,7 @@ dependencies = [
  "cargo-lock",
  "getrandom 0.2.17",
  "interprocess",
+ "libc",
  "libloading",
  "memmap2",
  "opencaddocument",
@@ -4390,6 +4391,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "thiserror 1.0.69",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

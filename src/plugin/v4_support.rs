@@ -8,11 +8,16 @@ use ocs_plugin_api::process::NotificationHandler;
 use ocs_plugin_api::shm::DocumentViewInfo;
 
 fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
-    manager().lock().unwrap()
+    // Poisoned-lock tolerance: a publication panic elsewhere must not turn
+    // every later plugin IPC into a panic cascade (`unwrap()` would).
+    manager().lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
-pub fn open_document_view_v4(tab_id: u64, doc: &document::Document) -> Option<DocumentViewInfo> {
+pub fn open_document_view_v4(
+    tab_id: u64,
+    doc: &document::Document,
+) -> Result<DocumentViewInfo, String> {
     mgr().open(tab_id, doc)
 }
 
@@ -23,13 +28,23 @@ pub fn close_document_view_v4(tab_id: u64) {
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
 /// a change notification when successful.
-pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) {
-    let info = mgr().publish(tab_id, doc);
-    if let Some(info) = info {
-        broadcast(HostNotification::DocumentChangedV4 {
-            tab_id,
-            version: info.version,
-        });
+///
+/// `Ok(())` covers BOTH a real publication and the legitimate no-op (no V4
+/// consumer has opened a snapshot for this tab — nothing to publish, no
+/// notification to send, and the mutation boundary still settles).
+/// `Err` is a real failure the caller must report instead of claiming a
+/// boundary that plugins cannot observe.
+pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) -> Result<(), String> {
+    match mgr().publish(tab_id, doc) {
+        Ok(Some(info)) => {
+            broadcast(HostNotification::DocumentChangedV4 {
+                tab_id,
+                version: info.version,
+            });
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 

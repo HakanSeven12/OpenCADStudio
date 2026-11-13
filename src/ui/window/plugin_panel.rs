@@ -23,6 +23,17 @@ use crate::ui::window::plugin_dialog::{
 
 const LABEL_WIDTH: f32 = 110.0;
 
+/// Per-snapshot construction budget (P1-21): a panel snapshot was a complete,
+/// unrestricted clone of every typed value, raw text and full table, and a
+/// plugin could grow (or register) a table whose copy dominated the runner
+/// read loop on every poll. These caps bound one snapshot's form walk; each
+/// truncation is reported in the snapshot's `errors`, so a truncated snapshot
+/// is honestly unsuitable for submission instead of silently lying.
+const MAX_SNAPSHOT_TABLE_ROWS: usize = 4096;
+const MAX_SNAPSHOT_TABLE_CELLS: usize = 65_536;
+const MAX_SNAPSHOT_FIELDS_DEPTH: usize = 64;
+const MAX_SNAPSHOT_VALUE_LEN: usize = 64 * 1024;
+
 /// State backing an active declarative plugin dockable side panel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginPanelState {
@@ -206,6 +217,29 @@ impl PluginPanelState {
             Table,
         }
 
+        /// Per-snapshot counters threaded through the recursive form walk.
+        #[derive(Default)]
+        struct SnapshotBudget {
+            /// Current `Fields`/`Row`/`Column` nesting depth.
+            depth: usize,
+            /// Total table cells copied into this snapshot so far.
+            cells: usize,
+        }
+
+        /// Length-cap one string value for the snapshot (the panel state
+        /// keeps the real value; the copy in the snapshot is truncated and
+        /// honestly reported).
+        fn capped_text(raw: &str, id: &str, errors: &mut Vec<String>) -> String {
+            if raw.chars().count() <= MAX_SNAPSHOT_VALUE_LEN {
+                raw.to_string()
+            } else {
+                errors.push(format!(
+                    "value for control id '{id}' exceeds the snapshot length budget; truncated"
+                ));
+                raw.chars().take(MAX_SNAPSHOT_VALUE_LEN).collect()
+            }
+        }
+
         fn declare_control(
             id: &str,
             value_kind: Option<SnapshotValueKind>,
@@ -234,6 +268,7 @@ impl PluginPanelState {
             expected: &mut HashMap<String, SnapshotValueKind>,
             field_ids: &mut HashSet<String>,
             errors: &mut Vec<String>,
+            budget: &mut SnapshotBudget,
         ) {
             for control in controls {
                 match control {
@@ -253,7 +288,7 @@ impl PluginPanelState {
                     DialogControl::Text { id, .. } => {
                         declare_control(id, Some(SnapshotValueKind::Text), ids, expected, errors);
                         if let Some(raw) = state.text_values.get(id) {
-                            raw_text.insert(id.clone(), raw.clone());
+                            raw_text.insert(id.clone(), capped_text(raw, id, errors));
                             values.insert(id.clone(), DialogValue::Text(raw.clone()));
                         } else {
                             errors.push(format!("missing text value for control id '{id}'"));
@@ -262,7 +297,7 @@ impl PluginPanelState {
                     DialogControl::Number { id, .. } => {
                         declare_control(id, Some(SnapshotValueKind::Number), ids, expected, errors);
                         if let Some(raw) = state.text_values.get(id) {
-                            raw_text.insert(id.clone(), raw.clone());
+                            raw_text.insert(id.clone(), capped_text(raw, id, errors));
                             match raw.trim().parse::<f64>() {
                                 Ok(number) if number.is_finite() => {
                                     values.insert(id.clone(), DialogValue::Number(number));
@@ -323,7 +358,7 @@ impl PluginPanelState {
                             errors,
                         );
                         if let Some(raw) = state.file_values.get(id) {
-                            raw_text.insert(id.clone(), raw.clone());
+                            raw_text.insert(id.clone(), capped_text(raw, id, errors));
                             values.insert(id.clone(), DialogValue::FilePath(raw.clone()));
                         } else {
                             errors.push(format!("missing file value for control id '{id}'"));
@@ -332,32 +367,77 @@ impl PluginPanelState {
                     DialogControl::Fields { id, controls, .. } => {
                         declare_control(id, None, ids, expected, errors);
                         field_ids.insert(id.clone());
-                        let mut field_values = HashMap::new();
-                        snapshot_controls(
-                            state,
-                            controls,
-                            &mut field_values,
-                            raw_text,
-                            ids,
-                            expected,
-                            field_ids,
-                            errors,
-                        );
-                        values.insert(id.clone(), DialogValue::Fields(field_values));
+                        if budget.depth >= MAX_SNAPSHOT_FIELDS_DEPTH {
+                            errors.push(format!(
+                                "fields '{id}' exceed the snapshot depth budget; skipped"
+                            ));
+                        } else {
+                            budget.depth += 1;
+                            let mut field_values = HashMap::new();
+                            snapshot_controls(
+                                state,
+                                controls,
+                                &mut field_values,
+                                raw_text,
+                                ids,
+                                expected,
+                                field_ids,
+                                errors,
+                                budget,
+                            );
+                            budget.depth -= 1;
+                            values.insert(id.clone(), DialogValue::Fields(field_values));
+                        }
                     }
                     DialogControl::Table { id, .. } => {
                         declare_control(id, Some(SnapshotValueKind::Table), ids, expected, errors);
                         if let Some(rows) = state.table_values.get(id) {
-                            values.insert(id.clone(), DialogValue::Table(rows.clone()));
+                            let total: usize = rows.iter().map(|row| row.len()).sum();
+                            let over_rows = rows.len() > MAX_SNAPSHOT_TABLE_ROWS;
+                            let over_cells = budget.cells + total > MAX_SNAPSHOT_TABLE_CELLS;
+                            if !over_rows && !over_cells {
+                                budget.cells += total;
+                                values.insert(id.clone(), DialogValue::Table(rows.clone()));
+                            } else {
+                                // Keep whole rows until one of the caps
+                                // lands; the plugin sees which rows exist
+                                // via the error entry.
+                                let mut kept_rows = Vec::new();
+                                let mut kept_cells = 0usize;
+                                for row in rows {
+                                    if kept_rows.len() >= MAX_SNAPSHOT_TABLE_ROWS
+                                        || budget.cells + kept_cells + row.len()
+                                            > MAX_SNAPSHOT_TABLE_CELLS
+                                    {
+                                        break;
+                                    }
+                                    kept_cells += row.len();
+                                    kept_rows.push(row.clone());
+                                }
+                                budget.cells += kept_cells;
+                                errors.push(format!(
+                                    "table '{id}' exceeds the snapshot budget ({} rows, {total} \
+                                     cells); kept {} rows",
+                                    rows.len(),
+                                    kept_rows.len()
+                                ));
+                                values.insert(id.clone(), DialogValue::Table(kept_rows));
+                            }
                         } else {
                             errors.push(format!("missing table value for control id '{id}'"));
                         }
                     }
-                    DialogControl::Row { controls, .. }
-                    | DialogControl::Column { controls, .. } => {
-                        snapshot_controls(
-                            state, controls, values, raw_text, ids, expected, field_ids, errors,
-                        );
+                    DialogControl::Row { controls, .. } | DialogControl::Column { controls, .. } => {
+                        if budget.depth >= MAX_SNAPSHOT_FIELDS_DEPTH {
+                            errors.push("controls exceed the snapshot depth budget; skipped".to_string());
+                        } else {
+                            budget.depth += 1;
+                            snapshot_controls(
+                                state, controls, values, raw_text, ids, expected, field_ids,
+                                errors, budget,
+                            );
+                            budget.depth -= 1;
+                        }
                     }
                 }
             }
@@ -391,6 +471,7 @@ impl PluginPanelState {
         let mut expected = HashMap::new();
         let mut field_ids = HashSet::new();
         let mut errors = Vec::new();
+        let mut budget = SnapshotBudget::default();
 
         snapshot_controls(
             self,
@@ -401,6 +482,7 @@ impl PluginPanelState {
             &mut expected,
             &mut field_ids,
             &mut errors,
+            &mut budget,
         );
 
         validate_state_ids(

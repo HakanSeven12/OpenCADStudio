@@ -154,8 +154,9 @@ class _Solids:
     def union(self, first, second, layer=None, keep_operands=False):
         """Join two solids into a new one. The operands are consumed unless
         `keep_operands`. The kernel may refuse (the error says why) and a
-        refusal changes nothing. Curved operands can take a second or two,
-        and a whole script has a 30 second budget."""
+        refusal changes nothing.         Curved operands can take a second or two,
+        and a whole script has a 60 second budget (the host's ExecuteCode
+        floor; OCS_PLUGIN_EXECUTE_TIMEOUT_SECS can only raise it)."""
         return self._boolean("union", first, second, layer, keep_operands)
 
     def subtract(self, first, second, layer=None, keep_operands=False):

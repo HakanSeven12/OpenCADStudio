@@ -27,11 +27,24 @@ memmap2 = { version = "0.9", optional = true }
 rkyv = { version = "0.7", features = ["validation", "std"], optional = true }
 getrandom = { version = "0.2", optional = true }
 
+# Process-tree lifecycle (host feature only): Unix plugin runners run in their
+# own session so reaping can signal the whole tree; Windows runners are bound
+# to a kill-on-close Job Object so grandchildren cannot outlive the host.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [features]
 # Enables the runtime host surface (`HostApi` trait) and the out-of-process
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
-host = ["dep:document", "dep:serde_json", "dep:interprocess", "dep:bincode", "dep:serde_bytes", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
+host = ["dep:document", "dep:serde_json", "dep:interprocess", "dep:bincode", "dep:serde_bytes", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom", "dep:libc", "dep:windows-sys"]
 
 [build-dependencies]
 serde-reflection = "0.6"

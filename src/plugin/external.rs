@@ -74,6 +74,11 @@ pub struct ExternalPlugin {
     pub bundled: bool,
     /// Whether a native library for this platform sits beside `plugin.toml`.
     pub lib_present: bool,
+    /// Explicit library filename declared as `library` in `plugin.toml`. When
+    /// set, only that exact file is accepted as the package's native library
+    /// instead of the first file with the platform extension (an additive,
+    /// optional key — older packages are unaffected).
+    pub library: Option<String>,
 }
 
 impl ExternalPlugin {
@@ -274,6 +279,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
     let mut version = String::new();
     let mut description = String::new();
     let mut repository = None;
+    let mut library = None;
     let mut api_version: u32 = 0;
     let mut acadrust_source: Option<String> = None;
     let mut acadrust_declared = false;
@@ -303,6 +309,10 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
             "version" => version = unquote(value),
             "description" => description = unquote(value),
             "repository" => repository = normalize_repository(&unquote(value)),
+            "library" => {
+                let v = unquote(value);
+                library = if v.is_empty() { None } else { Some(v) };
+            }
             "api_version" => api_version = value.parse().unwrap_or(0),
             "acadrust_source" if section == Some("opencad") => {
                 acadrust_declared = true;
@@ -336,6 +346,7 @@ pub(crate) fn parse_plugin_toml(text: &str) -> Option<ExternalPlugin> {
         dir: PathBuf::new(),
         bundled: false,
         lib_present: false,
+        library,
     })
 }
 
@@ -388,8 +399,10 @@ fn parse_string_array(s: &str) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) use loader::PROCESS_TESTS_LOCK;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{shutdown_plugins, with_manager};
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) use loader::{shutdown_plugins, with_fresh_installed_manager, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -495,7 +508,7 @@ mod loader {
                 ));
                 continue;
             }
-            let Some(path) = lib_file(&d.dir) else {
+            let Some(path) = lib_file_for(&d) else {
                 out.push((
                     d.id.clone(),
                     Err("no native library in package".to_string()),
@@ -503,7 +516,7 @@ mod loader {
                 continue;
             };
             let mut host = crate::app::plugin_host::HostSession::new(app, 0);
-            match manager.load(&path, &mut host) {
+            match manager.load_with_expected_id(&path, Some(&d.id), &mut host) {
                 Ok(id) => out.push((id, Ok(()))),
                 Err(e) => {
                     // Also on stderr: a headless or automation session never
@@ -537,6 +550,21 @@ mod loader {
             let empty = PluginManager::new();
             f(&empty)
         })
+    }
+
+    /// Run `f` with an EMPTY manager installed in the process store (test
+    /// setup for the declaration-law tests: nothing is loaded, so only the
+    /// boot-window semantics can let an id pass the owner gate). Without an
+    /// installed manager `with_manager` serves a throwaway empty manager per
+    /// call, which cannot carry a boot marker across two calls. The previous
+    /// store is restored afterwards.
+    #[cfg(test)]
+    pub(crate) fn with_fresh_installed_manager<R>(f: impl FnOnce() -> R) -> R {
+        let previous = MANAGER.with(|m| m.borrow_mut().take());
+        MANAGER.with(|m| *m.borrow_mut() = Some(PluginManager::new()));
+        let result = f();
+        MANAGER.with(|m| *m.borrow_mut() = previous);
+        result
     }
 
     /// Serializes the process-spawning tests (spawn/dispatch/notification-attach)
@@ -621,6 +649,27 @@ mod loader {
             let p = e.path();
             (p.extension().and_then(|s| s.to_str()) == Some(ext)).then_some(p)
         })
+    }
+
+    /// The package's native library: the exact `library` file named by
+    /// `plugin.toml` when declared, otherwise the first file with this
+    /// platform's extension. A declared name that is missing or does not
+    /// carry the platform extension refuses the load with an honest error
+    /// instead of silently loading some other `.so`/`.dll` in the folder.
+    fn lib_file_for(plugin: &super::ExternalPlugin) -> Option<PathBuf> {
+        if let Some(name) = plugin.library.as_deref() {
+            let path = plugin.dir.join(name);
+            let matches_ext = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s == lib_extension());
+            return if matches_ext && path.is_file() {
+                Some(path)
+            } else {
+                None
+            };
+        }
+        lib_file(&plugin.dir)
     }
 }
 
@@ -1023,6 +1072,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
             &path,
             &mut host,
             v4_support::notification_handler(),
+            None,
         )
         .expect("spawn test plugin");
         assert_eq!(process.id(), "opencad.my_plugin");
@@ -1090,6 +1140,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
                 &path,
                 &mut host,
                 v4_support::notification_handler(),
+                None,
             )
             .unwrap_or_else(|e| panic!("fresh boot {boot}: spawn failed: {e}"));
             let handled = process

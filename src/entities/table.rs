@@ -757,31 +757,32 @@ fn table_cell_reference(reference: &str) -> Option<(usize, usize)> {
     Some((row, column.checked_sub(1)?))
 }
 
-fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
-    let body = expression.trim().strip_prefix('=')?.trim();
-    if let Some((row, column)) = table_cell_reference(body) {
-        return table
-            .cell(row, column)
-            .map(|cell| cell.text_value().to_string());
+/// A cell as an arithmetic operand: a blank cell is 0, text that is not a
+/// number makes the whole expression fail (the cell keeps its literal text).
+fn formula_cell_number(table: &Table, reference: &str) -> Option<f64> {
+    let (row, column) = table_cell_reference(reference)?;
+    let text = table
+        .cell(row, column)
+        .map(|cell| cell.text_value().trim())
+        .unwrap_or("");
+    if text.is_empty() {
+        Some(0.0)
+    } else {
+        text.parse::<f64>().ok()
     }
-    let open = body.find('(')?;
-    let close = body.rfind(')')?;
-    let function = body[..open].trim().to_ascii_uppercase();
-    // `find('(')` scans forward while `rfind(')')` scans backward, so a
-    // malformed body like `)(` orders them reversed; the safe `get` yields
-    // None (fall back to the literal text) instead of a slice panic.
-    let range = body.get(open + 1..close)?;
-    let (first, last) = range.split_once(':').unwrap_or((range, range));
+}
+
+/// The numeric cells a `SUM(A1:B2)` style range contributes. The walk is
+/// clamped to the table: a range can name any `usize`
+/// (`A1:A18446744073709551615`), and `cell()` would return None for every
+/// out-of-bounds index anyway, so stopping at the last real row and column
+/// collects the same values without an unbounded loop on the render path.
+fn formula_range_values(table: &Table, first: &str, last: &str) -> Option<Vec<f64>> {
     let (r1, c1) = table_cell_reference(first)?;
     let (r2, c2) = table_cell_reference(last)?;
-    let mut values = Vec::new();
-    // A range can name any `usize` (`A1:A18446744073709551615`): `cell()`
-    // returns None outside the table, so clamping the walk to the table's
-    // own rows/columns collects exactly the same values — every skipped
-    // cell would have been None — while keeping an unbounded walk off the
-    // render path (1.8e19 iterations of `..=`).
     let row_end = r1.max(r2).min(table.rows.len().saturating_sub(1));
     let col_end = c1.max(c2).min(table.columns.len().saturating_sub(1));
+    let mut values = Vec::new();
     for row in r1.min(r2)..=row_end {
         for column in c1.min(c2)..=col_end {
             if let Some(value) = table
@@ -792,23 +793,194 @@ fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
             }
         }
     }
-    match function.as_str() {
-        "SUM" => Some(values.iter().sum::<f64>().to_string()),
-        "AVERAGE" | "AVG" if !values.is_empty() => {
-            Some((values.iter().sum::<f64>() / values.len() as f64).to_string())
-        }
-        "COUNT" => Some(values.len().to_string()),
-        "MIN" if !values.is_empty() => {
-            Some(values.into_iter().fold(f64::INFINITY, f64::min).to_string())
-        }
-        "MAX" if !values.is_empty() => Some(
-            values
-                .into_iter()
-                .fold(f64::NEG_INFINITY, f64::max)
-                .to_string(),
-        ),
-        _ => None,
+    Some(values)
+}
+
+/// Recursive-descent parser for the arithmetic half of a table formula:
+/// numbers, cell references, `+ - * / ^`, parentheses and the aggregate
+/// functions. A returned `None` means the body is not a well-formed
+/// expression, so the cell keeps its literal text.
+struct FormulaParser<'a> {
+    table: &'a Table,
+    body: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> FormulaParser<'a> {
+    fn parse(table: &'a Table, body: &str) -> Option<f64> {
+        let mut parser = FormulaParser {
+            table,
+            body: body.as_bytes(),
+            pos: 0,
+        };
+        let value = parser.expression()?;
+        parser.skip_space();
+        (parser.pos == parser.body.len()).then_some(value)
     }
+
+    fn skip_space(&mut self) {
+        while self
+            .body
+            .get(self.pos)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            self.pos += 1;
+        }
+    }
+
+    fn peek(&mut self) -> Option<u8> {
+        self.skip_space();
+        self.body.get(self.pos).copied()
+    }
+
+    fn eat(&mut self, byte: u8) -> bool {
+        if self.peek() == Some(byte) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expression(&mut self) -> Option<f64> {
+        let mut value = self.term()?;
+        loop {
+            match self.peek() {
+                Some(b'+') => {
+                    self.pos += 1;
+                    value += self.term()?;
+                }
+                Some(b'-') => {
+                    self.pos += 1;
+                    value -= self.term()?;
+                }
+                _ => return Some(value),
+            }
+        }
+    }
+
+    fn term(&mut self) -> Option<f64> {
+        let mut value = self.power()?;
+        loop {
+            match self.peek() {
+                Some(b'*') => {
+                    self.pos += 1;
+                    value *= self.power()?;
+                }
+                Some(b'/') => {
+                    self.pos += 1;
+                    value /= self.power()?;
+                }
+                _ => return Some(value),
+            }
+        }
+    }
+
+    fn power(&mut self) -> Option<f64> {
+        let value = self.unary()?;
+        if self.eat(b'^') {
+            Some(value.powf(self.power()?))
+        } else {
+            Some(value)
+        }
+    }
+
+    fn unary(&mut self) -> Option<f64> {
+        match self.peek() {
+            Some(b'+') => {
+                self.pos += 1;
+                self.unary()
+            }
+            Some(b'-') => {
+                self.pos += 1;
+                self.unary().map(|value| -value)
+            }
+            _ => self.primary(),
+        }
+    }
+
+    fn primary(&mut self) -> Option<f64> {
+        match self.peek()? {
+            b'(' => {
+                self.pos += 1;
+                let value = self.expression()?;
+                self.eat(b')').then_some(value)
+            }
+            b'0'..=b'9' | b'.' => self.number(),
+            byte if byte.is_ascii_alphabetic() => self.name(),
+            _ => None,
+        }
+    }
+
+    fn number(&mut self) -> Option<f64> {
+        let start = self.pos;
+        while matches!(self.peek(), Some(b'0'..=b'9' | b'.')) {
+            self.pos += 1;
+        }
+        std::str::from_utf8(&self.body[start..self.pos])
+            .ok()?
+            .parse::<f64>()
+            .ok()
+    }
+
+    fn name(&mut self) -> Option<f64> {
+        let start = self.pos;
+        while matches!(
+            self.peek(),
+            Some(byte) if byte.is_ascii_alphanumeric() || byte == b'_'
+        ) {
+            self.pos += 1;
+        }
+        let token = std::str::from_utf8(&self.body[start..self.pos]).ok()?;
+        if self.eat(b'(') {
+            self.function(token)
+        } else {
+            formula_cell_number(self.table, token)
+        }
+    }
+
+    fn function(&mut self, name: &str) -> Option<f64> {
+        let start = self.pos;
+        while matches!(
+            self.peek(),
+            Some(byte) if byte.is_ascii_alphanumeric() || byte == b':'
+        ) {
+            self.pos += 1;
+        }
+        let range = std::str::from_utf8(&self.body[start..self.pos]).ok()?;
+        if !self.eat(b')') {
+            return None;
+        }
+        let (first, last) = range.split_once(':').unwrap_or((range, range));
+        let values = formula_range_values(self.table, first, last)?;
+        match name.to_ascii_uppercase().as_str() {
+            "SUM" => Some(values.iter().sum()),
+            "AVERAGE" | "AVG" if !values.is_empty() => {
+                Some(values.iter().sum::<f64>() / values.len() as f64)
+            }
+            "COUNT" => Some(values.len() as f64),
+            "MIN" if !values.is_empty() => {
+                Some(values.iter().copied().fold(f64::INFINITY, f64::min))
+            }
+            "MAX" if !values.is_empty() => Some(
+                values
+                    .iter()
+                    .copied()
+                    .fold(f64::NEG_INFINITY, f64::max),
+            ),
+            _ => None,
+        }
+    }
+}
+
+fn evaluate_table_formula(table: &Table, expression: &str) -> Option<String> {
+    let body = expression.trim().strip_prefix('=')?.trim();
+    if let Some((row, column)) = table_cell_reference(body) {
+        return table
+            .cell(row, column)
+            .map(|cell| cell.text_value().to_string());
+    }
+    FormulaParser::parse(table, body).map(|value| value.to_string())
 }
 
 fn fallback_content_centers(
@@ -5091,6 +5263,48 @@ mod tests {
             Some("10".to_string())
         );
         assert_eq!(evaluate_table_formula(&table, "not a formula"), None);
+    }
+
+    /// M048: a table formula is an expression, not just a lone aggregate.
+    /// The reference accepts cell references, numbers, parentheses and the
+    /// `+ - * / ^` operators (with `SUM`/`AVERAGE`/… callable inside them);
+    /// this build only understood a single `SUM(A1:B2)`-shaped call, so
+    /// `=A1*B1` or `=SUM(A1:B2)*2` showed their literal text in the cell.
+    #[test]
+    fn formula_arithmetic_combines_cells_numbers_and_aggregates() {
+        let table = sample_table();
+        for (expression, expected) in [
+            ("=A1+B1", "30"),
+            ("=A1*B1-A2", "170"),
+            ("=(A1+B1)/2", "15"),
+            ("=SUM(A1:B2)*2", "200"),
+            ("=-A1", "-10"),
+            ("=2^3", "8"),
+            ("=A1+B1*2", "50"),
+            ("=A1 * (B1 - A2)", "-100"),
+        ] {
+            assert_eq!(
+                evaluate_table_formula(&table, expression),
+                Some(expected.to_string()),
+                "{expression}"
+            );
+        }
+    }
+
+    /// The same expression reaches the rendered cell text: `content_display_value`
+    /// is what the tessellator draws for the cell.
+    #[test]
+    fn formula_arithmetic_is_what_the_cell_draws() {
+        let document = document::Document::new();
+        let mut table = Table::new(document::types::Vector3::ZERO, 2, 2);
+        table.set_cell_text(0, 0, "2");
+        table.set_cell_text(0, 1, "3");
+        table.set_cell_text(1, 0, "=A1*B1");
+        let cell = table.cell(1, 0).unwrap();
+        assert_eq!(
+            content_display_value(&document, &table, &cell.contents[0]),
+            "6"
+        );
     }
 
     /// A cell range can name any `usize` — `A1:A18446744073709551615`

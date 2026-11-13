@@ -61,7 +61,7 @@ pub struct MLeaderCommand {
     text_styles: Vec<(String, document::Handle)>,
     /// A block-content leader parked for its placement and attribute
     /// values, with the point its block centre goes to.
-    pending: Option<(MultiLeader, Vector3)>,
+    pending: Option<(MultiLeader, Option<Vector3>)>,
     attributes: Vec<AttributeDefinition>,
     attribute_values: Vec<(usize, String)>,
     attribute_index: usize,
@@ -402,11 +402,11 @@ impl MLeaderCommand {
         // drawing at hand.
         if self.content_type == LeaderContentType::Block {
             if let Some(block_name) = self.block_name() {
-                let click = match self.order {
-                    CreationOrder::ArrowFirst => self.plane.to_local(self.verts[self.verts.len() - 1]),
-                    _ => self.plane.to_local(self.verts[0]),
-                };
-                self.pending = Some((ml, v3(click)));
+                // Content first places the block's centre; otherwise the
+                // landing ends at the block's edge.
+                let centre = (self.order == CreationOrder::ContentFirst)
+                    .then(|| v3(self.plane.to_local(self.verts[0])));
+                self.pending = Some((ml, centre));
                 if self.attrs_done {
                     return self.finish_block().map_or(CmdResult::Cancel, CmdResult::CommitAndExit);
                 }
@@ -1159,9 +1159,9 @@ impl MLeaderCommand {
     }
 
     fn finish_block(&mut self) -> Option<EntityType> {
-        let (mut ml, click) = self.pending.take()?;
+        let (mut ml, centre) = self.pending.take()?;
         if let Some((bounds, base)) = self.block_geom {
-            place_block_content(&mut ml, click, bounds, base);
+            place_block_content(&mut ml, centre, bounds, base);
         }
         ml.block_attributes = self
             .attribute_values
@@ -1184,11 +1184,13 @@ impl MLeaderCommand {
     }
 }
 
-/// The block's centre (its insertion point, by an insertion-point style) goes
-/// to `click`; the landing runs from the block's edge back toward the arrow.
+/// The block's edge facing the arrow sits at the landing's end. Given a
+/// `centre` (content first: the block's centre, or its insertion point by an
+/// insertion-point style), the landing is drawn back from that edge toward
+/// the arrow; otherwise the block follows the landing.
 fn place_block_content(
     ml: &mut MultiLeader,
-    click: Vector3,
+    centre: Option<Vector3>,
     bounds: Option<[f64; 4]>,
     base: Vector3,
 ) {
@@ -1221,16 +1223,26 @@ fn place_block_content(
     let edge = (if from_left { min_x } else { max_x }, (min_y + max_y) * 0.5);
     let (ex, ey) = rotate(edge.0 - pivot.0, edge.1 - pivot.1);
     let (ix, iy) = rotate(pivot.0 - base.x, pivot.1 - base.y);
-    let content_base = Vector3::new(click.x + ex, click.y + ey, click.z);
-    ml.context.content_base_point = content_base;
+    let click = match centre {
+        Some(c) => {
+            let content_base = Vector3::new(c.x + ex, c.y + ey, c.z);
+            ml.context.content_base_point = content_base;
+            if let Some(root) = ml.context.leader_roots.first_mut() {
+                root.connection_point = Vector3::new(
+                    content_base.x - dir.x * landing,
+                    content_base.y - dir.y * landing,
+                    content_base.z,
+                );
+            }
+            c
+        }
+        None => {
+            let b = ml.context.content_base_point;
+            Vector3::new(b.x - ex, b.y - ey, b.z)
+        }
+    };
+    // The stored location is the block's insertion point.
     ml.context.block_content_location = Vector3::new(click.x - ix, click.y - iy, click.z);
-    if let Some(root) = ml.context.leader_roots.first_mut() {
-        root.connection_point = Vector3::new(
-            content_base.x - dir.x * landing,
-            content_base.y - dir.y * landing,
-            content_base.z,
-        );
-    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -112,6 +112,109 @@ pub fn rasterize_page_print(path: &str, page: &str) -> Option<Arc<PdfPage>> {
     rasterize_cached(path, page, PRINT_DPI, true)
 }
 
+/// Longest side of a zoomed-in region raster, pixels.
+pub const REGION_SIDE: f64 = 4096.0;
+
+/// Part of a page for display at `dpi`: `region` is min x, min y, max x,
+/// max y in page inches from the lower-left corner of the shown page. The
+/// last region is kept, so other entities' reseeds do not draw it again.
+/// `None` for rotated or encrypted pages (they show the whole-page raster).
+pub fn rasterize_page_region(
+    path: &str,
+    page: &str,
+    region: [f64; 4],
+    dpi: f32,
+) -> Option<Arc<PdfPage>> {
+    type RegionKey = (String, String, [u64; 4], u32);
+    static LAST: OnceLock<Mutex<Option<(RegionKey, Option<Arc<PdfPage>>)>>> = OnceLock::new();
+    let key = (
+        path.to_string(),
+        page.to_string(),
+        region.map(f64::to_bits),
+        dpi.to_bits(),
+    );
+    let last = LAST.get_or_init(|| Mutex::new(None));
+    if let Some((k, hit)) = last.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *k == key {
+            return hit.clone();
+        }
+    }
+    let built = region_uncached(path, page, region, dpi);
+    *last.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, built.clone()));
+    built
+}
+
+fn region_uncached(path: &str, page: &str, region: [f64; 4], dpi: f32) -> Option<Arc<PdfPage>> {
+    use hayro::hayro_syntax::page::Rotation;
+    let bytes = source_bytes(path)?;
+    if super::pdf_password::is_encrypted(&bytes) {
+        return None;
+    }
+    let index = page.trim().parse::<usize>().unwrap_or(1).max(1) - 1;
+    let cropped = {
+        let pdf = Pdf::new(bytes.clone()).ok()?;
+        let page = pdf.pages().get(index)?;
+        if !matches!(page.rotation(), Rotation::None) {
+            return None;
+        }
+        let id = page.raw().obj_id()?;
+        let dict = page.raw().data();
+        let close = dict.iter().rposition(|&c| c == b'>')?;
+        if close == 0 || dict[close - 1] != b'>' {
+            return None;
+        }
+        let crop = page.intersected_crop_box();
+        let r = [
+            crop.x0 + region[0] * 72.0,
+            crop.y0 + region[1] * 72.0,
+            crop.x0 + region[2] * 72.0,
+            crop.y0 + region[3] * 72.0,
+        ];
+        if !r.iter().all(|v| v.is_finite()) || r[2] <= r[0] || r[3] <= r[1] {
+            return None;
+        }
+        let prev = last_startxref(&bytes)?;
+        let root = pdf.xref().root_id();
+        // An incremental update giving the page a box around the region; the
+        // last definition of a dictionary key wins, so the old boxes give way.
+        let mut out = bytes.as_ref().clone();
+        out.push(b'\n');
+        let offset = out.len();
+        out.extend_from_slice(format!("{} {} obj\n", id.obj_number, id.gen_number).as_bytes());
+        out.extend_from_slice(&dict[..close - 1]);
+        let boxed = format!("[{} {} {} {}]", r[0], r[1], r[2], r[3]);
+        out.extend_from_slice(format!(" /MediaBox {boxed} /CropBox {boxed} >>\nendobj\n").as_bytes());
+        let xref = out.len();
+        out.extend_from_slice(
+            format!(
+                "xref\n{} 1\n{offset:010} {:05} n\r\ntrailer\n<< /Size {} /Root {} {} R /Prev {prev} >>\nstartxref\n{xref}\n%%EOF\n",
+                id.obj_number,
+                id.gen_number,
+                (id.obj_number as usize + 1).max(pdf.len() + 1),
+                root.obj_number,
+                root.gen_number,
+            )
+            .as_bytes(),
+        );
+        out
+    };
+    let pdf = Pdf::new(Arc::new(cropped)).ok()?;
+    raster_pdf_page(&pdf, index, dpi, true)
+}
+
+/// Offset after the file's last `startxref`.
+fn last_startxref(bytes: &[u8]) -> Option<usize> {
+    let tail = &bytes[bytes.len().saturating_sub(2048)..];
+    let at = tail.windows(9).rposition(|w| w == b"startxref")?;
+    let digits: String = tail[at + 9..]
+        .iter()
+        .skip_while(|c| c.is_ascii_whitespace())
+        .take_while(|c| c.is_ascii_digit())
+        .map(|&c| c as char)
+        .collect();
+    digits.parse().ok()
+}
+
 fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Option<Arc<PdfPage>> {
     let key = (
         path.to_string(),
@@ -422,6 +525,30 @@ pub fn adjusted_pixels(
         return hit;
     }
     let mut pixels = raster.pixels.as_ref().clone();
+    adjust_in_place(&mut pixels, &adjust);
+    let pixels = Arc::new(pixels);
+    adjusted_cache()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(key, pixels.clone());
+    pixels
+}
+
+/// [`adjusted_pixels`] for a one-off raster (a zoomed-in region), not memoised.
+pub fn adjusted_pixels_uncached(raster: &PdfPage, adjust: PageAdjust) -> Arc<Vec<u8>> {
+    if adjust.contrast >= 100
+        && !adjust.monochrome
+        && !adjust.adjust_for_background
+        && adjust.fade_before_contrast.is_none()
+    {
+        return raster.pixels.clone();
+    }
+    let mut pixels = raster.pixels.as_ref().clone();
+    adjust_in_place(&mut pixels, &adjust);
+    Arc::new(pixels)
+}
+
+fn adjust_in_place(pixels: &mut [u8], adjust: &PageAdjust) {
     for px in pixels.chunks_exact_mut(4) {
         if px[3] == 0 {
             continue;
@@ -432,18 +559,12 @@ pub fn adjusted_pixels(
                 px[1] as f32 / 255.0,
                 px[2] as f32 / 255.0,
             ],
-            &adjust,
+            adjust,
         );
         for (dst, c) in px[..3].iter_mut().zip(rgb) {
             *dst = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         }
     }
-    let pixels = Arc::new(pixels);
-    adjusted_cache()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert(key, pixels.clone());
-    pixels
 }
 
 /// Upper bound on one previewed page's pixel edge. Rasteriser dimensions

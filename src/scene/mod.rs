@@ -3172,7 +3172,11 @@ pub struct Scene {
     /// underlay rasters are made for, and a new step waiting for the view
     /// to settle.
     underlay_world_per_pixel: Option<f64>,
-    underlay_scale_pending: Option<(i32, iced::time::Instant)>,
+    underlay_scale_pending: Option<((i32, u64), iced::time::Instant)>,
+    /// World rectangle the zoomed-in underlay regions are drawn for (the
+    /// plan view with a margin), and whether any underlay drew one.
+    underlay_view: Option<[f64; 4]>,
+    underlay_region_used: std::cell::Cell<bool>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3719,6 +3723,8 @@ impl Scene {
             dynamic_dimension_camera_gen: None,
             underlay_world_per_pixel: None,
             underlay_scale_pending: None,
+            underlay_view: None,
+            underlay_region_used: std::cell::Cell::new(false),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3798,23 +3804,30 @@ impl Scene {
         let current = self
             .underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32);
-        if current == Some(step) {
+        if current == Some(step) && !self.underlay_view_moved() {
             self.underlay_scale_pending = None;
             return;
         }
+        // Wait for the camera to rest, not only for the scale step to hold.
+        let key = (step, self.camera_generation);
         match self.underlay_scale_pending {
-            Some((pending, since)) if pending == step => {
+            Some((pending, since)) if pending == key => {
                 if now.duration_since(since) < std::time::Duration::from_millis(150) {
                     return;
                 }
             }
             _ => {
-                self.underlay_scale_pending = Some((step, now));
+                self.underlay_scale_pending = Some((key, now));
                 return;
             }
         }
         self.underlay_scale_pending = None;
         self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
+        self.underlay_view = self.plan_view_rect().map(|[x0, y0, x1, y1]| {
+            let (mx, my) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
+            [x0 - mx, y0 - my, x1 + mx, y1 + my]
+        });
+        self.underlay_region_used.set(false);
         if self
             .document
             .entities()
@@ -3825,7 +3838,8 @@ impl Scene {
     }
 
     /// The view has moved to another scale step than the underlay rasters
-    /// were made for (frames are requested until they are made again).
+    /// were made for, or out of their sharp region (frames are requested
+    /// until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
         if !self.has_underlays() {
             return false;
@@ -3837,6 +3851,46 @@ impl Scene {
         self.underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32)
             != Some(step)
+            || self.underlay_view_moved()
+    }
+
+    /// A zoomed-in underlay region was drawn and the view has left it.
+    fn underlay_view_moved(&self) -> bool {
+        if !self.underlay_region_used.get() {
+            return false;
+        }
+        match (self.underlay_view, self.plan_view_rect()) {
+            (Some(have), Some(now)) => {
+                now[0] < have[0] || now[1] < have[1] || now[2] > have[2] || now[3] > have[3]
+            }
+            _ => true,
+        }
+    }
+
+    /// World XY rectangle of the model view when it looks straight down
+    /// (orthographic plan view); `None` otherwise.
+    fn plan_view_rect(&self) -> Option<[f64; 4]> {
+        if self.current_layout != "Model" {
+            return None;
+        }
+        let cam = self.camera.borrow();
+        if !matches!(cam.projection, view::camera::Projection::Orthographic) {
+            return None;
+        }
+        if (cam.rotation * glam::Vec3::NEG_Z).z > -0.9999 {
+            return None;
+        }
+        let h = f64::from(cam.ortho_size());
+        let w = h * self.view_aspect();
+        let right = (cam.rotation * glam::Vec3::X).as_dvec3();
+        let up = (cam.rotation * glam::Vec3::Y).as_dvec3();
+        let (hx, hy) = (
+            (right.x * w).abs() + (up.x * h).abs(),
+            (right.y * w).abs() + (up.y * h).abs(),
+        );
+        let t = cam.target;
+        let rect = [t.x - hx, t.y - hy, t.x + hx, t.y + hy];
+        rect.iter().all(|v| v.is_finite()).then_some(rect)
     }
 
     /// Width over height of the view last drawn (1 before the first frame).
@@ -5209,6 +5263,20 @@ impl Scene {
         }) {
             self.has_tables.set(Some(true));
         }
+        if let Some(true) = self.has_underlays.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_underlays.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Underlay(_)))
+        }) {
+            self.has_underlays.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5444,6 +5512,7 @@ impl Scene {
         self.lighting_cache.borrow_mut().clear();
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
+        self.has_underlays.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);

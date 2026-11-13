@@ -454,6 +454,11 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+/// Whether the file declares an encryption dictionary.
+pub(crate) fn is_encrypted(data: &[u8]) -> bool {
+    rfind_key(data, b"/Encrypt").is_some()
+}
+
 /// The last `key` name that is not the start of a longer name
 /// (`/Encrypt`, not `/EncryptMetadata`).
 fn rfind_key(data: &[u8], key: &[u8]) -> Option<usize> {

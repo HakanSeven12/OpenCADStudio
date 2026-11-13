@@ -3593,7 +3593,19 @@ impl Scene {
                     } else {
                         self.paper_bg_color
                     };
-                    ImageModel::from_underlay(u, def, background, self.underlay_world_per_pixel)
+                    ImageModel::from_underlay_in_view(
+                        u,
+                        def,
+                        background,
+                        self.underlay_world_per_pixel,
+                        self.underlay_view,
+                    )
+                    .map(|(model, sharp)| {
+                        if sharp {
+                            self.underlay_region_used.set(true);
+                        }
+                        model
+                    })
                 }
                 _ => None,
             },

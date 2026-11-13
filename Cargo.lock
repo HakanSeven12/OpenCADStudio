@@ -102,7 +102,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=5f34f3f#5f34f3f79068634a572535970a517efe87623bba"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=605edaf#605edaff8e12eb5fb3aacb1165db7962551dacc0"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -4451,7 +4451,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=4b71795#4b717957cc60a58d6f9bd7c61d28104fcf6de1b4"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=a5f1ca3#a5f1ca3347f87ada23db835240724b4f163dd8b6"
 dependencies = [
  "acadrust",
  "ifccad",

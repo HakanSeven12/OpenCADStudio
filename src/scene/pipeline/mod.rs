@@ -3278,44 +3278,102 @@ impl Pipeline {
         output
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upload_split_highlights(
-        &mut self, device: &wgpu::Device, queue: &wgpu::Queue,
-        wires: &[WireModel], selected: &rustc_hash::FxHashSet<document::Handle>,
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[WireModel],
+        selected: &rustc_hash::FxHashSet<document::Handle>,
         hovered: &rustc_hash::FxHashSet<document::Handle>,
-        selected_annotation: &std::sync::Arc<Vec<WireModel>>, hover_annotation: &[WireModel],
+        selected_annotation: &std::sync::Arc<Vec<WireModel>>,
+        hover_annotation: &[WireModel],
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
-        selected_tint: Option<[f32; 4]>, wire_id: u64, depth_generation: u64,
+        selected_tint: Option<[f32; 4]>,
+        wire_id: u64,
+        depth_generation: u64,
     ) {
         let tint_key = selected_tint.map(|color| color.map(f32::to_bits));
         let reusable = self.selected_highlight_gpu_cache.as_ref().is_some_and(|cache| {
-            cache.wire_id == wire_id && cache.depth_generation == depth_generation
-                && cache.tint == tint_key && cache.selected == *selected
+            cache.wire_id == wire_id
+                && cache.depth_generation == depth_generation
+                && cache.tint == tint_key
+                && cache.selected == *selected
                 && (std::sync::Arc::ptr_eq(&cache.annotation, selected_annotation)
                     || (cache.annotation.is_empty() && selected_annotation.is_empty()))
         });
         let empty = rustc_hash::FxHashSet::default();
         if !reusable {
-            self.upload_selected_wires(device, queue, wires, selected, &empty, selected_annotation, depth_map, selected_tint);
-            self.upload_text_highlight(device, queue, wires, selected, &empty, selected_annotation, depth_map, selected_tint);
+            self.upload_selected_wires(
+                device,
+                queue,
+                wires,
+                selected,
+                &empty,
+                selected_annotation,
+                depth_map,
+                selected_tint,
+            );
+            self.upload_text_highlight(
+                device,
+                queue,
+                wires,
+                selected,
+                &empty,
+                selected_annotation,
+                depth_map,
+                selected_tint,
+            );
             self.selected_highlight_gpu_cache = Some(SelectedHighlightGpuCache {
-                wire_id, depth_generation, tint: tint_key, selected: selected.clone(),
+                wire_id,
+                depth_generation,
+                tint: tint_key,
+                selected: selected.clone(),
                 annotation: std::sync::Arc::clone(selected_annotation),
-                wires: self.gpu_selected_wires.clone(), blocks: self.gpu_selected_block_wires.clone(),
-                circles: self.gpu_selected_circles.clone(), ellipses: self.gpu_selected_ellipses.clone(),
-                text: self.text_highlight_gpu.clone(), block_text: self.block_text_highlight_gpu.clone(),
+                wires: self.gpu_selected_wires.clone(),
+                blocks: self.gpu_selected_block_wires.clone(),
+                circles: self.gpu_selected_circles.clone(),
+                ellipses: self.gpu_selected_ellipses.clone(),
+                text: self.text_highlight_gpu.clone(),
+                block_text: self.block_text_highlight_gpu.clone(),
             });
         }
         let hover_only = hovered.difference(selected).copied().collect();
-        self.upload_selected_wires(device, queue, wires, &empty, &hover_only, hover_annotation, depth_map, selected_tint);
-        self.upload_text_highlight(device, queue, wires, &empty, &hover_only, hover_annotation, depth_map, selected_tint);
-        let cache = self.selected_highlight_gpu_cache.as_ref().expect("selection cache built above");
-        // Draw committed selection before the current hover, as in the combined overlay.
-        let mut append_after = cache.wires.clone(); append_after.append(&mut self.gpu_selected_wires); self.gpu_selected_wires = append_after;
-        let mut append_after = cache.blocks.clone(); append_after.append(&mut self.gpu_selected_block_wires); self.gpu_selected_block_wires = append_after;
-        let mut append_after = cache.circles.clone(); append_after.append(&mut self.gpu_selected_circles); self.gpu_selected_circles = append_after;
-        let mut append_after = cache.ellipses.clone(); append_after.append(&mut self.gpu_selected_ellipses); self.gpu_selected_ellipses = append_after;
-        let mut append_after = cache.text.clone(); append_after.append(&mut self.text_highlight_gpu); self.text_highlight_gpu = append_after;
-        let mut append_after = cache.block_text.clone(); append_after.append(&mut self.block_text_highlight_gpu); self.block_text_highlight_gpu = append_after;
+        self.upload_selected_wires(
+            device,
+            queue,
+            wires,
+            &empty,
+            &hover_only,
+            hover_annotation,
+            depth_map,
+            selected_tint,
+        );
+        self.upload_text_highlight(
+            device,
+            queue,
+            wires,
+            &empty,
+            &hover_only,
+            hover_annotation,
+            depth_map,
+            selected_tint,
+        );
+        let cache = self
+            .selected_highlight_gpu_cache
+            .as_ref()
+            .expect("selection cache built above");
+        // Draw committed selection before the current hover, as in the
+        // combined overlay.
+        fn prepend<T: Clone>(cached: &[T], live: &mut Vec<T>) {
+            live.splice(0..0, cached.iter().cloned());
+        }
+        prepend(&cache.wires, &mut self.gpu_selected_wires);
+        prepend(&cache.blocks, &mut self.gpu_selected_block_wires);
+        prepend(&cache.circles, &mut self.gpu_selected_circles);
+        prepend(&cache.ellipses, &mut self.gpu_selected_ellipses);
+        prepend(&cache.text, &mut self.text_highlight_gpu);
+        prepend(&cache.block_text, &mut self.block_text_highlight_gpu);
     }
 
     pub fn upload_selected_wires(
@@ -4316,7 +4374,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         selected_edge_wires: &[WireModel],
     ) {
         let edge_handles: rustc_hash::FxHashSet<document::Handle> = edge_wires
-            .iter().chain(selected_edge_wires)
+            .iter()
+            .chain(selected_edge_wires)
             .filter_map(|wire| wire.name.strip_prefix("mesh-edge:"))
             .filter_map(|value| value.parse::<u64>().ok())
             .map(document::Handle::new)

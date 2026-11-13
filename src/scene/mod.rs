@@ -2595,6 +2595,14 @@ pub struct CountDisplay {
     pub error_color: [f32; 4],
 }
 
+/// Selected handles, picked segments and the selected-only annotation
+/// highlight built for them.
+type AnnotationSelectedEntry = (
+    HashSet<Handle>,
+    HashMap<Handle, std::collections::BTreeSet<usize>>,
+    Arc<Vec<WireModel>>,
+);
+
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     /// View saved immediately before the latest navigation operation. ZOOM
@@ -2622,7 +2630,7 @@ pub struct Scene {
     /// invalidate normal geometry, picking, or snapping caches.
     annotation_highlight_cache: RefCell<HashMap<u64, Arc<Vec<WireModel>>>>,
     // The selected part is independent of box/rollover hover changes.
-    annotation_selected_cache: RefCell<HashMap<u64, (HashSet<Handle>, HashMap<Handle, std::collections::BTreeSet<usize>>, Arc<Vec<WireModel>>)>>,
+    annotation_selected_cache: RefCell<HashMap<u64, AnnotationSelectedEntry>>,
     /// Per wire-source `(geometry_epoch, gathered text)` of the most recent
     /// SDF-text build. When a new content id misses the cache but the journal
     /// shows no text-bearing entity changed since that epoch, the same glyphs

@@ -2479,7 +2479,13 @@ impl OpenCADStudio {
             // above. Reusing it avoids rebuilding that entire selection again.
             let selected: Vec<_> = cur_handles
                 .iter()
-                .filter_map(|&handle| self.tabs[i].scene.document.get_entity(handle).map(|entity| (handle, entity)))
+                .filter_map(|&handle| {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .map(|entity| (handle, entity))
+                })
                 .collect();
             let mut panel = match selected.len() {
                 0 => {
@@ -3878,10 +3884,14 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             // The limit is based on live entities, not raw handles. Count only
             // up to the threshold before allocating or ordering the full set.
             let over_limit = limit > 0
-                && self.tabs[i].scene.selected.iter()
+                && self.tabs[i]
+                    .scene
+                    .selected
+                    .iter()
                     .filter(|handle| self.tabs[i].scene.document.get_entity(**handle).is_some())
                     .take(limit as usize + 1)
-                    .count() > limit as usize;
+                    .count()
+                    > limit as usize;
             let selected = if over_limit {
                 Vec::new()
             } else {

@@ -1244,12 +1244,18 @@ retained_contributors={}",
                     !(previous.is_empty() && vp.annotation_context_wires.is_empty())
                         && !Arc::ptr_eq(previous, &vp.annotation_context_wires)
                 });
-            let selected_annotation_changed = inner.cached_selected_annotation_source.as_ref()
+            let selected_annotation_changed = inner
+                .cached_selected_annotation_source
+                .as_ref()
                 .map_or(!vp.selected_annotation_context_wires.is_empty(), |previous| {
                     !(previous.is_empty() && vp.selected_annotation_context_wires.is_empty())
                         && !Arc::ptr_eq(previous, &vp.selected_annotation_context_wires)
                 });
-            if selection_changed || highlighted_geometry_changed || annotation_context_changed || selected_annotation_changed {
+            if selection_changed
+                || highlighted_geometry_changed
+                || annotation_context_changed
+                || selected_annotation_changed
+            {
                 inner.prepare_highlight_wire_cache(vp.wire_content_id, vp.draw_depth_generation);
                 let sel_color = if self.selection_effect {
                     Some(self.selection_color)
@@ -1257,13 +1263,22 @@ retained_contributors={}",
                     None
                 };
                 inner.upload_split_highlights(
-                    device, queue, &vp_wires[..], &vp.selected_handles, &vp.hover_handles,
-                    &vp.selected_annotation_context_wires, &vp.annotation_context_wires,
-                    &draw_depths, sel_color, vp.wire_content_id, vp.draw_depth_generation,
+                    device,
+                    queue,
+                    &vp_wires[..],
+                    &vp.selected_handles,
+                    &vp.hover_handles,
+                    &vp.selected_annotation_context_wires,
+                    &vp.annotation_context_wires,
+                    &draw_depths,
+                    sel_color,
+                    vp.wire_content_id,
+                    vp.draw_depth_generation,
                 );
                 inner.cached_annotation_highlight_source =
                     Some(Arc::clone(&vp.annotation_context_wires));
-                inner.cached_selected_annotation_source = Some(Arc::clone(&vp.selected_annotation_context_wires));
+                inner.cached_selected_annotation_source =
+                    Some(Arc::clone(&vp.selected_annotation_context_wires));
             }
             // Advance the content id even when an unrelated entity patch kept
             // the existing overlay valid, so future deltas compare to the
@@ -1298,7 +1313,10 @@ retained_contributors={}",
                 Arc::as_ptr(&vp.meshes) as usize as u64,
                 vp.selection_generation,
             );
-            if hl_key != inner.cached_highlight_key || selected_annotation_changed || annotation_context_changed {
+            if hl_key != inner.cached_highlight_key
+                || selected_annotation_changed
+                || annotation_context_changed
+            {
                 inner.update_mesh_highlight(
                     &vp.selected_handles,
                     &vp.hover_handles,
@@ -4469,7 +4487,11 @@ impl Scene {
         verts
     }
 
-    fn annotation_context_highlight_wires(&self, inst: &ViewportInstance, selected_part: bool) -> Arc<Vec<WireModel>> {
+    fn annotation_context_highlight_wires(
+        &self,
+        inst: &ViewportInstance,
+        selected_part: bool,
+    ) -> Arc<Vec<WireModel>> {
         if self.selected.is_empty()
             && self.hover_highlight.is_none()
             && self.constraint_hover_highlights.is_empty()
@@ -4523,7 +4545,9 @@ impl Scene {
         let mut mix =
             |value: u64| key = key.rotate_left(17) ^ value.wrapping_mul(0x9E37_79B9_7F4A_7C15);
         mix(self.geometry_epoch);
-        if !selected_part { mix(self.selection_generation); }
+        if !selected_part {
+            mix(self.selection_generation);
+        }
         mix(target_block.value());
         mix(annotation_scale_handle.map_or(0, |handle| handle.value()));
         mix(annotation_scale.to_bits() as u64);
@@ -4542,7 +4566,9 @@ impl Scene {
         mix(frozen_sig);
 
         if selected_part {
-            if let Some((selected, segments, wires)) = self.annotation_selected_cache.borrow().get(&key) {
+            if let Some((selected, segments, wires)) =
+                self.annotation_selected_cache.borrow().get(&key)
+            {
                 if selected == &self.selected && segments == &self.sub_segments {
                     return Arc::clone(wires);
                 }
@@ -4554,9 +4580,11 @@ impl Scene {
         let mut highlighted: Vec<(Handle, bool)> = if selected_part {
             self.selected.iter().copied().map(|handle| (handle, true)).collect()
         } else {
-            self.hover_highlight_handles().into_iter()
+            self.hover_highlight_handles()
+                .into_iter()
                 .filter(|handle| !self.selected.contains(handle))
-                .map(|handle| (handle, false)).collect()
+                .map(|handle| (handle, false))
+                .collect()
         };
         highlighted.sort_unstable_by_key(|(handle, _)| handle.value());
 
@@ -4737,11 +4765,22 @@ impl Scene {
         let wires = Arc::new(wires);
         if selected_part {
             let mut cache = self.annotation_selected_cache.borrow_mut();
-            if cache.len() > 16 { cache.clear(); }
-            cache.insert(key, (self.selected.clone(), self.sub_segments.clone(), Arc::clone(&wires)));
+            if cache.len() > 16 {
+                cache.clear();
+            }
+            cache.insert(
+                key,
+                (
+                    self.selected.clone(),
+                    self.sub_segments.clone(),
+                    Arc::clone(&wires),
+                ),
+            );
         } else {
             let mut cache = self.annotation_highlight_cache.borrow_mut();
-            if cache.len() > 16 { cache.clear(); }
+            if cache.len() > 16 {
+                cache.clear();
+            }
             cache.insert(key, Arc::clone(&wires));
         }
         wires
@@ -5124,8 +5163,10 @@ impl Scene {
                 inst.paper_sheet
             };
         let (selected_annotation_context_wires, annotation_context_wires) = if show_live_overlay {
-            (self.annotation_context_highlight_wires(inst, true),
-             self.annotation_context_highlight_wires(inst, false))
+            (
+                self.annotation_context_highlight_wires(inst, true),
+                self.annotation_context_highlight_wires(inst, false),
+            )
         } else {
             (Arc::new(Vec::new()), Arc::new(Vec::new()))
         };

@@ -55,10 +55,9 @@ pub fn view<'a>(
         .spacing(12),
         row![
             text(crate::tr!("anno-scale-prompt", "scale")).size(12),
-            pick_list(state.scales.clone(), Some(state.picked.clone()), |scale| {
-                msg(AnnoScaleMsg::Pick(scale))
-            })
-            .text_size(12)
+            pick_list(Some(state.picked.clone()), state.scales.clone(), |scale| scale.clone())
+                .on_select(|scale| msg(AnnoScaleMsg::Pick(scale)))
+                .text_size(12)
             .width(Fill),
         ]
         .spacing(10)

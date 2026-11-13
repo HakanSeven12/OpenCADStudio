@@ -4470,7 +4470,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 crate::modules::annotate::data_link::link_cells(table, link, 1);
             }
             const PREFIX: &str = "__OPENCAD_LINK_PENDING__";
-            if let Some(path) = table.name.strip_prefix(PREFIX).map(str::to_string) {
+            if let Some(pending) = table.name.strip_prefix(PREFIX).map(str::to_string) {
+                // A file; or a file, a sheet of it and the cells of the
+                // sheet, each on a line (`DataLinkPlaceCommand::of_cells`).
+                let mut lines = pending.split('\n');
+                let path = lines.next().unwrap_or_default().to_string();
+                let sheet = lines.next().unwrap_or_default();
+                let cells = lines.next().filter(|cells| !cells.is_empty());
                 let document = &mut self.tabs[i].scene.document;
                 let stem = std::path::Path::new(&path)
                     .file_stem()
@@ -4493,9 +4499,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     &crate::app::annotation_data::SpreadsheetLinkSettings {
                         path: &path,
                         stored_path: &path,
-                        sheet: "",
-                        kind: crate::ui::window::annotation_data::LinkRange::EntireSheet,
-                        range: None,
+                        sheet,
+                        kind: match cells {
+                            Some(_) => crate::ui::window::annotation_data::LinkRange::CellRange,
+                            None => crate::ui::window::annotation_data::LinkRange::EntireSheet,
+                        },
+                        range: cells,
                         path_option: 1,
                         allow_write: false,
                         use_source_formatting: true,

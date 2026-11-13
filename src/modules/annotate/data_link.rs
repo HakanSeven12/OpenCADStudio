@@ -59,6 +59,13 @@ impl DataLinkPlaceCommand {
         }
     }
 
+    /// Place a table of `cells` of a sheet of a file; on placement it is
+    /// linked to those cells, and DATALINKUPDATE refreshes it from them.
+    pub fn of_cells(table: Table, file: &str, sheet: &str, cells: &str) -> Self {
+        // A path holds no line ends, so they keep the three apart.
+        Self::new(table, &format!("{file}\n{sheet}\n{cells}"))
+    }
+
     /// Place a table that references a data-link object already stored in the
     /// drawing. Every populated cell is locked and points at the same link so
     /// update and save/reopen keep one stable relationship.

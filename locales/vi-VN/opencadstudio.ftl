@@ -9440,6 +9440,11 @@ mleader-style =
     .available-linetypes = Kiểu đường có sẵn
     .program-linetypes = Kiểu đường của chương trình
     .already-loaded = { $name } (đã tải)
+    .reload-ask = Một số kiểu đường đã chọn đã có trong bản vẽ. Đọc lại chúng từ tệp?
+    .reload-this = Tải lại { $name }
+    .reload-all = Tải lại tất cả kiểu đường đã chọn
+    .reload-skip = Giữ nguyên { $name }
+    .reload-skip-rest = Giữ nguyên tất cả các kiểu còn lại
 
 dim-style =
     .manager-title = Dimension Style Manager

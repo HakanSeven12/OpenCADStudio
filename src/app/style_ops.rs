@@ -361,6 +361,7 @@ impl OpenCADStudio {
             StyleKind::MLeader => {
                 let mut s = MultiLeaderStyle::new(name);
                 s.description = name.to_string();
+                s.align_space = s.text_height;
                 s.handle = handle;
                 doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
             }
@@ -449,8 +450,9 @@ impl OpenCADStudio {
                     ObjectType::MultiLeaderStyle(s) => Some((s.name.as_str(), s.clone())),
                     _ => None,
                 }) {
+                    // The copy keeps the description of the style it
+                    // starts from.
                     s.name = name.to_string();
-                    s.description = name.to_string();
                     s.handle = handle;
                     doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
                     return true;

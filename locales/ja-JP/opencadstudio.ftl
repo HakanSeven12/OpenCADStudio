@@ -9421,6 +9421,11 @@ mleader-style =
     .available-linetypes = 使用可能な線種
     .program-linetypes = プログラムの線種
     .already-loaded = { $name }（ロード済み）
+    .reload-ask = チェックした線種の一部は既に図面にあります。ファイルから読み直しますか?
+    .reload-this = { $name } を再ロード
+    .reload-all = チェックしたすべての線種を再ロード
+    .reload-skip = { $name } をそのままにする
+    .reload-skip-rest = 残りをすべてそのままにする
 
 dim-style =
     .manager-title = Dimension Style Manager

@@ -9443,6 +9443,11 @@ mleader-style =
     .available-linetypes = Διαθέσιμοι τύποι γραμμής
     .program-linetypes = Τύποι γραμμής του προγράμματος
     .already-loaded = { $name } (φορτωμένος)
+    .reload-ask = Ορισμένοι από τους επιλεγμένους τύπους γραμμής υπάρχουν ήδη στο σχέδιο. Να διαβαστούν ξανά από το αρχείο;
+    .reload-this = Επαναφόρτωση { $name }
+    .reload-all = Επαναφόρτωση όλων των επιλεγμένων τύπων γραμμής
+    .reload-skip = Διατήρηση του { $name } ως έχει
+    .reload-skip-rest = Διατήρηση όλων των υπολοίπων ως έχουν
 
 dim-style =
     .manager-title = Dimension Style Manager

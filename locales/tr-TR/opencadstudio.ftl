@@ -9363,6 +9363,11 @@ mleader-style =
     .available-linetypes = Kullanılabilir çizgi türleri
     .program-linetypes = Program çizgi türleri
     .already-loaded = { $name } (yüklü)
+    .reload-ask = İşaretli çizgi türlerinden bazıları çizimde zaten var. Dosyadan yeniden okunsunlar mı?
+    .reload-this = { $name } çizgi türünü yeniden yükle
+    .reload-all = İşaretli tüm çizgi türlerini yeniden yükle
+    .reload-skip = { $name } çizgi türü olduğu gibi kalsın
+    .reload-skip-rest = Kalanların hepsi olduğu gibi kalsın
 
 dim-style =
     .manager-title = Ölçü Stili Yöneticisi

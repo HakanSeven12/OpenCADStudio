@@ -9421,6 +9421,11 @@ mleader-style =
     .available-linetypes = Elérhető vonaltípusok
     .program-linetypes = A program vonaltípusai
     .already-loaded = { $name } (betöltve)
+    .reload-ask = A bejelölt vonaltípusok közül néhány már szerepel a rajzban. Újra beolvassa őket a fájlból?
+    .reload-this = { $name } újratöltése
+    .reload-all = Az összes bejelölt vonaltípus újratöltése
+    .reload-skip = { $name } megtartása változatlanul
+    .reload-skip-rest = Az összes többi megtartása változatlanul
 
 dim-style =
     .manager-title = Dimension Style Manager

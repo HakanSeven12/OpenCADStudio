@@ -9447,6 +9447,11 @@ mleader-style =
     .available-linetypes = Доступные типы линий
     .program-linetypes = Типы линий программы
     .already-loaded = { $name } (загружен)
+    .reload-ask = Некоторые из отмеченных типов линий уже есть в чертеже. Прочитать их заново из файла?
+    .reload-this = Перезагрузить { $name }
+    .reload-all = Перезагрузить все отмеченные типы линий
+    .reload-skip = Оставить { $name } без изменений
+    .reload-skip-rest = Оставить все остальные без изменений
 
 dim-style =
     .manager-title = Dimension Style Manager

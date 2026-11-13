@@ -4094,22 +4094,27 @@ impl Scene {
                     s.landing_gap = 2.0;
                     s.landing_distance = 8.0;
                     s.break_gap_size = 3.75;
-                    // The rest as the reference's Standard: its name as the
-                    // description, a ByBlock linetype, leader drawn first,
-                    // underlined top line on the right, centred top and
-                    // bottom attachments and the leader extended to the text.
+                    // The hidden text alignment spacing follows the text
+                    // height, as in the metric template.
+                    s.align_space = 4.0;
+                    // The rest as the metric template's Standard: its name as
+                    // the description, a ByBlock linetype, leader drawn first,
+                    // the middle of the top line on both sides, centred top
+                    // and bottom attachments, the leader not extended to the
+                    // text.
                     s.description = s.name.clone();
                     if by_block_linetype.is_some() {
                         s.line_type_handle = by_block_linetype;
                     }
                     s.multileader_draw_order =
                         document::objects::MultiLeaderDrawOrderType::LeaderFirst;
+                    s.text_left_attachment = document::objects::TextAttachmentType::MiddleOfTopLine;
                     s.text_right_attachment =
-                        document::objects::TextAttachmentType::BottomOfTopLineUnderlineBottomLine;
+                        document::objects::TextAttachmentType::MiddleOfTopLine;
                     s.text_top_attachment = document::objects::TextAttachmentType::CenterOfText;
                     s.text_bottom_attachment =
                         document::objects::TextAttachmentType::CenterOfText;
-                    s.unknown_flag_298 = true;
+                    s.unknown_flag_298 = false;
                     s.enable_block_scale = true;
                     s.enable_block_rotation = true;
                 }

@@ -9440,6 +9440,11 @@ mleader-style =
     .available-linetypes = Käytettävissä olevat viivatyypit
     .program-linetypes = Ohjelman viivatyypit
     .already-loaded = { $name } (ladattu)
+    .reload-ask = Osa valituista viivatyypeistä on jo piirustuksessa. Luetaanko ne uudelleen tiedostosta?
+    .reload-this = Lataa { $name } uudelleen
+    .reload-all = Lataa kaikki valitut viivatyypit uudelleen
+    .reload-skip = Pidä { $name } ennallaan
+    .reload-skip-rest = Pidä kaikki jäljellä olevat ennallaan
 
 dim-style =
     .manager-title = Dimension Style Manager

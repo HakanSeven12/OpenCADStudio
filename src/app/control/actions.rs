@@ -2987,6 +2987,7 @@ impl OpenCADStudio {
             // "pick=<name>", "pick_ok", "pick_cancel", "pick_load",
             // "load_file", "load_path=<.lin path>", "load_toggle=<linetype>",
             // "load_ok", "load_cancel",
+            // "reload=this|all|skip|skip_rest|cancel",
             // "default_text",
             // "text_styles", "ok", "cancel".
             "mleader_style_dialog" => {
@@ -3110,6 +3111,22 @@ impl OpenCADStudio {
                     "load_toggle" => dlg(M::LoadToggle(value.to_string())),
                     "load_ok" => dlg(M::LoadOk),
                     "load_cancel" => dlg(M::LoadCancel),
+                    "reload" => {
+                        use crate::ui::style::mleaderstyle::Reload;
+                        dlg(M::ReloadAnswer(match value {
+                            "this" => Reload::This,
+                            "all" => Reload::All,
+                            "skip" => Reload::Skip,
+                            "skip_rest" => Reload::SkipRest,
+                            "cancel" => Reload::Cancel,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "reload is this, all, skip, skip_rest or cancel",
+                                ))
+                            }
+                        }))
+                    }
                     "default_text" => dlg(M::DefaultText),
                     "text_styles" => dlg(M::TextStyles),
                     "ok" => dlg(M::Ok),

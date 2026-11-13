@@ -9441,6 +9441,11 @@ mleader-style =
     .available-linetypes = Verfügbare Linientypen
     .program-linetypes = Linientypen des Programms
     .already-loaded = { $name } (geladen)
+    .reload-ask = Einige der markierten Linientypen sind bereits in der Zeichnung. Sollen sie erneut aus der Datei gelesen werden?
+    .reload-this = { $name } neu laden
+    .reload-all = Alle markierten Linientypen neu laden
+    .reload-skip = { $name } unverändert lassen
+    .reload-skip-rest = Alle übrigen unverändert lassen
 
 dim-style =
     .manager-title = Dimension Style Manager

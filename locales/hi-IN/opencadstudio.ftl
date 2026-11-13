@@ -9431,6 +9431,11 @@ mleader-style =
     .available-linetypes = उपलब्ध रेखा प्रकार
     .program-linetypes = प्रोग्राम के रेखा प्रकार
     .already-loaded = { $name } (लोड किया गया)
+    .reload-ask = चिह्नित रेखा प्रकारों में से कुछ ड्राइंग में पहले से हैं। क्या उन्हें फ़ाइल से फिर से पढ़ा जाए?
+    .reload-this = { $name } फिर से लोड करें
+    .reload-all = सभी चिह्नित रेखा प्रकार फिर से लोड करें
+    .reload-skip = { $name } जैसा है वैसा रखें
+    .reload-skip-rest = शेष सभी को जैसा है वैसा रखें
 
 dim-style =
     .manager-title = Dimension Style Manager

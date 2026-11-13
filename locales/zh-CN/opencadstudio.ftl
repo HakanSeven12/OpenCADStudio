@@ -9416,6 +9416,11 @@ mleader-style =
     .available-linetypes = 可用线型
     .program-linetypes = 程序线型
     .already-loaded = { $name }（已加载）
+    .reload-ask = 部分勾选的线型已存在于图形中。是否从文件重新读取?
+    .reload-this = 重新加载 { $name }
+    .reload-all = 重新加载所有勾选的线型
+    .reload-skip = 保留 { $name } 不变
+    .reload-skip-rest = 保留其余所有线型不变
 
 dim-style =
     .manager-title = Dimension Style Manager

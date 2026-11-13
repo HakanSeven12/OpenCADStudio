@@ -355,6 +355,7 @@ impl super::OpenCADStudio {
             {
                 self.tabs[i].scene.document.header.text_height = paper_height;
             }
+            let style_name = t.style.clone();
             let handle = self.commit_new_text(plane.place_entity(EntityType::Text(t)));
             if annotative {
                 let scale = self.tabs[i].scene.creation_annotation_scale_handle();
@@ -363,6 +364,11 @@ impl super::OpenCADStudio {
                         &mut self.tabs[i].scene.document,
                         handle,
                         scale,
+                    );
+                    crate::scene::annotative::apply_style_orientation(
+                        &mut self.tabs[i].scene.document,
+                        handle,
+                        &style_name,
                     );
                     self.tabs[i]
                         .scene

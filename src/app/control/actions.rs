@@ -174,6 +174,7 @@ pub(super) const NAMES: &[&str] = &[
     "object_scale_dialog",
     "mleader_style_dialog",
     "dimstyle_dialog",
+    "text_style_dialog",
     "scale_list_dialog",
     "spell_dialog",
     "table_cell_tab",
@@ -3162,6 +3163,82 @@ impl OpenCADStudio {
             // "load_cancel", "reload=this|all|skip|skip_rest|cancel",
             // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
+            // The Text Style window, one step per call: "select=<name>",
+            // "context=<name>" (right click),
+            // "in_use=0|1", "set_current", "new", "name=<text>", "new_ok",
+            // "new_cancel", "notice_close", "delete", "delete_yes",
+            // "delete_no", "modified_yes", "modified_no", "rename=<old>:<new>",
+            // "font=<SHX file or TrueType family>", "big_font=<SHX file>",
+            // "toggle=backward|upside_down|vertical|annotative|orientation|
+            // use_big_font", "height|width|oblique=<text>", "apply" or
+            // "close".
+            "text_style_dialog" => {
+                use crate::ui::font_picker::{FontChoice, FontPickerEvent as F};
+                use crate::ui::style::textstyle::CardMsg as C;
+                if !self.focus_dialog(crate::app::ModalKind::TextStyle) {
+                    return Err(failure("no_dialog", "The Text Style window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                const TOGGLES: &[&str] = &[
+                    "backward",
+                    "upside_down",
+                    "vertical",
+                    "annotative",
+                    "orientation",
+                    "use_big_font",
+                ];
+                match key {
+                    "select" => Message::TextStyleDialogSelect(value.to_string()),
+                    "context" => Message::TextStyleContext(value.to_string()),
+                    "in_use" => Message::TextStyleInUseFilter(value == "1"),
+                    "set_current" => Message::TextStyleDialogSetCurrent,
+                    "new" => Message::TextStyleDialogNew,
+                    "name" => Message::TextStyleCard(C::NewName(value.to_string())),
+                    "new_ok" => Message::TextStyleCard(C::NewOk),
+                    "new_cancel" => Message::TextStyleCard(C::NewCancel),
+                    "notice_close" => Message::TextStyleCard(C::NoticeClose),
+                    "delete" => Message::TextStyleDialogDelete,
+                    "delete_yes" => Message::TextStyleCard(C::DeleteAnswer(true)),
+                    "delete_no" => Message::TextStyleCard(C::DeleteAnswer(false)),
+                    "modified_yes" => Message::TextStyleCard(C::ModifiedAnswer(true)),
+                    "modified_no" => Message::TextStyleCard(C::ModifiedAnswer(false)),
+                    "rename" => {
+                        let (old, new) = value
+                            .split_once(':')
+                            .ok_or_else(|| failure("invalid_value", spec))?;
+                        let _ = self.update(Message::StyleRenameStart(
+                            crate::app::StyleKind::Text,
+                            old.to_string(),
+                        ));
+                        if self.style_rename.is_some() {
+                            let _ = self.update(Message::StyleRenameEdit(new.to_string()));
+                            Message::StyleRenameCommit(crate::app::StyleKind::Text)
+                        } else {
+                            Message::TextStyleDialogSelect(old.to_string())
+                        }
+                    }
+                    "font" => Message::TextStyleFont(F::Pick(FontChoice::of_name(value))),
+                    "big_font" => Message::TextStyleBigFont(F::Pick(FontChoice::Stroke(
+                        value.to_string(),
+                    ))),
+                    "toggle" => match TOGGLES.iter().find(|name| **name == value) {
+                        Some(name) => Message::TextStyleToggle(name),
+                        None => return Err(failure("invalid_value", spec)),
+                    },
+                    "height" | "width" | "oblique" => Message::TextStyleEdit {
+                        field: match key {
+                            "height" => "height",
+                            "width" => "width",
+                            _ => "oblique",
+                        },
+                        value: value.to_string(),
+                    },
+                    "apply" => Message::TextStyleApply,
+                    "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
             "dimstyle_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::DimStyle) {
                     return Err(failure(

@@ -2098,6 +2098,10 @@ pub(super) struct OpenCADStudio {
     /// Working copy of the selected style; written into the document before
     /// any list operation and on Apply.
     textstyle_draft: text_style_draft::TextStyleDraft,
+    /// A question or notice over the text style window.
+    textstyle_card: Option<crate::ui::style::textstyle::Card>,
+    /// The text style whose actions (right click) show under it.
+    textstyle_context: Option<String>,
     textstyle_font_picker: crate::ui::font_picker::FontPickerState,
     textstyle_bigfont_picker: crate::ui::font_picker::FontPickerState,
     /// The texts of every text style (ASCII-lowercase name), for "Where
@@ -5716,6 +5720,11 @@ pub enum Message {
     },
     /// Commit edits to the selected text style.
     TextStyleApply,
+    /// The text style window's cards: New, a refused name, Delete, a style
+    /// in use, unsaved changes.
+    TextStyleCard(crate::ui::style::textstyle::CardMsg),
+    /// A right click on a text style: select it and show its actions.
+    TextStyleContext(String),
     /// The font picker: open, search or pick a stroke or TrueType font.
     TextStyleFont(crate::ui::font_picker::FontPickerEvent),
     /// The big font picker: open, search or pick a double-byte SHX font.
@@ -6726,6 +6735,8 @@ impl OpenCADStudio {
             textstyle_sample: String::new(),
             textstyle_compare: String::new(),
             textstyle_draft: Default::default(),
+            textstyle_card: None,
+            textstyle_context: None,
             textstyle_font_picker: Default::default(),
             textstyle_bigfont_picker: Default::default(),
             textstyle_users: Default::default(),

@@ -6,6 +6,13 @@
 
 use super::*;
 use crate::command::{PromptAnswers, PromptFlow, PromptStep, ScriptPromptCommand};
+
+/// A translated line without Fluent's isolation marks around its values.
+macro_rules! trp {
+    ($($arg:tt)*) => {
+        crate::i18n::plain(crate::tr!($($arg)*))
+    };
+}
 use crate::io::xref_model::wildcard_match;
 
 /// Run a flow written as straight-line prompts (`?` returns the step).
@@ -349,88 +356,172 @@ fn purge_flow() -> PromptFlow {
 #[derive(Clone)]
 struct StyleDefaults {
     name: String,
+    /// The font as the font prompt offers it: the TrueType family, or the
+    /// SHX file (with its big font after a comma).
     font: String,
     height: f64,
     width: f64,
     oblique: f64,
+    annotative: bool,
+    orientation: bool,
+    /// The font is a TrueType family.
+    true_type: bool,
 }
 
-fn style_flow(current: String, styles: Vec<StyleDefaults>) -> PromptFlow {
+/// What -STYLE knows before it asks: the styles, the fonts it can find and
+/// the drawing's precisions.
+#[derive(Clone)]
+struct StyleFlowContext {
+    current: String,
+    styles: Vec<StyleDefaults>,
+    /// The fonts a typed name is looked up in (lower case): stroke font
+    /// stems and TrueType families.
+    fonts: Vec<String>,
+    angle_places: usize,
+}
+
+/// `name` names a font -STYLE can use: a known stroke font (with or without
+/// `.shx`, a big font after a comma) or an installed TrueType family or file.
+fn style_font_available(fonts: &[String], name: &str) -> bool {
+    let font = name.split(',').next().unwrap_or("").trim().to_ascii_lowercase();
+    let stem = font
+        .strip_suffix(".shx")
+        .or_else(|| font.strip_suffix(".ttf"))
+        .unwrap_or(&font);
+    !stem.is_empty() && fonts.iter().any(|known| known == stem || *known == font)
+}
+
+/// A Yes/No answer whose refusal is "Yes or No, please."
+fn style_yes_no(q: &mut PromptAnswers, prompt: String, default: bool) -> Result<bool, PromptStep> {
+    match q.yes_no(prompt, default) {
+        Err(PromptStep::Retry(_)) => Err(PromptStep::Retry("Yes or No, please.")),
+        other => other,
+    }
+}
+
+fn style_flow(context: StyleFlowContext) -> PromptFlow {
     flow(move |q| {
+        let current = &context.current;
         let name = q.text(
-            crate::t!(
-                "-STYLE  Enter name of text style or [?] <%{name}>:",
-                name = current
-            )
-            .into_owned(),
+            trp!("text-style", "cmd-name", name = current.clone()),
             Some(current.clone()),
         )?;
         if name == "?" {
-            return Ok(PromptStep::Run("STYLE LIST".into()));
+            let pattern = q.text(trp!("text-style", "cmd-list"), Some("*".into()))?;
+            return run("-STYLE", &["?", &pattern]);
         }
-        let base = styles
+        let existing = context
+            .styles
             .iter()
             .find(|style| style.name.eq_ignore_ascii_case(&name))
-            .or_else(|| styles.iter().find(|style| style.name == current))
-            .cloned()
-            .unwrap_or(StyleDefaults {
-                name: String::new(),
-                font: "txt.shx".into(),
-                height: 0.0,
-                width: 1.0,
-                oblique: 0.0,
-            });
+            .cloned();
+        let base = existing.clone().unwrap_or(StyleDefaults {
+            name: String::new(),
+            font: "txt".into(),
+            height: 0.0,
+            width: 1.0,
+            oblique: 0.0,
+            annotative: false,
+            orientation: false,
+            true_type: false,
+        });
+        // The name's answer: a new style, or an existing one with its
+        // TrueType face named.
+        let info = match &existing {
+            None => trp!("text-style", "info-new"),
+            Some(style) if style.true_type => format!(
+                "{}{}",
+                trp!("text-style", "info-existing"),
+                trp!("text-style", "info-full-font", font = style.font.clone())
+            ),
+            Some(_) => trp!("text-style", "info-existing"),
+        };
         let font = q.text(
-            crate::t!(
-                "-STYLE  Specify full font name or font filename (TTF or SHX) <%{font}>:",
-                font = base.font
-            )
-            .into_owned(),
+            format!(
+                "{info}
+{}",
+                trp!("text-style", "cmd-font", font = base.font.clone())
+            ),
             Some(base.font.clone()),
         )?;
-        let height = q.number(
-            crate::t!(
-                "-STYLE  Specify height of text <%{value}>:",
-                value = base.height
-            )
-            .into_owned(),
-            base.height,
+        if !style_font_available(&context.fonts, &font) {
+            return run("-STYLE", &["FONT_MISSING"]);
+        }
+        // Annotative is an option of the height prompt, which is asked again
+        // after it.
+        let mut annotative = base.annotative;
+        let mut orientation = base.orientation;
+        let height = loop {
+            let answer = q.text(
+                trp!("text-style", "cmd-height", value = format!("{:.4}", base.height)),
+                Some(base.height.to_string()),
+            )?;
+            let answer = answer.trim();
+            if answer.eq_ignore_ascii_case("A") || answer.eq_ignore_ascii_case("ANNOTATIVE") {
+                annotative = style_yes_no(q, trp!("text-style", "cmd-annotative"), true)?;
+                orientation = annotative
+                    && style_yes_no(q, trp!("text-style", "cmd-orientation"), false)?;
+                continue;
+            }
+            match answer.parse::<f64>().ok().filter(|v| v.is_finite()) {
+                None => {
+                    return Err(PromptStep::Retry(
+                        "Requires numeric distance, two points, or option keyword.",
+                    ))
+                }
+                Some(value) if value < 0.0 => {
+                    return Err(PromptStep::Retry("Value must be positive."))
+                }
+                Some(value) => break value,
+            }
+        };
+        let width = q.text(
+            trp!("text-style", "cmd-width", value = format!("{:.4}", base.width)),
+            Some(base.width.to_string()),
         )?;
-        let width = q.number(
-            crate::t!(
-                "-STYLE  Specify width factor <%{value}>:",
-                value = base.width
-            )
-            .into_owned(),
-            base.width,
+        let width = match width.trim().parse::<f64>().ok().filter(|v| v.is_finite()) {
+            None => return Err(PromptStep::Retry("Requires numeric value.")),
+            Some(value) if value <= 0.0 => {
+                return Err(PromptStep::Retry("Value must be positive and nonzero."))
+            }
+            Some(value) if !(0.01..=100.0).contains(&value) => {
+                return Err(PromptStep::Retry("Width factor out of range (0.01 to 100.0)."))
+            }
+            Some(value) => value,
+        };
+        let oblique = q.text(
+            trp!(
+                "text-style",
+                "cmd-oblique",
+                value = format!("{:.*}", context.angle_places, base.oblique)
+            ),
+            Some(base.oblique.to_string()),
         )?;
-        let oblique = q.number(
-            crate::t!(
-                "-STYLE  Specify obliquing angle <%{value}>:",
-                value = base.oblique
-            )
-            .into_owned(),
-            base.oblique,
-        )?;
-        let backwards = q.yes_no(
+        let oblique = match oblique.trim().parse::<f64>().ok().filter(|v| v.is_finite()) {
+            None => return Err(PromptStep::Retry("Requires valid numeric angle or two points.")),
+            Some(value) if value.abs() > 85.0 => {
+                return Err(PromptStep::Retry("Obliquing angle too large."))
+            }
+            Some(value) => value,
+        };
+        let backwards = style_yes_no(
+            q,
             crate::t!("-STYLE  Display text backwards? [Yes/No] <No>:").into_owned(),
             false,
         )?;
-        let upside_down = q.yes_no(
+        let upside_down = style_yes_no(
+            q,
             crate::t!("-STYLE  Display text upside-down? [Yes/No] <No>:").into_owned(),
             false,
         )?;
         // Only shape fonts can stand vertically, so only they ask.
         let vertical = shape_font(&font)
-            && q.yes_no(
-                crate::t!("-STYLE  Vertically? [Yes/No] <No>:").into_owned(),
-                false,
-            )?;
+            && style_yes_no(q, trp!("text-style", "cmd-vertical"), false)?;
         let flag = |on: bool| if on { "Y" } else { "N" };
         run(
             "-STYLE",
             &[
-                &name,
+                existing.as_ref().map_or(name.trim(), |style| style.name.as_str()),
                 &font,
                 &height.to_string(),
                 &width.to_string(),
@@ -438,16 +529,19 @@ fn style_flow(current: String, styles: Vec<StyleDefaults>) -> PromptFlow {
                 flag(backwards),
                 flag(upside_down),
                 flag(vertical),
+                flag(annotative),
+                flag(orientation),
             ],
         )
     })
 }
 
-/// A font named without an extension is a shape font (`romans` →
-/// `romans.shx`), as a reference script expects.
 fn shape_font(font: &str) -> bool {
-    let lower = font.to_ascii_lowercase();
-    lower.ends_with(".shx") || !lower.contains('.')
+    let font = font.split(',').next().unwrap_or("").trim();
+    matches!(
+        crate::ui::font_picker::FontChoice::of_name(font),
+        crate::ui::font_picker::FontChoice::Stroke(_)
+    ) || (!font.contains('.') && !crate::scene::text::sysfont::has_family(font))
 }
 
 fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
@@ -993,20 +1087,48 @@ impl OpenCADStudio {
                     .filter(|style| !style.name.is_empty())
                     .map(|style| StyleDefaults {
                         name: style.name.clone(),
-                        font: if style.font_file.is_empty() {
-                            style.true_type_font.clone()
-                        } else {
+                        font: if !style.true_type_font.trim().is_empty() {
+                            style.true_type_font.trim().to_string()
+                        } else if style.big_font_file.trim().is_empty() {
                             style.font_file.clone()
+                        } else {
+                            format!("{},{}", style.font_file, style.big_font_file)
                         },
                         height: style.height,
                         width: style.width_factor,
                         oblique: style.oblique_angle.to_degrees(),
+                        annotative: style.annotative,
+                        true_type: !style.true_type_font.trim().is_empty(),
+                        orientation: crate::scene::annotative::text_style_orientation(
+                            doc,
+                            style.handle,
+                        ),
                     })
                     .collect();
-                let current = doc.header.current_text_style_name.clone();
+                let fonts = crate::ui::font_picker::catalogue(doc, false)
+                    .into_iter()
+                    .filter(|entry| entry.missing.is_none())
+                    .map(|entry| match entry.choice {
+                        crate::ui::font_picker::FontChoice::Stroke(file) => {
+                            let file = file.to_ascii_lowercase();
+                            file.strip_suffix(".shx").unwrap_or(&file).to_string()
+                        }
+                        crate::ui::font_picker::FontChoice::TrueType(family) => {
+                            family.to_ascii_lowercase()
+                        }
+                        crate::ui::font_picker::FontChoice::StyleDefault => String::new(),
+                    })
+                    .filter(|name| !name.is_empty())
+                    .collect();
+                let context = StyleFlowContext {
+                    current: doc.header.current_text_style_name.clone(),
+                    styles,
+                    fonts,
+                    angle_places: doc.header.angular_unit_precision.clamp(0, 8) as usize,
+                };
                 start(
                     self,
-                    ScriptPromptCommand::new("-STYLE", style_flow(current, styles)),
+                    ScriptPromptCommand::new("-STYLE", style_flow(context)),
                 );
             }
             "-STYLE" => self.dash_style(i, &args),
@@ -1579,8 +1701,21 @@ impl OpenCADStudio {
     }
 
     fn dash_style(&mut self, i: usize, args: &[String]) {
-        let [name, font, height, width, oblique, backwards, upside_down, vertical] =
-            std::array::from_fn(|n| args.get(n).cloned().unwrap_or_default());
+        let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
+        match arg(0).as_str() {
+            "?" => {
+                self.list_text_styles(i, &arg(1), arg(2).parse().unwrap_or(0));
+                return;
+            }
+            "FONT_MISSING" => {
+                self.command_line
+                    .push_output(&trp!("text-style", "font-missing"));
+                return;
+            }
+            _ => {}
+        }
+        let [name, font, height, width, oblique, backwards, upside_down, vertical, annotative, orientation] =
+            std::array::from_fn(|n| arg(n));
         let undo = self.begin_text_style_undo(i, "STYLE", std::slice::from_ref(&name));
         let doc = &mut self.tabs[i].scene.document;
         if doc.text_styles.get(&name).is_none() {
@@ -1588,28 +1723,138 @@ impl OpenCADStudio {
             style.handle = doc.allocate_handle();
             let _ = doc.text_styles.add(style);
         }
+        let mut handle = document::Handle::NULL;
         if let Some(style) = doc.text_styles.get_mut(&name) {
-            let font = if font.contains('.') {
-                font
-            } else {
-                format!("{font}.shx")
+            handle = style.handle;
+            // The font as the dialog sets it: a TrueType family keeps its
+            // face file, a stroke font its SHX file and big font.
+            let mut draft = crate::app::text_style_draft::TextStyleDraft::load(style);
+            let (main, big) = match font.split_once(',') {
+                Some((main, big)) => (main.trim(), Some(big.trim())),
+                None => (font.trim(), None),
             };
+            match crate::ui::font_picker::FontChoice::of_name(main) {
+                crate::ui::font_picker::FontChoice::TrueType(family)
+                    if !shape_font(main) =>
+                {
+                    draft.pick_system_font(
+                        crate::scene::text::sysfont::canonical_family_name(&family)
+                            .unwrap_or(family),
+                    )
+                }
+                _ => {
+                    draft.pick_stroke_font(crate::ui::font_picker::stroke_file(main));
+                    draft.style.big_font_file = big
+                        .filter(|big| !big.is_empty())
+                        .map(crate::ui::font_picker::stroke_file)
+                        .unwrap_or_default();
+                }
+            }
+            *style = draft.resolved();
             style.is_shape_file = false;
-            style.true_type_font.clear();
-            style.font_file = font;
             style.height = height.parse().unwrap_or(0.0);
             style.width_factor = width.parse().unwrap_or(1.0);
             style.oblique_angle = oblique.parse::<f64>().unwrap_or(0.0).to_radians();
             style.flags.backward = backwards == "Y";
             style.flags.upside_down = upside_down == "Y";
             style.is_vertical = vertical == "Y";
+            style.annotative = annotative == "Y";
         }
+        crate::scene::annotative::set_text_style_orientation(
+            doc,
+            handle,
+            annotative == "Y" && orientation == "Y",
+        );
+        doc.header.current_text_style_name = name.clone();
         self.tabs[i].dirty = true;
         self.tabs[i].scene.invalidate_text_style_dependencies(&name);
         self.commit_text_style_undo(i, undo);
         let _ = self.on_ribbon_style_changed(crate::modules::StyleKey::TextStyle, name.clone());
         self.command_line
-            .push_output(crate::tf!("{} is now the current text style.", name).as_ref());
+            .push_output(&trp!("text-style", "now-current", name = name));
+    }
+
+    /// -STYLE `?`: the styles matching `pattern`, then the current style,
+    /// from line `from` on. The list stops every 22 lines (even inside a
+    /// style's lines) at "Press ENTER to continue:", whose answer lists on.
+    fn list_text_styles(&mut self, i: usize, pattern: &str, from: usize) {
+        let doc = &self.tabs[i].scene.document;
+        let mut styles: Vec<&document::tables::TextStyle> = doc
+            .text_styles
+            .iter()
+            .filter(|style| !style.name.is_empty() && listed(&style.name, pattern))
+            .collect();
+        styles.sort_by_key(|style| style.name.to_lowercase());
+        let mut lines = vec![trp!("text-style", "list-title")];
+        for style in styles {
+            let head = trp!("text-style", "list-name", name = style.name.clone());
+            let pad = 26usize.saturating_sub(head.chars().count()).max(2);
+            let font = if style.true_type_font.trim().is_empty() {
+                let files = if style.big_font_file.trim().is_empty() {
+                    style.font_file.clone()
+                } else {
+                    format!("{}, {}", style.font_file, style.big_font_file)
+                };
+                trp!("text-style", "list-files", files = files)
+            } else {
+                trp!(
+                    "text-style",
+                    "list-typeface",
+                    face = style.true_type_font.trim().to_string()
+                )
+            };
+            lines.push(format!("{head}{}{font}", " ".repeat(pad)));
+            let places = doc.header.angular_unit_precision.clamp(0, 8) as usize;
+            lines.push(trp!(
+                "text-style",
+                "list-values",
+                height = format!("{:.4}", style.height),
+                width = format!("{:.4}", style.width_factor),
+                oblique = format!("{:.*}", places, style.oblique_angle.to_degrees())
+            ));
+            let mut generation = Vec::new();
+            if style.flags.backward {
+                generation.push(trp!("text-style", "gen-backwards"));
+            }
+            if style.flags.upside_down {
+                generation.push(trp!("text-style", "gen-upside-down"));
+            }
+            if style.is_vertical {
+                generation.push(trp!("text-style", "gen-vertical"));
+            }
+            if generation.is_empty() {
+                generation.push(trp!("text-style", "gen-normal"));
+            }
+            lines.push(trp!(
+                "text-style",
+                "list-generation",
+                generation = generation.join(", ")
+            ));
+        }
+        lines.push(trp!(
+            "text-style",
+            "current",
+            name = doc.header.current_text_style_name.clone()
+        ));
+        const PAGE: usize = 22;
+        let end = (from + PAGE).min(lines.len());
+        for line in lines.get(from..end).unwrap_or_default() {
+            self.command_line.push_output(line);
+        }
+        if end < lines.len() {
+            let pattern = pattern.to_string();
+            let next = end.to_string();
+            let command = ScriptPromptCommand::new(
+                "-STYLE",
+                flow(move |q| {
+                    q.text(trp!("text-style", "cmd-press-enter"), Some(String::new()))?;
+                    run("-STYLE", &["?", &pattern, &next])
+                }),
+            );
+            self.command_line.push_info(&command.prompt());
+            self.command_line.set_step_options(command.options());
+            self.tabs[i].active_cmd = Some(Box::new(command));
+        }
     }
 
     /// "Current dimension style: X   Annotative: No".

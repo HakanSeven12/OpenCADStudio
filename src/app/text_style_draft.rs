@@ -53,27 +53,14 @@ impl NumberField {
             return None;
         }
         Some(if !self.max.is_finite() {
-            crate::t!("Enter 0 or a positive number.")
+            crate::tr!("text-style", "invalid-height").into()
         } else if self.min < 0.0 {
             // Only the oblique angle goes either way of upright.
-            crate::tf!(
-                "Must be between {}° and {}°.",
-                signed(self.min),
-                signed(self.max)
-            )
+            crate::tr!("text-style", "invalid-oblique").into()
         } else {
-            crate::tf!(
-                "Use digits and a decimal point. Enter a value from {} to {}.",
-                self.min,
-                self.max
-            )
+            crate::tr!("text-style", "invalid-width").into()
         })
     }
-}
-
-/// `value` with a true minus sign, as a message writes a negative number.
-fn signed(value: f64) -> String {
-    value.to_string().replacen('-', "\u{2212}", 1)
 }
 
 /// The regular face file of common TrueType families, as other programs
@@ -118,6 +105,10 @@ pub(super) struct TextStyleDraft {
     big_font_off: String,
     /// What the last font switch turned off, to say so.
     pub(super) turned_off: Option<String>,
+    /// "Match text orientation to layout" (the style's AcadAnnoPO flag),
+    /// and the stored value it was loaded with.
+    pub(super) orientation: bool,
+    orientation_stored: bool,
 }
 
 impl Default for TextStyleDraft {
@@ -128,11 +119,17 @@ impl Default for TextStyleDraft {
 
 impl TextStyleDraft {
     pub(super) fn load(style: &TextStyle) -> Self {
+        Self::load_with(style, 2, false)
+    }
+
+    /// Load `style`, its oblique angle shown with `angle_places` decimals (the
+    /// drawing's angular precision) and its orientation flag.
+    pub(super) fn load_with(style: &TextStyle, angle_places: usize, orientation: bool) -> Self {
         Self {
             style: style.clone(),
             width: NumberField::new(format!("{:.4}", style.width_factor), 0.01, 100.0),
             oblique: NumberField::new(
-                format!("{:.2}", style.oblique_angle.to_degrees()),
+                format!("{:.*}", angle_places, style.oblique_angle.to_degrees()),
                 -85.0,
                 85.0,
             ),
@@ -140,7 +137,18 @@ impl TextStyleDraft {
             big_font_on: !style.big_font_file.trim().is_empty(),
             big_font_off: String::new(),
             turned_off: None,
+            orientation,
+            orientation_stored: orientation,
         }
+    }
+
+    /// Whether the window holds a change Apply would write: a value, a
+    /// switch or the orientation flag differs from `stored`, or a number field
+    /// holds text that cannot be applied yet.
+    pub(super) fn is_modified(&self, stored: &TextStyle) -> bool {
+        self.resolved() != *stored
+            || self.orientation != self.orientation_stored
+            || self.invalid_fields() > 0
     }
 
     /// How many number fields hold text that cannot be applied.
@@ -270,15 +278,15 @@ mod tests {
         assert!(draft
             .width
             .error()
-            .is_some_and(|error| error.contains("0.01 to 100")));
+            .is_some_and(|error| error.contains("0.01 to 100.0")));
         assert_eq!(
             draft.oblique.error().as_deref(),
-            Some("Must be between \u{2212}85° and 85°.")
+            Some("Invalid Oblique angle, please enter a new angle.")
         );
-        assert_eq!(
-            draft.height.error().as_deref(),
-            Some("Enter 0 or a positive number.")
-        );
+        assert!(draft
+            .height
+            .error()
+            .is_some_and(|error| error.contains("1.0E-50")));
         assert_eq!(draft.resolved(), style());
         assert_eq!(draft.width.text, "200");
 

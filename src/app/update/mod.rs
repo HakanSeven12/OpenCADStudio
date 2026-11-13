@@ -276,6 +276,14 @@ impl OpenCADStudio {
             self.reset_modal_geometry();
             return;
         }
+        // The text style window keeps what it did (New, Delete, Rename, Set
+        // Current, Apply) as one undo step; what Apply did not write was
+        // answered for before closing.
+        if self.active_modal == Some(TextStyle) {
+            self.textstyle_card = None;
+            self.style_stage_commit();
+            self.style_stage = None;
+        }
         if matches!(
             self.active_modal,
             Some(TextStyle | DimStyle | TableStyle | MLeaderStyle | MlStyle | LinetypeManager)
@@ -12604,6 +12612,23 @@ impl OpenCADStudio {
                 {
                     return Task::none();
                 }
+                // The text style window's ✕ closes a card first, and asks
+                // before dropping changes Apply has not written.
+                if self.active_modal == Some(super::ModalKind::TextStyle)
+                    && self.style_parent_stage.is_none()
+                {
+                    if self.textstyle_card.is_some() {
+                        return self.on_text_style_card(
+                            crate::ui::style::textstyle::CardMsg::NoticeClose,
+                        );
+                    }
+                    if self.textstyle_modified() {
+                        self.textstyle_card = Some(crate::ui::style::textstyle::Card::Modified(
+                            crate::ui::style::textstyle::Pending::Close,
+                        ));
+                        return Task::none();
+                    }
+                }
                 if self.active_modal == Some(super::ModalKind::BlockLookup) {
                     self.block_lookup = None;
                 }
@@ -14845,14 +14870,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleDialogSelect(name) => {
-                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                if self.style_editor_blocked(crate::app::StyleKind::Text)
+                    || name == self.textstyle_selected
+                {
                     return Task::none();
                 }
-                self.flush_textstyle_draft();
-                let i = self.active_tab;
-                self.textstyle_selected = name;
-                self.load_textstyle_draft(i);
-                Task::none()
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::Select(name))
             }
             Message::TextStyleInUseFilter(on) => {
                 self.textstyle_in_use_only = on;
@@ -14867,24 +14890,48 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TextStyleDialogSetCurrent => {
-                // Staged: persists on Apply.
-                let i = self.active_tab;
-                let name = self.textstyle_selected.clone();
-                if !self.selected_textstyle_is_read_only() {
-                    self.tabs[i].scene.document.header.current_text_style_name = name.clone();
-                    self.sync_ribbon_styles();
-                    self.command_line
-                        .push_output(crate::tf!("Current text style: {}", name).as_ref());
-                }
-                Task::none()
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::SetCurrent)
             }
-            Message::TextStyleDialogNew => self.style_new(crate::app::StyleKind::Text),
-            Message::TextStyleDialogCopy => self.style_copy(crate::app::StyleKind::Text),
+            Message::TextStyleDialogNew => {
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::New)
+            }
+            Message::TextStyleDialogCopy => {
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::Copy)
+            }
             Message::TextStyleDialogDelete => {
-                self.style_delete(crate::app::StyleKind::Text);
-                Task::none()
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::Delete)
+            }
+            Message::TextStyleCard(message) => self.on_text_style_card(message),
+            Message::TextStyleContext(name) => {
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                let task = if name == self.textstyle_selected {
+                    Task::none()
+                } else {
+                    self.text_style_go_on(crate::ui::style::textstyle::Pending::Select(name.clone()))
+                };
+                self.textstyle_context = Some(name);
+                task
             }
             // ── Shared inline rename (all style managers) ─────────────────
+            Message::StyleRenameStart(crate::app::StyleKind::Text, name)
+                if self.active_modal == Some(super::ModalKind::TextStyle) =>
+            {
+                if self.style_editor_blocked(crate::app::StyleKind::Text) {
+                    return Task::none();
+                }
+                self.text_style_go_on(crate::ui::style::textstyle::Pending::Rename(name))
+            }
             Message::StyleRenameStart(kind, name) => {
                 self.style_rename_start(kind, name);
                 // Focus the freshly-shown rename field so the user can type
@@ -14936,7 +14983,32 @@ impl OpenCADStudio {
                     "upside_down" => s.flags.upside_down = !s.flags.upside_down,
                     "vertical" => s.is_vertical = !s.is_vertical,
                     "annotative" => s.annotative = !s.annotative,
-                    "use_big_font" => self.textstyle_draft.toggle_big_font(),
+                    "orientation" => {
+                        self.textstyle_draft.orientation = !self.textstyle_draft.orientation
+                    }
+                    "use_big_font" => {
+                        self.textstyle_draft.toggle_big_font();
+                        // Turned on with no big font named, the first big
+                        // font of the list is taken.
+                        if self.textstyle_draft.big_font_on
+                            && self.textstyle_draft.style.big_font_file.trim().is_empty()
+                        {
+                            let mut big_fonts: Vec<String> =
+                                crate::io::font_repo::folder_shx_fonts()
+                                    .into_iter()
+                                    .filter(|file| {
+                                        crate::io::font_repo::font_file_path(file, None)
+                                            .is_some_and(|path| {
+                                                crate::scene::text::shx::is_bigfont(&path)
+                                            })
+                                    })
+                                    .collect();
+                            big_fonts.sort_by_key(|file| file.to_ascii_lowercase());
+                            if let Some(first) = big_fonts.into_iter().next() {
+                                self.textstyle_draft.style.big_font_file = first;
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 Task::none()

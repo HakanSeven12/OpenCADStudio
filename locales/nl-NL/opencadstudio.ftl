@@ -5506,7 +5506,7 @@ view =
     .cmd-not-yet-implemented = __ocs_fmt_0__: nog niet geïmplementeerd.
     .viewport-s-in-layout = __ocs_fmt_0__ weergavevenster(s) in indeling "__ocs_fmt_1__":
 
-    .ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name = UCS  { common.specify }: { action.options } [{ common.world }/{ ribbon-tab.view }/{ draw.value-3-point }/Z/X/Y/{ common.origin }/{ common.save }/{ common.delete }] ({ common.name-title-case }):
+    .ucs-option-world-view-3point-z-x-y-origin-save-delete-or-name = UCS  { common.specify }: { action.options } [{ properties.face }/{ common.object-title-case }/{ common.world }/{ ribbon-tab.view }/{ draw.value-3-point }/Z/X/Y/{ common.origin }/{ common.save }/{ common.delete }] ({ common.name-title-case }):
     .ucs-specify-new-origin = UCS  { common.specify }: { common.new-origin }:
     .ucs-specify-point-on-positive-x-axis = UCS  { common.specify }: X · { common.positive-direction } · { common.point }:
     .ucs-specify-point-in-positive-xy-plane = UCS  { common.specify }: XY · { common.positive-direction } · { common.point }:

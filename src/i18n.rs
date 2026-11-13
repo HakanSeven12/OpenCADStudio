@@ -432,7 +432,80 @@ fn cached_translation_with(
     }
     let label: &'static str = Box::leak(loader.get_attr(message_id, attribute_id).into_boxed_str());
     labels.1.insert(source.into(), label);
+    record_option_groups(source, label);
     label
+}
+
+thread_local! {
+    /// Translated `[A/B/C]` option list → the source list, recorded as
+    /// prompts are translated, so typed localized keywords can be mapped back.
+    static OPTION_GROUPS: RefCell<rustc_hash::FxHashMap<String, String>> =
+        RefCell::default();
+}
+
+/// The `[...]` option lists of a prompt, Fluent isolation marks removed.
+fn option_groups(text: &str) -> Vec<String> {
+    plain(text.to_string())
+        .split('[')
+        .skip(1)
+        .filter_map(|rest| rest.split_once(']').map(|(group, _)| group.to_string()))
+        .collect()
+}
+
+fn record_option_groups(source: &str, translated: &str) {
+    if !source.contains('[') {
+        return;
+    }
+    let (source, translated) = (option_groups(source), option_groups(translated));
+    if source.len() != translated.len() {
+        return;
+    }
+    OPTION_GROUPS.with(|map| {
+        let mut map = map.borrow_mut();
+        if map.len() >= 16_384 {
+            map.clear();
+        }
+        for (source, translated) in source.into_iter().zip(translated) {
+            if source != translated && source.split('/').count() == translated.split('/').count()
+            {
+                map.insert(translated, source);
+            }
+        }
+    });
+}
+
+/// The source option a typed answer picks from a translated prompt's `[...]`
+/// list: the whole localized option, or a prefix only one option has. Commands
+/// compare against source keywords, so `M` for `Monde` must reach UCS as
+/// `World`. `_`-prefixed input is the source keyword already; `None` when
+/// nothing localized matches.
+pub fn source_option(prompt: &str, typed: &str) -> Option<String> {
+    let typed = typed.trim().to_lowercase();
+    if typed.is_empty() || typed.starts_with('_') {
+        return None;
+    }
+    OPTION_GROUPS.with(|map| {
+        let map = map.borrow();
+        let mut prefixed = Vec::new();
+        for group in option_groups(prompt) {
+            let Some(source) = map.get(&group) else {
+                continue;
+            };
+            for (local, option) in group.split('/').zip(source.split('/')) {
+                let local = local.trim().to_lowercase();
+                if local == typed {
+                    return Some(option.trim().to_string());
+                }
+                if local.starts_with(&typed) {
+                    prefixed.push(option.trim());
+                }
+            }
+        }
+        match prefixed.as_slice() {
+            [option] => Some(option.to_string()),
+            _ => None,
+        }
+    })
 }
 
 fn format_values(template: &str, rendered: &str) -> Option<Vec<String>> {

@@ -699,9 +699,10 @@ pub fn view_window<'a>(
             text(crate::t!("Interface scale")).size(12).width(150),
             crate::ui::dropdown_list::pick_list(
                 Some(format!("{}%", prefs.ui_scale_percent)),
-                [75u16, 100, 125, 150, 175, 200]
+                (75u16..=200)
+                    .step_by(5)
                     .map(|p| format!("{p}%"))
-                    .to_vec(),
+                    .collect::<Vec<_>>(),
                 |label: &String| label.clone(),
             )
             .on_select(|label: String| {

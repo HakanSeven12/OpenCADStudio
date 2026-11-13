@@ -297,14 +297,14 @@ where
     Ok(clamp_quad_hover_delay_ms(raw.max(0) as u64))
 }
 
-/// Hold a ZOOMFACTOR inside the range the application can store, wherever it
-/// arrives from — the slider, the Options field, or a configuration file
-/// written by hand or by an older build.
-/// Interface scale in percent, kept to the range the Options slider offers.
+/// Interface scale in percent, kept to the range the Options list offers.
 pub fn clamp_ui_scale(percent: u16) -> u16 {
     percent.clamp(75, 200)
 }
 
+/// Hold a ZOOMFACTOR inside the range the application can store, wherever it
+/// arrives from — the slider, the Options field, or a configuration file
+/// written by hand or by an older build.
 pub fn clamp_zoom_factor(v: i32) -> i32 {
     v.clamp(ZOOM_FACTOR_MIN, ZOOM_FACTOR_MAX)
 }

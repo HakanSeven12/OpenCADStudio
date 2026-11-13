@@ -7,13 +7,14 @@
 
 use crate::app::{Message, ModalKind, OpenCADStudio, StyleKind};
 use crate::scene::creation_style::{dim_style_extras, set_dim_style_extras, DimStyleExtras};
+use crate::entities::dim_override;
 use crate::tr;
 use crate::ui::style::dimstyle::{
     self as ui, alt_below, center_mode, field_id, field_tab, lineweight_value, with_zero_flag,
     CompareRow, CompareState, CreateDraft, DraftNames, DsMsg, Edit, Mode, Notice, Pick,
     PreviewArrows, PreviewTexts, StyleRow, View, OTHER,
 };
-use crate::ui::style::mleaderstyle::{trim_number, LinetypeRow, LoadDraft};
+use crate::ui::style::mleaderstyle::{trim_number, LinetypeRow, LoadDraft, ReloadAsk};
 use document::entities::{Dimension, DimensionAligned, DimensionAngular3Pt, DimensionRadius};
 use document::tables::DimStyle;
 use document::types::{Color as AcadColor, Vector3};
@@ -138,83 +139,83 @@ fn join_template(prefix: &str, suffix: &str, marker: &str) -> String {
     }
 }
 
-/// The variables Compare lists: description key, variable.
-const COMPARE_VARS: &[(&str, &str)] = &[
-    ("cmp-alt-precision", "DIMALTD"),
-    ("cmp-alt-post", "DIMAPOST"),
-    ("cmp-alt-round", "DIMALTRND"),
-    ("cmp-alt-scale", "DIMALTF"),
-    ("cmp-alt-tol-precision", "DIMALTTD"),
-    ("cmp-alt-tol-zeroes", "DIMALTTZ"),
-    ("cmp-alt-units", "DIMALTU"),
-    ("cmp-alt-zero-factor", "DIMALTMZF"),
-    ("cmp-alt-zero-suffix", "DIMALTMZS"),
-    ("cmp-alt-zeroes", "DIMALTZ"),
-    ("cmp-alternate", "DIMALT"),
-    ("cmp-angle-format", "DIMAUNIT"),
-    ("cmp-angle-precision", "DIMADEC"),
-    ("cmp-angle-zeroes", "DIMAZIN"),
-    ("cmp-arc-symbol", "DIMARCSYM"),
-    ("cmp-arrow", "DIMBLK"),
-    ("cmp-arrow1", "DIMBLK1"),
-    ("cmp-arrow2", "DIMBLK2"),
-    ("cmp-arrow-size", "DIMASZ"),
-    ("cmp-center", "DIMCEN"),
-    ("cmp-separator", "DIMDSEP"),
-    ("cmp-dim-color", "DIMCLRD"),
-    ("cmp-dim-ext", "DIMDLE"),
-    ("cmp-dim-forced", "DIMTOFL"),
-    ("cmp-dim-linetype", "DIMLTYPE"),
-    ("cmp-dim-lineweight", "DIMLWD"),
-    ("cmp-dim-spacing", "DIMDLI"),
-    ("cmp-ext1-linetype", "DIMLTEX1"),
-    ("cmp-ext2-linetype", "DIMLTEX2"),
-    ("cmp-ext-color", "DIMCLRE"),
-    ("cmp-ext-extension", "DIMEXE"),
-    ("cmp-ext-lineweight", "DIMLWE"),
-    ("cmp-ext-offset", "DIMEXO"),
-    ("cmp-fit", "DIMATFIT"),
-    ("cmp-text-movement", "DIMTMOVE"),
-    ("cmp-fixed-on", "DIMFXLON"),
-    ("cmp-fixed-length", "DIMFXL"),
-    ("cmp-fraction", "DIMFRAC"),
-    ("cmp-jog-angle", "DIMJOGANG"),
-    ("cmp-leader-arrow", "DIMLDRBLK"),
-    ("cmp-length-scale", "DIMLFAC"),
-    ("cmp-length-units", "DIMLUNIT"),
-    ("cmp-no-dim1", "DIMSD1"),
-    ("cmp-no-dim2", "DIMSD2"),
-    ("cmp-no-outside", "DIMSOXD"),
-    ("cmp-no-ext1", "DIMSE1"),
-    ("cmp-no-ext2", "DIMSE2"),
-    ("cmp-scale", "DIMSCALE"),
-    ("cmp-precision", "DIMDEC"),
-    ("cmp-round", "DIMRND"),
-    ("cmp-separate", "DIMSAH"),
-    ("cmp-fill-color", "DIMTFILLCLR"),
-    ("cmp-fill", "DIMTFILL"),
-    ("cmp-text-color", "DIMCLRT"),
-    ("cmp-text-direction", "DIMTXTDIRECTION"),
-    ("cmp-text-height", "DIMTXT"),
-    ("cmp-text-inside", "DIMTIX"),
-    ("cmp-inside-align", "DIMTIH"),
-    ("cmp-text-offset", "DIMGAP"),
-    ("cmp-outside-align", "DIMTOH"),
-    ("cmp-pos-hor", "DIMJUST"),
-    ("cmp-pos-vert", "DIMTAD"),
-    ("cmp-post", "DIMPOST"),
-    ("cmp-text-style", "DIMTXSTY"),
-    ("cmp-tol-lower", "DIMTM"),
-    ("cmp-tol-upper", "DIMTP"),
-    ("cmp-tol-deviation", "DIMTOL"),
-    ("cmp-tol-limits", "DIMLIM"),
-    ("cmp-tol-vert", "DIMTOLJ"),
-    ("cmp-tol-precision", "DIMTDEC"),
-    ("cmp-tol-scale", "DIMTFAC"),
-    ("cmp-tol-zeroes", "DIMTZIN"),
-    ("cmp-zero-factor", "DIMMZF"),
-    ("cmp-zero-suffix", "DIMMZS"),
-    ("cmp-zeroes", "DIMZIN"),
+/// The variables Compare lists: description key, variable, group code.
+const COMPARE_VARS: &[(&str, &str, i16)] = &[
+    ("cmp-alt-precision", "DIMALTD", dim_override::DIMALTD),
+    ("cmp-alt-post", "DIMAPOST", dim_override::DIMAPOST),
+    ("cmp-alt-round", "DIMALTRND", dim_override::DIMALTRND),
+    ("cmp-alt-scale", "DIMALTF", dim_override::DIMALTF),
+    ("cmp-alt-tol-precision", "DIMALTTD", dim_override::DIMALTTD),
+    ("cmp-alt-tol-zeroes", "DIMALTTZ", dim_override::DIMALTTZ),
+    ("cmp-alt-units", "DIMALTU", dim_override::DIMALTU),
+    ("cmp-alt-zero-factor", "DIMALTMZF", dim_override::DIMALTMZF),
+    ("cmp-alt-zero-suffix", "DIMALTMZS", dim_override::DIMALTMZS),
+    ("cmp-alt-zeroes", "DIMALTZ", dim_override::DIMALTZ),
+    ("cmp-alternate", "DIMALT", dim_override::DIMALT),
+    ("cmp-angle-format", "DIMAUNIT", dim_override::DIMAUNIT),
+    ("cmp-angle-precision", "DIMADEC", dim_override::DIMADEC),
+    ("cmp-angle-zeroes", "DIMAZIN", dim_override::DIMAZIN),
+    ("cmp-arc-symbol", "DIMARCSYM", dim_override::DIMARCSYM),
+    ("cmp-arrow", "DIMBLK", dim_override::DIMBLK),
+    ("cmp-arrow1", "DIMBLK1", dim_override::DIMBLK1),
+    ("cmp-arrow2", "DIMBLK2", dim_override::DIMBLK2),
+    ("cmp-arrow-size", "DIMASZ", dim_override::DIMASZ),
+    ("cmp-center", "DIMCEN", dim_override::DIMCEN),
+    ("cmp-separator", "DIMDSEP", dim_override::DIMDSEP),
+    ("cmp-dim-color", "DIMCLRD", dim_override::DIMCLRD),
+    ("cmp-dim-ext", "DIMDLE", dim_override::DIMDLE),
+    ("cmp-dim-forced", "DIMTOFL", dim_override::DIMTOFL),
+    ("cmp-dim-linetype", "DIMLTYPE", dim_override::DIMLTYPE),
+    ("cmp-dim-lineweight", "DIMLWD", dim_override::DIMLWD),
+    ("cmp-dim-spacing", "DIMDLI", dim_override::DIMDLI),
+    ("cmp-ext1-linetype", "DIMLTEX1", dim_override::DIMLTEX1),
+    ("cmp-ext2-linetype", "DIMLTEX2", dim_override::DIMLTEX2),
+    ("cmp-ext-color", "DIMCLRE", dim_override::DIMCLRE),
+    ("cmp-ext-extension", "DIMEXE", dim_override::DIMEXE),
+    ("cmp-ext-lineweight", "DIMLWE", dim_override::DIMLWE),
+    ("cmp-ext-offset", "DIMEXO", dim_override::DIMEXO),
+    ("cmp-fit", "DIMATFIT", dim_override::DIMATFIT),
+    ("cmp-text-movement", "DIMTMOVE", dim_override::DIMTMOVE),
+    ("cmp-fixed-on", "DIMFXLON", dim_override::DIMFXLON),
+    ("cmp-fixed-length", "DIMFXL", dim_override::DIMFXL),
+    ("cmp-fraction", "DIMFRAC", dim_override::DIMFRAC),
+    ("cmp-jog-angle", "DIMJOGANG", dim_override::DIMJOGANG),
+    ("cmp-leader-arrow", "DIMLDRBLK", dim_override::DIMLDRBLK),
+    ("cmp-length-scale", "DIMLFAC", dim_override::DIMLFAC),
+    ("cmp-length-units", "DIMLUNIT", dim_override::DIMLUNIT),
+    ("cmp-no-dim1", "DIMSD1", dim_override::DIMSD1),
+    ("cmp-no-dim2", "DIMSD2", dim_override::DIMSD2),
+    ("cmp-no-outside", "DIMSOXD", dim_override::DIMSOXD),
+    ("cmp-no-ext1", "DIMSE1", dim_override::DIMSE1),
+    ("cmp-no-ext2", "DIMSE2", dim_override::DIMSE2),
+    ("cmp-scale", "DIMSCALE", dim_override::DIMSCALE),
+    ("cmp-precision", "DIMDEC", dim_override::DIMDEC),
+    ("cmp-round", "DIMRND", dim_override::DIMRND),
+    ("cmp-separate", "DIMSAH", dim_override::DIMSAH),
+    ("cmp-fill-color", "DIMTFILLCLR", dim_override::DIMTFILLCLR),
+    ("cmp-fill", "DIMTFILL", dim_override::DIMTFILL),
+    ("cmp-text-color", "DIMCLRT", dim_override::DIMCLRT),
+    ("cmp-text-direction", "DIMTXTDIRECTION", dim_override::DIMTXTDIRECTION),
+    ("cmp-text-height", "DIMTXT", dim_override::DIMTXT),
+    ("cmp-text-inside", "DIMTIX", dim_override::DIMTIX),
+    ("cmp-inside-align", "DIMTIH", dim_override::DIMTIH),
+    ("cmp-text-offset", "DIMGAP", dim_override::DIMGAP),
+    ("cmp-outside-align", "DIMTOH", dim_override::DIMTOH),
+    ("cmp-pos-hor", "DIMJUST", dim_override::DIMJUST),
+    ("cmp-pos-vert", "DIMTAD", dim_override::DIMTAD),
+    ("cmp-post", "DIMPOST", dim_override::DIMPOST),
+    ("cmp-text-style", "DIMTXSTY", dim_override::DIMTXSTY),
+    ("cmp-tol-lower", "DIMTM", dim_override::DIMTM),
+    ("cmp-tol-upper", "DIMTP", dim_override::DIMTP),
+    ("cmp-tol-deviation", "DIMTOL", dim_override::DIMTOL),
+    ("cmp-tol-limits", "DIMLIM", dim_override::DIMLIM),
+    ("cmp-tol-vert", "DIMTOLJ", dim_override::DIMTOLJ),
+    ("cmp-tol-precision", "DIMTDEC", dim_override::DIMTDEC),
+    ("cmp-tol-scale", "DIMTFAC", dim_override::DIMTFAC),
+    ("cmp-tol-zeroes", "DIMTZIN", dim_override::DIMTZIN),
+    ("cmp-zero-factor", "DIMMZF", dim_override::DIMMZF),
+    ("cmp-zero-suffix", "DIMMZS", dim_override::DIMMZS),
+    ("cmp-zeroes", "DIMZIN", dim_override::DIMZIN),
 ];
 
 fn compare_description(key: &str) -> String {
@@ -335,7 +336,7 @@ fn compare_value(doc: &Document, style: &DimStyle, variable: &str) -> String {
 fn compare_rows(doc: &Document, first: &DimStyle, second: Option<&DimStyle>) -> Vec<CompareRow> {
     let mut rows: Vec<CompareRow> = COMPARE_VARS
         .iter()
-        .filter_map(|(key, variable)| {
+        .filter_map(|(key, variable, _)| {
             let a = compare_value(doc, first, variable);
             let b = second.map(|s| compare_value(doc, s, variable));
             if b.as_ref().is_some_and(|b| *b == a) {
@@ -353,24 +354,76 @@ fn compare_rows(doc: &Document, first: &DimStyle, second: Option<&DimStyle>) -> 
     rows
 }
 
+/// "Description = value" for each variable `style` sets differently from
+/// `base`, in group-code order (the manager's Description).
+fn description_lines(doc: &Document, style: &DimStyle, base: &DimStyle) -> Vec<String> {
+    let mut vars: Vec<&(&str, &str, i16)> = COMPARE_VARS.iter().collect();
+    vars.sort_by_key(|(_, _, code)| *code);
+    vars.into_iter()
+        .filter_map(|(key, variable, _)| {
+            let value = compare_value(doc, style, variable);
+            (value != compare_value(doc, base, variable))
+                .then(|| format!("{} = {}", compare_description(key), value))
+        })
+        .collect()
+}
+
+/// A dimension text with its stacked fractions (`\S1/2;`) written flat,
+/// as the preview draws plain text.
+fn flat_text(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("\\S") {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at + 2..];
+        let end = tail.find(';').unwrap_or(tail.len());
+        out.push_str(&tail[..end].replace(['^', '#'], "/"));
+        rest = tail.get(end + 1..).unwrap_or("");
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The sample values of the preview, written the way `style` writes them.
+/// A family member shows only the dimensions it is for.
 fn preview_texts(style: &DimStyle) -> PreviewTexts {
-    let at = |x: f64, y: f64| Vector3::new(x, y, 0.0);
+    // The sample part is drawn to the style's text height, so its lengths
+    // read larger with a larger text.
+    let f = style.dimtxt.abs() / 2.5;
+    let at = |x: f64, y: f64| Vector3::new(x * f, y * f, 0.0);
     let text = |dim: Dimension| {
-        crate::entities::dimension::dimension_text_value(&dim, Some(style)).unwrap_or_default()
+        flat_text(&crate::entities::dimension::dimension_text_value(&dim, Some(style)).unwrap_or_default())
     };
     let angle = 60f64.to_radians();
-    PreviewTexts {
+    let mut texts = PreviewTexts {
         horizontal: text(Dimension::Aligned(DimensionAligned::new(at(0.0, 0.0), at(14.11, 0.0)))),
-        vertical: text(Dimension::Aligned(DimensionAligned::new(at(0.0, 0.0), at(0.0, 16.6)))),
-        aligned: text(Dimension::Aligned(DimensionAligned::new(at(0.0, 0.0), at(28.07, 0.0)))),
+        vertical: text(Dimension::Aligned(DimensionAligned::new(at(0.0, 0.0), at(0.0, 16.604)))),
+        aligned: text(Dimension::Aligned(DimensionAligned::new(at(0.0, 0.0), at(28.066, 0.0)))),
         radius: text(Dimension::Radius(DimensionRadius::new(at(0.0, 0.0), at(11.17, 0.0)))),
         angle: text(Dimension::Angular3Pt(DimensionAngular3Pt::new(
             at(0.0, 0.0),
             at(10.0, 0.0),
             at(10.0 * angle.cos(), 10.0 * angle.sin()),
         ))),
+    };
+    let suffix = style.name.rfind('$').map(|at| &style.name[at..]);
+    let linear = matches!(suffix, Some("$0"));
+    let angular = matches!(suffix, Some("$2"));
+    let radial = matches!(suffix, Some("$3" | "$4"));
+    if linear || angular || radial {
+        if !linear {
+            texts.horizontal.clear();
+            texts.vertical.clear();
+            texts.aligned.clear();
+        }
+        if !radial {
+            texts.radius.clear();
+        }
+        if !angular {
+            texts.angle.clear();
+        }
     }
+    texts
 }
 
 impl OpenCADStudio {
@@ -408,6 +461,47 @@ impl OpenCADStudio {
         Some(style)
     }
 
+    /// The current style's extended data with its DIMTALN override.
+    fn ds_overridden_extras(&self) -> Option<DimStyleExtras> {
+        let style = self.ds_style(&self.ds_current())?;
+        let mut extras = dim_style_extras(&self.tabs[self.active_tab].scene.document, style.handle);
+        if let Some(document::xdata::XDataValue::Integer16(v)) = self
+            .ds_overrides()
+            .into_iter()
+            .find(|(code, _)| *code == dim_override::DIMTALN)
+            .map(|(_, v)| v)
+        {
+            extras.dimtaln = v;
+        }
+        Some(extras)
+    }
+
+    fn ds_set_current(&mut self, name: &str) {
+        let i = self.active_tab;
+        let doc = &mut self.tabs[i].scene.document;
+        let Some((style_name, handle)) = doc
+            .dim_styles
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+            .map(|s| (s.name.clone(), s.handle))
+        else {
+            return;
+        };
+        doc.header.current_dimstyle_name = style_name;
+        doc.header.current_dimstyle_handle = handle;
+        crate::scene::creation_style::sync_header_dim_vars(doc);
+        // Overrides belong to the style they were made for.
+        if self.tabs[i]
+            .scene
+            .dim_overrides
+            .as_ref()
+            .is_some_and(|(owner, _)| !owner.eq_ignore_ascii_case(name))
+        {
+            self.tabs[i].scene.dim_overrides = None;
+        }
+        self.after_style_change(StyleKind::Dim);
+    }
+
     pub(super) fn on_dim_style_dialog_open(&mut self) -> Task<Message> {
         let current = self.ds_current();
         let selected = self
@@ -424,6 +518,9 @@ impl OpenCADStudio {
             .unwrap_or_else(|| "Standard".to_string());
         self.dimstyle_selected = selected;
         self.dsd = Default::default();
+        // The current style's overrides, when there are any, are what the
+        // window shows first.
+        self.dsd.overrides_selected = !self.ds_overrides().is_empty();
         self.active_modal = Some(ModalKind::DimStyle);
         // Linetypes loaded from Select Linetype belong to the session too.
         self.style_stage_begin_linetypes();
@@ -434,8 +531,13 @@ impl OpenCADStudio {
     /// the manager is open.
     pub(super) fn dim_style_close_face(&mut self) -> bool {
         let d = &mut self.dsd;
+        if d.reload_ask.take().is_some() {
+            d.load = None;
+            return true;
+        }
         if d.notice.take().is_some()
             || d.delete_ask.take().is_some()
+            || d.discard_ask.take().is_some()
             || d.load.take().is_some()
             || d.pick.take().is_some()
             || d.create.take().is_some()
@@ -501,11 +603,8 @@ impl OpenCADStudio {
         let override_lines: Vec<String> = match self.ds_style(current) {
             Some(base) => {
                 let mut over = base.clone();
-                crate::entities::dim_override::apply_pairs(&mut over, &overrides);
-                compare_rows(doc, &over, Some(base))
-                    .into_iter()
-                    .map(|row| format!("{} = {}", row.description, row.first))
-                    .collect()
+                dim_override::apply_pairs(&mut over, &overrides);
+                description_lines(doc, &over, base)
             }
             None => Vec::new(),
         };
@@ -517,10 +616,23 @@ impl OpenCADStudio {
         } else {
             self.ds_style(&self.dimstyle_selected).cloned()
         };
+        // Another style reads as the current one plus what it changes; a
+        // family member reads as its parent.
+        let member_of = ui::family_member(&self.dimstyle_selected).map(|(parent, _)| parent.to_string());
+        let other_lines = match (self.ds_style(&self.dimstyle_selected), self.ds_style(current)) {
+            (Some(style), Some(base))
+                if !d.overrides_selected && member_of.is_none() && style.handle != base.handle =>
+            {
+                description_lines(doc, style, base)
+            }
+            _ => Vec::new(),
+        };
         let description = if d.overrides_selected && !override_lines.is_empty() {
             format!("{} + {}", current, override_lines.join(", "))
+        } else if !other_lines.is_empty() {
+            format!("{} + {}", current, other_lines.join(", "))
         } else {
-            self.dimstyle_selected.clone()
+            member_of.unwrap_or_else(|| self.dimstyle_selected.clone())
         };
         let arrows_of = |s: &DimStyle| PreviewArrows {
             first: crate::entities::arrowheads::label(doc, if s.dimsah { s.dimblk1 } else { s.dimblk }),
@@ -606,7 +718,6 @@ impl OpenCADStudio {
             text_styles,
             user_blocks: super::mleader_style::user_blocks(doc),
             compare_rows,
-            unit: if doc.header.measurement == 1 { 2.5 } else { 0.18 },
         }
     }
 
@@ -661,14 +772,32 @@ impl OpenCADStudio {
             DsMsg::HideXrefs(hide) => self.dsd.list_xrefs = !hide,
             DsMsg::Context(name) => {
                 self.dsd.context = if self.dsd.context == name { None } else { name };
-                if let Some(name) = &self.dsd.context {
-                    self.dimstyle_selected = name.clone();
-                    self.dsd.overrides_selected = false;
+                match self.dsd.context.clone() {
+                    Some(name) if name == ui::OVERRIDES => {
+                        self.dimstyle_selected = self.ds_current();
+                        self.dsd.overrides_selected = true;
+                    }
+                    Some(name) => {
+                        self.dimstyle_selected = name;
+                        self.dsd.overrides_selected = false;
+                    }
+                    None => {}
                 }
             }
             DsMsg::RenameStart(name) => {
                 self.dsd.context = None;
-                if self.ds_style(&name).is_some_and(|s| !is_xref(s)) {
+                // Renaming the overrides names a new style made of them.
+                if name == ui::OVERRIDES {
+                    if !self.ds_overrides().is_empty() {
+                        self.dimstyle_selected = self.ds_current();
+                        self.dsd.overrides_selected = true;
+                        self.dsd.rename = Some((name, tr!("dim-style", "style-overrides")));
+                        return self.ds_focus(iced::widget::Id::new("ds-rename"));
+                    }
+                } else if self
+                    .ds_style(&name)
+                    .is_some_and(|s| !is_xref(s) && ui::family_member(&s.name).is_none())
+                {
                     self.dimstyle_selected = name.clone();
                     self.dsd.rename = Some((name.clone(), name));
                     return self.ds_focus(iced::widget::Id::new("ds-rename"));
@@ -682,6 +811,29 @@ impl OpenCADStudio {
             DsMsg::RenameCommit => {
                 if let Some((old, new)) = self.dsd.rename.clone() {
                     let new = new.trim().to_string();
+                    if old == ui::OVERRIDES {
+                        if new == tr!("dim-style", "style-overrides") {
+                            self.dsd.rename = None;
+                        } else if let Some(notice) = self.ds_name_notice(&new) {
+                            self.dsd.notice = Some(notice);
+                        } else if let (Some(mut style), Some(extras)) =
+                            (self.ds_overridden(), self.ds_overridden_extras())
+                        {
+                            let doc = &mut self.tabs[i].scene.document;
+                            style.name = new.clone();
+                            style.handle = doc.allocate_handle();
+                            style.xref_dependent = false;
+                            let handle = style.handle;
+                            let _ = doc.dim_styles.add(style);
+                            set_dim_style_extras(doc, handle, extras);
+                            self.tabs[i].scene.dim_overrides = None;
+                            self.dimstyle_selected = new;
+                            self.dsd.overrides_selected = false;
+                            self.dsd.rename = None;
+                            self.after_style_change(StyleKind::Dim);
+                        }
+                        return Task::none();
+                    }
                     // Style names are not case sensitive: a change of case
                     // keeps the name.
                     if new.eq_ignore_ascii_case(&old) {
@@ -710,22 +862,35 @@ impl OpenCADStudio {
             DsMsg::SetCurrent => {
                 self.dsd.context = None;
                 let name = self.dimstyle_selected.clone();
-                if self.ds_style(&name).is_some() && !self.dsd.overrides_selected {
-                    let doc = &mut self.tabs[i].scene.document;
-                    doc.header.current_dimstyle_name = name.clone();
-                    if let Some(style) = doc.dim_styles.get(&name) {
-                        doc.header.current_dimstyle_handle = style.handle;
-                    }
-                    crate::scene::creation_style::sync_header_dim_vars(doc);
-                    // Overrides belong to the style they were made for.
-                    if self.tabs[i]
-                        .scene
-                        .dim_overrides
-                        .as_ref()
-                        .is_some_and(|(owner, _)| !owner.eq_ignore_ascii_case(&name))
-                    {
+                // The overrides and a family member are never made current.
+                if self.dsd.overrides_selected || ui::family_member(&name).is_some() {
+                    return Task::none();
+                }
+                if !name.eq_ignore_ascii_case(&self.ds_current()) && !self.ds_overrides().is_empty() {
+                    self.dsd.discard_ask = Some(name);
+                } else {
+                    self.ds_set_current(&name);
+                }
+            }
+            DsMsg::DiscardAnswer(yes) => {
+                if let Some(name) = self.dsd.discard_ask.take() {
+                    if yes {
                         self.tabs[i].scene.dim_overrides = None;
+                        self.ds_set_current(&name);
                     }
+                }
+            }
+            DsMsg::SaveOverrides => {
+                self.dsd.context = None;
+                if let (Some(style), Some(extras)) = (self.ds_overridden(), self.ds_overridden_extras()) {
+                    let doc = &mut self.tabs[i].scene.document;
+                    let (handle, name) = (style.handle, style.name.clone());
+                    doc.dim_styles.add_or_replace(style);
+                    set_dim_style_extras(doc, handle, extras);
+                    self.tabs[i].scene.dim_overrides = None;
+                    self.ds_refresh_dimensions(&name);
+                    self.dimstyle_selected = name;
+                    self.dsd.overrides_selected = false;
                     self.after_style_change(StyleKind::Dim);
                 }
             }
@@ -775,12 +940,7 @@ impl OpenCADStudio {
             DsMsg::CreateCancel => self.dsd.create = None,
             DsMsg::CreateContinue => return self.ds_create_continue(),
             DsMsg::NoticeClose => {
-                let notice = self.dsd.notice.take();
-                if let Some(Notice::Value(..)) = notice {
-                    if let Some(field) = self.dsd.edit.as_ref().and_then(|_| self.ds_invalid_field()) {
-                        return self.ds_focus(field_id(field));
-                    }
-                }
+                self.dsd.notice = None;
                 if self.dsd.create.is_some() {
                     return self.ds_focus(iced::widget::Id::new("ds-new-name"));
                 }
@@ -795,20 +955,17 @@ impl OpenCADStudio {
                 let name = self.dimstyle_selected.clone();
                 if let Some(style) = self.ds_style(&name).cloned() {
                     let extras = dim_style_extras(&self.tabs[i].scene.document, style.handle);
-                    self.ds_begin_edit(Mode::Modify, name, style, extras);
+                    self.ds_begin_edit(Mode::Modify, ui::display_name(&name), style, extras);
                 }
             }
             DsMsg::Override => {
-                if let Some(style) = self.ds_overridden() {
-                    let mut extras = dim_style_extras(&self.tabs[i].scene.document, style.handle);
-                    if let Some(document::xdata::XDataValue::Integer16(v)) = self
-                        .ds_overrides()
-                        .iter()
-                        .find(|(code, _)| *code == crate::entities::dim_override::DIMTALN)
-                        .map(|(_, v)| v.clone())
-                    {
-                        extras.dimtaln = v;
-                    }
+                // Override… changes the current style only.
+                if !self.dsd.overrides_selected
+                    && !self.dimstyle_selected.eq_ignore_ascii_case(&self.ds_current())
+                {
+                    return Task::none();
+                }
+                if let (Some(style), Some(extras)) = (self.ds_overridden(), self.ds_overridden_extras()) {
                     let name = style.name.clone();
                     self.ds_begin_edit(Mode::Override, name, style, extras);
                 }
@@ -851,27 +1008,34 @@ impl OpenCADStudio {
             DsMsg::CompareClose => self.dsd.compare = None,
             DsMsg::Delete(name) => {
                 self.dsd.context = None;
+                if name == ui::OVERRIDES {
+                    if !self.ds_overrides().is_empty() {
+                        self.dsd.delete_ask = Some(name);
+                    }
+                    return Task::none();
+                }
                 let Some(style) = self.ds_style(&name) else {
                     return Task::none();
                 };
                 if is_xref(style) {
                     return Task::none();
                 }
-                let why = if name.eq_ignore_ascii_case(&self.ds_current()) {
-                    Some(tr!("dim-style", "delete-current"))
-                } else if self.style_in_use(StyleKind::Dim, &name) {
-                    Some(tr!("dim-style", "delete-used"))
+                // Current and used styles are refused with one notice.
+                if name.eq_ignore_ascii_case(&self.ds_current())
+                    || self.style_in_use(StyleKind::Dim, &name)
+                {
+                    self.dsd.notice = Some(Notice::Delete(ui::display_name(&name)));
                 } else {
-                    None
-                };
-                match why {
-                    Some(why) => self.dsd.notice = Some(Notice::Delete(why)),
-                    None => self.dsd.delete_ask = Some(name),
+                    self.dsd.delete_ask = Some(name);
                 }
             }
             DsMsg::DeleteAnswer(yes) => {
                 if let Some(name) = self.dsd.delete_ask.take() {
-                    if yes && self.remove_style_storage(StyleKind::Dim, &name) {
+                    if yes && name == ui::OVERRIDES {
+                        self.tabs[i].scene.dim_overrides = None;
+                        self.dsd.overrides_selected = false;
+                        self.dimstyle_selected = self.ds_current();
+                    } else if yes && self.remove_style_storage(StyleKind::Dim, &name) {
                         self.dimstyle_selected = self.ds_current();
                         self.after_style_change(StyleKind::Dim);
                     }
@@ -1084,20 +1248,23 @@ impl OpenCADStudio {
                 }
             }
             DsMsg::LoadCancel => self.dsd.load = None,
+            // OK asks about the ticked linetypes the drawing already has, one
+            // by one, before loading anything.
             DsMsg::LoadOk => {
-                if let Some(load) = self.dsd.load.take() {
-                    let doc = &mut self.tabs[i].scene.document;
-                    crate::io::linetypes::populate_document_named(
-                        doc,
-                        &load.source,
-                        load.dir.as_deref(),
-                        &load.picked,
-                    );
-                    // The last loaded linetype is the one picked.
-                    if let (Some(Pick::Linetype(_, selected)), Some(last)) =
-                        (self.dsd.pick.as_mut(), load.picked.last())
-                    {
-                        *selected = last.clone();
+                if let Some(load) = self.dsd.load.as_ref() {
+                    match ReloadAsk::for_load(load, &self.tabs[i].scene.document) {
+                        Some(ask) => self.dsd.reload_ask = Some(ask),
+                        None => self.ds_finish_load(Vec::new()),
+                    }
+                }
+            }
+            DsMsg::ReloadAnswer(answer) => {
+                if let Some(mut ask) = self.dsd.reload_ask.take() {
+                    match ask.answer(answer) {
+                        Some(Ok(reload)) => self.ds_finish_load(reload),
+                        // Nothing is loaded and Load Linetypes closes.
+                        Some(Err(())) => self.dsd.load = None,
+                        None => self.dsd.reload_ask = Some(ask),
                     }
                 }
             }
@@ -1112,6 +1279,22 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// Load Linetypes ends: the ticked linetypes the drawing lacks are
+    /// added, `reload` are read again; Select Linetype keeps its choice.
+    fn ds_finish_load(&mut self, reload: Vec<String>) {
+        let Some(load) = self.dsd.load.take() else {
+            return;
+        };
+        let doc = &mut self.tabs[self.active_tab].scene.document;
+        crate::io::linetypes::populate_document_named(
+            doc,
+            &load.source,
+            load.dir.as_deref(),
+            &load.picked,
+        );
+        crate::io::linetypes::reload_document_named(doc, &load.source, load.dir.as_deref(), &reload);
+    }
+
     fn ds_set_arrow(&mut self, slot: u8, value: &str) {
         let i = self.active_tab;
         let doc = &mut self.tabs[i].scene.document;
@@ -1124,12 +1307,19 @@ impl OpenCADStudio {
         };
         let d = &mut e.draft;
         match slot {
-            // The first arrowhead sets the second too.
+            // The first arrowhead sets the second too while they match; a
+            // second that differs stays.
+            0 if d.dimsah => {
+                d.dimblk1 = handle;
+                if handle == d.dimblk2 {
+                    d.dimblk = handle;
+                    d.dimsah = false;
+                }
+            }
             0 => {
                 d.dimblk = handle;
                 d.dimblk1 = handle;
                 d.dimblk2 = handle;
-                d.dimsah = false;
             }
             1 => {
                 let first = if d.dimsah { d.dimblk1 } else { d.dimblk };
@@ -1202,22 +1392,17 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// The first typed value OK cannot take, by field.
-    fn ds_invalid_field(&self) -> Option<&'static str> {
-        let e = self.dsd.edit.as_ref()?;
-        ds_validate(e).err().map(|(field, _)| field)
-    }
-
     fn ds_ok(&mut self) -> Task<Message> {
         let Some(e) = self.dsd.edit.as_ref() else {
             return Task::none();
         };
-        if let Err((field, rule)) = ds_validate(e) {
+        // A value OK cannot take keeps the face open on its field, selected.
+        if let Err(field) = ds_validate(e) {
             if let Some(e) = self.dsd.edit.as_mut() {
                 e.tab = field_tab(field);
             }
-            self.dsd.notice = Some(Notice::Value(tr!("dim-style", "invalid-value"), rule));
-            return Task::none();
+            self.dsd.open_list = None;
+            return self.ds_focus(field_id(field));
         }
         let Some(e) = self.dsd.edit.take() else {
             return Task::none();
@@ -1231,9 +1416,44 @@ impl OpenCADStudio {
                 let doc = &mut self.tabs[i].scene.document;
                 let handle = style.handle;
                 let name = style.name.clone();
+                let old = doc.dim_styles.iter().find(|s| s.handle == handle).cloned();
+                let old_extras = dim_style_extras(doc, handle);
+                // What a parent changes, its family members change too.
+                let mut family = Vec::new();
+                if let (Some(old), None) = (old, ui::family_member(&name)) {
+                    let pairs = dim_override::diff_pairs(&old, &style);
+                    let members: Vec<DimStyle> = doc
+                        .dim_styles
+                        .iter()
+                        .filter(|c| {
+                            ui::family_member(&c.name).is_some_and(|(p, _)| p.eq_ignore_ascii_case(&name))
+                        })
+                        .cloned()
+                        .collect();
+                    for mut member in members {
+                        dim_override::apply_pairs(&mut member, &pairs);
+                        let mut member_extras = dim_style_extras(doc, member.handle);
+                        if extras.jog_height != old_extras.jog_height {
+                            member_extras.jog_height = extras.jog_height;
+                        }
+                        if extras.break_size != old_extras.break_size {
+                            member_extras.break_size = extras.break_size;
+                        }
+                        if extras.dimtaln != old_extras.dimtaln {
+                            member_extras.dimtaln = extras.dimtaln;
+                        }
+                        family.push(member.name.clone());
+                        let member_handle = member.handle;
+                        doc.dim_styles.add_or_replace(member);
+                        set_dim_style_extras(doc, member_handle, member_extras);
+                    }
+                }
                 doc.dim_styles.add_or_replace(style);
                 set_dim_style_extras(doc, handle, extras);
                 self.ds_refresh_dimensions(&name);
+                for member in family {
+                    self.ds_refresh_dimensions(&member);
+                }
             }
             Mode::New(_) => {
                 let doc = &mut self.tabs[i].scene.document;
@@ -1314,9 +1534,10 @@ fn ds_live_value(e: &mut Edit, field: &str, v: f64) {
     let d = &mut e.draft;
     match field {
         "dimdle" => d.dimdle = v,
-        "dimdli" => d.dimdli = v,
-        "dimexe" => d.dimexe = v,
-        "dimexo" => d.dimexo = v,
+        // OK leaves a negative distance here as it was.
+        "dimdli" if v >= 0.0 => d.dimdli = v,
+        "dimexe" if v >= 0.0 => d.dimexe = v,
+        "dimexo" if v >= 0.0 => d.dimexo = v,
         "dimfxl" => d.dimfxl = v,
         "dimasz" => d.dimasz = v,
         "dimcen" if d.dimcen != 0.0 => d.dimcen = v.abs() * d.dimcen.signum(),
@@ -1496,35 +1717,33 @@ fn ds_toggle(e: &mut Edit, field: &str, on: bool) {
     }
 }
 
-/// The typed values of the face: each field's rule, by field. A field the
-/// face shows inert is not checked.
-fn ds_validate(e: &Edit) -> Result<(), (&'static str, String)> {
-    let num = |field: &'static str| -> Result<f64, (&'static str, String)> {
+/// The typed values of the face: the first field OK cannot take. A field
+/// the face shows inert is not checked; extension and baseline distances
+/// typed negative are not refused but left as they were (see
+/// `ds_commit_draft`).
+fn ds_validate(e: &Edit) -> Result<(), &'static str> {
+    let num = |field: &'static str| -> Result<f64, &'static str> {
         e.text(field)
             .trim()
             .parse::<f64>()
             .ok()
             .filter(|v| v.is_finite())
-            .ok_or_else(|| (field, tr!("dim-style", "rule-number")))
+            .ok_or(field)
     };
-    let non_negative = |field: &'static str| -> Result<f64, (&'static str, String)> {
-        let v = num(field)?;
-        if v < 0.0 {
-            return Err((field, tr!("dim-style", "rule-non-negative")));
-        }
-        Ok(v)
+    let non_negative = |field: &'static str| -> Result<f64, &'static str> {
+        num(field).and_then(|v| if v < 0.0 { Err(field) } else { Ok(v) })
     };
-    let positive = |field: &'static str| -> Result<f64, (&'static str, String)> {
-        let v = num(field)?;
-        if v <= 0.0 {
-            return Err((field, tr!("dim-style", "rule-positive")));
-        }
-        Ok(v)
+    let positive = |field: &'static str| -> Result<f64, &'static str> {
+        num(field).and_then(|v| if v <= 0.0 { Err(field) } else { Ok(v) })
     };
     let d = &e.draft;
-    for field in ["dimdli", "dimexe", "dimexo", "dimasz", "dimbreak", "dimtxt", "dimgap", "dimrnd"] {
+    for field in ["dimdli", "dimexe", "dimexo"] {
+        num(field)?;
+    }
+    for field in ["dimasz", "dimbreak", "dimgap", "dimrnd"] {
         non_negative(field)?;
     }
+    positive("dimtxt")?;
     if draws_ticks_hint(d) {
         non_negative("dimdle")?;
     }
@@ -1536,19 +1755,16 @@ fn ds_validate(e: &Edit) -> Result<(), (&'static str, String)> {
     }
     let jog = num("dimjogang")?;
     if !(5.0..=90.0).contains(&jog) {
-        return Err(("dimjogang", tr!("dim-style", "rule-jog-angle")));
+        return Err("dimjogang");
     }
     positive("dimjag")?;
     if ui::linear_kind_is_fraction(d.dimlunit) || ui::tolerance_method(d) != 0 {
         positive("dimtfac")?;
     }
     if !d.annotative && d.dimscale != 0.0 {
-        positive("dimscale")?;
+        non_negative("dimscale")?;
     }
-    let lfac = num("dimlfac")?;
-    if lfac == 0.0 {
-        return Err(("dimlfac", tr!("dim-style", "rule-nonzero")));
-    }
+    positive("dimlfac")?;
     if ui::zero_flag(d.dimzin, 0) {
         positive("dimmzf")?;
     }
@@ -1582,9 +1798,11 @@ fn ds_commit_draft(e: &Edit) -> (DimStyle, DimStyleExtras) {
             .unwrap_or(fallback)
     };
     d.dimdle = typed("dimdle", d.dimdle);
-    d.dimdli = typed("dimdli", d.dimdli);
-    d.dimexe = typed("dimexe", d.dimexe);
-    d.dimexo = typed("dimexo", d.dimexo);
+    // A negative distance here is not refused; the value stays as it was.
+    let kept = |field: &str, old: f64| Some(typed(field, old)).filter(|v| *v >= 0.0).unwrap_or(old);
+    d.dimdli = kept("dimdli", d.dimdli);
+    d.dimexe = kept("dimexe", d.dimexe);
+    d.dimexo = kept("dimexo", d.dimexo);
     d.dimfxl = typed("dimfxl", d.dimfxl);
     d.dimasz = typed("dimasz", d.dimasz);
     d.dimcen = match center_mode(d.dimcen) {

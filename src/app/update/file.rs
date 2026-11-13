@@ -1428,6 +1428,10 @@ impl OpenCADStudio {
             let h = &self.tabs[i].scene.document.header;
             (h.ortho_mode, h.object_snap_mode)
         };
+        // Header dimension variables that differ from the current style are
+        // its overrides.
+        self.tabs[i].scene.dim_overrides =
+            crate::scene::creation_style::header_dim_overrides(&self.tabs[i].scene.document);
         self.ortho_mode = ortho;
         // Ortho and Polar are mutually exclusive (ToggleOrtho clears Polar).
         if ortho {
@@ -1458,6 +1462,13 @@ impl OpenCADStudio {
         let h = &mut self.tabs[i].scene.document.header;
         h.ortho_mode = self.ortho_mode;
         h.object_snap_mode = osmode;
+        // The header's dimension variables are the current style with its
+        // overrides, so the overrides stay with the drawing.
+        let scene = &mut self.tabs[i].scene;
+        crate::scene::creation_style::stamp_header_dim_overrides(
+            &mut scene.document,
+            scene.dim_overrides.as_ref(),
+        );
     }
 
     /// Apply persisted viewport display defaults to tab `idx`.

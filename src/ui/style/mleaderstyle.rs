@@ -61,6 +61,49 @@ pub struct ReloadAsk {
     pub reload: Vec<String>,
 }
 
+impl ReloadAsk {
+    /// Load Linetypes' OK: the ticked linetypes the drawing already has, to
+    /// be asked about one by one; `None` when there are none.
+    pub fn for_load(load: &LoadDraft, doc: &document::Document) -> Option<Self> {
+        let pending: Vec<String> = load
+            .entries
+            .iter()
+            .map(|(name, _, _)| name)
+            .filter(|name| {
+                load.picked.iter().any(|p| p.eq_ignore_ascii_case(name))
+                    && doc.line_types.get(name).is_some()
+            })
+            .cloned()
+            .collect();
+        (!pending.is_empty()).then_some(Self {
+            pending,
+            reload: Vec::new(),
+        })
+    }
+
+    /// Takes an answer: `Some(Ok(reload))` when every linetype is answered
+    /// (those to read again), `Some(Err(()))` on Cancel, `None` while more
+    /// are still to be asked about.
+    pub fn answer(&mut self, answer: Reload) -> Option<Result<Vec<String>, ()>> {
+        match answer {
+            Reload::This | Reload::Skip => {
+                if !self.pending.is_empty() {
+                    let name = self.pending.remove(0);
+                    if answer == Reload::This {
+                        self.reload.push(name);
+                    }
+                }
+            }
+            Reload::All => self.reload.append(&mut self.pending),
+            Reload::SkipRest => self.pending.clear(),
+            Reload::Cancel => return Some(Err(())),
+        }
+        self.pending
+            .is_empty()
+            .then(|| Ok(std::mem::take(&mut self.reload)))
+    }
+}
+
 /// An answer to the reload question.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reload {
@@ -423,7 +466,10 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
         } else if let Some(draft) = &v.dialog.create {
             Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
         } else if let Some(ask) = &v.dialog.reload_ask {
-            Some((reload_card(ask), msg(MlsMsg::ReloadAnswer(Reload::Cancel))))
+            Some((
+                reload_card(ask, |answer| msg(MlsMsg::ReloadAnswer(answer))),
+                msg(MlsMsg::ReloadAnswer(Reload::Cancel)),
+            ))
         } else if let Some(load) = &v.dialog.load {
             Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
         } else {
@@ -1046,11 +1092,13 @@ pub(crate) fn load_linetypes_card<'a>(
 /// Load Linetypes, OK with ticked linetypes the drawing has: reload the
 /// first one asked about, all of them, skip it, skip the rest, or load
 /// nothing.
-fn reload_card<'a>(ask: &'a ReloadAsk) -> Element<'a, Message> {
+pub(crate) fn reload_card<'a>(
+    ask: &'a ReloadAsk,
+    on_answer: impl Fn(Reload) -> Message + 'a,
+) -> Element<'a, Message> {
     let name = ask.pending.first().cloned().unwrap_or_default();
     let choice = |label: String, answer: Reload| {
-        dialog_button(label, msg(MlsMsg::ReloadAnswer(answer)), answer == Reload::This)
-            .width(Fill)
+        dialog_button(label, on_answer(answer), answer == Reload::This).width(Fill)
     };
     let body = column![
         row![
@@ -1071,11 +1119,7 @@ fn reload_card<'a>(ask: &'a ReloadAsk) -> Element<'a, Message> {
         .spacing(6),
         row![
             Space::new().width(Fill),
-            dialog_button(
-                tr!("mleader-style", "cancel"),
-                msg(MlsMsg::ReloadAnswer(Reload::Cancel)),
-                false
-            ),
+            dialog_button(tr!("mleader-style", "cancel"), on_answer(Reload::Cancel), false),
         ],
     ]
     .spacing(14);

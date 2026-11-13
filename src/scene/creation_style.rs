@@ -395,17 +395,322 @@ fn apply_object_defaults(doc: &Document, entity: &mut EntityType) {
 /// making a style current does; DIM's Offset changes it afterwards.
 pub fn sync_header_dim_vars(doc: &mut Document) {
     let current = doc.header.current_dimstyle_name.clone();
-    let value = doc
+    let style = doc
         .dim_styles
         .iter()
         .find(|style| style.name.eq_ignore_ascii_case(&current))
-        .map(|style| (style.dimdli, style.dimzin));
-    if let Some((dimdli, dimzin)) = value {
-        doc.header.dim_line_increment = dimdli;
-        // The header's DIMZIN follows the current style too; numbers the
-        // drawing writes (Properties, prompts) drop zeros by it.
-        doc.header.dim_zero_suppression = dimzin;
+        .cloned();
+    if let Some(style) = style {
+        // Every dimension variable of the header is the current style's
+        // (the header holds the current style plus its overrides); the
+        // header's DIMZIN drops zeros in the numbers the drawing writes.
+        write_header_dim_vars(doc, &style);
+        doc.header.dim_line_increment = style.dimdli;
     }
+}
+
+fn header_color(index: i16, true_color: Option<document::types::Color>) -> document::types::Color {
+    use document::types::Color;
+    if let Some(rgb @ Color::Rgb { .. }) = true_color {
+        return rgb;
+    }
+    match index {
+        0 => Color::ByBlock,
+        256 => Color::ByLayer,
+        1..=255 => Color::Index(index as u8),
+        _ => Color::ByBlock,
+    }
+}
+
+fn style_color(color: document::types::Color) -> (i16, Option<document::types::Color>) {
+    use document::types::Color;
+    match color {
+        Color::Rgb { .. } => (color.approximate_index(), Some(color)),
+        other => (other.approximate_index(), None),
+    }
+}
+
+/// Writes `style`'s dimension variables into the drawing header, which holds
+/// the current style with its overrides. DIMDLI is the drawing's own (DIM's
+/// Offset sets it) and is left to the caller.
+pub fn write_header_dim_vars(doc: &mut Document, style: &DimStyle) {
+    let text_style = doc
+        .text_styles
+        .iter()
+        .find(|t| t.handle == style.dimtxsty_handle)
+        .map(|t| t.name.clone())
+        .unwrap_or_else(|| style.dimtxsty.clone());
+    let linetype = |handle: Handle| {
+        doc.line_types
+            .iter()
+            .find(|lt| lt.handle == handle)
+            .map(|lt| lt.name.clone())
+            .unwrap_or_default()
+    };
+    let (ltype, ltex1, ltex2) = (
+        linetype(style.dimltex_handle),
+        linetype(style.dimltex1_handle),
+        linetype(style.dimltex2_handle),
+    );
+    let h = &mut doc.header;
+    h.dim_scale = style.dimscale;
+    h.dim_arrow_size = style.dimasz;
+    h.dim_ext_line_offset = style.dimexo;
+    h.dim_ext_line_extension = style.dimexe;
+    h.dim_rounding = style.dimrnd;
+    h.dim_line_extension = style.dimdle;
+    h.dim_tolerance_plus = style.dimtp;
+    h.dim_tolerance_minus = style.dimtm;
+    h.dim_text_height = style.dimtxt;
+    h.dim_center_mark = style.dimcen;
+    h.dim_tick_size = style.dimtsz;
+    h.dim_alt_scale = style.dimaltf;
+    h.dim_linear_scale = style.dimlfac;
+    h.dim_text_vertical_pos = style.dimtvp;
+    h.dim_tolerance_scale = style.dimtfac;
+    h.dim_line_gap = style.dimgap;
+    h.dim_alt_rounding = style.dimaltrnd;
+    h.dim_tolerance = style.dimtol;
+    h.dim_limits = style.dimlim;
+    h.dim_text_inside_horizontal = style.dimtih;
+    h.dim_text_outside_horizontal = style.dimtoh;
+    h.dim_suppress_ext1 = style.dimse1;
+    h.dim_suppress_ext2 = style.dimse2;
+    h.dim_text_above = style.dimtad;
+    h.dim_zero_suppression = style.dimzin;
+    h.dim_alt_zero_suppression = style.dimazin;
+    h.dim_alternate_units = style.dimalt;
+    h.dim_alt_decimal_places = style.dimaltd;
+    h.dim_force_line_inside = style.dimtofl;
+    h.dim_separate_arrows = style.dimsah;
+    h.dim_force_text_inside = style.dimtix;
+    h.dim_suppress_outside_ext = style.dimsoxd;
+    h.dim_line_color = header_color(style.dimclrd, style.dimclrd_true_color);
+    h.dim_ext_line_color = header_color(style.dimclre, style.dimclre_true_color);
+    h.dim_text_color = header_color(style.dimclrt, style.dimclrt_true_color);
+    h.dim_angular_decimal_places = style.dimadec;
+    h.dim_decimal_places = style.dimdec;
+    h.dim_tolerance_decimal_places = style.dimtdec;
+    h.dim_alt_units_format = style.dimaltu;
+    h.dim_alt_tolerance_decimal_places = style.dimalttd;
+    h.dim_angular_units = style.dimaunit;
+    h.dim_fraction_format = style.dimfrac;
+    h.dim_linear_unit_format = style.dimlunit;
+    h.dim_decimal_separator = char::from_u32(style.dimdsep.max(0) as u32).unwrap_or('.');
+    h.dim_text_movement = style.dimtmove;
+    h.dim_horizontal_justification = style.dimjust;
+    h.dim_suppress_line1 = style.dimsd1;
+    h.dim_suppress_line2 = style.dimsd2;
+    h.dim_tolerance_justification = style.dimtolj;
+    h.dim_tolerance_zero_suppression = style.dimtzin;
+    h.dim_alt_tolerance_zero_suppression = style.dimaltz;
+    h.dim_alt_tolerance_zero_tight = style.dimalttz;
+    h.dim_fit = style.dimatfit;
+    h.dim_user_positioned_text = style.dimupt;
+    h.dim_post = style.dimpost.clone();
+    h.dim_alt_post = style.dimapost.clone();
+    h.dim_fixed_ext_line_length = style.dimfxl;
+    h.dim_fixed_ext_line_on = style.dimfxlon;
+    h.dim_arc_symbol = style.dimarcsym;
+    h.dim_jog_angle = style.dimjogang;
+    h.dim_text_fill = style.dimtfill;
+    h.dim_text_fill_color = header_color(style.dimtfillclr, style.dimtfillclr_true_color);
+    h.dim_text_direction = style.dimtxtdirection;
+    h.dim_alt_mzf = style.dimaltmzf;
+    h.dim_alt_mzs = style.dimaltmzs.clone();
+    h.dim_mzf = style.dimmzf;
+    h.dim_mzs = style.dimmzs.clone();
+    h.dim_line_weight = style.dimlwd;
+    h.dim_ext_line_weight = style.dimlwe;
+    h.dim_text_style_handle = style.dimtxsty_handle;
+    h.dim_text_style_name = text_style;
+    h.dim_linetype_handle = style.dimltex_handle;
+    h.dim_linetype1_handle = style.dimltex1_handle;
+    h.dim_linetype2_handle = style.dimltex2_handle;
+    h.dim_linetype_name = ltype;
+    h.dim_linetype1_name = ltex1;
+    h.dim_linetype2_name = ltex2;
+    h.dim_arrow_block_handle = style.dimblk;
+    h.dim_arrow_block1_handle = style.dimblk1;
+    h.dim_arrow_block2_handle = style.dimblk2;
+    h.dim_leader_arrow_block_handle = style.dimldrblk;
+    // The arrow names follow from the handles when the drawing is written.
+    h.dim_arrow_block.clear();
+    h.dim_arrow_block1.clear();
+    h.dim_arrow_block2.clear();
+    h.dim_leader_arrow_block.clear();
+}
+
+/// The current style as the drawing header holds it: `base` with the
+/// header's dimension variables laid over it. The header carries the
+/// current style's overrides, so the differences from `base` are those.
+pub fn header_dim_style(doc: &Document, base: &DimStyle) -> DimStyle {
+    let h = &doc.header;
+    let mut s = base.clone();
+    // A value the file wrote with less precision is still the style's.
+    let near = |value: f64, style: f64| {
+        if (value - style).abs() <= 1e-9 * (1.0 + style.abs()) {
+            style
+        } else {
+            value
+        }
+    };
+    s.dimscale = near(h.dim_scale, s.dimscale);
+    s.dimasz = near(h.dim_arrow_size, s.dimasz);
+    s.dimexo = near(h.dim_ext_line_offset, s.dimexo);
+    s.dimdli = near(h.dim_line_increment, s.dimdli);
+    s.dimexe = near(h.dim_ext_line_extension, s.dimexe);
+    s.dimrnd = near(h.dim_rounding, s.dimrnd);
+    s.dimdle = near(h.dim_line_extension, s.dimdle);
+    s.dimtp = near(h.dim_tolerance_plus, s.dimtp);
+    s.dimtm = near(h.dim_tolerance_minus, s.dimtm);
+    s.dimtxt = near(h.dim_text_height, s.dimtxt);
+    s.dimcen = near(h.dim_center_mark, s.dimcen);
+    s.dimtsz = near(h.dim_tick_size, s.dimtsz);
+    s.dimaltf = near(h.dim_alt_scale, s.dimaltf);
+    s.dimlfac = near(h.dim_linear_scale, s.dimlfac);
+    s.dimtvp = near(h.dim_text_vertical_pos, s.dimtvp);
+    s.dimtfac = near(h.dim_tolerance_scale, s.dimtfac);
+    s.dimgap = near(h.dim_line_gap, s.dimgap);
+    s.dimaltrnd = near(h.dim_alt_rounding, s.dimaltrnd);
+    s.dimtol = h.dim_tolerance;
+    s.dimlim = h.dim_limits;
+    s.dimtih = h.dim_text_inside_horizontal;
+    s.dimtoh = h.dim_text_outside_horizontal;
+    s.dimse1 = h.dim_suppress_ext1;
+    s.dimse2 = h.dim_suppress_ext2;
+    s.dimtad = h.dim_text_above;
+    s.dimzin = h.dim_zero_suppression;
+    s.dimazin = h.dim_alt_zero_suppression;
+    s.dimalt = h.dim_alternate_units;
+    s.dimaltd = h.dim_alt_decimal_places;
+    s.dimtofl = h.dim_force_line_inside;
+    s.dimsah = h.dim_separate_arrows;
+    s.dimtix = h.dim_force_text_inside;
+    s.dimsoxd = h.dim_suppress_outside_ext;
+    (s.dimclrd, s.dimclrd_true_color) = style_color(h.dim_line_color);
+    (s.dimclre, s.dimclre_true_color) = style_color(h.dim_ext_line_color);
+    (s.dimclrt, s.dimclrt_true_color) = style_color(h.dim_text_color);
+    s.dimadec = h.dim_angular_decimal_places;
+    s.dimdec = h.dim_decimal_places;
+    s.dimtdec = h.dim_tolerance_decimal_places;
+    s.dimaltu = h.dim_alt_units_format;
+    s.dimalttd = h.dim_alt_tolerance_decimal_places;
+    s.dimaunit = h.dim_angular_units;
+    s.dimfrac = h.dim_fraction_format;
+    s.dimlunit = h.dim_linear_unit_format;
+    s.dimdsep = h.dim_decimal_separator as i16;
+    s.dimtmove = h.dim_text_movement;
+    s.dimjust = h.dim_horizontal_justification;
+    s.dimsd1 = h.dim_suppress_line1;
+    s.dimsd2 = h.dim_suppress_line2;
+    s.dimtolj = h.dim_tolerance_justification;
+    s.dimtzin = h.dim_tolerance_zero_suppression;
+    s.dimaltz = h.dim_alt_tolerance_zero_suppression;
+    s.dimalttz = h.dim_alt_tolerance_zero_tight;
+    s.dimatfit = h.dim_fit;
+    s.dimupt = h.dim_user_positioned_text;
+    s.dimpost = h.dim_post.clone();
+    s.dimapost = h.dim_alt_post.clone();
+    s.dimfxl = near(h.dim_fixed_ext_line_length, s.dimfxl);
+    s.dimfxlon = h.dim_fixed_ext_line_on;
+    s.dimarcsym = h.dim_arc_symbol;
+    s.dimjogang = near(h.dim_jog_angle, s.dimjogang);
+    s.dimtfill = h.dim_text_fill;
+    (s.dimtfillclr, s.dimtfillclr_true_color) = style_color(h.dim_text_fill_color);
+    s.dimtxtdirection = h.dim_text_direction;
+    s.dimaltmzf = near(h.dim_alt_mzf, s.dimaltmzf);
+    s.dimaltmzs = h.dim_alt_mzs.clone();
+    s.dimmzf = near(h.dim_mzf, s.dimmzf);
+    s.dimmzs = h.dim_mzs.clone();
+    s.dimlwd = h.dim_line_weight;
+    s.dimlwe = h.dim_ext_line_weight;
+    // A DXF header names these; a DWG gives their handles.
+    let named = |handle: Handle, name: &str, find: &dyn Fn(&str) -> Option<Handle>| {
+        if !handle.is_null() {
+            Some(handle)
+        } else if name.is_empty() {
+            None
+        } else {
+            find(name)
+        }
+    };
+    let text_style = |name: &str| {
+        doc.text_styles
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .map(|t| t.handle)
+    };
+    let linetype = |name: &str| {
+        doc.line_types
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .map(|t| t.handle)
+    };
+    let block = |name: &str| {
+        doc.block_records
+            .iter()
+            .find(|b| b.name.eq_ignore_ascii_case(name))
+            .map(|b| b.handle)
+    };
+    if let Some(handle) = named(h.dim_text_style_handle, &h.dim_text_style_name, &text_style) {
+        s.dimtxsty_handle = handle;
+        if let Some(t) = doc.text_styles.iter().find(|t| t.handle == handle) {
+            s.dimtxsty = t.name.clone();
+        }
+    }
+    for (slot, handle, name) in [
+        (&mut s.dimltex_handle, h.dim_linetype_handle, &h.dim_linetype_name),
+        (&mut s.dimltex1_handle, h.dim_linetype1_handle, &h.dim_linetype1_name),
+        (&mut s.dimltex2_handle, h.dim_linetype2_handle, &h.dim_linetype2_name),
+    ] {
+        if let Some(found) = named(handle, name, &linetype) {
+            *slot = found;
+        }
+    }
+    // An empty arrow name is the default closed filled arrowhead.
+    for (slot, handle, name) in [
+        (&mut s.dimblk, h.dim_arrow_block_handle, &h.dim_arrow_block),
+        (&mut s.dimblk1, h.dim_arrow_block1_handle, &h.dim_arrow_block1),
+        (&mut s.dimblk2, h.dim_arrow_block2_handle, &h.dim_arrow_block2),
+        (&mut s.dimldrblk, h.dim_leader_arrow_block_handle, &h.dim_leader_arrow_block),
+    ] {
+        *slot = named(handle, name, &block).unwrap_or(Handle::NULL);
+    }
+    s
+}
+
+/// The overrides the drawing header holds over the current dimension style
+/// (the header is the current style with its overrides).
+pub fn header_dim_overrides(
+    doc: &Document,
+) -> Option<(String, Vec<(i16, document::xdata::XDataValue)>)> {
+    let current = doc.header.current_dimstyle_name.clone();
+    let style = named_dim_style(doc, &current)?;
+    let pairs = crate::entities::dim_override::diff_pairs(&style, &header_dim_style(doc, &style));
+    (!pairs.is_empty()).then(|| (style.name.clone(), pairs))
+}
+
+/// Writes the current dimension style with `overrides` laid over it into the
+/// header, so the overrides are kept with the drawing. The drawing's DIMDLI
+/// stays unless an override sets it.
+pub fn stamp_header_dim_overrides(
+    doc: &mut Document,
+    overrides: Option<&(String, Vec<(i16, document::xdata::XDataValue)>)>,
+) {
+    let current = doc.header.current_dimstyle_name.clone();
+    let Some(mut style) = named_dim_style(doc, &current) else {
+        return;
+    };
+    let mut dimdli = doc.header.dim_line_increment;
+    if let Some((_, pairs)) = overrides.filter(|(owner, _)| owner.eq_ignore_ascii_case(&current)) {
+        crate::entities::dim_override::apply_pairs(&mut style, pairs);
+        if pairs.iter().any(|(code, _)| *code == crate::entities::dim_override::DIMDLI) {
+            dimdli = style.dimdli;
+        }
+    }
+    write_header_dim_vars(doc, &style);
+    doc.header.dim_line_increment = dimdli;
 }
 
 /// The drawing's DIMDLI (the header's; the current style's when the header

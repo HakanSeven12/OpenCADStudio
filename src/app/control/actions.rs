@@ -3144,7 +3144,9 @@ impl OpenCADStudio {
             // "hide_xrefs=0|1", "context=<style>", "rename=<style>",
             // "rename_to=<text>", "rename_ok", "set_current", "new",
             // "modify", "override", "compare", "delete=<style>",
-            // "delete_yes", "delete_no", "help", "close". New: "name=<text>",
+            // "delete_yes", "delete_no", "save_overrides", "discard_yes",
+            // "discard_no", "help", "close" ("overrides" also names the
+            // overrides entry in context/rename/delete). New: "name=<text>",
             // "start=<style>", "annotative=0|1", "use_for=0..6", "continue",
             // "create_cancel", "notice_close". Settings: "tab=0..6",
             // "text=<field>:<value>", "set=<field>:<code>",
@@ -3154,7 +3156,8 @@ impl OpenCADStudio {
             // "lineweight=<field>:<1/100 mm|-1|-2|-3>", "pick=<name>",
             // "pick_ok", "pick_cancel", "pick_load", "load_file",
             // "load_path=<.lin path>", "load_toggle=<linetype>", "load_ok",
-            // "load_cancel", "text_styles", "ok", "cancel". Compare:
+            // "load_cancel", "reload=this|all|skip|skip_rest|cancel",
+            // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
             "dimstyle_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::DimStyle) {
@@ -3163,7 +3166,7 @@ impl OpenCADStudio {
                         "The Dimension Style window is not open",
                     ));
                 }
-                use crate::ui::style::dimstyle::{DsMsg as M, OTHER};
+                use crate::ui::style::dimstyle::{DsMsg as M, OTHER, OVERRIDES};
                 let spec = string(req, "value")?;
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 let (field, arg) = value.split_once(':').unwrap_or((value, ""));
@@ -3202,13 +3205,20 @@ impl OpenCADStudio {
                     }
                 };
                 let dlg = Message::DimStyleDlg;
+                let entry = |name: &str| {
+                    if name == "overrides" {
+                        OVERRIDES.to_string()
+                    } else {
+                        name.to_string()
+                    }
+                };
                 match key {
                     "select" => dlg(M::Select(value.to_string())),
                     "overrides" => dlg(M::SelectOverrides),
                     "filter" => dlg(M::ListFilter(value == "used")),
                     "hide_xrefs" => dlg(M::HideXrefs(value == "1")),
-                    "context" => dlg(M::Context(Some(value.to_string()))),
-                    "rename" => dlg(M::RenameStart(value.to_string())),
+                    "context" => dlg(M::Context(Some(entry(value)))),
+                    "rename" => dlg(M::RenameStart(entry(value))),
                     "rename_to" => dlg(M::RenameInput(value.to_string())),
                     "rename_ok" => dlg(M::RenameCommit),
                     "set_current" => dlg(M::SetCurrent),
@@ -3216,9 +3226,28 @@ impl OpenCADStudio {
                     "modify" => dlg(M::Modify),
                     "override" => dlg(M::Override),
                     "compare" => dlg(M::Compare),
-                    "delete" => dlg(M::Delete(value.to_string())),
+                    "delete" => dlg(M::Delete(entry(value))),
                     "delete_yes" => dlg(M::DeleteAnswer(true)),
                     "delete_no" => dlg(M::DeleteAnswer(false)),
+                    "save_overrides" => dlg(M::SaveOverrides),
+                    "reload" => {
+                        use crate::ui::style::mleaderstyle::Reload;
+                        dlg(M::ReloadAnswer(match value {
+                            "this" => Reload::This,
+                            "all" => Reload::All,
+                            "skip" => Reload::Skip,
+                            "skip_rest" => Reload::SkipRest,
+                            "cancel" => Reload::Cancel,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "reload is this, all, skip, skip_rest or cancel",
+                                ))
+                            }
+                        }))
+                    }
+                    "discard_yes" => dlg(M::DiscardAnswer(true)),
+                    "discard_no" => dlg(M::DiscardAnswer(false)),
                     "help" => dlg(M::Help),
                     "close" => Message::CloseModal,
                     "name" => dlg(M::CreateName(value.to_string())),

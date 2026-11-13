@@ -14830,6 +14830,29 @@ impl Scene {
         self.interaction_candidates_in_aabb(wires, aabb, screen_rect, view_rot, eye, bounds)
     }
 
+    /// An already prepared resident index is required by incremental box
+    /// previews. Its identity also invalidates a preview when an index is
+    /// replaced asynchronously during the gesture.
+    pub(crate) fn box_preview_interaction_index(
+        &self,
+        wires: &Arc<Vec<WireModel>>,
+        height: f32,
+    ) -> Option<Arc<crate::scene::pick::interaction_index::InteractionIndex>> {
+        self.interaction_source_is_resident(wires, height)
+            .then(|| self.cached_interaction_index(wires))
+            .flatten()
+    }
+
+    /// Fills and solid meshes have selection paths beyond the wire index.
+    /// Recheck them conservatively instead of assuming their wire bounds
+    /// describe every filled/instanced part of an entity.
+    pub(crate) fn box_preview_non_wire_handles(&self) -> HashSet<Handle> {
+        let mut handles: HashSet<Handle> = self.hatches.keys().copied().collect();
+        handles.extend(self.insert_hatches_for_click().keys().copied());
+        handles.extend(self.interaction_meshes_arc().iter().filter_map(|set| set.entity_handle()));
+        handles
+    }
+
     pub fn interaction_candidates_in_aabb(
         &self,
         wires: Arc<Vec<WireModel>>,

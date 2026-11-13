@@ -6442,13 +6442,24 @@ impl Scene {
             _ => None,
         };
 
+        let block_handles = document
+            .block_records
+            .iter()
+            .find(|block| block.handle == layout.block_record)
+            .map(|block| block.entity_handles.as_slice())
+            .unwrap_or_default();
+
         // A layout whose viewports are all numbered 2 and up has no sheet yet:
         // they are content viewports added (e.g. by a script) before the layout
-        // was first opened, and opening it must still create its sheet.
-        if !document.entities().any(|entity| {
-            matches!(entity, EntityType::Viewport(vp)
-                if vp.common.owner_handle == layout.block_record && vp.id <= 1)
-        }) {
+        // was first opened, and opening it must still create its sheet. Only
+        // the layout's own lists are scanned: this runs every frame.
+        let mut owned_ids = layout
+            .viewports
+            .iter()
+            .chain(block_handles)
+            .filter_map(|&handle| owned_viewport(handle).map(|vp| vp.id))
+            .peekable();
+        if owned_ids.peek().is_some() && owned_ids.all(|id| id > 1) {
             return Handle::NULL;
         }
 
@@ -6465,12 +6476,6 @@ impl Scene {
             return handle;
         }
 
-        let block_handles = document
-            .block_records
-            .iter()
-            .find(|block| block.handle == layout.block_record)
-            .map(|block| block.entity_handles.as_slice())
-            .unwrap_or_default();
         let block_viewports = block_handles
             .iter()
             .copied()

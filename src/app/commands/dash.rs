@@ -1380,8 +1380,7 @@ impl OpenCADStudio {
 
     fn finish_linetype_change(&mut self, i: usize, names: &[String]) {
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.invalidate_layer_dependencies(names);
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.invalidate_linetype_dependencies(names);
         self.sync_ribbon_layers();
         self.sync_ribbon_from_selection();
     }

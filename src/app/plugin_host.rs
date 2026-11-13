@@ -458,6 +458,23 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].scene.bump_geometry();
     }
 
+    fn bump_handles_incremental(&mut self, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .copied()
+            .map(|h| (h, crate::scene::ChangeKind::Modified))
+            .collect();
+        let scene = &mut self.app.tabs[self.tab].scene;
+        if scene.changes_touch_block_definition(&changes) {
+            scene.bump_geometry();
+        } else {
+            scene.bump_entities(&changes);
+        }
+    }
+
     /// Replace the entity carrying `entity`'s handle in place, refreshing the
     /// scene's derived caches. Returns `false` when no entity has that handle.
     pub fn update_entity(&mut self, entity: EntityType) -> bool {
@@ -743,7 +760,7 @@ impl<'a> HostSession<'a> {
         // boundary notification — marked BEFORE the publish that carries it.
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_record_dirty(handle, app, epoch);
-        self.bump_geometry();
+        self.bump_handles_incremental(&[handle]);
         self.set_dirty();
         self.publish_document_view();
         true
@@ -786,7 +803,7 @@ impl<'a> HostSession<'a> {
         if let Some(ah) = app_handle {
             xd.raw_dwg_eed.retain(|(a, _)| *a != ah);
         }
-        self.bump_geometry();
+        self.bump_handles_incremental(&[handle]);
         self.set_dirty();
         self.publish_document_view();
         true
@@ -1994,8 +2011,7 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].dirty = true;
         self.app.tabs[self.tab]
             .scene
-            .invalidate_layer_dependencies(names);
-        self.app.tabs[self.tab].scene.bump_geometry();
+            .invalidate_linetype_dependencies(names);
         if self.tab == self.app.active_tab {
             self.app.sync_ribbon_layers();
             self.app.sync_ribbon_from_selection();
@@ -3280,10 +3296,9 @@ impl<'a> HostSession<'a> {
             "designation state was checked before the mutation"
         );
         // The wires carry the click-through stamp baked at tessellation, so a
-        // designation change must rebuild them: bump_geometry clears the
-        // tessellation memos and resident wire sets exactly like an entity
-        // edit would.
-        self.bump_geometry();
+        // designation change must rebuild them incrementally (or rebuild block
+        // caches when the entity belongs to a block definition).
+        self.bump_handles_incremental(&[handle]);
         self.set_dirty();
         self.publish_document_view();
         if own_scope {
@@ -3465,7 +3480,7 @@ impl<'a> HostSession<'a> {
                 .scene
                 .set_reference_only_membership(*handle, true);
         }
-        self.bump_geometry();
+        self.bump_handles_incremental(&handles);
         self.set_dirty();
         self.publish_document_view();
         if own_scope {
@@ -3656,9 +3671,10 @@ impl<'a> HostSession<'a> {
                 }
                 stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::Integer32(1));
             }
-            self.write_record(*handle, stamp);
             // Designation inside the SAME scope, the before-image
-            // pending-scoped the way set_reference_only does.
+            // pending-scoped the way set_reference_only does. Set before
+            // `write_record` so its incremental handle bump already bakes the
+            // designation stamp without a redundant full rebuild.
             let before = self.app.tabs[self.tab]
                 .scene
                 .reference_only
@@ -3668,8 +3684,8 @@ impl<'a> HostSession<'a> {
             self.app.tabs[self.tab]
                 .scene
                 .set_reference_only_membership(*handle, !instance.selectable_custom);
+            self.write_record(*handle, stamp);
         }
-        self.bump_geometry();
         self.set_dirty();
         self.publish_document_view();
         if own_scope {

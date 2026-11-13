@@ -1805,7 +1805,7 @@ impl OpenCADStudio {
                 if changed {
                     self.push_undo_snapshot(i, "MCP SET_PROPERTIES");
                     self.tabs[i].scene.document.summary_info = edited;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].scene.update_summary_field_hosts();
                     self.tabs[i].dirty = true;
                 }
                 result_name = Some("summary_info".to_string());

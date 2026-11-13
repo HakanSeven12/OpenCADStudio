@@ -4281,6 +4281,25 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.invalidate_property_targets_with_driven(i, handles, &[]);
     }
 
+    /// Invalidate property targets incrementally when all handles are in top-level
+    /// spaces, falling back to `bump_geometry()` if any handle belongs to a block
+    /// definition (whose assembled cache and references must rebuild).
+    pub(super) fn invalidate_property_targets_or_blocks(&mut self, i: usize, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .copied()
+            .map(|h| (h, crate::scene::ChangeKind::Modified))
+            .collect();
+        if self.tabs[i].scene.changes_touch_block_definition(&changes) {
+            self.tabs[i].scene.bump_geometry();
+        } else {
+            self.invalidate_property_targets(i, handles);
+        }
+    }
+
     pub(super) fn invalidate_property_targets_with_driven(
         &mut self,
         i: usize,

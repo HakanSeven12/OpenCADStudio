@@ -579,7 +579,8 @@ impl OpenCADStudio {
         {
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 if crate::io::linetypes::ensure_catalog_linetype(&mut tab.scene.document, name) {
-                    tab.scene.bump_geometry();
+                    tab.scene
+                        .invalidate_linetype_dependencies(std::slice::from_ref(name));
                 }
             }
         }
@@ -14616,6 +14617,17 @@ impl OpenCADStudio {
                 // In the open Linetype Manager a load is staged like its
                 // other changes: Apply keeps it, Close drops it.
                 let staged = self.linetypes_are_staged();
+                let before_names: rustc_hash::FxHashSet<String> = if staged {
+                    rustc_hash::FxHashSet::default()
+                } else {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .map(|lt| lt.name.to_ascii_uppercase())
+                        .collect()
+                };
                 if !staged {
                     self.push_undo_snapshot(i, "LINETYPE");
                 }
@@ -14627,8 +14639,18 @@ impl OpenCADStudio {
                 if staged {
                     self.load_linetype_bufs(i);
                 } else if added > 0 {
+                    let added_names: Vec<String> = self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .filter(|lt| !before_names.contains(&lt.name.to_ascii_uppercase()))
+                        .map(|lt| lt.name.clone())
+                        .collect();
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i]
+                        .scene
+                        .invalidate_linetype_dependencies(&added_names);
                 }
                 self.command_line
                     .push_output(crate::tf!("{added} linetype(s) loaded.").as_ref());

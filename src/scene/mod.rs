@@ -679,9 +679,21 @@ struct DependencyTargets {
     touches_block_definition: bool,
 }
 
+impl DependencyTargets {
+    fn extend_from(&mut self, other: &DependencyTargets) {
+        self.render_handles
+            .extend(other.render_handles.iter().copied());
+        self.source_handles
+            .extend(other.source_handles.iter().copied());
+        self.block_users.extend(other.block_users.iter().copied());
+        self.touches_block_definition |= other.touches_block_definition;
+    }
+}
+
 #[derive(Clone, Copy)]
 enum DependencyKind {
     Layer,
+    Linetype,
     TextStyle,
     DimStyle,
 }
@@ -720,6 +732,7 @@ impl RenderHandles<'_> {
 #[derive(Default)]
 struct SceneDependencyIndex {
     layers: HashMap<String, DependencyTargets>,
+    linetypes: HashMap<String, DependencyTargets>,
     text_styles: HashMap<String, DependencyTargets>,
     dim_styles: HashMap<String, DependencyTargets>,
     object_styles: HashMap<Handle, DependencyTargets>,
@@ -4705,6 +4718,14 @@ impl Scene {
             self.bump_text_hosts(&changed);
         }
         (changed.len(), found)
+    }
+
+    /// Re-evaluate fields reading drawing/custom properties (`acvar`).
+    pub fn update_summary_field_hosts(&mut self) {
+        let hosts = crate::entities::field::acvar_hosts(&self.document);
+        if !hosts.is_empty() {
+            self.update_fields(32, Some(&hosts));
+        }
     }
 
     /// Redraw text hosts whose stored text changed (re-evaluated fields). An
@@ -16346,6 +16367,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         common.handle.hash(&mut hasher);
         common.owner_handle.hash(&mut hasher);
         normalized_layer.hash(&mut hasher);
+        normalize_name(&common.linetype).hash(&mut hasher);
 
         let category = match entity {
             EntityType::Point(_) => 1_u8,
@@ -16500,6 +16522,12 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             .text_styles
             .iter()
             .map(|style| (style.handle, style.name.clone()))
+            .collect();
+        let linetype_names: HashMap<Handle, String> = self
+            .document
+            .line_types
+            .iter()
+            .map(|lt| (lt.handle, lt.name.clone()))
             .collect();
 
         let mut roots: HashMap<String, HashSet<Handle>> = HashMap::default();
@@ -16673,7 +16701,15 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 let target = map.entry(handle).or_default();
                 render_handles.extend_into(target, common.handle);
             };
+            let is_direct_linetype = |name: &str| {
+                !name.is_empty()
+                    && !name.eq_ignore_ascii_case("bylayer")
+                    && !name.eq_ignore_ascii_case("byblock")
+            };
             add(&mut index.layers, &common.layer);
+            if is_direct_linetype(&common.linetype) {
+                add(&mut index.linetypes, &common.linetype);
+            }
             match entity {
                 EntityType::Text(text) => add(&mut index.text_styles, &text.style),
                 EntityType::MText(text) => add(&mut index.text_styles, &text.style),
@@ -16686,6 +16722,9 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 EntityType::Insert(insert) => {
                     for attribute in &insert.attributes {
                         add(&mut index.layers, &attribute.common.layer);
+                        if is_direct_linetype(&attribute.common.linetype) {
+                            add(&mut index.linetypes, &attribute.common.linetype);
+                        }
                         add(&mut index.text_styles, &attribute.text_style);
                     }
                 }
@@ -16694,6 +16733,15 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                     if let Some(style) = self.document.dim_styles.get(&dimension.base().style_name)
                     {
                         add(&mut index.text_styles, &style.dimtxsty);
+                        for lt_handle in [
+                            style.dimltex_handle,
+                            style.dimltex1_handle,
+                            style.dimltex2_handle,
+                        ] {
+                            if let Some(name) = linetype_names.get(&lt_handle) {
+                                add(&mut index.linetypes, name);
+                            }
+                        }
                     }
                 }
                 EntityType::Leader(leader) => {
@@ -16734,6 +16782,22 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                             {
                                 add(&mut index.text_styles, name);
                             }
+                            for border in [
+                                &style.top_border,
+                                &style.right_border,
+                                &style.bottom_border,
+                                &style.left_border,
+                            ]
+                            .into_iter()
+                            .chain(style.additional_borders.iter().map(|(_, border)| border))
+                            {
+                                if let Some(name) = border
+                                    .line_type_handle
+                                    .and_then(|handle| linetype_names.get(&handle))
+                                {
+                                    add(&mut index.linetypes, name);
+                                }
+                            }
                         }
                         for cell in &row.cells {
                             if let Some(style) = &cell.style {
@@ -16742,6 +16806,22 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                                     .and_then(|handle| text_style_names.get(&handle))
                                 {
                                     add(&mut index.text_styles, name);
+                                }
+                                for border in [
+                                    &style.top_border,
+                                    &style.right_border,
+                                    &style.bottom_border,
+                                    &style.left_border,
+                                ]
+                                .into_iter()
+                                .chain(style.additional_borders.iter().map(|(_, border)| border))
+                                {
+                                    if let Some(name) = border
+                                        .line_type_handle
+                                        .and_then(|handle| linetype_names.get(&handle))
+                                    {
+                                        add(&mut index.linetypes, name);
+                                    }
                                 }
                             }
                             for content in &cell.contents {
@@ -16763,6 +16843,17 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                             add(&mut index.text_styles, name);
                         }
                     }
+                    for handle in [leader.line_type_handle].into_iter().chain(
+                        leader
+                            .context
+                            .leader_roots
+                            .iter()
+                            .flat_map(|root| root.lines.iter().map(|line| line.line_type_handle)),
+                    ) {
+                        if let Some(name) = handle.and_then(|handle| linetype_names.get(&handle)) {
+                            add(&mut index.linetypes, name);
+                        }
+                    }
                     if let Some(ObjectType::MultiLeaderStyle(style)) = leader
                         .style_handle
                         .and_then(|handle| self.document.objects.get(&handle))
@@ -16773,9 +16864,26 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                         {
                             add(&mut index.text_styles, name);
                         }
+                        if let Some(name) = style
+                            .line_type_handle
+                            .and_then(|handle| linetype_names.get(&handle))
+                        {
+                            add(&mut index.linetypes, name);
+                        }
                     }
                 }
-                EntityType::MLine(line) => add_handle(&mut index.object_styles, line.style_handle),
+                EntityType::MLine(line) => {
+                    add_handle(&mut index.object_styles, line.style_handle);
+                    if let Some(style) =
+                        crate::entities::mline::resolved_mline_style(line, &self.document)
+                    {
+                        for element in &style.elements {
+                            if is_direct_linetype(&element.linetype) {
+                                add(&mut index.linetypes, &element.linetype);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -16792,6 +16900,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         let index = cache.as_ref().unwrap();
         let map = match kind {
             DependencyKind::Layer => &index.layers,
+            DependencyKind::Linetype => &index.linetypes,
             DependencyKind::TextStyle => &index.text_styles,
             DependencyKind::DimStyle => &index.dim_styles,
         };
@@ -16800,16 +16909,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             let Some(target) = map.get(&normalize_name(name)) else {
                 continue;
             };
-            combined
-                .render_handles
-                .extend(target.render_handles.iter().copied());
-            combined
-                .source_handles
-                .extend(target.source_handles.iter().copied());
-            combined
-                .block_users
-                .extend(target.block_users.iter().copied());
-            combined.touches_block_definition |= target.touches_block_definition;
+            combined.extend_from(target);
         }
         combined
     }
@@ -16940,6 +17040,49 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
     pub fn invalidate_layer_dependencies(&mut self, names: &[String]) {
         let targets = self.dependency_targets(DependencyKind::Layer, names);
         self.invalidate_dependency_targets(targets);
+    }
+
+    pub fn invalidate_linetype_dependencies(&mut self, names: &[String]) {
+        if names.is_empty() {
+            return;
+        }
+        let wanted: HashSet<String> = names.iter().map(|name| normalize_name(name)).collect();
+        let wanted_handles: HashSet<Handle> = self
+            .document
+            .line_types
+            .iter()
+            .filter(|lt| wanted.contains(&normalize_name(&lt.name)))
+            .map(|lt| lt.handle)
+            .collect();
+        let affected_layers: Vec<String> = self
+            .document
+            .layers
+            .iter()
+            .filter(|layer| {
+                wanted.contains(&normalize_name(&layer.line_type))
+                    || (!wanted_handles.is_empty()
+                        && self
+                            .document
+                            .layer_viewport_overrides(
+                                layer.handle,
+                                document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                            )
+                            .into_iter()
+                            .any(|(_, value)| {
+                                value
+                                    .as_handle()
+                                    .is_some_and(|handle| wanted_handles.contains(&handle))
+                            }))
+            })
+            .map(|layer| layer.name.clone())
+            .collect();
+        let mut targets = self.dependency_targets(DependencyKind::Linetype, names);
+        if !affected_layers.is_empty() {
+            let layer_targets = self.dependency_targets(DependencyKind::Layer, &affected_layers);
+            targets.extend_from(&layer_targets);
+        }
+        self.invalidate_dependency_targets(targets);
+        self.invalidate_dependency_index();
     }
 
     pub fn invalidate_text_style_dependencies(&mut self, name: &str) {
@@ -18226,6 +18369,68 @@ mod journal_tests {
             scene.geometry_epoch, epoch,
             "the cached hatch needs an entity delta"
         );
+    }
+
+    #[test]
+    fn linetype_dependency_invalidation_stays_incremental_for_direct_and_bylayer_users() {
+        use document::entities::Line;
+        use document::tables::layer::Layer;
+        use document::tables::linetype::{LineType, LineTypeElement};
+        use document::types::Vector3;
+
+        let mut scene = Scene::new();
+        let mut lt = LineType::new("DASHED");
+        lt.elements = vec![
+            LineTypeElement {
+                length: 0.5,
+                complex: None,
+            },
+            LineTypeElement {
+                length: -0.25,
+                complex: None,
+            },
+        ];
+        lt.pattern_length = 0.75;
+        let _ = scene.document.line_types.add(lt);
+
+        let mut layer = Layer::new("DashedLayer");
+        layer.line_type = "DASHED".to_string();
+        scene.document.layers.add_or_replace(layer);
+
+        let mut direct_line = Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        direct_line.common.linetype = "dashed".to_string();
+        let direct = scene.add_entity(EntityType::Line(direct_line));
+
+        let mut bylayer_line = Line::from_points(
+            Vector3::new(0.0, 2.0, 0.0),
+            Vector3::new(10.0, 2.0, 0.0),
+        );
+        bylayer_line.common.layer = "DashedLayer".to_string();
+        let bylayer = scene.add_entity(EntityType::Line(bylayer_line));
+
+        let plain_line = Line::from_points(
+            Vector3::new(0.0, 4.0, 0.0),
+            Vector3::new(10.0, 4.0, 0.0),
+        );
+        let plain = scene.add_entity(EntityType::Line(plain_line));
+
+        let epoch_before = scene.geometry_epoch;
+        let block_epoch_before = scene.block_epoch;
+
+        scene.invalidate_linetype_dependencies(&["DASHED".to_string()]);
+
+        assert_ne!(scene.geometry_epoch, epoch_before);
+        assert_eq!(scene.block_epoch, block_epoch_before);
+        let deltas = scene
+            .replay_since(epoch_before)
+            .expect("linetype invalidation must emit an incremental delta");
+        let changed: HashSet<Handle> = deltas.into_iter().map(|(h, _)| h).collect();
+        assert!(changed.contains(&direct));
+        assert!(changed.contains(&bylayer));
+        assert!(!changed.contains(&plain));
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

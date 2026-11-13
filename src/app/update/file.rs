@@ -2888,7 +2888,6 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "WBLOCK");
                     self.tabs[i].scene.erase_entities(handles);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.refresh_properties();
                 }
                 crate::ui::window::block_definition::BlockObjectMode::Convert => {
@@ -2918,7 +2917,6 @@ impl OpenCADStudio {
                     };
                     let _ = self.tabs[i].scene.create_block_with_options(options);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.refresh_properties();
                 }
             }

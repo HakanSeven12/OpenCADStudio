@@ -1592,8 +1592,7 @@ impl OpenCADStudio {
 
         if !dry_run {
             // Refresh scene caches and dirty flags
-            self.invalidate_property_targets(i, &changed_handles);
-            self.tabs[i].scene.bump_geometry();
+            self.invalidate_property_targets_or_blocks(i, &changed_handles);
             self.tabs[i].dirty = true;
             self.refresh_properties();
 

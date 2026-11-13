@@ -3953,6 +3953,56 @@ fn entities_create_insert_refuses_unknown_constant_and_non_text_attributes() {
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
+fn ifccad_undo_does_not_reissue_a_saved_linetype_handle() {
+    use super::tests::request;
+    use document::ifccad::{encode_ifccad_document, load_ifccad_bytes};
+    use serde_json::json;
+
+    let drawing = document::Ifcx
+        .export_ifccad(&document::Document::new())
+        .unwrap()
+        .drawing;
+    let encoded = encode_ifccad_document(&drawing).unwrap();
+    let (loaded, session) = ocs_save::read_ifccad_for_edit(encoded.bytes()).unwrap();
+    let session = session.expect("IFCCAD identity session");
+    let mut app = OpenCADStudio::new_for_test();
+    assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+    let tab = app.active_tab;
+    app.tabs[tab].scene.document = loaded.document;
+    app.tabs[tab].ifccad_session = Some(session.clone());
+
+    let cmd = |app: &mut OpenCADStudio, command| {
+        let reply = request(app, json!({"op":"run","cmd":command}));
+        assert_eq!(reply["ok"], true, "{reply}");
+    };
+    let saved_pattern_id = |app: &OpenCADStudio, name| {
+        let format = ocs_save::external_format("ifccad").unwrap();
+        let bytes = ocs_save::write_external_for_edit(
+            &app.tabs[tab].scene.document,
+            format,
+            true,
+            Some(&session),
+        )
+        .unwrap();
+        load_ifccad_bytes(&bytes, Default::default())
+            .unwrap()
+            .document()
+            .line_patterns
+            .iter()
+            .find(|pattern| pattern.name.eq_ignore_ascii_case(name))
+            .unwrap()
+            .id
+    };
+    cmd(&mut app, "-LINETYPE CREATE FIRST 1,-1");
+    let first_id = saved_pattern_id(&app, "FIRST");
+    assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
+    assert!(app.tabs[tab].scene.document.line_types.get("FIRST").is_none());
+    cmd(&mut app, "-LINETYPE CREATE SECOND 2,-2");
+    assert_ne!(saved_pattern_id(&app, "SECOND"), first_id);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
     use super::tests::request;
     use crate::app::{SaveContinuation, SavePurpose};
@@ -4053,13 +4103,10 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
     source
         .objects
         .insert(style.handle, ObjectType::MLineStyle(style));
+    let mut b_root = a.clone();
+    b_root.translate(Vector3::new(10.0, 0.0, 0.0));
     source.add_entity(EntityType::MLine(a)).unwrap();
-    source
-        .add_entity(EntityType::MLine(MLine::from_points(&[
-            Vector3::new(12.0, 3.0, 0.0),
-            Vector3::new(15.0, 3.0, 0.0),
-        ])))
-        .unwrap();
+    source.add_entity(EntityType::MLine(b_root)).unwrap();
     source
         .add_entity(EntityType::Line(Line::from_points(
             Vector3::ZERO,
@@ -4071,7 +4118,8 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
         .line_patterns
         .retain(|pattern| pattern.name != "Wall dash");
     let b = drawing.model.entities[1].as_opaque().unwrap().clone();
-    let missing = IfccadLinePatternId(drawing.id_counters.next_line_pattern_id);
+    let missing = IfccadLinePatternId(250);
+    drawing.id_counters.next_line_pattern_id = 251;
     let record = drawing
         .preservation
         .as_mut()
@@ -4086,6 +4134,16 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
         target: IfccadPreservationTarget::LinePattern(missing),
     });
     let original_b = record.clone();
+    let original_backing = drawing
+        .preservation
+        .as_ref()
+        .unwrap()
+        .records
+        .iter()
+        .find(|r| Some(r.id) == original_b.storage_backing)
+        .unwrap()
+        .clone();
+    assert_eq!(drawing.preservation.as_ref().unwrap().records.len(), 3);
     std::fs::write(&input, encode_ifccad_document(&drawing).unwrap().bytes()).unwrap();
 
     let mut app = OpenCADStudio::new_for_test();
@@ -4109,6 +4167,7 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
         .blocked_entities();
     assert_eq!(blocked.len(), 1);
     assert_eq!(blocked[0].0, b.id);
+    assert_eq!(original_backing.payload.as_ref().unwrap().version, 1);
     let i = app.active_tab;
     let wblock_dwg = dir.join("blocked-wblock.dwg");
     let wblock_ifccad = dir.join("blocked-wblock.ifccad");
@@ -4234,6 +4293,24 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
     assert_eq!(live_mline(&reopened).common.layer, "Edited MLINE");
     req(&mut reopened, json!({"op":"redo"}));
     no_live_mline(&reopened);
+    let native = reopened.tabs[reopened.active_tab]
+        .scene
+        .document
+        .entities()
+        .find_map(|entity| match entity {
+            EntityType::Line(line) => Some(line.common.handle),
+            _ => None,
+        })
+        .unwrap();
+    req(
+        &mut reopened,
+        json!({"op":"select","handles":[format!("{native:X}")]}),
+    );
+    req(&mut reopened, json!({"op":"run","cmd":"MOVE 0,0,0 8,0,0"}));
+    req(
+        &mut reopened,
+        json!({"op":"run","cmd":"-LINETYPE CREATE FENCE Fence 1.5,-0.25,0,-0.75"}),
+    );
     req(&mut reopened, json!({"op":"save"}));
     drop(reopened);
     let bytes = std::fs::read(&output).unwrap();
@@ -4242,10 +4319,24 @@ fn ifccad_blocked_mline_survives_studio_edit_save_and_reopen() {
     assert_eq!(saved.model.entities.len(), 2);
     assert_eq!(saved.model.entities[0].as_opaque().unwrap().id, b.id);
     assert!(saved.model.entities[1].as_native().is_some());
-    assert_eq!(saved.preservation.as_ref().unwrap().records, [original_b]);
+    assert!(saved
+        .line_patterns
+        .iter()
+        .any(|pattern| pattern.name.eq_ignore_ascii_case("FENCE") && pattern.id.0 > missing.0));
+    assert_eq!(
+        saved.preservation.as_ref().unwrap().records,
+        [original_backing, original_b]
+    );
     let mut reopened = OpenCADStudio::new_for_test();
     req(&mut reopened, json!({"op":"open","path":output}));
     no_live_mline(&reopened);
+    assert!(reopened.tabs[reopened.active_tab]
+        .scene
+        .document
+        .entities()
+        .any(|entity| {
+            matches!(entity, EntityType::Line(line) if line.start == Vector3::new(8.0, 0.0, 0.0))
+        }));
     drop(reopened);
     for path in [&input, &output] {
         let _ = std::fs::remove_file(path);

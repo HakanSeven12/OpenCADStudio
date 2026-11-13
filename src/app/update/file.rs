@@ -2579,7 +2579,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
         self.tabs[i].ifccad_alpha_acknowledged = false;
-        if let Some(session) = &ifccad_session {
+        if let Some(session) = ifccad_session.as_ref().filter(|s| s.has_blocked_entities()) {
             for (id, reason) in session.blocked_entities() {
                 self.command_line.push_info(
                     crate::tf!("IFCCAD entity {id} retained without geometry: {reason}").as_ref(),
@@ -2871,35 +2871,6 @@ impl OpenCADStudio {
             }
         }
         let document = self.tabs[i].scene.document_for_save();
-        #[cfg(target_arch = "wasm32")]
-        if let Some(session) = ifccad_session {
-            let ext = path
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let filename = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let mut document = document;
-            document.header.insertion_units = unit;
-            let version = document.version;
-            let prepared = crate::io::prepare_document_for_save(document, version);
-            return Task::perform(
-                async move {
-                    crate::io::serialize_prepared_document(&prepared, &ext, false, Some(&session))
-                        .await
-                },
-                move |result| Message::WebWblockSerialized {
-                    block_name: "*".into(),
-                    path,
-                    filename,
-                    result,
-                },
-            );
-        }
         if let crate::modules::insert::block_cmdline::WblockSource::Objects {
             handles,
             base,
@@ -2951,43 +2922,67 @@ impl OpenCADStudio {
             crate::modules::insert::block_cmdline::WblockSource::Block(name) => name.clone(),
             _ => "*".to_string(),
         };
-        let worker_path = path.clone();
-        background_task(
-            crate::t!("WBLOCK save"),
-            move || {
-                let out_doc = match source {
-                    crate::modules::insert::block_cmdline::WblockSource::Block(name) => {
-                        let mut d =
-                            crate::modules::insert::wblock::extract_block_to_doc(&document, &name)
-                                .map_err(|e| e.to_string())?;
-                        d.header.insertion_units = unit;
-                        d
-                    }
-                    crate::modules::insert::block_cmdline::WblockSource::Drawing => {
-                        let mut d = document.clone();
-                        d.header.insertion_units = unit;
-                        d
-                    }
-                    crate::modules::insert::block_cmdline::WblockSource::Objects {
-                        handles,
-                        base,
-                        ..
-                    } => crate::modules::insert::wblock::extract_entities_to_doc_with_base(
-                        &document, &handles, base, unit,
+        let extract = move || -> Result<document::Document, String> {
+            use crate::modules::insert::{block_cmdline::WblockSource, wblock};
+            let mut extracted = match source {
+                WblockSource::Block(name) => wblock::extract_block_to_doc(&document, &name),
+                WblockSource::Drawing => Ok(document),
+                WblockSource::Objects { handles, base, .. } => {
+                    wblock::extract_entities_to_doc_with_base(&document, &handles, base, unit)
+                }
+            }
+            .map_err(|error| error.to_string())?;
+            extracted.header.insertion_units = unit;
+            Ok(extracted)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let worker_path = path.clone();
+            background_task(
+                crate::t!("WBLOCK save"),
+                move || {
+                    crate::io::save_wblock_snapshot(
+                        extract()?,
+                        &worker_path,
+                        ifccad_session.as_ref(),
                     )
-                    .map_err(|e| e.to_string())?,
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                return crate::io::save_wblock_snapshot(
-                    out_doc,
-                    &worker_path,
-                    ifccad_session.as_ref(),
-                );
-                #[cfg(target_arch = "wasm32")]
-                crate::io::save(&out_doc, &worker_path)
-            },
-            move |result| Message::WblockWriteFinished(display, path, result),
-        )
+                },
+                move |result| Message::WblockWriteFinished(display, path, result),
+            )
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let ext = path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            Task::perform(
+                async move {
+                    let document = extract()?;
+                    let version = document.version;
+                    let prepared = crate::io::prepare_document_for_save(document, version);
+                    crate::io::serialize_prepared_document(
+                        &prepared,
+                        &ext,
+                        false,
+                        ifccad_session.as_ref(),
+                    )
+                    .await
+                },
+                move |result| Message::WebWblockSerialized {
+                    block_name: display,
+                    path,
+                    filename,
+                    result,
+                },
+            )
+        }
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -5298,7 +5293,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
-                || self.tabs[i].ifccad_session.is_some()
+                || self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_blocked_entities)
                 || self.active_save_jobs.contains_key(&self.tabs[i].id)
             {
                 continue;
@@ -5337,7 +5335,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
-                || self.tabs[i].ifccad_session.is_some()
+                || self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_blocked_entities)
             {
                 continue;
             }

@@ -932,6 +932,7 @@ impl OpenCADStudio {
                 block_defaults.wblock_mode,
             ),
             field_display: crate::entities::field::display(),
+            annotation_scale_prompt: crate::app::commands::annotation_scale_prompt(),
             hyperlink_options: crate::app::commands::hyperlink_options(),
             xref_fade: crate::scene::cache::block_cache::xref_fade_ctl(),
             file_dia: crate::sys::file_dia(),
@@ -981,6 +982,7 @@ impl OpenCADStudio {
             check_missing_fonts: self.check_missing_fonts,
             font_source_url: self.font_source_url.clone(),
             qnew_template: self.qnew_template.clone(),
+            transmittal_layout: self.transmittal_layout,
             donation_prompt_version: self.donation_prompt_version.clone(),
             gpu_warning_silenced: self.gpu_warning_silenced.clone(),
             disabled_plugins: {
@@ -1151,6 +1153,7 @@ impl OpenCADStudio {
             remembered.wblock_mode = bc::mode_from_code(s.wblock_object_mode);
         }
         crate::entities::field::set_display(s.field_display);
+        crate::app::commands::set_annotation_scale_prompt(s.annotation_scale_prompt);
         crate::app::commands::set_hyperlink_options(s.hyperlink_options);
         crate::scene::cache::block_cache::set_xref_fade_ctl(s.xref_fade);
         self.ribbon.xref_fade = crate::scene::cache::block_cache::xref_fade_ctl();
@@ -1224,6 +1227,7 @@ impl OpenCADStudio {
         self.check_missing_fonts = s.check_missing_fonts;
         self.font_source_url = s.font_source_url.clone();
         self.qnew_template = s.qnew_template.clone();
+        self.transmittal_layout = s.transmittal_layout;
         self.font_source_input = s.font_source_url.clone();
         self.donation_prompt_version = s.donation_prompt_version.clone();
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
@@ -1426,6 +1430,10 @@ impl OpenCADStudio {
             let h = &self.tabs[i].scene.document.header;
             (h.ortho_mode, h.object_snap_mode)
         };
+        // Header dimension variables that differ from the current style are
+        // its overrides.
+        self.tabs[i].scene.dim_overrides =
+            crate::scene::creation_style::header_dim_overrides(&self.tabs[i].scene.document);
         self.ortho_mode = ortho;
         // Ortho and Polar are mutually exclusive (ToggleOrtho clears Polar).
         if ortho {
@@ -1456,6 +1464,13 @@ impl OpenCADStudio {
         let h = &mut self.tabs[i].scene.document.header;
         h.ortho_mode = self.ortho_mode;
         h.object_snap_mode = osmode;
+        // The header's dimension variables are the current style with its
+        // overrides, so the overrides stay with the drawing.
+        let scene = &mut self.tabs[i].scene;
+        crate::scene::creation_style::stamp_header_dim_overrides(
+            &mut scene.document,
+            scene.dim_overrides.as_ref(),
+        );
     }
 
     /// Apply persisted viewport display defaults to tab `idx`.
@@ -2566,7 +2581,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
         self.tabs[i].ifccad_alpha_acknowledged = false;
-        if let Some(session) = &ifccad_session {
+        if let Some(session) = ifccad_session.as_ref().filter(|s| s.has_blocked_entities()) {
             for (id, reason) in session.blocked_entities() {
                 self.command_line.push_info(
                     crate::tf!("IFCCAD entity {id} retained without geometry: {reason}").as_ref(),
@@ -2770,9 +2785,12 @@ impl OpenCADStudio {
         // it for the next boot's restore flow (web session memory).
         #[cfg(target_arch = "wasm32")]
         self.persist_web_session();
-        // A running script does not stop at the recovery dialog; the
-        // report is already written and the repairs were on the command line.
-        let recovery_report = recovery_report.filter(|_| !self.script_running);
+        // A running script or an automation open does not stop at the
+        // recovery dialog; the report is already written and the repairs
+        // were on the command line.
+        let recovery_report = recovery_report.filter(|_| {
+            !self.script_running && !crate::app::control::controlled_open_pending(self)
+        });
         let pending_open_task = if let Some(report) = recovery_report {
             self.recovery_report = Some(report);
             self.active_modal = Some(crate::app::ModalKind::Recovery);
@@ -2858,35 +2876,6 @@ impl OpenCADStudio {
             }
         }
         let document = self.tabs[i].scene.document_for_save();
-        #[cfg(target_arch = "wasm32")]
-        if let Some(session) = ifccad_session {
-            let ext = path
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let filename = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let mut document = document;
-            document.header.insertion_units = unit;
-            let version = document.version;
-            let prepared = crate::io::prepare_document_for_save(document, version);
-            return Task::perform(
-                async move {
-                    crate::io::serialize_prepared_document(&prepared, &ext, false, Some(&session))
-                        .await
-                },
-                move |result| Message::WebWblockSerialized {
-                    block_name: "*".into(),
-                    path,
-                    filename,
-                    result,
-                },
-            );
-        }
         if let crate::modules::insert::block_cmdline::WblockSource::Objects {
             handles,
             base,
@@ -2899,7 +2888,6 @@ impl OpenCADStudio {
                     self.push_undo_snapshot(i, "WBLOCK");
                     self.tabs[i].scene.erase_entities(handles);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.refresh_properties();
                 }
                 crate::ui::window::block_definition::BlockObjectMode::Convert => {
@@ -2929,7 +2917,6 @@ impl OpenCADStudio {
                     };
                     let _ = self.tabs[i].scene.create_block_with_options(options);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.refresh_properties();
                 }
             }
@@ -2938,43 +2925,67 @@ impl OpenCADStudio {
             crate::modules::insert::block_cmdline::WblockSource::Block(name) => name.clone(),
             _ => "*".to_string(),
         };
-        let worker_path = path.clone();
-        background_task(
-            crate::t!("WBLOCK save"),
-            move || {
-                let out_doc = match source {
-                    crate::modules::insert::block_cmdline::WblockSource::Block(name) => {
-                        let mut d =
-                            crate::modules::insert::wblock::extract_block_to_doc(&document, &name)
-                                .map_err(|e| e.to_string())?;
-                        d.header.insertion_units = unit;
-                        d
-                    }
-                    crate::modules::insert::block_cmdline::WblockSource::Drawing => {
-                        let mut d = document.clone();
-                        d.header.insertion_units = unit;
-                        d
-                    }
-                    crate::modules::insert::block_cmdline::WblockSource::Objects {
-                        handles,
-                        base,
-                        ..
-                    } => crate::modules::insert::wblock::extract_entities_to_doc_with_base(
-                        &document, &handles, base, unit,
+        let extract = move || -> Result<document::Document, String> {
+            use crate::modules::insert::{block_cmdline::WblockSource, wblock};
+            let mut extracted = match source {
+                WblockSource::Block(name) => wblock::extract_block_to_doc(&document, &name),
+                WblockSource::Drawing => Ok(document),
+                WblockSource::Objects { handles, base, .. } => {
+                    wblock::extract_entities_to_doc_with_base(&document, &handles, base, unit)
+                }
+            }
+            .map_err(|error| error.to_string())?;
+            extracted.header.insertion_units = unit;
+            Ok(extracted)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let worker_path = path.clone();
+            background_task(
+                crate::t!("WBLOCK save"),
+                move || {
+                    crate::io::save_wblock_snapshot(
+                        extract()?,
+                        &worker_path,
+                        ifccad_session.as_ref(),
                     )
-                    .map_err(|e| e.to_string())?,
-                };
-                #[cfg(not(target_arch = "wasm32"))]
-                return crate::io::save_wblock_snapshot(
-                    out_doc,
-                    &worker_path,
-                    ifccad_session.as_ref(),
-                );
-                #[cfg(target_arch = "wasm32")]
-                crate::io::save(&out_doc, &worker_path)
-            },
-            move |result| Message::WblockWriteFinished(display, path, result),
-        )
+                },
+                move |result| Message::WblockWriteFinished(display, path, result),
+            )
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let ext = path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            Task::perform(
+                async move {
+                    let document = extract()?;
+                    let version = document.version;
+                    let prepared = crate::io::prepare_document_for_save(document, version);
+                    crate::io::serialize_prepared_document(
+                        &prepared,
+                        &ext,
+                        false,
+                        ifccad_session.as_ref(),
+                    )
+                    .await
+                },
+                move |result| Message::WebWblockSerialized {
+                    block_name: display,
+                    path,
+                    filename,
+                    result,
+                },
+            )
+        }
     }
 
     pub(super) fn on_wblock_save_result_some(
@@ -3300,14 +3311,14 @@ impl OpenCADStudio {
         )
     }
 
-    pub(super) fn on_obj_import_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
+    pub(in crate::app) fn on_obj_import_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
         background_task(
             crate::t!("OBJ import"),
             move || {
                 let src = std::fs::read_to_string(&worker_path).map_err(|e| e.to_string())?;
-                crate::io::obj::parse_obj(&src, [0.7, 0.7, 0.85, 1.0])
+                crate::io::obj::parse_obj(&src)
                     .ok_or_else(|| "no usable geometry in file".to_string())
             },
             move |result| Message::ObjImportFinished(tab_id, path, result),
@@ -5285,7 +5296,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
-                || self.tabs[i].ifccad_session.is_some()
+                || self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_blocked_entities)
                 || self.active_save_jobs.contains_key(&self.tabs[i].id)
             {
                 continue;
@@ -5324,7 +5338,10 @@ impl OpenCADStudio {
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()
                 || !self.tabs[i].dirty
-                || self.tabs[i].ifccad_session.is_some()
+                || self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_blocked_entities)
             {
                 continue;
             }
@@ -7652,7 +7669,8 @@ impl OpenCADStudio {
                     self.plot_dialog.style_missing = false;
                     self.plot_dialog.style_error = None;
                 } else {
-                    match crate::io::plot_style::PlotStyleTable::load_named(&name) {
+                    let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+                    match crate::io::plot_style::PlotStyleTable::load_named_at(&name, base) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
@@ -7980,13 +7998,17 @@ impl OpenCADStudio {
             self.plot_dialog.window = self.plot_window;
         }
         let mut style_error = None;
+        let drawing_base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
                 .as_ref()
                 .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
         {
-            match crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet) {
+            match crate::io::plot_style::PlotStyleTable::load_named_at(
+                &ps.current_style_sheet,
+                drawing_base,
+            ) {
                 Ok(table) => {
                     self.report_plot_style_warnings(&table);
                     self.active_plot_style = Some(table);
@@ -8391,7 +8413,8 @@ impl OpenCADStudio {
         // object. After reopening a drawing the name may be correct while the
         // in-memory table is still the previous/default one. Plotting must not
         // silently ignore the selected CTB in that state.
-        crate::io::plot_style::PlotStyleTable::load_named(&d.style_name).ok()
+        let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+        crate::io::plot_style::PlotStyleTable::load_named_at(&d.style_name, base).ok()
     }
 
     pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {

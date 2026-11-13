@@ -1313,13 +1313,15 @@ fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document
             let masks = alignment.alignment_masked_ranges();
             let shown = shown_stations(Some(alignment));
             let name = alignment.alignment_name().unwrap_or_default();
-            // A group limited to the beginning (1) or the end (2).
+            // The kinds the group labels: 1 the beginning, 2 the end, 3 and
+            // up the points between (which are not told apart here).
             let kinds = data.label_geometry_point_kinds();
             let points = alignment.alignment_geometry_points();
             let last = points.len().saturating_sub(1);
             for (i, point) in points.into_iter().enumerate() {
                 let kind = if i == 0 { 1 } else if i == last { 2 } else { 0 };
-                if !kinds.is_empty() && !kinds.contains(&kind) {
+                let listed = if kind == 0 { kinds.iter().any(|k| *k >= 3) } else { kinds.contains(&kind) };
+                if !kinds.is_empty() && !listed {
                     continue;
                 }
                 if masked(start + point.distance, &masks) {
@@ -1478,12 +1480,14 @@ fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document
             let collectors = band_collectors(document, slot.style);
             let shown = shown_stations(Some(alignment));
             let mut station = alignment.alignment_start_station().unwrap_or(0.0);
-            for (piece, points) in alignment.alignment_pieces() {
+            for (piece, curvature, points) in alignment.alignment_pieces_with_curvature() {
                 // Band label kinds: curve, curve, spiral, title, tangent.
-                let (index, radius) = match piece {
-                    AlignmentPiece::Curve => (0, circumradius(&points)),
-                    AlignmentPiece::Spiral => (2, None),
-                    AlignmentPiece::Line => (4, None),
+                // A curve's radius is the one its element was solved with.
+                let radius = (curvature.abs() > 1e-12).then(|| 1.0 / curvature.abs());
+                let index = match piece {
+                    AlignmentPiece::Curve => 0,
+                    AlignmentPiece::Spiral => 2,
+                    AlignmentPiece::Line => 4,
                 };
                 // A curve's chords measured along its arc.
                 let length: f64 = points
@@ -1832,47 +1836,23 @@ fn is_band_style(name: &str) -> bool {
     name.starts_with("AECC_PROFILE_VIEW_") && name.ends_with("_BAND_STYLE")
 }
 
-fn is_band_group(name: &str) -> bool {
-    matches!(
-        name,
-        "AECC_PROFILEDATABAND_LABELGROUP"
-            | "AECC_HORIZONTALGEOMETRYBAND_LABELGROUP"
-            | "AECC_VERTICALGEOMETRYBAND_LABELGROUP"
-            | "AECC_SUPERELEVATIONBAND_LABELGROUP"
-    )
-}
-
-/// The band a band label group labels: the view lists its bands top to
-/// bottom, each style followed by the band's profiles, and the view's band
-/// label groups follow the same order. Bands hang below the view, each
-/// below the one before.
+/// The band a band label group labels. A view written from Civil 3D 2018
+/// on lists its band label groups first in its references, in band order;
+/// an older view lists none, and its only band is the group's. Each band
+/// is then `style, null, alignment, profile 1, profile 2` among the view's
+/// references. Bands hang below the view, each below the one before.
 // ponytail: no gap between bands (none in the drawings seen); read the
 // view's per-band gap once a drawing sets one.
 fn band_slot<'a>(document: &'a document::Document, view: &'a ArchEntityData, group: u64) -> Option<BandSlot<'a>> {
-    let view_handle = document
-        .entities()
-        .find(|e| matches!(e, EntityType::Extended(x) if matches!(&x.data, ExtendedEntityData::Arch(a) if std::ptr::eq(a, view))))?
-        .common()
-        .handle
-        .value();
-    let mut groups: Vec<u64> = document
-        .entities()
-        .filter_map(|e| match e {
-            EntityType::Extended(x) => match &x.data {
-                ExtendedEntityData::Arch(a) if is_band_group(&a.dxf_name) && a.decode().handles.contains(&view_handle) => {
-                    Some(e.common().handle.value())
-                }
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect();
-    groups.sort_unstable();
-    let index = groups.iter().position(|h| *h == group)?;
     let handles = view.decode().handles;
     let bands: Vec<usize> = (0..handles.len())
         .filter(|&i| object_arch(document, handles[i]).is_some_and(|o| is_band_style(&o.dxf_name)))
         .collect();
+    let index = match handles.iter().position(|h| *h == group) {
+        Some(i) => i,
+        None if bands.len() == 1 => 0,
+        None => return None,
+    };
     let scale = drawing_scale(document);
     let frame = view.profile_view_frame()?;
     let mut top = frame.origin.y;
@@ -1880,11 +1860,10 @@ fn band_slot<'a>(document: &'a document::Document, view: &'a ArchEntityData, gro
         let style = object_arch(document, handles[at])?;
         let height = style.band_height().unwrap_or(0.0) * scale;
         if k == index {
-            let next = bands.get(k + 1).copied().unwrap_or(handles.len());
-            let profiles = handles[at + 1..next]
+            let profiles = handles
+                .get(at + 3..at + 5)?
                 .iter()
                 .filter_map(|h| arch_of(document, *h, CivilKind::Profile))
-                .take(2)
                 .collect();
             return Some(BandSlot { style, profiles, top, height });
         }
@@ -1931,14 +1910,6 @@ fn band_texts(
         };
         place(out, document, &single, Vector2::new(x, y), 0.0, value);
     }
-}
-
-/// Radius of the circle through a curve's ends and middle point.
-fn circumradius(points: &[Vector2]) -> Option<f64> {
-    let (a, b, c) = (*points.first()?, points[points.len() / 2], *points.last()?);
-    let (ab, bc, ca) = (a.distance(&b), b.distance(&c), c.distance(&a));
-    let area2 = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs();
-    (area2 > 1e-12).then(|| ab * bc * ca / (2.0 * area2))
 }
 
 /// Horizontal geometry band fields: a piece's length, radius and start

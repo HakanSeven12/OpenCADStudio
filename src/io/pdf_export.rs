@@ -1086,6 +1086,19 @@ fn append_pdf_page(
             // along northing — which is exactly the distortion the plot showed while
             // low-coordinate drawings came out clean. The result is a sheet-mm value
             // in single digits, so f32 is lossless from here.
+            // A circle or arc is drawn as its curve, not as chords.
+            if let Some(spans) = crate::io::plot::wire_arc_beziers(wire, page_h) {
+                let mm = |p: glam::DVec2, bezier: bool| LinePoint {
+                    p: Point::new(Mm((p.x + ox) as f32), Mm((p.y + oy) as f32)),
+                    bezier,
+                };
+                let mut curve = vec![mm(spans[0][0], false)];
+                for [_, c1, c2, end] in spans {
+                    curve.extend([mm(c1, true), mm(c2, true), mm(end, false)]);
+                }
+                flush_line(&mut ops, &curve, None, line_step);
+                continue;
+            }
             let mut segment: Vec<LinePoint> = Vec::new();
             let dot_radius = (wire.name == "viewport_hatch_pattern")
                 .then_some(Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6))));

@@ -259,6 +259,7 @@ fn the_form_shows_the_block_its_prompts_and_its_buttons() {
             label: "Width".to_string(),
             value: "100".to_string(),
         }],
+        first: 0,
     };
     let mut window = Simulator::with_size(
         iced::Settings::default(),

@@ -34,14 +34,17 @@ Rules every patch follows:
 - Formatting rules are the editor's own: italic is the 15° oblique (`\Q15;`), bold names the face, and both work on stroke fonts as before.
 - The `^` of a stack is written without a following space, so it reads back byte for byte from both DWG and DXF.
 
-## The window
+## The in-place editor
+
+MTEXT opens on the drawing at its insertion point, using the active viewport projection for the editable text, caret and selection. The formatting controls float alongside the text. Drag the grip at the left of the compact formatting bar to move it. The ruler shows drawing-unit distances; drag its end handle to change the text-box width or the bottom handle to change its height. A single selected MTEXT shows its box frame beside the ordinary grips. Clicking outside commits the draft; Escape cancels it. If the text plane cannot be projected, the full editor remains available as a fallback. Table-cell editing retains its separate cell workflow.
+
 
 - **First row: the object's own values**, each labelled: Style, Font, Height, Width factor, Rotation, Color, Annotative. Font and Width factor show where their value comes from: *By style*, *Custom*, or *Mixed* when characters override the style. With a selection, Font, Height, Width factor and Color format the selection instead.
 - **Second row:** B, I, U, overline, strike (highlighted when on, a warning border when mixed, inert when the selection cannot be formatted; with nothing selected they set the format of the next typed text), undo and redo, paragraph alignment, and the menus. Below its full width the row scrolls sideways.
 - **Menus:** More formatting (superscript, subscript, Stack, Fraction…, oblique angle, tracking, UPPERCASE / lowercase, clear formatting), Paragraph (lists, tab, line spacing factor and mode, indents and spacing), Columns, Justification, Position (drawing direction), Background (mask), Symbols, Find and replace. An action closes its menu; typing in a menu field keeps it open; Escape closes the open menu before the editor.
 - **Preview:** the text as it will draw, at its rotation, with a box-width ruler above it (the box grows from its attachment point) and a full-line selection band.
 - **Status bar:** character and paragraph counts, the box width, and Cancel (discard, as Escape), Apply (save and keep editing) and Close Text Editor (save and close).
-- The window does not shrink below 900 × 370 px, although a smaller window still caps it.
+- The fallback window does not shrink below 900 × 370 px, although a smaller window still caps it.
 
 ## Saving and undo
 

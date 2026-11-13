@@ -162,6 +162,30 @@ pub(super) fn format_row(ed: &MTextEditorState) -> Element<'static, Message> {
     .into()
 }
 
+/// Compact actions for the floating in-place formatting bar.
+pub(super) fn compact_status_bar(ed: &MTextEditorState) -> Element<'static, Message> {
+    let action = |name: String, message: Message, primary: bool| {
+        button(text(name).size(11))
+            .on_press(message)
+            .padding([3, 8])
+            .style(if primary { button::primary } else { button::secondary })
+    };
+    row![
+        text(label!("box-width")).size(11),
+        text_input("", &ed.rect_width_field())
+            .on_input(Message::MTextRectWidthField)
+            .width(76)
+            .padding([2, 4])
+            .size(11),
+        action(t!("Cancel").into_owned(), Message::MTextCancel, false),
+        action(t!("Apply").into_owned(), Message::MTextApply, false),
+        action(t!("Close Text Editor").into_owned(), Message::MTextOk, true),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 /// The bar under the text: what the text holds, the box width, and the
 /// editor's actions. Cancel discards, as Escape does; Apply saves and keeps
 /// editing; Close Text Editor saves and closes.

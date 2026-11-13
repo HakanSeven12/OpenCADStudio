@@ -19,6 +19,14 @@ fn resolve_font_reference(reference: &str) -> Option<String> {
     crate::scene::text::sysfont::family_for_reference(reference)
 }
 
+fn resolve_font_reference_at(reference: &str, document: &Document) -> Option<String> {
+    if lff::is_builtin(reference) {
+        return None;
+    }
+    let base = crate::io::drawing_dir(document);
+    crate::scene::text::sysfont::family_for_reference_at(reference, base)
+}
+
 /// `font_name` naming its own bold / italic face when it is a TrueType
 /// family that has one (see `sysfont::styled_family`); `None` for a stroke
 /// font, a big-font pairing, or a family without such a face — bold stroke
@@ -119,7 +127,7 @@ fn resolve_style(
                     .unwrap_or(file)
                     .trim()
                     .to_string()
-            } else if let Some(family) = resolve_font_reference(file) {
+            } else if let Some(family) = resolve_font_reference_at(file, document) {
                 // The file is installed, so its family is the face to draw with.
                 // Substituting a stroke font instead drops every letter that
                 // font does not have — for a Cyrillic drawing, all of them.

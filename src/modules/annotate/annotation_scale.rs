@@ -3,18 +3,32 @@ use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
 
-/// Selection front-end used by the annotation-scale ribbon actions. The
-/// action itself runs only after the normal selection engine completes, so
-/// window/crossing selection, removal, Escape and Previous all keep their
-/// usual behavior.
+/// Selection front-end used by the annotation-scale ribbon actions (and any
+/// command that only needs objects before it runs). The action itself runs
+/// only after the normal selection engine completes, so window/crossing
+/// selection, removal, Escape and Previous all keep their usual behavior.
 pub struct AnnotationScaleSelectionCommand {
     name: &'static str,
     action: &'static str,
+    annotative: bool,
 }
 
 impl AnnotationScaleSelectionCommand {
     pub fn new(name: &'static str, action: &'static str) -> Self {
-        Self { name, action }
+        Self {
+            name,
+            action,
+            annotative: true,
+        }
+    }
+
+    /// Ask for any objects, then rerun `name` with them selected.
+    pub fn objects(name: &'static str) -> Self {
+        Self {
+            name,
+            action: name,
+            annotative: false,
+        }
     }
 }
 
@@ -24,7 +38,11 @@ impl CadCommand for AnnotationScaleSelectionCommand {
     }
 
     fn prompt(&self) -> String {
-        crate::tf!("{}  Select annotative objects:", self.name).into_owned()
+        if self.annotative {
+            crate::tf!("{}  Select annotative objects:", self.name).into_owned()
+        } else {
+            crate::t!("Select objects:").into_owned()
+        }
     }
 
     fn is_selection_gathering(&self) -> bool {

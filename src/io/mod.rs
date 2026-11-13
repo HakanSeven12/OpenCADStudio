@@ -40,6 +40,8 @@ pub mod svg_import;
 pub mod tds_import;
 pub mod tds_legacy;
 pub mod thumbnail;
+pub(crate) mod transmit;
+pub(crate) mod transmit_zip;
 pub mod update_check;
 pub mod visual_styles;
 #[cfg(target_arch = "wasm32")]
@@ -1070,6 +1072,7 @@ pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<Document, Str
     crate::scene::center_native::import(&mut doc);
     resolve_raster_image_paths(&mut doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    crate::scene::text::sysfont::load_drawing_fonts(path.parent(), &doc);
     // Opening is a field evaluation event (FIELDEVAL bit 1).
     crate::entities::field::update_fields(&mut doc, 1, None);
     Ok(doc)
@@ -1095,6 +1098,15 @@ fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
     } else {
         "dxf"
     }
+}
+
+/// The folder of the drawing `doc` was read from, where resources stored
+/// relative to it are looked up first.
+pub(crate) fn drawing_dir(doc: &Document) -> Option<&Path> {
+    doc.source_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::parent)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1345,6 +1357,7 @@ fn finalize_loaded_outcome(
     crate::entities::field::local_header_dates(doc);
     resolve_raster_image_paths(doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    crate::scene::text::sysfont::load_drawing_fonts(path.parent(), doc);
     // Opening is a field evaluation event (FIELDEVAL bit 1).
     crate::entities::field::update_fields(doc, 1, None);
     Ok(outcome)

@@ -315,18 +315,32 @@ impl HatchModel {
 
     /// Indexed local-space fill mesh with even-odd loop containment.
     pub(crate) fn fill_mesh(&self) -> (Vec<[f32; 2]>, Vec<u32>) {
+        // Some DWGs contain closed paths that run from A to B and back to A.
+        // They have no area, but passing them to the polygon triangulator can
+        // make it reject the other, valid rings as well. Discard only paths
+        // with fewer than three distinct points; keep the source boundary
+        // intact for picking, editing, and serialization.
+        let has_three_points = |ring: &[[f64; 2]]| {
+            let Some(first) = ring.first() else {
+                return false;
+            };
+            let Some(second) = ring.iter().find(|point| *point != first) else {
+                return false;
+            };
+            ring.iter().any(|point| point != first && point != second)
+        };
         let mut rings = Vec::new();
         let mut ring = Vec::new();
         for &[x, y] in self.boundary.iter() {
             if x.is_finite() && y.is_finite() {
                 ring.push([x as f64, y as f64]);
-            } else if ring.len() >= 3 {
+            } else if has_three_points(&ring) {
                 rings.push(std::mem::take(&mut ring));
             } else {
                 ring.clear();
             }
         }
-        if ring.len() >= 3 {
+        if has_three_points(&ring) {
             rings.push(ring);
         }
 

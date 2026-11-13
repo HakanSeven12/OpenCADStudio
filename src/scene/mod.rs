@@ -57,6 +57,8 @@ mod block_base_point_tests;
 #[cfg(test)]
 mod block_definition_handles_tests;
 #[cfg(test)]
+mod block_solid_fill_tests;
+#[cfg(test)]
 mod layer_visibility_block_cache_tests;
 mod boundary;
 mod camera_ops;
@@ -64,6 +66,8 @@ mod camera_ops;
 mod reference_only_tests;
 #[cfg(test)]
 mod resident_patch_shorter_runs_tests;
+#[cfg(test)]
+mod solid_box_select_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
@@ -74,6 +78,7 @@ pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
+pub(crate) use entity::wire_thumbnail_bgra;
 pub use camera_ops::named_view_center;
 pub(crate) use entity::gradient_tint_color;
 pub(crate) use entity::normalize_block_terminators;
@@ -333,7 +338,7 @@ impl Scene {
     /// their own points and are left alone; non-solids are untouched.
     /// Idempotent: a wire already carrying 3D snaps is skipped, so shared
     /// memo entries can pass through every assembly path safely.
-    pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut Vec<WireModel>) {
+    pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut [WireModel]) {
         use crate::scene::model::wire_model::SnapHint;
         let points = self.solid_snap_points(handle);
         if points.is_empty() {
@@ -674,9 +679,21 @@ struct DependencyTargets {
     touches_block_definition: bool,
 }
 
+impl DependencyTargets {
+    fn extend_from(&mut self, other: &DependencyTargets) {
+        self.render_handles
+            .extend(other.render_handles.iter().copied());
+        self.source_handles
+            .extend(other.source_handles.iter().copied());
+        self.block_users.extend(other.block_users.iter().copied());
+        self.touches_block_definition |= other.touches_block_definition;
+    }
+}
+
 #[derive(Clone, Copy)]
 enum DependencyKind {
     Layer,
+    Linetype,
     TextStyle,
     DimStyle,
 }
@@ -715,6 +732,7 @@ impl RenderHandles<'_> {
 #[derive(Default)]
 struct SceneDependencyIndex {
     layers: HashMap<String, DependencyTargets>,
+    linetypes: HashMap<String, DependencyTargets>,
     text_styles: HashMap<String, DependencyTargets>,
     dim_styles: HashMap<String, DependencyTargets>,
     object_styles: HashMap<Handle, DependencyTargets>,
@@ -1136,20 +1154,6 @@ impl MemoHit {
         match self {
             MemoHit::Owned(wires) => wires,
             MemoHit::Slice(set, start, len) => &set[*start..*start + *len],
-        }
-    }
-
-    /// The wire at `ordinal` as a shared run reference — the run `Arc` plus
-    /// the wire's index inside it — so an overlay gather can share
-    /// memoized geometry instead of cloning it per query.
-    fn shared_at(&self, ordinal: usize) -> Option<(Arc<Vec<WireModel>>, u32)> {
-        match self {
-            MemoHit::Owned(wires) => wires
-                .get(ordinal)
-                .map(|_| (Arc::clone(wires), ordinal as u32)),
-            MemoHit::Slice(set, start, len) => {
-                (ordinal < *len).then(|| (Arc::clone(set), (start + ordinal) as u32))
-            }
         }
     }
 }
@@ -2703,6 +2707,8 @@ pub struct Scene {
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
+    /// Existing MTEXT replaced by an in-place editor draft.
+    mtext_editor_hidden: Option<Handle>,
     /// During in-place block edit (REFEDIT), the handles of the entities being
     /// edited. Everything else is rendered faded toward the background so the
     /// edited geometry stands out while the surrounding drawing stays visible
@@ -2914,6 +2920,18 @@ pub struct Scene {
             usize,
             std::sync::Weak<Vec<MeshLodSet>>,
             Arc<HashMap<Handle, Vec<u32>>>,
+        )>,
+    >,
+    /// The box around the vertices of each mesh the current renderer mesh
+    /// source draws, by the mesh's address: the references of a block share
+    /// one. The box and lasso tests tell the solids clear of a selection from
+    /// it. Guarded by the weak source like the lookup above.
+    #[allow(clippy::type_complexity)]
+    mesh_pick_boxes_cache: RefCell<
+        Option<(
+            usize,
+            std::sync::Weak<Vec<MeshLodSet>>,
+            Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>>,
         )>,
     >,
     /// Per-viewport (VP-frozen-layer) filtered fill / image / mesh sets, keyed by
@@ -3158,7 +3176,11 @@ pub struct Scene {
     /// underlay rasters are made for, and a new step waiting for the view
     /// to settle.
     underlay_world_per_pixel: Option<f64>,
-    underlay_scale_pending: Option<(i32, iced::time::Instant)>,
+    underlay_scale_pending: Option<((i32, u64), iced::time::Instant)>,
+    /// World rectangle the zoomed-in underlay regions are drawn for (the
+    /// plan view with a margin), and whether any underlay drew one.
+    underlay_view: Option<[f64; 4]>,
+    underlay_region_used: std::cell::Cell<bool>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3581,6 +3603,7 @@ impl Scene {
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
             command_preview_hidden: HashSet::default(),
+            mtext_editor_hidden: None,
             refedit_keep: None,
             refedit_lock: false,
             count_display: None,
@@ -3634,6 +3657,7 @@ impl Scene {
             mesh_cache: RefCell::new(HashMap::default()),
             interaction_mesh_cache: RefCell::new(None),
             mesh_pick_lookup_cache: RefCell::new(None),
+            mesh_pick_boxes_cache: RefCell::new(None),
             frozen_hatch_cache: RefCell::new(HashMap::default()),
             frozen_wipeout_cache: RefCell::new(HashMap::default()),
             frozen_image_cache: RefCell::new(HashMap::default()),
@@ -3704,6 +3728,8 @@ impl Scene {
             dynamic_dimension_camera_gen: None,
             underlay_world_per_pixel: None,
             underlay_scale_pending: None,
+            underlay_view: None,
+            underlay_region_used: std::cell::Cell::new(false),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3783,23 +3809,30 @@ impl Scene {
         let current = self
             .underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32);
-        if current == Some(step) {
+        if current == Some(step) && !self.underlay_view_moved() {
             self.underlay_scale_pending = None;
             return;
         }
+        // Wait for the camera to rest, not only for the scale step to hold.
+        let key = (step, self.camera_generation);
         match self.underlay_scale_pending {
-            Some((pending, since)) if pending == step => {
+            Some((pending, since)) if pending == key => {
                 if now.duration_since(since) < std::time::Duration::from_millis(150) {
                     return;
                 }
             }
             _ => {
-                self.underlay_scale_pending = Some((step, now));
+                self.underlay_scale_pending = Some((key, now));
                 return;
             }
         }
         self.underlay_scale_pending = None;
         self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
+        self.underlay_view = self.plan_view_rect().map(|[x0, y0, x1, y1]| {
+            let (mx, my) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
+            [x0 - mx, y0 - my, x1 + mx, y1 + my]
+        });
+        self.underlay_region_used.set(false);
         if self
             .document
             .entities()
@@ -3810,7 +3843,8 @@ impl Scene {
     }
 
     /// The view has moved to another scale step than the underlay rasters
-    /// were made for (frames are requested until they are made again).
+    /// were made for, or out of their sharp region (frames are requested
+    /// until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
         if !self.has_underlays() {
             return false;
@@ -3822,6 +3856,46 @@ impl Scene {
         self.underlay_world_per_pixel
             .map(|w| (w.log2() * 4.0).round() as i32)
             != Some(step)
+            || self.underlay_view_moved()
+    }
+
+    /// A zoomed-in underlay region was drawn and the view has left it.
+    fn underlay_view_moved(&self) -> bool {
+        if !self.underlay_region_used.get() {
+            return false;
+        }
+        match (self.underlay_view, self.plan_view_rect()) {
+            (Some(have), Some(now)) => {
+                now[0] < have[0] || now[1] < have[1] || now[2] > have[2] || now[3] > have[3]
+            }
+            _ => true,
+        }
+    }
+
+    /// World XY rectangle of the model view when it looks straight down
+    /// (orthographic plan view); `None` otherwise.
+    fn plan_view_rect(&self) -> Option<[f64; 4]> {
+        if self.current_layout != "Model" {
+            return None;
+        }
+        let cam = self.camera.borrow();
+        if !matches!(cam.projection, view::camera::Projection::Orthographic) {
+            return None;
+        }
+        if (cam.rotation * glam::Vec3::NEG_Z).z > -0.9999 {
+            return None;
+        }
+        let h = f64::from(cam.ortho_size());
+        let w = h * self.view_aspect();
+        let right = (cam.rotation * glam::Vec3::X).as_dvec3();
+        let up = (cam.rotation * glam::Vec3::Y).as_dvec3();
+        let (hx, hy) = (
+            (right.x * w).abs() + (up.x * h).abs(),
+            (right.y * w).abs() + (up.y * h).abs(),
+        );
+        let t = cam.target;
+        let rect = [t.x - hx, t.y - hy, t.x + hx, t.y + hy];
+        rect.iter().all(|v| v.is_finite()).then_some(rect)
     }
 
     /// Width over height of the view last drawn (1 before the first frame).
@@ -4646,6 +4720,14 @@ impl Scene {
         (changed.len(), found)
     }
 
+    /// Re-evaluate fields reading drawing/custom properties (`acvar`).
+    pub fn update_summary_field_hosts(&mut self) {
+        let hosts = crate::entities::field::acvar_hosts(&self.document);
+        if !hosts.is_empty() {
+            self.update_fields(32, Some(&hosts));
+        }
+    }
+
     /// Redraw text hosts whose stored text changed (re-evaluated fields). An
     /// attribute is drawn by its INSERT, and a host inside a block definition
     /// by every reference to that block, so those redraw instead of the host;
@@ -5194,6 +5276,20 @@ impl Scene {
         }) {
             self.has_tables.set(Some(true));
         }
+        if let Some(true) = self.has_underlays.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_underlays.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Underlay(_)))
+        }) {
+            self.has_underlays.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5429,6 +5525,7 @@ impl Scene {
         self.lighting_cache.borrow_mut().clear();
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
+        self.has_underlays.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);
@@ -5945,6 +6042,7 @@ impl Scene {
             *self.wire_cache.borrow_mut() = None;
             *self.interaction_mesh_cache.borrow_mut() = None;
             *self.mesh_pick_lookup_cache.borrow_mut() = None;
+            *self.mesh_pick_boxes_cache.borrow_mut() = None;
             *self.insert_hatch_cache.borrow_mut() = None;
         }
     }
@@ -8169,6 +8267,7 @@ impl Scene {
         self.object_isolation.hides(handle)
             || self.preview_hidden.contains(&handle)
             || self.command_preview_hidden.contains(&handle)
+            || self.mtext_editor_hidden == Some(handle)
             || self.hidden_dynamic_dimensions.contains(&handle)
     }
 
@@ -8195,6 +8294,24 @@ impl Scene {
             for (handle, _) in &changes {
                 self.tess_memo.borrow_mut().remove(handle);
                 self.resident_tess_memo.borrow_mut().remove(handle);
+            }
+            self.push_geometry_delta(epoch, changes, false);
+        }
+    }
+
+    /// Hide only the source replaced by the MTEXT editor, independently from
+    /// command previews and table-cell previews.
+    pub(crate) fn set_mtext_editor_hidden(&mut self, handle: Option<Handle>) {
+        if self.mtext_editor_hidden == handle { return; }
+        let old = std::mem::replace(&mut self.mtext_editor_hidden, handle);
+        let changes: Vec<_> = old.into_iter().chain(handle).map(|h| (h, ChangeKind::Modified)).collect();
+        if !changes.is_empty() {
+            let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            self.geometry_epoch = epoch;
+            self.invalidate_projection_bounds();
+            for (h, _) in &changes {
+                self.tess_memo.borrow_mut().remove(h);
+                self.resident_tess_memo.borrow_mut().remove(h);
             }
             self.push_geometry_delta(epoch, changes, false);
         }
@@ -8242,11 +8359,16 @@ impl Scene {
     /// Roll over everything a selection box still being drawn would catch,
     /// before the release commits it. An empty slice clears the preview.
     pub fn set_box_hover_highlights(&mut self, handles: &[Handle]) {
+        self.set_box_hover_highlights_limited(handles, usize::MAX);
+    }
+
+    pub fn set_box_hover_highlights_limited(&mut self, handles: &[Handle], limit: usize) {
         let handles = if handles.is_empty() {
             HashSet::default()
         } else {
             self.handles_expanded_for_selectable_groups(handles)
         };
+        let handles = if handles.len() > limit { HashSet::default() } else { handles };
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
             self.bump_selection();
@@ -8503,6 +8625,7 @@ impl Scene {
         self.layer_walk = LayerWalkState::default();
         self.preview_hidden.clear();
         self.command_preview_hidden.clear();
+        self.mtext_editor_hidden = None;
     }
 
     /// True if any currently selected entity is a Viewport.
@@ -10518,11 +10641,15 @@ impl Scene {
                 .unwrap_or(hv);
             by_block.entry(block).or_default().push((hv, eff));
         }
-        let mut depth_map: HashMap<u64, [f32; 2]> = HashMap::default();
-        let mut owners: HashMap<u64, Handle> = HashMap::default();
-        let mut blocks: HashMap<Handle, Vec<DrawDepthEntry>> = HashMap::default();
+        let total_entries: usize = by_block.values().map(Vec::len).sum();
+        let mut depth_map: HashMap<u64, [f32; 2]> =
+            HashMap::with_capacity_and_hasher(total_entries, Default::default());
+        let mut owners: HashMap<u64, Handle> =
+            HashMap::with_capacity_and_hasher(total_entries, Default::default());
+        let mut blocks: HashMap<Handle, Vec<DrawDepthEntry>> =
+            HashMap::with_capacity_and_hasher(by_block.len(), Default::default());
         for (block, mut order) in by_block {
-            order.sort_by_key(|(handle, effective)| (*effective, *handle));
+            order.sort_unstable_by_key(|(handle, effective)| (*effective, *handle));
             let entries = seed_draw_depth_entries(order);
             for entry in &entries {
                 depth_map.insert(
@@ -11698,6 +11825,47 @@ impl Scene {
         *self.mesh_pick_lookup_cache.borrow_mut() =
             Some((source, Arc::downgrade(meshes), Arc::clone(&lookup)));
         lookup
+    }
+
+    /// The box around the vertices of each mesh `meshes` draws, in the mesh's
+    /// own coordinates, by the mesh's address. A mesh with no vertices, or
+    /// with one that is not finite, has none. Measured once for a mesh list:
+    /// a selection box asked every solid of the drawing for its vertices on
+    /// every pointer move.
+    fn mesh_pick_boxes(
+        &self,
+        meshes: &Arc<Vec<MeshLodSet>>,
+    ) -> Arc<rustc_hash::FxHashMap<usize, [glam::DVec3; 2]>> {
+        let source = Arc::as_ptr(meshes) as usize;
+        {
+            let cache = self.mesh_pick_boxes_cache.borrow();
+            if let Some((ptr, weak, boxes)) = cache.as_ref() {
+                if *ptr == source
+                    && weak
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, meshes))
+                {
+                    return Arc::clone(boxes);
+                }
+            }
+        }
+        let mut boxes = rustc_hash::FxHashMap::default();
+        let mut measured = rustc_hash::FxHashSet::default();
+        for set in meshes.iter() {
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            let address = std::ptr::from_ref(mesh) as usize;
+            if measured.insert(address) {
+                if let Some(local) = pick::hit_test::mesh_local_box(mesh) {
+                    boxes.insert(address, local);
+                }
+            }
+        }
+        let boxes = Arc::new(boxes);
+        *self.mesh_pick_boxes_cache.borrow_mut() =
+            Some((source, Arc::downgrade(meshes), Arc::clone(&boxes)));
+        boxes
     }
 
     /// Solid-mesh set (top-level + block-instanced), optionally dropping those
@@ -13577,27 +13745,75 @@ impl Scene {
         changes: &[(Handle, ChangeKind)],
         changed_wires: &Arc<Vec<WireModel>>,
     ) -> OverlayGather {
+        enum MemoSliceRef<'a> {
+            Owned(&'a Arc<Vec<WireModel>>),
+            Slice(&'a Arc<Vec<WireModel>>, usize, usize),
+        }
+        impl<'a> MemoSliceRef<'a> {
+            #[inline]
+            fn shared_at(&self, ordinal: usize) -> Option<(&'a Arc<Vec<WireModel>>, u32)> {
+                match *self {
+                    Self::Owned(wires) => {
+                        (ordinal < wires.len()).then_some((wires, ordinal as u32))
+                    }
+                    Self::Slice(set, start, len) => {
+                        (ordinal < len).then_some((set, (start + ordinal) as u32))
+                    }
+                }
+            }
+        }
+
         let changed: HashSet<Handle> = changes.iter().map(|(handle, _)| *handle).collect();
         let memo = self.resident_tess_memo.borrow();
-        let mut wires = crate::scene::pick::interaction_index::SharedWireRuns::default();
-        let mut base_slots = HashMap::default();
+        let backing_ref = self.resident_memo_backing.borrow();
+        let backing_set = backing_ref.set.upgrade();
+        let base_iter = base_keys.into_iter();
+        let base_hint = base_iter.size_hint().0;
+        let mut wires =
+            crate::scene::pick::interaction_index::SharedWireRuns::with_capacity(base_hint);
+        let mut base_slots = HashMap::with_capacity_and_hasher(base_hint, Default::default());
         let mut misses: HashMap<Handle, Vec<u32>> = HashMap::default();
-        for (handle_value, ordinal) in base_keys {
+        let mut prev_handle = Handle::NULL;
+        let mut prev_hit: Option<MemoSliceRef<'_>> = None;
+        let mut prev_valid = false;
+        for (handle_value, ordinal) in base_iter {
             let handle = Handle::new(handle_value);
-            if changed.contains(&handle) || self.document.get_entity(handle).is_none() {
+            if handle != prev_handle {
+                prev_handle = handle;
+                if changed.contains(&handle) || self.document.get_entity(handle).is_none() {
+                    prev_valid = false;
+                    prev_hit = None;
+                } else {
+                    prev_valid = true;
+                    prev_hit = match memo.get(&handle) {
+                        Some(MemoRun::Owned(w)) => Some(MemoSliceRef::Owned(w)),
+                        Some(MemoRun::InSet) => {
+                            if let (Some(set), Some(&(start, len))) =
+                                (backing_set.as_ref(), backing_ref.ranges.get(&handle))
+                            {
+                                (start + len <= set.len())
+                                    .then_some(MemoSliceRef::Slice(set, start, len))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                }
+            }
+            if !prev_valid {
                 continue;
             }
-            let hit = memo
-                .get(&handle)
-                .and_then(|run| self.resolve_memo_run(handle, run));
-            if let Some((run, index)) = hit.as_ref().and_then(|hit| hit.shared_at(ordinal as usize))
+            if let Some((run, index)) =
+                prev_hit.as_ref().and_then(|hit| hit.shared_at(ordinal as usize))
             {
                 base_slots.insert((handle_value, ordinal), wires.len() as u32);
-                wires.push(&run, index);
+                wires.push(run, index);
             } else {
                 misses.entry(handle).or_default().push(ordinal);
             }
         }
+        drop(backing_ref);
         drop(memo);
         // A memo miss is uncommon (guard change / legacy source). Preserve
         // correctness without expanding every nearby entity: regenerate that
@@ -13665,9 +13881,9 @@ impl Scene {
     ) -> InteractionCandidates {
         let direct = |index: &InteractionIndex, wires| match snap {
             Some(category) => index.query_snap_xy_with_category(wires, aabb, category),
-            None if pick_only => index.query_xy_selection(wires, aabb, true),
-            None if area_only => index.query_xy_area(wires, aabb),
-            None => index.query_xy(wires, aabb),
+            None if pick_only => index.query_xy_selection_for_materialize(wires, aabb, true),
+            None if area_only => index.query_xy_selection_for_materialize(wires, aabb, false),
+            None => index.query_xy_for_materialize(wires, aabb),
         };
         if let Some((base_epoch, base, changes)) = self.interaction_overlay_base() {
             // Nothing changed since the base was indexed: query its own
@@ -13706,54 +13922,62 @@ impl Scene {
             );
             let local_ms = t_local.elapsed().as_secs_f64() * 1000.0;
             let t_remap = iced::time::Instant::now();
-            let result = match (snap, base_parts, changed_parts) {
-                (Some(category), Some(base_parts), Some(changed_parts)) => {
-                    let mut result = base.query_remapped_snap_xy_from_parts_with_category(
-                        Arc::clone(&local),
-                        &base_slots,
-                        base_parts,
-                        aabb,
-                        category,
-                    );
-                    result.extend_indexed(
-                        changed_index.query_remapped_snap_xy_from_parts_with_category(
-                            local,
-                            &changed_slots,
-                            changed_parts,
+            // `indexed_interaction_candidates_xy` runs `materialize_stubs` next,
+            // which discards all primitive ref lists whenever any candidate
+            // wire is a stub, so skip remapping them in that case.
+            let result = if local.has_any_stub() {
+                InteractionCandidates::shared_indexed_all(local, Some(aabb))
+            } else {
+                match (snap, base_parts, changed_parts) {
+                    (Some(category), Some(base_parts), Some(changed_parts)) => {
+                        let mut result = base.query_remapped_snap_xy_from_parts_with_category(
+                            Arc::clone(&local),
+                            &base_slots,
+                            base_parts,
                             aabb,
                             category,
-                        ),
-                    );
-                    result
-                }
-                _ if area_only || pick_only => {
-                    let mut result = base.query_remapped_xy_area(
-                        Arc::clone(&local),
-                        &base_slots,
-                        aabb,
-                        pick_only,
-                    );
-                    let replacements = changed_index.query_remapped_xy_area(
-                        local,
-                        &changed_slots,
-                        aabb,
-                        pick_only,
-                    );
-                    if pick_only {
-                        result.extend_indexed(replacements);
-                    } else {
-                        result.extend_indexed_area(replacements);
+                        );
+                        result.extend_indexed(
+                            changed_index.query_remapped_snap_xy_from_parts_with_category(
+                                local,
+                                &changed_slots,
+                                changed_parts,
+                                aabb,
+                                category,
+                            ),
+                        );
+                        result
                     }
-                    result
-                }
-                _ => {
-                    let mut result = base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
-                    result.extend_indexed(changed_index.query_remapped_xy(
-                        local,
-                        &changed_slots,
-                        aabb,
-                    ));
-                    result
+                    _ if area_only || pick_only => {
+                        let mut result = base.query_remapped_xy_area(
+                            Arc::clone(&local),
+                            &base_slots,
+                            aabb,
+                            pick_only,
+                        );
+                        let replacements = changed_index.query_remapped_xy_area(
+                            local,
+                            &changed_slots,
+                            aabb,
+                            pick_only,
+                        );
+                        if pick_only {
+                            result.extend_indexed(replacements);
+                        } else {
+                            result.extend_indexed_area(replacements);
+                        }
+                        result
+                    }
+                    _ => {
+                        let mut result =
+                            base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
+                        result.extend_indexed(changed_index.query_remapped_xy(
+                            local,
+                            &changed_slots,
+                            aabb,
+                        ));
+                        result
+                    }
                 }
             };
             let remap_ms = t_remap.elapsed().as_secs_f64() * 1000.0;
@@ -14303,6 +14527,37 @@ impl Scene {
     /// `interaction_candidate_handles`, none of which snap, so the flat-ortho
     /// path asks for the reduced category set. A caller that needs snapping
     /// belongs on `interaction_candidates_near` instead.
+    pub fn interaction_box_candidates(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        screen_rect: [f32; 4],
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+            && view_rot.z_axis.y.abs() < 1e-9
+            && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+        if flat_ortho && self.interaction_source_is_resident(&wires, bounds.height)
+        {
+            if let Some(index) = self.cached_interaction_index(&wires) {
+                let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
+                let x = ((view_rot.x_axis.x * bounds.width * 0.5).powi(2)
+                    + (view_rot.x_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+                let y = ((view_rot.y_axis.x * bounds.width * 0.5).powi(2)
+                    + (view_rot.y_axis.y * bounds.height * 0.5).powi(2)).sqrt();
+                let scale = x.min(y);
+                if scale > 1e-6 {
+                    let pad = pad_px as f64 / scale as f64;
+                    let padded = [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad];
+                    return self.materialize_stubs_cached(index.query_xy_box_wires(wires, padded));
+                }
+            }
+        }
+        self.interaction_candidates_in_aabb(wires, aabb, screen_rect, view_rot, eye, bounds)
+    }
+
     pub fn interaction_candidates_in_aabb(
         &self,
         wires: Arc<Vec<WireModel>>,
@@ -14463,6 +14718,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14477,16 +14733,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -14646,6 +14919,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14660,15 +14934,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices
@@ -14960,6 +15249,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -14974,16 +15264,33 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_box_hit(
-                        a,
-                        b,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear inside or clear outside the box is told
+                    // from the box around its vertices.
+                    let told = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .and_then(|local| {
+                            pick::hit_test::box_hit_from_bounds(
+                                a,
+                                b,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    told.unwrap_or_else(|| {
+                        !pick::hit_test::mesh_box_hit(
+                            a,
+                            b,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
+                    })
                 })
             };
             let mut sets = indices
@@ -15020,6 +15327,7 @@ impl Scene {
         }
         let meshes = self.interaction_meshes_arc();
         let lookup = self.mesh_pick_lookup(&meshes);
+        let boxes = self.mesh_pick_boxes(&meshes);
         let handles: Vec<Handle> = lookup.keys().copied().collect();
         let mut out = Vec::new();
         for handle in handles {
@@ -15034,15 +15342,30 @@ impl Scene {
             };
             let test = |set: &MeshLodSet| {
                 set.geometry_lods().first().is_some_and(|mesh| {
-                    !pick::hit_test::mesh_poly_hit(
-                        poly,
-                        crossing,
-                        std::iter::once((handle, mesh, set.instance_transform)),
-                        view_rot,
-                        eye,
-                        bounds,
-                    )
-                    .is_empty()
+                    // A solid clear of the rectangle around the lasso is told
+                    // from the box around its vertices.
+                    let missed = boxes
+                        .get(&(std::ptr::from_ref(mesh) as usize))
+                        .is_some_and(|local| {
+                            pick::hit_test::poly_misses_bounds(
+                                poly,
+                                local,
+                                set.instance_transform,
+                                view_rot,
+                                eye,
+                                bounds,
+                            )
+                        });
+                    !missed
+                        && !pick::hit_test::mesh_poly_hit(
+                            poly,
+                            crossing,
+                            std::iter::once((handle, mesh, set.instance_transform)),
+                            view_rot,
+                            eye,
+                            bounds,
+                        )
+                        .is_empty()
                 })
             };
             let mut sets = indices
@@ -15600,52 +15923,118 @@ impl Scene {
                 .flat_map_iter(|hit| hit.wires().iter().cloned())
                 .collect();
             hits_ms = crate::perf::elapsed_ms(t_hits);
-            let t_tess_miss = perf.then(iced::time::Instant::now);
-            let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
-                .par_iter()
-                .map(|e| {
-                    let e: &EntityType = e;
-                    let w = tessellate_entity(
-                        doc,
-                        sel,
-                        avp,
-                        bg,
-                        anno,
-                        annotation_scale_handle,
-                        e,
-                        Some(blk_ref),
-                        view_aabb,
-                        wpp,
-                        paper,
-                        reference_only_set,
-                    );
-                    (e.common().handle, Arc::new(w))
-                })
-                .collect();
-            tess_ms = crate::perf::elapsed_ms(t_tess_miss);
-            // Materialize new wires while the memo retains their shared source.
-            let t_materialize = perf.then(iced::time::Instant::now);
+            let is_building_resident = resident && self.building_resident_set.get();
             let mut out = hit_wires;
-            {
-                let mut memo = memo_cell.borrow_mut();
-                for (h, a) in miss_pairs {
-                    // Uniquely owned (just built above): enrich solid shells
-                    // with B-rep vertex snaps before the memo/assembly split.
-                    let mut wires = Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
-                    self.attach_solid_snaps(h, &mut wires);
-                    if resident && self.building_resident_set.get() {
-                        // The resident set built from `out` becomes the
-                        // memo's backing: no second copy (#1542, #1698).
-                        out.extend(wires);
-                        memo.insert(h, MemoRun::Pending);
-                    } else {
-                        let a = Arc::new(wires);
-                        out.extend(a.iter().cloned());
-                        memo.insert(h, MemoRun::Owned(Arc::clone(&a)));
+            if is_building_resident {
+                const MISS_CHUNK_SIZE: usize = 256;
+                struct MissChunk {
+                    wires: Vec<WireModel>,
+                    handles: Vec<Handle>,
+                    solid_ranges: Vec<(Handle, usize, usize)>,
+                }
+                let t_tess_miss = perf.then(iced::time::Instant::now);
+                let chunks: Vec<MissChunk> = misses
+                    .par_chunks(MISS_CHUNK_SIZE)
+                    .map(|chunk| {
+                        let mut wires = Vec::with_capacity(chunk.len());
+                        let mut handles = Vec::with_capacity(chunk.len());
+                        let mut solid_ranges = Vec::new();
+                        for &e in chunk {
+                            let h = e.common().handle;
+                            let w = tessellate_entity(
+                                doc,
+                                sel,
+                                avp,
+                                bg,
+                                anno,
+                                annotation_scale_handle,
+                                e,
+                                Some(blk_ref),
+                                view_aabb,
+                                wpp,
+                                paper,
+                                reference_only_set,
+                            );
+                            if Self::is_solid_shell_entity(e) {
+                                let start = wires.len();
+                                wires.extend(w);
+                                let end = wires.len();
+                                solid_ranges.push((h, start, end));
+                            } else {
+                                wires.extend(w);
+                            }
+                            handles.push(h);
+                        }
+                        MissChunk {
+                            wires,
+                            handles,
+                            solid_ranges,
+                        }
+                    })
+                    .collect();
+                tess_ms = crate::perf::elapsed_ms(t_tess_miss);
+                let t_materialize = perf.then(iced::time::Instant::now);
+                let total_new_wires: usize = chunks.iter().map(|c| c.wires.len()).sum();
+                out.reserve(total_new_wires);
+                {
+                    let mut memo = memo_cell.borrow_mut();
+                    memo.reserve(misses.len());
+                    for chunk in chunks {
+                        let base = out.len();
+                        out.extend(chunk.wires);
+                        for (h, start, end) in chunk.solid_ranges {
+                            self.attach_solid_snaps(h, &mut out[base + start..base + end]);
+                        }
+                        for h in chunk.handles {
+                            // The resident set built from `out` becomes the
+                            // memo's backing: no second copy (#1542, #1698).
+                            memo.insert(h, MemoRun::Pending);
+                        }
                     }
                 }
+                materialize_ms = crate::perf::elapsed_ms(t_materialize);
+            } else {
+                let t_tess_miss = perf.then(iced::time::Instant::now);
+                let miss_pairs: Vec<(Handle, bool, Vec<WireModel>)> = misses
+                    .par_iter()
+                    .map(|&e| {
+                        let w = tessellate_entity(
+                            doc,
+                            sel,
+                            avp,
+                            bg,
+                            anno,
+                            annotation_scale_handle,
+                            e,
+                            Some(blk_ref),
+                            view_aabb,
+                            wpp,
+                            paper,
+                            reference_only_set,
+                        );
+                        (e.common().handle, Self::is_solid_shell_entity(e), w)
+                    })
+                    .collect();
+                tess_ms = crate::perf::elapsed_ms(t_tess_miss);
+                // Materialize new wires while the memo retains their shared source.
+                let t_materialize = perf.then(iced::time::Instant::now);
+                let total_new_wires: usize = miss_pairs.iter().map(|(_, _, w)| w.len()).sum();
+                out.reserve(total_new_wires);
+                {
+                    let mut memo = memo_cell.borrow_mut();
+                    memo.reserve(miss_pairs.len());
+                    for (h, is_solid, mut wires) in miss_pairs {
+                        // Enrich solid shells with B-rep vertex snaps before the memo/assembly split.
+                        if is_solid {
+                            self.attach_solid_snaps(h, &mut wires);
+                        }
+                        let a = Arc::new(wires);
+                        out.extend(a.iter().cloned());
+                        memo.insert(h, MemoRun::Owned(a));
+                    }
+                }
+                materialize_ms = crate::perf::elapsed_ms(t_materialize);
             }
-            materialize_ms = crate::perf::elapsed_ms(t_materialize);
             out
         } else {
             let t_tess_all = perf.then(iced::time::Instant::now);
@@ -15982,6 +16371,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         common.handle.hash(&mut hasher);
         common.owner_handle.hash(&mut hasher);
         normalized_layer.hash(&mut hasher);
+        normalize_name(&common.linetype).hash(&mut hasher);
 
         let category = match entity {
             EntityType::Point(_) => 1_u8,
@@ -16136,6 +16526,12 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             .text_styles
             .iter()
             .map(|style| (style.handle, style.name.clone()))
+            .collect();
+        let linetype_names: HashMap<Handle, String> = self
+            .document
+            .line_types
+            .iter()
+            .map(|lt| (lt.handle, lt.name.clone()))
             .collect();
 
         let mut roots: HashMap<String, HashSet<Handle>> = HashMap::default();
@@ -16309,7 +16705,15 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 let target = map.entry(handle).or_default();
                 render_handles.extend_into(target, common.handle);
             };
+            let is_direct_linetype = |name: &str| {
+                !name.is_empty()
+                    && !name.eq_ignore_ascii_case("bylayer")
+                    && !name.eq_ignore_ascii_case("byblock")
+            };
             add(&mut index.layers, &common.layer);
+            if is_direct_linetype(&common.linetype) {
+                add(&mut index.linetypes, &common.linetype);
+            }
             match entity {
                 EntityType::Text(text) => add(&mut index.text_styles, &text.style),
                 EntityType::MText(text) => add(&mut index.text_styles, &text.style),
@@ -16322,6 +16726,9 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 EntityType::Insert(insert) => {
                     for attribute in &insert.attributes {
                         add(&mut index.layers, &attribute.common.layer);
+                        if is_direct_linetype(&attribute.common.linetype) {
+                            add(&mut index.linetypes, &attribute.common.linetype);
+                        }
                         add(&mut index.text_styles, &attribute.text_style);
                     }
                 }
@@ -16330,6 +16737,15 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                     if let Some(style) = self.document.dim_styles.get(&dimension.base().style_name)
                     {
                         add(&mut index.text_styles, &style.dimtxsty);
+                        for lt_handle in [
+                            style.dimltex_handle,
+                            style.dimltex1_handle,
+                            style.dimltex2_handle,
+                        ] {
+                            if let Some(name) = linetype_names.get(&lt_handle) {
+                                add(&mut index.linetypes, name);
+                            }
+                        }
                     }
                 }
                 EntityType::Leader(leader) => {
@@ -16370,6 +16786,22 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                             {
                                 add(&mut index.text_styles, name);
                             }
+                            for border in [
+                                &style.top_border,
+                                &style.right_border,
+                                &style.bottom_border,
+                                &style.left_border,
+                            ]
+                            .into_iter()
+                            .chain(style.additional_borders.iter().map(|(_, border)| border))
+                            {
+                                if let Some(name) = border
+                                    .line_type_handle
+                                    .and_then(|handle| linetype_names.get(&handle))
+                                {
+                                    add(&mut index.linetypes, name);
+                                }
+                            }
                         }
                         for cell in &row.cells {
                             if let Some(style) = &cell.style {
@@ -16378,6 +16810,22 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                                     .and_then(|handle| text_style_names.get(&handle))
                                 {
                                     add(&mut index.text_styles, name);
+                                }
+                                for border in [
+                                    &style.top_border,
+                                    &style.right_border,
+                                    &style.bottom_border,
+                                    &style.left_border,
+                                ]
+                                .into_iter()
+                                .chain(style.additional_borders.iter().map(|(_, border)| border))
+                                {
+                                    if let Some(name) = border
+                                        .line_type_handle
+                                        .and_then(|handle| linetype_names.get(&handle))
+                                    {
+                                        add(&mut index.linetypes, name);
+                                    }
                                 }
                             }
                             for content in &cell.contents {
@@ -16399,6 +16847,17 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                             add(&mut index.text_styles, name);
                         }
                     }
+                    for handle in [leader.line_type_handle].into_iter().chain(
+                        leader
+                            .context
+                            .leader_roots
+                            .iter()
+                            .flat_map(|root| root.lines.iter().map(|line| line.line_type_handle)),
+                    ) {
+                        if let Some(name) = handle.and_then(|handle| linetype_names.get(&handle)) {
+                            add(&mut index.linetypes, name);
+                        }
+                    }
                     if let Some(ObjectType::MultiLeaderStyle(style)) = leader
                         .style_handle
                         .and_then(|handle| self.document.objects.get(&handle))
@@ -16409,9 +16868,26 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                         {
                             add(&mut index.text_styles, name);
                         }
+                        if let Some(name) = style
+                            .line_type_handle
+                            .and_then(|handle| linetype_names.get(&handle))
+                        {
+                            add(&mut index.linetypes, name);
+                        }
                     }
                 }
-                EntityType::MLine(line) => add_handle(&mut index.object_styles, line.style_handle),
+                EntityType::MLine(line) => {
+                    add_handle(&mut index.object_styles, line.style_handle);
+                    if let Some(style) =
+                        crate::entities::mline::resolved_mline_style(line, &self.document)
+                    {
+                        for element in &style.elements {
+                            if is_direct_linetype(&element.linetype) {
+                                add(&mut index.linetypes, &element.linetype);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -16428,6 +16904,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
         let index = cache.as_ref().unwrap();
         let map = match kind {
             DependencyKind::Layer => &index.layers,
+            DependencyKind::Linetype => &index.linetypes,
             DependencyKind::TextStyle => &index.text_styles,
             DependencyKind::DimStyle => &index.dim_styles,
         };
@@ -16436,16 +16913,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             let Some(target) = map.get(&normalize_name(name)) else {
                 continue;
             };
-            combined
-                .render_handles
-                .extend(target.render_handles.iter().copied());
-            combined
-                .source_handles
-                .extend(target.source_handles.iter().copied());
-            combined
-                .block_users
-                .extend(target.block_users.iter().copied());
-            combined.touches_block_definition |= target.touches_block_definition;
+            combined.extend_from(target);
         }
         combined
     }
@@ -16576,6 +17044,49 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
     pub fn invalidate_layer_dependencies(&mut self, names: &[String]) {
         let targets = self.dependency_targets(DependencyKind::Layer, names);
         self.invalidate_dependency_targets(targets);
+    }
+
+    pub fn invalidate_linetype_dependencies(&mut self, names: &[String]) {
+        if names.is_empty() {
+            return;
+        }
+        let wanted: HashSet<String> = names.iter().map(|name| normalize_name(name)).collect();
+        let wanted_handles: HashSet<Handle> = self
+            .document
+            .line_types
+            .iter()
+            .filter(|lt| wanted.contains(&normalize_name(&lt.name)))
+            .map(|lt| lt.handle)
+            .collect();
+        let affected_layers: Vec<String> = self
+            .document
+            .layers
+            .iter()
+            .filter(|layer| {
+                wanted.contains(&normalize_name(&layer.line_type))
+                    || (!wanted_handles.is_empty()
+                        && self
+                            .document
+                            .layer_viewport_overrides(
+                                layer.handle,
+                                document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                            )
+                            .into_iter()
+                            .any(|(_, value)| {
+                                value
+                                    .as_handle()
+                                    .is_some_and(|handle| wanted_handles.contains(&handle))
+                            }))
+            })
+            .map(|layer| layer.name.clone())
+            .collect();
+        let mut targets = self.dependency_targets(DependencyKind::Linetype, names);
+        if !affected_layers.is_empty() {
+            let layer_targets = self.dependency_targets(DependencyKind::Layer, &affected_layers);
+            targets.extend_from(&layer_targets);
+        }
+        self.invalidate_dependency_targets(targets);
+        self.invalidate_dependency_index();
     }
 
     pub fn invalidate_text_style_dependencies(&mut self, name: &str) {
@@ -17862,6 +18373,68 @@ mod journal_tests {
             scene.geometry_epoch, epoch,
             "the cached hatch needs an entity delta"
         );
+    }
+
+    #[test]
+    fn linetype_dependency_invalidation_stays_incremental_for_direct_and_bylayer_users() {
+        use document::entities::Line;
+        use document::tables::layer::Layer;
+        use document::tables::linetype::{LineType, LineTypeElement};
+        use document::types::Vector3;
+
+        let mut scene = Scene::new();
+        let mut lt = LineType::new("DASHED");
+        lt.elements = vec![
+            LineTypeElement {
+                length: 0.5,
+                complex: None,
+            },
+            LineTypeElement {
+                length: -0.25,
+                complex: None,
+            },
+        ];
+        lt.pattern_length = 0.75;
+        let _ = scene.document.line_types.add(lt);
+
+        let mut layer = Layer::new("DashedLayer");
+        layer.line_type = "DASHED".to_string();
+        scene.document.layers.add_or_replace(layer);
+
+        let mut direct_line = Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        );
+        direct_line.common.linetype = "dashed".to_string();
+        let direct = scene.add_entity(EntityType::Line(direct_line));
+
+        let mut bylayer_line = Line::from_points(
+            Vector3::new(0.0, 2.0, 0.0),
+            Vector3::new(10.0, 2.0, 0.0),
+        );
+        bylayer_line.common.layer = "DashedLayer".to_string();
+        let bylayer = scene.add_entity(EntityType::Line(bylayer_line));
+
+        let plain_line = Line::from_points(
+            Vector3::new(0.0, 4.0, 0.0),
+            Vector3::new(10.0, 4.0, 0.0),
+        );
+        let plain = scene.add_entity(EntityType::Line(plain_line));
+
+        let epoch_before = scene.geometry_epoch;
+        let block_epoch_before = scene.block_epoch;
+
+        scene.invalidate_linetype_dependencies(&["DASHED".to_string()]);
+
+        assert_ne!(scene.geometry_epoch, epoch_before);
+        assert_eq!(scene.block_epoch, block_epoch_before);
+        let deltas = scene
+            .replay_since(epoch_before)
+            .expect("linetype invalidation must emit an incremental delta");
+        let changed: HashSet<Handle> = deltas.into_iter().map(|(h, _)| h).collect();
+        assert!(changed.contains(&direct));
+        assert!(changed.contains(&bylayer));
+        assert!(!changed.contains(&plain));
     }
 
     /// The loader's handed-over draw depths must equal a local rebuild.

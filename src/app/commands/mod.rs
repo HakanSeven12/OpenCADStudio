@@ -8,6 +8,7 @@ pub(crate) use anno_scaling::{
     anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display,
 };
 mod attdef;
+mod attout;
 mod attman;
 mod block_cmdline;
 mod blocks;
@@ -51,8 +52,10 @@ pub(crate) use log_file::write_line as write_log_line;
 pub(crate) use log_file::{
     log_file_folder_setting, log_file_mode, set_log_file_folder, set_log_file_mode,
 };
+mod anno_scale_prompt;
 mod hyperlink;
 pub(crate) use group_display::{group_display_mode, set_group_display_mode};
+pub(crate) use anno_scale_prompt::{annotation_scale_prompt, set_annotation_scale_prompt};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
 mod inquiry;
 mod layerprops;
@@ -157,6 +160,7 @@ impl OpenCADStudio {
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
         self.remember_selection_before_command(cmd);
         let task = self.dispatch_command_inner(cmd, false);
+        self.ask_annotation_scale_if_first();
         self.clear_idle_tool_highlight();
         task
     }
@@ -185,6 +189,9 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
+        if self.mtext_editor.is_some() {
+            self.mtext_cancel();
+        }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
         }
@@ -227,6 +234,7 @@ impl OpenCADStudio {
     /// and never get silent substitution.
     pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
         let task = self.dispatch_command_inner(cmd, true);
+        self.ask_annotation_scale_if_first();
         self.clear_idle_tool_highlight();
         task
     }
@@ -834,6 +842,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_count(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_attout(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_draw(cmd, i) {
             return Some(t);
         }
@@ -1388,6 +1399,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "WINDOWAREACOLOR",
         "CROSSINGAREACOLOR",
         "SELECTIONPREVIEW",
+        "SELECTIONPREVIEWLIMIT",
         "GRIPSIZE",
         "GRIPCOLOR",
         "GRIPHOT",
@@ -1418,6 +1430,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "ATTACH",
         "ATTDISP",
         "ATTEXT",
+        "ATTIN",
+        "ATTOUT",
         "BACKGROUND",
         "CDIMSTY",
         "CELTSCALE",

@@ -47,6 +47,8 @@ pub struct AppPrefs {
     pub savetime_min: i32,
     /// ISAVEBAK: keep a `.bak` when overwriting.
     pub backup_on_save: bool,
+    /// ETRANSMIT/ARCHIVE: preserve, structured-by-type, or flat layout.
+    pub transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// TEXTFILL: fill TrueType glyphs rather than drawing them hollow.
     pub textfill: bool,
     /// CLIPROMPTLINES: prompt lines shown above the command window.
@@ -457,6 +459,25 @@ pub fn view_window<'a>(
     .spacing(0)
     .width(sizing.width);
 
+    let transmittal_layout_options = vec![
+        Labelled {
+            value: crate::io::transmit::TransmittalLayout::Preserve,
+            label: crate::tr!("options", "transmittal-layout-preserve"),
+        },
+        Labelled {
+            value: crate::io::transmit::TransmittalLayout::Structured,
+            label: crate::tr!("options", "transmittal-layout-structured"),
+        },
+        Labelled {
+            value: crate::io::transmit::TransmittalLayout::Flat,
+            label: crate::tr!("options", "transmittal-layout-flat"),
+        },
+    ];
+    let selected_transmittal_layout = transmittal_layout_options
+        .iter()
+        .find(|choice| choice.value == prefs.transmittal_layout)
+        .cloned();
+
     // Saving preferences, gathered onto one page. The format and the file
     // association were on General, which had become a page of three unrelated
     // controls; the autosave interval and the backup toggle have existed since
@@ -559,6 +580,27 @@ pub fn view_window<'a>(
         ]
         .spacing(8)
         .align_y(iced::Center),
+        Space::new().height(14),
+        row![
+            text(crate::tr!("options", "transmittal-layout-label"))
+                .size(12)
+                .width(150),
+            crate::ui::dropdown_list::pick_list(
+                selected_transmittal_layout,
+                transmittal_layout_options,
+                |choice: &Labelled<crate::io::transmit::TransmittalLayout>| choice.label.clone(),
+            )
+            .on_select(|choice: Labelled<crate::io::transmit::TransmittalLayout>| {
+                Message::TransmittalLayoutChanged(choice.value)
+            })
+            .width(Fill),
+        ]
+        .spacing(12)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::tr!("options", "transmittal-layout-help"))
+            .size(11)
+            .width(sizing.width),
     ]
     .spacing(0)
     .width(sizing.width);
@@ -699,9 +741,10 @@ pub fn view_window<'a>(
             text(crate::t!("Interface scale")).size(12).width(150),
             crate::ui::dropdown_list::pick_list(
                 Some(format!("{}%", prefs.ui_scale_percent)),
-                [75u16, 100, 125, 150, 175, 200]
+                (75u16..=200)
+                    .step_by(5)
                     .map(|p| format!("{p}%"))
-                    .to_vec(),
+                    .collect::<Vec<_>>(),
                 |label: &String| label.clone(),
             )
             .on_select(|label: String| {

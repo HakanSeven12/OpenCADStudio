@@ -43,6 +43,19 @@ pub(crate) fn project_screen(
     (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
 }
 
+/// [`project_screen`] with the clip W the point was divided by: its depth in
+/// front of the eye in a perspective view, 1 in a parallel one.
+pub(crate) fn project_screen_w(
+    view_rot: Mat4,
+    eye: DVec3,
+    bounds: Rectangle,
+    world: DVec3,
+) -> Option<(Point, f32)> {
+    let screen = project_screen(view_rot, eye, bounds, world)?;
+    let clip = view_rot * (world - eye).as_vec3().extend(1.0);
+    Some((screen, clip.w))
+}
+
 /// The candidate whose own screen position is nearest `click` within
 /// `aperture_px`, skipping candidates on or behind the perspective eye plane.
 /// One rule for every grip pick, so a mirrored point can never win a click.

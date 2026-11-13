@@ -72,6 +72,7 @@ impl OpenCADStudio {
             Some(K::TableCellBlock) => crate::tr!("table-cells", "block-title"),
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
+            Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
             Some(K::TableCellEntry) => crate::tr!("table-cells", "entry-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
@@ -247,6 +248,7 @@ impl OpenCADStudio {
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,
                             backup_on_save: self.backup_on_save,
+                            transmittal_layout: self.transmittal_layout,
                             page_setup_on_new_layout: self.plot_dialog.page_setup_on_new_layout,
                             textfill: crate::scene::text::sdf_atlas::textfill(),
                             cliprompt_lines: self.cliprompt_lines,
@@ -607,6 +609,12 @@ impl OpenCADStudio {
                     crate::ui::window::table_cell_dialog::view_block(state, flow)
                 })
             }
+            super::super::ModalKind::AnnotationScalePrompt => {
+                let state = self.anno_scale_prompt.as_ref()?;
+                sized_flow(ex, 440, 250, |flow| {
+                    crate::ui::window::anno_scale_prompt::view(state, flow)
+                })
+            }
             super::super::ModalKind::TableCellWarning => {
                 let (_, cells) = self.table_cell_warning.as_ref()?;
                 sized_flow(ex, 460, 230, |flow| {
@@ -743,7 +751,7 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::InsertAttributes => {
                 let state = self.insert_attr_dialog.as_ref()?;
-                sized_flow(ex, 500, 520, |flow| {
+                sized_flow(ex, 500, 740, |flow| {
                     crate::ui::window::insert_attr_dialog::view(state, flow)
                 })
             }

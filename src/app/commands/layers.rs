@@ -244,11 +244,21 @@ impl OpenCADStudio {
                     .collect();
                 self.push_undo_snapshot(i, "LAYDEL");
                 let n = handles.len();
+                let touches_blocks = !handles.is_empty() && {
+                    let changes: Vec<_> = handles
+                        .iter()
+                        .copied()
+                        .map(|h| (h, crate::scene::ChangeKind::Removed))
+                        .collect();
+                    self.tabs[i].scene.changes_touch_block_definition(&changes)
+                };
                 if !handles.is_empty() {
                     self.tabs[i].scene.erase_entities(&handles);
                 }
                 self.tabs[i].scene.document.layers.remove(&layer);
-                self.tabs[i].scene.bump_geometry();
+                if touches_blocks {
+                    self.tabs[i].scene.bump_geometry();
+                }
                 self.tabs[i].dirty = true;
                 self.refresh_layer_panel();
                 self.command_line.push_output(

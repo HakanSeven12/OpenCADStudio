@@ -169,22 +169,36 @@ impl OpenCADStudio {
     }
 
     /// PASTESPEC with the formats on hand: the copied objects, and `text`
-    /// from the system clipboard once it has been read.
+    /// and `picture` from the system clipboard once it has been read. Text
+    /// in rows of cells is also a table, in the current table style at the
+    /// column width TABLE uses.
     pub(in crate::app) fn paste_special_command(
         &self,
         i: usize,
         text: Option<&str>,
+        picture: Option<crate::io::ole_embed::EmbeddedImage>,
     ) -> Box<dyn CadCommand> {
+        use crate::modules::annotate::table_cmd;
+        use crate::modules::draw::clipboard::pastespec;
         let document = &self.tabs[i].scene.document;
         let defaults = crate::scene::creation_style::current_text_defaults(document);
-        Box::new(
-            crate::modules::draw::clipboard::pastespec::PasteSpecCommand::new(
-                !self.clipboard.is_empty(),
-                text,
-                defaults.style_name,
-                defaults.height,
-            ),
-        )
+        let table = text.and_then(pastespec::grid_cells).map(|cells| {
+            let style = crate::app::annotation_data::current_table_style(document);
+            let width = table_cmd::session().cell_width(document.header.measurement == 1);
+            let mut table = table_cmd::data_table(style.as_ref(), &cells, width);
+            // As after typing the cells: text read as their data type, and
+            // each row as high as its wrapped text needs.
+            crate::entities::table::settle_table(&mut table, document);
+            table
+        });
+        Box::new(pastespec::PasteSpecCommand::new(
+            !self.clipboard.is_empty(),
+            text,
+            table,
+            picture,
+            defaults.style_name,
+            defaults.height,
+        ))
     }
 
     /// Draw the selected objects, or else the existing definition the name
@@ -513,15 +527,19 @@ impl OpenCADStudio {
             }
 
             // PASTESPEC — offer the copied objects now; the system clipboard's
-            // text joins the formats once read (Message::PasteSpecial).
+            // text and picture join the formats once read
+            // (Message::PasteSpecial), and the prompt that lists them is
+            // shown then.
             "PASTESPEC" => {
-                let command = self.paste_special_command(i, None);
-                let started = self.start_count_command(i, command);
-                #[cfg(target_arch = "wasm32")]
-                let read = Task::perform(crate::sys::read_clipboard_text(), Message::PasteSpecial);
-                #[cfg(not(target_arch = "wasm32"))]
-                let read = iced::clipboard::read_text()
-                    .map(|result| Message::PasteSpecial(result.ok().map(|text| (*text).clone())));
+                let command = crate::modules::draw::clipboard::pastespec::PasteSpecCommand::reading(
+                    !self.clipboard.is_empty(),
+                );
+                self.reset_command_start_state(i);
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                self.push_ucs_to_cmd(i);
+                self.sync_dyn_fields();
+                let started = self.focus_cmd_input();
+                let read = self.read_system_clipboard_formats();
                 return Some(Task::batch([started, read]));
             }
 

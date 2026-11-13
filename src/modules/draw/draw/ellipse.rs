@@ -1,8 +1,9 @@
 // Ellipse tool — ribbon dropdown + all OpenCADStudio ellipse creation methods.
 //
 // Commands:
-//   ELLIPSE      — Center, Axes  (center → major endpoint → minor distance)
-//   ELLIPSE_AXIS — Axis, End     (axis endpoint 1 → endpoint 2 → minor distance)
+//   ELLIPSE_CENTER — Center, Axes  (center → major endpoint → minor distance)
+//   ELLIPSE        — Axis, End     (axis endpoint 1 → endpoint 2 → minor distance),
+//                    AutoCAD's default; ELLIPSE_AXIS is kept as an alias
 //   ELLIPSE_ARC  — Ellipse Arc   (shape as above, then start/end parametric angles)
 
 use crate::t;
@@ -41,8 +42,8 @@ const ICON_ARC: IconKind = IconKind::Svg(include_bytes!(
 pub const DROPDOWN_ID: &str = "ELLIPSE";
 
 pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
-    ("ELLIPSE", "Center, Axes", ICON_CTR),
-    ("ELLIPSE_AXIS", "Axis, End", ICON_AXIS),
+    ("ELLIPSE_CENTER", "Center, Axes", ICON_CTR),
+    ("ELLIPSE", "Axis, End", ICON_AXIS),
     ("ELLIPSE_ARC", "Ellipse Arc", ICON_ARC),
 ];
 
@@ -204,7 +205,7 @@ impl CadCommand for EllipseCommand {
     }
 
     fn name(&self) -> &'static str {
-        "ELLIPSE"
+        "ELLIPSE_CENTER"
     }
 
     fn prompt(&self) -> String {
@@ -263,7 +264,7 @@ impl CadCommand for EllipseCommand {
         if matches!(self.step, CtrStep::Center) {
             return match text.trim().to_uppercase().as_str() {
                 "A" | "ARC" => Some(CmdResult::Dispatch("ELLIPSE_ARC".into())),
-                "AXIS" => Some(CmdResult::Dispatch("ELLIPSE_AXIS".into())),
+                "AXIS" => Some(CmdResult::Dispatch("ELLIPSE".into())),
                 _ => None,
             };
         }
@@ -351,7 +352,19 @@ impl CadCommand for EllipseAxisCommand {
     }
 
     fn name(&self) -> &'static str {
-        "ELLIPSE_AXIS"
+        "ELLIPSE"
+    }
+
+    fn options(&self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self.step {
+            AxisStep::Pt1 => vec![CmdOption::new("Arc", "ARC"), CmdOption::new("Center", "C")],
+            _ => vec![],
+        }
+    }
+
+    fn point_step_accepts_keywords(&self) -> bool {
+        matches!(self.step, AxisStep::Pt1)
     }
 
     fn prompt(&self) -> String {
@@ -395,6 +408,14 @@ impl CadCommand for EllipseAxisCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        // AutoCAD's ELLIPSE: an axis endpoint, or [Arc/Center].
+        if matches!(self.step, AxisStep::Pt1) {
+            return match text.trim().to_uppercase().as_str() {
+                "A" | "ARC" => Some(CmdResult::Dispatch("ELLIPSE_ARC".into())),
+                "C" | "CENTER" => Some(CmdResult::Dispatch("ELLIPSE_CENTER".into())),
+                _ => None,
+            };
+        }
         if let AxisStep::MinorRatio { center, major } = &self.step {
             let r_minor = parse_num(text)?;
             if r_minor > 0.0 {
@@ -786,6 +807,32 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ELLIPSE takes the major axis by its two endpoints, as AutoCAD does;
+    /// C switches to the centre method and A to the arc.
+    #[test]
+    fn ellipse_starts_with_the_axis_endpoints() {
+        crate::modules::draw::defaults::set_pellipse(false);
+        let mut command = EllipseAxisCommand::new();
+        assert_eq!(command.name(), "ELLIPSE");
+        command.on_point(DVec3::new(0.0, 0.0, 0.0));
+        command.on_point(DVec3::new(10.0, 0.0, 0.0));
+        let Some(CmdResult::CommitAndExit(EntityType::Ellipse(e))) = command.on_text_input("3")
+        else {
+            panic!("ELLIPSE 0,0 10,0 3 must commit an ellipse");
+        };
+        assert!((e.center.x - 5.0).abs() < 1e-9 && e.center.y.abs() < 1e-9);
+        assert!((e.major_axis.x - 5.0).abs() < 1e-9);
+        assert!((e.minor_axis_ratio - 0.6).abs() < 1e-9);
+        for (keyword, target) in [("C", "ELLIPSE_CENTER"), ("a", "ELLIPSE_ARC")] {
+            let mut command = EllipseAxisCommand::new();
+            assert!(matches!(
+                command.on_text_input(keyword),
+                Some(CmdResult::Dispatch(name)) if name == target
+            ));
+        }
+        assert_eq!(EllipseCommand::new().name(), "ELLIPSE_CENTER");
+    }
 
     /// PELLIPSE 1: a full ellipse is a closed 16-arc polyline, an elliptical
     /// arc an open one; every vertex lies on the ellipse.

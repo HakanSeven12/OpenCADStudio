@@ -423,8 +423,50 @@ pub fn populate_document_named(
     names: &[String],
 ) -> usize {
     populate_matching(doc, source, lin_dir, |candidate| {
-        names.iter().any(|name| name.eq_ignore_ascii_case(candidate))
+        names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(candidate))
     })
+}
+
+/// Read the linetypes `names` the drawing has again from a `.lin` source:
+/// their description and pattern become the source's, their handle and
+/// name stay. Returns how many were read.
+pub fn reload_document_named(
+    doc: &mut Document,
+    source: &str,
+    lin_dir: Option<&std::path::Path>,
+    names: &[String],
+) -> usize {
+    if names.is_empty() {
+        return 0;
+    }
+    let complex = parse_complex(source);
+    let mut seen = std::collections::HashSet::new();
+    let mut reloaded = 0;
+    for mut lt in parse(source) {
+        // The first definition of a name is the one offered.
+        if !seen.insert(lt.name.to_ascii_uppercase())
+            || !names.iter().any(|name| name.eq_ignore_ascii_case(&lt.name))
+            || doc.line_types.get(&lt.name).is_none()
+        {
+            continue;
+        }
+        if let Some(elements) = complex
+            .get(&lt.name.to_ascii_uppercase())
+            .and_then(|s| complex_elements(doc, s, &lt.elements, lin_dir))
+        {
+            lt.elements = elements;
+        }
+        if let Some(existing) = doc.line_types.get_mut(&lt.name) {
+            existing.description = lt.description;
+            existing.elements = lt.elements;
+            existing.pattern_length = lt.pattern_length;
+            existing.alignment = lt.alignment;
+            reloaded += 1;
+        }
+    }
+    reloaded
 }
 
 /// Add the linetypes of a caller-supplied `.lin` source, embedded shapes and
@@ -545,26 +587,37 @@ pub fn is_bundled_shape_file(file: &str) -> bool {
     BUNDLED_SHAPES.iter().any(|(f, _, _)| *f == stem)
 }
 
+fn file_named(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let direct = dir.join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+}
+
 /// A shape file found as written, next to its drawing or `.lin` catalog (in
-/// any letter case, as stored references rarely match the files' case), or in
-/// the fonts folder.
+/// any letter case, as stored references rarely match the files' case), in an
+/// AutoCAD-style transmittal `Fonts` folder, or in the configured font folders.
 pub(crate) fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<String> {
     if let Some(found) = crate::io::resolve_image_file(file, lin_dir) {
         return Some(found);
     }
     let name = file.rsplit(['/', '\\']).next()?;
     lin_dir
-        .and_then(|dir| {
-            std::fs::read_dir(dir)
-                .ok()?
-                .filter_map(Result::ok)
-                .find(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .eq_ignore_ascii_case(name)
-                })
-                .map(|entry| entry.path())
+        .and_then(|dir| file_named(dir, name))
+        .or_else(|| {
+            crate::io::font_repo::packaged_font_dirs(lin_dir)
+                .into_iter()
+                .find_map(|dir| file_named(&dir, name))
         })
         .or_else(|| crate::io::font_repo::local_font_file(name))
         .map(|path| path.to_string_lossy().into_owned())

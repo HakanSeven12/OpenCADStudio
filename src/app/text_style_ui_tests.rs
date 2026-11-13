@@ -137,6 +137,7 @@ fn mtext_editor(raw: &str) -> OpenCADStudio {
         .document
         .header
         .current_text_style_name = "Notes".into();
+    app.tabs[app.active_tab].scene.selection.borrow_mut().view.vp_size = (1280.0, 650.0);
     app.open_mtext_editor(glam::DVec3::ZERO, None, raw, 2.5, None);
     app
 }

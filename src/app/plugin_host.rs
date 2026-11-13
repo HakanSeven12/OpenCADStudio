@@ -519,6 +519,23 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].scene.bump_geometry();
     }
 
+    fn bump_handles_incremental(&mut self, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .copied()
+            .map(|h| (h, crate::scene::ChangeKind::Modified))
+            .collect();
+        let scene = &mut self.app.tabs[self.tab].scene;
+        if scene.changes_touch_block_definition(&changes) {
+            scene.bump_geometry();
+        } else {
+            scene.bump_entities(&changes);
+        }
+    }
+
     /// Replace the entity carrying `entity`'s handle in place, refreshing the
     /// scene's derived caches. Returns `false` when no entity has that handle.
     pub fn update_entity(&mut self, entity: EntityType) -> bool {
@@ -918,6 +935,7 @@ impl<'a> HostSession<'a> {
         // boundary notification — marked BEFORE the publish that carries it.
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_record_dirty(handle, app, epoch);
+        self.bump_handles_incremental(&[handle]);
         true
     }
 
@@ -958,7 +976,7 @@ impl<'a> HostSession<'a> {
         if let Some(ah) = app_handle {
             xd.raw_dwg_eed.retain(|(a, _)| *a != ah);
         }
-        self.bump_geometry();
+        self.bump_handles_incremental(&[handle]);
         self.set_dirty();
         self.publish_document_view();
         true
@@ -1941,8 +1959,8 @@ impl<'a> HostSession<'a> {
                 if !editor_before {
                     self.app.text_inline = None;
                 }
-                if !mtext_before {
-                    self.app.mtext_editor = None;
+                if !mtext_before && self.app.mtext_editor.is_some() {
+                    self.app.mtext_cancel();
                 }
                 if !modal_before {
                     self.app.active_modal = None;
@@ -2166,8 +2184,7 @@ impl<'a> HostSession<'a> {
         self.app.tabs[self.tab].dirty = true;
         self.app.tabs[self.tab]
             .scene
-            .invalidate_layer_dependencies(names);
-        self.app.tabs[self.tab].scene.bump_geometry();
+            .invalidate_linetype_dependencies(names);
         if self.tab == self.app.active_tab {
             self.app.sync_ribbon_layers();
             self.app.sync_ribbon_from_selection();
@@ -3493,10 +3510,9 @@ impl<'a> HostSession<'a> {
             "designation state was checked before the mutation"
         );
         // The wires carry the click-through stamp baked at tessellation, so a
-        // designation change must rebuild them: bump_geometry clears the
-        // tessellation memos and resident wire sets exactly like an entity
-        // edit would.
-        self.bump_geometry();
+        // designation change must rebuild them incrementally (or rebuild block
+        // caches when the entity belongs to a block definition).
+        self.bump_handles_incremental(&[handle]);
         self.set_dirty();
         self.publish_document_view();
         if own_scope {
@@ -3678,7 +3694,7 @@ impl<'a> HostSession<'a> {
                 .scene
                 .set_reference_only_membership(*handle, true);
         }
-        self.bump_geometry();
+        self.bump_handles_incremental(&handles);
         self.set_dirty();
         self.publish_document_view();
         if own_scope {
@@ -3893,7 +3909,9 @@ impl<'a> HostSession<'a> {
                 break;
             }
             // Designation inside the SAME scope, the before-image
-            // pending-scoped the way set_reference_only does.
+            // pending-scoped the way set_reference_only does. Set before
+            // `write_record` so its incremental handle bump already bakes the
+            // designation stamp without a redundant full rebuild.
             let before = self.app.tabs[self.tab]
                 .scene
                 .reference_only
@@ -3903,6 +3921,7 @@ impl<'a> HostSession<'a> {
             self.app.tabs[self.tab]
                 .scene
                 .set_reference_only_membership(*handle, !instance.selectable_custom);
+            self.write_record(*handle, stamp);
         }
         if let Some(index) = stamp_failed {
             self.app.tabs[self.tab]
@@ -5175,10 +5194,21 @@ impl HostApi for HostSession<'_> {
         panel_id: &str,
         values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
     ) -> bool {
-        let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) else {
-            return false;
-        };
-        self.update_panel(&panel_id, values)
+        if let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) {
+            return self.update_panel(&panel_id, values);
+        }
+        // A modal dialog the plugin opened is updated in place; it is never
+        // routed through `update_panel`, whose side-panel lookup by name
+        // could reach another plugin's panel with the same title.
+        if let Some(state) = &mut self.app.plugin_dialog_state {
+            if state.plugin_id.as_deref() == Some(plugin_id)
+                && (panel_id.is_empty() || state.def.title.eq_ignore_ascii_case(panel_id))
+            {
+                state.update_values(values);
+                return true;
+            }
+        }
+        false
     }
 
     fn toggle_panel_for_plugin(
@@ -18298,5 +18328,48 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(host.app.plugin_panels["panel"].visible);
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
         assert!(host.app.tabs[0].history.pending.is_none());
+    }
+
+    #[test]
+    fn api17_update_panel_for_plugin_allows_owned_modal_dialog() {
+        use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let dlg = DialogDef::new("Test Dialog")
+            .with_control(DialogControl::Text {
+                id: "field1".into(),
+                label: "Field 1".into(),
+                default: "initial".into(),
+            });
+        app.open_plugin_dialog_on_tab(0, dlg, Some("MY_PLUGIN".to_string()));
+
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Foreign plugin cannot update the dialog
+        assert!(!host.update_panel_for_plugin(
+            "OTHER_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("hacked".into()))]),
+        ));
+
+        // Owner plugin can update by title
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("updated".into()))]),
+        ));
+        let field1 = |host: &HostSession| {
+            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").cloned()
+        };
+        assert_eq!(field1(&host).as_deref(), Some("updated"));
+
+        // Owner plugin can also update with empty panel_id (active dialog convention)
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("empty_id_update".into()))]),
+        ));
+        assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 }

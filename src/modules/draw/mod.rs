@@ -76,7 +76,7 @@ impl CadModule for DrawModule {
                             id: ellipse::DROPDOWN_ID,
                             icon: ellipse::ICON,
                             items: ellipse::DROPDOWN_ITEMS.to_vec(),
-                            default: "ELLIPSE",
+                            default: "ELLIPSE_CENTER",
                         },
                         RibbonItem::Dropdown {
                             id: hatch::DROPDOWN_ID,
@@ -124,12 +124,12 @@ impl CadModule for DrawModule {
                         RibbonItem::LargeDropdown {
                             id: "ANNOTATION_TEXT",
                             label: "Text",
-                            icon: text::ICON,
+                            icon: mtext::ICON,
                             items: vec![
-                                (text::tool().id, text::tool().label, text::tool().icon),
                                 (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
+                                (text::tool().id, text::tool().label, text::tool().icon),
                             ],
-                            default: "TEXT",
+                            default: "MTEXT",
                         },
                         RibbonItem::LargeDropdown {
                             id: "ANNOTATION_DIMENSIONS",

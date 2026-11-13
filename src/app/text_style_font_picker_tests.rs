@@ -59,11 +59,12 @@ fn the_drawing_fonts_come_first_and_a_missing_one_is_marked() {
         drawing.contains(&("No Such Family".to_string(), true)),
         "{drawing:?}"
     );
-    // The new drawing's Standard style uses txt.shx: listed once, by name.
+    // The new drawing's Standard and Annotative styles both use Arial:
+    // listed once.
     assert_eq!(
         drawing
             .iter()
-            .filter(|(label, _)| label == "Standard")
+            .filter(|(label, _)| label == "Arial")
             .count(),
         1
     );

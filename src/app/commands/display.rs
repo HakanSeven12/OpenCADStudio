@@ -933,17 +933,23 @@ impl OpenCADStudio {
                 // the interactive command gathers any number of profiles.
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let ucs = self.tabs[i].ucs_xform().working_plane();
                 if !selected.is_empty() {
                     let mut cmd = ExtrudeCommand::new_named(cmd, color);
-                    let first_curve = selected
+                    cmd.set_working_plane(ucs);
+                    let anchor = selected
                         .iter()
-                        .find_map(|(_, entity)| crate::entities::curve::entity_curve(entity));
-                    let anchor = first_curve
-                        .as_ref()
+                        .find_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
                         .map(|curve| glam::DVec3::from_array(curve.plane.origin))
                         .unwrap_or(glam::DVec3::ZERO);
-                    let direction = first_curve
-                        .and_then(|curve| curve.plane.normal())
+                    let direction = selected
+                        .iter()
+                        .find_map(|(_, entity)| {
+                            crate::scene::model::sweep_model::extrusion_axis(
+                                entity,
+                                ucs.z.to_array(),
+                            )
+                        })
                         .map(glam::DVec3::from_array);
                     cmd.set_preselection(
                         selected
@@ -961,7 +967,8 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let cmd = ExtrudeCommand::new_named(cmd, color);
+                    let mut cmd = ExtrudeCommand::new_named(cmd, color);
+                    cmd.set_working_plane(ucs);
                     self.command_line.push_info(&cmd.wire_density_line(
                         crate::entities::solid3d::clamp_header_isolines(
                             self.tabs[i].scene.document.header.isolines,
@@ -2399,13 +2406,7 @@ impl OpenCADStudio {
                 let write = args.starts_with('W');
                 let scope = args.get(2..).unwrap_or("").trim();
                 let document = &self.tabs[i].scene.document;
-                let link_of = |table: &document::entities::Table| {
-                    table
-                        .rows
-                        .iter()
-                        .flat_map(|row| row.cells.iter())
-                        .find_map(|cell| cell.data_link_handle)
-                };
+                use super::extraction_eval::{LinkUpdate, LinkedCellRange};
                 let wanted_link = scope.strip_prefix("NAME ").and_then(|name| {
                     crate::app::annotation_data::data_link_entries(document)
                         .into_iter()
@@ -2422,26 +2423,45 @@ impl OpenCADStudio {
                 } else {
                     Vec::new()
                 };
-                let jobs: Vec<(document::Handle, document::Handle)> = document
-                    .entities()
-                    .filter_map(|entity| match entity {
-                        document::EntityType::Table(table) => {
-                            link_of(table).map(|link| (entity.common().handle, link))
-                        }
-                        _ => None,
-                    })
-                    .filter(|(table, link)| match scope {
-                        "SEL" => selected.contains(table),
-                        "ALL" => true,
-                        _ => Some(*link) == wanted_link,
-                    })
-                    .collect();
+                let mut jobs = Vec::new();
+                for entity in document.entities() {
+                    let document::EntityType::Table(table) = entity else {
+                        continue;
+                    };
+                    let handle = table.common.handle;
+                    if scope == "SEL" && !selected.contains(&handle) {
+                        continue;
+                    }
+                    let anchors = table.rows.iter().enumerate().flat_map(|(row, entry)| {
+                        entry
+                            .cells
+                            .iter()
+                            .enumerate()
+                            .filter_map(move |(column, cell)| {
+                                let link = cell.data_link_handle?;
+                                Some((
+                                    link,
+                                    LinkedCellRange {
+                                        row,
+                                        column,
+                                        rows: cell.data_link_rows.max(1) as usize,
+                                        columns: cell.data_link_columns.max(1) as usize,
+                                    },
+                                ))
+                            })
+                    });
+                    let limit = if write { 1 } else { usize::MAX };
+                    jobs.extend(anchors.take(limit).filter_map(|(link, range)| {
+                        (matches!(scope, "ALL" | "SEL") || Some(link) == wanted_link)
+                            .then_some((handle, link, range))
+                    }));
+                }
                 self.command_line
                     .push_output(crate::tf!("{} object(s) found.", jobs.len()).as_ref());
                 if write {
                     let mut refused = 0usize;
                     let mut written = 0usize;
-                    for (table_handle, link_handle) in &jobs {
+                    for (table_handle, link_handle, _) in &jobs {
                         let document = &self.tabs[i].scene.document;
                         if !crate::app::annotation_data::data_link_allows_write(
                             document,
@@ -2483,26 +2503,30 @@ impl OpenCADStudio {
                 }
                 let mut updates = Vec::new();
                 let mut failed = 0usize;
-                for (table_handle, link_handle) in &jobs {
+                for (table_handle, link_handle, range) in jobs {
                     let document = &self.tabs[i].scene.document;
                     // An extraction table is refreshed by running its saved
                     // extraction again, under its title row.
-                    let (read, first_linked_row) =
-                        match crate::app::annotation_data::extraction_table_rows(
-                            document,
-                            self.tabs[i].current_path.as_deref(),
-                            *table_handle,
-                            *link_handle,
-                        ) {
-                            Some(rows) => (rows, 1),
-                            None => (
-                                crate::app::annotation_data::read_data_link(document, *link_handle),
-                                0,
-                            ),
-                        };
+                    let (read, range) = match crate::app::annotation_data::extraction_table_rows(
+                        document,
+                        self.tabs[i].current_path.as_deref(),
+                        table_handle,
+                        link_handle,
+                    ) {
+                        Some(rows) => (rows, None),
+                        None => (
+                            crate::app::annotation_data::read_data_link(document, link_handle),
+                            Some(range),
+                        ),
+                    };
                     match read {
                         Ok(rows) if !rows.is_empty() => {
-                            updates.push((*table_handle, *link_handle, rows, first_linked_row))
+                            updates.push(LinkUpdate {
+                                table: table_handle,
+                                link: link_handle,
+                                rows,
+                                range,
+                            });
                         }
                         _ => failed += 1,
                     }

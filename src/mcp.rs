@@ -54,14 +54,12 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// block, base point, unit, object mode and path, and `dialog_ok` applies it.
 /// Native dock panels are driven through `panel_input` and `panel_button`:
 /// form-only input, then the declared synchronous document-bound command.
+/// The attribute form pages fifteen rows at a time: `dialog_page`.
 #[cfg(test)]
-// Pinned 2026-11-12 against the tool surface as merged on main
-// (`c4ac37663`): commits after `c96a327d4` changed the tool definitions
-// without re-pinning, which broke this deliberate-drift check on a clean
-// upstream checkout. Recomputed from `tool_definitions()` itself.
-const TOOL_SCHEMA_DIGEST: &str = "99bc4906b90c5076dcf1dd42fb2dd8e461e2c09a8a06295359d1b2b358908d88";
+const TOOL_SCHEMA_DIGEST: &str = "012e995182ab7d7d52c8022ec109fdde74f9ccac5008786096ba4b5064ceb987";
 const MAX_REQUEST: usize = 1_048_576;
-const MAX_RESPONSE: u64 = 16 * 1024 * 1024;const CACHE_TTL_MS: u64 = 3_600_000;
+const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
+const CACHE_TTL_MS: u64 = 3_600_000;
 /// Freshness for resources/*, which vary as sessions open and snapshots
 /// land. Tools and discovery are static by comparison, so they keep the hour.
 const RESOURCE_TTL_MS: u64 = 60_000;
@@ -4777,7 +4775,7 @@ mod tests {
             .unwrap()
         };
         let catalog = call("entity_schema", json!({}));
-        assert_eq!(catalog["types"].as_array().unwrap().len(), 11);
+        assert_eq!(catalog["types"].as_array().unwrap().len(), 13);
         assert!(catalog.get("schema").is_none());
         let circle = call("entity_schema", json!({"type":"Circle"}));
         assert_eq!(

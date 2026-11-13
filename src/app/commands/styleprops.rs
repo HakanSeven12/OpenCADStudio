@@ -1158,6 +1158,7 @@ impl OpenCADStudio {
                     | "WINDOWAREACOLOR"
                     | "CROSSINGAREACOLOR"
                     | "SELECTIONPREVIEW"
+                    | "SELECTIONPREVIEWLIMIT"
                     | "GRIPSIZE"
                     | "GRIPCOLOR"
                     | "GRIPHOT"
@@ -3013,6 +3014,16 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            "SELECTIONPREVIEWLIMIT" => match &value {
+                                Some(v) => match v.parse::<u32>() {
+                                    Ok(limit) => {
+                                        self.model_space.selection_preview_limit = limit;
+                                        Ok((format!("SELECTIONPREVIEWLIMIT = {limit}"), true))
+                                    }
+                                    _ => Err("SETVAR: non-negative integer required.".into()),
+                                },
+                                None => Ok((format!("SELECTIONPREVIEWLIMIT = {}", self.model_space.selection_preview_limit), false)),
+                            },
                             "GRIPSIZE" => match &value {
                                 Some(v) => match v.parse::<u8>() {
                                     Ok(size @ 1..=25) => {
@@ -3802,6 +3813,7 @@ impl OpenCADStudio {
                                         | "WINDOWAREACOLOR"
                                         | "CROSSINGAREACOLOR"
                                         | "SELECTIONPREVIEW"
+                                        | "SELECTIONPREVIEWLIMIT"
                                         | "GRIPSIZE"
                                         | "GRIPCOLOR"
                                         | "GRIPHOT"

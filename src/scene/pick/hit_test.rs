@@ -1245,6 +1245,176 @@ fn mesh_vert(hi: [f32; 3], low: &[[f32; 3]], i: usize) -> glam::DVec3 {
     )
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Mesh vertices projected to the screen by the box and lasso tests, so a
+    /// test can tell how many solids a selection had to look into.
+    pub(crate) static MESH_VERTS_PROJECTED: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    /// Makes the box and lasso tests look at the vertices of every solid, as
+    /// they did before a solid's box could tell: the parity reference.
+    pub(crate) static EVERY_VERTEX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// How far, in pixels, what a solid's box spans on the screen must stay from
+/// the edges of a selection for the box to tell. The projection rounds by
+/// far less; a solid nearer an edge than this has its vertices looked at.
+const BOUNDS_CLEARANCE_PX: f32 = 1.0;
+/// Added to the clearance for each pixel of the largest coordinate compared,
+/// for spans far off the screen, where the projection rounds by more.
+const BOUNDS_CLEARANCE_SHARE: f32 = 1e-4;
+/// A box whose nearest corner is this share of its farthest one from the eye
+/// plane comes too near it to tell: a vertex in it may round onto the plane.
+const BOUNDS_NEAR_EYE_SHARE: f32 = 1e-3;
+
+/// The box around the vertices of `mesh`, in the mesh's own coordinates, or
+/// `None` when it has no vertex or one that is not finite.
+pub(crate) fn mesh_local_box(mesh: &MeshModel) -> Option<[glam::DVec3; 2]> {
+    let mut lo = glam::DVec3::splat(f64::INFINITY);
+    let mut hi = glam::DVec3::splat(f64::NEG_INFINITY);
+    for (i, &vert) in mesh.verts.iter().enumerate() {
+        let point = mesh_vert(vert, &mesh.verts_low, i);
+        if !point.is_finite() {
+            return None;
+        }
+        lo = lo.min(point);
+        hi = hi.max(point);
+    }
+    (!mesh.verts.is_empty()).then_some([lo, hi])
+}
+
+/// The screen rectangle spanned by the corners of a solid's box once its
+/// reference has placed them, as `[min x, min y, max x, max y]`. `None` when
+/// a corner is on or behind the eye plane, or the box comes near it.
+///
+/// In front of the eye a projection keeps a box convex, so every vertex in
+/// the box lands inside what its corners span.
+fn bounds_screen_span(
+    local: &[glam::DVec3; 2],
+    transform: Option<document::types::Transform>,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<[f32; 4]> {
+    let mut span = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    let (mut near, mut far) = (f32::INFINITY, f32::NEG_INFINITY);
+    for corner in 0..8usize {
+        let of = |axis: usize| local[(corner >> axis) & 1];
+        let point = glam::DVec3::new(of(0).x, of(1).y, of(2).z);
+        // Placed as `project_mesh_verts` places a vertex.
+        let point = transform.map_or(point, |transform| {
+            let point = transform.apply(document::types::Vector3::new(point.x, point.y, point.z));
+            glam::DVec3::new(point.x, point.y, point.z)
+        });
+        let (screen, depth) = projection::project_screen_w(view_rot, eye, bounds, point)?;
+        span[0] = span[0].min(screen.x);
+        span[1] = span[1].min(screen.y);
+        span[2] = span[2].max(screen.x);
+        span[3] = span[3].max(screen.y);
+        near = near.min(depth);
+        far = far.max(depth);
+    }
+    (near > far * BOUNDS_NEAR_EYE_SHARE).then_some(span)
+}
+
+fn bounds_clearance(compared: &[f32]) -> f32 {
+    let reach = compared.iter().fold(0.0f32, |reach, value| reach.max(value.abs()));
+    BOUNDS_CLEARANCE_PX + reach * BOUNDS_CLEARANCE_SHARE
+}
+
+/// What a selection box does with a solid, told from the box around the
+/// solid's vertices and not from the vertices: `Some(true)` when the solid
+/// lies inside the selection box, `Some(false)` when it lies outside it, and
+/// `None` when it reaches an edge of the box or cannot be placed, so that its
+/// vertices have to be looked at. The answer is the same for a window and for
+/// a crossing box: inside, every vertex is; outside, none is, and no corner of
+/// the box can be inside the solid.
+pub(crate) fn box_hit_from_bounds(
+    a: Point,
+    b: Point,
+    local: &[glam::DVec3; 2],
+    transform: Option<document::types::Transform>,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<bool> {
+    #[cfg(test)]
+    if EVERY_VERTEX.with(std::cell::Cell::get) {
+        return None;
+    }
+    let span = bounds_screen_span(local, transform, view_rot, eye, bounds)?;
+    let (min_x, max_x) = (a.x.min(b.x), a.x.max(b.x));
+    let (min_y, max_y) = (a.y.min(b.y), a.y.max(b.y));
+    let clear = bounds_clearance(&[span[0], span[1], span[2], span[3], min_x, max_x, min_y, max_y]);
+    if span[0] >= min_x + clear
+        && span[2] <= max_x - clear
+        && span[1] >= min_y + clear
+        && span[3] <= max_y - clear
+    {
+        return Some(true);
+    }
+    if span[2] < min_x - clear
+        || span[0] > max_x + clear
+        || span[3] < min_y - clear
+        || span[1] > max_y + clear
+    {
+        return Some(false);
+    }
+    None
+}
+
+/// Whether a lasso misses a solid, told from the box around the solid's
+/// vertices: what the box spans on the screen lies clear of the rectangle
+/// around the lasso, so no vertex is inside the lasso and no point of the
+/// lasso inside the solid. `false` when that cannot be told.
+pub(crate) fn poly_misses_bounds(
+    poly: &[Point],
+    local: &[glam::DVec3; 2],
+    transform: Option<document::types::Transform>,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> bool {
+    #[cfg(test)]
+    if EVERY_VERTEX.with(std::cell::Cell::get) {
+        return false;
+    }
+    if poly.len() < 3
+        || poly
+            .iter()
+            .any(|point| !point.x.is_finite() || !point.y.is_finite())
+    {
+        return false;
+    }
+    let Some(span) = bounds_screen_span(local, transform, view_rot, eye, bounds) else {
+        return false;
+    };
+    let mut around = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for point in poly {
+        around[0] = around[0].min(point.x);
+        around[1] = around[1].min(point.y);
+        around[2] = around[2].max(point.x);
+        around[3] = around[3].max(point.y);
+    }
+    let clear = bounds_clearance(&[
+        span[0], span[1], span[2], span[3], around[0], around[1], around[2], around[3],
+    ]);
+    span[2] < around[0] - clear
+        || span[0] > around[2] + clear
+        || span[3] < around[1] - clear
+        || span[1] > around[3] + clear
+}
+
 /// Project a mesh's vertices to screen space. `None` for a vertex the eye-plane
 /// guard rejects: its raw projection would be a mirrored pixel that the box or
 /// lasso must not reach (#64).
@@ -1255,6 +1425,8 @@ fn project_mesh_verts(
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> Vec<Option<Point>> {
+    #[cfg(test)]
+    MESH_VERTS_PROJECTED.with(|count| count.set(count.get() + mesh.verts.len()));
     mesh.verts
         .iter()
         .enumerate()
@@ -1867,6 +2039,59 @@ fn indexed_polygon_crossing_hits<'a, W: WireSource + ?Sized>(
     out
 }
 
+fn large_wire_screen_bounds(
+    wire: &WireModel,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<[f32; 4]> {
+    let aabb = wire.aabb;
+    let flat_ortho = view_rot.z_axis.x.abs() < 1e-9
+        && view_rot.z_axis.y.abs() < 1e-9
+        && view_rot.x_axis.w.abs() < 1e-9
+        && view_rot.y_axis.w.abs() < 1e-9
+        && view_rot.z_axis.w.abs() < 1e-9
+        && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
+    if !flat_ortho || wire.points.len() < 256 || wire.point_marker.is_some()
+        || wire.world_width != 0.0 || !wire.taper_widths.is_empty()
+        || !wire.text_verts.is_empty() || !wire.fill_tris.is_empty()
+        || !wire.pick_tris.is_empty() || aabb == WireModel::UNBOUNDED_AABB
+        || !aabb.iter().all(|v| v.is_finite())
+    {
+        return None;
+    }
+    let pad = aabb.iter().fold(1.0_f64, |m, v| m.max((*v as f64).abs()))
+        * f32::EPSILON as f64 * 2.0;
+    let corners = [
+        (aabb[0] as f64 - pad, aabb[1] as f64 - pad),
+        (aabb[2] as f64 + pad, aabb[1] as f64 - pad),
+        (aabb[2] as f64 + pad, aabb[3] as f64 + pad),
+        (aabb[0] as f64 - pad, aabb[3] as f64 + pad),
+    ];
+    let mut projected = [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+    for (x, y) in corners {
+        let p = projection::project_screen(view_rot, eye, bounds, glam::DVec3::new(x, y, eye.z))?;
+        projected[0] = projected[0].min(p.x);
+        projected[1] = projected[1].min(p.y);
+        projected[2] = projected[2].max(p.x);
+        projected[3] = projected[3].max(p.y);
+    }
+    Some(projected)
+}
+
+fn large_wire_inside_box(
+    wire: &WireModel,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    rect: [f32; 4],
+) -> bool {
+    large_wire_screen_bounds(wire, view_rot, eye, bounds).is_some_and(|b| {
+        b[0] > rect[0] + 1.0 && b[1] > rect[1] + 1.0
+            && b[2] < rect[2] - 1.0 && b[3] < rect[3] - 1.0
+    })
+}
+
 /// Return the names of wires selected by a completed rectangular selection box.
 ///
 /// - **Window mode** (`crossing = false`, left→right drag):
@@ -1915,7 +2140,18 @@ pub fn box_hit<W: WireSource + ?Sized>(
         let mut out = Vec::new();
         let mut seen = HashSet::default();
         for wire in wires.iter() {
-            if wire.snap_only || wire.reference_only {
+            if wire.snap_only || wire.reference_only || seen.contains(wire.name.as_str()) {
+                continue;
+            }
+            if large_wire_inside_box(wire, view_rot, eye, bounds, [min_x, min_y, max_x, max_y]) {
+                seen.insert(wire.name.as_str());
+                out.push(wire.name.as_str());
+                continue;
+            }
+            if large_wire_screen_bounds(wire, view_rot, eye, bounds).is_some_and(|b| {
+                b[2] < min_x - 1.0 || b[0] > max_x + 1.0
+                    || b[3] < min_y - 1.0 || b[1] > max_y + 1.0
+            }) {
                 continue;
             }
             // Fallback: when wire has no line geometry (e.g. greek text emits
@@ -1925,9 +2161,9 @@ pub fn box_hit<W: WireSource + ?Sized>(
             let empty_pts: [[f32; 3]; 0] = [];
             let pts: &[[f32; 3]] = if !wire.points.is_empty() {
                 &wire.points
-            } else if !wire.text_verts.is_empty() {
+            } else if !wire.text_verts.is_empty() || !wire.fill_tris.is_empty() || !wire.pick_tris.is_empty() {
                 &empty_pts
-            } else if wire.aabb != WireModel::UNBOUNDED_AABB {
+            } else if !wires.box_wires_only() && wire.aabb != WireModel::UNBOUNDED_AABB {
                 let [ax, ay, bx, by] = wire.aabb;
                 aabb_pts = vec![
                     [ax, ay, 0.0],
@@ -1977,7 +2213,16 @@ pub fn box_hit<W: WireSource + ?Sized>(
                     }
                 }
                 prev = Some(sp);
+                if hit {
+                    break;
+                }
             }
+
+            let triangle_hit = !hit && [(wire.fill_tris.len(), false), (wire.pick_tris.len(), true)]
+                .into_iter().any(|(len, pick_only)| (0..len).step_by(3).any(|start| {
+                    projected_wire_triangle(wire, start, pick_only, view_rot, eye, bounds)
+                        .is_some_and(|triangle| triangle_crosses_box(triangle, box_corners))
+                }));
 
             let mut glyph_crosses = false;
             for start in (0..wire.text_verts.len()).step_by(6) {
@@ -1995,7 +2240,7 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 }
             }
 
-            if (hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
+            if (hit || triangle_hit || glyph_crosses) && seen.insert(wire.name.as_str()) {
                 out.push(wire.name.as_str());
             }
         }
@@ -2011,6 +2256,13 @@ pub fn box_hit<W: WireSource + ?Sized>(
             }
             let name = wire.name.as_str();
             if disqualified.contains(name) {
+                continue;
+            }
+
+            if large_wire_inside_box(wire, view_rot, eye, bounds, [min_x, min_y, max_x, max_y]) {
+                if seen.insert(name) {
+                    qualified.push(name);
+                }
                 continue;
             }
 

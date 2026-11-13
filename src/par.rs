@@ -48,6 +48,17 @@ pub mod prelude {
         }
     }
 
+    /// `.par_chunks(n)` → sequential `chunks(n)`.
+    pub trait ParChunksShim<T> {
+        fn par_chunks(&self, size: usize) -> core::slice::Chunks<'_, T>;
+    }
+
+    impl<T> ParChunksShim<T> for [T] {
+        fn par_chunks(&self, size: usize) -> core::slice::Chunks<'_, T> {
+            self.chunks(size)
+        }
+    }
+
     /// `.into_par_iter()` → sequential `into_iter()`.
     pub trait IntoParShim {
         type IntoIter;

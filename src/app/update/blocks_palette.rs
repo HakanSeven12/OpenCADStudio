@@ -1071,7 +1071,10 @@ fn read_thumbnails(
     let read = |paths: &[PathBuf]| -> Vec<_> {
         paths
             .iter()
-            .map(|p| (p.clone(), crate::io::thumbnail::read_handle(p)))
+            .map(|p| {
+                let thumb = crate::io::thumbnail::read_handle(p).or_else(|| drawn_thumbnail(p));
+                (p.clone(), thumb)
+            })
             .collect()
     };
     #[cfg(not(target_arch = "wasm32"))]
@@ -1091,4 +1094,28 @@ fn read_thumbnails(
         let all: Vec<_> = paths.chunks(BATCH).map(read).collect();
         iced::futures::stream::iter(all)
     }
+}
+
+/// A drawing without an embedded preview (a DXF, or a DWG saved without one)
+/// shown by its model-space geometry, drawn the way block previews are.
+fn drawn_thumbnail(path: &Path) -> Option<iced::widget::image::Handle> {
+    const SIZE: usize = 128;
+    let mut scene = crate::scene::Scene::new();
+    scene.document = crate::io::load_file(path).ok()?;
+    let bgra = crate::scene::wire_thumbnail_bgra(
+        &scene.block_preview_wires("*Model_Space"),
+        SIZE,
+    )?;
+    // Bottom-up BGRA rows to top-down RGBA.
+    let rgba: Vec<u8> = bgra
+        .chunks(SIZE)
+        .rev()
+        .flatten()
+        .flat_map(|&[b, g, r, a]| [r, g, b, a])
+        .collect();
+    Some(iced::widget::image::Handle::from_rgba(
+        SIZE as u32,
+        SIZE as u32,
+        rgba,
+    ))
 }

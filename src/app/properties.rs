@@ -4281,6 +4281,25 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.invalidate_property_targets_with_driven(i, handles, &[]);
     }
 
+    /// Invalidate property targets incrementally when all handles are in top-level
+    /// spaces, falling back to `bump_geometry()` if any handle belongs to a block
+    /// definition (whose assembled cache and references must rebuild).
+    pub(super) fn invalidate_property_targets_or_blocks(&mut self, i: usize, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .copied()
+            .map(|h| (h, crate::scene::ChangeKind::Modified))
+            .collect();
+        if self.tabs[i].scene.changes_touch_block_definition(&changes) {
+            self.tabs[i].scene.bump_geometry();
+        } else {
+            self.invalidate_property_targets(i, handles);
+        }
+    }
+
     pub(super) fn invalidate_property_targets_with_driven(
         &mut self,
         i: usize,
@@ -5124,32 +5143,16 @@ fn intersect_into(
     acc: &mut Vec<crate::scene::model::object::PropSection>,
     right: &[crate::scene::model::object::PropSection],
 ) {
-    use rustc_hash::FxHashMap;
-
-    // First match wins, exactly like `right.iter().find(...)`.
-    let mut right_sections: FxHashMap<&str, usize> = FxHashMap::default();
-    let mut right_fields: Vec<FxHashMap<&'static str, usize>> = Vec::with_capacity(right.len());
-    for (section_index, section) in right.iter().enumerate() {
-        let mut fields = FxHashMap::default();
-        for (prop_index, prop) in section.props.iter().enumerate() {
-            fields.entry(prop.field).or_insert(prop_index);
-        }
-        right_fields.push(fields);
-        right_sections
-            .entry(section.title.as_str())
-            .or_insert(section_index);
-    }
-
+    // Property sections are small. Avoid allocating hash maps for every one
+    // of thousands of selected entities while retaining first-match behavior.
     acc.retain_mut(|section| {
-        let Some(&section_index) = right_sections.get(section.title.as_str()) else {
+        let Some(other_section) = right.iter().find(|other| other.title == section.title) else {
             return false;
         };
-        let fields = &right_fields[section_index];
         section.props.retain_mut(|prop| {
-            let Some(&prop_index) = fields.get(prop.field) else {
+            let Some(other) = other_section.props.iter().find(|other| other.field == prop.field) else {
                 return false;
             };
-            let other = &right[section_index].props[prop_index];
             if prop.value != other.value {
                 prop.value = merge_prop_value(&prop.value, &other.value);
             }

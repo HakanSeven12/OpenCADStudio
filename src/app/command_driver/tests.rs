@@ -3399,6 +3399,19 @@ mod dash_layer_properties_tests {
             .expect("WALLS layer")
     }
 
+    /// A quoted name or description keeps its spaces, as in AutoCAD.
+    #[test]
+    fn dash_layer_takes_quoted_names_with_spaces() {
+        let mut app = app_with_layer();
+        let _ = app.run_command_line(r#"-LAYER NEW "Power Cables""#);
+        let _ = app.run_command_line(r#"-LAYER D "outer walls" WALLS"#);
+        let _ = app.run_command_line(r#"-LAYER R WALLS "Main Walls""#);
+        let layers = &app.tabs[app.active_tab].scene.document.layers;
+        assert!(layers.get("Power Cables").is_some());
+        assert!(layers.get("WALLS").is_none());
+        assert_eq!(layers.get("Main Walls").expect("renamed").description, "outer walls");
+    }
+
     #[test]
     fn dash_layer_sets_transparency_and_description() {
         let mut app = app_with_layer();

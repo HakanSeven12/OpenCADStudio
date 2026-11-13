@@ -139,7 +139,28 @@ pub fn update_fields(
         return (Vec::new(), 0);
     }
     let snapshot = document.clone();
-    document.update_fields(&OcsFieldContext(Some(&snapshot)), event, hosts)
+    let context = OcsFieldContext(Some(&snapshot));
+    if let (32, Some(hosts)) = (event, hosts) {
+        let (mut tables, text_hosts): (Vec<_>, Vec<_>) =
+            hosts.iter().copied().partition(|handle| {
+                matches!(
+                    snapshot.get_entity(*handle),
+                    Some(document::EntityType::Table(_))
+                )
+            });
+        tables.sort_unstable();
+        tables.dedup();
+        let (mut changed, mut found) = document.update_fields(&context, event, Some(&text_hosts));
+        for table in tables {
+            let (updated, count) = document.update_table_cell_fields(&context, table);
+            found += count;
+            if updated {
+                changed.push(table);
+            }
+        }
+        return (changed, found);
+    }
+    document.update_fields(&context, event, hosts)
 }
 
 /// Recompute a table's cell formulas into its block after the table changed;
@@ -506,7 +527,13 @@ pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1
 
 /// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.
 pub fn hosts_field(document: &Document, entity: &document::entities::EntityType) -> bool {
-    common_hosts_field(document, entity.common())
+    matches!(entity, document::EntityType::Table(table) if table
+        .rows
+        .iter()
+        .flat_map(|row| &row.cells)
+        .flat_map(|cell| &cell.contents)
+        .any(|item| item.field_handle.is_some()))
+        || common_hosts_field(document, entity.common())
 }
 
 /// [`hosts_field`] for an entity known only by its common data, such as an

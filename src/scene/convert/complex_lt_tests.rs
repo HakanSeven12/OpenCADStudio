@@ -70,20 +70,22 @@ fn wires_at(document: &Document, handle: Handle, anno: f32, paper_space: bool) -
 
 /// The dashes, as absolute XY points.
 fn strokes(wires: &[WireModel]) -> Vec<Vec<[f64; 2]>> {
-    wires
-        .iter()
-        .filter(|wire| wire.points.len() >= 2)
-        .map(|wire| {
-            wire.points
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
-                    [p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]
-                })
-                .collect()
-        })
-        .collect()
+    // Hairline strokes share a wire, a NaN point between each two.
+    let mut out = Vec::new();
+    for wire in wires {
+        let mut stroke: Vec<[f64; 2]> = Vec::new();
+        for (i, p) in wire.points.iter().enumerate() {
+            if p[0].is_nan() {
+                out.push(std::mem::take(&mut stroke));
+                continue;
+            }
+            let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            stroke.push([p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]);
+        }
+        out.push(stroke);
+    }
+    out.retain(|stroke| stroke.len() >= 2);
+    out
 }
 
 /// The centre of each "X", from the glyph quads (glyphs sit at least a dash
@@ -1561,4 +1563,46 @@ fn a_tapered_polyline_in_a_block_scales_its_widths() {
         })
         .fold(0.0f32, f32::max);
     assert!(widest > 11.0 && widest <= 12.0 + 1e-3, "widest {widest}");
+}
+
+#[test]
+fn complex_linetype_too_dense_to_see_is_drawn_solid() {
+    // A 1.52 period at annotation factor 0.001 is ~65 000 repeats over 100
+    // units: each would be wire geometry, and none is visible. The curve is
+    // one continuous stroke instead.
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let got = wires_at(&document, handle, 0.001, false);
+    assert!(got.len() <= 2, "{} wires", got.len());
+    assert!(got.iter().all(|wire| wire.text_verts.is_empty()));
+    let solid = strokes(&got);
+    assert_eq!(solid.len(), 1, "{solid:?}");
+    assert_near(
+        &[solid[0][0], *solid[0].last().unwrap()],
+        &[[0.0, 0.0], [100.0, 0.0]],
+        1e-3,
+    );
+}
+
+#[test]
+fn complex_linetype_with_thousands_of_repeats_is_still_patterned() {
+    // 5 000 units of a 1.52 period: ~3 300 repeats, well under the cap.
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(5000.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let got = wires(&document, handle);
+    assert!(glyph_centres(&got).len() > 3000, "{} wires", got.len());
+}
+
+#[test]
+fn complex_linetype_polyline_of_short_dense_runs_is_drawn_solid() {
+    // Each of the 40 straight runs is ~4 000 repeats, under the per-run cap,
+    // but the polyline as a whole is ~158 000: the entity's total counts.
+    let mut document = fence_document();
+    let vertices: Vec<(f64, f64, f64)> = (0..=40).map(|i| (i as f64 * 6.0, 0.0, 0.0)).collect();
+    let handle = add(&mut document, polyline(&vertices, false));
+    let got = wires_at(&document, handle, 0.001, false);
+    assert!(got.len() <= 2, "{} wires", got.len());
+    assert!(got.iter().all(|wire| wire.text_verts.is_empty()));
 }

@@ -9392,6 +9392,7 @@ fn preview_wire(points: Vec<[f32; 3]>, color: [f32; 4], name: &str) -> WireModel
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
+        solid_normal: None,
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),

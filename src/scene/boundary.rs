@@ -1729,32 +1729,10 @@ impl Scene {
             })
         };
         sources.retain(|handle, _| shown(handle));
-        if self.active_viewport.is_some() {
+        let Some(corners) = self.view_corners_on_plane(plane) else {
             return;
-        }
-        let (width, height) = self.selection.borrow().view.vp_size;
-        if !(width > 1.0 && height > 1.0) {
-            return;
-        }
-        let bounds = iced::Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
         };
-        let camera = self.camera.borrow();
-        let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)].map(|(x, y)| {
-            let world = camera.unproject_on_plane(
-                iced::Point::new(x, y),
-                bounds,
-                plane.z.as_vec3(),
-                plane.origin,
-            );
-            plane.to_local(world)
-        });
-        if !corners.iter().all(|corner| corner.is_finite()) {
-            return;
-        }
+        let corners = corners.map(|corner| plane.to_local(corner));
         let (min_x, max_x) = corners
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
@@ -1774,6 +1752,57 @@ impl Scene {
         sources.retain(|_, source| source.segments.iter().any(on_screen));
     }
 
+    /// The world points where the view's corners meet `plane`, for a view
+    /// drawn straight in the window (not through a layout viewport). `None`
+    /// when the view has no size yet or a corner misses the plane.
+    fn view_corners_on_plane(&self, plane: WorkingPlane) -> Option<[glam::DVec3; 4]> {
+        if self.active_viewport.is_some() {
+            return None;
+        }
+        let (width, height) = self.selection.borrow().view.vp_size;
+        if !(width > 1.0 && height > 1.0) {
+            return None;
+        }
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        };
+        let camera = self.camera.borrow();
+        let corners = [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)].map(|(x, y)| {
+            camera.unproject_on_plane(
+                iced::Point::new(x, y),
+                bounds,
+                plane.z.as_vec3(),
+                plane.origin,
+            )
+        });
+        corners.iter().all(|corner| corner.is_finite()).then_some(corners)
+    }
+
+    /// `boundary_sources_on_plane` for what the view shows, as HATCH,
+    /// GRADIENT and BOUNDARY pick among. Objects whose box misses the view
+    /// are left out before their geometry is clipped and their curves
+    /// rebuilt, so the cost follows the view rather than the drawing (#2756).
+    pub fn boundary_sources_on_screen(
+        &self,
+        plane: WorkingPlane,
+        tolerance: f64,
+    ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
+        // The view's region on the plane is the quad of its corners; its
+        // world XY box holds every point of the plane that is on screen.
+        let near = self.view_corners_on_plane(plane).map(|corners| {
+            corners.iter().fold(
+                [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY],
+                |[x0, y0, x1, y1], c| [x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y)],
+            )
+        });
+        let mut sources = self.boundary_sources_near(plane, tolerance, near);
+        self.retain_sources_on_screen(&mut sources, plane);
+        sources
+    }
+
     /// Boundary candidates in the active working plane, with exact curves
     /// where the source entity exposes them.
     pub fn boundary_sources_on_plane(
@@ -1781,7 +1810,19 @@ impl Scene {
         plane: WorkingPlane,
         tolerance: f64,
     ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
-        let wires = if let Some(viewport) = self.active_viewport {
+        self.boundary_sources_near(plane, tolerance, None)
+    }
+
+    /// Boundary candidates whose world XY box meets `near` (all of them for
+    /// `None`).
+    fn boundary_sources_near(
+        &self,
+        plane: WorkingPlane,
+        tolerance: f64,
+        near: Option<[f64; 4]>,
+    ) -> rustc_hash::FxHashMap<Handle, BoundarySource> {
+        use crate::scene::model::instance_model::{expand_stub_near_into, expand_stubs};
+        let all = if let Some(viewport) = self.active_viewport {
             self.model_wires_for_viewport_arc(viewport, 0.0)
         } else if self.current_layout == "Model" {
             let camera = self.camera.borrow().clone();
@@ -1789,7 +1830,31 @@ impl Scene {
         } else {
             self.paper_sheet_wires_arc()
         };
-        let wires = crate::scene::model::instance_model::expand_stubs(&wires);
+        let expanded;
+        let wires: Vec<&WireModel> = match near {
+            None => {
+                expanded = expand_stubs(&all);
+                expanded.iter().collect()
+            }
+            Some(near) => {
+                let meets = |aabb: [f32; 4]| {
+                    !aabb.iter().all(|v| v.is_finite())
+                        || (aabb[0] as f64 <= near[2]
+                            && aabb[2] as f64 >= near[0]
+                            && aabb[1] as f64 <= near[3]
+                            && aabb[3] as f64 >= near[1])
+                };
+                let mut copies = Vec::new();
+                for wire in all.iter().filter(|wire| wire.stub.is_some()) {
+                    expand_stub_near_into(wire, Some(near), &mut copies);
+                }
+                expanded = std::borrow::Cow::Owned(copies);
+                all.iter()
+                    .filter(|wire| wire.stub.is_none() && meets(wire.aabb))
+                    .chain(expanded.iter())
+                    .collect()
+            }
+        };
         let wire_started = crate::perf::enabled().then(iced::time::Instant::now);
         // Clip in parallel, merge per handle in order. `filter_map` + `collect`
         // also exist on the sequential wasm32 shim; `fold`/`reduce` do not.
@@ -1823,7 +1888,9 @@ impl Scene {
         } else {
             self.current_layout_block_handle()
         };
-        for entity in self.document.entities() {
+        // A pick among what is on screen drops them again at once.
+        let hidden_layer_sources = near.is_none();
+        for entity in self.document.entities().filter(|_| hidden_layer_sources) {
             let common = entity.common();
             if common.owner_handle != space || sources.contains_key(&common.handle) {
                 continue;

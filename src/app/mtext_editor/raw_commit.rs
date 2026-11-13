@@ -23,7 +23,7 @@ editor_history! {
     height: String, height_dirty: bool, rotation: String, rotation_dirty: bool,
     style: String, font: String, width: String, object_style: super::raw_style::ObjectStyle,
     object_color: Option<document::types::Color>, color_aci: u16, oblique: String, char_space: String,
-    annotative: bool, attachment: AttachmentPoint, line_spacing: f64, rect_width: f64,
+    annotative: bool, attachment: AttachmentPoint, line_spacing: f64, rect_width: f64, rect_height: String,
     line_spacing_style: document::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
     mask_draft: Option<super::entity_options::MaskDraft>,
     direction: Option<document::entities::DrawingDirection>,
@@ -237,7 +237,7 @@ impl crate::app::OpenCADStudio {
             } else {
                 self.pending_command_editor_text = Some(ed.build_mtext().value);
                 self.command_mtext_input = false;
-                self.mtext_editor = None;
+                self.close_mtext_editor();
                 self.refresh_properties();
             }
             return true;
@@ -259,7 +259,7 @@ impl crate::app::OpenCADStudio {
                     "MTEXT: an existing entity cannot be emptied here; use the drawing's delete command.",
                 );
             } else if !keep_open {
-                self.mtext_editor = None;
+                self.close_mtext_editor();
                 self.refresh_properties();
             }
             return false;
@@ -452,8 +452,14 @@ impl crate::app::OpenCADStudio {
             ed.undo.clear();
             ed.redo.clear();
             self.rebuild_mtext_preview();
+            if matches!(self.tabs[i].scene.document.get_entity(handle), Some(EntityType::MText(_))) {
+                self.tabs[i].scene.set_mtext_editor_hidden(Some(handle));
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.hidden_source_tab = Some(self.tabs[i].id);
+                }
+            }
         } else {
-            self.mtext_editor = None;
+            self.close_mtext_editor();
         }
         self.refresh_properties();
         true

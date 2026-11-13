@@ -1380,8 +1380,7 @@ impl OpenCADStudio {
 
     fn finish_linetype_change(&mut self, i: usize, names: &[String]) {
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.invalidate_layer_dependencies(names);
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.invalidate_linetype_dependencies(names);
         self.sync_ribbon_layers();
         self.sync_ribbon_from_selection();
     }
@@ -1434,7 +1433,8 @@ impl OpenCADStudio {
             }
             "NEW" => self.create_layers(i, &arg(1)),
             "RENAME" => {
-                return self.dispatch_command(&format!("RENAME LAYER {} {}", arg(1), arg(2)))
+                // Direct call: a name with spaces must not be re-split as text.
+                self.rename_named_object(i, "LAYER", &arg(1), &arg(2));
             }
             "COLOR" => {
                 let names = self.listed_layers(i, &arg(2));

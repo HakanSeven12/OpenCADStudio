@@ -177,6 +177,22 @@ pub(crate) fn walk_complex_linetype(
             (rotated.as_slice(), true, rotated_band.as_deref())
         }
     };
+    // A polyline's runs are walked one by one, each under the per-run repeat
+    // cap, so the whole path is checked here: past the budget, draw it solid.
+    let total: f64 = path
+        .split(|p| p[0].is_nan())
+        .map(|run| {
+            run.windows(2)
+                .map(|w| {
+                    let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                })
+                .sum::<f64>()
+        })
+        .sum();
+    if text::complex_lt::exceeds_repeat_budget(linetype, scale, total) {
+        return None;
+    }
     let mut wires = Vec::new();
     let mut next_run = 0;
     for run in path.split(|p| p[0].is_nan()) {
@@ -324,32 +340,30 @@ fn block_object_style(
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
 ) -> BlockObjectStyle {
-    let entity = EntityType::Insert(insert.clone());
+    let common = &insert.common;
     let (color, pattern_length, pattern, line_weight_px, aci) =
-        view::render::render_style_for_viewport(document, &entity, active_viewport);
+        view::render::render_style_for_common_viewport(document, common, active_viewport);
     let (pattern_length, pattern) =
-        view::render::insert_pattern_for_children(&insert.common, pattern_length, pattern);
+        view::render::insert_pattern_for_children(common, pattern_length, pattern);
     let mut layer =
-        view::render::layer_render_style_viewport(document, &insert.common.layer, active_viewport);
+        view::render::layer_render_style_viewport(document, &common.layer, active_viewport);
+    let layer_record = document.layers.get(&common.layer);
+    let locked = layer_record.is_some_and(|l| l.is_locked());
     layer.color = view::render::adapt_to_bg(layer.color, bg_color);
-    if view::render::layer_locked(document, &entity) {
+    if locked {
         layer.color = crate::scene::cache::block_cache::fade_toward_bg(layer.color, bg_color);
     }
-    let layer_aci = document
-        .layers
-        .get(&insert.common.layer)
+    let layer_aci = layer_record
         .and_then(|layer| match &layer.color {
             document::types::Color::Index(index) => Some(*index),
             _ => None,
         })
         .unwrap_or(0);
-    let layer_plottable = document
-        .layers
-        .get(&insert.common.layer)
-        .map(|layer| layer.is_plottable)
-        .unwrap_or(true);
-    let color = view::render::adapt_to_bg(color, bg_color);
-    let color = fade_if_locked(document, &entity, color, bg_color);
+    let layer_plottable = layer_record.map(|layer| layer.is_plottable).unwrap_or(true);
+    let mut color = view::render::adapt_to_bg(color, bg_color);
+    if locked {
+        color = crate::scene::cache::block_cache::fade_toward_bg(color, bg_color);
+    }
     BlockObjectStyle {
         color,
         aci,
@@ -380,11 +394,12 @@ pub(crate) fn expand_block_object(
 ) -> ExpandedBlockObject {
     let style = block_object_style(document, insert, active_viewport, bg_color);
     let fallback_depths = rustc_hash::FxHashMap::default();
-    let fallback_cache;
-    let cache = match block_cache {
-        Some(cache) if cache.defn(&insert.block_name).is_some() => cache,
-        _ => {
-            fallback_cache = cache::block_cache::BlockCache::build_for_block(
+    let mut fallback_cache = None;
+    let resolved = block_cache.and_then(|cache| cache.defn(&insert.block_name).map(|d| (cache, d)));
+    let (cache, defn) = match resolved {
+        Some(pair) => pair,
+        None => {
+            let built = cache::block_cache::BlockCache::build_for_block(
                 document,
                 &insert.block_name,
                 anno_scale,
@@ -394,17 +409,22 @@ pub(crate) fn expand_block_object(
                 active_viewport,
                 &fallback_depths,
             );
-            &fallback_cache
+            let cache_ref = fallback_cache.insert(built);
+            let Some(defn) = cache_ref.defn(&insert.block_name) else {
+                return ExpandedBlockObject {
+                    wires: Vec::new(),
+                    style,
+                    is_xref: false,
+                };
+            };
+            (cache_ref as &cache::block_cache::BlockCache, defn)
         }
     };
-    let is_xref = document
-        .block_records
-        .get(&insert.block_name)
-        .map(|record| record.flags.is_xref || record.flags.is_xref_overlay)
-        .unwrap_or(false);
-    let mut wires = cache::block_cache::expand_insert(
+    let is_xref = defn.is_xref;
+    let mut wires = cache::block_cache::expand_insert_with_defn(
         document,
         cache,
+        defn,
         insert,
         owner,
         style.color,
@@ -1389,6 +1409,7 @@ fn tessellate_entity_inner(
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
+            solid_normal: None,
             render_instance: None,
             pick_tris,
             pick_tris_low,
@@ -1644,6 +1665,7 @@ fn tessellate_entity_inner(
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
+            solid_normal: None,
             render_instance: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -1899,7 +1921,18 @@ fn tessellate_entity_inner(
                 band.as_deref(),
             ) {
                 for wire in &mut wires {
-                    set_wire_aabb(wire, aabb);
+                    // Each hairline batch has its own extent. The box index
+                    // groups these under the entity for whole-object selection.
+                    let box_hint = if !wire.points.is_empty()
+                        && wire.world_width == 0.0
+                        && wire.taper_widths.is_empty()
+                        && wire.text_verts.is_empty()
+                    {
+                        WireModel::UNBOUNDED_AABB
+                    } else {
+                        aabb
+                    };
+                    set_wire_aabb(wire, box_hint);
                 }
                 // Dashes and gaps don't change where a wide band picks.
                 if let (Some(first), Some(picks)) = (
@@ -1908,6 +1941,8 @@ fn tessellate_entity_inner(
                 ) {
                     first.pick_tris = picks.pick_tris.clone();
                     first.pick_tris_low = picks.pick_tris_low.clone();
+                    let box_hint = first.aabb;
+                    set_wire_aabb(first, box_hint);
                 }
                 return wires;
             }
@@ -2082,6 +2117,7 @@ fn lod_stub_wire(
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
+        solid_normal: None,
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
@@ -2180,6 +2216,7 @@ fn lod_stub_wire_3d(
         plot_visible: true,
         fill_is_3d: false,
         fill_is_2d_solid: false,
+        solid_normal: None,
         render_instance: None,
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
@@ -2325,11 +2362,98 @@ pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
             return (bounds.min, bounds.max);
         }
     }
+    if let document::EntityType::Ellipse(ellipse) = e {
+        if let Some(bounds) = ellipse_bounds(ellipse) {
+            return bounds;
+        }
+    }
     let bounds = e.as_entity().bounding_box();
     (
         [bounds.min.x, bounds.min.y, bounds.min.z],
         [bounds.max.x, bounds.max.y, bounds.max.z],
     )
+}
+
+/// Tight WCS box of an ellipse or elliptical arc: the swept endpoints plus
+/// every axis-extreme parameter inside the sweep. The generic
+/// `bounding_box()` uses the major radius on both axes.
+fn ellipse_bounds(el: &document::entities::Ellipse) -> Option<([f64; 3], [f64; 3])> {
+    let (c, a, n) = (el.center, el.major_axis, el.normal);
+    let r = el.minor_axis_ratio;
+    // A stored normal need not be unit length; the minor axis must be.
+    let len = (n.x * n.x + n.y * n.y + n.z * n.z).sqrt();
+    if !(len > 0.0) {
+        return None;
+    }
+    let n = document::types::Vector3::new(n.x / len, n.y / len, n.z / len);
+    // Minor axis = normal x major, scaled by the ratio.
+    let b = [
+        (n.y * a.z - n.z * a.y) * r,
+        (n.z * a.x - n.x * a.z) * r,
+        (n.x * a.y - n.y * a.x) * r,
+    ];
+    let a = [a.x, a.y, a.z];
+    if !(a.iter().chain(b.iter()).all(|v| v.is_finite())) || a == [0.0; 3] {
+        return None;
+    }
+    let tau = std::f64::consts::TAU;
+    let start = el.start_parameter;
+    let mut sweep = (el.end_parameter - start).rem_euclid(tau);
+    if sweep <= 1e-12 {
+        sweep = tau;
+    }
+    let mut params = vec![start, start + sweep];
+    for k in 0..3 {
+        // d/dt (a cos t + b sin t) = 0  ->  t = atan2(b, a) (+ pi)
+        let t0 = b[k].atan2(a[k]);
+        for t in [t0, t0 + std::f64::consts::PI] {
+            let off = (t - start).rem_euclid(tau);
+            if off <= sweep {
+                params.push(start + off);
+            }
+        }
+    }
+    let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    let cc = [c.x, c.y, c.z];
+    for t in params {
+        let (ct, st) = (t.cos(), t.sin());
+        for k in 0..3 {
+            let v = cc[k] + a[k] * ct + b[k] * st;
+            min[k] = min[k].min(v);
+            max[k] = max[k].max(v);
+        }
+    }
+    Some((min, max))
+}
+
+#[cfg(test)]
+mod ellipse_bounds_tests {
+    use super::*;
+
+    fn ellipse(start: f64, end: f64) -> document::EntityType {
+        let mut el = document::entities::Ellipse::default();
+        el.center = document::types::Vector3::new(0.0, 0.0, 0.0);
+        el.major_axis = document::types::Vector3::new(10.0, 0.0, 0.0);
+        el.normal = document::types::Vector3::new(0.0, 0.0, 1.0);
+        el.minor_axis_ratio = 0.3;
+        el.start_parameter = start;
+        el.end_parameter = end;
+        document::EntityType::Ellipse(el)
+    }
+
+    #[test]
+    fn full_ellipse_uses_minor_axis() {
+        let (min, max) = entity_bounds(&ellipse(0.0, std::f64::consts::TAU));
+        assert!((min[0] + 10.0).abs() < 1e-9 && (max[0] - 10.0).abs() < 1e-9);
+        assert!((min[1] + 3.0).abs() < 1e-9 && (max[1] - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quarter_arc_covers_only_its_sweep() {
+        let (min, max) = entity_bounds(&ellipse(0.0, std::f64::consts::FRAC_PI_2));
+        assert!(min[0].abs() < 1e-9 && (max[0] - 10.0).abs() < 1e-9);
+        assert!(min[1].abs() < 1e-9 && (max[1] - 3.0).abs() < 1e-9);
+    }
 }
 
 /// [`entity_bounds`] with the document, for entities whose extent is not

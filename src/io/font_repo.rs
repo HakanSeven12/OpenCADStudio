@@ -191,6 +191,17 @@ pub fn local_font_file(name: &str) -> Option<PathBuf> {
         })
 }
 
+/// AutoCAD-style transmittal font folders visible to a drawing at `base`.
+/// Drawing-local `Fonts/` wins, followed by ancestor `Fonts/` folders up to the
+/// package root. This covers flat `xref/` and arbitrary preserved hierarchies;
+/// no ancestor's ordinary files are searched, only its `Fonts` directory.
+pub(crate) fn packaged_font_dirs(base: Option<&Path>) -> Vec<PathBuf> {
+    base.into_iter()
+        .flat_map(Path::ancestors)
+        .map(|dir| dir.join("Fonts"))
+        .collect()
+}
+
 /// How long a font file lookup is remembered.
 const FONT_PATH_MEMORY: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -451,5 +462,41 @@ mod tests {
         let missing = missing_shx_fonts(&doc);
         assert_eq!(missing, vec!["MISSING1.shx".to_string()]);
         let _ = std::fs::remove_file(dir.join("exists.shx"));
+    }
+
+    #[test]
+    fn transmittal_fonts_resolve_from_root_and_xref_drawings() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmittal-font-lookup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let fonts = dir.join("Fonts");
+        let xrefs = dir.join("xref/discipline");
+        std::fs::create_dir_all(&fonts).unwrap();
+        std::fs::create_dir_all(&xrefs).unwrap();
+        std::fs::write(fonts.join("Package-Custom.shx"), b"shape").unwrap();
+
+        let resolved = font_file_path("package-custom.SHX", Some(&dir)).unwrap();
+        let expected = fonts
+            .join("Package-Custom.shx")
+            .to_string_lossy()
+            .into_owned();
+        // Windows resolves the direct path with the query's casing, while the
+        // Linux fallback scan returns the directory entry's casing.
+        assert!(resolved.eq_ignore_ascii_case(&expected), "{resolved}");
+        assert_eq!(
+            font_file_path("Package-Custom.shx", Some(&xrefs)),
+            Some(
+                fonts
+                    .join("Package-Custom.shx")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

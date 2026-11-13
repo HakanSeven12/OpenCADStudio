@@ -323,6 +323,10 @@ pub struct Pipeline {
     clip_boundary: Option<(wgpu::Buffer, u32)>,
     /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
     gpu_selected_wires: Vec<WireGpu>,
+    /// Reusable GPU overlays for dense entities during changing box previews.
+    highlight_wire_cache: rustc_hash::FxHashMap<(u64, [u32; 4]), Vec<WireGpu>>,
+    highlight_wire_cache_key: Option<(u64, u64)>,
+    highlight_wire_cache_bytes: usize,
     gpu_selected_circles: Vec<CircleGpu>,
     gpu_selected_ellipses: Vec<EllipseGpu>,
     gpu_selected_block_wires: Vec<BlockWireGpu>,
@@ -2509,6 +2513,9 @@ impl Pipeline {
             silhouette_key: (usize::MAX, u64::MAX, [u32::MAX; 3], false),
             clip_boundary: None,
             gpu_selected_wires: vec![],
+            highlight_wire_cache: rustc_hash::FxHashMap::default(),
+            highlight_wire_cache_key: None,
+            highlight_wire_cache_bytes: 0,
             gpu_selected_circles: vec![],
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
@@ -3069,6 +3076,95 @@ impl Pipeline {
         (circles, ellipses, regular, blocks)
     }
 
+    pub(crate) fn prepare_highlight_wire_cache(&mut self, wire_id: u64, depth_generation: u64) {
+        let key = (wire_id, depth_generation);
+        if self.highlight_wire_cache_key != Some(key) {
+            self.highlight_wire_cache.clear();
+            self.highlight_wire_cache_bytes = 0;
+            self.highlight_wire_cache_key = Some(key);
+        }
+    }
+
+    fn highlight_regular_wires(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[&WireModel],
+        color: [f32; 4],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        annotation_context_wires: &[WireModel],
+    ) -> Vec<WireGpu> {
+        const MIN_POINTS: usize = 8192;
+        const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
+        if self.highlight_wire_cache_key.is_none() {
+            return WireGpu::from_highlight_refs(device, queue, wires, color, depth_map, self.wire_const_bgl.as_ref());
+        }
+
+        // Annotation outlines are transient and can share an entity handle
+        // with resident wires. Never include them in a resident cache entry.
+        let transient: rustc_hash::FxHashSet<usize> = annotation_context_wires
+            .iter().map(|wire| wire as *const WireModel as usize).collect();
+        let mut counts = rustc_hash::FxHashMap::<u64, usize>::default();
+        let mut wire_counts = rustc_hash::FxHashMap::<document::Handle, usize>::default();
+        let mut ineligible = rustc_hash::FxHashSet::default();
+        for wire in wires {
+            if transient.contains(&(*wire as *const WireModel as usize)) { continue; }
+            if let Some(handle) = wire_gpu::fast_parse_u64(&wire.name) {
+                *counts.entry(handle).or_default() += wire.points.len();
+                let handle = document::Handle::new(handle);
+                *wire_counts.entry(handle).or_default() += 1;
+                if wire_arena::classify_wire(wire) != wire_arena::WireKind::Regular {
+                    ineligible.insert(handle);
+                }
+            }
+        }
+        wire_counts.retain(|handle, _| !ineligible.contains(handle)
+            && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS);
+        let (mut output, reused) = match (&self.wire_arena, &self.wire_const_bgl, self.highlight_wire_cache_key) {
+            (Some(arena), Some(bgl), Some((wire_id, depth_generation)))
+                if self.wire_arena_id == wire_id && self.wire_arena_depth_generation == depth_generation =>
+                    arena.highlight_dense(device, queue, bgl, &wire_counts, color),
+            _ => (Vec::new(), rustc_hash::FxHashSet::default()),
+        };
+        let mut groups = rustc_hash::FxHashMap::<u64, Vec<&WireModel>>::default();
+        let mut small = Vec::new();
+        for &wire in wires {
+            if transient.contains(&(wire as *const WireModel as usize)) {
+                small.push(wire);
+                continue;
+            }
+            match wire_gpu::fast_parse_u64(&wire.name) {
+                Some(handle) if reused.contains(&document::Handle::new(handle)) => {},
+                Some(handle) if counts.get(&handle).copied().unwrap_or(0) >= MIN_POINTS => {
+                    groups.entry(handle).or_default().push(wire);
+                }
+                _ => small.push(wire),
+            }
+        }
+        output.extend(WireGpu::from_highlight_refs(
+            device, queue, &small, color, depth_map, self.wire_const_bgl.as_ref(),
+        ));
+        for (handle, group) in groups {
+            let key = (handle, color.map(f32::to_bits));
+            if let Some(cached) = self.highlight_wire_cache.get(&key) {
+                output.extend(cached.iter().cloned());
+                continue;
+            }
+            let gpu = WireGpu::from_highlight_refs(
+                device, queue, &group, color, depth_map, self.wire_const_bgl.as_ref(),
+            );
+            let bytes = gpu.iter().fold(0usize, |total, wire| {
+                total.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
+            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            if bytes <= MAX_CACHE_BYTES.saturating_sub(self.highlight_wire_cache_bytes) {
+                self.highlight_wire_cache_bytes += bytes;
+                self.highlight_wire_cache.insert(key, gpu.clone());
+            }
+            output.extend(gpu);
+        }
+        output
+    }
+
     pub fn upload_selected_wires(
         &mut self,
         device: &wgpu::Device,
@@ -3169,24 +3265,12 @@ impl Pipeline {
         };
         let t_split = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let mut gpu = if let Some(tint) = selected_tint {
-            WireGpu::from_highlight_refs(
-                device,
-                queue,
-                &selected_regular,
-                tint,
-                depth_map,
-                self.wire_const_bgl.as_ref(),
-            )
+            self.highlight_regular_wires(device, queue, &selected_regular, tint, depth_map, annotation_context_wires)
         } else {
             Vec::new()
         };
-        gpu.extend(WireGpu::from_highlight_refs(
-            device,
-            queue,
-            &hover_regular,
-            WireModel::HOVER,
-            depth_map,
-            self.wire_const_bgl.as_ref(),
+        gpu.extend(self.highlight_regular_wires(
+            device, queue, &hover_regular, WireModel::HOVER, depth_map, annotation_context_wires,
         ));
         let t_regular = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         self.gpu_selected_wires = gpu;
@@ -4083,12 +4167,28 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .filter_map(|value| value.parse::<u64>().ok())
             .map(document::Handle::new)
             .collect();
+        self.mesh_highlight_draws = Self::mesh_highlight_draws(
+            &self.mesh_ranges_by_handle,
+            selected,
+            hovered,
+            &edge_handles,
+        );
+    }
+
+    /// The highlight draws for the picked and the hovered solids: the resident
+    /// ranges of each, leaving out the ones highlighted by their edges.
+    fn mesh_highlight_draws(
+        ranges_by_handle: &rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>>,
+        selected: &rustc_hash::FxHashSet<document::Handle>,
+        hovered: &rustc_hash::FxHashSet<document::Handle>,
+        edge_handles: &rustc_hash::FxHashSet<document::Handle>,
+    ) -> Vec<MeshHighlightDraw> {
         let mut out = Vec::new();
         for handle in selected
             .iter()
             .filter(|handle| !edge_handles.contains(handle))
         {
-            if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
+            if let Some(ranges) = ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
                     kind: MeshHighlightKind::Selected,
@@ -4099,14 +4199,75 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             .iter()
             .filter(|handle| !selected.contains(handle) && !edge_handles.contains(handle))
         {
-            if let Some(ranges) = self.mesh_ranges_by_handle.get(handle) {
+            if let Some(ranges) = ranges_by_handle.get(handle) {
                 out.extend(ranges.iter().copied().map(|range| MeshHighlightDraw {
                     range,
                     kind: MeshHighlightKind::Hover,
                 }));
             }
         }
-        self.mesh_highlight_draws = out;
+        Self::joined_highlight_draws(out)
+    }
+
+    /// Highlight draws that read the same buffers and follow one another, as
+    /// one draw.
+    ///
+    /// Each reference of a block is a range of one instance and each solid a
+    /// range of its own triangles, so with thousands of them picked the
+    /// highlight was a draw call apiece on every frame, over solids that are
+    /// drawn in a handful. What is drawn stays the same: the same triangles
+    /// for the same instances, as often as they were listed.
+    fn joined_highlight_draws(mut draws: Vec<MeshHighlightDraw>) -> Vec<MeshHighlightDraw> {
+        draws.sort_unstable_by_key(|draw| {
+            let range = &draw.range;
+            (
+                draw.kind == MeshHighlightKind::Hover,
+                range.dynamic,
+                range.chunk,
+                range.transparent,
+                range.index_start,
+                range.index_count,
+                range.instance_start,
+                range.instance_count,
+            )
+        });
+        let mut joined: Vec<MeshHighlightDraw> = Vec::with_capacity(draws.len());
+        for draw in draws {
+            let next = draw.range;
+            let last = joined.last_mut().filter(|last| {
+                last.kind == draw.kind
+                    && last.range.dynamic == next.dynamic
+                    && last.range.chunk == next.chunk
+                    && last.range.transparent == next.transparent
+            });
+            if let Some(last) = last {
+                let range = &mut last.range;
+                // The same triangles, for the instances that follow.
+                if range.index_start == next.index_start
+                    && range.index_count == next.index_count
+                    && range.instance_start.checked_add(range.instance_count)
+                        == Some(next.instance_start)
+                {
+                    if let Some(count) = range.instance_count.checked_add(next.instance_count) {
+                        range.instance_count = count;
+                        continue;
+                    }
+                }
+                // The triangles that follow, for the same instances.
+                if range.instance_start == next.instance_start
+                    && range.instance_count == next.instance_count
+                    && range.index_count % 3 == 0
+                    && range.index_start.checked_add(range.index_count) == Some(next.index_start)
+                {
+                    if let Some(count) = range.index_count.checked_add(next.index_count) {
+                        range.index_count = count;
+                        continue;
+                    }
+                }
+            }
+            joined.push(draw);
+        }
+        joined
     }
 
     fn active_mesh_chunks_indexed(
@@ -6614,6 +6775,311 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             mesh_batch_cache: Default::default(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod mesh_highlight_draw_tests {
+    use super::*;
+
+    type Handles = rustc_hash::FxHashSet<document::Handle>;
+
+    /// Triangle indices of the block's solid.
+    const INDICES: u32 = 36;
+
+    fn handle(index: u32) -> document::Handle {
+        document::Handle::new(0x100 + u64::from(index))
+    }
+
+    /// The resident ranges of `count` references of one block: the solid's
+    /// triangles once, and an instance of them for each reference.
+    fn references_of_one_block(
+        count: u32,
+    ) -> rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>> {
+        (0..count)
+            .map(|index| {
+                (
+                    handle(index),
+                    vec![MeshResidentRange {
+                        chunk: 0,
+                        dynamic: false,
+                        index_start: 0,
+                        index_count: INDICES,
+                        transparent: false,
+                        instance_start: index,
+                        instance_count: 1,
+                    }],
+                )
+            })
+            .collect()
+    }
+
+    /// Each index of each instance the draws cover, in which buffers and with
+    /// which tint, as often as it is drawn.
+    fn drawn(draws: &[MeshHighlightDraw]) -> Vec<(bool, bool, usize, bool, u32, u32)> {
+        let mut out = Vec::new();
+        for draw in draws {
+            let range = &draw.range;
+            for instance in range.instance_start..range.instance_start + range.instance_count {
+                for index in range.index_start..range.index_start + range.index_count {
+                    out.push((
+                        draw.kind == MeshHighlightKind::Hover,
+                        range.dynamic,
+                        range.chunk,
+                        range.transparent,
+                        index,
+                        instance,
+                    ));
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// With every reference of a block picked, the solids under the highlight
+    /// are one instanced draw. The highlight must not be a draw for each
+    /// reference on every frame.
+    #[test]
+    fn every_reference_of_a_block_picked_is_highlighted_in_one_draw() {
+        const REFERENCES: u32 = 1_000;
+        let ranges = references_of_one_block(REFERENCES);
+        let selected: Handles = (0..REFERENCES).map(handle).collect();
+
+        let draws = Pipeline::mesh_highlight_draws(
+            &ranges,
+            &selected,
+            &Handles::default(),
+            &Handles::default(),
+        );
+
+        let every_index_of_every_reference: Vec<_> = (0..INDICES)
+            .flat_map(|index| {
+                (0..REFERENCES).map(move |instance| (false, false, 0, false, index, instance))
+            })
+            .collect();
+        let mut expected = every_index_of_every_reference;
+        expected.sort_unstable();
+        assert_eq!(drawn(&draws), expected, "each reference once, whole");
+        assert_eq!(
+            draws.len(),
+            1,
+            "{} highlight draws for {REFERENCES} picked references of one block",
+            draws.len(),
+        );
+    }
+
+    /// The draws as they were before any were joined: every range of every
+    /// picked or hovered solid, on its own.
+    fn one_draw_for_each_range(
+        ranges: &rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>>,
+        selected: &Handles,
+        hovered: &Handles,
+        edge_handles: &Handles,
+    ) -> Vec<MeshHighlightDraw> {
+        let mut out = Vec::new();
+        for (handle, ranges) in ranges {
+            let kind = if edge_handles.contains(handle) {
+                continue;
+            } else if selected.contains(handle) {
+                MeshHighlightKind::Selected
+            } else if hovered.contains(handle) {
+                MeshHighlightKind::Hover
+            } else {
+                continue;
+            };
+            out.extend(
+                ranges
+                    .iter()
+                    .map(|range| MeshHighlightDraw { range: *range, kind }),
+            );
+        }
+        out
+    }
+
+    /// References that do not follow one another keep a draw each.
+    #[test]
+    fn references_apart_keep_a_draw_each() {
+        const REFERENCES: u32 = 200;
+        let ranges = references_of_one_block(REFERENCES);
+        let selected: Handles = (0..REFERENCES).step_by(2).map(handle).collect();
+        let none = Handles::default();
+
+        let draws = Pipeline::mesh_highlight_draws(&ranges, &selected, &none, &none);
+
+        assert_eq!(draws.len(), REFERENCES as usize / 2);
+        assert_eq!(
+            drawn(&draws),
+            drawn(&one_draw_for_each_range(&ranges, &selected, &none, &none)),
+        );
+    }
+
+    /// Solids of their own, whose triangles follow one another in a chunk,
+    /// are one draw when they are all picked.
+    #[test]
+    fn solids_whose_triangles_follow_one_another_are_one_draw() {
+        const SOLIDS: u32 = 300;
+        let ranges: rustc_hash::FxHashMap<_, _> = (0..SOLIDS)
+            .map(|index| {
+                (
+                    handle(index),
+                    vec![MeshResidentRange {
+                        chunk: 2,
+                        dynamic: false,
+                        index_start: index * INDICES,
+                        index_count: INDICES,
+                        transparent: false,
+                        instance_start: 0,
+                        instance_count: 1,
+                    }],
+                )
+            })
+            .collect();
+        let selected: Handles = (0..SOLIDS).map(handle).collect();
+        let none = Handles::default();
+
+        let draws = Pipeline::mesh_highlight_draws(&ranges, &selected, &none, &none);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].range.index_start, 0);
+        assert_eq!(draws[0].range.index_count, SOLIDS * INDICES);
+        assert_eq!(
+            drawn(&draws),
+            drawn(&one_draw_for_each_range(&ranges, &selected, &none, &none)),
+        );
+    }
+
+    /// A picked reference and the hovered one after it keep their own tints.
+    #[test]
+    fn a_picked_reference_and_a_hovered_one_are_not_joined() {
+        let ranges = references_of_one_block(3);
+        let selected: Handles = [handle(0), handle(2)].into_iter().collect();
+        let hovered: Handles = [handle(1), handle(2)].into_iter().collect();
+        let none = Handles::default();
+
+        let draws = Pipeline::mesh_highlight_draws(&ranges, &selected, &hovered, &none);
+
+        assert_eq!(draws.len(), 3, "picked, hovered, picked");
+        assert_eq!(
+            draws
+                .iter()
+                .filter(|draw| draw.kind == MeshHighlightKind::Hover)
+                .map(|draw| draw.range.instance_start)
+                .collect::<Vec<_>>(),
+            vec![1],
+            "the picked reference under the cursor is drawn as picked only",
+        );
+        assert_eq!(
+            drawn(&draws),
+            drawn(&one_draw_for_each_range(&ranges, &selected, &hovered, &none)),
+        );
+    }
+
+    /// Whatever is picked, hovered or highlighted by its edges, the joined
+    /// draws cover what a draw for each range covers: the same indices of the
+    /// same instances in the same buffers, with the same tint, as many times.
+    #[test]
+    fn joined_draws_cover_what_a_draw_for_each_range_covers() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |below: u32| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((state >> 33) as u32) % below
+        };
+        let mut joined_any = false;
+        for round in 0..300 {
+            let mut ranges: rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>> =
+                rustc_hash::FxHashMap::default();
+            let mut id = 0;
+            for chunk in 0..1 + next(3) as usize {
+                let dynamic = next(4) == 0;
+                let transparent = next(4) == 0;
+                if next(2) == 0 {
+                    // References of one block: one set of triangles, an
+                    // instance apiece.
+                    let index_count = 3 * (1 + next(4));
+                    for instance in 0..1 + next(30) {
+                        ranges
+                            .entry(handle(id))
+                            .or_default()
+                            .push(MeshResidentRange {
+                                chunk,
+                                dynamic,
+                                index_start: 0,
+                                index_count,
+                                transparent,
+                                instance_start: instance,
+                                instance_count: 1,
+                            });
+                        id += 1;
+                    }
+                } else {
+                    // Solids of their own: one instance, the triangles of each
+                    // after the last, now and then with a gap or in two parts.
+                    let mut index_start = 0;
+                    for _ in 0..1 + next(30) {
+                        let index_count = 3 * (1 + next(4));
+                        let solid = ranges.entry(handle(id)).or_default();
+                        solid.push(MeshResidentRange {
+                            chunk,
+                            dynamic,
+                            index_start,
+                            index_count,
+                            transparent,
+                            instance_start: 0,
+                            instance_count: 1,
+                        });
+                        index_start += index_count;
+                        match next(8) {
+                            0 => index_start += 3,
+                            1 => {
+                                solid.push(MeshResidentRange {
+                                    chunk,
+                                    dynamic,
+                                    index_start,
+                                    index_count: 3,
+                                    transparent: !transparent,
+                                    instance_start: 0,
+                                    instance_count: 1,
+                                });
+                            }
+                            // The same range listed twice is drawn twice.
+                            2 => {
+                                let again = solid[0];
+                                solid.push(again);
+                            }
+                            _ => {}
+                        }
+                        id += 1;
+                    }
+                }
+            }
+            let mut selected = Handles::default();
+            let mut hovered = Handles::default();
+            let mut edge_handles = Handles::default();
+            let picked_share = 1 + next(4);
+            for index in 0..id {
+                if next(4) < picked_share {
+                    selected.insert(handle(index));
+                }
+                if next(6) == 0 {
+                    hovered.insert(handle(index));
+                }
+                if next(12) == 0 {
+                    edge_handles.insert(handle(index));
+                }
+            }
+
+            let draws =
+                Pipeline::mesh_highlight_draws(&ranges, &selected, &hovered, &edge_handles);
+            let separate = one_draw_for_each_range(&ranges, &selected, &hovered, &edge_handles);
+
+            assert_eq!(drawn(&draws), drawn(&separate), "round {round}");
+            assert!(draws.len() <= separate.len(), "round {round}");
+            joined_any |= draws.len() < separate.len();
+        }
+        assert!(joined_any, "the rounds must reach draws that are joined");
     }
 }
 

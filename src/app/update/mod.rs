@@ -378,6 +378,7 @@ impl OpenCADStudio {
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
+            Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
             // Cancel drops the typed value; the cell keeps its value and type.
             Some(TableCellEntry) => self.table_cell_entry = None,
             Some(HatchBoundaryWarning) => self.close_hatch_boundary_warning(),
@@ -585,7 +586,8 @@ impl OpenCADStudio {
         {
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 if crate::io::linetypes::ensure_catalog_linetype(&mut tab.scene.document, name) {
-                    tab.scene.bump_geometry();
+                    tab.scene
+                        .invalidate_linetype_dependencies(std::slice::from_ref(name));
                 }
             }
         }
@@ -1077,6 +1079,8 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .map(|c| c.prompt())
+            // A step with nothing to ask yet keeps no line.
+            .filter(|prompt| !prompt.is_empty())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
         // In Remove mode a selection step asks "Remove objects:" in place of
@@ -1436,6 +1440,15 @@ impl OpenCADStudio {
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
                 Task::none()
+            }
+            Message::ControlCopySetup => {
+                let (config, add_line) = mcp_client_setup();
+                self.command_line
+                    .push_info(crate::t!("MCP client setup copied to the clipboard").as_ref());
+                for line in add_line.lines().chain(config.lines()) {
+                    self.command_line.push_info(line);
+                }
+                iced::clipboard::write(config).discard()
             }
             // Drain plugin-to-host requests that arrived outside of a host call.
             // This runs on a periodic timer so long-lived plugin sessions such
@@ -2121,12 +2134,16 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 // An automation open has nobody to answer the recovery
-                // prompt, so it fails like any other unreadable drawing
-                // instead of holding the request open behind the modal.
-                if e.recovery_available && !crate::app::control::controlled_open_pending(self) {
+                // prompt, so it takes the recovery read straight away, as a
+                // headless read does.
+                let controlled = crate::app::control::controlled_open_pending(self);
+                if e.recovery_available {
                     if let Some(opening) = self.opening.as_mut() {
                         opening.recovery_error = Some(e.message);
                         opening.recovery_read_stats = e.read_stats;
+                        if controlled {
+                            return self.update(Message::RecoveryAttempt);
+                        }
                         self.active_modal = Some(super::ModalKind::RecoveryPrompt);
                         return Task::none();
                     }
@@ -2157,8 +2174,13 @@ impl OpenCADStudio {
                     );
                     report.persist();
                     self.recovery_report = Some(report);
-                    self.active_modal = Some(super::ModalKind::Recovery);
-                    return Task::none();
+                    // The report modal holds the open queue; an automation
+                    // client already has the error and must be able to open
+                    // the next drawing.
+                    if !controlled {
+                        self.active_modal = Some(super::ModalKind::Recovery);
+                        return Task::none();
+                    }
                 }
                 // A drawing that fails to parse must not strand the ones queued
                 // behind it.
@@ -2694,6 +2716,16 @@ impl OpenCADStudio {
 
             Message::DataExtractionSaveResult(_, None) => Task::none(),
 
+            Message::AttOutSave(text, Some(path)) => {
+                self.on_attout_save(text, path);
+                Task::none()
+            }
+            Message::AttOutSave(_, None) | Message::AttInPicked(None) => Task::none(),
+            Message::AttInPicked(Some(text)) => {
+                self.on_attin_text(text);
+                Task::none()
+            }
+
             Message::StlExport => {
                 let i = self.active_tab;
                 if self.tabs[i].scene.meshes.is_empty() {
@@ -2896,11 +2928,8 @@ impl OpenCADStudio {
                             .await?;
                         let path = crate::sys::handle_path(&handle);
                         let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(
-                            &String::from_utf8_lossy(&bytes),
-                            [0.7, 0.7, 0.85, 1.0],
-                        )
-                        .ok_or_else(|| "no usable geometry in file".to_string());
+                        let result = crate::io::obj::parse_obj(&String::from_utf8_lossy(&bytes))
+                            .ok_or_else(|| "no usable geometry in file".to_string());
                         Some((tab_id, path, result))
                     },
                     |picked| match picked {
@@ -2921,7 +2950,7 @@ impl OpenCADStudio {
                     Err(error) => self
                         .command_line
                         .push_error(crate::tf!("IMPORTOBJ: {error}").as_ref()),
-                    Ok(mut mesh) => {
+                    Ok(meshes) => {
                         let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                             self.command_line.push_info(
                                 crate::t!("IMPORTOBJ: target drawing was closed.").as_ref(),
@@ -2932,15 +2961,15 @@ impl OpenCADStudio {
                             .file_stem()
                             .map(|s| s.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "obj_mesh".into());
-                        mesh.name = file_stem.clone();
                         self.push_undo_snapshot(i, "IMPORTOBJ");
-                        let entity = crate::modules::insert::solid3d_cmds::empty_solid3d();
-                        let handle = self.tabs[i].scene.add_entity(entity);
-                        if !handle.is_null() {
-                            self.tabs[i]
-                                .scene
-                                .meshes
-                                .insert(handle, crate::scene::MeshLodSet::from_single(mesh));
+                        let count = meshes
+                            .into_iter()
+                            .map(|mesh| {
+                                self.tabs[i].scene.add_entity(document::EntityType::Mesh(mesh))
+                            })
+                            .filter(|handle| !handle.is_null())
+                            .count();
+                        if count > 0 {
                             self.tabs[i].dirty = true;
                             self.command_line.push_output(
                                 crate::tf!("IMPORTOBJ: imported \"{file_stem}\" as mesh.").as_ref(),
@@ -3073,6 +3102,7 @@ impl OpenCADStudio {
             Message::PdfPassword(message) => self.update_pdf_password(message),
             Message::DimInspect(message) => self.update_dim_inspect(message),
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
+            Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
@@ -3760,6 +3790,9 @@ impl OpenCADStudio {
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.close_table_cell_editor();
                 // Preserve the outgoing drawing's Ortho / running OSNAP.
                 self.stamp_header_sysvars(self.active_tab);
@@ -3808,6 +3841,9 @@ impl OpenCADStudio {
                 }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
+                }
+                if idx < self.tabs.len() && idx != self.active_tab && self.mtext_editor.is_some() {
+                    self.mtext_cancel();
                 }
                 self.layout_list_open = false;
                 self.layout_rename_state = None;
@@ -9131,6 +9167,21 @@ impl OpenCADStudio {
                 self.mtext_rect_width_field(value);
                 Task::none()
             }
+            Message::MTextHeightDrag(height) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    if let Some(height) = height.filter(|h| h.is_finite() && *h > 0.0) {
+                        if !ed.height_dragging {
+                            ed.record_undo();
+                            ed.height_dragging = true;
+                        }
+                        ed.rect_height = height.to_string();
+                    } else {
+                        ed.height_dragging = false;
+                    }
+                }
+                self.rebuild_mtext_preview();
+                Task::none()
+            }
             Message::MTextBoxDrag(width) => {
                 self.mtext_box_drag(width);
                 Task::none()
@@ -9397,7 +9448,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text) => {
+            Message::PasteSpecial(text, picture) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd
@@ -9406,20 +9457,20 @@ impl OpenCADStudio {
                 if !waiting {
                     return Task::none();
                 }
-                match text.filter(|text| !text.trim().is_empty()) {
-                    Some(text) => {
-                        // Same prompt, one more option: swap without echoing it.
-                        self.tabs[i].active_cmd = Some(self.paste_special_command(i, Some(&text)));
-                        self.push_ucs_to_cmd(i);
-                        Task::none()
-                    }
-                    // Nothing but maybe an image: paste it as one.
-                    None if self.clipboard.is_empty() => {
-                        self.tabs[i].active_cmd = None;
-                        self.read_system_clipboard_image()
-                    }
-                    None => Task::none(),
+                let text = text.filter(|text| !text.trim().is_empty());
+                if text.is_none() && picture.is_none() && self.clipboard.is_empty() {
+                    // Nothing to paste in any format.
+                    self.tabs[i].active_cmd = None;
+                    self.command_line
+                        .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                    return Task::none();
                 }
+                // Every format is known now: ask for one of them.
+                let command = self.paste_special_command(i, text.as_deref(), picture);
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(command);
+                self.push_ucs_to_cmd(i);
+                Task::none()
             }
 
             Message::SystemClipboardPaste(result) => {
@@ -11833,6 +11884,11 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::TransmittalLayoutChanged(layout) => {
+                self.transmittal_layout = layout;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::StartTemplates(open) => {
                 self.start_templates = open.then(|| self.template_folder_files());
                 if self.start_templates.as_ref().is_some_and(Vec::is_empty) {
@@ -12467,6 +12523,7 @@ impl OpenCADStudio {
                 self.model_space.selection_highlight_color = 0;
                 self.model_space.selection_effect = true;
                 self.model_space.selection_preview = 3;
+                self.model_space.selection_preview_limit = 20_000;
                 self.model_space.grip_size = 5;
                 self.model_space.grip_color = 0;
                 self.model_space.grip_hot = 0;
@@ -12642,6 +12699,14 @@ impl OpenCADStudio {
                     };
                 }
                 if self.active_modal == Some(super::ModalKind::InsertAttributes) {
+                    let i = self.active_tab;
+                    if self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|c| c.attreq_cancel_keeps_defaults())
+                    {
+                        return self.keep_insert_attr_defaults();
+                    }
                     self.cancel_insert_attr_dialog();
                     self.close_active_modal();
                     return Task::none();
@@ -12769,8 +12834,14 @@ impl OpenCADStudio {
                 };
                 let initial_stats = opening.recovery_read_stats.take();
                 let Some(path) = opening.source_path.clone() else {
+                    // Nothing on disk to read again: the open fails with the
+                    // strict read's error.
+                    self.opening = None;
+                    let e = initial_error;
+                    self.command_line
+                        .push_error(crate::tf!("Open failed: {e}").as_ref());
                     self.close_active_modal();
-                    return Task::none();
+                    return self.drain_pending_open();
                 };
                 let progress = std::sync::Arc::new(crate::io::OpenProgressState::new(
                     super::OPEN_PHASE_READING,
@@ -13007,6 +13078,29 @@ impl OpenCADStudio {
             | Message::OsWindowResized(..)
             | Message::OsWindowMoved(..)
             | Message::OsWindowScale(..) => Task::none(),
+            Message::MTextToolbarGrab => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.toolbar_dragging = true;
+                    ed.toolbar_drag_last = None;
+                }
+                Task::none()
+            }
+            Message::MTextToolbarMove(p) => {
+                if let Some(ed) = self.mtext_editor.as_mut().filter(|ed| ed.toolbar_dragging) {
+                    if let Some(last) = ed.toolbar_drag_last {
+                        ed.toolbar_offset += p - last;
+                    }
+                    ed.toolbar_drag_last = Some(p);
+                }
+                Task::none()
+            }
+            Message::MTextToolbarRelease => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.toolbar_dragging = false;
+                    ed.toolbar_drag_last = None;
+                }
+                Task::none()
+            }
             Message::ModalGrab => {
                 // Start a drag; the first ModalDragMove seeds the reference.
                 self.modal_dragging = true;
@@ -13798,6 +13892,9 @@ impl OpenCADStudio {
                     self.mtext_undo();
                     return Task::none();
                 }
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 // Mid-command Ctrl+Z: a drawing command steps itself back
                 // (PLINE pops the last vertex) instead of the document undo
                 // swallowing the whole in-progress object.
@@ -13817,17 +13914,26 @@ impl OpenCADStudio {
                     self.mtext_redo();
                     return Task::none();
                 }
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.redo_active_tab();
                 Task::none()
             }
 
             Message::UndoMany(steps) => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.ribbon.close_dropdown();
                 self.undo_steps(steps);
                 Task::none()
             }
 
             Message::RedoMany(steps) => {
+                if self.mtext_editor.is_some() {
+                    self.mtext_cancel();
+                }
                 self.ribbon.close_dropdown();
                 self.redo_steps(steps);
                 Task::none()
@@ -14192,8 +14298,11 @@ impl OpenCADStudio {
                 filename,
                 deps,
                 skipped,
+                warnings,
                 result,
-            } => self.on_web_archive_serialized(cmd, zip_name, filename, deps, skipped, result),
+            } => self.on_web_archive_serialized(
+                cmd, zip_name, filename, deps, skipped, warnings, result,
+            ),
 
             #[cfg(not(target_arch = "wasm32"))]
             Message::SaveFileInUseRetry => self.on_save_file_in_use_retry(),
@@ -14515,6 +14624,17 @@ impl OpenCADStudio {
                 // In the open Linetype Manager a load is staged like its
                 // other changes: Apply keeps it, Close drops it.
                 let staged = self.linetypes_are_staged();
+                let before_names: rustc_hash::FxHashSet<String> = if staged {
+                    rustc_hash::FxHashSet::default()
+                } else {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .map(|lt| lt.name.to_ascii_uppercase())
+                        .collect()
+                };
                 if !staged {
                     self.push_undo_snapshot(i, "LINETYPE");
                 }
@@ -14526,8 +14646,18 @@ impl OpenCADStudio {
                 if staged {
                     self.load_linetype_bufs(i);
                 } else if added > 0 {
+                    let added_names: Vec<String> = self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .filter(|lt| !before_names.contains(&lt.name.to_ascii_uppercase()))
+                        .map(|lt| lt.name.clone())
+                        .collect();
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i]
+                        .scene
+                        .invalidate_linetype_dependencies(&added_names);
                 }
                 self.command_line
                     .push_output(crate::tf!("{added} linetype(s) loaded.").as_ref());
@@ -14595,7 +14725,12 @@ impl OpenCADStudio {
                         .is_none_or(|table| !table.name.eq_ignore_ascii_case(&selected_style));
 
                     if needs_load {
-                        match crate::io::plot_style::PlotStyleTable::load_named(&selected_style) {
+                        let base =
+                            crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
+                        match crate::io::plot_style::PlotStyleTable::load_named_at(
+                            &selected_style,
+                            base,
+                        ) {
                             Ok(table) => {
                                 self.report_plot_style_warnings(&table);
                                 self.active_plot_style = Some(table);
@@ -16238,4 +16373,31 @@ mod point_style_dialog_tests {
             -5.0
         );
     }
+}
+
+/// The MCP client config (`mcpServers` JSON) and the matching
+/// `claude mcp add` line for this install. AppImage and Flatpak builds are
+/// started through their launcher, not the binary inside the bundle.
+fn mcp_client_setup() -> (String, String) {
+    let (command, mut args): (String, Vec<String>) = if let Ok(id) = std::env::var("FLATPAK_ID") {
+        ("flatpak".into(), vec!["run".into(), id])
+    } else if let Ok(appimage) = std::env::var("APPIMAGE") {
+        (appimage, Vec::new())
+    } else {
+        let exe = std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "OpenCADStudio".into());
+        (exe, Vec::new())
+    };
+    args.push("--mcp".into());
+    let config = serde_json::json!({
+        "mcpServers": { "opencadstudio": { "command": command, "args": args } }
+    });
+    let config = serde_json::to_string_pretty(&config).unwrap_or_default();
+    let quoted: Vec<String> = std::iter::once(&command)
+        .chain(&args)
+        .map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() })
+        .collect();
+    let add_line = format!("claude mcp add opencadstudio -- {}", quoted.join(" "));
+    (config, add_line)
 }

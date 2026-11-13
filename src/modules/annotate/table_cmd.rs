@@ -249,6 +249,55 @@ fn blank_cell_like(
     blank
 }
 
+/// A table that holds `cells`, a data row for each row of them: the columns
+/// and row heights TABLE gives a new table of `style`, every row in the Data
+/// cell style — cells that come from somewhere else bring no title or
+/// header of their own.
+pub fn data_table(
+    style: Option<&StyleChoice>,
+    cells: &[Vec<String>],
+    column_width: f64,
+) -> document::entities::Table {
+    let columns = cells.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    let heights = row_heights_for(
+        style.map(|choice| &choice.style),
+        ["Data"; 3],
+        false,
+        false,
+        cells.len().max(1),
+        1,
+    );
+    let mut table = TableBuilder::new(heights.len(), columns).build();
+    for column in &mut table.columns {
+        column.width = column_width;
+    }
+    table.table_style_handle = style.map(|choice| choice.handle);
+    let data = style.and_then(|choice| {
+        choice
+            .style
+            .cell_style(&cell_style_name("Data"))
+            .map(|cell| cell.id)
+    });
+    for (row, height) in table.rows.iter_mut().zip(&heights) {
+        row.height = *height;
+        match (data, style) {
+            // The row names its cell style; the style draws it.
+            (Some(id), _) => {
+                row.style_id = id;
+                row.style = None;
+            }
+            (None, Some(choice)) => row.style = Some(selected_row_style(&choice.style, "Data")),
+            (None, None) => {}
+        }
+    }
+    for (row, texts) in cells.iter().enumerate() {
+        for (column, text) in texts.iter().enumerate() {
+            table.set_cell_text(row, column, text);
+        }
+    }
+    table
+}
+
 /// A table made from a style's starting table: its rows, columns, merges
 /// and sizes, the cell contents `options` keep, and `extra_rows` /
 /// `extra_columns` more rows and columns like its last ones.

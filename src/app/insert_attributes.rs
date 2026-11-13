@@ -27,6 +27,7 @@ impl OpenCADStudio {
                     value: ad.default_value.clone(),
                 })
                 .collect(),
+            first: 0,
         });
         self.active_modal = Some(ModalKind::InsertAttributes);
     }
@@ -63,6 +64,17 @@ impl OpenCADStudio {
         self.apply_cmd_result(result)
     }
 
+    /// Cancel on a form that only declines the values: every attribute keeps
+    /// its default and the command goes on.
+    pub(super) fn keep_insert_attr_defaults(&mut self) -> Task<Message> {
+        if let Some(dialog) = self.insert_attr_dialog.as_mut() {
+            for row in &mut dialog.rows {
+                row.value.clear();
+            }
+        }
+        self.apply_insert_attr_dialog()
+    }
+
     /// Drop the parked insert without committing it.
     pub(super) fn cancel_insert_attr_dialog(&mut self) {
         self.insert_attr_dialog = None;
@@ -85,6 +97,16 @@ impl OpenCADStudio {
                 if let Some(dialog) = self.insert_attr_dialog.as_mut() {
                     if let Some(row) = dialog.rows.get_mut(index) {
                         row.value = value;
+                    }
+                }
+                Task::none()
+            }
+            InsertAttrMsg::Previous | InsertAttrMsg::Next => {
+                if let Some(dialog) = self.insert_attr_dialog.as_mut() {
+                    if matches!(message, InsertAttrMsg::Next) {
+                        dialog.next_page();
+                    } else {
+                        dialog.previous_page();
                     }
                 }
                 Task::none()

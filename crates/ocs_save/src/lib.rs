@@ -129,8 +129,12 @@ pub fn write_external_for_edit(
     allow_loss: bool,
     session: Option<&IfccadSession>,
 ) -> Result<Vec<u8>, String> {
-    let (bytes, losses) = if let Some(session) = session {
-        session.check_destination(format.extensions().first().copied().unwrap_or_default())?;
+    let extension = format.extensions().first().copied().unwrap_or_default();
+    if let Some(session) = session {
+        session.check_destination(extension)?;
+    }
+    let (bytes, losses) = if let Some(session) = session.filter(|_| is_ifccad_extension(extension))
+    {
         let result = session.export(doc, false)?;
         let bytes = document::ifccad::encode_ifccad_document(&result.drawing)
             .map_err(|error| error.to_string())?;
@@ -168,7 +172,11 @@ pub fn external_losses_for_edit(
     let Some(session) = session else {
         return external_losses(doc, format);
     };
-    session.check_destination(format.extensions().first().copied().unwrap_or_default())?;
+    let extension = format.extensions().first().copied().unwrap_or_default();
+    session.check_destination(extension)?;
+    if !is_ifccad_extension(extension) {
+        return external_losses(doc, format);
+    }
     let outcome = session.export(doc, true)?;
     Ok(outcome
         .losses

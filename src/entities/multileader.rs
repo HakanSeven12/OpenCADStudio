@@ -1952,6 +1952,30 @@ impl crate::entities::traits::Transformable for MultiLeader {
     }
 }
 
+/// The block's extents in its own coordinates, without its attribute
+/// definitions: each is replaced by its value, so its tag does not count.
+pub(crate) fn block_content_bounds(
+    document: &document::Document,
+    record: &document::tables::BlockRecord,
+) -> Option<[f64; 4]> {
+    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for handle in &record.entity_handles {
+        if let Some(entity) = document
+            .get_entity(*handle)
+            .filter(|entity| !matches!(entity, document::EntityType::AttributeDefinition(_)))
+        {
+            let aabb = crate::scene::convert::tess::entity_aabb(entity);
+            if aabb != crate::scene::model::wire_model::WireModel::UNBOUNDED_AABB {
+                bounds[0] = bounds[0].min(aabb[0]);
+                bounds[1] = bounds[1].min(aabb[1]);
+                bounds[2] = bounds[2].max(aabb[2]);
+                bounds[3] = bounds[3].max(aabb[3]);
+            }
+        }
+    }
+    (bounds[0] <= bounds[2] && bounds[1] <= bounds[3]).then(|| bounds.map(f64::from))
+}
+
 pub(crate) fn block_content_insert(
     document: &document::Document,
     ml: &MultiLeader,
@@ -1983,30 +2007,13 @@ pub(crate) fn block_content_insert(
         // location, already moved off the landing by the extents; derive it
         // again from the content base point so it is not moved twice.
         insertion = ml.context.content_base_point;
-        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-        for handle in &record.entity_handles {
-            // An attribute definition is replaced by its value, so its tag
-            // does not count toward the extents.
-            if let Some(entity) = document
-                .get_entity(*handle)
-                .filter(|entity| !matches!(entity, document::EntityType::AttributeDefinition(_)))
-            {
-                let aabb = crate::scene::convert::tess::entity_aabb(entity);
-                if aabb != crate::scene::model::wire_model::WireModel::UNBOUNDED_AABB {
-                    bounds[0] = bounds[0].min(aabb[0]);
-                    bounds[1] = bounds[1].min(aabb[1]);
-                    bounds[2] = bounds[2].max(aabb[2]);
-                    bounds[3] = bounds[3].max(aabb[3]);
-                }
-            }
-        }
-        if bounds[0] <= bounds[2] && bounds[1] <= bounds[3] {
+        if let Some(bounds) = block_content_bounds(document, record) {
             let to_block = Transform::rotation(-ml.block_rotation);
             let from_left = ml.context.leader_roots.first().is_none_or(|root| {
                 to_block.apply_vector([root.direction.x, root.direction.y])[0] >= 0.0
             });
-            let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
-            let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
+            let anchor_x = if from_left { bounds[0] } else { bounds[2] };
+            let anchor_y = (bounds[1] + bounds[3]) * 0.5;
             let local_x = (anchor_x - record.base_point.x) * scale.x;
             let local_y = (anchor_y - record.base_point.y) * scale.y;
             let rotated = Transform::rotation(ml.block_rotation).apply_vector([local_x, local_y]);
@@ -2540,6 +2547,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
+            solid_normal: None,
             render_instance: None,
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
@@ -2985,6 +2993,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
+                        solid_normal: None,
                         render_instance: None,
                         stub: None,
                         pick_tris: Vec::new(),
@@ -3096,6 +3105,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     plot_visible: true,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
+                    solid_normal: None,
                     render_instance: None,
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
@@ -3196,6 +3206,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
+                        solid_normal: None,
                         render_instance: None,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
@@ -3243,6 +3254,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         plot_visible: true,
                         fill_is_3d: false,
                         fill_is_2d_solid: false,
+                        solid_normal: None,
                         render_instance: None,
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),

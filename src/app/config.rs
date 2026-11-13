@@ -402,6 +402,8 @@ pub struct ModelSpaceThemeConfig {
     pub selection_effect: bool,
     /// SELECTIONPREVIEW bitmask: 1 = idle, 2 = during a command, 3 = both.
     pub selection_preview: u8,
+    /// Maximum number of entities highlighted while a selection box is open.
+    pub selection_preview_limit: u32,
     /// GRIPSIZE: grip marker half-size in pixels (1–25, default 5).
     pub grip_size: u8,
     /// GRIPCOLOR: unselected grip ACI color (0 = Theme Primary outline, 1..=255 = ACI).
@@ -444,6 +446,7 @@ impl Default for ModelSpaceThemeConfig {
             selection_highlight_widen: 0,
             selection_effect: true,
             selection_preview: 3,
+            selection_preview_limit: 20_000,
             grip_size: 5,
             grip_color: 0,
             grip_hot: 0,

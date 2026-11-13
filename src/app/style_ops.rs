@@ -361,6 +361,7 @@ impl OpenCADStudio {
             StyleKind::MLeader => {
                 let mut s = MultiLeaderStyle::new(name);
                 s.description = name.to_string();
+                s.align_space = s.text_height;
                 s.handle = handle;
                 doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
             }
@@ -449,8 +450,9 @@ impl OpenCADStudio {
                     ObjectType::MultiLeaderStyle(s) => Some((s.name.as_str(), s.clone())),
                     _ => None,
                 }) {
+                    // The copy keeps the description of the style it
+                    // starts from.
                     s.name = name.to_string();
-                    s.description = name.to_string();
                     s.handle = handle;
                     doc.objects.insert(handle, ObjectType::MultiLeaderStyle(s));
                     return true;
@@ -1222,13 +1224,19 @@ impl OpenCADStudio {
                 .map(|(handle, _, _)| (*handle, crate::scene::ChangeKind::Modified))
                 .collect();
             self.tabs[i].scene.bump_entities(&renamed);
+            if linetypes {
+                if let (Some(new_lt), Some(old_lt)) =
+                    (edited.linetypes.as_ref(), stage.baseline.linetypes.as_ref())
+                {
+                    new_lt.invalidate_diff(old_lt, &mut self.tabs[i].scene);
+                }
+            }
             self.commit_style_undo(i, stage.baseline, edited, entities, stage.dirty_at_open);
         } else {
             self.tabs[i].dirty = stage.dirty_at_open;
         }
         self.sync_ribbon_styles();
         if linetypes {
-            self.tabs[i].scene.bump_geometry();
             self.sync_ribbon_layers();
             self.sync_ribbon_from_selection();
         }
@@ -1334,6 +1342,67 @@ pub(super) struct LinetypeState {
     msltscale: bool,
 }
 
+fn diff_table_names<T: document::tables::TableEntry + PartialEq>(
+    a: &document::tables::Table<T>,
+    b: &document::tables::Table<T>,
+) -> Vec<String> {
+    a.iter()
+        .filter(|entry| b.get(entry.name()) != Some(*entry))
+        .map(|entry| entry.name().to_string())
+        .chain(
+            b.iter()
+                .filter(|entry| a.get(entry.name()) != Some(*entry))
+                .map(|entry| entry.name().to_string()),
+        )
+        .collect::<rustc_hash::FxHashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+impl LinetypeState {
+    fn invalidate_diff(&self, other: &Self, scene: &mut crate::scene::Scene) {
+        if (self.ltscale - other.ltscale).abs() > f64::EPSILON
+            || self.psltscale != other.psltscale
+            || self.msltscale != other.msltscale
+        {
+            scene.bump_geometry();
+            return;
+        }
+        let linetype_names = diff_table_names(&self.table, &other.table);
+        if !linetype_names.is_empty() {
+            scene.invalidate_linetype_dependencies(&linetype_names);
+        }
+        let self_layers: rustc_hash::FxHashMap<_, _> = self
+            .layer_linetypes
+            .iter()
+            .map(|(h, lt)| (*h, lt.as_str()))
+            .collect();
+        let other_layers: rustc_hash::FxHashMap<_, _> = other
+            .layer_linetypes
+            .iter()
+            .map(|(h, lt)| (*h, lt.as_str()))
+            .collect();
+        let layer_names: Vec<String> = self_layers
+            .iter()
+            .chain(other_layers.iter())
+            .filter(|(handle, _)| self_layers.get(*handle) != other_layers.get(*handle))
+            .filter_map(|(handle, _)| {
+                scene
+                    .document
+                    .layers
+                    .iter()
+                    .find(|layer| layer.handle == *handle)
+                    .map(|layer| layer.name.clone())
+            })
+            .collect::<rustc_hash::FxHashSet<_>>()
+            .into_iter()
+            .collect();
+        if !layer_names.is_empty() {
+            scene.invalidate_layer_dependencies(&layer_names);
+        }
+    }
+}
+
 impl StyleStateSnapshot {
     pub(super) fn estimated_bytes(&self) -> usize {
         self.text_styles
@@ -1350,36 +1419,8 @@ impl StyleStateSnapshot {
     }
 
     pub(super) fn changed_keys(&self, other: &Self) -> (Vec<String>, Vec<String>, Vec<Handle>) {
-        let text_names = self
-            .text_styles
-            .iter()
-            .filter(|style| other.text_styles.get(&style.name) != Some(*style))
-            .map(|style| style.name.clone())
-            .chain(
-                other
-                    .text_styles
-                    .iter()
-                    .filter(|style| self.text_styles.get(&style.name) != Some(*style))
-                    .map(|style| style.name.clone()),
-            )
-            .collect::<rustc_hash::FxHashSet<_>>()
-            .into_iter()
-            .collect();
-        let dim_names = self
-            .dim_styles
-            .iter()
-            .filter(|style| other.dim_styles.get(&style.name) != Some(*style))
-            .map(|style| style.name.clone())
-            .chain(
-                other
-                    .dim_styles
-                    .iter()
-                    .filter(|style| self.dim_styles.get(&style.name) != Some(*style))
-                    .map(|style| style.name.clone()),
-            )
-            .collect::<rustc_hash::FxHashSet<_>>()
-            .into_iter()
-            .collect();
+        let text_names = diff_table_names(&self.text_styles, &other.text_styles);
+        let dim_names = diff_table_names(&self.dim_styles, &other.dim_styles);
         let self_objects: rustc_hash::FxHashMap<_, _> =
             self.style_objects.iter().map(|(h, o)| (*h, o)).collect();
         let other_objects: rustc_hash::FxHashMap<_, _> =

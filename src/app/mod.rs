@@ -78,6 +78,8 @@ pub(crate) mod node_graph;
 #[cfg(test)]
 mod object_isolation_tests;
 mod options_session;
+#[cfg(test)]
+mod paste_special_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
@@ -154,13 +156,15 @@ use crate::scene::CubeRegion;
 
 /// Which UCS-icon grip is being dragged. `Origin` slides the UCS origin within
 /// its own plane; `XAxis`/`YAxis` rotate the UCS so that axis points at the
-/// cursor (the other in-plane axis follows, Z fixed). The cursor is mapped onto
-/// the UCS plane every move, so no extra drag-start state is needed.
+/// cursor (the other in-plane axis follows, Z fixed); `ZAxis` turns Z to the
+/// cursor, keeping X as close to where it was as it can. The cursor is mapped
+/// onto the UCS plane every move, so no extra drag-start state is needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UcsGripKind {
     Origin,
     XAxis,
     YAxis,
+    ZAxis,
 }
 
 /// Cursor dwelling over a grip. When `started.elapsed() >=` the popup
@@ -947,6 +951,8 @@ pub(super) struct OpenCADStudio {
     table_cell_block: Option<crate::ui::window::table_cell_dialog::CellBlockState>,
     /// The picked table cells' Cell Data Format window.
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
+    /// The annotation scale asked for before a session's first annotative text.
+    anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
     table_cell_warning: Option<(
@@ -1875,6 +1881,8 @@ pub(super) struct OpenCADStudio {
     font_source_url: String,
     /// Template a new drawing starts from (QNEW); empty = blank.
     qnew_template: String,
+    /// Source-relative, type-structured, or flat ETRANSMIT/ARCHIVE package.
+    transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// The start page's template list, while it is open: the drawing
     /// templates beside the default one.
     start_templates: Option<Vec<std::path::PathBuf>>,
@@ -3239,6 +3247,8 @@ pub enum ModalKind {
     TableCellBlock,
     TableCellFormat,
     TableCellWarning,
+    /// The annotation scale asked for before a session's first annotative text.
+    AnnotationScalePrompt,
     /// A value typed into a cell that is not of the cell's data type.
     TableCellEntry,
     PdfShxSettings,
@@ -3424,6 +3434,8 @@ pub enum Message {
         redrew: bool,
     },
     ControlToggle,
+    /// Copy a ready-to-paste MCP client config for this install (#2401).
+    ControlCopySetup,
     /// Node graph overlay interaction.
     Graph(crate::ui::node_graph::GraphMsg),
     Tick(Instant),
@@ -3457,8 +3469,9 @@ pub enum Message {
     PasteShortcut,
     /// Which text input held focus when `PasteShortcut` arrived.
     PasteShortcutResolved(PasteFocus),
-    /// Completion of the system text clipboard read PASTESPEC starts.
-    PasteSpecial(Option<String>),
+    /// Completion of the system clipboard read PASTESPEC starts: its text
+    /// and its picture.
+    PasteSpecial(Option<String>, Option<crate::io::ole_embed::EmbeddedImage>),
     /// Completion of the system text clipboard read PASTEASHYPERLINK starts.
     PasteAsHyperlink(Option<String>),
     /// Completion of a system text clipboard read requested by PASTECLIP.
@@ -3635,6 +3648,8 @@ pub enum Message {
     /// Options → Files: the default template for new drawings.
     QnewTemplateChanged(String),
     QnewTemplateBrowse,
+    /// Options → Open and Save: preserve, structured-by-type, or flat packages.
+    TransmittalLayoutChanged(crate::io::transmit::TransmittalLayout),
     /// NEW: the picked template a new drawing starts from (`None` = cancelled).
     NewFromTemplate(Option<std::path::PathBuf>),
     /// Open (true) or close the start page's template list.
@@ -4112,6 +4127,7 @@ pub enum Message {
         filename: String,
         deps: Vec<(String, Vec<u8>)>,
         skipped: Vec<String>,
+        warnings: Vec<String>,
         result: Result<Vec<u8>, String>,
     },
     /// Retry the failed save after the other application releases the file.
@@ -5253,6 +5269,9 @@ pub enum Message {
     ModalDragMove(Point),
     /// Title-bar released: stop dragging.
     ModalDragRelease,
+    MTextToolbarGrab,
+    MTextToolbarMove(Point),
+    MTextToolbarRelease,
     AboutCopyInfo,
     // ── Plugin Manager window ───────────────────────────────────────────
     PluginManagerOpen,
@@ -5408,6 +5427,7 @@ pub enum Message {
     MTextRectWidthField(String),
     /// A ruler drag: the width while it moves, `None` when it ends.
     MTextBoxDrag(Option<f64>),
+    MTextHeightDrag(Option<f64>),
     /// Column layout controls.
     MTextColumnMode(String),
     MTextColumnCount(String),
@@ -5873,6 +5893,7 @@ pub enum Message {
     DimInspect(crate::ui::window::dim_inspect_dialog::DimInspectMsg),
     /// An edit in a picked table cell window (Cell Borders, Cell Contents).
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
+    AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.
     Spell(crate::ui::window::spell_dialog::SpellMsg),
@@ -5977,6 +5998,10 @@ pub enum Message {
     DataExtractionSave(String),
     /// Path chosen (or None = cancelled).
     DataExtractionSaveResult(String, Option<std::path::PathBuf>),
+    /// ATTOUT text and the picked output file.
+    AttOutSave(String, Option<std::path::PathBuf>),
+    /// ATTIN file contents, `None` when the picker was cancelled.
+    AttInPicked(Option<String>),
     // ── STL export ────────────────────────────────────────────────────────
     /// Trigger STL export: collect meshes and show save dialog.
     StlExport,
@@ -6005,7 +6030,7 @@ pub enum Message {
     ObjImportFinished(
         u64,
         std::path::PathBuf,
-        Result<crate::scene::model::mesh_model::MeshModel, String>,
+        Result<Vec<document::entities::mesh::Mesh>, String>,
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),
@@ -6157,6 +6182,7 @@ impl OpenCADStudio {
             table_cell_contents: None,
             table_cell_block: None,
             table_cell_format: None,
+            anno_scale_prompt: None,
             table_cell_warning: None,
             table_cell_entry: None,
             table_cell_entry_typed: false,
@@ -6540,6 +6566,7 @@ impl OpenCADStudio {
             check_missing_fonts: true,
             font_source_url: String::new(),
             qnew_template: String::new(),
+            transmittal_layout: crate::io::transmit::TransmittalLayout::Structured,
             start_templates: None,
             font_source_input: String::new(),
             donation_prompt_version: String::new(),

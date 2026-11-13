@@ -200,11 +200,7 @@ impl OpenCADStudio {
         document.summary_info = edited;
         self.tabs[i].dirty = true;
         // Fields showing Title, Author or a custom property read it again.
-        let hosts = crate::entities::field::acvar_hosts(&self.tabs[i].scene.document);
-        if !hosts.is_empty() {
-            self.tabs[i].scene.update_fields(32, Some(&hosts));
-        }
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.update_summary_field_hosts();
         Task::none()
     }
 }

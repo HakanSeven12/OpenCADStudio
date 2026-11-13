@@ -140,7 +140,7 @@ pub enum PanelId {
     QuickCalc,
     /// The whole command history, kept open beside the drawing.
     CommandHistory,
-    /// The Assistant: a chat with Claude that drives the drawing (ASSISTANT).
+    /// The Assistant: a chat with an external AI agent that drives the drawing (ASSISTANT).
     Assistant,
     /// Dynamic plugin dockable side panel / palette (identified by unique numeric ID).
     Plugin(u32),

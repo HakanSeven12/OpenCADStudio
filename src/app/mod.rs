@@ -1598,7 +1598,7 @@ pub(super) struct OpenCADStudio {
     pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
-    /// The Assistant pallet (ASSISTANT): chat with Claude about this drawing.
+    /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
     pub(crate) assistant: crate::ui::window::assistant::AssistantPalette,
     /// Sheet Set Manager palette, the open sheet sets and their dialogs.
     pub(crate) sheet_set: crate::ui::window::sheet_set::SheetSetManager,

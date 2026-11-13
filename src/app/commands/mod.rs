@@ -1180,7 +1180,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "QUICKCALC",
         "QC",
         "ASSISTANT",
-        "AI",
         "COMMANDHISTORY",
         "HYPERLINK",
         "XOPEN",

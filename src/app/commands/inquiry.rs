@@ -174,8 +174,8 @@ impl OpenCADStudio {
             //   spaces inside the expression don't end the input.
             // QUICKCALC / QC show or hide the QuickCalc pallet.
             "QUICKCALC" | "QC" => return Some(self.toggle_quick_calc()),
-            // ASSISTANT / AI show or hide the Assistant pallet (chat with Claude).
-            "ASSISTANT" | "AI" => return Some(self.toggle_assistant()),
+            // ASSISTANT shows or hides the Assistant pallet.
+            "ASSISTANT" => return Some(self.toggle_assistant()),
             // COMMANDHISTORY shows or hides the Command History pallet.
             "COMMANDHISTORY" => {
                 let id = crate::ui::dock::PanelId::CommandHistory;

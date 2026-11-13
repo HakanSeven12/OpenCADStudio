@@ -21,7 +21,7 @@ impl OpenCADStudio {
         self.assistant.update(msg)
     }
 
-    /// ASSISTANT / AI: show the pallet (docked on the right the first time)
+    /// ASSISTANT: show the pallet (docked on the right the first time)
     /// with its input focused, or close it when it is showing.
     pub(in crate::app) fn toggle_assistant(&mut self) -> Task<Message> {
         if self.dock_panel_visible(PanelId::Assistant) {

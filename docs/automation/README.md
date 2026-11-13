@@ -11,7 +11,7 @@ Every native OpenCADStudio build contains the same MCP server as the editor. `Op
 OpenCADStudio --mcp
 ```
 
-The client must start that command over standard input/output. If it asks for the executable and arguments separately, select the installed `OpenCADStudio` executable and enter `--mcp` as its only argument. The exact registration screen or configuration location belongs to the client. Once connected, the 20 tools below should appear in the client's MCP tool list.
+The copy button next to the **MCP** button in the command line copies a ready-to-paste `mcpServers` entry with the path of the running install, and prints the matching `claude mcp add` line in the command history. The client must start that command over standard input/output. If it asks for the executable and arguments separately, select the installed `OpenCADStudio` executable and enter `--mcp` as its only argument. The exact registration screen or configuration location belongs to the client. Once connected, the 20 tools below should appear in the client's MCP tool list.
 
 The server provides four general-purpose tools:
 

@@ -336,7 +336,7 @@ impl Scene {
     /// their own points and are left alone; non-solids are untouched.
     /// Idempotent: a wire already carrying 3D snaps is skipped, so shared
     /// memo entries can pass through every assembly path safely.
-    pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut Vec<WireModel>) {
+    pub(crate) fn attach_solid_snaps(&self, handle: Handle, wires: &mut [WireModel]) {
         use crate::scene::model::wire_model::SnapHint;
         let points = self.solid_snap_points(handle);
         if points.is_empty() {
@@ -15888,52 +15888,118 @@ impl Scene {
                 .flat_map_iter(|hit| hit.wires().iter().cloned())
                 .collect();
             hits_ms = crate::perf::elapsed_ms(t_hits);
-            let t_tess_miss = perf.then(iced::time::Instant::now);
-            let miss_pairs: Vec<(Handle, Arc<Vec<WireModel>>)> = misses
-                .par_iter()
-                .map(|e| {
-                    let e: &EntityType = e;
-                    let w = tessellate_entity(
-                        doc,
-                        sel,
-                        avp,
-                        bg,
-                        anno,
-                        annotation_scale_handle,
-                        e,
-                        Some(blk_ref),
-                        view_aabb,
-                        wpp,
-                        paper,
-                        reference_only_set,
-                    );
-                    (e.common().handle, Arc::new(w))
-                })
-                .collect();
-            tess_ms = crate::perf::elapsed_ms(t_tess_miss);
-            // Materialize new wires while the memo retains their shared source.
-            let t_materialize = perf.then(iced::time::Instant::now);
+            let is_building_resident = resident && self.building_resident_set.get();
             let mut out = hit_wires;
-            {
-                let mut memo = memo_cell.borrow_mut();
-                for (h, a) in miss_pairs {
-                    // Uniquely owned (just built above): enrich solid shells
-                    // with B-rep vertex snaps before the memo/assembly split.
-                    let mut wires = Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone());
-                    self.attach_solid_snaps(h, &mut wires);
-                    if resident && self.building_resident_set.get() {
-                        // The resident set built from `out` becomes the
-                        // memo's backing: no second copy (#1542, #1698).
-                        out.extend(wires);
-                        memo.insert(h, MemoRun::Pending);
-                    } else {
-                        let a = Arc::new(wires);
-                        out.extend(a.iter().cloned());
-                        memo.insert(h, MemoRun::Owned(Arc::clone(&a)));
+            if is_building_resident {
+                const MISS_CHUNK_SIZE: usize = 256;
+                struct MissChunk {
+                    wires: Vec<WireModel>,
+                    handles: Vec<Handle>,
+                    solid_ranges: Vec<(Handle, usize, usize)>,
+                }
+                let t_tess_miss = perf.then(iced::time::Instant::now);
+                let chunks: Vec<MissChunk> = misses
+                    .par_chunks(MISS_CHUNK_SIZE)
+                    .map(|chunk| {
+                        let mut wires = Vec::with_capacity(chunk.len());
+                        let mut handles = Vec::with_capacity(chunk.len());
+                        let mut solid_ranges = Vec::new();
+                        for &e in chunk {
+                            let h = e.common().handle;
+                            let w = tessellate_entity(
+                                doc,
+                                sel,
+                                avp,
+                                bg,
+                                anno,
+                                annotation_scale_handle,
+                                e,
+                                Some(blk_ref),
+                                view_aabb,
+                                wpp,
+                                paper,
+                                reference_only_set,
+                            );
+                            if Self::is_solid_shell_entity(e) {
+                                let start = wires.len();
+                                wires.extend(w);
+                                let end = wires.len();
+                                solid_ranges.push((h, start, end));
+                            } else {
+                                wires.extend(w);
+                            }
+                            handles.push(h);
+                        }
+                        MissChunk {
+                            wires,
+                            handles,
+                            solid_ranges,
+                        }
+                    })
+                    .collect();
+                tess_ms = crate::perf::elapsed_ms(t_tess_miss);
+                let t_materialize = perf.then(iced::time::Instant::now);
+                let total_new_wires: usize = chunks.iter().map(|c| c.wires.len()).sum();
+                out.reserve(total_new_wires);
+                {
+                    let mut memo = memo_cell.borrow_mut();
+                    memo.reserve(misses.len());
+                    for chunk in chunks {
+                        let base = out.len();
+                        out.extend(chunk.wires);
+                        for (h, start, end) in chunk.solid_ranges {
+                            self.attach_solid_snaps(h, &mut out[base + start..base + end]);
+                        }
+                        for h in chunk.handles {
+                            // The resident set built from `out` becomes the
+                            // memo's backing: no second copy (#1542, #1698).
+                            memo.insert(h, MemoRun::Pending);
+                        }
                     }
                 }
+                materialize_ms = crate::perf::elapsed_ms(t_materialize);
+            } else {
+                let t_tess_miss = perf.then(iced::time::Instant::now);
+                let miss_pairs: Vec<(Handle, bool, Vec<WireModel>)> = misses
+                    .par_iter()
+                    .map(|&e| {
+                        let w = tessellate_entity(
+                            doc,
+                            sel,
+                            avp,
+                            bg,
+                            anno,
+                            annotation_scale_handle,
+                            e,
+                            Some(blk_ref),
+                            view_aabb,
+                            wpp,
+                            paper,
+                            reference_only_set,
+                        );
+                        (e.common().handle, Self::is_solid_shell_entity(e), w)
+                    })
+                    .collect();
+                tess_ms = crate::perf::elapsed_ms(t_tess_miss);
+                // Materialize new wires while the memo retains their shared source.
+                let t_materialize = perf.then(iced::time::Instant::now);
+                let total_new_wires: usize = miss_pairs.iter().map(|(_, _, w)| w.len()).sum();
+                out.reserve(total_new_wires);
+                {
+                    let mut memo = memo_cell.borrow_mut();
+                    memo.reserve(miss_pairs.len());
+                    for (h, is_solid, mut wires) in miss_pairs {
+                        // Enrich solid shells with B-rep vertex snaps before the memo/assembly split.
+                        if is_solid {
+                            self.attach_solid_snaps(h, &mut wires);
+                        }
+                        let a = Arc::new(wires);
+                        out.extend(a.iter().cloned());
+                        memo.insert(h, MemoRun::Owned(a));
+                    }
+                }
+                materialize_ms = crate::perf::elapsed_ms(t_materialize);
             }
-            materialize_ms = crate::perf::elapsed_ms(t_materialize);
             out
         } else {
             let t_tess_all = perf.then(iced::time::Instant::now);

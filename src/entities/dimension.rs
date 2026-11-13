@@ -3882,7 +3882,7 @@ fn tessellate_dimension_inner(
             flip2: dim.base().flip_arrow2,
             text_position: text_layout.position,
             horizontal_text: text_layout.horizontal,
-            text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0,
+            text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0 || text_splits_at_line(dim),
             text_movement,
             text_break: text_layout.break_box,
             leader_anchor: style
@@ -5050,6 +5050,8 @@ struct TextBreak {
     half_height: f32,
     padding: f32,
     rotation: f64,
+    /// `\X` text: the line runs between its parts, unbroken.
+    through: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -5089,6 +5091,7 @@ fn dimension_text_layout(
         half_height: dimension_text_extent_height(dimension, style, text_height) as f32 * 0.5,
         padding: gap,
         rotation: dimension_text_rotation(dimension, style),
+        through: text_splits_at_line(dimension),
     });
     let outside = dimension_text_is_outside(dimension, style);
     let horizontal =
@@ -5499,7 +5502,7 @@ fn add_segment_with_text_break(
     if length <= 1.0e-6 {
         return;
     }
-    let Some(text_break) = text_break else {
+    let Some(text_break) = text_break.filter(|text_break| !text_break.through) else {
         add_segment(points, start, end);
         return;
     };
@@ -7311,7 +7314,7 @@ fn dimension_text_parts(
         if user_text.is_empty() || user_text.trim().is_empty() {
             return None;
         }
-        return Some((user_text.replace("<>", &primary), tolerance_suffix));
+        return Some((split_at_line(&user_text.replace("<>", &primary)), tolerance_suffix));
     }
     // The stored text the same way: empty is the measurement, blank (" ")
     // hides it.
@@ -7319,9 +7322,26 @@ fn dimension_text_parts(
         if base.text.trim().is_empty() {
             return None;
         }
-        return Some((base.text.replace("<>", &primary), tolerance_suffix));
+        return Some((split_at_line(&base.text.replace("<>", &primary)), tolerance_suffix));
     }
     Some((primary, tolerance_suffix))
+}
+
+/// The text the user typed, or the stored text when there is none.
+fn typed_text(dim: &Dimension) -> &str {
+    let base = dim.base();
+    base.user_text.as_deref().unwrap_or(&base.text)
+}
+
+/// Whether the text carries `\X`, which puts what follows below the
+/// dimension line.
+fn text_splits_at_line(dim: &Dimension) -> bool {
+    typed_text(dim).contains(r"\X")
+}
+
+/// `\X` laid out as a line break; the text is then centred on the line.
+fn split_at_line(text: &str) -> String {
+    text.replacen(r"\X", r"\P", 1)
 }
 
 /// The value the text reports. An angular dimension whose extension point
@@ -8710,6 +8730,9 @@ fn dimension_text_pos_f64(
     let dimtvp = style.map(|s| s.dimtvp).unwrap_or(0.0);
     let perp_off = if dimtad == 0 {
         dimtvp * text_height
+    } else if text_splits_at_line(dim) {
+        // `\X`: the first part above the line, the rest below it.
+        0.0
     } else {
         dimension_text_extent_height(dim, style, text_height) * 0.5 + dimgap
     };
@@ -9603,6 +9626,7 @@ mod dimtmove_leader_tests {
                 half_height: 1.0,
                 padding: 0.0,
                 rotation: 0.0,
+                through: false,
             }),
             horizontal: true,
         }

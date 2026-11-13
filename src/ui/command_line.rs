@@ -1317,8 +1317,17 @@ impl CommandLine {
         let mcp_tip = container(text(t!(mcp_tooltip)).size(11))
             .padding([3, 6])
             .style(container::bordered_box);
-        let mcp_btn =
-            container(tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4)).padding(Padding {
+        let mcp_btn = tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4);
+        let mcp_copy_btn = button(crate::ui::icons::themed(crate::ui::icons::COPY, 13.0))
+            .on_press(Message::ControlCopySetup)
+            .style(button::subtle)
+            .padding([2, 6]);
+        let mcp_copy_tip = container(text(t!("Copy MCP client setup")).size(11))
+            .padding([3, 6])
+            .style(container::bordered_box);
+        let mcp_copy_btn = tooltip(mcp_copy_btn, mcp_copy_tip, tooltip::Position::Top).gap(4);
+        let mcp_btn = container(row![mcp_btn, mcp_copy_btn].spacing(2).align_y(iced::Center))
+            .padding(Padding {
                 top: 0.0,
                 right: 6.0,
                 bottom: 0.0,

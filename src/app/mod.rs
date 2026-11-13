@@ -3430,6 +3430,8 @@ pub enum Message {
         redrew: bool,
     },
     ControlToggle,
+    /// Copy a ready-to-paste MCP client config for this install (#2401).
+    ControlCopySetup,
     /// Node graph overlay interaction.
     Graph(crate::ui::node_graph::GraphMsg),
     Tick(Instant),

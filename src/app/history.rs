@@ -1197,15 +1197,23 @@ impl OpenCADStudio {
                 }
             }
             StructureSnapshot::Full(stored) => {
-                let inverse = self.tabs[i]
-                    .scene
-                    .document
-                    .swap_structure(std::mem::replace(stored, document::Document::new()));
-                *stored = inverse;
-                self.tabs[i].scene.invalidate_dependency_index();
-                self.tabs[i].scene.bump_layout_epoch();
-                self.tabs[i].scene.bump_scale_epoch();
-                self.tabs[i].scene.bump_ucs_epoch();
+                let tab = &mut self.tabs[i];
+                let document = &mut tab.scene.document;
+                let next = document.next_handle().max(document.header.handle_seed);
+                *stored =
+                    document.swap_structure(std::mem::replace(stored, document::Document::new()));
+                if tab.ifccad_session.is_some() {
+                    // The IFCCAD session keeps mappings for saved handles across
+                    // undo. New objects must never pick up those mappings.
+                    let next = next
+                        .max(document.next_handle())
+                        .max(document.header.handle_seed);
+                    super::block_editor::normalize_allocation(document, next);
+                }
+                tab.scene.invalidate_dependency_index();
+                tab.scene.bump_layout_epoch();
+                tab.scene.bump_scale_epoch();
+                tab.scene.bump_ucs_epoch();
             }
             StructureSnapshot::Layers(entries) => {
                 let names: Vec<String> = entries.iter().map(|entry| entry.name.clone()).collect();

@@ -22,9 +22,19 @@ impl IfccadSession {
             .collect()
     }
 
+    /// Whether this session carries content that ordinary CAD formats cannot retain.
+    pub fn has_blocked_entities(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .blocked_entities()
+            .next()
+            .is_some()
+    }
+
     /// Prevent a save to a format that cannot carry the session's retained roots.
     pub fn check_destination(&self, ext: &str) -> Result<(), String> {
-        if super::is_ifccad_extension(ext) {
+        if super::is_ifccad_extension(ext) || !self.has_blocked_entities() {
             Ok(())
         } else {
             Err("This drawing has retained IFCCAD content. Save it as .ifccad to keep that content.".into())
@@ -58,8 +68,7 @@ pub fn read_ifccad_for_edit(
         document::Ifcx.import_ifccad_preserving(file.document())
     };
     let (outcome, context) = read().map_err(|error| read_error(bytes, &error.to_string()))?;
-    let has_blocked = context.blocked_entities().next().is_some();
-    let session = has_blocked.then(|| IfccadSession(Arc::new(Mutex::new(context))));
+    let session = Some(IfccadSession(Arc::new(Mutex::new(context))));
     Ok((
         super::external_read_outcome(outcome.document, outcome.losses),
         session,

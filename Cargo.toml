@@ -393,6 +393,10 @@ harness = false
 name = "large_overlay_interaction"
 harness = false
 
+[[bench]]
+name = "stub_materialize"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

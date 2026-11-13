@@ -56,6 +56,11 @@ pub struct Param {
 pub enum Rule {
     /// At least one of these keys must be present.
     AnyOf(&'static [&'static str]),
+    /// Exactly one key must be present and non-null (or deferred by a batch
+    /// binding). Explicit null is invalid, not an omitted alternative.
+    ExactlyOneOf(&'static [&'static str]),
+    /// Reject unknown request keys instead of retaining the legacy warning.
+    RejectUnknown,
     /// If `key` equals `equals`, every key in `then` must be present.
     RequiredWhen {
         key: &'static str,
@@ -91,6 +96,8 @@ const fn opt(name: &'static str, ty: Ty, doc: &'static str) -> Param {
         doc,
     }
 }
+
+const COLOR_SCHEMA: &str = r#"{"anyOf":[{"type":"string","enum":["ByLayer","ByBlock"]},{"type":"integer","minimum":0,"maximum":256},{"type":"object","properties":{"Index":{"type":"integer","minimum":0,"maximum":256}},"required":["Index"],"additionalProperties":false},{"type":"object","properties":{"Rgb":{"type":"object","properties":{"r":{"type":"integer","minimum":0,"maximum":255},"g":{"type":"integer","minimum":0,"maximum":255},"b":{"type":"integer","minimum":0,"maximum":255}},"required":["r","g","b"],"additionalProperties":false}},"required":["Rgb"],"additionalProperties":false},{"type":"object","properties":{"rgb":{"type":"array","items":{"type":"integer","minimum":0,"maximum":255},"minItems":3,"maxItems":3}},"required":["rgb"],"additionalProperties":false}]}"#;
 
 // ============================================================================
 // OP DEFINITIONS
@@ -408,6 +415,21 @@ pub static EMBED_IMAGE: OpDef = OpDef {
     example: r#"{"op":"embed_image","path":"plan.png","linked":true,"calibrate":{"point_a":[52,910],"point_b":[450,910],"distance":6500},"layer":"_XREF","lock_layer":true}"#,
 };
 
+pub static DGN_IMPORT: OpDef = OpDef {
+    name: "dgn_import",
+    doc: "Import a DGN model synchronously with named options and no prompt replay.",
+    batchable: true,
+    params: &[
+        req("path", Ty::Str, "DGN source file path."),
+        opt("model", Ty::Str, "Design model name (case-insensitive; omitted uses the first)."),
+        opt("units", Ty::EnumCi(&["Master", "Sub"]), "DGN unit conversion (Master or Sub)."),
+        opt("mapping", Ty::Str, "Conversion mapping; Standard, optionally with ;codepage=N."),
+        opt("codepage", Ty::Int, "V7 text code page; 0/1252 select the default; explicit value overrides mapping suffix."),
+    ],
+    rules: &[],
+    example: r#"{"op":"dgn_import","path":"cadastral.dgn","model":"Default","units":"Master","mapping":"Standard","codepage":1250}"#,
+};
+
 pub static WBLOCK: OpDef = OpDef {
     name: "wblock",
     doc: "Export selected entities or a block definition to an external DWG/DXF file.",
@@ -477,6 +499,26 @@ pub static ENTITIES_CREATE: OpDef = OpDef {
     )],
     rules: &[],
     example: r#"{"op":"entities_create","entities":[{"type":"Line","start":[0,0],"end":[10,10]}]}"#,
+};
+
+pub static ENTITIES_SET: OpDef = OpDef {
+    name: "entities_set",
+    doc: "Atomically apply shared common-property writes to any number of entity handles in one undo step.",
+    batchable: true,
+    params: &[
+        req("handles", Ty::Handles, "Non-empty unique entity handle list."),
+        opt("layer", Ty::Str, "Existing target layer name; omitted leaves layers unchanged."),
+        opt("color", Ty::Raw(COLOR_SCHEMA), "ByLayer/ByBlock, ACI 0..256, {Index:N}, {Rgb:{r,g,b}}, or {rgb:[r,g,b]}."),
+        opt("linetype", Ty::Str, "Existing linetype name, ByLayer, or ByBlock."),
+        opt("linetype_scale", Ty::Num, "Finite positive linetype scale."),
+        opt("invisible", Ty::Bool, "Exact visibility state (false = visible)."),
+        opt("label", Ty::Str, "Optional non-empty undo-history label."),
+    ],
+    rules: &[
+        Rule::AnyOf(&["layer", "color", "linetype", "linetype_scale", "invisible"]),
+        Rule::RejectUnknown,
+    ],
+    example: r#"{"op":"entities_set","handles":["2A","2B"],"layer":"Walls","color":"ByLayer","label":"Cadastral cleanup"}"#,
 };
 
 pub static ENTITIES_DELETE: OpDef = OpDef {
@@ -791,6 +833,36 @@ pub static LAYOUT_CREATE: OpDef = OpDef {
     example: r#"{"op":"layout_create","name":"Sheet1"}"#,
 };
 
+pub static LAYOUT_RENAME: OpDef = OpDef {
+    name: "layout_rename",
+    doc: "Rename a paper-space layout; Model is protected.",
+    batchable: true,
+    params: &[
+        req("name", Ty::Str, "Existing layout name (case-insensitive)."),
+        req("new_name", Ty::Str, "New unique layout name."),
+    ],
+    rules: &[],
+    example: r#"{"op":"layout_rename","name":"Sheet1","new_name":"Floor Plan"}"#,
+};
+
+pub static LAYOUT_ACTIVATE: OpDef = OpDef {
+    name: "layout_activate",
+    doc: "Activate an existing Model or paper-space layout without modifying the drawing.",
+    batchable: true,
+    params: &[req("name", Ty::Str, "Layout name (case-insensitive).")],
+    rules: &[],
+    example: r#"{"op":"layout_activate","name":"Floor Plan"}"#,
+};
+
+pub static LAYOUT_DELETE: OpDef = OpDef {
+    name: "layout_delete",
+    doc: "Delete a paper-space layout in one undo step; Model is protected.",
+    batchable: true,
+    params: &[req("name", Ty::Str, "Layout name (case-insensitive).")],
+    rules: &[],
+    example: r#"{"op":"layout_delete","name":"Floor Plan"}"#,
+};
+
 pub static PAGE_SETUP_SET: OpDef = OpDef {
     name: "page_setup_set",
     doc: "Configure page setup / print settings for a layout.",
@@ -830,6 +902,83 @@ pub static PAGE_SETUP_SET: OpDef = OpDef {
         then: &["window"],
     }],
     example: r#"{"op":"page_setup_set","layout":"Sheet1","paper":"A4"}"#,
+};
+
+pub static XREF_RELOAD: OpDef = OpDef {
+    name: "xref_reload",
+    doc: "Reload one direct external reference by id, preserving prior content on load failure.",
+    batchable: true,
+    params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
+    rules: &[Rule::RejectUnknown],
+    example: r#"{"op":"xref_reload","id":"2A"}"#,
+};
+
+pub static XREF_UNLOAD: OpDef = OpDef {
+    name: "xref_unload",
+    doc: "Unload one direct external reference without deleting its definition.",
+    batchable: true,
+    params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
+    rules: &[Rule::RejectUnknown],
+    example: r#"{"op":"xref_unload","id":"2A"}"#,
+};
+
+pub static XREF_DETACH: OpDef = OpDef {
+    name: "xref_detach",
+    doc:
+        "Detach one direct reference, its insertion, and owned dependent records in one undo step.",
+    batchable: true,
+    params: &[req("id", Ty::Handle, "Direct reference id from xrefs.")],
+    rules: &[Rule::RejectUnknown],
+    example: r#"{"op":"xref_detach","id":"2A"}"#,
+};
+
+pub static XREF_BIND: OpDef = OpDef {
+    name: "xref_bind",
+    doc: "Bind one direct DWG/DXF xref into a local block definition.",
+    batchable: true,
+    params: &[req("id", Ty::Handle, "Direct DWG xref id from xrefs.")],
+    rules: &[Rule::RejectUnknown],
+    example: r#"{"op":"xref_bind","id":"2A"}"#,
+};
+
+pub static XREF_SET_PATH: OpDef = OpDef {
+    name: "xref_set_path",
+    doc: "Set one direct reference's stored path or path type without implicitly reloading it.",
+    batchable: true,
+    params: &[
+        req("id", Ty::Handle, "Direct reference id from xrefs."),
+        opt(
+            "path",
+            Ty::Str,
+            "New stored path; mutually exclusive with path_type.",
+        ),
+        opt(
+            "path_type",
+            Ty::EnumCi(&["full", "relative", "none"]),
+            "Convert stored path style; mutually exclusive with path.",
+        ),
+    ],
+    rules: &[
+        Rule::ExactlyOneOf(&["path", "path_type"]),
+        Rule::RejectUnknown,
+    ],
+    example: r#"{"op":"xref_set_path","id":"2A","path_type":"relative"}"#,
+};
+
+pub static XREF_SET_TYPE: OpDef = OpDef {
+    name: "xref_set_type",
+    doc: "Switch one direct DWG/DXF xref between attachment and overlay.",
+    batchable: true,
+    params: &[
+        req("id", Ty::Handle, "Direct DWG xref id from xrefs."),
+        req(
+            "reference_type",
+            Ty::EnumCi(&["attach", "overlay"]),
+            "External reference type.",
+        ),
+    ],
+    rules: &[Rule::RejectUnknown],
+    example: r#"{"op":"xref_set_type","id":"2A","reference_type":"overlay"}"#,
 };
 
 pub static FILE_IDENTITY: OpDef = OpDef {
@@ -1138,9 +1287,11 @@ pub static OPS: &[&OpDef] = &[
     &PANEL_BUTTON,
     &ACTION,
     &EMBED_IMAGE,
+    &DGN_IMPORT,
     &WBLOCK,
     &PLOT,
     &ENTITIES_CREATE,
+    &ENTITIES_SET,
     &ENTITIES_DELETE,
     &ENTITIES_TRANSFORM,
     &NODE_GRAPH,
@@ -1158,7 +1309,16 @@ pub static OPS: &[&OpDef] = &[
     &CLOSE,
     &SYSVAR,
     &LAYOUT_CREATE,
+    &LAYOUT_RENAME,
+    &LAYOUT_ACTIVATE,
+    &LAYOUT_DELETE,
     &PAGE_SETUP_SET,
+    &XREF_RELOAD,
+    &XREF_UNLOAD,
+    &XREF_DETACH,
+    &XREF_BIND,
+    &XREF_SET_PATH,
+    &XREF_SET_TYPE,
     &FILE_IDENTITY,
     &SAVE,
     &SAVE_VERIFIED,
@@ -1228,6 +1388,10 @@ fn rules_text(op: &OpDef) -> String {
             Rule::AnyOf(keys) => {
                 out.push_str(&format!(" Requires at least one of: {}.", keys.join(", ")));
             }
+            Rule::ExactlyOneOf(keys) => {
+                out.push_str(&format!(" Requires exactly one of: {}.", keys.join(", ")));
+            }
+            Rule::RejectUnknown => {}
             Rule::RequiredWhen { key, equals, then } => {
                 out.push_str(&format!(
                     " When {key}={equals}, requires: {}.",
@@ -1251,12 +1415,22 @@ pub fn op_schema(op: &OpDef) -> Value {
     }
     let mut required = vec!["op"];
     required.extend(op.params.iter().filter(|p| p.required).map(|p| p.name));
-    json!({
+    let mut schema = json!({
         "type": "object",
         "description": format!("{}{}", op.doc, rules_text(op)),
         "properties": props,
         "required": required,
-    })
+    });
+    for rule in op.rules {
+        if let Rule::ExactlyOneOf(keys) = rule {
+            schema["oneOf"] = keys
+                .iter()
+                .map(|key| json!({"required":[key]}))
+                .collect::<Vec<_>>()
+                .into();
+        }
+    }
+    schema
 }
 
 /// The common envelope is optional in static preflight; dispatch requires an id.
@@ -1519,6 +1693,24 @@ pub fn validate_request_deferred(
                     ));
                 }
             }
+            Rule::ExactlyOneOf(keys) => {
+                let present = keys
+                    .iter()
+                    .filter(|key| deferred.contains(*key) || obj.contains_key(**key))
+                    .count();
+                let explicit_null = keys.iter().any(|key| {
+                    !deferred.contains(key) && obj.get(*key).is_some_and(Value::is_null)
+                });
+                if present != 1 || explicit_null {
+                    return Err(format!(
+                        "Supply exactly one of {} for {}. Example request: {}",
+                        keys.join(", "),
+                        op_name,
+                        op_def.example
+                    ));
+                }
+            }
+            Rule::RejectUnknown => {}
             Rule::RequiredWhen { key, equals, then } => {
                 let matches = obj
                     .get(*key)
@@ -1550,7 +1742,12 @@ pub fn validate_request_deferred(
         }
     }
 
-    // Detect unknown keys (Phase 1: warning)
+    // Legacy operations warn on unknown keys; explicitly strict operations
+    // reject them so a typo cannot become a silent no-op.
+    let reject_unknown = op_def
+        .rules
+        .iter()
+        .any(|rule| matches!(rule, Rule::RejectUnknown));
     let mut warnings = Vec::new();
     let mut allowed: Vec<&str> = op_def.params.iter().map(|p| p.name).collect();
     if is_batch_step {
@@ -1558,9 +1755,15 @@ pub fn validate_request_deferred(
     } else {
         allowed.extend(ENVELOPE_KEYS.iter().copied());
     }
+    if is_batch_step && reject_unknown {
+        allowed.push("bindings");
+    }
 
     for (k, _) in obj {
         if !allowed.contains(&k.as_str()) {
+            if reject_unknown {
+                return Err(format!("unknown parameter '{k}' for op '{op_name}'"));
+            }
             if k == "data_base64" {
                 warnings.push(
                     "data_base64 is supported only in the Web/WASM build, not in native desktop"

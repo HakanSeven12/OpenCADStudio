@@ -53,23 +53,102 @@
         "responses": {"200": {"description": "Applied"}, "400": {"description": "Unknown sysvar or invalid value"}}
       }
     },
+    "/api/v1/xrefs": {
+      "get": {
+        "summary": "Fresh structured external-reference listing (direct and nested rows; embedded images omitted)",
+        "responses": {"200": {"description": "{count,xrefs[]}; rows contain id, name, kind, format, reference_type, status, saved_path, resolved_path, parent_id, nested, size_bytes, modified_unix_ms", "content": {"application/json": {"schema": {"type": "object", "properties": {"count": {"type": "integer"}, "xrefs": {"type": "array", "items": {"$ref": "#/components/schemas/ExternalReference"}}}}}}}}
+      }
+    },
+    "/api/v1/xref_reload": {
+      "post": {
+        "summary": "Reload one direct DWG/DXF xref, underlay, or point cloud; prior content survives load failure",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefIdRequest"}}}},
+        "responses": {"200": {"description": "Fresh reference and diagnostics"}, "400": {"description": "Unsupported kind or load failure"}, "404": {"description": "Unknown reference"}}
+      }
+    },
+    "/api/v1/xref_unload": {
+      "post": {
+        "summary": "Unload one direct reference without deleting its definition",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefIdRequest"}}}},
+        "responses": {"200": {"description": "Fresh reference, session_only, unchanged"}, "404": {"description": "Unknown reference"}}
+      }
+    },
+    "/api/v1/xref_detach": {
+      "post": {
+        "summary": "Detach one direct reference, its insertion, and owned dependent records in one undo step",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefIdRequest"}}}},
+        "responses": {"200": {"description": "Detached id and name"}, "404": {"description": "Unknown reference"}}
+      }
+    },
+    "/api/v1/xref_bind": {
+      "post": {
+        "summary": "Bind one direct DWG/DXF xref into a local block definition",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefIdRequest"}}}},
+        "responses": {"200": {"description": "Local block and unremapped count"}, "400": {"description": "Unsupported kind or bind failure"}, "404": {"description": "Unknown reference"}}
+      }
+    },
+    "/api/v1/xref_set_path": {
+      "post": {
+        "summary": "Set one direct reference's stored path or path type without reloading",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefSetPathRequest"}}}},
+        "responses": {"200": {"description": "old_path, saved_path, reload_required, unchanged, reference"}, "400": {"description": "Invalid or unconvertible path"}, "404": {"description": "Unknown reference"}}
+      }
+    },
+    "/api/v1/xref_set_type": {
+      "post": {
+        "summary": "Switch one direct DWG/DXF xref between attachment and overlay",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefSetTypeRequest"}}}},
+        "responses": {"200": {"description": "Fresh reference and unchanged"}, "400": {"description": "Unsupported kind or invalid reference type"}, "404": {"description": "Unknown reference"}}
+      }
+    },
     "/api/v1/layouts": {
+      "get": {
+        "summary": "List layouts",
+        "responses": {"200": {"description": "Layouts"}}
+      },
       "post": {
         "summary": "Create a layout with the default page setup",
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}}}},
         "responses": {"201": {"description": "Layout created"}, "400": {"description": "Duplicate or invalid name"}}
       }
     },
+    "/api/v1/layouts/{name}": {
+      "patch": {
+        "summary": "Rename a layout",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["new_name"], "properties": {"new_name": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "Layout renamed"}, "400": {"description": "Duplicate or invalid new name"}, "404": {"description": "Unknown layout"}}
+      },
+      "delete": {
+        "summary": "Delete a layout",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Layout deleted"}, "400": {"description": "Deletion refused"}, "404": {"description": "Unknown layout"}}
+      }
+    },
+    "/api/v1/layouts/{name}/activate": {
+      "post": {
+        "summary": "Activate a layout",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Layout activated"}, "404": {"description": "Unknown layout"}}
+      }
+    },
     "/api/v1/layouts/{name}/page-setup": {
+      "get": {
+        "summary": "Read a layout's plot configuration",
+        "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Stored setup"}, "404": {"description": "Unknown layout"}}
+      },
       "put": {
         "summary": "Write a layout's plot configuration (explicit fields win)",
         "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}],
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "paper": {"type": "string"}, "orientation": {"type": "string", "enum": ["portrait", "landscape"]},
           "fit": {"type": "boolean"}, "scale": {"type": "string"}, "center": {"type": "boolean"},
-          "window": {"type": "array", "items": {"type": "number"}}, "plot_style": {"type": "string"}
+          "offset_x": {"type": "number"}, "offset_y": {"type": "number"},
+          "area": {"type": "string", "enum": ["extents", "display", "limits", "layout", "window"]},
+          "window": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}, "plot_style": {"type": "string"}
         }}}}},
-        "responses": {"200": {"description": "Stored setup"}, "400": {"description": "Unknown layout, paper or scale"}}
+        "responses": {"200": {"description": "Stored setup"}, "400": {"description": "Invalid paper or scale"}, "404": {"description": "Unknown layout"}}
       }
     },
     "/api/v1/entities": {
@@ -250,6 +329,20 @@
     "/api/v1/header": {"get": {"summary": "Drawing header summary", "responses": {"200": {"description": "Header"}}}},
     "/api/v1/records": {"get": {"summary": "Database records (collection, type, offset, limit)", "responses": {"200": {"description": "Records"}, "400": {"description": "Invalid query"}}}},
     "/api/v1/openapi": {"get": {"summary": "This document", "responses": {"200": {"description": "OpenAPI JSON"}}}},
+    "/api/v1/entities_set": {
+      "post": {
+        "summary": "Atomically apply one flat common-property patch to unique entity handles in one undo step",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EntitiesSetRequest"}}}},
+        "responses": {"200": {"description": "{requested,written,unchanged}; no-op writes create no history"}, "400": {"description": "Unknown field, invalid value, duplicate handle, or locked/non-native target; nothing commits"}, "404": {"description": "Unknown handle; nothing commits"}}
+      }
+    },
+    "/api/v1/dgn_import": {
+      "post": {
+        "summary": "Prompt-free DGN import through the same conversion and placement pipeline as -DGNIMPORT",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DgnImportRequest"}}}},
+        "responses": {"200": {"description": "Resolved path, canonical model, and top-level converted entity count"}, "400": {"description": "Invalid DGN, model, units, mapping, codepage, or empty model"}}
+      }
+    },
     "/api/v1/{op}": {
       "post": {
         "summary": "Generic passthrough: any automation operation name with its JSON body (mutations are wrapped in the protocol envelope automatically)",
@@ -259,6 +352,74 @@
     }
   },
   "components": {
+    "schemas": {
+      "ExternalReference": {
+        "type": "object",
+        "required": ["id", "name", "kind", "format", "reference_type", "status", "saved_path", "resolved_path", "parent_id", "nested", "size_bytes", "modified_unix_ms"],
+        "properties": {
+          "id": {"type": "string", "description": "Hexadecimal definition handle"},
+          "name": {"type": "string"},
+          "kind": {"type": "string", "enum": ["dwg_xref", "image", "underlay", "point_cloud"]},
+          "format": {"type": "string", "nullable": true},
+          "reference_type": {"type": "string", "enum": ["attach", "overlay"], "nullable": true},
+          "status": {"type": "string", "enum": ["loaded", "unloaded", "not_found", "failed", "stale", "orphaned", "unreferenced"]},
+          "saved_path": {"type": "string", "description": "Raw stored path"},
+          "resolved_path": {"type": "string", "nullable": true},
+          "parent_id": {"type": "string", "nullable": true},
+          "nested": {"type": "boolean"},
+          "size_bytes": {"type": "integer", "format": "int64", "nullable": true},
+          "modified_unix_ms": {"type": "integer", "format": "int64", "nullable": true}
+        }
+      },
+      "XrefIdRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string", "description": "Direct reference id from GET /api/v1/xrefs"}}
+      },
+      "XrefSetPathRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string"},
+          "path": {"type": "string", "minLength": 1},
+          "path_type": {"type": "string", "enum": ["full", "relative", "none"]}
+        },
+        "oneOf": [{"required": ["path"]}, {"required": ["path_type"]}]
+      },
+      "XrefSetTypeRequest": {
+        "type": "object",
+        "required": ["id", "reference_type"],
+        "properties": {
+          "id": {"type": "string"},
+          "reference_type": {"type": "string", "enum": ["attach", "overlay"]}
+        }
+      },
+      "EntitiesSetRequest": {
+        "type": "object",
+        "required": ["handles"],
+        "properties": {
+          "handles": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+          "layer": {"type": "string"},
+          "color": {"description": "ByLayer/ByBlock, ACI 0..256, {Index:N}, {Rgb:{r,g,b}}, or {rgb:[r,g,b]}"},
+          "linetype": {"type": "string"},
+          "linetype_scale": {"type": "number", "exclusiveMinimum": 0},
+          "invisible": {"type": "boolean"},
+          "label": {"type": "string", "minLength": 1}
+        },
+        "anyOf": [{"required": ["layer"]}, {"required": ["color"]}, {"required": ["linetype"]}, {"required": ["linetype_scale"]}, {"required": ["invisible"]}]
+      },
+      "DgnImportRequest": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "model": {"type": "string", "minLength": 1},
+          "units": {"type": "string", "enum": ["Master", "Sub", "master", "sub"]},
+          "mapping": {"type": "string", "description": "Standard, optionally followed by ;codepage=N"},
+          "codepage": {"type": "integer", "description": "Explicit numeric code page; overrides mapping suffix and stored settings"}
+        }
+      }
+    },
     "securitySchemes": {
       "bearer": {"type": "http", "scheme": "bearer", "description": "OCS_API_TOKEN, or the token printed on stderr at startup."}
     }

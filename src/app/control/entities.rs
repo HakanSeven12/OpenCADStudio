@@ -60,6 +60,131 @@ pub(super) fn require_existing(
     }
 }
 
+fn resolve_layer(
+    document: &document::Document,
+    value: &Value,
+) -> Parsed<(String, Option<document::Handle>)> {
+    let name = value
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| failure("invalid_layer", "layer must be a non-empty string"))?;
+    let layer = document
+        .layers
+        .iter()
+        .find(|layer| layer.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| failure("layer_missing", format!("Layer '{name}' does not exist")))?;
+    Ok((
+        layer.name.clone(),
+        (!layer.handle.is_null()).then_some(layer.handle),
+    ))
+}
+
+fn resolve_linetype(
+    document: &document::Document,
+    value: &Value,
+) -> Parsed<(String, Option<document::Handle>)> {
+    let name = value
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| failure("invalid_linetype", "linetype must be a non-empty string"))?;
+    if name.eq_ignore_ascii_case("ByLayer") {
+        return Ok(("ByLayer".to_string(), None));
+    }
+    if name.eq_ignore_ascii_case("ByBlock") {
+        return Ok(("ByBlock".to_string(), None));
+    }
+    let linetype = document
+        .line_types
+        .iter()
+        .find(|linetype| linetype.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| {
+            failure(
+                "linetype_missing",
+                format!("Linetype '{name}' does not exist"),
+            )
+        })?;
+    Ok((
+        linetype.name.clone(),
+        (!linetype.handle.is_null()).then_some(linetype.handle),
+    ))
+}
+
+fn parse_entities_set_color(value: &Value) -> Parsed<document::types::Color> {
+    use document::types::Color;
+
+    let invalid = || {
+        failure(
+            "invalid_color",
+            "color must be ByLayer, ByBlock, an ACI integer 0..=256, {Index:N}, {Rgb:{r,g,b}} or {rgb:[r,g,b]}",
+        )
+    };
+    if let Some(name) = value.as_str() {
+        if name.eq_ignore_ascii_case("ByLayer") {
+            return Ok(Color::ByLayer);
+        }
+        if name.eq_ignore_ascii_case("ByBlock") {
+            return Ok(Color::ByBlock);
+        }
+        return Err(invalid());
+    }
+    if let Some(index) = value.as_i64() {
+        return match index {
+            0 => Ok(Color::ByBlock),
+            1..=255 => Ok(Color::Index(index as u8)),
+            256 => Ok(Color::ByLayer),
+            _ => Err(invalid()),
+        };
+    }
+    let Some(object) = value.as_object().filter(|object| object.len() == 1) else {
+        return Err(invalid());
+    };
+    if let Some(index) = object.get("Index") {
+        let Some(index) = index.as_u64() else {
+            return Err(invalid());
+        };
+        return match index {
+            0 => Ok(Color::ByBlock),
+            1..=255 => Ok(Color::Index(index as u8)),
+            256 => Ok(Color::ByLayer),
+            _ => Err(invalid()),
+        };
+    }
+    if let Some(rgb) = object.get("Rgb") {
+        let Some(rgb) = rgb.as_object().filter(|rgb| rgb.len() == 3) else {
+            return Err(invalid());
+        };
+        let component = |key: &str| {
+            rgb.get(key)
+                .and_then(Value::as_u64)
+                .and_then(|component| u8::try_from(component).ok())
+                .ok_or_else(invalid)
+        };
+        return Ok(Color::Rgb {
+            r: component("r")?,
+            g: component("g")?,
+            b: component("b")?,
+        });
+    }
+    if let Some(rgb) = object.get("rgb") {
+        let Some(rgb) = rgb.as_array().filter(|rgb| rgb.len() == 3) else {
+            return Err(invalid());
+        };
+        let mut components = [0u8; 3];
+        for (slot, component) in components.iter_mut().zip(rgb) {
+            *slot = component
+                .as_u64()
+                .and_then(|component| u8::try_from(component).ok())
+                .ok_or_else(invalid)?;
+        }
+        return Ok(Color::Rgb {
+            r: components[0],
+            g: components[1],
+            b: components[2],
+        });
+    }
+    Err(invalid())
+}
+
 impl OpenCADStudio {
     /// `entities_create` — build a batch of typed entities, auto-create the
     /// layers they name, and commit everything as one undoable step. All definitions are validated before the first
@@ -145,6 +270,249 @@ impl OpenCADStudio {
             "layers_created": layers_created,
         }));
         Ok(Task::none())
+    }
+
+    /// `entities_set` — apply one flat common-property patch to a batch of
+    /// existing entities. Parsing, lookup and edit-policy checks all finish
+    /// before the first write; only typed clones that actually differ enter
+    /// the single scene update.
+    pub(super) fn control_entities_set(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let result = self.entities_set(req)?;
+        self.set_control_result(result);
+        Ok(Task::none())
+    }
+
+    fn entities_set(&mut self, req: &Value) -> Result<Value, Value> {
+        let object = req
+            .as_object()
+            .ok_or_else(|| failure("invalid_request", "entities_set expects an object"))?;
+        for key in object.keys() {
+            if !matches!(
+                key.as_str(),
+                "handles"
+                    | "layer"
+                    | "color"
+                    | "linetype"
+                    | "linetype_scale"
+                    | "invisible"
+                    | "label"
+                    | "op"
+                    | "request_id"
+                    | "document_id"
+                    | "revision"
+                    | "geometry_revision"
+                    | "camera_revision"
+                    | "selection"
+                    | "client_id"
+                    | "steps"
+                    | "protocol"
+                    | "session_id"
+                    | "token"
+                    | "active_only"
+                    // Batch binding resolution normally removes this key. The
+                    // core remains tolerant if a transport leaves it in place.
+                    | "bindings"
+            ) {
+                return Err(failure(
+                    "unknown_entity_field",
+                    format!("Unknown entities_set field '{key}'"),
+                ));
+            }
+        }
+
+        let handles = hex_handles(req, "handles")?;
+        let mut seen = std::collections::HashSet::with_capacity(handles.len());
+        if let Some(duplicate) = handles.iter().find(|handle| !seen.insert(**handle)) {
+            return Err(failure(
+                "duplicate_handle",
+                format!("Duplicate handle {:X}", duplicate.value()),
+            ));
+        }
+        if !["layer", "color", "linetype", "linetype_scale", "invisible"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+        {
+            return Err(failure(
+                "properties_required",
+                "Supply at least one of layer, color, linetype, linetype_scale or invisible",
+            ));
+        }
+
+        let i = self.active_tab;
+        let document = &self.tabs[i].scene.document;
+        let layer = req
+            .get("layer")
+            .map(|value| resolve_layer(document, value))
+            .transpose()?;
+        let color = req.get("color").map(parse_entities_set_color).transpose()?;
+        let linetype = req
+            .get("linetype")
+            .map(|value| resolve_linetype(document, value))
+            .transpose()?;
+        let linetype_scale = req
+            .get("linetype_scale")
+            .map(|value| {
+                value
+                    .as_f64()
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+                    .ok_or_else(|| {
+                        failure(
+                            "invalid_linetype_scale",
+                            "linetype_scale must be a finite number greater than zero",
+                        )
+                    })
+            })
+            .transpose()?;
+        let invisible = req
+            .get("invisible")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| failure("invalid_invisible", "invisible must be a Boolean"))
+            })
+            .transpose()?;
+        let label = req
+            .get("label")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|label| !label.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| failure("invalid_label", "label must be a non-empty string"))
+            })
+            .transpose()?
+            .unwrap_or_else(|| "ENTITIESSET".to_string());
+
+        require_existing(document, &handles)?;
+        for &handle in &handles {
+            let scene = &self.tabs[i].scene;
+            if scene.is_layer_locked(handle) {
+                return Err(failure("layer_locked", "entity is on a locked layer"));
+            }
+            if scene.is_reference_only(handle) {
+                return Err(failure(
+                    "reference_only",
+                    "entity is reference-only (plugin-owned display data)",
+                ));
+            }
+            if scene.native_edit_disabled(handle) {
+                return Err(failure(
+                    "native_edit_disabled",
+                    "entity is selectable custom geometry; use its plugin write path",
+                ));
+            }
+        }
+
+        let mut updates = Vec::with_capacity(handles.len());
+        for &handle in &handles {
+            let source = document
+                .get_entity(handle)
+                .expect("all entities_set handles were validated");
+            let mut edited = source.clone();
+            if let Some((name, handle)) = &layer {
+                let construction =
+                    crate::scene::block_construction::is_construction(edited.common());
+                crate::scene::view::dispatch::apply_common_prop(&mut edited, "layer", name);
+                if !construction && edited.common().layer == *name {
+                    edited.common_mut().layer_handle = *handle;
+                }
+            }
+            if let Some(color) = color {
+                crate::scene::view::dispatch::apply_color(&mut edited, color);
+            }
+            if let Some((name, handle)) = &linetype {
+                let construction =
+                    crate::scene::block_construction::is_construction(edited.common());
+                crate::scene::view::dispatch::apply_common_prop(&mut edited, "linetype", name);
+                if !construction {
+                    edited.common_mut().linetype_handle = *handle;
+                }
+            }
+            if let Some(scale) = linetype_scale {
+                crate::scene::view::dispatch::apply_common_prop(
+                    &mut edited,
+                    "linetype_scale",
+                    &scale.to_string(),
+                );
+            }
+            if let Some(invisible) = invisible {
+                let current = edited.as_entity_mut().is_invisible();
+                if current != invisible {
+                    crate::scene::view::dispatch::toggle_invisible(&mut edited);
+                }
+            }
+            if &edited != source {
+                updates.push(edited);
+            }
+        }
+
+        let requested = handles.len();
+        let unchanged = requested - updates.len();
+        if updates.is_empty() {
+            return Ok(json!({
+                "requested": requested,
+                "written": 0,
+                "unchanged": unchanged,
+            }));
+        }
+
+        // Ordinary block members need a full assembled-block invalidation;
+        // update_entities already does that itself for BLOCK/BLOCKEND sentinels.
+        let changed_handles: Vec<document::Handle> = updates
+            .iter()
+            .map(|entity| entity.common().handle)
+            .collect();
+        let sentinel_update = updates.iter().any(|entity| {
+            matches!(
+                entity,
+                document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
+            )
+        });
+        let dimension_handles: Vec<document::Handle> = updates
+            .iter()
+            .filter_map(|entity| match entity {
+                document::EntityType::Dimension(dimension)
+                    if !dimension.base().block_name.is_empty() =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        let touches_block = !sentinel_update && {
+            let changes: Vec<_> = changed_handles
+                .iter()
+                .copied()
+                .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+                .collect();
+            self.tabs[i].scene.changes_touch_block_definition(&changes)
+        };
+
+        self.push_undo_snapshot(i, label);
+        let written = self.tabs[i].scene.update_entities(updates);
+        if touches_block {
+            self.invalidate_property_targets_or_blocks(i, &changed_handles);
+        }
+        if !dimension_handles.is_empty() {
+            // update_entities handles slots, but a Dimension renders from its
+            // baked block. Use the normal property path to detach that picture
+            // inside the same undo group and publish the resulting redraw.
+            self.invalidate_property_targets(i, &dimension_handles);
+        }
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+        Ok(json!({
+            "requested": requested,
+            "written": written,
+            "unchanged": unchanged,
+        }))
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn entities_set_for_test(&mut self, req: &Value) -> Result<Value, Value> {
+        let result = self.entities_set(req);
+        self.finish_all_pending_history();
+        result
     }
 
     /// `entities_delete` — erase by handles. Every handle is

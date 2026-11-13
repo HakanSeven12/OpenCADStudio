@@ -147,9 +147,9 @@ impl PluginManager {
     }
 
     /// Like [`PluginManager::load`], but with the package's expected plugin id:
-    /// the runner's self-declared manifest id must match, and the resulting id
-    /// must not collide with an already-loaded plugin (transport identity is
-    /// host-verified, not self-asserted).
+    /// the runner's self-declared manifest id must match (the transport stays
+    /// the verified identity), the id must not collide with an already-loaded
+    /// plugin, and the spawn bootstrap's declaration window carries it.
     pub fn load_with_expected_id(
         &mut self,
         cdylib_path: &Path,

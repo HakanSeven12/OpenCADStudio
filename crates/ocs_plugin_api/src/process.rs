@@ -545,7 +545,13 @@ impl PluginProcess {
         };
 
         // Accept the runner connection with a timeout so a hung/crashed runner
-        // does not block the host indefinitely.
+        // does not block the host indefinitely. The wait is a POLL loop that
+        // also watches the runner itself: a runner that exits while connecting
+        // (stale wire schema, unloadable library, crash) ends the wait within
+        // one poll tick instead of burning the whole spawn budget — a
+        // start-of-day worse case of 90 s per dead plugin had every launch
+        // freeze for a minute and a half with a perfectly healthy host.
+        let accept_deadline = Instant::now() + spawn_timeout();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(listener.accept());
@@ -553,7 +559,6 @@ impl PluginProcess {
         // The wait also watches the runner itself: one that exits before it
         // connects (a plugin built against another wire schema, a crash while
         // loading) fails the spawn at once instead of after the whole budget.
-        let accept_deadline = Instant::now() + spawn_timeout();
         let accepted = loop {
             let remaining = accept_deadline.saturating_duration_since(Instant::now());
             match rx.recv_timeout(remaining.min(SPAWN_EXIT_POLL)) {

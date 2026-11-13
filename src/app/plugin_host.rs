@@ -87,6 +87,15 @@ impl<'a> HostSession<'a> {
     /// transport owner. Alias lookup must not turn into an ownership bypass:
     /// a title/command that resolves to another plugin's panel is refused.
     fn owned_panel_id(&self, plugin_id: &str, panel_id: &str) -> Option<String> {
+        if let Some(state) = &self.app.plugin_dialog_state {
+            if (panel_id.is_empty()
+                || state.def.title == panel_id
+                || state.def.title.eq_ignore_ascii_case(panel_id))
+                && state.plugin_id.as_deref() == Some(plugin_id)
+            {
+                return Some(panel_id.to_string());
+            }
+        }
         let resolved = resolve_toggle_panel_id(self.app, panel_id)?;
         match self.app.plugin_panels.get(&resolved) {
             Some(panel) if panel.owner_plugin_id.as_deref() == Some(plugin_id) => Some(resolved),
@@ -17933,5 +17942,51 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(host.app.plugin_panels["panel"].visible);
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
         assert!(host.app.tabs[0].history.pending.is_none());
+    }
+
+    #[test]
+    fn api17_update_panel_for_plugin_allows_owned_modal_dialog() {
+        use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let dlg = DialogDef::new("Test Dialog")
+            .with_control(DialogControl::Text {
+                id: "field1".into(),
+                label: "Field 1".into(),
+                default: "initial".into(),
+            });
+        app.open_plugin_dialog_on_tab(0, dlg, Some("MY_PLUGIN".to_string()));
+
+        let mut host = HostSession::new(&mut app, 0);
+
+        // Foreign plugin cannot update the dialog
+        assert!(!host.update_panel_for_plugin(
+            "OTHER_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("hacked".into()))]),
+        ));
+
+        // Owner plugin can update by title
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "Test Dialog",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("updated".into()))]),
+        ));
+        assert_eq!(
+            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").map(String::as_str),
+            Some("updated")
+        );
+
+        // Owner plugin can also update with empty panel_id (active dialog convention)
+        assert!(host.update_panel_for_plugin(
+            "MY_PLUGIN",
+            "",
+            std::collections::HashMap::from([("field1".into(), DialogValue::Text("empty_id_update".into()))]),
+        ));
+        assert_eq!(
+            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").map(String::as_str),
+            Some("empty_id_update")
+        );
     }
 }

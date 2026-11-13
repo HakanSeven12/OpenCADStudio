@@ -301,6 +301,7 @@ pub enum EntryKind {
     Command,
     Output,
     Error,
+    Warning,
     Info,
     /// A row of a listing (`?` tables): drawn in a fixed-width font so its
     /// space-padded columns line up.
@@ -537,13 +538,10 @@ impl CommandLine {
         }
         self.push(EntryKind::Error, text);
     }
-    /// Append a warning about the session that no command caused (the
-    /// renderer fell back to the CPU, say). Styled like an error so it is
-    /// seen, but it must not touch `last_error` / `error_revision`:
-    /// automation reads those to decide whether the command it just ran
-    /// failed, and a warning is not a failed command.
+    /// Append a warning without marking the command as failed. Automation
+    /// reads `last_error` / `error_revision`, which warnings never touch.
     pub fn push_warning(&mut self, msg: &str) {
-        self.push(EntryKind::Error, format!("*{}*  {msg}", t!("Warning")));
+        self.push(EntryKind::Warning, format!("*{}*  {msg}", t!("Warning")));
     }
     pub fn push_info(&mut self, msg: &str) {
         self.push(EntryKind::Info, format_info(msg));
@@ -564,7 +562,7 @@ impl CommandLine {
         self.quiet_replay = self.quiet_replay.saturating_sub(1);
     }
     fn push(&mut self, kind: EntryKind, text: String) {
-        if self.quiet_replay > 0 && !matches!(kind, EntryKind::Error) {
+        if self.quiet_replay > 0 && !matches!(kind, EntryKind::Error | EntryKind::Warning) {
             // A quiet machine replay (API v13) leaves no echo; errors pass.
             return;
         }
@@ -979,7 +977,7 @@ impl CommandLine {
             .iter()
             .fold(column![].spacing(0), |col, entry| {
                 let kind = entry.kind.clone();
-                let is_error = kind == EntryKind::Error;
+                let is_emphasized = matches!(kind, EntryKind::Error | EntryKind::Warning);
                 let entry_text = |value: String| {
                     let mut txt = text(value).size(self.font_size).font(self.font).style({
                         let kind = kind.clone();
@@ -987,7 +985,7 @@ impl CommandLine {
                             color: Some(history_color(theme, &kind)),
                         }
                     });
-                    if is_error {
+                    if is_emphasized {
                         txt = txt.font(iced::Font {
                             weight: iced::font::Weight::Bold,
                             ..self.font
@@ -1644,6 +1642,7 @@ fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
         EntryKind::Command => text_color(theme),
         EntryKind::Output | EntryKind::Table => text_color(theme).scale_alpha(0.72),
         EntryKind::Error => palette.danger.base.color,
+        EntryKind::Warning => palette.warning.base.color,
         EntryKind::Info => user_text_color().unwrap_or_else(|| {
             accessible_accent_threshold(
                 palette.primary.base.color,
@@ -1662,7 +1661,9 @@ fn history_highlight_format(
     iced::advanced::text::highlighter::Format {
         color: Some(history_color(theme, kind)),
         font: match kind {
-            EntryKind::Error => Some(iced::Font::DEFAULT.weight(iced::font::Weight::Bold)),
+            EntryKind::Error | EntryKind::Warning => {
+                Some(iced::Font::DEFAULT.weight(iced::font::Weight::Bold))
+            }
             EntryKind::Table => Some(iced::Font::MONOSPACE),
             _ => None,
         },
@@ -1691,7 +1692,7 @@ mod tests {
         let revision = line.error_revision;
         line.push_warning("GPU unavailable");
         let last = line.history.last().expect("warning must be appended");
-        assert_eq!(last.kind, super::EntryKind::Error);
+        assert_eq!(last.kind, super::EntryKind::Warning);
         assert!(last.text.ends_with("GPU unavailable"), "{}", last.text);
         assert_eq!(line.error_revision, revision);
         assert!(line.last_error.is_none());
@@ -1865,12 +1866,15 @@ mod tests {
     }
 
     #[test]
-    fn error_history_uses_bold_highlight_format() {
+    fn error_and_warning_history_use_bold_highlight_format() {
         let theme = iced::Theme::Light;
         let bold = iced::Font::DEFAULT.weight(iced::font::Weight::Bold);
+        for kind in [EntryKind::Error, EntryKind::Warning] {
+            assert_eq!(history_highlight_format(&kind, &theme).font, Some(bold));
+        }
         assert_eq!(
-            history_highlight_format(&EntryKind::Error, &theme).font,
-            Some(bold)
+            history_highlight_format(&EntryKind::Warning, &theme).color,
+            Some(theme.palette().warning.base.color)
         );
         for kind in [EntryKind::Command, EntryKind::Info, EntryKind::Output] {
             assert_eq!(history_highlight_format(&kind, &theme).font, None);

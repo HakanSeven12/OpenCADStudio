@@ -23,6 +23,8 @@ The package contains:
 - A custom external `.lin`/`.dnl` file retained by `CENTERLTYPEFILE`, when present. Embedded linetype definitions are already stored in the drawing and are not exported as invented `.lin` files.
 - `ETRANSMIT.txt`, listing packaged files, missing dependencies, and warnings.
 
+Missing or conflicting dependencies produce warnings; they do not prevent the available drawing and resolved dependencies from being exported.
+
 ## References and filenames
 - Packaged drawings are rewritten copies; the original drawings are never modified. Xrefs remain separate files—they are not bound.
 - Xref and other resource paths are relative to their owning drawing. In Structured packages a root drawing uses paths such as `xref/name.dwg` and `Images/name.png`, while one xref references a sibling xref as `name.dwg` and another resource type as `../Images/name.png`.

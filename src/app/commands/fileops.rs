@@ -1068,7 +1068,7 @@ fn report_package_issues(
             .map(|issue| format!("{} (from {})", issue.reference, issue.owner))
             .collect::<Vec<_>>()
             .join(", ");
-        app.command_line.push_error(
+        app.command_line.push_warning(
             crate::tf!("{cmd}: {n} referenced file(s) missing or conflicting: {names}").as_ref(),
         );
     }
@@ -1224,7 +1224,7 @@ impl OpenCADStudio {
         if !skipped.is_empty() {
             let n = skipped.len();
             let names = skipped.join(", ");
-            self.command_line.push_error(
+            self.command_line.push_warning(
                 crate::tf!("{cmd}: {n} referenced file(s) missing or conflicting: {names}")
                     .as_ref(),
             );
@@ -1505,6 +1505,50 @@ ZOOM EXTENTS
             crate::io::transmit::REPORT_FILE
         );
         assert!(!dir.join("root_archive").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_etransmit_missing_dependencies_warn_without_failing_export() {
+        let (dir, mut app) = transmittal_command_fixture("warnings");
+        let i = app.active_tab;
+        let source = app.tabs[i].current_path.clone().unwrap();
+        let mut doc = document::Document::new();
+        let mut style = document::tables::TextStyle::new("MissingFont");
+        style.font_file = "missing-ocs-etransmit-font.shx".into();
+        doc.text_styles.add(style).unwrap();
+        std::fs::write(
+            &source,
+            crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap(),
+        )
+        .unwrap();
+        let error_revision = app.command_line.error_revision;
+        let last_error = app.command_line.last_error.clone();
+
+        app.archive_native(i, "ETRANSMIT");
+
+        let output = dir.join("root_transmit.zip");
+        assert!(output.is_file(), "missing dependencies must not block the ZIP");
+        assert_eq!(app.command_line.error_revision, error_revision);
+        assert_eq!(app.command_line.last_error, last_error);
+        let notice = app.command_line.history.last().unwrap();
+        assert_eq!(
+            notice.kind,
+            crate::ui::command_line::EntryKind::Warning,
+            "{}",
+            notice.text
+        );
+        assert!(notice.text.contains("missing-ocs-etransmit-font.shx"));
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(output).unwrap())).unwrap();
+        let mut report = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name(crate::io::transmit::REPORT_FILE).unwrap(),
+            &mut report,
+        )
+        .unwrap();
+        assert!(report.contains("missing-ocs-etransmit-font.shx"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

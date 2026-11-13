@@ -2889,11 +2889,8 @@ impl OpenCADStudio {
                             .await?;
                         let path = crate::sys::handle_path(&handle);
                         let bytes = handle.read().await;
-                        let result = crate::io::obj::parse_obj(
-                            &String::from_utf8_lossy(&bytes),
-                            [0.7, 0.7, 0.85, 1.0],
-                        )
-                        .ok_or_else(|| "no usable geometry in file".to_string());
+                        let result = crate::io::obj::parse_obj(&String::from_utf8_lossy(&bytes))
+                            .ok_or_else(|| "no usable geometry in file".to_string());
                         Some((tab_id, path, result))
                     },
                     |picked| match picked {
@@ -2914,7 +2911,7 @@ impl OpenCADStudio {
                     Err(error) => self
                         .command_line
                         .push_error(crate::tf!("IMPORTOBJ: {error}").as_ref()),
-                    Ok(mut mesh) => {
+                    Ok(meshes) => {
                         let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                             self.command_line.push_info(
                                 crate::t!("IMPORTOBJ: target drawing was closed.").as_ref(),
@@ -2925,15 +2922,15 @@ impl OpenCADStudio {
                             .file_stem()
                             .map(|s| s.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "obj_mesh".into());
-                        mesh.name = file_stem.clone();
                         self.push_undo_snapshot(i, "IMPORTOBJ");
-                        let entity = crate::modules::insert::solid3d_cmds::empty_solid3d();
-                        let handle = self.tabs[i].scene.add_entity(entity);
-                        if !handle.is_null() {
-                            self.tabs[i]
-                                .scene
-                                .meshes
-                                .insert(handle, crate::scene::MeshLodSet::from_single(mesh));
+                        let count = meshes
+                            .into_iter()
+                            .map(|mesh| {
+                                self.tabs[i].scene.add_entity(document::EntityType::Mesh(mesh))
+                            })
+                            .filter(|handle| !handle.is_null())
+                            .count();
+                        if count > 0 {
                             self.tabs[i].dirty = true;
                             self.command_line.push_output(
                                 crate::tf!("IMPORTOBJ: imported \"{file_stem}\" as mesh.").as_ref(),

@@ -6007,7 +6007,7 @@ pub enum Message {
     ObjImportFinished(
         u64,
         std::path::PathBuf,
-        Result<crate::scene::model::mesh_model::MeshModel, String>,
+        Result<Vec<document::entities::mesh::Mesh>, String>,
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),

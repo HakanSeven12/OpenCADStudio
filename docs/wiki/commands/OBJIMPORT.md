@@ -1,12 +1,12 @@
 ---
-summary: Imports a polygon mesh from a Wavefront OBJ file into the current drawing.
+summary: Imports a Wavefront OBJ file into the current drawing as MESH objects, one for each object of the file.
 related: IMPORT, STLOUT
 ---
 
 ## Usage
 1. Run the command. A file dialog opens.
 2. Pick an OBJ file.
-3. The mesh is added to the drawing, named after the file.
+3. Each object of the file becomes a MESH on the current layer.
 
 ## Notes
 - The import can be undone.

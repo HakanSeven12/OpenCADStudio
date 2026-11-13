@@ -1346,6 +1346,13 @@ impl OpenCADStudio {
             {
                 return Some(self.apply_cmd_result(CmdResult::CommitAndExit(entity.clone())));
             }
+            if entity.is_none() {
+                // The command goes on (a leader's arrowhead is still to come).
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
             if let Some(entity) = entity {
                 let insert_name = match &entity {
                     document::EntityType::Insert(ins) => Some(ins.block_name.clone()),

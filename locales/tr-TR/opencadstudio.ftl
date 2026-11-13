@@ -8229,6 +8229,7 @@ mleader-prompt =
     .landing-first-text = Kılavuz dirseğinin konumunu belirtin veya [önce kılavuz ok ucu/önce içerik/Seçenekler] <Seçenekler>:
     .content-first = Metnin ilk köşesini belirtin veya [önceden metin gir/çok satırlı metin seç/önce kılavuz ok ucu/önce kılavuz dirseği/Seçenekler] <Seçenekler>:
     .content-first-text = Metnin ilk köşesini belirtin veya [çok satırlı metin seç/önce kılavuz ok ucu/önce kılavuz dirseği/Seçenekler] <Seçenekler>:
+    .content-first-block = Blok için ekleme noktasını belirtin veya [önce kılavuz ok ucu/önce kılavuz dirseği/Seçenekler] <Seçenekler>:
     .landing = Kılavuz dirseğinin konumunu belirtin:
     .arrowhead = Kılavuz ok ucunun konumunu belirtin:
     .next-point = Sonraki noktayı belirtin:

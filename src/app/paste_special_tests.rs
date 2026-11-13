@@ -2,6 +2,7 @@
 //! each one places.
 use super::{Message, OpenCADStudio};
 use crate::io::ole_embed::EmbeddedImage;
+use crate::sys::clipboard_link::SourceLink;
 use document::entities::{Line, Ole2Frame, OlePresentation, RasterImage, Table};
 use document::types::Vector3;
 use document::EntityType;
@@ -37,7 +38,11 @@ fn started_with(
         app.tabs[i].scene.deselect_all();
     }
     let _ = app.dispatch_command("PASTESPEC");
-    let _ = app.update(Message::PasteSpecial(text.map(str::to_string), picture));
+    let _ = app.update(Message::PasteSpecial(
+        text.map(str::to_string),
+        picture,
+        None,
+    ));
     app
 }
 
@@ -416,7 +421,7 @@ fn with_nothing_to_paste_the_command_says_so_and_ends() {
     app.automation_op(r#"{"op":"new"}"#);
     let errors = app.command_line.error_revision;
     let _ = app.dispatch_command("PASTESPEC");
-    let _ = app.update(Message::PasteSpecial(None, None));
+    let _ = app.update(Message::PasteSpecial(None, None, None));
     let i = app.active_tab;
     assert!(app.tabs[i].active_cmd.is_none(), "no format, no command");
     assert!(
@@ -450,7 +455,7 @@ fn the_prompt_is_shown_once_when_the_clipboard_has_been_read() {
         Vec::<String>::new(),
         "there is nothing to ask while the clipboard is being read"
     );
-    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None));
+    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None, None));
     let shown = prompts_shown(&app);
     assert_eq!(shown.len(), 1, "one prompt, with every format: {shown:?}");
 }
@@ -476,8 +481,132 @@ fn copied_objects_can_be_asked_for_while_the_clipboard_is_read() {
         Vec::<String>::new(),
         "the prompt waits for the formats of the system clipboard"
     );
-    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None));
+    let _ = app.update(Message::PasteSpecial(Some(RANGE.to_string()), None, None));
     assert_eq!(keywords(&app), ["O", "B", "T", "TA"]);
     let shown = prompts_shown(&app);
     assert_eq!(shown.len(), 1, "one prompt, with every format: {shown:?}");
+}
+
+/// Rows of cells in a file, as a spreadsheet keeps them.
+const BARS: &str = "Mark,Qty,Length\nB1,4,5.20\nC1,6,3.00\nS1,1,12.50\n";
+
+/// A file that holds `contents`, in a folder of its own, and the link a
+/// spreadsheet leaves on the clipboard when `cells` of it are copied.
+fn copied_from_a_file(name: &str, contents: &str, cells: &str) -> (std::path::PathBuf, SourceLink) {
+    let file = drawing_folder(name).join("bars.csv");
+    std::fs::write(&file, contents).expect("the file the cells are copied from");
+    let link = SourceLink {
+        file: file.to_string_lossy().into_owned(),
+        sheet: "bars".to_string(),
+        cells: cells.to_string(),
+    };
+    (file, link)
+}
+
+/// PASTESPEC in a new drawing, once the system clipboard is read: the text
+/// of a copied range and the link to where it was copied from.
+fn started_with_a_link(text: &str, link: SourceLink) -> OpenCADStudio {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let _ = app.dispatch_command("PASTESPEC");
+    let _ = app.update(Message::PasteSpecial(
+        Some(text.to_string()),
+        None,
+        Some(link),
+    ));
+    app
+}
+
+fn remove_folder_of(file: &std::path::Path) {
+    if let Some(folder) = file.parent() {
+        let _ = std::fs::remove_dir_all(folder);
+    }
+}
+
+#[test]
+fn a_range_copied_from_a_saved_file_is_offered_as_a_link() {
+    let (file, link) = copied_from_a_file("link-offered", BARS, "A1:B3");
+    let app = started_with_a_link("Mark\tQty\r\nB1\t4\r\nC1\t6\r\n", link);
+    assert_eq!(keywords(&app), ["T", "TA", "L"]);
+    remove_folder_of(&file);
+}
+
+#[test]
+fn link_places_a_table_of_the_cells_linked_to_their_file() {
+    let (file, link) = copied_from_a_file("link-placed", BARS, "A1:B3");
+    // The cells come from the file, not from the text beside the link.
+    let mut app = started_with_a_link("not\tthe file\r\n", link);
+    // The format, then the insertion point of the table.
+    answer(&mut app, &["L", "5,5"]);
+    let i = app.active_tab;
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "the command ends with the table placed"
+    );
+    let placed = tables(&app);
+    assert_eq!(placed.len(), 1, "one table for the linked cells");
+    assert_eq!(
+        cells(&placed[0]),
+        [["Mark", "Qty"], ["B1", "4"], ["C1", "6"]]
+    );
+    assert_eq!(placed[0].insertion_point, Vector3::new(5.0, 5.0, 0.0));
+    // The drawing holds the data link the table reads: named after the
+    // file, to those cells of it.
+    let document = &app.tabs[i].scene.document;
+    let links = crate::app::annotation_data::data_link_entries(document);
+    assert_eq!(links.len(), 1, "one data link: {links:?}");
+    assert_eq!(links[0].0, "bars");
+    assert_eq!(
+        placed[0].cell(0, 0).and_then(|cell| cell.data_link_handle),
+        Some(links[0].1),
+        "the table's cells are tied to that link"
+    );
+    assert_eq!(
+        crate::app::annotation_data::read_data_link(document, links[0].1),
+        Ok(vec![
+            vec!["Mark".to_string(), "Qty".to_string()],
+            vec!["B1".to_string(), "4".to_string()],
+            vec!["C1".to_string(), "6".to_string()],
+        ]),
+        "the link reads the copied cells, not the whole file"
+    );
+    remove_folder_of(&file);
+}
+
+#[test]
+fn a_linked_table_follows_its_file() {
+    let (file, link) = copied_from_a_file("link-updated", BARS, "A1:B3");
+    let mut app = started_with_a_link("Mark\tQty\r\n", link);
+    answer(&mut app, &["L", "0,0"]);
+    assert_eq!(tables(&app).len(), 1, "the linked table");
+    // The file changes; the tables of the drawing are updated from it.
+    std::fs::write(&file, "Mark,Qty,Length\nB1,8,5.20\nC2,6,3.00\n").expect("the changed file");
+    let _ = app.dispatch_command("DATALINKUPDATE _RUN U ALL");
+    let placed = tables(&app);
+    assert_eq!(placed.len(), 1);
+    assert_eq!(
+        cells(&placed[0]),
+        [["Mark", "Qty"], ["B1", "8"], ["C2", "6"]]
+    );
+    remove_folder_of(&file);
+}
+
+#[test]
+fn a_link_to_a_file_that_is_gone_says_so_and_places_nothing() {
+    let (file, link) = copied_from_a_file("link-gone", BARS, "A1:B3");
+    remove_folder_of(&file);
+    let mut app = started_with_a_link("Mark\tQty\r\n", link);
+    assert_eq!(keywords(&app), ["T", "TA", "L"]);
+    let errors = app.command_line.error_revision;
+    answer(&mut app, &["L", "0,0"]);
+    let i = app.active_tab;
+    assert!(
+        app.command_line.error_revision > errors,
+        "the command line says the file could not be read"
+    );
+    assert!(tables(&app).is_empty(), "no table without its cells");
+    assert!(
+        crate::app::annotation_data::data_link_entries(&app.tabs[i].scene.document).is_empty(),
+        "and no data link"
+    );
 }

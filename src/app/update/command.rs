@@ -3430,7 +3430,7 @@ impl OpenCADStudio {
                         .and_then(|(name, bytes)| EmbeddedImage::from_bytes(name, bytes).ok());
                     (text, picture)
                 },
-                |(text, picture)| Message::PasteSpecial(text, picture),
+                |(text, picture)| Message::PasteSpecial(text, picture, None),
             )
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -3447,7 +3447,7 @@ impl OpenCADStudio {
                             name: format!("{}.png", pasted_image_stem()),
                         })
                     });
-                    Message::PasteSpecial(text.clone(), picture)
+                    Message::PasteSpecial(text.clone(), picture, None)
                 })
             })
         }

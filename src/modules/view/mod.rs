@@ -1,5 +1,6 @@
 // View module — viewport tools, navigation, visual styles, palettes, interface.
 
+mod assistant_palette;
 mod cascade;
 mod count_palette;
 pub mod dview;
@@ -129,6 +130,7 @@ impl CadModule for ViewModule {
                         RibbonItem::LargeTool(count_palette::tool()),
                         RibbonItem::LargeTool(graphic_attributes_palette::tool()),
                         RibbonItem::LargeTool(sheetset::tool()),
+                        RibbonItem::LargeTool(assistant_palette::tool()),
                     ],
                 },
                 // ── Interface ─────────────────────────────────────────────────────

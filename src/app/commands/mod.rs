@@ -1179,6 +1179,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "VISUALSTYLES",
         "QUICKCALC",
         "QC",
+        "ASSISTANT",
+        "AI",
         "COMMANDHISTORY",
         "HYPERLINK",
         "XOPEN",

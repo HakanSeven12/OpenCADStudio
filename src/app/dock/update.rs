@@ -600,6 +600,7 @@ impl OpenCADStudio {
                         }
                     }
                     PanelId::QuickCalc => self.quick_calc.show = true,
+                    PanelId::Assistant => self.assistant.opened(),
                     PanelId::CommandHistory => {
                         self.show_command_history = true;
                         self.sync_command_history_panel();
@@ -701,6 +702,7 @@ impl OpenCADStudio {
             }
             PanelId::Laywalk => self.close_layer_walk(false),
             PanelId::QuickCalc => self.quick_calc.show = false,
+            PanelId::Assistant => self.assistant.show = false,
             PanelId::CommandHistory => {
                 self.show_command_history = false;
                 self.save_config();
@@ -842,6 +844,7 @@ impl OpenCADStudio {
                 tab.layer_walk.is_some() && !(tab.layer_walk_picking && tab.active_cmd.is_some())
             }
             PanelId::QuickCalc => self.quick_calc.show,
+            PanelId::Assistant => self.assistant.show,
             PanelId::CommandHistory => self.show_command_history,
             PanelId::GraphicAttributes => self.show_graphic_attributes,
             PanelId::Plugin(num) => {

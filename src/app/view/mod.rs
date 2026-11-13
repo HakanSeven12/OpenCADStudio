@@ -4029,6 +4029,13 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // Drain the Assistant's connection while it is open or working.
+        let assistant_poll = match self.assistant.poll_interval() {
+            Some(every) => iced::time::every(every).map(|_| {
+                Message::Assistant(crate::ui::window::assistant::AssistantMsg::Poll)
+            }),
+            None => Subscription::none(),
+        };
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
             iced::time::every(std::time::Duration::from_millis(530))
@@ -4152,6 +4159,7 @@ impl OpenCADStudio {
             capture_frame,
             caret_blink,
             quick_calc_flash,
+            assistant_poll,
             ribbon_minimize,
             web_fonts,
             autosave,

@@ -995,6 +995,7 @@ impl OpenCADStudio {
             &src,
             &drawing_name,
             active_plot_style.as_deref(),
+            self.transmittal_layout,
         ) {
             Ok(package) => package,
             Err(error) => {
@@ -1044,7 +1045,11 @@ fn write_archive_folder(
     std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     for (name, bytes) in entries {
         let name = crate::io::transmit_zip::entry_name(name)?;
-        std::fs::write(folder.join(name), bytes).map_err(|error| error.to_string())?;
+        let path = folder.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::fs::write(path, bytes).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1119,12 +1124,14 @@ impl OpenCADStudio {
             .active_plot_style
             .as_ref()
             .map(|table| table.name.clone());
-        let package = match crate::io::transmit::collect_web(
-            &self.tabs[i].scene.document,
+        let save_document = self.tabs[i].scene.document_for_save();
+        let (package, drawing) = match crate::io::transmit::collect_web(
+            &save_document,
             &filename,
             active_plot_style.as_deref(),
+            self.transmittal_layout,
         ) {
-            Ok(package) => package,
+            Ok(collected) => collected,
             Err(error) => {
                 self.command_line.push_error(
                     crate::tf!("{cmd}: cannot package the drawing ({e}).", e = error).as_ref(),
@@ -1151,8 +1158,7 @@ impl OpenCADStudio {
         // assembly and download are cheap and stay on the main thread —
         // they continue in the completion message.
         let zip_name = format!("{stem}_transmit.zip");
-        let prepared =
-            crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+        let prepared = crate::io::prepare_document_for_save(drawing, version);
         let cmd = cmd.to_string();
         let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
@@ -1514,5 +1520,34 @@ ZOOM EXTENTS
         assert!(folder.join(crate::io::transmit::REPORT_FILE).is_file());
         assert!(!dir.join("root_transmit.zip").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_archive_folder_creates_nested_subfolders() {
+        let folder = std::env::temp_dir().join(format!(
+            "ocs-transmit-folder-layout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let entries = vec![
+            ("root.dwg".to_owned(), b"root".to_vec()),
+            ("xref/nested.dwg".to_owned(), b"nested".to_vec()),
+            ("Fonts/custom.shx".to_owned(), b"font".to_vec()),
+        ];
+        super::write_archive_folder(&folder, &entries).unwrap();
+        assert_eq!(std::fs::read(folder.join("root.dwg")).unwrap(), b"root");
+        assert_eq!(
+            std::fs::read(folder.join("xref/nested.dwg")).unwrap(),
+            b"nested"
+        );
+        assert_eq!(
+            std::fs::read(folder.join("Fonts/custom.shx")).unwrap(),
+            b"font"
+        );
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }

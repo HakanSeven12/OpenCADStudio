@@ -1879,6 +1879,8 @@ pub(super) struct OpenCADStudio {
     font_source_url: String,
     /// Template a new drawing starts from (QNEW); empty = blank.
     qnew_template: String,
+    /// Source-relative, type-structured, or flat ETRANSMIT/ARCHIVE package.
+    transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// The start page's template list, while it is open: the drawing
     /// templates beside the default one.
     start_templates: Option<Vec<std::path::PathBuf>>,
@@ -3640,6 +3642,8 @@ pub enum Message {
     /// Options → Files: the default template for new drawings.
     QnewTemplateChanged(String),
     QnewTemplateBrowse,
+    /// Options → Open and Save: preserve, structured-by-type, or flat packages.
+    TransmittalLayoutChanged(crate::io::transmit::TransmittalLayout),
     /// NEW: the picked template a new drawing starts from (`None` = cancelled).
     NewFromTemplate(Option<std::path::PathBuf>),
     /// Open (true) or close the start page's template list.
@@ -6546,6 +6550,7 @@ impl OpenCADStudio {
             check_missing_fonts: true,
             font_source_url: String::new(),
             qnew_template: String::new(),
+            transmittal_layout: crate::io::transmit::TransmittalLayout::Structured,
             start_templates: None,
             font_source_input: String::new(),
             donation_prompt_version: String::new(),

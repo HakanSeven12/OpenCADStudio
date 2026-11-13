@@ -981,6 +981,7 @@ impl OpenCADStudio {
             check_missing_fonts: self.check_missing_fonts,
             font_source_url: self.font_source_url.clone(),
             qnew_template: self.qnew_template.clone(),
+            transmittal_layout: self.transmittal_layout,
             donation_prompt_version: self.donation_prompt_version.clone(),
             gpu_warning_silenced: self.gpu_warning_silenced.clone(),
             disabled_plugins: {
@@ -1224,6 +1225,7 @@ impl OpenCADStudio {
         self.check_missing_fonts = s.check_missing_fonts;
         self.font_source_url = s.font_source_url.clone();
         self.qnew_template = s.qnew_template.clone();
+        self.transmittal_layout = s.transmittal_layout;
         self.font_source_input = s.font_source_url.clone();
         self.donation_prompt_version = s.donation_prompt_version.clone();
         self.gpu_warning_silenced = s.gpu_warning_silenced.clone();
@@ -7652,7 +7654,14 @@ impl OpenCADStudio {
                     self.plot_dialog.style_missing = false;
                     self.plot_dialog.style_error = None;
                 } else {
-                    match crate::io::plot_style::PlotStyleTable::load_named(&name) {
+                    let base = self.tabs[self.active_tab]
+                        .scene
+                        .document
+                        .source_path
+                        .as_deref()
+                        .map(std::path::Path::new)
+                        .and_then(std::path::Path::parent);
+                    match crate::io::plot_style::PlotStyleTable::load_named_at(&name, base) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
@@ -7980,13 +7989,23 @@ impl OpenCADStudio {
             self.plot_dialog.window = self.plot_window;
         }
         let mut style_error = None;
+        let drawing_base = self.tabs[self.active_tab]
+            .scene
+            .document
+            .source_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(std::path::Path::parent);
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
                 .as_ref()
                 .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
         {
-            match crate::io::plot_style::PlotStyleTable::load_named(&ps.current_style_sheet) {
+            match crate::io::plot_style::PlotStyleTable::load_named_at(
+                &ps.current_style_sheet,
+                drawing_base,
+            ) {
                 Ok(table) => {
                     self.report_plot_style_warnings(&table);
                     self.active_plot_style = Some(table);
@@ -8391,7 +8410,14 @@ impl OpenCADStudio {
         // object. After reopening a drawing the name may be correct while the
         // in-memory table is still the previous/default one. Plotting must not
         // silently ignore the selected CTB in that state.
-        crate::io::plot_style::PlotStyleTable::load_named(&d.style_name).ok()
+        let base = self.tabs[self.active_tab]
+            .scene
+            .document
+            .source_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(std::path::Path::parent);
+        crate::io::plot_style::PlotStyleTable::load_named_at(&d.style_name, base).ok()
     }
 
     pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {

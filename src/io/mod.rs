@@ -1072,6 +1072,7 @@ pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<Document, Str
     crate::scene::center_native::import(&mut doc);
     resolve_raster_image_paths(&mut doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    crate::scene::text::sysfont::load_drawing_fonts(path.parent(), &doc);
     // Opening is a field evaluation event (FIELDEVAL bit 1).
     crate::entities::field::update_fields(&mut doc, 1, None);
     Ok(doc)
@@ -1347,6 +1348,7 @@ fn finalize_loaded_outcome(
     crate::entities::field::local_header_dates(doc);
     resolve_raster_image_paths(doc, path.parent());
     doc.source_path = Some(path.to_string_lossy().into_owned());
+    crate::scene::text::sysfont::load_drawing_fonts(path.parent(), doc);
     // Opening is a field evaluation event (FIELDEVAL bit 1).
     crate::entities::field::update_fields(doc, 1, None);
     Ok(outcome)

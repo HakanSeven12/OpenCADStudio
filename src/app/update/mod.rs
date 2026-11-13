@@ -11825,6 +11825,11 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::TransmittalLayoutChanged(layout) => {
+                self.transmittal_layout = layout;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
             Message::StartTemplates(open) => {
                 self.start_templates = open.then(|| self.template_folder_files());
                 if self.start_templates.as_ref().is_some_and(Vec::is_empty) {
@@ -14590,7 +14595,17 @@ impl OpenCADStudio {
                         .is_none_or(|table| !table.name.eq_ignore_ascii_case(&selected_style));
 
                     if needs_load {
-                        match crate::io::plot_style::PlotStyleTable::load_named(&selected_style) {
+                        let base = self.tabs[self.active_tab]
+                            .scene
+                            .document
+                            .source_path
+                            .as_deref()
+                            .map(std::path::Path::new)
+                            .and_then(std::path::Path::parent);
+                        match crate::io::plot_style::PlotStyleTable::load_named_at(
+                            &selected_style,
+                            base,
+                        ) {
                             Ok(table) => {
                                 self.report_plot_style_warnings(&table);
                                 self.active_plot_style = Some(table);

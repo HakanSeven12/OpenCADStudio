@@ -14,3 +14,4 @@ The tabs are **General**, **Files**, **Open and Save**, **Display**, **Drafting*
 ## Notes
 - The graphics backend is chosen on the Graphics tab.
 - The default template used by [`QNEW`](QNEW-Command) is set on the Files tab.
+- The Open and Save tab selects Preserve, Structured-by-type, or Flat packages for [`ETRANSMIT`](ETRANSMIT-Command) and [`ARCHIVE`](ARCHIVE-Command).

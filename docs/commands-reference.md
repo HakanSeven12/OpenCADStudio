@@ -629,7 +629,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `DBLIST` | — | List data for every entity in the drawing (LIST over the whole database rather than the current selection). |
 | `DSETTINGS` | `DS` | Menu: Drafting Settings.... |
 | `DWGPROPS` | — | Sets and displays file properties (Title, Subject, Author, Keywords, Custom fields) of the current drawing. *Tip:* Custom fields can be dynamically referenced by fields in title blocks and Sheet Sets. |
-| `ETRANSMIT` | `ZIP` | Packages the drawing, recursive xrefs, images, underlays, point clouds, fonts, SHX shapes, custom plot tables, and generated linetypes into one ZIP. The included report identifies missing files and name conflicts. |
+| `ETRANSMIT` | `ZIP` | Packages the drawing, recursive xrefs, images, underlays, point clouds, fonts, SHX shapes, custom plot tables, and external CENTERLTYPEFILE sources into one ZIP. Options selects source-folder preservation, type-based folders, or a flat package; references are rewritten and name collisions receive unique names. |
 | `EXIT` | — | Exits the application window after confirming unsaved changes. |
 | `FILEASSOC` | — | Registers the app as the handler of DWG/DXF files. † |
 | `FINDNONPURGEABLE` | — | Ribbon: Find Non-\nPurgeable Items. |

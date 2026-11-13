@@ -1,16 +1,26 @@
-//! Shared ETRANSMIT dependency discovery and package bookkeeping.
+//! Shared ETRANSMIT dependency discovery, reference rewriting, and packaging.
 //!
-//! The drawing remains authoritative: references are not renamed or rebound.
-//! A same-named dependency is therefore reused only when its bytes are exactly
-//! equal; otherwise it is reported as a conflict instead of silently replacing
-//! another file in the flat package.
+//! Packaged documents are clones: the user's drawings are never modified.
+//! Packages preserve source-relative folders, group files by type, or stay
+//! flat. References are rewritten to match those locations, with unique names
+//! allocated when different sources collide.
 
-use crate::io::transmit_zip::entry_name;
+use crate::io::transmit_zip::{entry_name, file_name};
 use document::{Document, EntityType};
 use std::collections::HashMap;
 
-pub(crate) const LINETYPES_FILE: &str = "opencadstudio.lin";
 pub(crate) const REPORT_FILE: &str = "ETRANSMIT.txt";
+const XREF_FOLDER: &str = "xref";
+const FONT_FOLDER: &str = "Fonts";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TransmittalLayout {
+    Preserve,
+    #[default]
+    Structured,
+    Flat,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DependencyKind {
@@ -22,6 +32,7 @@ pub(crate) enum DependencyKind {
     BigFont,
     Shape,
     PlotStyle,
+    Linetype,
 }
 
 impl DependencyKind {
@@ -35,6 +46,49 @@ impl DependencyKind {
             Self::BigFont => "big font",
             Self::Shape => "shape file",
             Self::PlotStyle => "plot style table",
+            Self::Linetype => "external linetype file",
+        }
+    }
+}
+
+/// Type-to-folder mapping for Structured packages. Empty folders intentionally
+/// mean the package root. The settings UI can expose these mappings later
+/// without changing collection or reference rewriting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TransmittalFolders {
+    xrefs: String,
+    images: String,
+    underlays: String,
+    point_clouds: String,
+    fonts: String,
+    plot_styles: String,
+    linetypes: String,
+}
+
+impl Default for TransmittalFolders {
+    fn default() -> Self {
+        Self {
+            xrefs: XREF_FOLDER.into(),
+            images: "Images".into(),
+            underlays: "Underlays".into(),
+            point_clouds: "PointClouds".into(),
+            fonts: FONT_FOLDER.into(),
+            plot_styles: "PlotStyles".into(),
+            linetypes: "Linetypes".into(),
+        }
+    }
+}
+
+impl TransmittalFolders {
+    fn folder(&self, kind: DependencyKind) -> &str {
+        match kind {
+            DependencyKind::Xref => &self.xrefs,
+            DependencyKind::Image => &self.images,
+            DependencyKind::Underlay => &self.underlays,
+            DependencyKind::PointCloud => &self.point_clouds,
+            DependencyKind::Font | DependencyKind::BigFont | DependencyKind::Shape => &self.fonts,
+            DependencyKind::PlotStyle => &self.plot_styles,
+            DependencyKind::Linetype => &self.linetypes,
         }
     }
 }
@@ -76,27 +130,53 @@ pub(crate) struct DependencyIssue {
 }
 
 #[derive(Debug)]
+struct Resource {
+    bytes: Vec<u8>,
+    identity: String,
+    file_name: String,
+    preserved_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct Addition {
+    path: String,
+    is_new: bool,
+}
+
+#[derive(Debug)]
 pub(crate) struct TransmittalPackage {
     pub entries: Vec<(String, Vec<u8>)>,
     pub issues: Vec<DependencyIssue>,
     pub warnings: Vec<String>,
     drawing_name: String,
+    layout: TransmittalLayout,
+    folders: TransmittalFolders,
     claimed: HashMap<String, String>,
+    sources: HashMap<String, String>,
     packaged: Vec<(String, String, String)>,
 }
 
 impl TransmittalPackage {
+    #[cfg(test)]
     pub fn new(drawing_name: &str) -> Result<Self, String> {
-        let drawing_name = entry_name(drawing_name)?;
+        Self::with_layout(drawing_name, TransmittalLayout::Structured)
+    }
+
+    pub fn with_layout(drawing_name: &str, layout: TransmittalLayout) -> Result<Self, String> {
+        Self::with_folders(drawing_name, layout, TransmittalFolders::default())
+    }
+
+    fn with_folders(
+        drawing_name: &str,
+        layout: TransmittalLayout,
+        folders: TransmittalFolders,
+    ) -> Result<Self, String> {
+        let drawing_name = entry_name(&file_name(drawing_name)?)?;
         let mut claimed = HashMap::new();
         claimed.insert(drawing_name.to_ascii_lowercase(), "the drawing".into());
         claimed.insert(
             REPORT_FILE.to_ascii_lowercase(),
             "the transmittal report".into(),
-        );
-        claimed.insert(
-            LINETYPES_FILE.to_ascii_lowercase(),
-            "the generated linetype file".into(),
         );
         Ok(Self {
             entries: Vec::new(),
@@ -108,7 +188,10 @@ impl TransmittalPackage {
                 "the transmittal root".into(),
             )],
             drawing_name,
+            layout,
+            folders,
             claimed,
+            sources: HashMap::new(),
         })
     }
 
@@ -117,45 +200,109 @@ impl TransmittalPackage {
         self.entries.insert(0, (self.drawing_name.clone(), bytes));
     }
 
-    pub fn add(&mut self, dependency: &Dependency, bytes: Vec<u8>) {
-        let name = match entry_name(&dependency.reference) {
-            Ok(name) => name,
-            Err(reason) => {
-                self.fail(dependency, reason);
-                return;
-            }
-        };
-        self.add_named(dependency, name, bytes);
+    fn nested_owner_folder<'a>(&self, packaged_path: &'a str) -> &'a str {
+        packaged_path
+            .rsplit_once('/')
+            .map(|(folder, _)| folder)
+            .unwrap_or("")
     }
 
-    fn add_named(&mut self, dependency: &Dependency, name: String, bytes: Vec<u8>) {
-        let key = name.to_ascii_lowercase();
-        if let Some(previous) = self.claimed.get(&key) {
-            let identical = self
-                .entries
-                .iter()
-                .find(|(entry, _)| entry.eq_ignore_ascii_case(&name))
-                .is_some_and(|(_, existing)| *existing == bytes)
-                && previous != "the drawing";
-            if identical {
-                return;
-            }
-            self.fail(
-                dependency,
-                format!("package name `{name}` conflicts with {previous}; references were not rewritten"),
-            );
-            return;
+    fn reference(&self, owner_folder: &str, target: &str, kind: DependencyKind) -> String {
+        // AutoCAD's standard Fonts and PlotStyles folders support bare names.
+        // Other mappings need an explicit relative path, especially when an
+        // empty mapping puts a nested drawing's dependency at the root.
+        let bare_name = self.layout == TransmittalLayout::Structured
+            && match kind {
+                DependencyKind::Font | DependencyKind::BigFont | DependencyKind::Shape => {
+                    self.folders.fonts.eq_ignore_ascii_case(FONT_FOLDER)
+                }
+                DependencyKind::PlotStyle => {
+                    self.folders.plot_styles.eq_ignore_ascii_case("PlotStyles")
+                }
+                _ => false,
+            };
+        package_reference(owner_folder, target, bare_name)
+    }
+
+    fn reserve_source(&mut self, kind: DependencyKind, identity: String, path: &str) {
+        self.sources
+            .insert(source_key(kind, &identity), path.to_owned());
+    }
+
+    fn add(&mut self, dependency: &Dependency, resource: Resource) -> Result<Addition, String> {
+        let key = source_key(dependency.kind, &resource.identity);
+        if let Some(existing) = self.sources.get(&key) {
+            return Ok(Addition {
+                path: existing.clone(),
+                is_new: false,
+            });
         }
+
+        let name = file_name(&resource.file_name)?;
+        let base = match self.layout {
+            TransmittalLayout::Flat => name,
+            TransmittalLayout::Preserve => resource.preserved_path.clone().unwrap_or(name),
+            TransmittalLayout::Structured => {
+                let folder = self.folders.folder(dependency.kind).trim();
+                if folder.is_empty() {
+                    name
+                } else {
+                    format!("{folder}/{name}")
+                }
+            }
+        };
+        let mut candidate = entry_name(&base)?;
+        let mut suffix = 0usize;
+        loop {
+            let key = candidate.to_ascii_lowercase();
+            let Some(previous) = self.claimed.get(&key) else {
+                break;
+            };
+            let identical = (dependency.kind != DependencyKind::Xref && previous != "the drawing")
+                .then(|| {
+                    self.entries
+                        .iter()
+                        .find(|(entry, existing)| {
+                            entry.eq_ignore_ascii_case(&candidate) && **existing == resource.bytes
+                        })
+                        .map(|(entry, _)| entry.clone())
+                })
+                .flatten();
+            if let Some(existing) = identical {
+                self.sources.insert(
+                    source_key(dependency.kind, &resource.identity),
+                    existing.clone(),
+                );
+                return Ok(Addition {
+                    path: existing,
+                    is_new: false,
+                });
+            }
+            suffix += 1;
+            candidate = entry_name(&suffixed_name(&base, suffix))?;
+        }
+
         self.claimed.insert(
-            key,
+            candidate.to_ascii_lowercase(),
             format!("{} `{}`", dependency.kind.label(), dependency.reference),
         );
+        self.sources.insert(key, candidate.clone());
         self.packaged.push((
-            name.clone(),
+            candidate.clone(),
             dependency.kind.label().into(),
             format!("{} (from {})", dependency.reference, dependency.owner),
         ));
-        self.entries.push((name, bytes));
+        self.entries.push((candidate.clone(), resource.bytes));
+        Ok(Addition {
+            path: candidate,
+            is_new: true,
+        })
+    }
+
+    fn replace(&mut self, path: &str, bytes: Vec<u8>) {
+        if let Some((_, existing)) = self.entries.iter_mut().find(|(name, _)| name == path) {
+            *existing = bytes;
+        }
     }
 
     pub fn fail(&mut self, dependency: &Dependency, reason: impl Into<String>) {
@@ -170,52 +317,38 @@ impl TransmittalPackage {
         }
     }
 
-    pub fn add_linetypes(&mut self, output: crate::io::linetypes::writer::LinOutput) {
-        for (name, reason) in output.skipped {
-            if reason != crate::io::linetypes::writer::SkipReason::NoPattern {
-                self.warnings.push(format!(
-                    "Linetype `{name}` was not written to {LINETYPES_FILE}: {}.",
-                    reason.label()
-                ));
-            }
-        }
-        for (name, warning) in output.warnings {
-            self.warnings.push(format!(
-                "Linetype `{name}` in {LINETYPES_FILE}: {}.",
-                warning.label()
-            ));
-        }
-        if output.written.is_empty() {
-            return;
-        }
-        let text = format!(
-            ";; Generated by OpenCADStudio ETRANSMIT from the drawing's linetype table.\n{}",
-            output.text
-        );
-        self.entries
-            .push((LINETYPES_FILE.into(), text.into_bytes()));
-        self.packaged.push((
-            LINETYPES_FILE.into(),
-            "generated linetype definitions".into(),
-            self.drawing_name.clone(),
-        ));
-    }
-
     pub fn finish(mut self) -> Self {
-        let mut report = String::from(
+        let mut report = format!(
             "OpenCADStudio transmittal report\n\
-             ================================\n\n\
-             References retain their stored names. Install packaged fonts, shape files,\n\
-             and plot style tables in the receiving program's support folders if it\n\
-             does not discover them beside the drawing automatically.\n\n",
+             ================================\n\
+             Drawing: {}\n\n",
+            self.drawing_name
         );
+        match self.layout {
+            TransmittalLayout::Preserve => report.push_str(
+                "Source-relative folder paths are preserved where possible. Resources\n\
+                 outside the source root fall back to safe package-root filenames.\n\
+                 References are rewritten relative to each owning drawing.\n",
+            ),
+            TransmittalLayout::Structured => report.push_str(
+                "Resources are grouped by type: xref/, Images/, Underlays/, PointClouds/,\n\
+                 PlotStyles/, and Linetypes/. Fonts, big fonts, and SHX files use Fonts/.\n\
+                 References are rewritten relative to each owning drawing; fonts and plot\n\
+                 tables retain bare-filename references for package-folder discovery.\n",
+            ),
+            TransmittalLayout::Flat => report.push_str(
+                "All files are stored flat at the package root. Xref and resource paths\n\
+                 are rewritten to their allocated filenames; font references remain bare.\n",
+            ),
+        }
+        report
+            .push_str("Original drawings are not modified. Check missing dependencies below.\n\n");
         report.push_str("Packaged files\n--------------\n");
         for (name, kind, source) in &self.packaged {
             report.push_str(&format!("{name}\n  Type: {kind}\n  Source: {source}\n"));
         }
-        report.push_str(
-            "\nMissing or conflicting dependencies\n-----------------------------------\n",
-        );
+        report
+            .push_str("\nMissing or unpackaged dependencies\n----------------------------------\n");
         if self.issues.is_empty() {
             report.push_str("None.\n");
         } else {
@@ -243,6 +376,26 @@ impl TransmittalPackage {
     }
 }
 
+fn source_key(kind: DependencyKind, identity: &str) -> String {
+    format!("{kind:?}:{identity}")
+}
+
+fn suffixed_name(path: &str, suffix: usize) -> String {
+    let (folder, name) = path
+        .rsplit_once('/')
+        .map_or(("", path), |(folder, name)| (folder, name));
+    let (stem, extension) = name
+        .rfind('.')
+        .filter(|dot| *dot > 0)
+        .map_or((name, None), |dot| (&name[..dot], Some(&name[dot..])));
+    let renamed = format!("{stem}_{suffix}{}", extension.unwrap_or(""));
+    if folder.is_empty() {
+        renamed
+    } else {
+        format!("{folder}/{renamed}")
+    }
+}
+
 fn owner_name(doc: &Document) -> String {
     doc.source_path
         .as_deref()
@@ -264,9 +417,7 @@ pub(crate) fn direct_dependencies(
         if !dependency.reference.is_empty()
             && !dependencies.iter().any(|existing: &Dependency| {
                 existing.kind == dependency.kind
-                    && existing
-                        .reference
-                        .eq_ignore_ascii_case(&dependency.reference)
+                    && existing.reference == dependency.reference
                     && existing.bold == dependency.bold
                     && existing.italic == dependency.italic
             })
@@ -275,6 +426,12 @@ pub(crate) fn direct_dependencies(
         }
     };
 
+    // This is the only external linetype source reference OCS retains. The
+    // linetype table itself is embedded and must not be exported as a made-up
+    // `.lin` file.
+    if let Some(file) = crate::io::drawing_variable(doc, "CENTERLTYPEFILE") {
+        push(Dependency::new(DependencyKind::Linetype, &file, &owner));
+    }
     for record in doc.block_records.iter() {
         push(Dependency::new(
             DependencyKind::Xref,
@@ -425,103 +582,418 @@ fn built_in_resource(dependency: &Dependency) -> bool {
             crate::scene::text::lff::is_builtin(&dependency.reference)
                 || crate::io::linetypes::is_bundled_shape_file(&dependency.reference)
         }
+        DependencyKind::Linetype => {
+            let name = dependency
+                .reference
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(&dependency.reference);
+            name.eq_ignore_ascii_case("acad.lin") || name.eq_ignore_ascii_case("acadiso.lin")
+        }
         _ => false,
     }
+}
+
+fn same_reference(stored: &str, dependency: &Dependency) -> bool {
+    stored.trim() == dependency.reference
+}
+
+/// Preserve a stored relative path lexically within the package. Absolute and
+/// escaping paths have no safe source-relative form and fall back to basename.
+#[cfg(any(target_arch = "wasm32", test))]
+fn preserved_reference(source_folder: Option<&str>, raw: &str) -> Option<String> {
+    let raw = raw.trim().replace('\\', "/");
+    if raw.starts_with('/')
+        || (raw.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            && raw.as_bytes().get(1) == Some(&b':'))
+    {
+        return None;
+    }
+    let mut parts: Vec<&str> = source_folder?
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    for part in raw.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            _ => parts.push(part),
+        }
+    }
+    entry_name(&parts.join("/")).ok()
+}
+
+/// Source folder for a nested web xref, kept separate from its packaged owner
+/// folder. `None` means the source is outside the root drawing's hierarchy.
+#[cfg(any(target_arch = "wasm32", test))]
+fn preserved_parent(path: Option<&str>) -> Option<String> {
+    path.map(|path| {
+        path.rsplit_once('/')
+            .map(|(folder, _)| folder)
+            .unwrap_or("")
+            .to_owned()
+    })
+}
+
+fn package_reference(owner_folder: &str, target: &str, bare_name: bool) -> String {
+    let name = file_name(target).unwrap_or_else(|_| target.to_owned());
+    if bare_name {
+        return name;
+    }
+    let target_folder = target
+        .rsplit_once('/')
+        .map(|(folder, _)| folder)
+        .unwrap_or("");
+    if owner_folder == target_folder {
+        return name;
+    }
+    let owners: Vec<&str> = owner_folder
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let targets: Vec<&str> = target_folder
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let common = owners
+        .iter()
+        .zip(&targets)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut parts = Vec::new();
+    parts.extend(std::iter::repeat_n("..", owners.len() - common));
+    parts.extend_from_slice(&targets[common..]);
+    parts.push(&name);
+    parts.join("/")
+}
+
+fn rewrite_reference(doc: &mut Document, dependency: &Dependency, packaged: &str) {
+    match dependency.kind {
+        DependencyKind::Xref => {
+            for record in doc.block_records.iter_mut() {
+                if same_reference(&record.xref_path, dependency) {
+                    record.xref_path = packaged.to_owned();
+                }
+            }
+            for entity in doc.entities_mut() {
+                if let EntityType::Block(block) = entity {
+                    if same_reference(&block.xref_path, dependency) {
+                        block.xref_path = packaged.to_owned();
+                    }
+                }
+            }
+        }
+        DependencyKind::Image => {
+            for object in doc.objects.values_mut() {
+                if let document::objects::ObjectType::ImageDefinition(definition) = object {
+                    if same_reference(&definition.file_name, dependency) {
+                        definition.file_name = packaged.to_owned();
+                    }
+                }
+            }
+            for entity in doc.entities_mut() {
+                if let EntityType::RasterImage(image) = entity {
+                    if same_reference(&image.file_path, dependency) {
+                        image.file_path = packaged.to_owned();
+                    }
+                }
+            }
+        }
+        DependencyKind::Underlay => {
+            for object in doc.objects.values_mut() {
+                if let document::objects::ObjectType::UnderlayDefinition(definition) = object {
+                    if same_reference(&definition.file_path, dependency) {
+                        definition.file_path = packaged.to_owned();
+                    }
+                }
+            }
+        }
+        DependencyKind::PointCloud => {
+            for object in doc.objects.values_mut() {
+                let document::objects::ObjectType::ClassObject(object) = object else {
+                    continue;
+                };
+                match &mut object.data {
+                    document::objects::ClassObjectData::PointCloudDefinitionEx(definition)
+                    | document::objects::ClassObjectData::PointCloudDefinition(definition)
+                        if same_reference(&definition.source_filename, dependency) =>
+                    {
+                        definition.source_filename = packaged.to_owned();
+                    }
+                    _ => {}
+                }
+            }
+        }
+        DependencyKind::Font | DependencyKind::Shape => {
+            for style in doc.text_styles.iter_mut() {
+                if same_reference(&style.font_file, dependency) {
+                    style.font_file = packaged.to_owned();
+                }
+            }
+            // Inline font families stay families. A file-valued inline override
+            // does need retargeting when its source was flattened or renamed.
+            if font_file_valued(&dependency.reference) {
+                for entity in doc.entities_mut() {
+                    rewrite_inline_fonts(entity, dependency, packaged);
+                }
+            }
+        }
+        DependencyKind::BigFont => {
+            for style in doc.text_styles.iter_mut() {
+                if same_reference(&style.big_font_file, dependency) {
+                    style.big_font_file = packaged.to_owned();
+                }
+            }
+        }
+        DependencyKind::PlotStyle => {
+            for object in doc.objects.values_mut() {
+                if let document::objects::ObjectType::Layout(layout) = object {
+                    if same_reference(&layout.plot_style_sheet, dependency) {
+                        layout.plot_style_sheet = packaged.to_owned();
+                    }
+                }
+            }
+        }
+        DependencyKind::Linetype => {
+            if crate::io::drawing_variable(doc, "CENTERLTYPEFILE")
+                .is_some_and(|value| value.trim() == dependency.reference)
+            {
+                crate::io::set_drawing_variable(doc, "CENTERLTYPEFILE", packaged);
+            }
+        }
+    }
+}
+
+fn font_file_valued(reference: &str) -> bool {
+    let lower = reference.to_ascii_lowercase();
+    reference.contains(['/', '\\'])
+        || [".ttf", ".otf", ".ttc", ".shx"]
+            .iter()
+            .any(|extension| lower.ends_with(extension))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn preserved_font_reference(source_folder: Option<&str>, reference: &str) -> Option<String> {
+    if font_file_valued(reference) {
+        preserved_reference(source_folder, reference)
+    } else {
+        None
+    }
+}
+
+fn rewrite_inline_fonts(entity: &mut EntityType, dependency: &Dependency, packaged: &str) {
+    let rewrite = |text: &mut String| rewrite_formatted_font(text, dependency, packaged);
+    match entity {
+        EntityType::MText(text) => rewrite(&mut text.value),
+        EntityType::Dimension(dimension) => {
+            rewrite(&mut dimension.base_mut().text);
+            if let Some(text) = &mut dimension.base_mut().user_text {
+                rewrite(text);
+            }
+        }
+        EntityType::AttributeDefinition(attribute) => rewrite(&mut attribute.default_value),
+        EntityType::AttributeEntity(attribute) => rewrite(&mut attribute.value),
+        EntityType::Tolerance(tolerance) => rewrite(&mut tolerance.text),
+        EntityType::MultiLeader(leader) => {
+            rewrite(&mut leader.context.text_string);
+            for attribute in &mut leader.block_attributes {
+                rewrite(&mut attribute.text);
+            }
+        }
+        EntityType::Table(table) => {
+            for row in &mut table.rows {
+                for cell in &mut row.cells {
+                    for content in &mut cell.contents {
+                        rewrite(&mut content.value.text);
+                        rewrite(&mut content.value.formatted_value);
+                        for attribute in &mut content.attributes {
+                            rewrite(&mut attribute.value);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_formatted_font(text: &mut String, dependency: &Dependency, packaged: &str) {
+    if !(text.contains("\\f") || text.contains("\\F")) {
+        return;
+    }
+    let bytes = text.as_bytes();
+    let mut output = String::with_capacity(text.len());
+    let mut copied = 0usize;
+    let mut cursor = 0usize;
+    while cursor + 1 < bytes.len() {
+        if bytes[cursor] != b'\\' || !matches!(bytes[cursor + 1], b'f' | b'F') {
+            cursor += 1;
+            continue;
+        }
+        let value = cursor + 2;
+        let Some(relative_end) = text[value..].find(';') else {
+            break;
+        };
+        let end = value + relative_end;
+        let token = &text[value..end];
+        let (name, flags) = token
+            .split_once('|')
+            .map_or((token, None), |(name, _flags)| {
+                (name, Some(&token[name.len()..]))
+            });
+        output.push_str(&text[copied..value]);
+        if name.trim() == dependency.reference {
+            output.push_str(packaged);
+            output.push_str(flags.unwrap_or(""));
+        } else {
+            output.push_str(token);
+        }
+        copied = end;
+        cursor = end;
+    }
+    output.push_str(&text[copied..]);
+    *text = output;
+}
+
+fn serialize(doc: &Document, name: &str) -> Result<Vec<u8>, String> {
+    let extension = std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("dwg");
+    let format = if extension.eq_ignore_ascii_case("dxf") {
+        "dxf"
+    } else {
+        "dwg"
+    };
+    crate::io::save_to_bytes(doc, format, doc.version)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
-    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
 
     pub fn collect(
-        doc: &Document,
+        _doc: &Document,
         source: &Path,
         drawing_name: &str,
         active_plot_style: Option<&str>,
+        layout: TransmittalLayout,
     ) -> Result<TransmittalPackage, String> {
-        let drawing = std::fs::read(source)
+        let original = std::fs::read(source)
             .map_err(|error| format!("cannot read {}: {error}", source.display()))?;
-        let mut package = TransmittalPackage::new(drawing_name)?;
-        package.set_drawing(drawing);
-        let mut visited = HashSet::new();
-        if let Some(identity) = identity(source) {
-            visited.insert(identity);
-        }
-        visit(doc, source, active_plot_style, &mut package, &mut visited);
-        let output = crate::io::linetypes::writer::write_linetypes_at(
-            doc,
-            doc.line_types.iter(),
-            source.parent(),
+        // The native command packages the last-saved drawing, not unsaved scene
+        // edits. Read that same snapshot before cloning and rewriting it.
+        let saved = crate::io::load_bytes(&source.to_string_lossy(), original.clone())
+            .map_err(|error| format!("cannot inspect {}: {error}", source.display()))?;
+        let mut package = TransmittalPackage::with_layout(drawing_name, layout)?;
+        package.reserve_source(DependencyKind::Xref, identity(source), drawing_name);
+        let parent = source.parent().unwrap_or_else(|| Path::new("."));
+        let source_root = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+        let (rewritten, changed) = rewrite(
+            &saved,
+            source,
+            "",
+            &source_root,
+            active_plot_style,
+            &mut package,
         );
-        package.add_linetypes(output);
+        let drawing = if changed {
+            serialize(&rewritten, drawing_name)?
+        } else {
+            original
+        };
+        package.set_drawing(drawing);
         Ok(package.finish())
     }
 
-    fn visit(
+    fn rewrite(
         doc: &Document,
         source: &Path,
+        owner_folder: &str,
+        source_root: &Path,
         active_plot_style: Option<&str>,
         package: &mut TransmittalPackage,
-        visited: &mut HashSet<PathBuf>,
-    ) {
+    ) -> (Document, bool) {
+        let mut output = doc.clone();
+        output.source_path = Some(source.to_string_lossy().into_owned());
         let base = source.parent().unwrap_or_else(|| Path::new("."));
+        let mut changed = false;
         for dependency in direct_dependencies(doc, active_plot_style) {
             if built_in_resource(&dependency) {
                 continue;
             }
-            if dependency.kind == DependencyKind::PlotStyle {
-                if let Some(bytes) = crate::io::plot_style::session_table(&dependency.reference) {
-                    package.add(&dependency, (*bytes).clone());
+            let resource = match find_resource(&dependency, base, source_root) {
+                Ok(resource) => resource,
+                Err(reason) => {
+                    package.fail(&dependency, reason);
                     continue;
                 }
-                use crate::io::plot_style::PlotStyleTableExt as _;
-                if crate::io::plot_style::PlotStyleTable::builtin(&dependency.reference).is_ok() {
-                    continue;
-                }
-            }
-            let resolved = resolve(&dependency, base);
-            let Some(path) = resolved else {
-                if dependency.kind == DependencyKind::Font {
-                    if let Some((name, bytes)) = crate::scene::text::sysfont::transmittal_face(
-                        &dependency.reference,
-                        dependency.bold,
-                        dependency.italic,
-                    ) {
-                        package.add_named(&dependency, name, bytes);
+            };
+            let resource = if resource.is_some() {
+                resource
+            } else if dependency.kind == DependencyKind::PlotStyle {
+                crate::io::plot_style::session_table(&dependency.reference).map(|bytes| Resource {
+                    bytes: (*bytes).clone(),
+                    identity: format!("session:{}", dependency.reference),
+                    file_name: dependency.reference.clone(),
+                    // A session-only table has no trustworthy source hierarchy.
+                    preserved_path: None,
+                })
+            } else {
+                None
+            };
+            let Some(resource) = resource else {
+                if dependency.kind == DependencyKind::PlotStyle {
+                    use crate::io::plot_style::PlotStyleTableExt as _;
+                    if crate::io::plot_style::PlotStyleTable::builtin(&dependency.reference).is_ok()
+                    {
                         continue;
                     }
                 }
                 package.fail(&dependency, "file not found");
                 continue;
             };
-            let bytes = match std::fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    package.fail(
-                        &dependency,
-                        format!("cannot read {}: {error}", path.display()),
-                    );
+            let original_bytes = resource.bytes.clone();
+            let original_identity = resource.identity.clone();
+            let addition = match package.add(&dependency, resource) {
+                Ok(addition) => addition,
+                Err(reason) => {
+                    package.fail(&dependency, reason);
                     continue;
                 }
             };
-            if dependency.kind == DependencyKind::Xref {
-                let Some(identity) = identity(&path) else {
-                    continue;
-                };
-                if !visited.insert(identity) {
-                    continue;
-                }
+            let reference = package.reference(owner_folder, &addition.path, dependency.kind);
+            if reference != dependency.reference {
+                rewrite_reference(&mut output, &dependency, &reference);
+                changed = true;
             }
-            package.add(&dependency, bytes.clone());
-            if dependency.kind != DependencyKind::Xref {
+            if dependency.kind != DependencyKind::Xref || !addition.is_new {
                 continue;
             }
-            match crate::io::load_bytes(&path.to_string_lossy(), bytes) {
-                Ok(mut nested) => {
-                    nested.source_path = Some(path.to_string_lossy().into_owned());
-                    visit(&nested, &path, None, package, visited);
+            let nested_owner_folder = package.nested_owner_folder(&addition.path);
+            match crate::io::load_bytes(&dependency.reference, original_bytes.clone()) {
+                Ok(nested) => {
+                    let nested_source = PathBuf::from(&original_identity);
+                    let (nested, nested_changed) = rewrite(
+                        &nested,
+                        &nested_source,
+                        nested_owner_folder,
+                        source_root,
+                        None,
+                        package,
+                    );
+                    if nested_changed {
+                        match serialize(&nested, &addition.path) {
+                            Ok(bytes) => package.replace(&addition.path, bytes),
+                            Err(error) => package.fail(
+                                &dependency,
+                                format!("the xref was packaged, but its paths could not be rewritten: {error}"),
+                            ),
+                        }
+                    }
                 }
                 Err(error) => package.fail(
                     &dependency,
@@ -529,38 +1001,99 @@ mod native {
                 ),
             }
         }
+        (output, changed)
     }
 
-    fn identity(path: &Path) -> Option<PathBuf> {
-        std::fs::canonicalize(path).ok().or_else(|| {
-            if path.is_absolute() {
-                Some(path.to_path_buf())
-            } else {
-                std::env::current_dir().ok().map(|base| base.join(path))
-            }
-        })
-    }
-
-    fn resolve(dependency: &Dependency, base: &Path) -> Option<PathBuf> {
+    fn find_resource(
+        dependency: &Dependency,
+        base: &Path,
+        source_root: &Path,
+    ) -> Result<Option<Resource>, String> {
         let raw = dependency.reference.trim();
-        match dependency.kind {
+        let path = match dependency.kind {
             DependencyKind::Xref => {
-                crate::io::xref::resolve_path(raw, base).filter(|p| p.is_file())
+                crate::io::xref::resolve_path(raw, base).filter(|path| path.is_file())
             }
-            DependencyKind::Image | DependencyKind::Underlay | DependencyKind::PointCloud => {
+            DependencyKind::Image
+            | DependencyKind::Underlay
+            | DependencyKind::PointCloud
+            | DependencyKind::Linetype => {
                 crate::io::resolve_image_file(raw, Some(base)).map(PathBuf::from)
             }
-            DependencyKind::BigFont | DependencyKind::Shape => {
+            DependencyKind::BigFont | DependencyKind::Shape | DependencyKind::Font => {
                 crate::io::font_repo::font_file_path(raw, Some(base)).map(PathBuf::from)
             }
-            DependencyKind::Font => {
-                crate::io::font_repo::font_file_path(raw, Some(base)).map(PathBuf::from)
-            }
-            DependencyKind::PlotStyle => plot_style_path(raw),
+            DependencyKind::PlotStyle => plot_style_path(raw, base),
+        };
+        if let Some(path) = path {
+            let bytes = std::fs::read(&path)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            let file_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dependency.reference.clone());
+            let preserved_path = preserved_native_path(&path, source_root, &file_name);
+            return Ok(Some(Resource {
+                bytes,
+                identity: identity(&path),
+                file_name,
+                preserved_path,
+            }));
         }
+        if dependency.kind == DependencyKind::Font {
+            if let Some((name, bytes)) = crate::scene::text::sysfont::transmittal_face(
+                &dependency.reference,
+                dependency.bold,
+                dependency.italic,
+            ) {
+                return Ok(Some(Resource {
+                    bytes,
+                    identity: format!(
+                        "face:{}:{}:{}",
+                        dependency.reference, dependency.bold, dependency.italic
+                    ),
+                    file_name: name,
+                    preserved_path: None,
+                }));
+            }
+        }
+        Ok(None)
     }
 
-    fn plot_style_path(name: &str) -> Option<PathBuf> {
+    fn preserved_native_path(path: &Path, source_root: &Path, file_name: &str) -> Option<String> {
+        let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Ok(relative) = resolved.strip_prefix(source_root) {
+            let candidate = relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            if entry_name(&candidate).is_ok() {
+                return Some(candidate);
+            }
+        }
+        Some(file_name.to_owned())
+    }
+
+    fn identity(path: &Path) -> String {
+        std::fs::canonicalize(path)
+            .ok()
+            .or_else(|| {
+                if path.is_absolute() {
+                    Some(path.to_path_buf())
+                } else {
+                    std::env::current_dir().ok().map(|base| base.join(path))
+                }
+            })
+            .unwrap_or_else(|| path.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn plot_style_path(name: &str, base: &Path) -> Option<PathBuf> {
+        if let Some(path) = crate::io::plot_style::drawing_table_path(name, Some(base)) {
+            return Some(path);
+        }
         let folder = crate::io::plot_style::plot_styles_dir().ok()?;
         let direct = folder.join(name);
         if direct.is_file() {
@@ -585,54 +1118,73 @@ pub(crate) use native::collect as collect_native;
 #[cfg(target_arch = "wasm32")]
 mod web {
     use super::*;
-    use std::collections::HashSet;
     use std::sync::Arc;
 
     pub fn collect(
         doc: &Document,
         drawing_name: &str,
         active_plot_style: Option<&str>,
-    ) -> Result<TransmittalPackage, String> {
-        let mut package = TransmittalPackage::new(drawing_name)?;
-        let mut visited = HashSet::new();
-        visited.insert(crate::io::xref::file_name_key(drawing_name));
-        visit(doc, active_plot_style, &mut package, &mut visited);
-        package.add_linetypes(crate::io::linetypes::writer::write_linetypes_at(
-            doc,
-            doc.line_types.iter(),
-            None,
-        ));
-        Ok(package.finish())
+        layout: TransmittalLayout,
+    ) -> Result<(TransmittalPackage, Document), String> {
+        let mut package = TransmittalPackage::with_layout(drawing_name, layout)?;
+        package.reserve_source(
+            DependencyKind::Xref,
+            crate::io::xref::file_name_key(drawing_name),
+            drawing_name,
+        );
+        let (drawing, _) = rewrite(doc, "", Some(""), active_plot_style, &mut package);
+        Ok((package.finish(), drawing))
     }
 
-    fn visit(
+    fn rewrite(
         doc: &Document,
+        owner_folder: &str,
+        source_folder: Option<&str>,
         active_plot_style: Option<&str>,
         package: &mut TransmittalPackage,
-        visited: &mut HashSet<String>,
-    ) {
+    ) -> (Document, bool) {
+        let mut output = doc.clone();
+        let mut changed = false;
         for dependency in direct_dependencies(doc, active_plot_style) {
             if built_in_resource(&dependency) {
                 continue;
             }
             let mut registry_key = None;
-            let bytes = match dependency.kind {
+            let resource = match dependency.kind {
                 DependencyKind::Xref => {
                     registry_key = crate::io::xref::find_registered_source(&dependency.reference);
-                    registry_key
-                        .as_deref()
-                        .and_then(crate::io::xref::registered_bytes)
+                    registry_key.as_ref().and_then(|key| {
+                        crate::io::xref::registered_bytes(key).map(|bytes| Resource {
+                            bytes: (*bytes).clone(),
+                            identity: crate::io::xref::file_name_key(key),
+                            file_name: file_name(key).unwrap_or_else(|_| key.clone()),
+                            preserved_path: preserved_reference(
+                                source_folder,
+                                &dependency.reference,
+                            ),
+                        })
+                    })
                 }
                 DependencyKind::Image => {
                     crate::scene::model::image_model::registered_source_bytes(&dependency.reference)
+                        .map(|bytes| registered_resource(&dependency, source_folder, bytes))
                 }
                 DependencyKind::Underlay => {
                     crate::scene::model::pdf_raster::registered_source_bytes(&dependency.reference)
+                        .map(|bytes| registered_resource(&dependency, source_folder, bytes))
                 }
-                DependencyKind::Font => true_type_bytes(&dependency).map(Arc::new),
+                DependencyKind::Font => true_type_resource(&dependency, source_folder),
                 DependencyKind::PlotStyle => {
                     match crate::io::plot_style::session_table(&dependency.reference) {
-                        Some(bytes) => Some(bytes),
+                        Some(bytes) => Some(Resource {
+                            bytes: (*bytes).clone(),
+                            identity: format!("session:{}", dependency.reference),
+                            file_name: dependency.reference.clone(),
+                            preserved_path: preserved_reference(
+                                source_folder,
+                                &dependency.reference,
+                            ),
+                        }),
                         None => {
                             use crate::io::plot_style::PlotStyleTableExt as _;
                             if crate::io::plot_style::PlotStyleTable::builtin(&dependency.reference)
@@ -644,34 +1196,55 @@ mod web {
                         }
                     }
                 }
-                DependencyKind::BigFont | DependencyKind::Shape | DependencyKind::PointCloud => {
-                    None
-                }
+                DependencyKind::BigFont
+                | DependencyKind::Shape
+                | DependencyKind::PointCloud
+                | DependencyKind::Linetype => None,
             };
-            let Some(bytes) = bytes else {
+            let Some(resource) = resource else {
                 package.fail(
                     &dependency,
                     "original bytes are not loaded in this browser session",
                 );
                 continue;
             };
-            if dependency.kind == DependencyKind::Xref {
-                let Some(key) = registry_key.as_ref() else {
-                    continue;
-                };
-                if !visited.insert(crate::io::xref::file_name_key(key)) {
+            let original_preserved_path = resource.preserved_path.clone();
+            let addition = match package.add(&dependency, resource) {
+                Ok(addition) => addition,
+                Err(reason) => {
+                    package.fail(&dependency, reason);
                     continue;
                 }
+            };
+            let reference = package.reference(owner_folder, &addition.path, dependency.kind);
+            if reference != dependency.reference {
+                rewrite_reference(&mut output, &dependency, &reference);
+                changed = true;
             }
-            package.add(&dependency, (*bytes).clone());
-            if dependency.kind != DependencyKind::Xref {
+            if dependency.kind != DependencyKind::Xref || !addition.is_new {
                 continue;
             }
+            let nested_owner_folder = package.nested_owner_folder(&addition.path);
             let Some(key) = registry_key else { continue };
             match crate::io::xref::registered_document(&key) {
-                Ok(mut nested) => {
-                    nested.source_path = Some(key.clone());
-                    visit(&nested, None, package, visited);
+                Ok(nested) => {
+                    let nested_source_folder = preserved_parent(original_preserved_path.as_deref());
+                    let (nested, nested_changed) = rewrite(
+                        &nested,
+                        nested_owner_folder,
+                        nested_source_folder.as_deref(),
+                        None,
+                        package,
+                    );
+                    if nested_changed {
+                        match serialize(&nested, &addition.path) {
+                            Ok(bytes) => package.replace(&addition.path, bytes),
+                            Err(error) => package.fail(
+                                &dependency,
+                                format!("the xref was packaged, but its paths could not be rewritten: {error}"),
+                            ),
+                        }
+                    }
                 }
                 Err(error) => package.fail(
                     &dependency,
@@ -679,9 +1252,26 @@ mod web {
                 ),
             }
         }
+        (output, changed)
     }
 
-    fn true_type_bytes(dependency: &Dependency) -> Option<Vec<u8>> {
+    fn registered_resource(
+        dependency: &Dependency,
+        source_folder: Option<&str>,
+        bytes: Arc<Vec<u8>>,
+    ) -> Resource {
+        Resource {
+            bytes: (*bytes).clone(),
+            identity: dependency.reference.clone(),
+            file_name: dependency.reference.clone(),
+            preserved_path: preserved_reference(source_folder, &dependency.reference),
+        }
+    }
+
+    fn true_type_resource(
+        dependency: &Dependency,
+        source_folder: Option<&str>,
+    ) -> Option<Resource> {
         if dependency.reference.to_ascii_lowercase().ends_with(".shx") {
             return None;
         }
@@ -690,7 +1280,15 @@ mod web {
             dependency.bold,
             dependency.italic,
         )
-        .map(|(_, bytes)| bytes)
+        .map(|(name, bytes)| Resource {
+            bytes,
+            identity: format!(
+                "face:{}:{}:{}",
+                dependency.reference, dependency.bold, dependency.italic
+            ),
+            file_name: name,
+            preserved_path: preserved_font_reference(source_folder, &dependency.reference),
+        })
     }
 }
 
@@ -701,9 +1299,19 @@ pub(crate) use web::collect as collect_web;
 mod tests {
     use super::*;
 
+    fn resource(dependency: &Dependency, bytes: &[u8]) -> Resource {
+        Resource {
+            bytes: bytes.to_vec(),
+            identity: format!("{}:{}", dependency.owner, dependency.reference),
+            file_name: dependency.reference.clone(),
+            preserved_path: None,
+        }
+    }
+
     #[test]
-    fn direct_inventory_covers_resources_and_inline_fonts() {
+    fn direct_inventory_covers_resources_inline_fonts_and_external_linetypes() {
         let mut doc = Document::new();
+        crate::io::set_drawing_variable(&mut doc, "CENTERLTYPEFILE", "catalog/custom.lin");
         let mut record = document::tables::BlockRecord::new("SITE");
         record.xref_path = "xrefs/site.dwg".into();
         doc.block_records.add(record).unwrap();
@@ -732,17 +1340,241 @@ mod tests {
         assert!(dependencies
             .iter()
             .any(|d| d.kind == DependencyKind::Font && d.bold && d.italic));
+        assert!(dependencies.iter().any(|d| {
+            d.kind == DependencyKind::Linetype && d.reference == "catalog/custom.lin"
+        }));
+    }
+
+    #[test]
+    fn case_variant_references_remain_distinct_until_sources_resolve() {
+        let mut doc = Document::new();
+        for (name, path) in [("LOWER", "Site.dwg"), ("UPPER", "SITE.DWG")] {
+            let mut record = document::tables::BlockRecord::new(name);
+            record.flags.is_xref = true;
+            record.xref_path = path.into();
+            doc.block_records.add(record).unwrap();
+        }
+        let dependencies = direct_dependencies(&doc, None);
+        let mut paths: Vec<&str> = dependencies
+            .iter()
+            .filter(|dependency| dependency.kind == DependencyKind::Xref)
+            .map(|dependency| dependency.reference.as_str())
+            .collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["SITE.DWG", "Site.dwg"]);
+
+        let mut package = TransmittalPackage::new("root.dwg").unwrap();
+        for dependency in &dependencies {
+            let addition = package
+                .add(dependency, resource(dependency, b"drawing"))
+                .unwrap();
+            let packaged = package.reference("", &addition.path, dependency.kind);
+            rewrite_reference(&mut doc, dependency, &packaged);
+        }
+        assert_eq!(
+            doc.block_records.get("LOWER").unwrap().xref_path,
+            "xref/Site.dwg"
+        );
+        assert_eq!(
+            doc.block_records.get("UPPER").unwrap().xref_path,
+            "xref/SITE_1.DWG"
+        );
+    }
+
+    #[test]
+    fn embedded_linetypes_do_not_invent_an_external_dependency() {
+        let doc = Document::new();
+        assert!(!direct_dependencies(&doc, None)
+            .iter()
+            .any(|dependency| dependency.kind == DependencyKind::Linetype));
+        let mut default_catalog = Document::new();
+        crate::io::set_drawing_variable(&mut default_catalog, "CENTERLTYPEFILE", "acadiso.lin");
+        let dependency = direct_dependencies(&default_catalog, None)
+            .into_iter()
+            .find(|dependency| dependency.kind == DependencyKind::Linetype)
+            .unwrap();
+        assert!(built_in_resource(&dependency));
+    }
+
+    #[test]
+    fn web_preserve_tracks_outside_root_sources_separately() {
+        assert_eq!(
+            preserved_reference(Some("xrefs"), "details/a.dwg"),
+            Some("xrefs/details/a.dwg".into())
+        );
+        assert_eq!(
+            preserved_reference(Some("xrefs"), "../shared.dwg"),
+            Some("shared.dwg".into())
+        );
+        assert_eq!(preserved_reference(Some(""), "../outside.dwg"), None);
+        assert_eq!(preserved_reference(None, "images/a.png"), None);
+        assert_eq!(
+            preserved_parent(Some("xrefs/nested.dwg")),
+            Some("xrefs".into())
+        );
+        assert_eq!(preserved_parent(Some("outside.dwg")), Some(String::new()));
+        assert_eq!(preserved_parent(None), None);
+        assert_eq!(
+            preserved_font_reference(Some(""), "assets/custom.ttf"),
+            Some("assets/custom.ttf".into())
+        );
+        assert_eq!(preserved_font_reference(None, "assets/custom.ttf"), None);
+        assert_eq!(preserved_font_reference(Some(""), "Arial"), None);
+    }
+
+    #[test]
+    fn package_paths_match_autocad_layout() {
+        assert_eq!(
+            package_reference("", "xref/site.dwg", false),
+            "xref/site.dwg"
+        );
+        assert_eq!(
+            package_reference("xref", "xref/site.dwg", false),
+            "site.dwg"
+        );
+        assert_eq!(
+            package_reference("xref", "xref/root.dwg", false),
+            "root.dwg"
+        );
+        assert_eq!(package_reference("xref", "root.png", false), "../root.png");
+        assert_eq!(
+            package_reference("xref", "Fonts/arial.ttf", true),
+            "arial.ttf"
+        );
+        assert_eq!(package_reference("", "Fonts/arial.ttf", true), "arial.ttf");
+        assert_eq!(
+            package_reference("xref", "arial.ttf", false),
+            "../arial.ttf",
+            "an empty font-folder mapping needs an explicit root-relative reference"
+        );
+    }
+
+    #[test]
+    fn package_allocates_unique_names_and_reuses_sources() {
+        let mut package = TransmittalPackage::new("plan.dwg").unwrap();
+        package.set_drawing(b"drawing".to_vec());
+        let first = Dependency::new(DependencyKind::Image, "a/site.png", "plan.dwg");
+        let first_path = package.add(&first, resource(&first, b"first")).unwrap();
+        assert_eq!(first_path.path, "Images/site.png");
+        assert!(first_path.is_new);
+        assert!(
+            !package
+                .add(&first, resource(&first, b"first"))
+                .unwrap()
+                .is_new
+        );
+
+        let collision = Dependency::new(DependencyKind::Image, "b/SITE.PNG", "nested.dwg");
+        let collision_path = package
+            .add(&collision, resource(&collision, b"different"))
+            .unwrap();
+        assert_eq!(collision_path.path, "Images/SITE_1.PNG");
+        let identical_case_variant =
+            Dependency::new(DependencyKind::Image, "c/SITE.PNG", "other.dwg");
+        let entry_count = package.entries.len();
+        let deduplicated = package
+            .add(
+                &identical_case_variant,
+                resource(&identical_case_variant, b"first"),
+            )
+            .unwrap();
+        assert_eq!(deduplicated.path, "Images/site.png");
+        assert!(!deduplicated.is_new);
+        assert_eq!(package.entries.len(), entry_count);
+        let xref = Dependency::new(DependencyKind::Xref, "other/plan.dwg", "nested.dwg");
+        assert_eq!(
+            package
+                .add(&xref, resource(&xref, b"drawing"))
+                .unwrap()
+                .path,
+            "xref/plan.dwg"
+        );
+        let font = Dependency::new(DependencyKind::Font, "path/arial.ttf", "plan.dwg");
+        assert_eq!(
+            package.add(&font, resource(&font, b"font")).unwrap().path,
+            "Fonts/arial.ttf"
+        );
+        assert!(package.issues.is_empty());
+    }
+
+    #[test]
+    fn flat_package_uses_unique_root_names_without_subfolders() {
+        let mut package =
+            TransmittalPackage::with_layout("plan.dwg", TransmittalLayout::Flat).unwrap();
+        package.set_drawing(b"root".to_vec());
+        let xref = Dependency::new(DependencyKind::Xref, "other/plan.dwg", "root.dwg");
+        let xref_path = package.add(&xref, resource(&xref, b"nested")).unwrap();
+        assert_eq!(xref_path.path, "plan_1.dwg");
+        assert_eq!(package.nested_owner_folder(&xref_path.path), "");
+        assert_eq!(
+            package.reference(
+                package.nested_owner_folder(&xref_path.path),
+                &xref_path.path,
+                xref.kind
+            ),
+            "plan_1.dwg"
+        );
+        let font = Dependency::new(DependencyKind::Font, "fonts/arial.ttf", "root.dwg");
+        assert_eq!(
+            package.add(&font, resource(&font, b"font")).unwrap().path,
+            "arial.ttf"
+        );
+        assert!(package.entries.iter().all(|(name, _)| !name.contains('/')));
+    }
+
+    #[test]
+    fn structured_folders_may_be_empty_to_mean_package_root() {
+        let folders = TransmittalFolders {
+            images: String::new(),
+            fonts: String::new(),
+            ..TransmittalFolders::default()
+        };
+        let mut package =
+            TransmittalPackage::with_folders("plan.dwg", TransmittalLayout::Structured, folders)
+                .unwrap();
+        package.set_drawing(b"root".to_vec());
+        let xref = Dependency::new(DependencyKind::Xref, "nested.dwg", "root.dwg");
+        let xref_path = package.add(&xref, resource(&xref, b"nested")).unwrap();
+        assert_eq!(package.nested_owner_folder(&xref_path.path), "xref");
+
+        let image = Dependency::new(DependencyKind::Image, "images/site.png", "nested.dwg");
+        let image_path = package.add(&image, resource(&image, b"image")).unwrap();
+        assert_eq!(image_path.path, "site.png");
+        assert_eq!(
+            package.reference("xref", &image_path.path, image.kind),
+            "../site.png"
+        );
+
+        let font = Dependency::new(DependencyKind::Font, "assets/custom.shx", "nested.dwg");
+        let font_path = package.add(&font, resource(&font, b"font")).unwrap();
+        assert_eq!(font_path.path, "custom.shx");
+        assert_eq!(
+            package.reference("xref", &font_path.path, font.kind),
+            "../custom.shx"
+        );
+    }
+
+    #[test]
+    fn formatted_font_file_override_is_rewritten_without_changing_flags() {
+        let dependency = Dependency::font("old/Custom.ttf", "root.dwg", false, true);
+        let mut text = EntityType::MText(Box::new(document::entities::MText::new()));
+        let EntityType::MText(value) = &mut text else {
+            unreachable!()
+        };
+        value.value = "{\\f old/Custom.ttf |b0|i1;Text}".into();
+        rewrite_inline_fonts(&mut text, &dependency, "Custom_1.ttf");
+        let EntityType::MText(value) = text else {
+            unreachable!()
+        };
+        assert_eq!(value.value, "{\\fCustom_1.ttf|b0|i1;Text}");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn native_package_contains_recursive_resources_and_generated_linetypes() {
+    fn native_package_rewrites_recursive_layout_and_reopens_isolated() {
         use document::objects::{
             ClassObject, ClassObjectData, ImageDefinition, ObjectType, PointCloudDefinition,
             UnderlayDefinition,
-        };
-        use document::tables::linetype::{
-            LineTypeComplexContent, LineTypeComplexData, LineTypeElement,
         };
         use document::tables::{BlockRecord, LineType, TextStyle};
         use std::path::{Path, PathBuf};
@@ -757,6 +1589,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(dir.join("nested-assets")).unwrap();
+        std::fs::create_dir_all(dir.join("catalog")).unwrap();
         let write = |path: PathBuf, bytes: &[u8]| std::fs::write(path, bytes).unwrap();
         write(dir.join("root.png"), b"root image");
         write(dir.join("root.pdf"), b"root pdf");
@@ -767,11 +1600,21 @@ mod tests {
         write(dir.join("symbols.shx"), b"synthetic shape payload");
         write(dir.join("nested-assets/nested.shx"), b"nested font");
         write(dir.join("inner-big.shx"), b"inner big font");
+        write(dir.join("catalog/custom.lin"), b"*EXTERNAL\nA,1,-1\n");
+        let styled_text = |style: &str| {
+            let mut text = document::entities::MText::new();
+            text.style = style.to_owned();
+            text.value = "keep the text style referenced".into();
+            text
+        };
 
         let mut inner = Document::new();
         let mut inner_style = TextStyle::new("Inner");
         inner_style.big_font_file = "inner-big.shx".into();
         inner.text_styles.add(inner_style).unwrap();
+        inner
+            .add_entity(EntityType::MText(Box::new(styled_text("Inner"))))
+            .unwrap();
         write(
             dir.join("inner.dxf"),
             &crate::io::save_to_bytes(&inner, "dxf", inner.version).unwrap(),
@@ -781,6 +1624,9 @@ mod tests {
         let mut nested_style = TextStyle::new("Nested");
         nested_style.font_file = "nested-assets/nested.shx".into();
         nested.text_styles.add(nested_style).unwrap();
+        nested
+            .add_entity(EntityType::MText(Box::new(styled_text("Nested"))))
+            .unwrap();
         let mut inner_ref = BlockRecord::new("INNER");
         inner_ref.flags.is_xref = true;
         inner_ref.xref_path = "inner.dxf".into();
@@ -792,6 +1638,8 @@ mod tests {
 
         let mut root = Document::new();
         root.source_path = Some(dir.join("root.dwg").to_string_lossy().into_owned());
+        crate::io::set_drawing_variable(&mut root, "CENTERLTYPEFILE", "catalog/custom.lin");
+        root.line_types.add(LineType::new("EMBEDDED_ONLY")).unwrap();
         let mut nested_ref = BlockRecord::new("NESTED");
         nested_ref.flags.is_xref = true;
         nested_ref.xref_path = "nested.dwg".into();
@@ -801,49 +1649,93 @@ mod tests {
         image.handle = image_handle;
         root.objects
             .insert(image_handle, ObjectType::ImageDefinition(image));
-        for definition in [
-            UnderlayDefinition::pdf("root.pdf", "1"),
-            UnderlayDefinition::dgn("root.dgn", "Model"),
+        let mut raster = document::entities::RasterImage::new(
+            "root.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
+        raster.definition_handle = Some(image_handle);
+        root.add_entity(EntityType::RasterImage(raster)).unwrap();
+        for (kind, definition) in [
+            (
+                document::entities::UnderlayType::Pdf,
+                UnderlayDefinition::pdf("root.pdf", "1"),
+            ),
+            (
+                document::entities::UnderlayType::Dgn,
+                UnderlayDefinition::dgn("root.dgn", "Model"),
+            ),
         ] {
             let handle = root.allocate_handle();
+            let mut definition = definition;
+            definition.handle = handle;
             root.objects
                 .insert(handle, ObjectType::UnderlayDefinition(definition));
+            let mut underlay = document::entities::Underlay::new(kind);
+            underlay.definition_handle = handle;
+            root.add_entity(EntityType::Underlay(underlay)).unwrap();
         }
         let cloud_handle = root.allocate_handle();
-        root.objects.insert(
-            cloud_handle,
-            ObjectType::ClassObject(ClassObject::new(ClassObjectData::PointCloudDefinitionEx(
-                PointCloudDefinition {
-                    source_filename: "scan.rcs".into(),
-                    ..Default::default()
-                },
-            ))),
-        );
+        let mut cloud_definition = ClassObject::new(ClassObjectData::PointCloudDefinitionEx(
+            PointCloudDefinition {
+                source_filename: "scan.rcs".into(),
+                ..Default::default()
+            },
+        ));
+        cloud_definition.handle = cloud_handle;
+        root.objects
+            .insert(cloud_handle, ObjectType::ClassObject(cloud_definition));
+        let cloud = document::entities::PointCloudExData {
+            class_version: 1,
+            extents_min: document::types::Vector3::ZERO,
+            extents_max: document::types::Vector3::ZERO,
+            ucs_origin: document::types::Vector3::ZERO,
+            ucs_x_direction: document::types::Vector3::new(1.0, 0.0, 0.0),
+            ucs_y_direction: document::types::Vector3::new(0.0, 1.0, 0.0),
+            ucs_z_direction: document::types::Vector3::new(0.0, 0.0, 1.0),
+            locked: false,
+            definition_handle: cloud_handle,
+            reactor_handle: document::Handle::NULL,
+            name: "scan".into(),
+            show_intensity: false,
+            show_cropping: true,
+            hidden_scans: Vec::new(),
+            hidden_regions: Vec::new(),
+            stylization_type: 1,
+            intensity_color_scheme: String::new(),
+            current_color_scheme: String::new(),
+            classification_color_scheme: String::new(),
+            elevation_min: 0.0,
+            elevation_max: 0.0,
+            intensity_min: 0,
+            intensity_max: 100,
+            intensity_out_of_range_behavior: 1,
+            elevation_out_of_range_behavior: 1,
+            elevation_apply_to_fixed_range: false,
+            intensity_as_gradient: false,
+            elevation_as_gradient: false,
+            croppings: Vec::new(),
+        };
+        root.add_entity(EntityType::Extended(Box::new(
+            document::entities::ExtendedEntity {
+                common: document::entities::EntityCommon::new(),
+                data: document::entities::ExtendedEntityData::PointCloudEx(cloud),
+            },
+        )))
+        .unwrap();
         let mut text_style = TextStyle::new("RootText");
         text_style.font_file = "custom.ttf".into();
         text_style.big_font_file = "root-big.shx".into();
         root.text_styles.add(text_style).unwrap();
+        root.add_entity(EntityType::MText(Box::new(styled_text("RootText"))))
+            .unwrap();
         let mut custom_shape = TextStyle::new("CustomShapes");
         custom_shape.is_shape_file = true;
         custom_shape.font_file = "symbols.shx".into();
         root.text_styles.add(custom_shape).unwrap();
-        let bundled_handle = root.allocate_handle();
-        let mut bundled_shape = TextStyle::new("BundledShapes");
-        bundled_shape.is_shape_file = true;
-        bundled_shape.font_file = "ltypeshp.shx".into();
-        bundled_shape.handle = bundled_handle;
-        root.text_styles.add(bundled_shape).unwrap();
-        let mut dashed = LineType::new("TRANSMIT_DASH");
-        dashed.add_element(LineTypeElement::dash(5.0));
-        dashed.add_element(LineTypeElement {
-            length: -2.0,
-            complex: Some(LineTypeComplexData {
-                content: LineTypeComplexContent::Shape { shape_number: 132 },
-                style_handle: bundled_handle,
-                ..Default::default()
-            }),
-        });
-        root.line_types.add(dashed).unwrap();
+        root.add_entity(EntityType::MText(Box::new(styled_text("CustomShapes"))))
+            .unwrap();
 
         let root_bytes = crate::io::save_to_bytes(&root, "dwg", root.version).unwrap();
         write(dir.join("root.dwg"), &root_bytes);
@@ -857,6 +1749,7 @@ mod tests {
             Path::new(&dir.join("root.dwg")),
             "root.dwg",
             Some(&plot_name),
+            TransmittalLayout::Structured,
         )
         .unwrap();
         let entries: HashMap<String, &[u8]> = package
@@ -865,58 +1758,94 @@ mod tests {
             .map(|(name, bytes)| (name.to_ascii_lowercase(), bytes.as_slice()))
             .collect();
         for (name, expected) in [
-            ("root.png", b"root image".as_slice()),
-            ("root.pdf", b"root pdf"),
-            ("root.dgn", b"root dgn"),
-            ("scan.rcs", b"synthetic point cloud"),
-            ("custom.ttf", b"synthetic TrueType payload"),
-            ("root-big.shx", b"synthetic big-font payload"),
-            ("symbols.shx", b"synthetic shape payload"),
-            ("nested.shx", b"nested font"),
-            ("inner-big.shx", b"inner big font"),
+            ("images/root.png", b"root image".as_slice()),
+            ("underlays/root.pdf", b"root pdf"),
+            ("underlays/root.dgn", b"root dgn"),
+            ("pointclouds/scan.rcs", b"synthetic point cloud"),
+            ("linetypes/custom.lin", b"*EXTERNAL\nA,1,-1\n"),
+            ("fonts/custom.ttf", b"synthetic TrueType payload"),
+            ("fonts/root-big.shx", b"synthetic big-font payload"),
+            ("fonts/symbols.shx", b"synthetic shape payload"),
+            ("fonts/nested.shx", b"nested font"),
+            ("fonts/inner-big.shx", b"inner big font"),
         ] {
             assert_eq!(entries.get(name), Some(&expected), "entry {name}");
         }
-        assert_eq!(entries.get("root.dwg"), Some(&root_bytes.as_slice()));
-        let nested_bytes = std::fs::read(dir.join("nested.dwg")).unwrap();
-        let inner_bytes = std::fs::read(dir.join("inner.dxf")).unwrap();
-        assert_eq!(entries.get("nested.dwg"), Some(&nested_bytes.as_slice()));
-        assert_eq!(entries.get("inner.dxf"), Some(&inner_bytes.as_slice()));
+        assert!(!entries.contains_key("opencadstudio.lin"));
         assert_eq!(
-            entries.get(&plot_name.to_ascii_lowercase()),
+            entries.get("xref/inner.dxf"),
+            Some(&std::fs::read(dir.join("inner.dxf")).unwrap().as_slice())
+        );
+        assert_eq!(
+            entries.get(format!("plotstyles/{}", plot_name.to_ascii_lowercase()).as_str()),
             Some(&b"synthetic plot table".as_slice())
         );
-        let linetypes = String::from_utf8(entries[LINETYPES_FILE].to_vec()).unwrap();
-        assert!(linetypes.contains("*TRANSMIT_DASH"));
-        assert!(linetypes.contains("BOX,ltypeshp.shx"));
         assert!(entries.contains_key(&REPORT_FILE.to_ascii_lowercase()));
         assert!(package.issues.is_empty(), "{:?}", package.issues);
 
-        // Use only package bytes in a new folder: stored subfolder references
-        // must fall back to the flat sibling names on the receiving machine.
+        let packaged_root =
+            crate::io::load_bytes("root.dwg", entries["root.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_root
+                .block_records
+                .get("NESTED")
+                .map(|record| record.xref_path.as_str()),
+            Some("xref/nested.dwg")
+        );
+        assert_eq!(
+            crate::io::drawing_variable(&packaged_root, "CENTERLTYPEFILE").as_deref(),
+            Some("Linetypes/custom.lin")
+        );
+        assert!(packaged_root.line_types.get("EMBEDDED_ONLY").is_some());
+        let packaged_nested =
+            crate::io::load_bytes("nested.dwg", entries["xref/nested.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_nested
+                .text_styles
+                .get("Nested")
+                .map(|style| style.font_file.as_str()),
+            Some("nested.shx")
+        );
+        assert_eq!(
+            packaged_nested
+                .block_records
+                .get("INNER")
+                .map(|record| record.xref_path.as_str()),
+            Some("inner.dxf")
+        );
+
+        // Extract only package entries and resolve from the new layout.
         let isolated = dir.join("isolated");
-        std::fs::create_dir_all(&isolated).unwrap();
         for (name, bytes) in &package.entries {
-            std::fs::write(isolated.join(name), bytes).unwrap();
+            let path = isolated.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
         }
         let reopened = crate::io::load_bytes_finalized(
             &isolated.join("root.dwg"),
             entries["root.dwg"].to_vec(),
         )
         .unwrap();
-        assert!(reopened.line_types.get("TRANSMIT_DASH").is_some());
+        assert_eq!(
+            crate::io::xref::resolve_path(
+                &reopened.block_records.get("NESTED").unwrap().xref_path,
+                &isolated,
+            ),
+            Some(isolated.join("xref/nested.dwg"))
+        );
         assert_eq!(
             crate::io::xref::resolve_path("nested.dwg", &isolated),
-            Some(isolated.join("nested.dwg"))
+            Some(isolated.join("xref/nested.dwg")),
+            "a flat reference also finds the structured xref"
         );
         let reopened_nested = crate::io::load_bytes_finalized(
-            &isolated.join("nested.dwg"),
-            entries["nested.dwg"].to_vec(),
+            &isolated.join("xref/nested.dwg"),
+            entries["xref/nested.dwg"].to_vec(),
         )
         .unwrap();
         assert_eq!(
-            crate::io::resolve_image_file(
-                "nested-assets/nested.shx",
+            crate::io::font_repo::font_file_path(
+                &reopened_nested.text_styles.get("Nested").unwrap().font_file,
                 reopened_nested
                     .source_path
                     .as_deref()
@@ -924,9 +1853,414 @@ mod tests {
                     .and_then(Path::parent),
             )
             .map(PathBuf::from),
-            Some(isolated.join("nested.shx"))
+            Some(isolated.join("Fonts/nested.shx"))
         );
-        assert!(isolated.join(LINETYPES_FILE).is_file());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_plot_tables_use_each_owning_drawing() {
+        use document::objects::{Layout, ObjectType};
+        use document::tables::BlockRecord;
+        use std::sync::Arc;
+
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmit-plot-owners-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("PlotStyles")).unwrap();
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        let name = format!("Owner-{}.ctb", std::process::id());
+        let mut root_table = crate::io::plot_style::PlotStyleTable::identity(&name);
+        root_table.aci_entries[1].lineweight = 13;
+        let root_table_bytes = root_table.to_bytes().unwrap();
+        std::fs::write(dir.join("PlotStyles").join(&name), &root_table_bytes).unwrap();
+        let mut nested_table = crate::io::plot_style::PlotStyleTable::identity(&name);
+        nested_table.aci_entries[1].lineweight = 17;
+        let nested_table_bytes = nested_table.to_bytes().unwrap();
+        std::fs::write(dir.join("nested").join(&name), &nested_table_bytes).unwrap();
+        let mut session_table = crate::io::plot_style::PlotStyleTable::identity(&name);
+        session_table.aci_entries[1].lineweight = 25;
+        crate::io::plot_style::register_session_table(
+            &name,
+            Arc::new(session_table.to_bytes().unwrap()),
+        );
+
+        let with_table = |doc: &mut Document| {
+            let handle = doc.allocate_handle();
+            let mut layout = Layout::new("Test");
+            layout.handle = handle;
+            layout.plot_style_sheet = name.clone();
+            doc.objects.insert(handle, ObjectType::Layout(layout));
+        };
+        let mut nested = Document::new();
+        with_table(&mut nested);
+        std::fs::write(
+            dir.join("nested/nested.dwg"),
+            crate::io::save_to_bytes(&nested, "dwg", nested.version).unwrap(),
+        )
+        .unwrap();
+        let mut root = Document::new();
+        with_table(&mut root);
+        let mut xref = BlockRecord::new("NESTED");
+        xref.flags.is_xref = true;
+        xref.xref_path = "nested/nested.dwg".into();
+        root.block_records.add(xref).unwrap();
+        std::fs::write(
+            dir.join("root.dwg"),
+            crate::io::save_to_bytes(&root, "dwg", root.version).unwrap(),
+        )
+        .unwrap();
+
+        let package = native::collect(
+            &root,
+            &dir.join("root.dwg"),
+            "root.dwg",
+            None,
+            TransmittalLayout::Structured,
+        )
+        .unwrap();
+        let entries: HashMap<String, &[u8]> = package
+            .entries
+            .iter()
+            .map(|(path, bytes)| (path.to_ascii_lowercase(), bytes.as_slice()))
+            .collect();
+        let packaged_root =
+            crate::io::load_bytes("root.dwg", entries["root.dwg"].to_vec()).unwrap();
+        let packaged_nested =
+            crate::io::load_bytes("nested.dwg", entries["xref/nested.dwg"].to_vec()).unwrap();
+        let style_name = |doc: &Document| {
+            doc.objects
+                .values()
+                .find_map(|object| match object {
+                    ObjectType::Layout(layout) if layout.name == "Test" => {
+                        Some(layout.plot_style_sheet.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let root_reference = style_name(&packaged_root);
+        let nested_reference = style_name(&packaged_nested);
+        assert_ne!(root_reference, nested_reference);
+        let packaged_root_table = crate::io::plot_style::PlotStyleTable::from_bytes(
+            &root_reference,
+            entries[&format!("plotstyles/{root_reference}").to_ascii_lowercase()],
+        )
+        .unwrap();
+        let packaged_nested_table = crate::io::plot_style::PlotStyleTable::from_bytes(
+            &nested_reference,
+            entries[&format!("plotstyles/{nested_reference}").to_ascii_lowercase()],
+        )
+        .unwrap();
+        assert_eq!(packaged_root_table.aci_entries[1].lineweight, 13);
+        assert_eq!(packaged_nested_table.aci_entries[1].lineweight, 17);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_preserve_layout_retains_source_hierarchy() {
+        use document::objects::{ImageDefinition, ObjectType};
+        use document::tables::{BlockRecord, TextStyle};
+
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmit-preserve-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let project = dir.join("project");
+        std::fs::create_dir_all(project.join("xrefs/details")).unwrap();
+        std::fs::create_dir_all(project.join("xrefs/assets")).unwrap();
+        std::fs::create_dir_all(project.join("xrefs/textures")).unwrap();
+        std::fs::create_dir_all(project.join("images")).unwrap();
+        std::fs::create_dir_all(project.join("PlotStyles")).unwrap();
+        std::fs::write(project.join("images/root.png"), b"root image").unwrap();
+        std::fs::write(
+            project.join("PlotStyles/preserved.ctb"),
+            b"preserved plot table",
+        )
+        .unwrap();
+        std::fs::write(project.join("xrefs/textures/symbol.png"), b"nested image").unwrap();
+        std::fs::write(project.join("xrefs/assets/nested.shx"), b"nested font").unwrap();
+
+        let inner = Document::new();
+        std::fs::write(
+            project.join("xrefs/details/inner.dxf"),
+            crate::io::save_to_bytes(&inner, "dxf", inner.version).unwrap(),
+        )
+        .unwrap();
+        let outside = Document::new();
+        std::fs::write(
+            dir.join("outside.dwg"),
+            crate::io::save_to_bytes(&outside, "dwg", outside.version).unwrap(),
+        )
+        .unwrap();
+
+        let mut nested = Document::new();
+        let mut inner_ref = BlockRecord::new("INNER");
+        inner_ref.flags.is_xref = true;
+        inner_ref.xref_path = "details/inner.dxf".into();
+        nested.block_records.add(inner_ref).unwrap();
+        let mut style = TextStyle::new("Nested");
+        style.font_file = "assets/nested.shx".into();
+        nested.text_styles.add(style).unwrap();
+        let mut text = document::entities::MText::new();
+        text.style = "Nested".into();
+        nested
+            .add_entity(EntityType::MText(Box::new(text)))
+            .unwrap();
+        let image_handle = nested.allocate_handle();
+        let mut image = ImageDefinition::with_dimensions("textures/symbol.png", 8, 8);
+        image.handle = image_handle;
+        nested
+            .objects
+            .insert(image_handle, ObjectType::ImageDefinition(image));
+        let mut raster = document::entities::RasterImage::new(
+            "textures/symbol.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
+        raster.definition_handle = Some(image_handle);
+        nested.add_entity(EntityType::RasterImage(raster)).unwrap();
+        std::fs::write(
+            project.join("xrefs/nested.dwg"),
+            crate::io::save_to_bytes(&nested, "dwg", nested.version).unwrap(),
+        )
+        .unwrap();
+
+        let mut root = Document::new();
+        for (name, path) in [
+            ("NESTED", "xrefs/nested.dwg"),
+            ("OUTSIDE", "../outside.dwg"),
+        ] {
+            let mut record = BlockRecord::new(name);
+            record.flags.is_xref = true;
+            record.xref_path = path.into();
+            root.block_records.add(record).unwrap();
+        }
+        let image_handle = root.allocate_handle();
+        let mut image = ImageDefinition::with_dimensions("images/root.png", 8, 8);
+        image.handle = image_handle;
+        root.objects
+            .insert(image_handle, ObjectType::ImageDefinition(image));
+        let mut raster = document::entities::RasterImage::new(
+            "images/root.png",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
+        raster.definition_handle = Some(image_handle);
+        root.add_entity(EntityType::RasterImage(raster)).unwrap();
+        let layout_handle = root.allocate_handle();
+        let mut layout = document::objects::Layout::new("Test");
+        layout.handle = layout_handle;
+        layout.plot_style_sheet = "PlotStyles/preserved.ctb".into();
+        root.objects
+            .insert(layout_handle, ObjectType::Layout(layout));
+        std::fs::write(
+            project.join("root.dwg"),
+            crate::io::save_to_bytes(&root, "dwg", root.version).unwrap(),
+        )
+        .unwrap();
+
+        let package = native::collect(
+            &root,
+            &project.join("root.dwg"),
+            "root.dwg",
+            None,
+            TransmittalLayout::Preserve,
+        )
+        .unwrap();
+        let entries: HashMap<&str, &[u8]> = package
+            .entries
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+        for name in [
+            "images/root.png",
+            "xrefs/nested.dwg",
+            "xrefs/details/inner.dxf",
+            "xrefs/textures/symbol.png",
+            "xrefs/assets/nested.shx",
+            "PlotStyles/preserved.ctb",
+            "outside.dwg",
+        ] {
+            assert!(entries.contains_key(name), "missing {name}");
+        }
+        assert!(entries.keys().all(|name| !name.starts_with("..")));
+        let packaged_root =
+            crate::io::load_bytes("root.dwg", entries["root.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_root.block_records.get("NESTED").unwrap().xref_path,
+            "xrefs/nested.dwg"
+        );
+        assert_eq!(
+            packaged_root
+                .block_records
+                .get("OUTSIDE")
+                .unwrap()
+                .xref_path,
+            "outside.dwg"
+        );
+        assert!(packaged_root.objects.values().any(|object| matches!(
+            object,
+            ObjectType::Layout(layout) if layout.plot_style_sheet == "PlotStyles/preserved.ctb"
+        )));
+        let packaged_nested =
+            crate::io::load_bytes("nested.dwg", entries["xrefs/nested.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_nested
+                .block_records
+                .get("INNER")
+                .unwrap()
+                .xref_path,
+            "details/inner.dxf"
+        );
+        assert_eq!(
+            packaged_nested.text_styles.get("Nested").unwrap().font_file,
+            "assets/nested.shx"
+        );
+        assert!(packaged_nested.objects.values().any(|object| matches!(
+            object,
+            ObjectType::ImageDefinition(definition) if definition.file_name == "textures/symbol.png"
+        )));
+
+        let isolated = dir.join("isolated");
+        for (name, bytes) in &package.entries {
+            let path = isolated.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        assert_eq!(
+            crate::io::xref::resolve_path("xrefs/nested.dwg", &isolated),
+            Some(isolated.join("xrefs/nested.dwg"))
+        );
+        assert_eq!(
+            crate::io::resolve_image_file("textures/symbol.png", Some(&isolated.join("xrefs"))),
+            Some(
+                isolated
+                    .join("xrefs/textures/symbol.png")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert_eq!(
+            crate::io::font_repo::font_file_path(
+                "assets/nested.shx",
+                Some(&isolated.join("xrefs"))
+            ),
+            Some(
+                isolated
+                    .join("xrefs/assets/nested.shx")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_flat_package_rewrites_and_reopens_recursive_resources() {
+        use document::tables::{BlockRecord, TextStyle};
+
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-transmit-flat-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(dir.join("assets/nested.shx"), b"nested font").unwrap();
+        std::fs::write(dir.join("root.ttf"), b"root font").unwrap();
+
+        let mut nested = Document::new();
+        let mut style = TextStyle::new("Nested");
+        style.font_file = "assets/nested.shx".into();
+        nested.text_styles.add(style).unwrap();
+        let mut text = document::entities::MText::new();
+        text.style = "Nested".into();
+        nested
+            .add_entity(EntityType::MText(Box::new(text)))
+            .unwrap();
+        std::fs::write(
+            dir.join("nested.dwg"),
+            crate::io::save_to_bytes(&nested, "dwg", nested.version).unwrap(),
+        )
+        .unwrap();
+
+        let mut root = Document::new();
+        let mut xref = BlockRecord::new("NESTED");
+        xref.flags.is_xref = true;
+        xref.xref_path = "nested.dwg".into();
+        root.block_records.add(xref).unwrap();
+        let mut style = TextStyle::new("Root");
+        style.font_file = "root.ttf".into();
+        root.text_styles.add(style).unwrap();
+        let mut text = document::entities::MText::new();
+        text.style = "Root".into();
+        root.add_entity(EntityType::MText(Box::new(text))).unwrap();
+        std::fs::write(
+            dir.join("root.dwg"),
+            crate::io::save_to_bytes(&root, "dwg", root.version).unwrap(),
+        )
+        .unwrap();
+
+        let package = native::collect(
+            &root,
+            &dir.join("root.dwg"),
+            "root.dwg",
+            None,
+            TransmittalLayout::Flat,
+        )
+        .unwrap();
+        let entries: HashMap<&str, &[u8]> = package
+            .entries
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+        assert_eq!(entries.get("nested.shx"), Some(&b"nested font".as_slice()));
+        assert_eq!(entries.get("root.ttf"), Some(&b"root font".as_slice()));
+        assert!(entries.contains_key("nested.dwg"));
+        assert!(entries.keys().all(|name| !name.contains('/')));
+
+        let packaged_root =
+            crate::io::load_bytes("root.dwg", entries["root.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_root.block_records.get("NESTED").unwrap().xref_path,
+            "nested.dwg"
+        );
+        let packaged_nested =
+            crate::io::load_bytes("nested.dwg", entries["nested.dwg"].to_vec()).unwrap();
+        assert_eq!(
+            packaged_nested.text_styles.get("Nested").unwrap().font_file,
+            "nested.shx"
+        );
+        let isolated = dir.join("isolated");
+        std::fs::create_dir_all(&isolated).unwrap();
+        for (name, bytes) in &package.entries {
+            std::fs::write(isolated.join(name), bytes).unwrap();
+        }
+        assert_eq!(
+            crate::io::xref::resolve_path("nested.dwg", &isolated),
+            Some(isolated.join("nested.dwg"))
+        );
+        assert_eq!(
+            crate::io::font_repo::font_file_path("nested.shx", Some(&isolated)),
+            Some(isolated.join("nested.shx").to_string_lossy().into_owned())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -940,38 +2274,7 @@ mod tests {
             .unwrap();
         let report = String::from_utf8(report.1.clone()).unwrap();
         assert!(report.contains("web.dwg\n  Type: drawing"));
-    }
-
-    #[test]
-    fn package_rejects_conflicts_and_keeps_drawing() {
-        let mut package = TransmittalPackage::new("plan.dwg").unwrap();
-        package.set_drawing(b"drawing".to_vec());
-        let first = Dependency::new(DependencyKind::Image, "a/site.png", "plan.dwg");
-        package.add(&first, b"first".to_vec());
-        package.add(&first, b"first".to_vec());
-        let conflict = Dependency::new(DependencyKind::Image, "b/SITE.PNG", "nested.dwg");
-        package.add(&conflict, b"different".to_vec());
-        let drawing_conflict =
-            Dependency::new(DependencyKind::Xref, "other/plan.dwg", "nested.dwg");
-        package.add(&drawing_conflict, b"drawing".to_vec());
-        let package = package.finish();
-        assert_eq!(package.entries[0], ("plan.dwg".into(), b"drawing".to_vec()));
-        assert_eq!(
-            package
-                .entries
-                .iter()
-                .filter(|(name, _)| name == "site.png")
-                .count(),
-            1
-        );
-        assert_eq!(package.issues.len(), 2);
-        let report = package
-            .entries
-            .iter()
-            .find(|(name, _)| name == REPORT_FILE)
-            .unwrap();
-        let report = String::from_utf8(report.1.clone()).unwrap();
-        assert!(report.contains("conflicts"));
-        assert!(report.contains("plan.dwg"));
+        assert!(report.contains("xref/"));
+        assert!(report.contains("Fonts/"));
     }
 }

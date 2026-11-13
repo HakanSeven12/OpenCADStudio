@@ -672,6 +672,10 @@ pub(crate) fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
             if c.exists() {
                 return Some(c);
             }
+            let structured = base_dir.join("xref").join(fname);
+            if structured.is_file() {
+                return Some(structured);
+            }
         }
         return None;
     }
@@ -687,6 +691,13 @@ pub(crate) fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
         let c = base_dir.join(fname);
         if c.exists() {
             return Some(c);
+        }
+        // Flat references from older packages also resolve into the structured
+        // AutoCAD-style xref/ folder. The reverse (an xref/ path with a flat
+        // package) is covered by the bare-name fallback above.
+        let structured = base_dir.join("xref").join(fname);
+        if structured.is_file() {
+            return Some(structured);
         }
     }
 

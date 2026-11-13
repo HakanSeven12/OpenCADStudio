@@ -5,21 +5,21 @@ use std::io::{Cursor, Write};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-/// Return the flat, safe filename under which a transmittal stores `raw`.
+/// Return the safe trailing filename of a stored resource reference.
 ///
 /// Both slash styles are recognized regardless of the host platform. Parent,
 /// absolute, UNC, and drive paths contribute only their trailing filename;
 /// a trailing separator or dot component is not a filename.
-pub(crate) fn entry_name(raw: &str) -> Result<String, String> {
+pub(crate) fn file_name(raw: &str) -> Result<String, String> {
     if raw.chars().any(char::is_control) {
-        return Err("ZIP entry name contains a control character".to_owned());
+        return Err("resource filename contains a control character".to_owned());
     }
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err("ZIP entry name is empty".to_owned());
+        return Err("resource filename is empty".to_owned());
     }
     if raw.ends_with('/') || raw.ends_with('\\') {
-        return Err("ZIP entry name ends with a path separator".to_owned());
+        return Err("resource filename ends with a path separator".to_owned());
     }
 
     let mut name = raw.rsplit(['/', '\\']).next().unwrap_or_default();
@@ -31,12 +31,42 @@ pub(crate) fn entry_name(raw: &str) -> Result<String, String> {
         name = &name[2..];
     }
     if name.is_empty() {
-        return Err("ZIP entry name is empty".to_owned());
+        return Err("resource filename is empty".to_owned());
     }
     if matches!(name, "." | "..") {
-        return Err("ZIP entry name must be a filename, not a dot component".to_owned());
+        return Err("resource filename must not be a dot component".to_owned());
     }
     Ok(name.to_owned())
+}
+
+/// Validate a package-relative ZIP/folder entry, retaining curated subfolders.
+/// Absolute paths, traversal, dot components, and empty components are rejected
+/// rather than silently flattened into a different resource's name.
+pub(crate) fn entry_name(raw: &str) -> Result<String, String> {
+    if raw.chars().any(char::is_control) {
+        return Err("ZIP entry name contains a control character".to_owned());
+    }
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("ZIP entry name is empty".to_owned());
+    }
+    let normalized = raw.replace('\\', "/");
+    if normalized.starts_with('/')
+        || (normalized
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && normalized.as_bytes().get(1) == Some(&b':'))
+    {
+        return Err("ZIP entry name must be relative".to_owned());
+    }
+    if normalized
+        .split('/')
+        .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        return Err("ZIP entry name contains an empty or dot path component".to_owned());
+    }
+    Ok(normalized)
 }
 
 /// Build a deflated ZIP in memory, preserving entry order and bytes.
@@ -132,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn entry_names_flatten_traversal_absolute_and_foreign_paths() {
+    fn resource_names_flatten_stored_paths() {
         for (raw, expected) in [
             ("drawing.dwg", "drawing.dwg"),
             ("../drawing.dwg", "drawing.dwg"),
@@ -145,12 +175,12 @@ mod tests {
             (r"mixed\folder/drawing.dwg", "drawing.dwg"),
             ("  folder/drawing.dwg  ", "drawing.dwg"),
         ] {
-            assert_eq!(entry_name(raw).as_deref(), Ok(expected), "{raw:?}");
+            assert_eq!(file_name(raw).as_deref(), Ok(expected), "{raw:?}");
         }
     }
 
     #[test]
-    fn entry_names_reject_empty_dot_and_trailing_separators() {
+    fn resource_names_reject_empty_dot_and_trailing_separators() {
         for raw in [
             "",
             "   ",
@@ -166,10 +196,39 @@ mod tests {
             "C:.",
             "C:..",
         ] {
+            assert!(file_name(raw).is_err(), "{raw:?}");
+        }
+        assert_eq!(file_name(".hidden").as_deref(), Ok(".hidden"));
+        assert_eq!(file_name("..hidden").as_deref(), Ok("..hidden"));
+    }
+
+    #[test]
+    fn package_entries_retain_only_safe_relative_folders() {
+        for (raw, expected) in [
+            ("drawing.dwg", "drawing.dwg"),
+            ("Fonts/arial.ttf", "Fonts/arial.ttf"),
+            (r"xref\site.dwg", "xref/site.dwg"),
+            ("  xref/nested/site.dwg  ", "xref/nested/site.dwg"),
+            (".hidden", ".hidden"),
+            ("..hidden", "..hidden"),
+        ] {
+            assert_eq!(entry_name(raw).as_deref(), Ok(expected), "{raw:?}");
+        }
+        for raw in [
+            "../drawing.dwg",
+            "folder/../drawing.dwg",
+            "./drawing.dwg",
+            "folder/./drawing.dwg",
+            "/var/drawings/drawing.dwg",
+            r"C:\projects\drawing.dwg",
+            "C:drawing.dwg",
+            r"\\server\share\drawing.dwg",
+            "folder//drawing.dwg",
+            "folder/",
+            "",
+        ] {
             assert!(entry_name(raw).is_err(), "{raw:?}");
         }
-        assert_eq!(entry_name(".hidden").as_deref(), Ok(".hidden"));
-        assert_eq!(entry_name("..hidden").as_deref(), Ok("..hidden"));
     }
 
     #[test]
@@ -185,6 +244,7 @@ mod tests {
             "discarded\nfolder/good.dwg",
         ] {
             assert!(entry_name(raw).is_err(), "{raw:?}");
+            assert!(file_name(raw).is_err(), "{raw:?}");
         }
     }
 
@@ -197,7 +257,10 @@ mod tests {
                 b"synthetic notes\nnot a drawing format".to_vec(),
             ),
             ("empty.bin".to_owned(), Vec::new()),
-            ("ÜMLAUT.SHX".to_owned(), (0..=255).collect::<Vec<u8>>()),
+            (
+                "Fonts/ÜMLAUT.SHX".to_owned(),
+                (0..=255).collect::<Vec<u8>>(),
+            ),
         ];
 
         let bytes = build_zip(&entries).unwrap();
@@ -213,12 +276,12 @@ mod tests {
     }
 
     #[test]
-    fn zip_entries_use_only_safe_flat_names() {
+    fn zip_entries_preserve_safe_folders_and_reject_unsafe_paths() {
         let entries = vec![
-            ("../drawing.dwg".to_owned(), vec![1, 2, 3]),
-            (r"C:\project\fonts\simplex.shx".to_owned(), vec![4, 5]),
-            ("/absolute/image.png".to_owned(), vec![6]),
-            (r"\\server\share\plot.ctb".to_owned(), vec![7, 8]),
+            ("drawing.dwg".to_owned(), vec![1, 2, 3]),
+            (r"Fonts\simplex.shx".to_owned(), vec![4, 5]),
+            ("xref/site.dwg".to_owned(), vec![6]),
+            ("plot.ctb".to_owned(), vec![7, 8]),
         ];
         let actual = read_archive(&build_zip(&entries).unwrap());
         let names = actual
@@ -227,11 +290,21 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             names,
-            ["drawing.dwg", "simplex.shx", "image.png", "plot.ctb"]
+            [
+                "drawing.dwg",
+                "Fonts/simplex.shx",
+                "xref/site.dwg",
+                "plot.ctb"
+            ]
         );
-        assert!(names
-            .iter()
-            .all(|name| !name.contains(['/', '\\']) && *name != "." && *name != ".."));
+        for raw in [
+            "../drawing.dwg",
+            r"C:\project\fonts\simplex.shx",
+            "/absolute/image.png",
+            r"\\server\share\plot.ctb",
+        ] {
+            assert!(build_zip(&[(raw.to_owned(), vec![1])]).is_err(), "{raw:?}");
+        }
     }
 
     #[test]
@@ -253,15 +326,15 @@ mod tests {
     fn zip_rejects_ascii_case_insensitive_duplicates_including_the_drawing() {
         let drawing_collision = vec![
             ("Site.DWG".to_owned(), b"drawing".to_vec()),
-            (r"..\site.dwg".to_owned(), b"dependency".to_vec()),
+            ("site.dwg".to_owned(), b"dependency".to_vec()),
         ];
         let error = build_zip(&drawing_collision).unwrap_err();
         assert!(error.contains("duplicate"), "{error}");
 
         let dependency_collision = vec![
             ("drawing.dwg".to_owned(), vec![1]),
-            ("font.SHX".to_owned(), vec![2]),
-            ("other/FONT.shx".to_owned(), vec![3]),
+            ("Fonts/font.SHX".to_owned(), vec![2]),
+            ("fonts/FONT.shx".to_owned(), vec![3]),
         ];
         assert!(build_zip(&dependency_collision).is_err());
     }

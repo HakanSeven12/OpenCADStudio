@@ -109,8 +109,7 @@ pub fn available_table_names() -> Vec<String> {
             })
             .collect();
         names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
-        // Empty on native (nothing registers there); on the web this is
-        // where the tables picked this session surface.
+        // Tables picked or discovered beside packaged drawings this session.
         names.extend(session_table_names());
         names.sort_by_key(|name| name.to_ascii_lowercase());
         names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
@@ -128,23 +127,20 @@ pub fn available_table_names() -> Vec<String> {
     }
 }
 
-// ── Web session registry ────────────────────────────────────────────────────
+// ── Session table registry ──────────────────────────────────────────────────
 
-/// Plot tables picked this session, keyed by file name. The browser keeps
-/// no folder behind a picked name, so the web build remembers the bytes
-/// instead and `load_named` resolves through here before falling back to
-/// the built-ins — the plot-style counterpart of `pdf_raster::register_source`.
-/// Native never writes it, so the lookup is always empty there and the
-/// plot-styles folder stays authoritative.
+/// Plot tables explicitly picked or registered this session, keyed by reference.
+/// Packaged drawings instead resolve disk-backed tables against their owning
+/// drawing with `load_named_at`, avoiding cross-drawing global-name collisions.
 fn session_tables() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
     static TABLES: OnceLock<Mutex<HashMap<String, Arc<Vec<u8>>>>> = OnceLock::new();
     TABLES.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
-/// Remember a picked table's bytes so later `load_named` calls — the Plot
-/// dialog's table list and APPLY, plot settings, display plot style —
-/// resolve its name. Web only; on native, permanently registering a picked
-/// table copies it into the plot-styles folder instead.
+/// Remember a picked or packaged table's bytes so later `load_named` calls —
+/// the Plot dialog's table list and APPLY, plot settings, display plot style —
+/// resolve its name. Native picked tables may instead be copied into the
+/// configured plot-styles folder.
 pub fn register_session_table(name: &str, bytes: Arc<Vec<u8>>) {
     session_tables()
         .lock()
@@ -194,86 +190,89 @@ fn normal_entry(table: &PlotStyleTable) -> Option<&PlotStyleEntry> {
         .or_else(|| table.named_entries.values().next())
 }
 
-    // Names in a named table: the packed RGB the codec reads and writes.
-    fn packed_rgb([r, g, b]: [u8; 3]) -> i32 {
-        u32::from_be_bytes([0xC2, r, g, b]) as i32
-    }
+// Names in a named table: the packed RGB the codec reads and writes.
+fn packed_rgb([r, g, b]: [u8; 3]) -> i32 {
+    u32::from_be_bytes([0xC2, r, g, b]) as i32
+}
 
-    /// Encode a named-style (STB) table as the file bytes the codec reads
-    /// back. `PlotStyleTable::to_bytes` writes colour tables, so STB tables
-    /// need their own writer.
-    pub fn encode_stb(table: &PlotStyleTable) -> Result<Vec<u8>, String> {
-        let mut body = String::new();
-        let description = table.description.replace(['\r', '\n'], " ");
-        body.push_str(&format!("description=\"{description}\n"));
-        body.push_str("aci_table_available=TRUE\n");
+/// Encode a named-style (STB) table as the file bytes the codec reads
+/// back. `PlotStyleTable::to_bytes` writes colour tables, so STB tables
+/// need their own writer.
+pub fn encode_stb(table: &PlotStyleTable) -> Result<Vec<u8>, String> {
+    let mut body = String::new();
+    let description = table.description.replace(['\r', '\n'], " ");
+    body.push_str(&format!("description=\"{description}\n"));
+    body.push_str("aci_table_available=TRUE\n");
+    body.push_str(&format!(
+        "scale_factor={}\n",
+        full_real_stb(table.scale_factor)
+    ));
+    body.push_str(&format!(
+        "apply_factor={}\n",
+        if table.apply_factor { "TRUE" } else { "FALSE" }
+    ));
+    body.push_str(&format!(
+        "custom_lineweight_display_units={}\n",
+        table.custom_lineweight_display_units
+    ));
+    body.push_str("plot_style{\n");
+    for (index, (name, entry)) in table.named_entries.iter().enumerate() {
+        let localized_name = if entry.localized_name.is_empty() {
+            name.as_str()
+        } else {
+            entry.localized_name.as_str()
+        };
+        body.push_str(&format!(" {index}{{\n"));
+        body.push_str(&format!("  name=\"{name}\n"));
+        body.push_str(&format!("  localized_name=\"{localized_name}\n"));
         body.push_str(&format!(
-            "scale_factor={}\n",
-            full_real_stb(table.scale_factor)
+            "  description=\"{}\n",
+            entry.description.replace(['\r', '\n'], " ")
         ));
+        let color = entry.color.map(packed_rgb).unwrap_or(-1);
+        body.push_str(&format!("  color={color}\n  mode_color={color}\n"));
+        body.push_str(&format!("  color_policy={}\n", entry.color_policy));
         body.push_str(&format!(
-            "apply_factor={}\n",
-            if table.apply_factor { "TRUE" } else { "FALSE" }
+            "  physical_pen_number={}\n  virtual_pen_number={}\n",
+            entry.physical_pen_number, entry.virtual_pen_number
         ));
+        body.push_str(&format!("  screen={}\n", entry.screening));
         body.push_str(&format!(
-            "custom_lineweight_display_units={}\n",
-            table.custom_lineweight_display_units
-        ));
-        body.push_str("plot_style{\n");
-        for (index, (name, entry)) in table.named_entries.iter().enumerate() {
-            let localized_name = if entry.localized_name.is_empty() {
-                name.as_str()
+            "  linepattern_size={}\n  linetype={}\n  adaptive_linetype={}\n",
+            entry.linepattern_size,
+            entry.linetype,
+            if entry.adaptive_linetype {
+                "TRUE"
             } else {
-                entry.localized_name.as_str()
-            };
-            body.push_str(&format!(" {index}{{\n"));
-            body.push_str(&format!("  name=\"{name}\n"));
-            body.push_str(&format!("  localized_name=\"{localized_name}\n"));
-            body.push_str(&format!(
-                "  description=\"{}\n",
-                entry.description.replace(['\r', '\n'], " ")
-            ));
-            let color = entry.color.map(packed_rgb).unwrap_or(-1);
-            body.push_str(&format!("  color={color}\n  mode_color={color}\n"));
-            body.push_str(&format!("  color_policy={}\n", entry.color_policy));
-            body.push_str(&format!(
-                "  physical_pen_number={}\n  virtual_pen_number={}\n",
-                entry.physical_pen_number, entry.virtual_pen_number
-            ));
-            body.push_str(&format!("  screen={}\n", entry.screening));
-            body.push_str(&format!(
-                "  linepattern_size={}\n  linetype={}\n  adaptive_linetype={}\n",
-                entry.linepattern_size,
-                entry.linetype,
-                if entry.adaptive_linetype { "TRUE" } else { "FALSE" }
-            ));
-            body.push_str(&format!("  lineweight={}\n", entry.lineweight));
-            body.push_str(&format!(
-                "  fill_style={}\n  end_style={}\n  join_style={}\n }}\n",
-                entry.fill_style, entry.end_style, entry.join_style
-            ));
-        }
-        body.push_str("}\ncustom_lineweight_table{\n");
-        for (index, weight) in table.lineweights.iter().enumerate() {
-            body.push_str(&format!(" {index}={}\n", full_real_stb(*weight)));
-        }
-        body.push_str("}\n");
-        let mut encoder =
-            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        use std::io::Write as _;
-        encoder
-            .write_all(body.as_bytes())
-            .map_err(|error| error.to_string())?;
-        encoder.finish().map_err(|error| error.to_string())
+                "FALSE"
+            }
+        ));
+        body.push_str(&format!("  lineweight={}\n", entry.lineweight));
+        body.push_str(&format!(
+            "  fill_style={}\n  end_style={}\n  join_style={}\n }}\n",
+            entry.fill_style, entry.end_style, entry.join_style
+        ));
     }
+    body.push_str("}\ncustom_lineweight_table{\n");
+    for (index, weight) in table.lineweights.iter().enumerate() {
+        body.push_str(&format!(" {index}={}\n", full_real_stb(*weight)));
+    }
+    body.push_str("}\n");
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    use std::io::Write as _;
+    encoder
+        .write_all(body.as_bytes())
+        .map_err(|error| error.to_string())?;
+    encoder.finish().map_err(|error| error.to_string())
+}
 
-    fn full_real_stb(value: f32) -> String {
-        let rendered = format!("{value:.10}");
-        rendered
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
-    }
+fn full_real_stb(value: f32) -> String {
+    let rendered = format!("{value:.10}");
+    rendered
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
+}
 
 /// A named table (STB) narrowed to one object style: the copy plots every
 /// object with `style` the way the full table plots `Normal`, so the colour,
@@ -301,6 +300,9 @@ pub trait PlotStyleTableExt: Sized {
     fn load(path: &Path) -> Result<Self, String>;
     fn builtin(name: &str) -> Result<Self, String>;
     fn load_named(name: &str) -> Result<Self, String>;
+    /// Load a table relative to its owning drawing before using session or
+    /// configured-folder fallbacks.
+    fn load_named_at(name: &str, base: Option<&Path>) -> Result<Self, String>;
     fn save(&self, path: &Path) -> Result<(), String>;
     /// The plotted colour of an object, honouring a named table's `Normal`
     /// object style (STB) as well as a colour table's ACI row (CTB).
@@ -369,7 +371,9 @@ impl PlotStyleTableExt for PlotStyleTable {
         }
     }
 
-    /// Load one CTB by file name from the per-user plot styles folder.
+    /// Load one CTB/STB by its session reference or by file name from the
+    /// per-user plot styles folder. Use `load_named_at` for drawing-relative
+    /// packaged references; arbitrary filesystem paths stay invalid here.
     fn load_named(name: &str) -> Result<Self, String> {
         let path = Path::new(name);
         if path.components().count() != 1
@@ -387,9 +391,6 @@ impl PlotStyleTableExt for PlotStyleTable {
             return Err(format!("Invalid plot style name: {name}"));
         }
 
-        // A table picked this session resolves through the registry first.
-        // Empty on native, so the folder search below stays authoritative
-        // there; on the web this is the only place a picked table lives.
         if let Some(bytes) = session_table(name) {
             return Self::from_bytes(name, &bytes).map_err(|e| e.to_string());
         }
@@ -422,6 +423,17 @@ impl PlotStyleTableExt for PlotStyleTable {
         Self::builtin(name)
     }
 
+    fn load_named_at(name: &str, base: Option<&Path>) -> Result<Self, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = drawing_table_path(name, base) {
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            return Self::from_bytes(name, &bytes).map_err(|error| error.to_string());
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = base;
+        Self::load_named(name)
+    }
+
     /// Write this table to disk as a CTB/STB file.
     fn save(&self, path: &Path) -> Result<(), String> {
         let bytes = self.to_bytes().map_err(|e| e.to_string())?;
@@ -441,9 +453,8 @@ impl PlotStyleTableExt for PlotStyleTable {
                 if aci == 7 {
                     Some([0.0; 3])
                 } else {
-                    document::types::aci_to_rgb(aci).map(|(r, g, b)| {
-                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-                    })
+                    document::types::aci_to_rgb(aci)
+                        .map(|(r, g, b)| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
                 }
             })?;
             let gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
@@ -481,6 +492,40 @@ impl PlotStyleTableExt for PlotStyleTable {
         }
         self.resolve_screening(aci)
     }
+}
+
+/// Resolve a table against its owning drawing: as stored or beside the
+/// drawing, then by bare name in ancestor `PlotStyles` folders. This preserves
+/// per-drawing ownership when equally named tables occur in different folders.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn drawing_table_path(name: &str, base: Option<&Path>) -> Option<PathBuf> {
+    let base = base?;
+    if let Some(path) = crate::io::resolve_image_file(name, Some(base)) {
+        return Some(PathBuf::from(path));
+    }
+    let file_name = name.rsplit(['/', '\\']).next()?;
+    for dir in base.ancestors().map(|dir| dir.join("PlotStyles")) {
+        let direct = dir.join(file_name);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        if let Some(path) = std::fs::read_dir(dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(file_name)
+            })
+            .map(|entry| entry.path())
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// A named table holding only `Normal`: `color` replaces every object's
@@ -561,7 +606,11 @@ mod lenient_loading_tests {
         for name in ["acad.stb", "Autodesk-Color.stb"] {
             let table = PlotStyleTable::load_named(name).expect("shipped named table");
             assert!(table.is_stb);
-            assert_eq!(table.resolve_style_color(1), None, "{name} keeps object colour");
+            assert_eq!(
+                table.resolve_style_color(1),
+                None,
+                "{name} keeps object colour"
+            );
         }
         let mono = PlotStyleTable::load_named("monochrome.stb").expect("monochrome.stb");
         assert_eq!(mono.resolve_style_color(1), Some([0.0; 3]));
@@ -595,5 +644,39 @@ mod lenient_loading_tests {
         let error = PlotStyleTable::load_named("nowhere-to-be-found.ctb").unwrap_err();
         assert!(error.contains("nowhere-to-be-found.ctb"), "{error}");
         assert!(PlotStyleTable::load_named("../escape.ctb").is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn packaged_plot_styles_resolve_from_nested_preserved_folders() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-packaged-plot-styles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let tables = dir.join("PlotStyles");
+        let nested = dir.join("xrefs/discipline");
+        std::fs::create_dir_all(&tables).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        let name = format!("Packaged-{}.ctb", std::process::id());
+        let mut root_table = PlotStyleTable::identity(&name);
+        root_table.aci_entries[1].lineweight = 13;
+        std::fs::write(tables.join(&name), root_table.to_bytes().unwrap()).unwrap();
+        let mut nested_table = PlotStyleTable::identity(&name);
+        nested_table.aci_entries[1].lineweight = 17;
+        std::fs::write(nested.join(&name), nested_table.to_bytes().unwrap()).unwrap();
+
+        let root = PlotStyleTable::load_named_at(&name, Some(&dir)).unwrap();
+        let local = PlotStyleTable::load_named_at(&name, Some(&nested)).unwrap();
+        assert_eq!(root.aci_entries[1].lineweight, 13);
+        assert_eq!(local.aci_entries[1].lineweight, 17);
+
+        let reference = format!("../../PlotStyles/{name}");
+        let preserved = PlotStyleTable::load_named_at(&reference, Some(&nested)).unwrap();
+        assert_eq!(preserved.aci_entries[1].lineweight, 13);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -177,6 +177,22 @@ pub(crate) fn walk_complex_linetype(
             (rotated.as_slice(), true, rotated_band.as_deref())
         }
     };
+    // A polyline's runs are walked one by one, each under the per-run repeat
+    // cap, so the whole path is checked here: past the budget, draw it solid.
+    let total: f64 = path
+        .split(|p| p[0].is_nan())
+        .map(|run| {
+            run.windows(2)
+                .map(|w| {
+                    let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                })
+                .sum::<f64>()
+        })
+        .sum();
+    if text::complex_lt::exceeds_repeat_budget(linetype, scale, total) {
+        return None;
+    }
     let mut wires = Vec::new();
     let mut next_run = 0;
     for run in path.split(|p| p[0].is_nan()) {

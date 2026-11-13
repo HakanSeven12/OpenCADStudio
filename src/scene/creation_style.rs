@@ -101,6 +101,32 @@ pub fn ensure_iso_dim_style(doc: &mut Document) -> Handle {
     handle
 }
 
+/// The metric template's text styles: Standard draws with Arial, and an
+/// annotative Annotative style (Arial too) sits beside it. Both keep 2.5 as
+/// the last height used and the Arial face's character set and pitch (34).
+pub fn ensure_metric_text_styles(doc: &mut Document) {
+    fn arial(style: &mut TextStyle) {
+        style.font_file = "arial.ttf".to_string();
+        style.true_type_font = "Arial".to_string();
+        style.true_type_font_flags = 34;
+        style.last_height = 2.5;
+    }
+    if let Some(standard) = doc.text_styles.get_mut("Standard") {
+        arial(standard);
+    }
+    if !doc
+        .text_styles
+        .iter()
+        .any(|style| style.name.eq_ignore_ascii_case("Annotative"))
+    {
+        let mut style = TextStyle::new("Annotative");
+        style.handle = doc.allocate_handle();
+        arial(&mut style);
+        style.annotative = true;
+        let _ = doc.text_styles.add(style);
+    }
+}
+
 /// The metric template's Annotative dimension style: ISO-25's settings,
 /// annotative, with the overall scale 0 (the annotation scale sizes it).
 /// Made from ISO-25, which is made first when the drawing lacks it.

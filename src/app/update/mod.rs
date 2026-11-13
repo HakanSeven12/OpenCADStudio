@@ -3103,6 +3103,7 @@ impl OpenCADStudio {
             Message::Count(message) => self.on_count(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
+            Message::Assistant(message) => self.on_assistant(message),
             Message::SheetSet(message) => self.on_sheet_set(message),
             Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {

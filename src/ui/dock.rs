@@ -140,13 +140,15 @@ pub enum PanelId {
     QuickCalc,
     /// The whole command history, kept open beside the drawing.
     CommandHistory,
+    /// The Assistant: a chat with Claude that drives the drawing (ASSISTANT).
+    Assistant,
     /// Dynamic plugin dockable side panel / palette (identified by unique numeric ID).
     Plugin(u32),
 }
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 16] = [
+    pub const ALL: [PanelId; 17] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
@@ -163,6 +165,7 @@ impl PanelId {
         PanelId::Laywalk,
         PanelId::QuickCalc,
         PanelId::CommandHistory,
+        PanelId::Assistant,
     ];
 
     /// Localized-friendly display name used by the collapsed/edge chrome.
@@ -184,6 +187,7 @@ impl PanelId {
             PanelId::Laywalk => "Layer Walk",
             PanelId::QuickCalc => "QuickCalc",
             PanelId::CommandHistory => "Command History",
+            PanelId::Assistant => "Assistant",
             PanelId::Plugin(_) => "Plugin",
         }
     }
@@ -209,6 +213,7 @@ impl PanelId {
             PanelId::Laywalk => include_bytes!("../../assets/icons/layers/laywalk.svg"),
             PanelId::QuickCalc => crate::ui::window::quick_calc::ICON,
             PanelId::CommandHistory => include_bytes!("../../assets/icons/ui/list.svg"),
+            PanelId::Assistant => crate::ui::window::assistant::ICON,
             PanelId::Plugin(_) => crate::ui::icons::MORE,
         }
     }
@@ -232,6 +237,7 @@ impl PanelId {
             PanelId::Laywalk => 420.0,
             PanelId::QuickCalc => 320.0,
             PanelId::CommandHistory => 420.0,
+            PanelId::Assistant => 380.0,
             PanelId::Plugin(_) => 280.0,
         }
     }

@@ -90,6 +90,7 @@ mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
 mod quick_calc;
+mod assistant;
 mod recent;
 mod record_api;
 mod rename_dialog;
@@ -1573,6 +1574,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
+    /// The Assistant pallet (ASSISTANT): chat with Claude about this drawing.
+    pub(crate) assistant: crate::ui::window::assistant::AssistantPalette,
     /// Sheet Set Manager palette, the open sheet sets and their dialogs.
     pub(crate) sheet_set: crate::ui::window::sheet_set::SheetSetManager,
     /// A sheet opened from the manager: its drawing (path key) and layout,
@@ -5911,6 +5914,8 @@ pub enum Message {
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.
     QuickCalc(crate::ui::window::quick_calc::QuickCalcMsg),
+    /// The Assistant pallet.
+    Assistant(crate::ui::window::assistant::AssistantMsg),
     SheetSet(crate::ui::window::sheet_set::SheetSetMsg),
     ToolPalettes(crate::ui::window::tool_palettes::ToolPalettesMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -6439,6 +6444,7 @@ impl OpenCADStudio {
             pc_manager: Default::default(),
             count_palette: Default::default(),
             quick_calc: Default::default(),
+            assistant: Default::default(),
             sheet_set: Default::default(),
             sheet_set_pending_layout: None,
             sheet_set_import_parent: None,

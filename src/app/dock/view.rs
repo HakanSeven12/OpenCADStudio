@@ -598,6 +598,7 @@ impl OpenCADStudio {
             }
             crate::ui::dock::PanelId::Laywalk => self.layer_walk_view(tab, width, chrome),
             crate::ui::dock::PanelId::QuickCalc => self.quick_calc_view(tab, width, chrome),
+            crate::ui::dock::PanelId::Assistant => self.assistant_view(width, chrome),
             crate::ui::dock::PanelId::CommandHistory => {
                 self.command_line
                     .history_panel(&self.history_content, width, chrome)

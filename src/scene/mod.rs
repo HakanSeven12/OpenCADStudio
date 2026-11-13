@@ -76,6 +76,7 @@ pub use dimension_assoc::{ReferenceStatus, ResolvedReference};
 pub use page_setup::{apply_default_page_setup, document_page_setups, rotated_margins};
 mod dwg_native_constraints;
 mod entity;
+pub(crate) use entity::wire_thumbnail_bgra;
 pub use camera_ops::named_view_center;
 pub(crate) use entity::gradient_tint_color;
 pub(crate) use entity::normalize_block_terminators;

@@ -1447,69 +1447,9 @@ impl Scene {
     /// for a block without drawable geometry.
     pub fn block_thumbnail(&self, name: &str) -> Vec<u8> {
         const SIZE: usize = 40;
-        let wires = self.block_preview_wires(name);
-        let mut lo = [f64::INFINITY; 2];
-        let mut hi = [f64::NEG_INFINITY; 2];
-        for wire in &wires {
-            for p in &wire.points {
-                if p[0].is_finite() && p[1].is_finite() {
-                    lo = [lo[0].min(p[0] as f64), lo[1].min(p[1] as f64)];
-                    hi = [hi[0].max(p[0] as f64), hi[1].max(p[1] as f64)];
-                }
-            }
-        }
-        if !lo[0].is_finite() {
+        let Some(pixels) = wire_thumbnail_bgra(&self.block_preview_wires(name), SIZE) else {
             return Vec::new();
-        }
-        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
-        let scale = (SIZE as f64 - 3.0) / span;
-        let offset = [
-            (SIZE as f64 - (hi[0] - lo[0]) * scale) / 2.0,
-            (SIZE as f64 - (hi[1] - lo[1]) * scale) / 2.0,
-        ];
-        let to_px = |p: &[f32; 3]| {
-            (
-                ((p[0] as f64 - lo[0]) * scale + offset[0]).floor() as i64,
-                ((p[1] as f64 - lo[1]) * scale + offset[1]).floor() as i64,
-            )
         };
-        // Bottom-up rows of BGRA pixels.
-        let mut pixels = vec![[0x30u8, 0x28, 0x21, 0xFF]; SIZE * SIZE];
-        let mut plot = |x: i64, y: i64| {
-            if (0..SIZE as i64).contains(&x) && (0..SIZE as i64).contains(&y) {
-                pixels[y as usize * SIZE + x as usize] = [0xFF; 4];
-            }
-        };
-        for wire in &wires {
-            let mut prev: Option<(i64, i64)> = None;
-            for p in &wire.points {
-                if !(p[0].is_finite() && p[1].is_finite()) {
-                    prev = None;
-                    continue;
-                }
-                let (x1, y1) = to_px(p);
-                let (mut x0, mut y0) = prev.unwrap_or((x1, y1));
-                let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
-                let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
-                let mut err = dx + dy;
-                loop {
-                    plot(x0, y0);
-                    if x0 == x1 && y0 == y1 {
-                        break;
-                    }
-                    let e2 = 2 * err;
-                    if e2 >= dy {
-                        err += dy;
-                        x0 += sx;
-                    }
-                    if e2 <= dx {
-                        err += dx;
-                        y0 += sy;
-                    }
-                }
-                prev = Some((x1, y1));
-            }
-        }
         let mut dib = Vec::with_capacity(40 + SIZE * SIZE * 4);
         for value in [40u32, SIZE as u32, SIZE as u32] {
             dib.extend_from_slice(&value.to_le_bytes());
@@ -4882,4 +4822,73 @@ mod hatch_single_loop_depth_tests {
             assert!(!fill_mesh.is_empty(), "{style:?}: fill mesh is built");
         }
     }
+}
+
+/// `size` × `size` bottom-up BGRA pixels of `wires` seen from above: white
+/// strokes on the dark preview background, fitted with a one-pixel margin.
+/// `None` when nothing in `wires` is drawable.
+pub(crate) fn wire_thumbnail_bgra(wires: &[WireModel], size: usize) -> Option<Vec<[u8; 4]>> {
+    let mut lo = [f64::INFINITY; 2];
+    let mut hi = [f64::NEG_INFINITY; 2];
+    for wire in wires {
+        for p in &wire.points {
+            if p[0].is_finite() && p[1].is_finite() {
+                lo = [lo[0].min(p[0] as f64), lo[1].min(p[1] as f64)];
+                hi = [hi[0].max(p[0] as f64), hi[1].max(p[1] as f64)];
+            }
+        }
+    }
+    if !lo[0].is_finite() {
+        return None;
+    }
+    let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(1e-9);
+    let scale = (size as f64 - 3.0) / span;
+    let offset = [
+        (size as f64 - (hi[0] - lo[0]) * scale) / 2.0,
+        (size as f64 - (hi[1] - lo[1]) * scale) / 2.0,
+    ];
+    let to_px = |p: &[f32; 3]| {
+        (
+            ((p[0] as f64 - lo[0]) * scale + offset[0]).floor() as i64,
+            ((p[1] as f64 - lo[1]) * scale + offset[1]).floor() as i64,
+        )
+    };
+    // Bottom-up rows of BGRA pixels.
+    let mut pixels = vec![[0x30u8, 0x28, 0x21, 0xFF]; size * size];
+    let mut plot = |x: i64, y: i64| {
+        if (0..size as i64).contains(&x) && (0..size as i64).contains(&y) {
+            pixels[y as usize * size + x as usize] = [0xFF; 4];
+        }
+    };
+    for wire in wires {
+        let mut prev: Option<(i64, i64)> = None;
+        for p in &wire.points {
+            if !(p[0].is_finite() && p[1].is_finite()) {
+                prev = None;
+                continue;
+            }
+            let (x1, y1) = to_px(p);
+            let (mut x0, mut y0) = prev.unwrap_or((x1, y1));
+            let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+            let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
+            let mut err = dx + dy;
+            loop {
+                plot(x0, y0);
+                if x0 == x1 && y0 == y1 {
+                    break;
+                }
+                let e2 = 2 * err;
+                if e2 >= dy {
+                    err += dy;
+                    x0 += sx;
+                }
+                if e2 <= dx {
+                    err += dx;
+                    y0 += sy;
+                }
+            }
+            prev = Some((x1, y1));
+        }
+    }
+    Some(pixels)
 }

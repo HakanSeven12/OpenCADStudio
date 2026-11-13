@@ -87,7 +87,7 @@ const WEB_ALIAS_KEY: &str = "opencadstudio.aliases";
 /// MLR / MLAL / QL dropped); version 15 TS (TABLESTYLE) and CT (CTABLESTYLE);
 /// version 16 dropped WO (WIPEOUT has no alias); version 17 DDLTYPE
 /// (LINETYPE).
-const DEFAULT_ALIASES_VERSION: u32 = 17;
+const DEFAULT_ALIASES_VERSION: u32 = 18;
 
 #[cfg(target_arch = "wasm32")]
 const WEB_ALIAS_VERSION_KEY: &str = "opencadstudio.aliases.version";
@@ -143,6 +143,7 @@ fn retargeted_at(version: u32) -> &'static [(&'static str, &'static str, &'stati
             ("QL", "QLEADER", ""),
         ],
         16 => &[("WO", "WIPEOUT", "")],
+        18 => &[("T", "TEXT", "MTEXT")],
         _ => &[],
     }
 }

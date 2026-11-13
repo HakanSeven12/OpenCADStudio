@@ -9,11 +9,11 @@ use crate::t;
 use crate::ui::wrap_bar::DensitySwap;
 use crate::ui::wrap_bar::WrapFlow;
 use iced::widget::{
-    button, column, container, mouse_area, pane_grid, responsive, row, scrollable, shader, stack,
-    text, Row, Space,
+    Row, Space, button, column, container, mouse_area, pane_grid, responsive, row, scrollable,
+    shader, stack, text,
 };
 use iced::window;
-use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
+use iced::{Background, Border, Color, Element, Fill, Subscription, Task, Theme, keyboard};
 use iced_aw::ContextMenu;
 
 #[cfg(test)]
@@ -290,7 +290,7 @@ use overlay::{
     mtext_editor_overlay, position_canvas_overlay, position_canvas_overlay_near_cursor,
     qselect_overlay, text_inline_overlay, viewport_context_menu_overlay, viewport_quad_overlay,
 };
-use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
+use viewcube::{UCS_PICKER_W, viewcube_nav_controls, viewcube_ucs_picker};
 
 // Re-export the text-input element ids so sibling modules can address them at
 // the `view::` path as before the split.
@@ -1215,7 +1215,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         })
                         .collect();
                     // GROUPDISPLAYMODE 2: each group box's four corners on screen.
-                    let boxes: Vec<Vec<iced::Point>> = tab
+                    let mut boxes: Vec<Vec<iced::Point>> = tab
                         .group_boxes
                         .iter()
                         .map(|[min, max]| {
@@ -1234,6 +1234,59 @@ bg={bg_ms:.1}ms n={view_count}"
                             project(&corners).into_iter().map(|grip| grip.1).collect()
                         })
                         .collect();
+                    // A single selected MTEXT shows its actual text-box frame,
+                    // with the same insertion, width and rotation as its grips.
+                    if let Some(handle) = tab.selected_grip_handles.first().copied().filter(|h| {
+                        tab.selected_grip_handles.iter().all(|owner| owner == h)
+                    }) {
+                        if let Some(document::EntityType::MText(mt)) = tab.scene.document.get_entity(handle) {
+                            // Layout is independent of the camera. Reuse it while the
+                            // document revision and selected entity stay unchanged.
+                            thread_local! {
+                                static MTEXT_FRAME_BOUNDS: std::cell::RefCell<Option<(u64, u64, document::Handle, [f32; 4])>> = const { std::cell::RefCell::new(None) };
+                            }
+                            let b = MTEXT_FRAME_BOUNDS.with(|cache| {
+                                let key = (tab.id, tab.scene.geometry_epoch, handle);
+                                if let Some((id, revision, h, bounds)) = *cache.borrow() {
+                                    if (id, revision, h) == key { return bounds; }
+                                }
+                                let bounds = crate::entities::mtext::layout_of(mt, &tab.scene.document, false).local_bounds;
+                                *cache.borrow_mut() = Some((key.0, key.1, key.2, bounds));
+                                bounds
+                            });
+                            let h = mt.height.abs().max(1e-9);
+                            let width = if mt.column_data.column_type != 0 && mt.column_data.column_count > 1 && mt.column_data.width > 0.0 {
+                                mt.column_data.width * f64::from(mt.column_data.column_count) + mt.column_data.gutter * f64::from(mt.column_data.column_count - 1)
+                            } else { mt.rectangle_width.max(0.0) };
+                            use document::entities::AttachmentPoint as A;
+                            let anchor = match mt.attachment_point {
+                                A::TopCenter | A::MiddleCenter | A::BottomCenter => 0.5,
+                                A::TopRight | A::MiddleRight | A::BottomRight => 1.0,
+                                _ => 0.0,
+                            };
+                            let width = width.max(if b[0] <= b[2] { f64::from(b[2] - b[0]) } else { h });
+                            let left = -anchor * width;
+                            let (mut bottom, mut top) = if b[1] <= b[3] {
+                                (f64::from(b[1]).min(0.0), f64::from(b[3]).max(0.0))
+                            } else { (-h, 0.0) };
+                            if let Some(height) = mt.rectangle_height.filter(|height| *height > 0.0) {
+                                let vertical = match mt.attachment_point {
+                                    A::MiddleLeft | A::MiddleCenter | A::MiddleRight => 0.5,
+                                    A::BottomLeft | A::BottomCenter | A::BottomRight => 1.0,
+                                    _ => 0.0,
+                                };
+                                bottom = bottom.min(-(1.0 - vertical) * height);
+                                top = top.max(vertical * height);
+                            }
+                            let (sin, cos) = mt.rotation.sin_cos();
+                            let base = glam::DVec3::new(mt.insertion_point.x, mt.insertion_point.y, mt.insertion_point.z);
+                            let corners: Vec<_> = [(left, top), (left + width, top), (left + width, bottom), (left, bottom)]
+                                .into_iter().map(|(x,y)| crate::entities::common::square_grip(0,
+                                    base + glam::DVec3::new(x * cos - y * sin, x * sin + y * cos, 0.0))).collect();
+                            let projected: Vec<_> = project(&corners).into_iter().map(|g| g.1).collect();
+                            if projected.len() == 4 { boxes.push(projected); }
+                        }
+                    }
                     let markers = screen_grips
                         .into_iter()
                         .enumerate()
@@ -1955,7 +2008,8 @@ bg={bg_ms:.1}ms n={view_count}"
                 pane_drop_rect,
                 pane_hover,
                 nav_cursor(tab),
-                self.ribbon.open_dropdown.is_some(),
+                self.ribbon.open_dropdown.is_some()
+                    || (self.mtext_editor.is_some() && tab.active_cmd.is_none()),
                 hover_locked,
                 crosshair_background(tab, is_paper),
                 crate::ui::overlay::CrosshairOptions {
@@ -2298,6 +2352,10 @@ bg={bg_ms:.1}ms n={view_count}"
                 .as_ref()
                 .map(|c| c.prompt())
                 .unwrap_or_default();
+            // Dynamic input shows only the current prompt, not preceding
+            // informational lines that also belong in command-line history.
+            prompt = prompt.lines().rev().find(|line| !line.trim().is_empty())
+                .unwrap_or("").trim().to_owned();
             // The command line is hidden: what is typed shows here.
             if self.command_line_hidden && !self.command_line.input.is_empty() {
                 prompt = format!("{prompt} {}", self.command_line.input);
@@ -2334,13 +2392,15 @@ bg={bg_ms:.1}ms n={view_count}"
             // Start tab: only the welcome widget over a flat background.
             // Skip every drawing-only overlay (selection markers, snap info,
             // mouse-area capturing draw clicks, viewcube, nav toolbar, …).
-            stack![container(viewport_3d)
-                .style(move |_: &Theme| container::Style {
-                    background: Some(Background::Color(bg_color)),
-                    ..Default::default()
-                })
-                .width(Fill)
-                .height(Fill)]
+            stack![
+                container(viewport_3d)
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(bg_color)),
+                        ..Default::default()
+                    })
+                    .width(Fill)
+                    .height(Fill)
+            ]
             .width(Fill)
             .height(Fill)
         } else if thumbnail_capture_clean {
@@ -3165,13 +3225,79 @@ bg={bg_ms:.1}ms n={view_count}"
                         .iter()
                         .map(|s| s.name.clone())
                         .collect();
-                    viewport_stack = viewport_stack.push(mtext_editor_overlay(
-                        ed,
-                        styles,
-                        self.modal_offset,
-                        self.modal_resize,
-                        self.modal_content_size,
-                    ));
+                    let (camera, bounds) =
+                        tab.scene.viewport_edit_frame(canvas).unwrap_or_else(|| {
+                            (
+                                tab.scene.camera.borrow().clone(),
+                                tab.scene.active_model_tile_bounds(canvas.0, canvas.1),
+                            )
+                        });
+                    let project = |p| {
+                        camera
+                            .project(p, bounds)
+                            .map(|p| iced::Point::new(p.x + bounds.x, p.y + bounds.y))
+                    };
+                    let frame = (|| {
+                        let origin = project(ed.pos)?;
+                        let x = project(ed.pos + glam::DVec3::X)? - origin;
+                        let y = project(ed.pos + glam::DVec3::Y)? - origin;
+                        if (x.x * y.y - x.y * y.x).abs() < 1e-8 {
+                            return None;
+                        }
+                        let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+                        let (sin, cos) = angle.sin_cos();
+                        let width = (ed.rect_width as f32).max(0.001);
+                        let padding = ed.height_value() as f32 * 0.5;
+                        let top = ed
+                            .glyph_boxes
+                            .iter()
+                            .map(|b| b.ymax)
+                            .fold(0.0_f32, f32::max)
+                            + padding;
+                        let bottom = ed
+                            .glyph_boxes
+                            .iter()
+                            .map(|b| b.ymin)
+                            .fold(-ed.height_value() as f32 * 1.8, f32::min)
+                            - padding;
+                        let fixed_height = ed.rect_height.trim().parse::<f32>().unwrap_or(0.0).max(0.0);
+                        let bottom = if fixed_height > 0.0 { bottom.min(top - fixed_height) } else { bottom };
+                        let growth = ed.box_growth();
+                        let left = if growth == 2.0 {
+                            -width * 0.5
+                        } else if growth < 0.0 {
+                            -width
+                        } else {
+                            0.0
+                        };
+                        let point = |u: f32, v: f32| {
+                            origin + x * (u * cos - v * sin) + y * (u * sin + v * cos)
+                        };
+                        Some(crate::app::table_cell_edit::CellCanvas {
+                            origin,
+                            x,
+                            y,
+                            height: ed.height_value() as f32,
+                            corners: [
+                                point(left, top),
+                                point(left + width, top),
+                                point(left + width, bottom),
+                                point(left, bottom),
+                            ],
+                        })
+                    })();
+                    if let Some(frame) = frame {
+                        viewport_stack = viewport_stack
+                            .push(overlay::mtext_inplace_overlay(ed, styles, frame, canvas));
+                    } else {
+                        viewport_stack = viewport_stack.push(mtext_editor_overlay(
+                            ed,
+                            styles,
+                            self.modal_offset,
+                            self.modal_resize,
+                            self.modal_content_size,
+                        ));
+                    }
                 }
                 if let Some(ed) = &self.text_inline {
                     viewport_stack = viewport_stack.push(text_inline_overlay(ed, canvas));
@@ -3939,8 +4065,7 @@ impl OpenCADStudio {
             } else {
                 std::time::Duration::from_millis(100)
             };
-            iced::time::every(interval)
-                .map(|_| Message::DrainPluginRequests)
+            iced::time::every(interval).map(|_| Message::DrainPluginRequests)
         } else {
             Subscription::none()
         };
@@ -4843,9 +4968,11 @@ fn start_page_content<'a>(
             .spacing(8)
             .width(Fill);
         for discussion in discussions {
-            let mut meta = iced::widget::row![text(format!("#{}", discussion.number))
-                .size(10)
-                .style(start_muted_style),]
+            let mut meta = iced::widget::row![
+                text(format!("#{}", discussion.number))
+                    .size(10)
+                    .style(start_muted_style),
+            ]
             .spacing(6)
             .align_y(iced::Center);
             if discussion.pinned {
@@ -5234,9 +5361,11 @@ fn recent_tiles<'a>(
     if large {
         column(recents.iter().map(tile)).spacing(6)
     } else {
-        column![iced::widget::Row::with_children(recents.iter().map(tile))
-            .spacing(4)
-            .wrap()]
+        column![
+            iced::widget::Row::with_children(recents.iter().map(tile))
+                .spacing(4)
+                .wrap()
+        ]
         .width(Fill)
     }
 }
@@ -5505,9 +5634,11 @@ pub(super) fn recent_files_panel<'a>(
 /// The open value list: a heading and one row per table row, the chosen row
 /// marked. Its width comes from the lines it shows, never from the canvas.
 fn value_list_panel(popup: &crate::app::visibility::TablePopup) -> Element<'_, Message> {
-    let mut col = column![text(popup.header.clone())
-        .size(12)
-        .wrapping(iced::widget::text::Wrapping::None)]
+    let mut col = column![
+        text(popup.header.clone())
+            .size(12)
+            .wrapping(iced::widget::text::Wrapping::None)
+    ]
     .spacing(2);
     for (idx, name) in popup.rows.iter().enumerate() {
         let mark: Element<'_, Message> = if popup.current == Some(idx) {
@@ -5651,9 +5782,9 @@ mod tests {
     /// with a fixed leading slot for the tick of the state in use.
     #[test]
     fn visibility_popup_left_aligns_its_state_entries() {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
 
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
@@ -5743,12 +5874,16 @@ mod tests {
             Cursor::Unavailable,
             Cursor::Levitating(iced::Point::new(250.0, 200.0)),
         ] {
-            assert!(ViewportPickSurface
-                .update(&mut viewport, &press, bounds, hidden)
-                .is_none());
-            assert!(PaneDragSurface(2)
-                .update(&mut pane, &press, bounds, hidden)
-                .is_none());
+            assert!(
+                ViewportPickSurface
+                    .update(&mut viewport, &press, bounds, hidden)
+                    .is_none()
+            );
+            assert!(
+                PaneDragSurface(2)
+                    .update(&mut pane, &press, bounds, hidden)
+                    .is_none()
+            );
         }
     }
 

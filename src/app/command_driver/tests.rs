@@ -6671,6 +6671,46 @@ mod batch4_tests {
         assert_eq!(members(&app), vec![("G".to_string(), vec![lines[1], lines[2]])]);
     }
 
+    /// UNGROUP on a group picked whole drops its box and centre grip at
+    /// once, not at the next click.
+    #[test]
+    fn ungroup_clears_the_group_box_and_grip() {
+        crate::app::commands::set_group_display_mode(2);
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 10,5");
+        let lines = model_lines(&app);
+        let group_grips = |app: &OpenCADStudio| {
+            app.tabs[i]
+                .selected_grips
+                .iter()
+                .filter(|grip| grip.id == crate::scene::GROUP_GRIP_ID)
+                .count()
+        };
+        app.tabs[i]
+            .scene
+            .create_group("G".to_string(), vec![lines[0], lines[1]]);
+        app.tabs[i].scene.select_entities(&lines);
+        app.refresh_selected_grips();
+        assert_eq!(app.tabs[i].group_boxes.len(), 1, "{}", out(&app));
+        assert!(group_grips(&app) > 0, "{}", out(&app));
+
+        let _ = app.run_command_line("UNGROUP");
+        assert_eq!(app.tabs[i].scene.groups().count(), 0, "{}", out(&app));
+        assert!(app.tabs[i].group_boxes.is_empty(), "{}", out(&app));
+        assert_eq!(group_grips(&app), 0, "{}", out(&app));
+        // The members stay picked, now with their own grips.
+        assert_eq!(
+            app.tabs[i].scene.selected_entities().len(),
+            2,
+            "{}",
+            out(&app)
+        );
+        assert!(!app.tabs[i].selected_grips.is_empty(), "{}", out(&app));
+    }
+
     #[test]
     fn qselect_command_line_compares_negates_and_matches_wildcards() {
         let mut app = new_app();

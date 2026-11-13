@@ -2077,6 +2077,8 @@ impl OpenCADStudio {
         let count = self.tabs[i].scene.delete_groups_containing(&handles);
         self.tabs[i].dirty = true;
         self.commit_group_undo(i, undo);
+        // Grips picked before UNGROUP still show the dissolved group's box.
+        self.refresh_selected_grips();
         if count > 0 {
             self.command_line
                 .push_info(crate::tf!("{} group(s) dissolved.", count).as_ref());

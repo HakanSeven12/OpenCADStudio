@@ -16949,6 +16949,58 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
     }
 
     #[test]
+    fn boot_time_declaration_is_attributed_to_the_declared_package_id() {
+        // HOST-FIXES-TODO 1: the spawn bootstrap registers entity classes and
+        // quad panels while GetManifest is still in flight — the registry
+        // entry does not exist yet, and the manifest window used to serve
+        // with an empty identity ("plugin \"\" is not a loaded, alive
+        // plugin"). The declaration law now treats the IN-FLIGHT BOOT as the
+        // live, authenticated transport: the package's declared id rides the
+        // connection before the manifest and the manifest must confirm it,
+        // while the empty identity still refuses.
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        crate::plugin::external::with_fresh_installed_manager(|| {
+            // An empty identity is never attributable, boot window or not.
+            let empty_err = host
+                .register_plugin_class("", &traverse_class())
+                .unwrap_err();
+            assert!(
+                empty_err.contains("not a loaded, alive plugin"),
+                "got: {empty_err}"
+            );
+
+            // The declared package id in its boot window passes the law.
+            crate::plugin::external::with_manager(|m| m.begin_boot("opencad.example"));
+            assert!(
+                host.register_plugin_class("opencad.example", &traverse_class())
+                    .is_ok()
+            );
+
+            // After the boot window closes (and without a registry entry at
+            // that id) the law refuses again: a different class key under the
+            // same owner must not register.
+            crate::plugin::external::with_manager(|m| m.end_boot("opencad.example"));
+            let mut unrelated = traverse_class();
+            unrelated.class_id = "OTHER_KEY".to_string();
+            let closed_err = host
+                .register_plugin_class("opencad.example", &unrelated)
+                .unwrap_err();
+            assert!(
+                closed_err.contains("not a loaded, alive plugin"),
+                "got: {closed_err}"
+            );
+
+            // The empty identity law survives the whole exercise.
+            let still_empty = host
+                .register_plugin_class("", &traverse_class())
+                .unwrap_err();
+            assert!(still_empty.contains("not a loaded, alive plugin"));
+        });
+    }
+
+    #[test]
     fn plugin_class_registration_is_owned_idempotent_and_refusing() {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;

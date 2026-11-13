@@ -627,6 +627,19 @@ impl PluginProcess {
             };
             let v4_conn =
                 V4Connection::new(stream, handler_for_v4, Some(Arc::clone(&child)))?;
+            // Owner-scoped declarations (entity classes, quad panels, custom
+            // grips) arrive as nested requests while GetManifest is in
+            // flight — the plugin registers them as part of its own boot.
+            // The connection carries the LOADED PACKAGE's declared id for
+            // that window (the transport identity for the request shapes in
+            // this protocol does not travel the wire). The manifest response
+            // below must confirm the id; a mismatched manifest refuses the
+            // spawn, so the attribution stays host-verified. Without a
+            // declared id (test loads) the window keeps the empty identity,
+            // and the declaration law refuses it as before.
+            if let Some(expected) = expected_plugin_id {
+                v4_conn.attach_plugin_id(expected);
+            }
             manifest = match v4_conn.call(host, HostRequest::GetManifest, no_op)? {
                 HostResponse::Manifest(m) => m,
                 other => return Err(PluginError::UnexpectedResponse(Box::new(other))),

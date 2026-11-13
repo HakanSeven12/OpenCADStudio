@@ -399,8 +399,10 @@ fn parse_string_array(s: &str) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) use loader::PROCESS_TESTS_LOCK;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{shutdown_plugins, with_manager};
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) use loader::{shutdown_plugins, with_fresh_installed_manager, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -548,6 +550,21 @@ mod loader {
             let empty = PluginManager::new();
             f(&empty)
         })
+    }
+
+    /// Run `f` with an EMPTY manager installed in the process store (test
+    /// setup for the declaration-law tests: nothing is loaded, so only the
+    /// boot-window semantics can let an id pass the owner gate). Without an
+    /// installed manager `with_manager` serves a throwaway empty manager per
+    /// call, which cannot carry a boot marker across two calls. The previous
+    /// store is restored afterwards.
+    #[cfg(test)]
+    pub(crate) fn with_fresh_installed_manager<R>(f: impl FnOnce() -> R) -> R {
+        let previous = MANAGER.with(|m| m.borrow_mut().take());
+        MANAGER.with(|m| *m.borrow_mut() = Some(PluginManager::new()));
+        let result = f();
+        MANAGER.with(|m| *m.borrow_mut() = previous);
+        result
     }
 
     /// Serializes the process-spawning tests (spawn/dispatch/notification-attach)

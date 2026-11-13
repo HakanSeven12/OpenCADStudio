@@ -2508,6 +2508,9 @@ pub enum CmdResult {
     PasteClipboard {
         base_pt: DVec3,
     },
+    /// PASTESPEC's Link format: place the cells a copied range was copied
+    /// from as a table linked to them, as DATALINK places one; end command.
+    PlaceLinkedTable(crate::sys::clipboard_link::SourceLink),
     /// PASTESPEC's Image formats: place the picture read off the system
     /// clipboard inside the drawing as IMAGEEMBED places one (`embedded`),
     /// or as a file the drawing points at, as IMAGE does; end command.

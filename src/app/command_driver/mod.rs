@@ -1189,6 +1189,13 @@ impl OpenCADStudio {
             CmdResult::PasteClipboard { base_pt } => {
                 self.handle_paste_clipboard(base_pt);
             }
+            CmdResult::PlaceLinkedTable(link) => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.place_linked_table(link);
+            }
             CmdResult::PlacePastedImage { image, embedded } => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;

@@ -1,6 +1,7 @@
 // PASTESPEC — paste the clipboard in a chosen format: the copied objects, the
 // copied objects as a block, the system clipboard's text as multi-line text
-// or, when it is in rows of cells, as a table, or its picture as an image
+// or, when it is in rows of cells, as a table — linked to the file the cells
+// were copied from, when the clipboard names it — or its picture as an image
 // file the drawing points at or as an image inside the drawing.
 
 use crate::t;
@@ -13,6 +14,7 @@ use glam::DVec3;
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
 use crate::io::ole_embed::EmbeddedImage;
 use crate::scene::model::wire_model::WireModel;
+use crate::sys::clipboard_link::SourceLink;
 
 /// What the command is asking for.
 #[derive(Clone, Copy, PartialEq)]
@@ -32,6 +34,8 @@ pub struct PasteSpecCommand {
     text: Option<String>,
     /// The table of that text's cells, when it is in rows of cells.
     table: Option<Table>,
+    /// The file, sheet and cells a copied range was copied from.
+    link: Option<SourceLink>,
     /// The system clipboard's picture.
     picture: Option<EmbeddedImage>,
     style: String,
@@ -51,6 +55,7 @@ impl PasteSpecCommand {
             objects,
             text: None,
             table: None,
+            link: None,
             picture: None,
             style: String::new(),
             height: 0.0,
@@ -65,6 +70,7 @@ impl PasteSpecCommand {
         objects: bool,
         text: Option<&str>,
         table: Option<Table>,
+        link: Option<SourceLink>,
         picture: Option<EmbeddedImage>,
         style: String,
         height: f64,
@@ -73,6 +79,7 @@ impl PasteSpecCommand {
             objects,
             text: text.map(mtext_value),
             table,
+            link,
             picture,
             style,
             height,
@@ -223,6 +230,9 @@ impl CadCommand for PasteSpecCommand {
         if self.table.is_some() {
             options.push(CmdOption::new("TAble", "TA"));
         }
+        if self.link.is_some() {
+            options.push(CmdOption::new("Link", "L"));
+        }
         if self.picture.is_some() {
             options.push(CmdOption::new("Image", "I"));
             options.push(CmdOption::new("Embedded image", "E"));
@@ -254,6 +264,8 @@ impl CadCommand for PasteSpecCommand {
                 self.step = Step::Table;
                 Some(CmdResult::NeedPoint)
             }
+            // The linked table goes on as DATALINK places one.
+            "L" | "LINK" => self.link.take().map(CmdResult::PlaceLinkedTable),
             // The picture goes on as IMAGE or IMAGEEMBED places one.
             "I" | "IMAGE" => self
                 .picture

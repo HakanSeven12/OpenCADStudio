@@ -9440,7 +9440,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text, picture) => {
+            Message::PasteSpecial(text, picture, link) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd
@@ -9450,7 +9450,8 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let text = text.filter(|text| !text.trim().is_empty());
-                if text.is_none() && picture.is_none() && self.clipboard.is_empty() {
+                let nothing = text.is_none() && picture.is_none() && link.is_none();
+                if nothing && self.clipboard.is_empty() {
                     // Nothing to paste in any format.
                     self.tabs[i].active_cmd = None;
                     self.command_line
@@ -9458,7 +9459,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 // Every format is known now: ask for one of them.
-                let command = self.paste_special_command(i, text.as_deref(), picture);
+                let command = self.paste_special_command(i, text.as_deref(), link, picture);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(command);
                 self.push_ucs_to_cmd(i);

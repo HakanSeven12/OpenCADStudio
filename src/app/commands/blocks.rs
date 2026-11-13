@@ -168,33 +168,29 @@ impl OpenCADStudio {
         }
     }
 
-    /// PASTESPEC with the formats on hand: the copied objects, and `text`
-    /// and `picture` from the system clipboard once it has been read. Text
-    /// in rows of cells is also a table, in the current table style at the
-    /// column width TABLE uses.
+    /// PASTESPEC with the formats on hand: the copied objects, and `text`,
+    /// `link` and `picture` from the system clipboard once it has been read.
+    /// Text in rows of cells is also a table, in the current table style at
+    /// the column width TABLE uses; `link` names the file those cells were
+    /// copied from.
     pub(in crate::app) fn paste_special_command(
         &self,
         i: usize,
         text: Option<&str>,
+        link: Option<crate::sys::clipboard_link::SourceLink>,
         picture: Option<crate::io::ole_embed::EmbeddedImage>,
     ) -> Box<dyn CadCommand> {
-        use crate::modules::annotate::table_cmd;
         use crate::modules::draw::clipboard::pastespec;
         let document = &self.tabs[i].scene.document;
         let defaults = crate::scene::creation_style::current_text_defaults(document);
-        let table = text.and_then(pastespec::grid_cells).map(|cells| {
-            let style = crate::app::annotation_data::current_table_style(document);
-            let width = table_cmd::session().cell_width(document.header.measurement == 1);
-            let mut table = table_cmd::data_table(style.as_ref(), &cells, width);
-            // As after typing the cells: text read as their data type, and
-            // each row as high as its wrapped text needs.
-            crate::entities::table::settle_table(&mut table, document);
-            table
-        });
+        let table = text
+            .and_then(pastespec::grid_cells)
+            .map(|cells| crate::app::annotation_data::pasted_table(document, &cells));
         Box::new(pastespec::PasteSpecCommand::new(
             !self.clipboard.is_empty(),
             text,
             table,
+            link,
             picture,
             defaults.style_name,
             defaults.height,

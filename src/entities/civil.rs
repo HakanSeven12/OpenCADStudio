@@ -1313,13 +1313,15 @@ fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document
             let masks = alignment.alignment_masked_ranges();
             let shown = shown_stations(Some(alignment));
             let name = alignment.alignment_name().unwrap_or_default();
-            // A group limited to the beginning (1) or the end (2).
+            // The kinds the group labels: 1 the beginning, 2 the end, 3 and
+            // up the points between (which are not told apart here).
             let kinds = data.label_geometry_point_kinds();
             let points = alignment.alignment_geometry_points();
             let last = points.len().saturating_sub(1);
             for (i, point) in points.into_iter().enumerate() {
                 let kind = if i == 0 { 1 } else if i == last { 2 } else { 0 };
-                if !kinds.is_empty() && !kinds.contains(&kind) {
+                let listed = if kind == 0 { kinds.iter().any(|k| *k >= 3) } else { kinds.contains(&kind) };
+                if !kinds.is_empty() && !listed {
                     continue;
                 }
                 if masked(start + point.distance, &masks) {

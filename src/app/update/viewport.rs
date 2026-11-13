@@ -426,6 +426,28 @@ fn over_ucs_icon(p: Point, h: &crate::ui::overlay::UcsIconHit) -> bool {
 }
 
 impl OpenCADStudio {
+    /// The solid a normal selection click (or its hover) takes: one whose
+    /// edge passes through the aperture, or, in a shaded style, the
+    /// front-most one whose face is under the cursor (#2797).
+    fn solid_select_hit(
+        &self,
+        i: usize,
+        p: iced::Point,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        candidate_handles: Option<&rustc_hash::FxHashSet<Handle>>,
+        aperture: f32,
+    ) -> Option<Handle> {
+        let scene = &self.tabs[i].scene;
+        scene
+            .solid_edge_hover_hit(p, view_rot, eye, bounds, candidate_handles, aperture)
+            .or_else(|| {
+                (!self.tabs[i].wireframe)
+                    .then(|| scene.solid_click_hit(p, view_rot, eye, bounds, candidate_handles))?
+            })
+    }
+
     fn select_command_marker_region(
         &mut self,
         i: usize,
@@ -8032,7 +8054,8 @@ properties={:.1}ms picked={}",
                                 // edges. Face-interior picking remains reserved for
                                 // modelling commands that explicitly request it.
                                 let solid_started = crate::perf::enabled().then(Instant::now);
-                                hit = self.tabs[i].scene.solid_edge_click_hit(
+                                hit = self.solid_select_hit(
+                                    i,
                                     p,
                                     view_rot,
                                     eye,
@@ -8538,7 +8561,8 @@ properties={:.1}ms picked={}",
             )
         })
         .or_else(|| {
-            self.tabs[i].scene.solid_edge_click_hit(
+            self.solid_select_hit(
+                i,
                 p,
                 view_rot,
                 eye,
@@ -9331,7 +9355,8 @@ properties={:.1}ms picked={}",
                         )
                     })
             } else {
-                self.tabs[i].scene.solid_edge_hover_hit(
+                self.solid_select_hit(
+                    i,
                     p,
                     view_rot,
                     eye,

@@ -6455,6 +6455,7 @@ plot =
     .vector-dpi = Vektor DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .geopdf = Térbeli PDF (GeoPDF)
     .layer-attributes = Rétegadat-attribútumok
     .open-when-done = Megnyitás megjelenítőben, ha kész
     .no-page-setups = (nincs oldalbeállítás)

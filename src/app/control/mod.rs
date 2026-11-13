@@ -5783,6 +5783,130 @@ mod tests {
     }
 
     #[test]
+    fn plot_op_geopdf_preserves_model_pages_in_single_mixed_and_per_page_pdfs() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,80"}));
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .insertion_units = 6;
+        let crs = crate::io::crs::CrsDefinition::from_epsg(5514).unwrap();
+        crate::io::crs::set_document_crs(
+            &mut app.tabs[app.active_tab].scene.document,
+            &crs,
+        )
+        .unwrap();
+        app.plot_dialog.geopdf = true;
+        // The destination extension, not this stale device selection, decides
+        // whether the output is PDF and needs GeoPDF validation.
+        app.plot_dialog.file_svg = true;
+        let model_index = app.tabs[app.active_tab]
+            .scene
+            .layout_names()
+            .iter()
+            .position(|name| name == "Model")
+            .unwrap();
+        let vp_by_page = |path: &std::path::Path| {
+            let pdf = hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(
+                std::fs::read(path).expect("plot PDF"),
+            ))
+            .unwrap();
+            pdf.pages()
+                .iter()
+                .map(|page| page.raw().contains_key(b"VP"))
+                .collect::<Vec<_>>()
+        };
+
+        for (kind, layout) in [("model", "Model"), ("mixed", "all")] {
+            let path = std::env::temp_dir().join(format!(
+                "ocs-geopdf-control-{kind}-{}.pdf",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let mut plot =
+                json!({"op":"plot","layout":layout,"path":path.to_string_lossy()});
+            if kind == "mixed" {
+                // Paper-space non-Layout areas are deliberately plain. They
+                // must not inherit the model page's GeoPDF eligibility check.
+                plot["area"] = "window".into();
+                plot["window"] = json!([0, 0, 297, 210]);
+            }
+            let response = request(&mut app, plot);
+            assert_eq!(response["status"], "completed", "{response}");
+            let flags = vp_by_page(&path);
+            if kind == "model" {
+                assert_eq!(flags, [true]);
+            } else {
+                assert!(flags.len() > 1);
+                assert!(flags[model_index]);
+                assert!(flags.iter().enumerate().all(|(index, vp)| {
+                    index == model_index || !vp
+                }));
+            }
+            let _ = std::fs::remove_file(&path);
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs-geopdf-control-per-page-{}.pdf",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({
+                "op":"plot",
+                "layout":"all",
+                "per_page":true,
+                "path":path.to_string_lossy(),
+                "area":"window",
+                "window":[0,0,297,210]
+            }),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        for file in response["result"]["files"].as_array().unwrap() {
+            let path = std::path::Path::new(file["path"].as_str().unwrap());
+            assert_eq!(vp_by_page(path), [file["layout"] == "Model"]);
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn plot_op_geopdf_rejects_invalid_pdf_frames_without_blocking_svg() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,80"}));
+        app.plot_dialog.geopdf = true;
+        app.plot_dialog.file_svg = true;
+        let pdf = std::env::temp_dir().join(format!(
+            "ocs-geopdf-control-missing-crs-{}.pdf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&pdf);
+
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":pdf.to_string_lossy()}),
+        );
+        assert_eq!(response["status"], "failed", "{response}");
+        assert_eq!(response["code"], "plot_failed");
+        assert!(response["error"].as_str().unwrap().contains("GEODATA"));
+        assert!(!pdf.exists());
+
+        let svg = std::env::temp_dir().join(format!(
+            "ocs-geopdf-control-missing-crs-{}.svg",
+            std::process::id()
+        ));
+        let response = request(
+            &mut app,
+            json!({"op":"plot","path":svg.to_string_lossy()}),
+        );
+        assert_eq!(response["status"], "completed", "{response}");
+        roxmltree::Document::parse(&std::fs::read_to_string(&svg).unwrap()).unwrap();
+        let _ = std::fs::remove_file(&svg);
+    }
+
+    #[test]
     fn plot_op_svg_text_as_outlines_uses_vector_paths() {
         let svg = std::env::temp_dir().join(format!("ocs-outline-{}.svg", std::process::id()));
         let mut svg_text = String::new();

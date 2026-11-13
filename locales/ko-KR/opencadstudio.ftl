@@ -6471,6 +6471,7 @@ plot =
     .vector-dpi = 벡터 DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .geopdf = 지리공간 PDF(GeoPDF)
     .layer-attributes = 레이어 데이터 속성
     .open-when-done = Open in viewer when done
     .no-page-setups = (페이지 설정 없음)

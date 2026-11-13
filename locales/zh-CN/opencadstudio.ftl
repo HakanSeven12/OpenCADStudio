@@ -6455,6 +6455,7 @@ plot =
     .vector-dpi = 矢量 DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .geopdf = 地理空间 PDF (GeoPDF)
     .layer-attributes = 图层数据属性
     .open-when-done = Open in viewer when done
     .no-page-setups = （无页面设置）

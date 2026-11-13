@@ -6471,6 +6471,7 @@ plot =
     .vector-dpi = DPI vettoriale
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .geopdf = PDF geospaziale (GeoPDF)
     .layer-attributes = Attributi dati dei layer
     .open-when-done = Open in viewer when done
     .no-page-setups = (nessuna impostazione di pagina)

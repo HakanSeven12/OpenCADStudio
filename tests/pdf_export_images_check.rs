@@ -41,6 +41,7 @@ fn page(images: Vec<PlotImage>) -> PdfPageInput {
         clip: None,
         options: PdfPlotOptions::default(),
         plot_style: None,
+        geopdf: None,
     }
 }
 

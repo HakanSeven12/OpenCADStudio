@@ -68,6 +68,9 @@ encoding_rs = "0.8"
 tiny-skia = "0.11"
 # PDF writer shared by desktop export and the web export/preview/print path.
 printpdf = { version = "0.9.1", default-features = false, features = ["images"] }
+# Direct access to the page dictionaries and classic-xref serializer used for
+# opt-in, full-precision GeoPDF metadata (same version printpdf already uses).
+lopdf = { version = "0.39.0", default-features = false }
 # TrueType subsetting for searchable PDF text (same version printpdf itself
 # uses, so no new binary enters the lockfile). Same feature set as printpdf's
 # own allsorts use (pure-Rust flate backend) — the defaults would drag in the

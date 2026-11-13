@@ -909,6 +909,9 @@ impl OpenCADStudio {
                     _ => None,
                 };
                 let page = page.ok_or_else(|| format!("Layout '{name}' plot area is empty."))?;
+                if !is_svg {
+                    app.validate_geopdf_page(&page)?;
+                }
                 pages.push(page);
             }
             Ok(pages)
@@ -959,7 +962,7 @@ impl OpenCADStudio {
                         export_style,
                     )
                 } else {
-                    crate::io::pdf_export::export_pdf_pages(
+                    crate::io::pdf_export::export_plot_pdf_pages(
                         std::slice::from_ref(page),
                         std::path::Path::new(&file),
                         export_style,
@@ -981,7 +984,7 @@ impl OpenCADStudio {
                 export_style,
             )
         } else {
-            crate::io::pdf_export::export_pdf_pages(
+            crate::io::pdf_export::export_plot_pdf_pages(
                 &pages,
                 std::path::Path::new(path),
                 export_style,

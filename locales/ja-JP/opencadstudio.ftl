@@ -6460,6 +6460,7 @@ plot =
     .vector-dpi = ベクトル DPI
     .text-as-outlines = Text as outlines
     .non-scaling-strokes = Non-scaling strokes
+    .geopdf = 地理空間 PDF（GeoPDF）
     .layer-attributes = レイヤーデータ属性
     .open-when-done = Open in viewer when done
     .no-page-setups = （ページ設定なし）

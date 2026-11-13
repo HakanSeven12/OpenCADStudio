@@ -6148,7 +6148,10 @@ impl OpenCADStudio {
             })?]
         };
         let style = self.dialog_plot_style(&self.plot_dialog);
-        crate::io::pdf_export::export_pdf_pages(&pages, path, style.as_ref())?;
+        if !all_layouts {
+            self.validate_geopdf_page(&pages[0])?;
+        }
+        crate::io::pdf_export::export_plot_pdf_pages(&pages, path, style.as_ref())?;
         let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
         let sheet = pages
             .first()
@@ -6179,7 +6182,7 @@ impl OpenCADStudio {
             return Err(crate::t!("Nothing to publish: no page could be built.").into_owned());
         }
         let style = self.dialog_plot_style(&self.plot_dialog);
-        crate::io::pdf_export::export_pdf_pages(&pages, path, style.as_ref())?;
+        crate::io::pdf_export::export_plot_pdf_pages(&pages, path, style.as_ref())?;
         let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
         let sheets = names
             .iter()
@@ -6217,6 +6220,9 @@ impl OpenCADStudio {
         &mut self,
         path: std::path::PathBuf,
     ) -> Task<Message> {
+        let is_svg = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
         self.refresh_current_plot_context();
         let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
@@ -6224,18 +6230,21 @@ impl OpenCADStudio {
             );
             return Task::none();
         };
+        if !is_svg {
+            if let Err(error) = self.validate_geopdf_page(&page) {
+                self.command_line.push_error(&error);
+                return Task::none();
+            }
+        }
         let worker_path = path.clone();
         let open_when_done = self.plot_dialog.open_when_done;
         let work = move || {
             // SVG shares the plot page with PDF: pick the writer from the
             // chosen extension.
-            let result = if worker_path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
-            {
+            let result = if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
             } else {
-                crate::io::pdf_export::export_pdf(&page, &worker_path)
+                crate::io::pdf_export::export_plot_pdf(&page, &worker_path)
             };
             if result.is_ok() && open_when_done {
                 // A viewer that cannot start leaves the file written all the same.
@@ -6254,6 +6263,9 @@ impl OpenCADStudio {
         &mut self,
         path: std::path::PathBuf,
     ) -> Task<Message> {
+        let is_svg = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
         let job = match self.plot_dialog.area.as_str() {
             "Display" => self.display_plot_job(),
             "Extents" => self.extents_plot_job(),
@@ -6264,17 +6276,20 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
             return Task::none();
         };
+        if !is_svg {
+            if let Err(error) = self.validate_geopdf_page(&page) {
+                self.command_line.push_error(&error);
+                return Task::none();
+            }
+        }
         let worker_path = path.clone();
         self.close_active_modal();
         let open_when_done = self.plot_dialog.open_when_done;
         let work = move || {
-            let result = if worker_path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
-            {
+            let result = if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
             } else {
-                crate::io::pdf_export::export_pdf(&page, &worker_path)
+                crate::io::pdf_export::export_plot_pdf(&page, &worker_path)
             };
             if result.is_ok() && open_when_done {
                 // A viewer that cannot start leaves the file written all the same.
@@ -6495,16 +6510,20 @@ impl OpenCADStudio {
         self.save_config();
         self.close_active_modal();
         let work = move || {
-            crate::io::pdf_export::export_pdf_pages(&pages, &worker_path, fallback_style.as_ref())
-                .map(|_| {
-                    crate::tf!(
-                        "Exported {} layouts to {}",
-                        pages.len(),
-                        worker_path.display()
-                    )
-                    .into_owned()
-                })
-                .map_err(|error| crate::tf!("Export failed: {error}").into_owned())
+            crate::io::pdf_export::export_plot_pdf_pages(
+                &pages,
+                &worker_path,
+                fallback_style.as_ref(),
+            )
+            .map(|_| {
+                crate::tf!(
+                    "Exported {} layouts to {}",
+                    pages.len(),
+                    worker_path.display()
+                )
+                .into_owned()
+            })
+            .map_err(|error| crate::tf!("Export failed: {error}").into_owned())
         };
         self.run_print_all_work(dialog.background_publish, work)
     }
@@ -6725,6 +6744,7 @@ impl OpenCADStudio {
                 clip,
                 options: Self::pdf_plot_options(&self.plot_dialog),
                 plot_style: self.dialog_plot_style(&self.plot_dialog),
+                geopdf: None,
             };
         }
 
@@ -6780,6 +6800,7 @@ impl OpenCADStudio {
             clip: None,
             options: Self::pdf_plot_options(&self.plot_dialog),
             plot_style: self.dialog_plot_style(&self.plot_dialog),
+            geopdf: None,
         }
     }
 
@@ -6893,6 +6914,7 @@ impl OpenCADStudio {
         // Small margin so the outermost strokes aren't clipped flush to the edge.
         let mx = ((x1 - x0) * 0.02).max(0.0);
         let my = ((y1 - y0) * 0.02).max(0.0);
+        self.plot_dialog.area = "Window".into();
         self.plot_window = Some((
             (x0 - mx) as f64,
             (y0 - my) as f64,
@@ -7656,6 +7678,14 @@ impl OpenCADStudio {
                     PlotFlag::LayerAttributes if d.to_file && d.file_svg => {
                         d.layer_attributes = !d.layer_attributes;
                     }
+                    PlotFlag::GeoPdf
+                        if (d.to_file || cfg!(target_arch = "wasm32"))
+                            && (!d.file_svg || cfg!(target_arch = "wasm32"))
+                            && !d.paper_space
+                            && d.area != "Layout" =>
+                    {
+                        d.geopdf = !d.geopdf;
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -8255,6 +8285,17 @@ impl OpenCADStudio {
             );
             return Task::none();
         }
+        if d.geopdf
+            && !preview
+            && to_file
+            && (!d.file_svg || cfg!(target_arch = "wasm32"))
+            && d.area != "Layout"
+        {
+            if let Err(error) = self.geopdf_eligibility() {
+                self.command_line.push_error(&error);
+                return Task::none();
+            }
+        }
         // Remember the user's print preferences across sessions.
         self.save_config();
         // A preview never touches the layout; a sent plot writes the dialog
@@ -8291,6 +8332,13 @@ impl OpenCADStudio {
                 self.active_modal = Some(crate::app::ModalKind::Plot);
                 return Task::none();
             };
+            if !preview && to_file && (!d.file_svg || cfg!(target_arch = "wasm32")) {
+                if let Err(error) = self.validate_geopdf_page(&page) {
+                    self.command_line.push_error(&error);
+                    self.active_modal = Some(crate::app::ModalKind::Plot);
+                    return Task::none();
+                }
+            }
             // Preview renders to a temp PDF and opens it — never a save dialog,
             // whatever the output target is.
             if preview {
@@ -8454,6 +8502,9 @@ impl OpenCADStudio {
     pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout == "Model" {
+            if let Some((min, max)) = scene.visible_block_bounds(scene.model_space_block_handle()) {
+                return self.area_plot_job((min.x, min.y, max.x, max.y));
+            }
             let (min, max) = scene.model_space_extents()?;
             return self.area_plot_job((min.x as f64, min.y as f64, max.x as f64, max.y as f64));
         }
@@ -8515,6 +8566,71 @@ impl OpenCADStudio {
             && x1 - x0 > 1e-6
             && y1 - y0 > 1e-6)
             .then_some((x0, y0, x1, y1))
+    }
+
+    fn geopdf_eligibility(&self) -> Result<crate::io::crs::CrsDefinition, String> {
+        let scene = &self.tabs[self.active_tab].scene;
+        if scene.current_layout != "Model"
+            || scene.block_edit_block.is_some()
+            || self.plot_dialog.area == "Layout"
+        {
+            return Err(
+                "GeoPDF export requires a root model-space plot frame, not a layout or block editor"
+                    .to_string(),
+            );
+        }
+        let camera = scene.camera.borrow();
+        if camera.projection != crate::scene::view::camera::Projection::Orthographic {
+            return Err("GeoPDF export does not support perspective scenes".to_string());
+        }
+        let eye = (camera.rotation * glam::Vec3::Z).as_dvec3();
+        if eye.x.abs() > 1e-6 || eye.y.abs() > 1e-6 || eye.z <= 0.0 {
+            return Err("GeoPDF export requires a top-down orthographic XY scene".to_string());
+        }
+        drop(camera);
+        let crs = crate::io::crs::document_crs(&scene.document)?
+            .ok_or_else(|| "GeoPDF export requires a drawing CRS in GEODATA".to_string())?;
+        if !crs.is_geographic()
+            && crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)
+                .is_none()
+        {
+            return Err("GeoPDF export requires explicit drawing units".to_string());
+        }
+        Ok(crs)
+    }
+
+    fn geopdf_frame_for_window(
+        &self,
+        window: (f64, f64, f64, f64),
+    ) -> Result<Option<crate::io::geopdf_export::GeoPdfFrame>, String> {
+        if !self.plot_dialog.geopdf {
+            return Ok(None);
+        }
+        let crs = self.geopdf_eligibility()?;
+        let units = crate::app::properties::insunits_to_mm(
+            self.tabs[self.active_tab]
+                .scene
+                .document
+                .header
+                .insertion_units,
+        );
+        crate::io::geopdf_export::GeoPdfFrame::for_window(&crs, units, window).map(Some)
+    }
+
+    /// `area_plot_job` has an established Option-returning API, so its callers
+    /// explicitly turn a missing opted-in frame into an export error.
+    pub(in crate::app) fn validate_geopdf_page(&self, page: &PdfPageInput) -> Result<(), String> {
+        let scene = &self.tabs[self.active_tab].scene;
+        if !self.plot_dialog.geopdf
+            || self.plot_dialog.area == "Layout"
+            || scene.current_layout != "Model"
+            || page.geopdf.is_some()
+        {
+            return Ok(());
+        }
+        Err(self.geopdf_eligibility().err().unwrap_or_else(|| {
+            "The selected model window cannot be represented as a GeoPDF frame".to_string()
+        }))
     }
 
     /// Render a selected rectangle through one shared Model/Paper path. The
@@ -8601,6 +8717,7 @@ impl OpenCADStudio {
             clip,
             options: Self::pdf_plot_options(&self.plot_dialog),
             plot_style: self.dialog_plot_style(&self.plot_dialog),
+            geopdf: self.geopdf_frame_for_window(window).ok().flatten(),
         })
     }
 
@@ -8725,6 +8842,278 @@ impl OpenCADStudio {
 mod plot_paper_tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::ui::window::plot::PlotDlgMsg;
+
+    const GEO_ORIGIN: [f64; 2] = [-742_925.271_389_167_2, -1_043_020.310_123_933_5];
+    const GEO_SIZE: [f64; 2] = [20.0, 10.0];
+
+    fn set_epsg(app: &mut OpenCADStudio, code: u16) {
+        let crs = crate::io::crs::CrsDefinition::from_epsg(code).unwrap();
+        crate::io::crs::set_document_crs(&mut app.tabs[app.active_tab].scene.document, &crs)
+            .unwrap();
+    }
+
+    fn geopdf_model_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::new(GEO_ORIGIN[0], GEO_ORIGIN[1], 0.0),
+                document::types::Vector3::new(
+                    GEO_ORIGIN[0] + GEO_SIZE[0],
+                    GEO_ORIGIN[1] + GEO_SIZE[1],
+                    0.0,
+                ),
+            ),
+        ));
+        app.tabs[i].scene.document.header.insertion_units = 6;
+        set_epsg(&mut app, 5514);
+        app.plot_dialog.geopdf = true;
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.paper_space = false;
+        app.plot_dialog.area = "Extents".into();
+        app
+    }
+
+    fn vp_by_page(bytes: Vec<u8>) -> Vec<bool> {
+        let pdf = hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+        pdf.pages()
+            .iter()
+            .map(|page| page.raw().contains_key(b"VP"))
+            .collect()
+    }
+
+    #[test]
+    fn geopdf_extents_frame_preserves_original_f64_model_coordinates() {
+        let app = geopdf_model_app();
+        let page = app.extents_plot_job().expect("georeferenced model extents");
+        let frame = page.geopdf.expect("explicit GeoPDF frame");
+        let expected_visible = {
+            let scene = &app.tabs[app.active_tab].scene;
+            let (min, max) = scene
+                .visible_block_bounds(scene.model_space_block_handle())
+                .unwrap();
+            [min.x, min.y, max.x, max.y]
+        };
+        assert_eq!(frame.model_window, expected_visible);
+        assert!(frame
+            .model_window
+            .iter()
+            .zip(expected_visible)
+            .any(|(actual, expected)| {
+                (actual - GEO_ORIGIN[0]).abs() < 1e-6
+                    && *actual != expected as f32 as f64
+            }));
+        let survey_window = [
+            GEO_ORIGIN[0],
+            GEO_ORIGIN[1],
+            GEO_ORIGIN[0] + GEO_SIZE[0],
+            GEO_ORIGIN[1] + GEO_SIZE[1],
+        ];
+        let explicit = app
+            .area_plot_job((
+                survey_window[0],
+                survey_window[1],
+                survey_window[2],
+                survey_window[3],
+            ))
+            .unwrap();
+        assert_eq!(explicit.geopdf.unwrap().model_window, survey_window);
+
+        let mut changed_output = app;
+        changed_output.plot_dialog.file_svg = true;
+        assert!(
+            changed_output.extents_plot_job().unwrap().geopdf.is_some(),
+            "a later PDF destination must not inherit the SVG device's suppression"
+        );
+    }
+
+    #[test]
+    fn geopdf_rejects_missing_crs_units_and_unsupported_scenes() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.plot_dialog.geopdf = true;
+        let window = (
+            GEO_ORIGIN[0],
+            GEO_ORIGIN[1],
+            GEO_ORIGIN[0] + 1.0,
+            GEO_ORIGIN[1] + 1.0,
+        );
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("GEODATA"));
+
+        set_epsg(&mut app, 5514);
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .insertion_units = 0;
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("units"));
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .insertion_units = 6;
+        assert!(app.geopdf_frame_for_window(window).is_ok());
+
+        let original_rotation = app.tabs[app.active_tab].scene.camera.borrow().rotation;
+        app.tabs[app.active_tab]
+            .scene
+            .camera
+            .borrow_mut()
+            .projection = crate::scene::view::camera::Projection::Perspective;
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("perspective"));
+        {
+            let scene = &app.tabs[app.active_tab].scene;
+            let mut camera = scene.camera.borrow_mut();
+            camera.projection = crate::scene::view::camera::Projection::Orthographic;
+            camera.rotation = glam::Quat::from_rotation_x(0.25);
+        }
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("top-down"));
+        app.tabs[app.active_tab].scene.camera.borrow_mut().rotation = original_rotation;
+
+        app.tabs[app.active_tab].scene.current_layout = "Layout1".into();
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("root model-space"));
+        app.tabs[app.active_tab].scene.current_layout = "Model".into();
+        let block = app.tabs[app.active_tab].scene.model_space_block_handle();
+        app.tabs[app.active_tab].scene.block_edit_block = Some(block);
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap_err()
+            .contains("block editor"));
+    }
+
+    #[test]
+    fn invalid_geopdf_opt_in_is_reported_before_opening_a_file_dialog() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::new(10.0, 10.0, 0.0),
+                ),
+            ));
+        app.plot_dialog.geopdf = true;
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.area = "Extents".into();
+        let old_error_revision = app.command_line.error_revision;
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Commit);
+
+        assert!(app.command_line.error_revision > old_error_revision);
+
+        let path = std::env::temp_dir().join(format!(
+            "ocs-geopdf-missing-crs-{}.pdf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let error = app.export_pdf_direct(&path, false).unwrap_err();
+        assert!(error.contains("GEODATA"), "{error}");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn pdf_destination_controls_geopdf_even_when_svg_was_selected() {
+        let mut app = geopdf_model_app();
+        app.plot_dialog.file_svg = true;
+        app.plot_dialog.background = false;
+        app.plot_dialog.open_when_done = false;
+        let gui_path = std::env::temp_dir().join(format!(
+            "ocs-geopdf-pdf-after-svg-{}.pdf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&gui_path);
+
+        let _ = app.on_plot_export_path_some(gui_path.clone());
+
+        assert_eq!(
+            vp_by_page(std::fs::read(&gui_path).expect("GUI PDF after SVG selection")),
+            [true]
+        );
+        let _ = std::fs::remove_file(&gui_path);
+
+        let direct_path = std::env::temp_dir().join(format!(
+            "ocs-geopdf-direct-after-svg-{}.pdf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&direct_path);
+        app.export_pdf_direct(&direct_path, false).unwrap();
+        assert_eq!(
+            vp_by_page(std::fs::read(&direct_path).expect("direct EXPORTPDF after SVG selection")),
+            [true]
+        );
+        let _ = std::fs::remove_file(&direct_path);
+    }
+
+    #[test]
+    fn quick_print_uses_its_actual_window_for_geopdf_validation() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let line = app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::new(10.0, 10.0, 0.0),
+                ),
+            ));
+        app.plot_dialog.geopdf = true;
+        app.plot_dialog.file_svg = true;
+        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.background = false;
+        app.plot_dialog.open_when_done = false;
+        let old_error_revision = app.command_line.error_revision;
+
+        let _ = app.on_quick_print_handles(vec![line]);
+
+        assert_eq!(app.plot_dialog.area, "Window");
+        assert!(
+            app.command_line.error_revision > old_error_revision,
+            "QuickPrint must report the missing CRS instead of silently writing plain PDF"
+        );
+    }
+
+    #[test]
+    fn geopdf_flag_cannot_be_toggled_while_its_checkbox_is_hidden() {
+        let mut app = geopdf_model_app();
+        app.plot_dialog.geopdf = false;
+        let flag = crate::ui::window::plot::PlotFlag::GeoPdf;
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(flag));
+        assert!(app.plot_dialog.geopdf);
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(flag));
+        assert!(
+            app.plot_dialog.geopdf,
+            "hidden SVG state leaves it unchanged"
+        );
+
+        let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
+        app.plot_dialog.paper_space = true;
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(flag));
+        assert!(
+            app.plot_dialog.geopdf,
+            "hidden paper-space state leaves it unchanged"
+        );
+    }
 
     #[test]
     fn non_scaling_stroke_is_an_svg_only_plot_preference() {

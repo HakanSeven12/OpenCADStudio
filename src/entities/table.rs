@@ -1798,16 +1798,17 @@ pub fn tessellate_table(
 
     let normal = v3(&tab.normal).normalize_or(Vec3::Z);
     // Each row's named cell style: the one its id names, else the title,
-    // header or data style its place gives it.
+    // header or data style of its role — the one its id names (1 to 3),
+    // else the one its place gives it.
     let row_cells: Vec<Option<&document::objects::NamedTableCellStyle>> = tab
         .rows
         .iter()
         .enumerate()
         .map(|(ri, row)| {
             let ts = table_style?;
-            let kind = match (title_suppressed, header_suppressed, ri) {
-                (false, _, 0) => document::objects::TITLE_CELL_STYLE,
-                (false, false, 1) | (true, false, 0) => document::objects::HEADER_CELL_STYLE,
+            let kind = match row_role_kind(tab, title_suppressed, header_suppressed, ri) {
+                0 => document::objects::TITLE_CELL_STYLE,
+                1 => document::objects::HEADER_CELL_STYLE,
                 _ => document::objects::DATA_CELL_STYLE,
             };
             (row.style_id != 0)
@@ -1823,14 +1824,10 @@ pub fn tessellate_table(
     let column_count = tab.columns.len();
     let line_types = &document.line_types;
     for (ri, row) in tab.rows.iter().enumerate() {
+        // A table style with its three row styles only has no cell style
+        // for a row's id to name: the row's role still picks among them.
         let legacy_row_style: Option<&document::objects::RowCellStyle> = table_style.map(|ts| {
-            let kind = match (title_suppressed, header_suppressed, ri) {
-                (false, _, 0) => 0,
-                (false, false, 1) => 1,
-                (true, false, 0) => 1,
-                _ => 2,
-            };
-            match kind {
+            match row_role_kind(tab, title_suppressed, header_suppressed, ri) {
                 0 => &ts.title_row_style,
                 1 => &ts.header_row_style,
                 _ => &ts.data_row_style,
@@ -4468,10 +4465,14 @@ pub fn table_indicator(
     let mut text_height = f64::MAX;
     let mut style_handle = None;
     for (ri, row) in tab.rows.iter().enumerate() {
-        let legacy = table_style.map(|ts| match (title_suppressed, header_suppressed, ri) {
-            (false, _, 0) => &ts.title_row_style,
-            (false, false, 1) | (true, false, 0) => &ts.header_row_style,
-            _ => &ts.data_row_style,
+        // The style the row's first cell draws with: the role its ids
+        // name, else the one the row's place gives it.
+        let legacy = table_style.map(|ts| {
+            match cell_role_kind(tab, title_suppressed, header_suppressed, ri, 0) {
+                0 => &ts.title_row_style,
+                1 => &ts.header_row_style,
+                _ => &ts.data_row_style,
+            }
         });
         let height = row
             .cells
@@ -4688,6 +4689,92 @@ mod tests {
         assert_eq!(
             (text(&left, 3, 2), text(&left, 3, 1), text(&left, 3, 0)),
             ("A".into(), "A".into(), String::new())
+        );
+    }
+
+    /// A row that names the data cell style is a data row wherever it is.
+    /// Drawn from its cells, the first and second rows of a table of data
+    /// rows take the data text height, as the rows below them do — also
+    /// when the table style has its three row styles and no cell styles to
+    /// look the name up in.
+    #[test]
+    fn rows_that_name_the_data_style_are_drawn_as_data_rows_wherever_they_are() {
+        use document::types::Vector3;
+        let mut document = document::Document::new();
+        let mut style = document::objects::TableStyle::standard();
+        style.title_row_style.text_height = 6.0;
+        style.header_row_style.text_height = 4.5;
+        style.data_row_style.text_height = 2.0;
+        assert!(
+            style.modern_overrides.is_empty(),
+            "the style has its three row styles only"
+        );
+        let handle = document.allocate_handle();
+        document
+            .objects
+            .insert(handle, document::objects::ObjectType::TableStyle(style));
+        let mut table = Table::new(Vector3::ZERO, 3, 1);
+        table.table_style_handle = Some(handle);
+        table.columns[0].width = 60.0;
+        for row in &mut table.rows {
+            row.height = 12.0;
+            // The data cell style, by its id.
+            row.style_id = 3;
+        }
+        // How high the text of `row` is drawn, alone in the table.
+        let drawn = |row: usize| {
+            let mut table = table.clone();
+            table.set_cell_text(row, 0, "H");
+            let wires = tessellate_table(&table, &document, false, [1.0; 4], 1.0, 1.0);
+            let text = wires
+                .iter()
+                .find(|wire| !wire.text_verts.is_empty())
+                .expect("the cell's text is drawn");
+            text.aabb[3] - text.aabb[1]
+        };
+        let (first, second, third) = (drawn(0), drawn(1), drawn(2));
+        assert!(
+            (first - third).abs() < 1e-3 && (second - third).abs() < 1e-3,
+            "the first rows' text is {first} and {second} high, a data row's {third}"
+        );
+    }
+
+    /// The band of row numbers and column letters around a table being
+    /// edited is as high as the smallest text of its rows. A table of data
+    /// rows measures it by the data style alone: not by the title or header
+    /// style when it has one or two rows, nor by a smaller title text when
+    /// it has more.
+    #[test]
+    fn the_indicator_of_a_table_of_data_rows_takes_the_data_text_height() {
+        use document::types::Vector3;
+        // The indicator's text height for `rows` data rows, in a table style
+        // with these title, header and data text heights.
+        let indicator = |heights: [f64; 3], rows: usize| {
+            let mut document = document::Document::new();
+            let mut style = document::objects::TableStyle::standard();
+            style.title_row_style.text_height = heights[0];
+            style.header_row_style.text_height = heights[1];
+            style.data_row_style.text_height = heights[2];
+            let handle = document.allocate_handle();
+            document
+                .objects
+                .insert(handle, document::objects::ObjectType::TableStyle(style));
+            let mut table = Table::new(Vector3::ZERO, rows, 1);
+            table.table_style_handle = Some(handle);
+            for row in &mut table.rows {
+                row.style_id = 3;
+            }
+            table_indicator(&table, &document, None)
+                .expect("the table has cells")
+                .text_height
+        };
+        let small_data = [1, 2, 3].map(|rows| indicator([6.0, 4.5, 2.0], rows));
+        let large_data = indicator([2.0, 2.0, 6.0], 3);
+        assert!(
+            small_data.iter().all(|height| (height - 2.0).abs() < 1e-6)
+                && (large_data - 6.0).abs() < 1e-6,
+            "data text 2 high: {small_data:?} for one, two and three rows; \
+             data text 6 high under a title of 2: {large_data}"
         );
     }
 

@@ -50,6 +50,19 @@ impl CrsDefinition {
         Self::from_parts(None, proj4, Some(wkt.to_string()))
     }
 
+    /// Parse the operation actually authored in WKT, without replacing its
+    /// parameters by a same-named EPSG registry entry. GeoPDF uses this to
+    /// detect an EPSG/WKT conflict instead of trusting the authority label.
+    pub(crate) fn from_wkt_parameters(wkt: &str) -> Result<Self, String> {
+        let wkt = wkt.trim();
+        if wkt.is_empty() {
+            return Err("The CRS WKT is empty".to_string());
+        }
+        let proj4 = proj4wkt::wkt_to_projstring(wkt)
+            .map_err(|error| format!("Cannot parse the CRS WKT: {error}"))?;
+        Self::from_parts(root_epsg_code(wkt), proj4, Some(wkt.to_string()))
+    }
+
     /// Resolve an EPSG code, WKT, or PROJ string. MapGuide XML is rejected
     /// explicitly rather than mistaken for a coordinate operation.
     pub fn from_text(input: &str) -> Result<Self, String> {
@@ -158,6 +171,31 @@ impl CrsDefinition {
         self.proj.is_latlong()
     }
 
+    /// Whether two definitions are proven to describe the same coordinate
+    /// operation. Names alone never establish equivalence.
+    pub fn equivalent_to(&self, other: &Self) -> bool {
+        if let (Some(left), Some(right)) = (self.code, other.code) {
+            if left != right {
+                return false;
+            }
+        }
+        canonical_proj4(&self.proj4, &self.proj) == canonical_proj4(&other.proj4, &other.proj)
+    }
+
+    /// The geographic CRS on which this definition is based. WKT1 preserves
+    /// its nested GEOGCS metadata; PROJ-only input retains its datum terms.
+    pub fn base_geographic_definition(&self) -> Result<Self, String> {
+        if self.is_geographic() {
+            return Ok(self.clone());
+        }
+        if let Some(wkt) = self.wkt.as_deref() {
+            if let Some(geogcs) = nested_geogcs(wkt) {
+                return Self::from_wkt(geogcs);
+            }
+        }
+        Self::from_parts(None, self.base_geographic_proj4(), None)
+    }
+
     pub fn is_normalized_axis(&self) -> bool {
         self.proj.is_normalized_axis()
     }
@@ -206,9 +244,7 @@ impl CrsDefinition {
         }
     }
 
-    /// Build a geographic CRS with identical ellipsoid/datum parameters. Using
-    /// the same datum definition makes proj4rs skip its WGS84-pivot transform.
-    fn base_geographic_proj(&self) -> Result<Proj, String> {
+    fn base_geographic_proj4(&self) -> String {
         const DATUM_KEYS: &[&str] = &[
             "+ellps=",
             "+datum=",
@@ -229,9 +265,78 @@ impl CrsDefinition {
                 .map(str::to_string),
         );
         definition.push("+no_defs".to_string());
-        Proj::from_proj_string(&definition.join(" "))
+        definition.join(" ")
+    }
+
+    /// Build a geographic CRS with identical ellipsoid/datum parameters. Using
+    /// the same datum definition makes proj4rs skip its WGS84-pivot transform.
+    fn base_geographic_proj(&self) -> Result<Proj, String> {
+        Proj::from_proj_string(&self.base_geographic_proj4())
             .map_err(|error| format!("Cannot initialize the CRS base geographic system: {error}"))
     }
+}
+
+fn canonical_proj4(definition: &str, proj: &Proj) -> Vec<String> {
+    const ELLIPSOID_KEYS: &[&str] = &["+ellps=", "+R=", "+a=", "+b=", "+f=", "+rf="];
+    let mut terms: Vec<String> = definition
+        .split_whitespace()
+        .filter(|term| {
+            !matches!(*term, "+no_defs" | "+wktext" | "+type=crs")
+                && !ELLIPSOID_KEYS.iter().any(|key| term.starts_with(key))
+        })
+        .map(|term| {
+            let Some((key, value)) = term.split_once('=') else {
+                return term.to_string();
+            };
+            let normalized = value
+                .split(',')
+                .map(|part| {
+                    part.parse::<f64>().map_or_else(
+                        |_| part.to_string(),
+                        |number| {
+                            if number == 0.0 {
+                                "0".to_string()
+                            } else {
+                                format!("{number:?}")
+                            }
+                        },
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{key}={normalized}")
+        })
+        .collect();
+    let (a, b) = proj.ellipse_parameters();
+    terms.push(format!("+resolved_a={a:?}"));
+    terms.push(format!("+resolved_b={b:?}"));
+    terms.sort();
+    terms
+}
+
+fn nested_geogcs(wkt: &str) -> Option<&str> {
+    let uppercase = wkt.to_ascii_uppercase();
+    let start = uppercase.find("GEOGCS[")?;
+    let bytes = wkt.as_bytes();
+    let mut quoted = false;
+    let mut depth = 0usize;
+    let mut index = start + "GEOGCS".len();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if quoted && bytes.get(index + 1) == Some(&b'"') => index += 1,
+            b'"' => quoted = !quoted,
+            b'[' if !quoted => depth += 1,
+            b']' if !quoted => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(&wkt[start..=index]);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
 }
 
 /// The GEODATA object owned by the root model-space block record. Xref and
@@ -425,6 +530,25 @@ mod tests {
         let (lon, lat) = crs.to_base_geographic(lon, lat).unwrap();
         close(lon, 14.5, 1e-12);
         close(lat, 50.25, 1e-12);
+    }
+
+    #[test]
+    fn base_geographic_identity_and_conservative_equivalence() {
+        let projected = CrsDefinition::from_epsg(5514).unwrap();
+        let geographic = projected.base_geographic_definition().unwrap();
+        assert_eq!(geographic.code(), Some(4156));
+        assert!(geographic.is_geographic());
+        assert!(geographic.equivalent_to(&CrsDefinition::from_epsg(4156).unwrap()));
+        assert!(!projected.equivalent_to(&CrsDefinition::from_epsg(4326).unwrap()));
+        assert!(CrsDefinition::from_text(
+            "+proj=krovak +lat_0=49.5 +lon_0=24.83333333333333 +alpha=30.28813975277778 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +units=m +no_defs"
+        )
+        .unwrap()
+        .equivalent_to(&CrsDefinition::from_text(
+            "+type=crs +y_0=0.0 +x_0=0 +k=0.999900 +alpha=30.28813975277778 +lon_0=24.83333333333333 +lat_0=49.5 +proj=krovak +ellps=bessel +units=m"
+        )
+        .unwrap()));
+        assert!(!projected.equivalent_to(&CrsDefinition::from_epsg(3857).unwrap()));
     }
 
     #[test]

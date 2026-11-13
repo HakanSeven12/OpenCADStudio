@@ -23,5 +23,7 @@ You can also type the file path right after the command name, for example `-PDFA
 
 ## Notes
 - When [`FILEDIA`](FILEDIA-System-Variable) is 0, or a file path follows the command name, `PDFATTACH` uses the command-line prompts too.
-- Several pages attached together are placed at the same point with the same scale and rotation.
+- Without usable GeoPDF metadata, several pages attached together are placed at the same point with the same scale and rotation.
+- In root model space (not paper space or the block editor), when the drawing has a `GEODATA` CRS and explicit `INSUNITS`, an interactive attach uses a page's unambiguous ISO `/VP` or legacy `/LGIDict` georeferencing. Each page is evaluated independently. The PDF and drawing must have proven equivalent CRSs; no cross-datum reprojection is performed.
+- Automatic placement supports affine rotation and non-uniform X/Y scale, including EPSG:5514 east/north coordinates. Missing metadata, unknown units, multiple frames, conflicting ISO and legacy dictionaries, PCSM, shear, reflection, paper space, and non-Z-normal underlays keep the manually entered values. The node-graph **PDF Underlay** node is always manual.
 - The underlay and its definition are created together, so cancelling leaves nothing behind and one undo removes both.

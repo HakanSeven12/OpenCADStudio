@@ -8287,6 +8287,7 @@ mleader-prompt =
     .landing-first-text = Specify leader landing location or [leader arrowHead first/Content first/Options] <Options>:
     .content-first = Specify first corner of text or [pre enter Text/select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
     .content-first-text = Specify first corner of text or [select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
+    .content-first-block = Specify insertion point for block or [leader arrowHead first/leader Landing first/Options] <Options>:
     .landing = Specify leader landing location:
     .arrowhead = Specify leader arrowhead location:
     .next-point = Specify next point:

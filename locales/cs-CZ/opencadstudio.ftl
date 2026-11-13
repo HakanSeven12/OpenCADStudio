@@ -8320,6 +8320,7 @@ mleader-prompt =
     .landing-first-text = Určete polohu ramena odkazu nebo [leader arrowHead first/Content first/Options] <Options>:
     .content-first = Určete první roh textu nebo [pre enter Text/select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
     .content-first-text = Určete první roh textu nebo [select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
+    .content-first-block = Specify insertion point for block or [leader arrowHead first/leader Landing first/Options] <Options>:
     .landing = Určete polohu ramena odkazu:
     .arrowhead = Určete polohu šipky odkazu:
     .next-point = Určete další bod:

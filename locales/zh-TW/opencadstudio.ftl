@@ -8300,6 +8300,7 @@ mleader-prompt =
     .landing-first-text = 指定引線末端位置或 [引線箭頭優先(A)/內容優先(C)/選項(O)] <Options>：
     .content-first = 指定文字的第一個角點或 [預先輸入文字(T)/選取多行文字(SE)/引線箭頭優先(A)/引線末端優先(L)/選項(O)] <Options>：
     .content-first-text = 指定文字的第一個角點或 [選取多行文字(SE)/引線箭頭優先(A)/引線末端優先(L)/選項(O)] <Options>：
+    .content-first-block = Specify insertion point for block or [leader arrowHead first/leader Landing first/Options] <Options>:
     .landing = 指定引線末端位置：
     .arrowhead = 指定引線箭頭位置：
     .next-point = 指定下一個點：

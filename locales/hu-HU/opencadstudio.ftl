@@ -8292,6 +8292,7 @@ mleader-prompt =
     .landing-first-text = Adja meg a mutatóvonal vízszintes szakaszának helyét vagy [leader arrowHead first/Content first/Options] <Options>:
     .content-first = Adja meg a szöveg első sarkát vagy [pre enter Text/select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
     .content-first-text = Adja meg a szöveg első sarkát vagy [select Mtext/leader arrowHead first/leader Landing first/Options] <Options>:
+    .content-first-block = Specify insertion point for block or [leader arrowHead first/leader Landing first/Options] <Options>:
     .landing = Adja meg a mutatóvonal vízszintes szakaszának helyét:
     .arrowhead = Adja meg a mutatóvonal nyílhegyének helyét:
     .next-point = Adja meg a következő pontot:

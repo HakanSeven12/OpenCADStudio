@@ -110,6 +110,14 @@ struct MeshHighlightDraw {
     kind: MeshHighlightKind,
 }
 
+/// GPU data for a stable bucket of regular highlight wires. Membership is
+/// compared exactly, rather than by hash, before buffers can be reused.
+struct HighlightWireChunk {
+    members: Vec<usize>,
+    gpu: Vec<WireGpu>,
+    bytes: usize,
+}
+
 pub struct Pipeline {
     gpu_error_epoch: usize,
     background_pipeline: wgpu::RenderPipeline,
@@ -327,6 +335,8 @@ pub struct Pipeline {
     highlight_wire_cache: rustc_hash::FxHashMap<(u64, [u32; 4]), Vec<WireGpu>>,
     highlight_wire_cache_key: Option<(u64, u64)>,
     highlight_wire_cache_bytes: usize,
+    highlight_wire_chunks: rustc_hash::FxHashMap<(u8, [u32; 4]), HighlightWireChunk>,
+    highlight_wire_chunk_bytes: usize,
     gpu_selected_circles: Vec<CircleGpu>,
     gpu_selected_ellipses: Vec<EllipseGpu>,
     gpu_selected_block_wires: Vec<BlockWireGpu>,
@@ -2516,6 +2526,8 @@ impl Pipeline {
             highlight_wire_cache: rustc_hash::FxHashMap::default(),
             highlight_wire_cache_key: None,
             highlight_wire_cache_bytes: 0,
+            highlight_wire_chunks: rustc_hash::FxHashMap::default(),
+            highlight_wire_chunk_bytes: 0,
             gpu_selected_circles: vec![],
             gpu_selected_ellipses: vec![],
             gpu_selected_block_wires: vec![],
@@ -3081,8 +3093,90 @@ impl Pipeline {
         if self.highlight_wire_cache_key != Some(key) {
             self.highlight_wire_cache.clear();
             self.highlight_wire_cache_bytes = 0;
+            self.highlight_wire_chunks.clear();
+            self.highlight_wire_chunk_bytes = 0;
             self.highlight_wire_cache_key = Some(key);
         }
+    }
+
+    /// Keep the unchanged portions of a large regular-wire highlight on the
+    /// GPU while a selection marquee changes. Buckets are stable for a handle
+    /// and cached only while wire geometry and draw depths are unchanged.
+    fn highlight_small_wire_chunks(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[&WireModel],
+        color: [f32; 4],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        transient: &rustc_hash::FxHashSet<usize>,
+    ) -> Vec<WireGpu> {
+        const BUCKETS: usize = 32;
+        const MIN_WIRES: usize = 512;
+        const MAX_BYTES: usize = 32 * 1024 * 1024;
+        if wires.len() < MIN_WIRES {
+            return WireGpu::from_highlight_refs(
+                device, queue, wires, color, depth_map, self.wire_const_bgl.as_ref(),
+            );
+        }
+        let mut buckets: [Vec<&WireModel>; BUCKETS] = std::array::from_fn(|_| Vec::new());
+        let mut uncached = Vec::new();
+        for &wire in wires {
+            let ptr = wire as *const WireModel as usize;
+            if transient.contains(&ptr) {
+                uncached.push(wire);
+            } else if let Some(handle) = wire_gpu::fast_parse_u64(&wire.name) {
+                buckets[((handle >> 8) as usize) % BUCKETS].push(wire);
+            } else {
+                uncached.push(wire);
+            }
+        }
+        let mut output = WireGpu::from_highlight_refs(
+            device, queue, &uncached, color, depth_map, self.wire_const_bgl.as_ref(),
+        );
+        let mut reused = 0;
+        let mut rebuilt = 0;
+        for (bucket, group) in buckets.iter().enumerate() {
+            if group.is_empty() {
+                continue;
+            }
+            let mut members: Vec<usize> = group
+                .iter()
+                .map(|wire| *wire as *const WireModel as usize)
+                .collect();
+            members.sort_unstable();
+            let key = (bucket as u8, color.map(f32::to_bits));
+            if let Some(cached) = self.highlight_wire_chunks.get(&key) {
+                if cached.members == members {
+                    output.extend(cached.gpu.iter().cloned());
+                    reused += 1;
+                    continue;
+                }
+            }
+            if let Some(old) = self.highlight_wire_chunks.remove(&key) {
+                self.highlight_wire_chunk_bytes = self.highlight_wire_chunk_bytes.saturating_sub(old.bytes);
+            }
+            let gpu = WireGpu::from_highlight_refs(
+                device, queue, group, color, depth_map, self.wire_const_bgl.as_ref(),
+            );
+            let bytes = gpu.iter().fold(0usize, |sum, wire| {
+                sum.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
+            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            if bytes <= MAX_BYTES.saturating_sub(self.highlight_wire_chunk_bytes) {
+                self.highlight_wire_chunk_bytes += bytes;
+                self.highlight_wire_chunks.insert(key, HighlightWireChunk {
+                    members,
+                    gpu: gpu.clone(),
+                    bytes,
+                });
+            }
+            output.extend(gpu);
+            rebuilt += 1;
+        }
+        if crate::perf::enabled() {
+            crate::perf_record!("[perf] highlight-chunks reused={reused} rebuilt={rebuilt}");
+        }
+        output
     }
 
     fn highlight_regular_wires(
@@ -3141,8 +3235,8 @@ impl Pipeline {
                 _ => small.push(wire),
             }
         }
-        output.extend(WireGpu::from_highlight_refs(
-            device, queue, &small, color, depth_map, self.wire_const_bgl.as_ref(),
+        output.extend(self.highlight_small_wire_chunks(
+            device, queue, &small, color, depth_map, &transient,
         ));
         for (handle, group) in groups {
             let key = (handle, color.map(f32::to_bits));
@@ -5841,6 +5935,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 
     /// Reset every cache key that describes this slot's uploaded content.
     pub(crate) fn forget_cached_keys(&mut self) {
+        self.highlight_wire_cache.clear();
+        self.highlight_wire_cache_bytes = 0;
+        self.highlight_wire_chunks.clear();
+        self.highlight_wire_chunk_bytes = 0;
+        self.highlight_wire_cache_key = None;
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
         self.cached_selection = (u64::MAX, u64::MAX);

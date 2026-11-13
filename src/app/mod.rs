@@ -194,6 +194,25 @@ pub struct HoverDwell {
     pub tab: usize,
 }
 
+/// Raw (unfiltered) box hits from the last preview. This is only used for
+/// an unchanged, indexed, flat model view; all other views use a full pick.
+struct BoxPreviewCache {
+    tab_id: u64,
+    geometry_epoch: u64,
+    camera_generation: u64,
+    anchor: iced::Point,
+    cursor: iced::Point,
+    crossing: bool,
+    bounds: iced::Rectangle,
+    view: glam::Mat4,
+    eye: glam::DVec3,
+    wires: Arc<Vec<crate::scene::WireModel>>,
+    index: Arc<crate::scene::pick::interaction_index::InteractionIndex>,
+    handles: rustc_hash::FxHashSet<document::Handle>,
+    #[cfg(test)]
+    incremental: bool,
+}
+
 /// What the last executed settled-rollover pick saw, so a re-armed tick can
 /// tell that a repeat would run identically and skip the O(N) sweep
 /// (docs/quad-menu.md §3.4). `point` is tile-local like [`HoverDwell::point`];
@@ -1457,6 +1476,11 @@ pub(super) struct OpenCADStudio {
     /// positions the cursor had long left. A superseded position is overwritten
     /// here unanswered, and `MoveCoalesceTick` answers the last one.
     move_owed: Option<(iced::Point, usize)>,
+    /// Latest box-preview position awaiting a frame, and its tab.
+    box_preview_pending: Option<(iced::Point, usize, u64)>,
+    /// Adaptive earliest time for the next expensive preview calculation.
+    box_preview_due: Option<Instant>,
+    box_preview_cache: Option<BoxPreviewCache>,
     /// When the next full pointer-move pass may run, set only after a pass
     /// expensive enough to be worth coalescing (`MOVE_COALESCE_FROM_MS`).
     /// `None` means every move runs its pass, as before.
@@ -4528,6 +4552,7 @@ pub enum Message {
     /// Frame pulse while a coalesced pointer move is owed an answer; runs the
     /// full pass at the position the gate withheld.
     MoveCoalesceTick,
+    BoxPreviewTick,
     /// Large projected interaction index finished preparing off the UI thread.
     InteractionIndexReady {
         tab_id: u64,
@@ -6395,6 +6420,9 @@ impl OpenCADStudio {
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
             move_owed: None,
+            box_preview_pending: None,
+            box_preview_due: None,
+            box_preview_cache: None,
             move_pass_due: None,
             move_withheld: 0,
             snap_dwell: None,

@@ -3948,6 +3948,11 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        let box_preview = if self.box_preview_pending.is_some() {
+            crate::app::tool_windows::main_window_frames().map(|_| Message::BoxPreviewTick)
+        } else {
+            Subscription::none()
+        };
         let snap_dwell = if self
             .snap_dwell
             .as_ref()
@@ -4140,6 +4145,7 @@ impl OpenCADStudio {
             hover_dwell,
             snap_dwell,
             move_coalesce,
+            box_preview,
             nav_settle,
             gpu_probe,
             thumbnail_capture,

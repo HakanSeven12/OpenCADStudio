@@ -1040,3 +1040,40 @@ fn test_pline_arc_switch_preview_and_render() {
         }
     }
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn highlight_chunks_reuse_unchanged_buckets_and_invalidate_on_geometry_change() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    })).expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    pipeline.prepare_highlight_wire_cache(7, 1);
+    let wires: Vec<_> = (1..=1024).map(|n| {
+        WireModel::solid(
+            n.to_string(),
+            vec![[n as f32, 0.0, 0.0], [n as f32, 1.0, 0.0]],
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+        )
+    }).collect();
+    let color = [0.1, 0.4, 1.0, 1.0];
+    let key = color.map(f32::to_bits);
+    let depth = rustc_hash::FxHashMap::default();
+    let transient = rustc_hash::FxHashSet::default();
+    let refs: Vec<_> = wires.iter().collect();
+    let _ = pipeline.highlight_small_wire_chunks(&device, &queue, &refs, color, &depth, &transient);
+    let unchanged = pipeline.highlight_wire_chunks[&(1, key)].gpu[0].instance_buffer.clone();
+    let changed = pipeline.highlight_wire_chunks[&(0, key)].gpu[0].instance_buffer.clone();
+    let refs: Vec<_> = wires.iter().skip(1).collect();
+    let _ = pipeline.highlight_small_wire_chunks(&device, &queue, &refs, color, &depth, &transient);
+    assert_eq!(pipeline.highlight_wire_chunks[&(1, key)].gpu[0].instance_buffer, unchanged);
+    assert_ne!(pipeline.highlight_wire_chunks[&(0, key)].gpu[0].instance_buffer, changed);
+    pipeline.prepare_highlight_wire_cache(8, 1);
+    assert!(pipeline.highlight_wire_chunks.is_empty());
+    assert_eq!(pipeline.highlight_wire_chunk_bytes, 0);
+}

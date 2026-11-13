@@ -2184,6 +2184,51 @@ pub trait WireSource {
 }
 
 impl InteractionCandidates {
+    /// Restrict a whole-wire box query to affected entities. Preserve whether
+    /// the source was indexed, since that controls the box pick's AABB
+    /// fallback; materialized block stubs are shared without geometry clones.
+    pub(crate) fn retain_box_handles(
+        &mut self,
+        handles: &rustc_hash::FxHashSet<document::Handle>,
+    ) -> bool {
+        if self.segments.is_some() {
+            return false;
+        }
+        let wires = &self.wires;
+        if let Some(indices) = &mut self.wire_indices {
+            indices.retain(|&index| {
+                wires.slot(index)
+                    .and_then(|wire| crate::scene::Scene::handle_from_wire_name(&wire.name))
+                    .is_some_and(|handle| handles.contains(&handle))
+            });
+        } else {
+            let keep = |wire: &WireModel| {
+                crate::scene::Scene::handle_from_wire_name(&wire.name)
+                    .is_some_and(|handle| handles.contains(&handle))
+            };
+            let filtered = match wires {
+                CandidateWires::Snapshot(snapshot) => {
+                    let mut filtered = SharedWireRuns::with_capacity(snapshot.len());
+                    for (index, wire) in snapshot.iter().enumerate() {
+                        if keep(wire) {
+                            filtered.push(snapshot, index as u32);
+                        }
+                    }
+                    filtered
+                }
+                CandidateWires::Shared(runs) => {
+                    let slots = (0..runs.len() as u32)
+                        .filter(|&slot| runs.get(slot).is_some_and(keep))
+                        .filter_map(|slot| runs.slot_ref(slot))
+                        .collect();
+                    SharedWireRuns::from_parts(runs.runs().to_vec(), slots)
+                }
+            };
+            self.wires = CandidateWires::Shared(Arc::new(filtered));
+        }
+        true
+    }
+
     pub fn all(wires: Arc<Vec<WireModel>>) -> Self {
         Self {
             wires: CandidateWires::Snapshot(wires),

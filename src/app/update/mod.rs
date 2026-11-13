@@ -6520,6 +6520,7 @@ impl OpenCADStudio {
 
             Message::HoverDwellTick => self.on_hover_dwell_tick(),
             Message::MoveCoalesceTick => self.on_move_coalesce_tick(),
+            Message::BoxPreviewTick => self.on_box_preview_tick(),
 
             Message::SnapDwellTick => self.on_snap_dwell_tick(),
 

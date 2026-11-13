@@ -31,6 +31,46 @@ const UCS_ICON_PICK_PX: f32 = 10.0;
 /// Pixel half-width for clicking an icon arm (line segment).
 const UCS_ICON_ARM_PX: f32 = 6.0;
 
+/// Rectangles covering A minus B. Boundaries overlap deliberately, because
+/// an entity on a selection edge must be reconsidered as the edge moves.
+fn box_rect_subtract(a: [f32; 4], b: [f32; 4], out: &mut Vec<(Point, Point)>) {
+    let intersection = [a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])];
+    if intersection[0] >= intersection[2] || intersection[1] >= intersection[3] {
+        out.push((Point::new(a[0], a[1]), Point::new(a[2], a[3])));
+        return;
+    }
+    let [x0, y0, x1, y1] = intersection;
+    for rect in [
+        [a[0], a[1], a[2], y0],
+        [a[0], y1, a[2], a[3]],
+        [a[0], y0, x0, y1],
+        [x1, y0, a[2], y1],
+    ] {
+        if rect[0] < rect[2] && rect[1] < rect[3] {
+            out.push((Point::new(rect[0], rect[1]), Point::new(rect[2], rect[3])));
+        }
+    }
+}
+
+fn box_preview_rect(a: Point, b: Point, bounds: iced::Rectangle) -> Option<[f32; 4]> {
+    if ![a.x, a.y, b.x, b.y, bounds.width, bounds.height].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    // Wire picking clips to the pane, but hatch and mesh picking currently do
+    // not. Use a full pick outside the pane rather than caching a clipped box
+    // that could miss a change in those un-clipped categories.
+    if [a, b].iter().any(|p| p.x < 0.0 || p.y < 0.0 || p.x > bounds.width || p.y > bounds.height) {
+        return None;
+    }
+    let rect = [
+        a.x.min(b.x).max(0.0),
+        a.y.min(b.y).max(0.0),
+        a.x.max(b.x).min(bounds.width),
+        a.y.max(b.y).min(bounds.height),
+    ];
+    (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
+}
+
 /// Decide whether a selection press has become a drag. A fast mouse
 /// movement alone must not turn the first click of a click-click rectangle
 /// into a lasso. Hold-to-lasso gets the normal dwell; PICKDRAG=1 keeps its
@@ -1017,6 +1057,63 @@ impl OpenCADStudio {
     // cursor exactly where the GPU draws it; otherwise the model/paper camera
     // and the normal hit-test wires. `bounds` is the pane-local rectangle.
 
+    /// Keep only the latest cursor position until a window frame can answer it.
+    fn queue_box_selection_preview(&mut self, i: usize, p: Point) {
+        let tab = &self.tabs[i];
+        let enabled = match tab.active_cmd.as_ref() {
+            None => self.model_space.selection_preview & 1 != 0,
+            Some(command) => {
+                command.is_selection_gathering() && self.model_space.selection_preview & 2 != 0
+            }
+        };
+        let selection = tab.scene.selection.borrow();
+        let active = selection.gesture.box_anchor.is_some() && !selection.gesture.poly_active;
+        drop(selection);
+        if enabled && active && !tab.orbit_mode && !tab.pan_mode && !tab.zoom_dynamic_mode {
+            self.box_preview_pending = Some((p, i, tab.id));
+        } else {
+            self.box_preview_pending = None;
+            self.box_preview_due = None;
+            self.box_preview_cache = None;
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+        }
+    }
+
+    pub(super) fn on_box_preview_tick(&mut self) -> Task<Message> {
+        let Some((p, i, tab_id)) = self.box_preview_pending else {
+            return Task::none();
+        };
+        if i != self.active_tab || i >= self.tabs.len() || self.tabs[i].id != tab_id
+            || self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_none()
+        {
+            self.box_preview_pending = None;
+            self.box_preview_due = None;
+            self.box_preview_cache = None;
+            if i < self.tabs.len() && self.tabs[i].id == tab_id {
+                self.tabs[i].scene.set_box_hover_highlights(&[]);
+            }
+            return Task::none();
+        }
+        // A coalesced input position is newer than the pending preview. Wait
+        // until the move handler has installed that position instead of
+        // briefly drawing a preview for a cursor the user has already left.
+        if self.move_owed.is_some_and(|(_, tab)| tab == i)
+            || self.box_preview_due.is_some_and(|due| Instant::now() < due)
+        {
+            return Task::none();
+        }
+        self.box_preview_pending = None;
+        let started = Instant::now();
+        self.refresh_box_selection_preview(i, p);
+        // Heavy previews yield time to pointer input. A stopped pointer still
+        // receives its last queued position on a later frame.
+        let cost = started.elapsed();
+        let next_frame = started + std::time::Duration::from_millis(16);
+        let recovery = Instant::now() + cost.min(std::time::Duration::from_millis(100));
+        self.box_preview_due = Some(next_frame.max(recovery));
+        Task::none()
+    }
+
     /// SELECTIONPREVIEW while a selection box is drawn (#2172): what the box
     /// would catch with its corner at `p` (canvas pixels) rolls over before
     /// the release commits it, with the release's filters.
@@ -1039,6 +1136,7 @@ impl OpenCADStudio {
             (anchor, crossing)
         };
         let Some(anchor) = anchor.filter(|_| enabled && !navigating) else {
+            self.box_preview_cache = None;
             self.tabs[i].scene.set_box_hover_highlights(&[]);
             return;
         };
@@ -1053,9 +1151,110 @@ impl OpenCADStudio {
         let edit_cam = edit_frame.map(|(cam, _)| cam);
         let local = |point: iced::Point| iced::Point::new(point.x - tile.x, point.y - tile.y);
         let bounds = iced::Rectangle::new(iced::Point::ORIGIN, tile.size());
+        let (a, p) = (local(anchor), local(p));
         let started = crate::perf::enabled().then(Instant::now);
-        let (mut handles, timing) =
-            self.box_selection_handles(i, &edit_cam, bounds, local(anchor), local(p), crossing);
+        let (view, eye, wires) = self.pick_view(i, &edit_cam, bounds);
+        let flat = view.z_axis.x.abs() < 1e-9
+            && view.z_axis.y.abs() < 1e-9
+            && (view.w_axis.w - 1.0).abs() < 1e-6;
+        // Only the resident flat model-space path has the complete whole-wire
+        // broad-phase guarantees needed to update a previous result safely.
+        let eligible = flat
+            && edit_cam.is_none()
+            && self.tabs[i].scene.current_layout == "Model"
+            && self.tabs[i].active_ucs.is_none()
+            && self.tabs[i].active_cmd.as_ref().is_none_or(|c| c.cursor_plane().is_none());
+        let index = eligible
+            .then(|| self.tabs[i].scene.box_preview_interaction_index(&wires, bounds.height))
+            .flatten();
+        let cache = self.box_preview_cache.take();
+        let mut incremental = false;
+        let mut affected_count = 0;
+        let mut cached_hits = None;
+        if let (Some(index), Some(mut cache), Some(new_rect)) =
+            (index.as_ref(), cache, box_preview_rect(a, p, bounds))
+        {
+            let scene = &self.tabs[i].scene;
+            let same_source = cache.tab_id == self.tabs[i].id
+                && cache.geometry_epoch == scene.geometry_epoch
+                && cache.camera_generation == scene.camera_generation
+                && cache.anchor == a
+                && cache.crossing == crossing
+                && cache.bounds == bounds
+                && cache.view == view
+                && cache.eye == eye
+                && Arc::ptr_eq(&cache.wires, &wires)
+                && Arc::ptr_eq(&cache.index, index);
+            if let Some(old_rect) = same_source
+                .then(|| box_preview_rect(cache.anchor, cache.cursor, bounds))
+                .flatten()
+            {
+                let mut bands = Vec::new();
+                box_rect_subtract(old_rect, new_rect, &mut bands);
+                box_rect_subtract(new_rect, old_rect, &mut bands);
+                let changed_area: f32 = bands.iter().map(|(x, y)| (y.x - x.x) * (y.y - x.y)).sum();
+                let full_area = (new_rect[2] - new_rect[0]) * (new_rect[3] - new_rect[1]);
+                // A large reversal is cheaper and simpler as a full pick.
+                if changed_area <= full_area * 0.75 {
+                    if let Some(affected) = self.box_preview_affected_handles(
+                        i, &edit_cam, bounds, &bands, view, eye, &wires,
+                    ) {
+                        affected_count = affected.len();
+                        let replacement = if bands.is_empty() {
+                            Some((Vec::new(), BoxSelectTiming::default()))
+                        } else {
+                            self.box_selection_handles_filtered(
+                                i, &edit_cam, bounds, a, p, crossing, Some(&affected),
+                            )
+                        };
+                        if let Some((hits, timing)) = replacement {
+                            if !bands.is_empty() {
+                                cache.handles.retain(|handle| !affected.contains(handle));
+                                cache.handles.extend(hits);
+                            }
+                            cached_hits = Some((cache.handles, timing));
+                            incremental = true;
+                        }
+                    }
+                }
+            }
+        }
+        let (mut raw_hits, timing) = cached_hits.unwrap_or_else(|| {
+            let (hits, timing) = self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
+            (hits.into_iter().collect(), timing)
+        });
+        // An opt-in diagnostic checks the optimization against the original
+        // full pick on real drawings. The reference result wins on mismatch.
+        #[cfg(not(target_arch = "wasm32"))]
+        if incremental && std::env::var_os("OCS_VERIFY_BOX_PREVIEW").is_some() {
+            let (reference, _) = self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
+            let reference: rustc_hash::FxHashSet<_> = reference.into_iter().collect();
+            if reference != raw_hits {
+                eprintln!("[perf] box-preview incremental mismatch; used full result");
+                raw_hits = reference;
+            } else {
+                crate::perf_record!("[perf] box-preview incremental verified");
+            }
+        }
+        let mut handles: Vec<Handle> = raw_hits.iter().copied().collect();
+        if let Some(index) = index {
+            self.box_preview_cache = Some(crate::app::BoxPreviewCache {
+                tab_id: self.tabs[i].id,
+                geometry_epoch: self.tabs[i].scene.geometry_epoch,
+                camera_generation: self.tabs[i].scene.camera_generation,
+                anchor: a,
+                cursor: p,
+                crossing,
+                bounds,
+                view,
+                eye,
+                wires,
+                index,
+                handles: raw_hits,
+                #[cfg(test)]
+                incremental,
+            });
+        }
         handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
         self.filter_handles_reject_locked(i, &mut handles);
         self.tabs[i].scene.set_box_hover_highlights_limited(
@@ -1064,10 +1263,51 @@ impl OpenCADStudio {
         let elapsed = crate::perf::elapsed_ms(started);
         if elapsed >= 4.0 {
             crate::perf_record!(
-                "[perf] box-preview total={elapsed:.1}ms candidates={:.1}ms handles={:.1}ms wires={:.1}ms hatch={:.1}ms hit={:.1}ms picked={}",
+                "[perf] box-preview total={elapsed:.1}ms incremental={incremental} affected={affected_count} candidates={:.1}ms handles={:.1}ms wires={:.1}ms hatch={:.1}ms hit={:.1}ms picked={}",
                 timing.candidates, timing.handles, timing.wires, timing.hatch, timing.hit, handles.len(),
             );
         }
+    }
+
+    /// Broad-phase entities along the changed edges, plus fills and meshes
+    /// that cannot be inferred from wire bounds alone. `None` falls back to
+    /// the full, unchanged selection implementation.
+    fn box_preview_affected_handles(
+        &self,
+        i: usize,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        bounds: iced::Rectangle,
+        bands: &[(Point, Point)],
+        view: glam::Mat4,
+        eye: glam::DVec3,
+        wires: &Arc<Vec<crate::scene::WireModel>>,
+    ) -> Option<rustc_hash::FxHashSet<Handle>> {
+        let scene = &self.tabs[i].scene;
+        let mut affected = scene.box_preview_non_wire_handles();
+        for &(a, b) in bands {
+            let points = [a, Point::new(a.x, b.y), b, Point::new(b.x, a.y)];
+            let world_aabb = points
+                .map(|p| self.cursor_model_point(i, edit_cam, p, bounds))
+                .into_iter()
+                .fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |mut aabb, p| {
+                    aabb[0] = aabb[0].min(p.x);
+                    aabb[1] = aabb[1].min(p.y);
+                    aabb[2] = aabb[2].max(p.x);
+                    aabb[3] = aabb[3].max(p.y);
+                    aabb
+                });
+            let rect = [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)];
+            let candidates = scene.interaction_box_candidates(
+                Arc::clone(wires), world_aabb, rect, view, eye, bounds,
+            );
+            // Materializing block stubs turns an indexed result into shared
+            // runs, but retains the XY query that produced it.
+            if candidates.query_aabb().is_none() || candidates.segments().is_some() {
+                return None;
+            }
+            affected.extend(scene.interaction_candidate_handles(&candidates)?);
+        }
+        Some(affected)
     }
 
     /// The entities a selection box from `a` to `p` (tile pixels) catches,
@@ -1083,6 +1323,23 @@ impl OpenCADStudio {
         p: iced::Point,
         crossing: bool,
     ) -> (Vec<Handle>, BoxSelectTiming) {
+        self.box_selection_handles_filtered(i, edit_cam, bounds, a, p, crossing, None)
+            .expect("an unrestricted box pick always returns a result")
+    }
+
+    /// When `only` is supplied, do the existing exact whole-box tests only
+    /// for those entities. A source that cannot be restricted without changing
+    /// its hit-test semantics signals the caller to perform a full pick.
+    fn box_selection_handles_filtered(
+        &self,
+        i: usize,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        bounds: iced::Rectangle,
+        a: iced::Point,
+        p: iced::Point,
+        crossing: bool,
+        only: Option<&rustc_hash::FxHashSet<Handle>>,
+    ) -> Option<(Vec<Handle>, BoxSelectTiming)> {
         let (view_rot, eye, all_wires) = self.pick_view(i, edit_cam, bounds);
         let world_aabb = [a, iced::Point::new(a.x, p.y), p, iced::Point::new(p.x, a.y)]
             .map(|point| self.cursor_model_point(i, edit_cam, point, bounds))
@@ -1110,13 +1367,19 @@ impl OpenCADStudio {
         let mut timing = BoxSelectTiming::default();
         let t_sel = crate::perf::enabled().then(Instant::now);
         let rect = [a.x.min(p.x), a.y.min(p.y), a.x.max(p.x), a.y.max(p.y)];
-        let area_candidates = self.tabs[i].scene.interaction_box_candidates(
+        let mut area_candidates = self.tabs[i].scene.interaction_box_candidates(
             all_wires, world_aabb, rect, view_rot, eye, bounds,
         );
         timing.candidates = elapsed(t_sel);
         let t_hit = crate::perf::enabled().then(Instant::now);
         let scene = &self.tabs[i].scene;
-        let candidate_handles = scene.interaction_candidate_handles(&area_candidates);
+        let mut candidate_handles = scene.interaction_candidate_handles(&area_candidates);
+        if let Some(only) = only {
+            if !area_candidates.retain_box_handles(only) {
+                return None;
+            }
+            candidate_handles.as_mut()?.retain(|handle| only.contains(handle));
+        }
         timing.handles = elapsed(t_hit);
         let mut handles: Vec<Handle> =
             scene::pick::hit_test::box_hit(a, p, crossing, &area_candidates, view_rot, eye, bounds)
@@ -1166,8 +1429,13 @@ impl OpenCADStudio {
         // Reference-only entities (API v9) are plugin-owned display geometry:
         // a box/window selection must not pick them.
         handles.retain(|h| !scene.is_reference_only(*h));
+        if let Some(only) = only {
+            // Mesh pickers currently scan all solid instances; restrict their
+            // results too, so the cache only replaces affected entities.
+            handles.retain(|handle| only.contains(handle));
+        }
         timing.hit = elapsed(t_hit);
-        (handles, timing)
+        Some((handles, timing))
     }
 
     pub(in crate::app) fn pick_view(
@@ -1807,7 +2075,10 @@ impl OpenCADStudio {
         if self.move_owed.is_none()
             || matches!(
                 msg,
-                Message::ViewportMove(_) | Message::PaneMove(..) | Message::MoveCoalesceTick
+                Message::ViewportMove(_)
+                    | Message::PaneMove(..)
+                    | Message::MoveCoalesceTick
+                    | Message::BoxPreviewTick
             )
         {
             return Task::none();
@@ -1934,7 +2205,7 @@ impl OpenCADStudio {
             // every pointer event while drawing, and clear any idle hover once.
             self.tabs[i].scene.set_constraint_hover_highlights(&[]);
         }
-        self.refresh_box_selection_preview(i, p);
+        self.queue_box_selection_preview(i, p);
         // Modifier-driven selection must be known before cursor_plane/axis and
         // drafting constraints are read, not merely before the final callback.
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
@@ -5083,6 +5354,10 @@ impl OpenCADStudio {
         sel.gesture.poly_points.clear();
         sel.gesture.poly_crossing = false;
         drop(sel);
+        self.box_preview_pending = None;
+        self.box_preview_due = None;
+        self.box_preview_cache = None;
+        self.tabs[i].scene.set_box_hover_highlights(&[]);
         // Clear the rollover highlight when the cursor leaves the
         // viewport so it doesn't stick while the mouse is over the
         // ribbon / panels.
@@ -6460,6 +6735,9 @@ impl OpenCADStudio {
         // A click fires after the cursor has settled — clear any pending
         // deferred snap so the release's own snap runs at full fidelity.
         self.snap_dwell = None;
+        self.box_preview_pending = None;
+        self.box_preview_due = None;
+        self.box_preview_cache = None;
         // The release commits (or restarts) any box; its preview is done.
         self.tabs[i].scene.set_box_hover_highlights(&[]);
         // A block dragged from the Blocks palette lands here.
@@ -13431,5 +13709,114 @@ mod pointer_move_coalescing_tests {
             "answering a pre-press position after the press would send the \
              cursor backwards"
         );
+    }
+}
+
+#[cfg(test)]
+mod box_preview_schedule_tests {
+    use super::*;
+
+    #[test]
+    fn boxes_outside_pane_and_zero_area_use_full_pick() {
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        assert!(box_preview_rect(Point::new(50.0, 50.0), Point::new(801.0, 100.0), bounds).is_none());
+        assert!(box_preview_rect(Point::new(50.0, 50.0), Point::new(50.0, 100.0), bounds).is_none());
+    }
+
+    #[test]
+    fn keeps_latest_position_until_frame_and_respects_due_time() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().gesture.box_anchor = Some(Point::new(10.0, 10.0));
+        app.queue_box_selection_preview(i, Point::new(20.0, 20.0));
+        app.queue_box_selection_preview(i, Point::new(40.0, 50.0));
+        assert_eq!(app.box_preview_pending, Some((Point::new(40.0, 50.0), i, app.tabs[i].id)));
+        // A newer coalesced pointer move must run before this older preview.
+        app.move_owed = Some((Point::new(60.0, 70.0), i));
+        let _ = app.on_box_preview_tick();
+        assert!(app.box_preview_pending.is_some());
+        app.move_owed = None;
+        app.box_preview_due = Some(Instant::now() + std::time::Duration::from_secs(60));
+        let _ = app.on_box_preview_tick();
+        assert_eq!(app.box_preview_pending, Some((Point::new(40.0, 50.0), i, app.tabs[i].id)));
+        app.tabs[i].scene.selection.borrow_mut().gesture.box_anchor = None;
+        let _ = app.on_box_preview_tick();
+        assert!(app.box_preview_pending.is_none());
+        assert!(app.box_preview_due.is_none());
+    }
+
+    #[test]
+    fn disabled_preview_never_queues_work() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.model_space.selection_preview = 0;
+        app.tabs[i].scene.selection.borrow_mut().gesture.box_anchor = Some(Point::new(10.0, 10.0));
+        app.queue_box_selection_preview(i, Point::new(30.0, 30.0));
+        assert!(app.box_preview_pending.is_none());
+    }
+
+    #[test]
+    fn incremental_box_hits_match_full_pick_when_growing_shrinking_and_switching_mode() {
+        use document::entities::{BoundaryEdge, BoundaryPath, Hatch, Line, PolylineEdge};
+        use document::types::{Vector2, Vector3};
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        for n in 0..4096 {
+            let x = (n % 64) as f64 * 0.6 - 19.2;
+            let y = (n / 64) as f64 * 0.6 - 19.2;
+            let mut line = Line::new();
+            line.start = Vector3::new(x, y, 0.0);
+            line.end = Vector3::new(x + 0.9, y + 0.4, 0.0);
+            app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+        }
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        let mut boundary = BoundaryPath::new();
+        boundary.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+                .into_iter().map(|p| Vector2::new(p[0], p[1])).collect(),
+            true,
+        )));
+        hatch.paths.push(boundary);
+        app.tabs[i].scene.add_entity(document::EntityType::Hatch(Box::new(hatch)));
+        let scene = &app.tabs[i].scene;
+        let wires = scene.hit_test_wires();
+        let (epoch, source) = scene.interaction_index_build_key(&wires, 600.0).unwrap();
+        scene.mark_interaction_index_pending(epoch, source);
+        let index = Arc::new(crate::scene::pick::interaction_index::InteractionIndex::build(&wires));
+        assert!(scene.install_prepared_interaction_index(epoch, source, Arc::downgrade(&wires), index));
+
+        let anchor = Point::new(650.0, 480.0);
+        app.tabs[i].scene.selection.borrow_mut().gesture.box_anchor = Some(anchor);
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let points = [
+            (Point::new(340.0, 260.0), false),
+            (Point::new(330.0, 250.0), true),
+            (Point::new(335.0, 255.0), true),
+            (Point::new(660.0, 260.0), false),
+            (Point::new(670.0, 250.0), true),
+        ];
+        for (point, expected_incremental) in points {
+            app.refresh_box_selection_preview(i, point);
+            let cache = app.box_preview_cache.as_ref().expect("indexed flat preview");
+            assert_eq!(cache.incremental, expected_incremental, "at {point:?}");
+            let (full, _) = app.box_selection_handles(i, &None, bounds, anchor, point, point.x < anchor.x);
+            let full: rustc_hash::FxHashSet<_> = full.into_iter().collect();
+            assert_eq!(cache.handles, full, "incremental result at {point:?}");
+        }
+
+        // Editing the drawing invalidates the index and must force the normal
+        // full pick instead of reusing hits from the previous geometry.
+        let mut added = Line::new();
+        added.start = Vector3::new(0.0, 0.0, 0.0);
+        added.end = Vector3::new(1.0, 1.0, 0.0);
+        app.tabs[i].scene.add_entity(document::EntityType::Line(added));
+        app.refresh_box_selection_preview(i, Point::new(672.0, 248.0));
+        assert!(app.box_preview_cache.is_none());
     }
 }

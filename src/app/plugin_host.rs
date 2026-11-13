@@ -3909,9 +3909,7 @@ impl<'a> HostSession<'a> {
                 break;
             }
             // Designation inside the SAME scope, the before-image
-            // pending-scoped the way set_reference_only does. Set before
-            // `write_record` so its incremental handle bump already bakes the
-            // designation stamp without a redundant full rebuild.
+            // pending-scoped the way set_reference_only does.
             let before = self.app.tabs[self.tab]
                 .scene
                 .reference_only
@@ -3921,7 +3919,6 @@ impl<'a> HostSession<'a> {
             self.app.tabs[self.tab]
                 .scene
                 .set_reference_only_membership(*handle, !instance.selectable_custom);
-            self.write_record(*handle, stamp);
         }
         if let Some(index) = stamp_failed {
             self.app.tabs[self.tab]
@@ -4133,6 +4130,17 @@ impl<'a> HostSession<'a> {
     ) -> Vec<bool> {
         let known = crate::plugin::grip_points::visibility(&self.app.disabled_plugins)(plugin_id);
         if !known {
+            if plugin_id.is_empty() {
+                // The boot-window registration storm fires before the handshake
+                // pins the process's manifest id (the empty-attribution class —
+                // HOST-FIXES-TODO #1). The plugin genuinely registered nothing
+                // in its own name, so the refusals that would follow name a
+                // plugin that never spoke: SILENCE is the honest noise law the
+                // user ordered (2026-11-13). Replay-after-handshake stays the
+                // #1 fix's direction; until then these requests simply do not
+                // exist for the user.
+                return vec![false; panels.len()];
+            }
             for panel in panels {
                 self.push_error(&format!(
                     "quad panel {id:?} refused: plugin {plugin_id:?} is not a loaded, alive \

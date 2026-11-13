@@ -48,6 +48,20 @@ mod manager;
 mod v4;
 pub use manager::{AttachOutcome, DispatchResult, NotificationHandler, PluginManager};
 
+/// An owned Windows kernel HANDLE that stays usable from any thread. The host
+/// hands runner spawn handles (the kill-on-close Job Object) between threads
+/// (the reap runs wherever the owner lasts locks the cell); kernel object
+/// handles are thread-portable, which raw-pointer [`Send`]/[`Sync`]
+/// derivations do not express — hence this newtype.
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+struct SystemHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+// SAFETY: a HANDLE is an integer-like, thread-portable reference to a kernel
+// object; nothing about it binds to the creating thread.
+unsafe impl Send for SystemHandle {}
+
 /// One runner child plus the OS handles that tie its process tree to the host
 /// lifetime. The runner runs in its own process group (or Windows Job) so
 /// reaping signals the whole tree: a runner's own children (e.g. a spawned
@@ -55,11 +69,11 @@ pub use manager::{AttachOutcome, DispatchResult, NotificationHandler, PluginMana
 /// host's connection semi-open after an abandoned plugin.
 struct RunnerChild {
     child: Child,
-    /// Windows kill-on-close Job Object (HANDLE; null when the host itself is
+    /// Windows kill-on-close Job Object (null when the host itself is
     /// inside a Job that forbids assignment, making this a best-effort net).
     /// The tree dies when the job terminates or the handle closes.
     #[cfg(windows)]
-    job: windows_sys::Win32::Foundation::HANDLE,
+    job: SystemHandle,
 }
 
 type RunnerChildCell = Mutex<Option<RunnerChild>>;
@@ -71,7 +85,7 @@ impl RunnerChild {
         {
             // Bind the job BEFORE taking ownership of the child in the
             // struct: the job assignment needs the child's raw handle.
-            let job = create_kill_on_close_job(&child);
+            let job = SystemHandle(create_kill_on_close_job(&child));
             Self { child, job }
         }
         #[cfg(unix)]
@@ -1234,11 +1248,11 @@ fn reap(mut runner: RunnerChild) {
     // ignores a direct kill cannot leave grandchildren behind.
     #[cfg(windows)]
     {
-        if !runner.job.is_null() {
+        if !runner.job.0.is_null() {
             use windows_sys::Win32::System::JobObjects::TerminateJobObject;
             // SAFETY: the job handle belongs to this RunnerChild; termination
             // is asynchronous but the direct kill/wait below still proceeds.
-            unsafe { TerminateJobObject(runner.job, 0) };
+            unsafe { TerminateJobObject(runner.job.0, 0) };
         }
     }
     let _ = runner.child.kill();
@@ -1246,11 +1260,11 @@ fn reap(mut runner: RunnerChild) {
     // the termination missed, and releases the kernel object.
     #[cfg(windows)]
     {
-        if !runner.job.is_null() {
+        if !runner.job.0.is_null() {
             use windows_sys::Win32::Foundation::CloseHandle;
             // SAFETY: our own job handle, closed exactly once.
-            unsafe { CloseHandle(runner.job) };
-            runner.job = std::ptr::null_mut();
+            unsafe { CloseHandle(runner.job.0) };
+            runner.job = SystemHandle(std::ptr::null_mut());
         }
     }
     std::thread::spawn(move || {

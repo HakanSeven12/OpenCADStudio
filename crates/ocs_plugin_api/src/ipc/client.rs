@@ -209,7 +209,9 @@ impl HostApi for PluginHostApi {
                 // perform). Locally made edits to the degraded doc are
                 // dropped and the replacement is loud.
                 let replaced = self.document_cache.take().is_some();
-                self.document_cache.set(doc);
+                // Always succeeds right after take; ignore the Result instead
+                // of tripping the unused_must_use lint.
+                let _ = self.document_cache.set(doc);
                 self.document_fetch_failed.set(false);
                 if replaced {
                     eprintln!(

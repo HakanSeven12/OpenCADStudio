@@ -87,15 +87,6 @@ impl<'a> HostSession<'a> {
     /// transport owner. Alias lookup must not turn into an ownership bypass:
     /// a title/command that resolves to another plugin's panel is refused.
     fn owned_panel_id(&self, plugin_id: &str, panel_id: &str) -> Option<String> {
-        if let Some(state) = &self.app.plugin_dialog_state {
-            if (panel_id.is_empty()
-                || state.def.title == panel_id
-                || state.def.title.eq_ignore_ascii_case(panel_id))
-                && state.plugin_id.as_deref() == Some(plugin_id)
-            {
-                return Some(panel_id.to_string());
-            }
-        }
         let resolved = resolve_toggle_panel_id(self.app, panel_id)?;
         match self.app.plugin_panels.get(&resolved) {
             Some(panel) if panel.owner_plugin_id.as_deref() == Some(plugin_id) => Some(resolved),
@@ -4903,10 +4894,21 @@ impl HostApi for HostSession<'_> {
         panel_id: &str,
         values: std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
     ) -> bool {
-        let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) else {
-            return false;
-        };
-        self.update_panel(&panel_id, values)
+        if let Some(panel_id) = self.owned_panel_id(plugin_id, panel_id) {
+            return self.update_panel(&panel_id, values);
+        }
+        // A modal dialog the plugin opened is updated in place; it is never
+        // routed through `update_panel`, whose side-panel lookup by name
+        // could reach another plugin's panel with the same title.
+        if let Some(state) = &mut self.app.plugin_dialog_state {
+            if state.plugin_id.as_deref() == Some(plugin_id)
+                && (panel_id.is_empty() || state.def.title.eq_ignore_ascii_case(panel_id))
+            {
+                state.update_values(values);
+                return true;
+            }
+        }
+        false
     }
 
     fn toggle_panel_for_plugin(
@@ -17973,10 +17975,10 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             "Test Dialog",
             std::collections::HashMap::from([("field1".into(), DialogValue::Text("updated".into()))]),
         ));
-        assert_eq!(
-            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").map(String::as_str),
-            Some("updated")
-        );
+        let field1 = |host: &HostSession| {
+            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").cloned()
+        };
+        assert_eq!(field1(&host).as_deref(), Some("updated"));
 
         // Owner plugin can also update with empty panel_id (active dialog convention)
         assert!(host.update_panel_for_plugin(
@@ -17984,9 +17986,6 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             "",
             std::collections::HashMap::from([("field1".into(), DialogValue::Text("empty_id_update".into()))]),
         ));
-        assert_eq!(
-            host.app.plugin_dialog_state.as_ref().unwrap().text_values.get("field1").map(String::as_str),
-            Some("empty_id_update")
-        );
+        assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 }

@@ -388,8 +388,10 @@ fn parse_string_array(s: &str) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) use loader::PROCESS_TESTS_LOCK;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{shutdown_plugins, with_manager};
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) use loader::{shutdown_plugins, with_fresh_installed_manager, with_manager};
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
 pub(crate) use loader::{load_at_startup, loaded_ids};
@@ -503,7 +505,7 @@ mod loader {
                 continue;
             };
             let mut host = crate::app::plugin_host::HostSession::new(app, 0);
-            match manager.load(&path, &mut host) {
+            match manager.load_with_expected_id(&path, Some(&d.id), &mut host) {
                 Ok(id) => out.push((id, Ok(()))),
                 Err(e) => {
                     // Also on stderr: a headless or automation session never
@@ -537,6 +539,21 @@ mod loader {
             let empty = PluginManager::new();
             f(&empty)
         })
+    }
+
+    /// Run `f` with an EMPTY manager installed in the process store (test
+    /// setup for the declaration-law tests: nothing is loaded, so only the
+    /// boot-window semantics can let an id pass the owner gate). Without an
+    /// installed manager `with_manager` serves a throwaway empty manager per
+    /// call, which cannot carry a boot marker across two calls. The previous
+    /// store is restored afterwards.
+    #[cfg(test)]
+    pub(crate) fn with_fresh_installed_manager<R>(f: impl FnOnce() -> R) -> R {
+        let previous = MANAGER.with(|m| m.borrow_mut().take());
+        MANAGER.with(|m| *m.borrow_mut() = Some(PluginManager::new()));
+        let result = f();
+        MANAGER.with(|m| *m.borrow_mut() = previous);
+        result
     }
 
     /// Serializes the process-spawning tests (spawn/dispatch/notification-attach)
@@ -1023,6 +1040,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
             &path,
             &mut host,
             v4_support::notification_handler(),
+        None,
         )
         .expect("spawn test plugin");
         assert_eq!(process.id(), "opencad.my_plugin");
@@ -1090,6 +1108,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
                 &path,
                 &mut host,
                 v4_support::notification_handler(),
+            None,
             )
             .unwrap_or_else(|e| panic!("fresh boot {boot}: spawn failed: {e}"));
             let handled = process

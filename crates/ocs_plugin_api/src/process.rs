@@ -311,10 +311,15 @@ pub struct PluginProcess {
 
 impl PluginProcess {
     /// Spawn the plugin cdylib in a separate process and connect to it.
+    ///
+    /// `expected_plugin_id` — when the caller knows the package manifest's
+    /// plugin id (e.g. from `plugin.toml`), the runner's own manifest must
+    /// agree; the host refuses to adopt a self-asserted identity otherwise.
     pub fn spawn(
         cdylib_path: &Path,
         host: &mut dyn HostApi,
         notification_handler: NotificationHandler,
+        expected_plugin_id: Option<&str>,
     ) -> Result<Self, PluginError> {
         let socket_name = generate_socket_name();
         let socket_name_ref: interprocess::local_socket::Name = socket_name
@@ -510,6 +515,19 @@ impl PluginProcess {
                 })
             };
             let v4_conn = V4Connection::new(stream, handler_for_v4)?;
+            // Owner-scoped declarations (entity classes, quad panels, custom
+            // grips) arrive as nested requests while GetManifest is in
+            // flight — the plugin registers them as part of its own boot.
+            // The connection carries the LOADED PACKAGE's declared id for
+            // that window (the transport identity for the request shapes in
+            // this protocol does not travel the wire). The manifest response
+            // below must confirm the id; a mismatched manifest refuses the
+            // spawn, so the attribution stays host-verified. Without a
+            // declared id (test loads) the window keeps the empty identity,
+            // and the declaration law refuses it as before.
+            if let Some(expected) = expected_plugin_id {
+                v4_conn.attach_plugin_id(expected);
+            }
             manifest = match v4_conn.call(host, HostRequest::GetManifest, no_op)? {
                 HostResponse::Manifest(m) => m,
                 other => return Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -546,6 +564,20 @@ impl PluginProcess {
             "Loaded plugin: {} ({} {})",
             manifest.name, manifest.id, manifest.version
         );
+
+        // The runner's manifest is the plugin's identity CLAIM. When the
+        // loaded package declared its own id, that claim must match — a
+        // repackaged binary cannot silently impersonate another plugin's
+        // registered panels/classes/state.
+        if let Some(expected) = expected_plugin_id {
+            if !manifest.id.eq_ignore_ascii_case(expected) {
+                return Err(PluginError::Runner(format!(
+                    "plugin manifest claims id `{}` but the package declared `{expected}` — \
+                     refusing to adopt a mismatched identity",
+                    manifest.id
+                )));
+            }
+        }
 
         let id = manifest.id.clone();
         *plugin_id_for_io.lock().unwrap_or_else(|e| e.into_inner()) = id.clone();

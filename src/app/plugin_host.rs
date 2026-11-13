@@ -6246,6 +6246,7 @@ mod tests {
             &plugin_path,
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .expect("spawn staged Python plugin");
         assert_eq!(process.id(), "opencad.python");
@@ -6378,6 +6379,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -6578,6 +6580,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -6797,6 +6800,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .expect("spawn staged Python plugin");
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7073,6 +7077,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7274,6 +7279,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7505,6 +7511,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -7849,6 +7856,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8137,6 +8145,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8476,6 +8485,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -8744,6 +8754,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -9007,6 +9018,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -10400,6 +10412,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -10758,6 +10771,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11054,6 +11068,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11138,6 +11153,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11420,6 +11436,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -11816,6 +11833,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12137,6 +12155,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12239,6 +12258,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12330,6 +12350,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12471,6 +12492,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dispatch = |host: &mut HostSession<'_>, command: &str| {
@@ -12676,6 +12698,7 @@ mod tests {
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -12880,6 +12903,7 @@ L.delete('Structure', erase_objects=True)
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13115,6 +13139,7 @@ S.delete('Heading')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13379,6 +13404,7 @@ B.delete('Widget2')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13581,6 +13607,7 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -13850,6 +13877,7 @@ LT.delete('Temp')
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let dir = std::env::temp_dir();
@@ -14255,6 +14283,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let script = std::env::temp_dir().join(format!("ocs_nested_{}.py", std::process::id()));
@@ -14450,6 +14479,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             std::path::Path::new(&plugin_path),
             &mut host,
             crate::plugin::v4_support::notification_handler(),
+        None,
         )
         .unwrap();
         let script = dir.join(format!("ocs_link_{}.py", std::process::id()));
@@ -14592,6 +14622,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     std::path::Path::new(&plugin_path),
                     &mut host,
                     crate::plugin::v4_support::notification_handler(),
+                None,
                 )
                 .expect("spawn staged Python plugin"),
             )
@@ -14737,6 +14768,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     std::path::Path::new(&plugin_path),
                     &mut host,
                     crate::plugin::v4_support::notification_handler(),
+                None,
                 )
                 .expect("spawn staged Python plugin"),
             )
@@ -16633,6 +16665,58 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             design_record: "PLUGIN_ALIGN_DISPLAY".to_string(),
             selectable_custom: false,
         }
+    }
+
+    #[test]
+    fn boot_time_declaration_is_attributed_to_the_declared_package_id() {
+        // HOST-FIXES-TODO 1: the spawn bootstrap registers entity classes and
+        // quad panels while GetManifest is still in flight — the registry
+        // entry does not exist yet, and the manifest window used to serve
+        // with an empty identity ("plugin \"\" is not a loaded, alive
+        // plugin"). The declaration law now treats the IN-FLIGHT BOOT as the
+        // live, authenticated transport: the package's declared id rides the
+        // connection before the manifest and the manifest must confirm it,
+        // while the empty identity still refuses.
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+        crate::plugin::external::with_fresh_installed_manager(|| {
+            // An empty identity is never attributable, boot window or not.
+            let empty_err = host
+                .register_plugin_class("", &traverse_class())
+                .unwrap_err();
+            assert!(
+                empty_err.contains("not a loaded, alive plugin"),
+                "got: {empty_err}"
+            );
+
+            // The declared package id in its boot window passes the law.
+            crate::plugin::external::with_manager(|m| m.begin_boot("opencad.example"));
+            assert!(
+                host.register_plugin_class("opencad.example", &traverse_class())
+                    .is_ok()
+            );
+
+            // After the boot window closes (and without a registry entry at
+            // that id) the law refuses again: a different class key under the
+            // same owner must not register.
+            crate::plugin::external::with_manager(|m| m.end_boot("opencad.example"));
+            let mut unrelated = traverse_class();
+            unrelated.class_id = "OTHER_KEY".to_string();
+            let closed_err = host
+                .register_plugin_class("opencad.example", &unrelated)
+                .unwrap_err();
+            assert!(
+                closed_err.contains("not a loaded, alive plugin"),
+                "got: {closed_err}"
+            );
+
+            // The empty identity law survives the whole exercise.
+            let still_empty = host
+                .register_plugin_class("", &traverse_class())
+                .unwrap_err();
+            assert!(still_empty.contains("not a loaded, alive plugin"));
+        });
     }
 
     #[test]

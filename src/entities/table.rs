@@ -422,6 +422,20 @@ pub(crate) fn resolved_table_margins(
     (horizontal, vertical)
 }
 
+/// The margin a cell's text keeps from a side that neither the cell nor
+/// its cell style sets: the table's, as the table's stored picture keeps
+/// it, and half the text height only where the table has none.
+fn side_margin<T>(table_margin: T, text_height: T) -> T
+where
+    T: Copy + Default + PartialOrd + From<u8> + std::ops::Div<Output = T>,
+{
+    if table_margin > T::default() {
+        table_margin
+    } else {
+        text_height / T::from(2)
+    }
+}
+
 fn table_offsets(table: &Table, scale: f32) -> (Vec<f32>, Vec<f32>) {
     let mut columns = Vec::with_capacity(table.columns.len() + 1);
     columns.push(0.0);
@@ -2078,7 +2092,7 @@ pub fn tessellate_table(
                     document::entities::table::CellStylePropertyFlags::MARGIN_LEFT,
                 )
                 .map(|style| style.margin_left as f32 * anno_scale)
-                .unwrap_or(h_margin.max(fallback_text_height * 0.5));
+                .unwrap_or(side_margin(h_margin, fallback_text_height));
                 let fallback_margin_right = style_for_property(
                     tab,
                     row,
@@ -2087,7 +2101,7 @@ pub fn tessellate_table(
                     document::entities::table::CellStylePropertyFlags::MARGIN_RIGHT,
                 )
                 .map(|style| style.margin_right as f32 * anno_scale)
-                .unwrap_or(h_margin.max(fallback_text_height * 0.5));
+                .unwrap_or(side_margin(h_margin, fallback_text_height));
                 let fallback_margin_top = style_for_property(
                     tab,
                     row,
@@ -2096,7 +2110,7 @@ pub fn tessellate_table(
                     document::entities::table::CellStylePropertyFlags::MARGIN_TOP,
                 )
                 .map(|style| style.margin_top as f32 * anno_scale)
-                .unwrap_or(v_margin.max(fallback_text_height * 0.5));
+                .unwrap_or(side_margin(v_margin, fallback_text_height));
                 let fallback_margin_bottom = style_for_property(
                     tab,
                     row,
@@ -2105,7 +2119,7 @@ pub fn tessellate_table(
                     document::entities::table::CellStylePropertyFlags::MARGIN_BOTTOM,
                 )
                 .map(|style| style.margin_bottom as f32 * anno_scale)
-                .unwrap_or(v_margin.max(fallback_text_height * 0.5));
+                .unwrap_or(side_margin(v_margin, fallback_text_height));
                 let fallback_layout = style_for_property(
                     tab,
                     row,
@@ -2208,7 +2222,7 @@ pub fn tessellate_table(
                     )
                     .map(|style| style.margin_left as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
-                    .unwrap_or_else(|| h_margin.max(cell_h * 0.5));
+                    .unwrap_or_else(|| side_margin(h_margin, cell_h));
                     let margin_right = style_for_property(
                         tab,
                         row,
@@ -2218,7 +2232,7 @@ pub fn tessellate_table(
                     )
                     .map(|style| style.margin_right as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
-                    .unwrap_or_else(|| h_margin.max(cell_h * 0.5));
+                    .unwrap_or_else(|| side_margin(h_margin, cell_h));
                     let margin_top = style_for_property(
                         tab,
                         row,
@@ -2228,7 +2242,7 @@ pub fn tessellate_table(
                     )
                     .map(|style| style.margin_top as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
-                    .unwrap_or_else(|| v_margin.max(cell_h * 0.5));
+                    .unwrap_or_else(|| side_margin(v_margin, cell_h));
                     let margin_bottom = style_for_property(
                         tab,
                         row,
@@ -2238,7 +2252,7 @@ pub fn tessellate_table(
                     )
                     .map(|style| style.margin_bottom as f32 * anno_scale)
                     .filter(|margin| *margin > 1e-6)
-                    .unwrap_or_else(|| v_margin.max(cell_h * 0.5));
+                    .unwrap_or_else(|| side_margin(v_margin, cell_h));
                     let style_handle = cell_text_style(document, tab, row, ci, cell, Some(content))
                         .or_else(|| row_style_text_style(document, row_style));
                     let font_owned =
@@ -4779,6 +4793,88 @@ mod tests {
         );
     }
 
+    /// A new table shows its stored picture, whose cell text sits the table
+    /// style's margins in from the cell's edges. Drawn from its cells, as it
+    /// is once edited, the text stays where the picture put it: the style's
+    /// margins are not raised to half the text height.
+    #[test]
+    fn a_table_drawn_from_its_cells_puts_its_text_where_its_picture_does() {
+        use document::types::Vector3;
+        use document::EntityType;
+        let mut scene = crate::scene::Scene::new();
+        // Margins 0.06 and data text 0.18 high, top-centred: a margin
+        // smaller than half the text height.
+        let style = scene.document.allocate_handle();
+        scene.document.objects.insert(
+            style,
+            document::objects::ObjectType::TableStyle(document::objects::TableStyle::standard()),
+        );
+        let mut table = Table::new(Vector3::ZERO, 1, 2);
+        table.table_style_handle = Some(style);
+        for column in &mut table.columns {
+            column.width = 2.0;
+        }
+        table.rows[0].height = 0.36;
+        table.rows[0].style_id = 3;
+        table.set_cell_text(0, 0, "Mark");
+        table.set_cell_text(0, 1, "Qty");
+        // The first cell top-left, so its left margin shows too.
+        let cell = table.cell_mut(0, 0).unwrap();
+        let own = cell.style.get_or_insert_with(Default::default);
+        own.alignment = 1;
+        own.property_flags
+            .insert(document::entities::table::CellStylePropertyFlags::ALIGNMENT);
+        let handle = scene.add_entity(EntityType::Table(Box::new(table)));
+        let Some(EntityType::Table(placed)) = scene.document.get_entity(handle) else {
+            panic!("the table is in the drawing");
+        };
+        assert!(
+            placed.block_record_handle.is_some(),
+            "a new table has a picture"
+        );
+        let mut from_cells = (**placed).clone();
+        from_cells.block_record_handle = None;
+        // The box of the text drawn for `table`: left, bottom, right, top.
+        let text_box = |table: &Table| {
+            let entity = EntityType::Table(Box::new(table.clone()));
+            let wires = crate::scene::tessellate_entity(
+                &scene.document,
+                &Default::default(),
+                None,
+                [0.0, 0.0, 0.0, 1.0],
+                1.0,
+                None,
+                &entity,
+                None,
+                None,
+                None,
+                None,
+                &Default::default(),
+            );
+            let mut bounds = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+            for vertex in wires.iter().flat_map(|wire| &wire.text_verts) {
+                let x = vertex.pos[0] as f64 + vertex.pos_low[0] as f64;
+                let y = vertex.pos[1] as f64 + vertex.pos_low[1] as f64;
+                bounds = [
+                    bounds[0].min(x),
+                    bounds[1].min(y),
+                    bounds[2].max(x),
+                    bounds[3].max(y),
+                ];
+            }
+            assert!(bounds[0] <= bounds[2], "the cells' text is drawn");
+            bounds
+        };
+        let (picture, cells) = (text_box(placed), text_box(&from_cells));
+        assert!(
+            picture
+                .iter()
+                .zip(&cells)
+                .all(|(a, b)| (a - b).abs() < 1e-4),
+            "picture text {picture:?}, drawn from the cells {cells:?}"
+        );
+    }
+
     /// Text wraps between the margins it is placed against: a long
     /// left-aligned line ends inside the cell, not past the
     /// cell's edge (with no table margin the text sits half its height in).
@@ -6128,7 +6224,7 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
                     .unwrap_or(fallback)
             };
             // The side margins the text is drawn between: the cell's own,
-            // else the table's, at least half the text height.
+            // else the table's (half the text height when it has none).
             let side = |property: P| {
                 style_for_property(table, row, ci, cell, property)
                     .map(|style| match property {
@@ -6136,7 +6232,7 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
                         _ => style.margin_right,
                     })
                     .filter(|margin| *margin > 1e-6)
-                    .unwrap_or(h_margin.max(height * 0.5))
+                    .unwrap_or(side_margin(h_margin, height))
             };
             let width: f64 = table.columns[ci..=c1.min(table.columns.len() - 1)]
                 .iter()

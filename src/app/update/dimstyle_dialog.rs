@@ -14,7 +14,7 @@ use crate::ui::style::dimstyle::{
     CompareRow, CompareState, CreateDraft, DraftNames, DsMsg, Edit, Mode, Notice, Pick,
     PreviewArrows, PreviewTexts, StyleRow, View, OTHER,
 };
-use crate::ui::style::mleaderstyle::{trim_number, LinetypeRow, LoadDraft};
+use crate::ui::style::mleaderstyle::{trim_number, LinetypeRow, LoadDraft, ReloadAsk};
 use document::entities::{Dimension, DimensionAligned, DimensionAngular3Pt, DimensionRadius};
 use document::tables::DimStyle;
 use document::types::{Color as AcadColor, Vector3};
@@ -531,6 +531,10 @@ impl OpenCADStudio {
     /// the manager is open.
     pub(super) fn dim_style_close_face(&mut self) -> bool {
         let d = &mut self.dsd;
+        if d.reload_ask.take().is_some() {
+            d.load = None;
+            return true;
+        }
         if d.notice.take().is_some()
             || d.delete_ask.take().is_some()
             || d.discard_ask.take().is_some()
@@ -1244,20 +1248,23 @@ impl OpenCADStudio {
                 }
             }
             DsMsg::LoadCancel => self.dsd.load = None,
+            // OK asks about the ticked linetypes the drawing already has, one
+            // by one, before loading anything.
             DsMsg::LoadOk => {
-                if let Some(load) = self.dsd.load.take() {
-                    let doc = &mut self.tabs[i].scene.document;
-                    crate::io::linetypes::populate_document_named(
-                        doc,
-                        &load.source,
-                        load.dir.as_deref(),
-                        &load.picked,
-                    );
-                    // The last loaded linetype is the one picked.
-                    if let (Some(Pick::Linetype(_, selected)), Some(last)) =
-                        (self.dsd.pick.as_mut(), load.picked.last())
-                    {
-                        *selected = last.clone();
+                if let Some(load) = self.dsd.load.as_ref() {
+                    match ReloadAsk::for_load(load, &self.tabs[i].scene.document) {
+                        Some(ask) => self.dsd.reload_ask = Some(ask),
+                        None => self.ds_finish_load(Vec::new()),
+                    }
+                }
+            }
+            DsMsg::ReloadAnswer(answer) => {
+                if let Some(mut ask) = self.dsd.reload_ask.take() {
+                    match ask.answer(answer) {
+                        Some(Ok(reload)) => self.ds_finish_load(reload),
+                        // Nothing is loaded and Load Linetypes closes.
+                        Some(Err(())) => self.dsd.load = None,
+                        None => self.dsd.reload_ask = Some(ask),
                     }
                 }
             }
@@ -1270,6 +1277,22 @@ impl OpenCADStudio {
             }
         }
         Task::none()
+    }
+
+    /// Load Linetypes ends: the ticked linetypes the drawing lacks are
+    /// added, `reload` are read again; Select Linetype keeps its choice.
+    fn ds_finish_load(&mut self, reload: Vec<String>) {
+        let Some(load) = self.dsd.load.take() else {
+            return;
+        };
+        let doc = &mut self.tabs[self.active_tab].scene.document;
+        crate::io::linetypes::populate_document_named(
+            doc,
+            &load.source,
+            load.dir.as_deref(),
+            &load.picked,
+        );
+        crate::io::linetypes::reload_document_named(doc, &load.source, load.dir.as_deref(), &reload);
     }
 
     fn ds_set_arrow(&mut self, slot: u8, value: &str) {

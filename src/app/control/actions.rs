@@ -3155,7 +3155,8 @@ impl OpenCADStudio {
             // "lineweight=<field>:<1/100 mm|-1|-2|-3>", "pick=<name>",
             // "pick_ok", "pick_cancel", "pick_load", "load_file",
             // "load_path=<.lin path>", "load_toggle=<linetype>", "load_ok",
-            // "load_cancel", "text_styles", "ok", "cancel". Compare:
+            // "load_cancel", "reload=this|all|skip|skip_rest|cancel",
+            // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
             "dimstyle_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::DimStyle) {
@@ -3228,6 +3229,22 @@ impl OpenCADStudio {
                     "delete_yes" => dlg(M::DeleteAnswer(true)),
                     "delete_no" => dlg(M::DeleteAnswer(false)),
                     "save_overrides" => dlg(M::SaveOverrides),
+                    "reload" => {
+                        use crate::ui::style::mleaderstyle::Reload;
+                        dlg(M::ReloadAnswer(match value {
+                            "this" => Reload::This,
+                            "all" => Reload::All,
+                            "skip" => Reload::Skip,
+                            "skip_rest" => Reload::SkipRest,
+                            "cancel" => Reload::Cancel,
+                            _ => {
+                                return Err(failure(
+                                    "invalid_value",
+                                    "reload is this, all, skip, skip_rest or cancel",
+                                ))
+                            }
+                        }))
+                    }
                     "discard_yes" => dlg(M::DiscardAnswer(true)),
                     "discard_no" => dlg(M::DiscardAnswer(false)),
                     "help" => dlg(M::Help),

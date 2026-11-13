@@ -15,7 +15,8 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, dialog_button_styled_opt};
 use crate::ui::style::mleaderstyle::{
     input_style, linetype_card, load_linetypes_card, panel, pattern_sample, preview_style,
-    record_label, sample_list, weight_sample, LinetypeRow, LoadDraft,
+    record_label, reload_card, sample_list, weight_sample, LinetypeRow, LoadDraft, Reload,
+    ReloadAsk,
 };
 use crate::ui::window::pdf_dialogs::{accent_text, card, card_style, well_style};
 use document::tables::DimStyle;
@@ -93,6 +94,8 @@ pub struct Dialog {
     pub delete_ask: Option<String>,
     pub pick: Option<Pick>,
     pub load: Option<LoadDraft>,
+    /// Load Linetypes asks about the ticked linetypes the drawing has.
+    pub reload_ask: Option<ReloadAsk>,
     /// The list (colour, linetype, lineweight, fill) that is open.
     pub open_list: Option<&'static str>,
 }
@@ -226,6 +229,8 @@ pub enum DsMsg {
     LoadToggle(String),
     LoadOk,
     LoadCancel,
+    /// The answer to the reload question of Load Linetypes.
+    ReloadAnswer(Reload),
     TextStyles,
     Ok,
     Cancel,
@@ -490,6 +495,11 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
             Some((discard_card(), msg(DsMsg::DiscardAnswer(false))))
         } else if let Some(draft) = &v.dialog.create {
             Some((create_card(draft, &v), msg(DsMsg::CreateCancel)))
+        } else if let Some(ask) = &v.dialog.reload_ask {
+            Some((
+                reload_card(ask, |answer| msg(DsMsg::ReloadAnswer(answer))),
+                msg(DsMsg::ReloadAnswer(Reload::Cancel)),
+            ))
         } else if let Some(load) = &v.dialog.load {
             Some((
                 load_linetypes_card(

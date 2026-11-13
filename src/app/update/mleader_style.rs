@@ -7,7 +7,7 @@
 
 use crate::app::{Message, ModalKind, OpenCADStudio, StyleKind};
 use crate::ui::style::mleaderstyle::{
-    field_id, field_tab, trim_number, CreateDraft, LoadDraft, MlsMsg, Modify, Notice, Pick, Reload,
+    field_id, field_tab, trim_number, CreateDraft, LoadDraft, MlsMsg, Modify, Notice, Pick,
     ReloadAsk, OTHER,
 };
 use document::objects::{
@@ -694,24 +694,9 @@ impl OpenCADStudio {
             // one by one, before loading anything.
             MlsMsg::LoadOk => {
                 if let Some(load) = self.mls.load.as_ref() {
-                    let doc = &self.tabs[i].scene.document;
-                    let pending: Vec<String> = load
-                        .entries
-                        .iter()
-                        .map(|(name, _, _)| name)
-                        .filter(|name| {
-                            load.picked.iter().any(|p| p.eq_ignore_ascii_case(name))
-                                && doc.line_types.get(name).is_some()
-                        })
-                        .cloned()
-                        .collect();
-                    if pending.is_empty() {
-                        self.mleader_style_finish_load(Vec::new());
-                    } else {
-                        self.mls.reload_ask = Some(ReloadAsk {
-                            pending,
-                            reload: Vec::new(),
-                        });
+                    match ReloadAsk::for_load(load, &self.tabs[i].scene.document) {
+                        Some(ask) => self.mls.reload_ask = Some(ask),
+                        None => self.mleader_style_finish_load(Vec::new()),
                     }
                 }
             }
@@ -719,27 +704,11 @@ impl OpenCADStudio {
                 let Some(mut ask) = self.mls.reload_ask.take() else {
                     return Task::none();
                 };
-                match answer {
-                    Reload::This | Reload::Skip => {
-                        if !ask.pending.is_empty() {
-                            let name = ask.pending.remove(0);
-                            if answer == Reload::This {
-                                ask.reload.push(name);
-                            }
-                        }
-                    }
-                    Reload::All => ask.reload.append(&mut ask.pending),
-                    Reload::SkipRest => ask.pending.clear(),
+                match ask.answer(answer) {
+                    Some(Ok(reload)) => self.mleader_style_finish_load(reload),
                     // Nothing is loaded and Load Linetypes closes.
-                    Reload::Cancel => {
-                        self.mls.load = None;
-                        return Task::none();
-                    }
-                }
-                if ask.pending.is_empty() {
-                    self.mleader_style_finish_load(ask.reload);
-                } else {
-                    self.mls.reload_ask = Some(ask);
+                    Some(Err(())) => self.mls.load = None,
+                    None => self.mls.reload_ask = Some(ask),
                 }
             }
             MlsMsg::PickCancel => self.mls.pick = None,

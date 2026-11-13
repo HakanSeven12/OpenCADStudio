@@ -863,6 +863,12 @@ pub struct WireModel {
     /// `true` only for a planar SOLID entity's interior. Wireframe 3D omits
     /// this fill while preserving its perimeter and every other 2-D overlay.
     pub fill_is_2d_solid: bool,
+    /// The direction a planar SOLID was drawn with, in the coordinates of the
+    /// space or block that holds it. The reference of a block turns the
+    /// triangles and leaves this alone: the fill shows when the view looks
+    /// along the solid's own direction, however its block is placed. `None`
+    /// for every other fill, whose triangles tell.
+    pub solid_normal: Option<[f32; 3]>,
     /// Shared block-render source and this placement's translation.
     pub render_instance: Option<super::instance_model::RenderInstance>,
     /// Set on a wire that stands for a translated copy of a nested block
@@ -944,6 +950,7 @@ impl WireModel {
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
+            solid_normal: None,
             render_instance: None,
             stub: None,
             pick_tris: Vec::new(),
@@ -1519,6 +1526,7 @@ impl Default for WireModel {
             plot_visible: true,
             fill_is_3d: false,
             fill_is_2d_solid: false,
+            solid_normal: None,
             render_instance: None,
             stub: None,
             pick_tris: Vec::new(),

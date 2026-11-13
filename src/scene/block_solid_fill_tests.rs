@@ -82,3 +82,35 @@ fn a_solid_drawn_off_the_view_is_an_outline() {
         "a tilted solid in a block under a flat reference"
     );
 }
+
+/// The direction that counts is the solid's own. A solid drawn tilted in its
+/// block stays an outline even under the reference that turns it flat to the
+/// view.
+#[test]
+fn a_solid_its_reference_turns_flat_is_still_an_outline() {
+    // The axes a reference with this normal places its block on.
+    let normal = tilted();
+    let across = Vector3::new(-normal.y, normal.x, 0.0);
+    let length = (across.x * across.x + across.y * across.y).sqrt();
+    let across = Vector3::new(across.x / length, across.y / length, 0.0);
+    let along = Vector3::new(
+        normal.y * across.z - normal.z * across.y,
+        normal.z * across.x - normal.x * across.z,
+        normal.x * across.y - normal.y * across.x,
+    );
+    // +Z of the model, as the block sees it.
+    let undone = Vector3::new(across.z, along.z, normal.z);
+    let mut scene = reference_of(undone, normal);
+
+    let fills = solid_fills(&mut scene);
+    assert_eq!(fills.len(), 1, "the scene draws one planar solid");
+    let corner = |index: usize| glam::Vec3::from_array(fills[0].fill_tris[index]);
+    let facing = (corner(1) - corner(0))
+        .cross(corner(2) - corner(0))
+        .normalize();
+    assert!(
+        facing.z.abs() > 0.9999,
+        "the reference turns the solid flat to the view: {facing:?}"
+    );
+    assert!(!planar_solid_faces_view(&fills[0], glam::Vec3::Z));
+}

@@ -26,6 +26,14 @@ pub(crate) fn planar_solid_faces_view(wire: &WireModel, view_dir: glam::Vec3) ->
         return true;
     }
     let view = view_dir.as_dvec3().normalize_or_zero();
+    // A solid in a block is told by the direction it was drawn with there,
+    // not by where the reference of the block turned its triangles.
+    if let Some(own) = wire.solid_normal {
+        let own = glam::Vec3::from_array(own).as_dvec3().normalize_or_zero();
+        if own.length_squared() > 0.0 {
+            return own.dot(view).abs() >= 1.0 - 1.0e-5;
+        }
+    }
     let point = |index: usize| {
         let high = wire.fill_tris[index];
         let low = wire.fill_tris_low.get(index).copied().unwrap_or([0.0; 3]);

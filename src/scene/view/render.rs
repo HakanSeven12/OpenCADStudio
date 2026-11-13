@@ -1774,6 +1774,7 @@ fn hash_preview_wires(wires: &[WireModel], h: &mut impl std::hash::Hasher) {
         w.display_visible.hash(h);
         w.fill_is_3d.hash(h);
         w.fill_is_2d_solid.hash(h);
+        w.solid_normal.map(|normal| normal.map(f32::to_bits)).hash(h);
         bytemuck::cast_slice::<_, u8>(&w.text_verts).hash(h);
         w.point_marker.is_some().hash(h);
         if let Some(marker) = w.point_marker {

@@ -102,6 +102,9 @@ pub struct LocalWire {
     /// Preserves the planar SOLID classification through block expansion so
     /// it never gets merged with unrelated annotation fills of the same style.
     pub fill_is_2d_solid: bool,
+    /// The direction the SOLID was drawn with in its block; a reference of
+    /// the block does not turn it.
+    pub solid_normal: Option<[f32; 3]>,
     /// Thickness-wall pick geometry, transformed by the insert like `points`
     /// so a block child's extruded wall stays selectable at the instance's
     /// place and scale. Never reaches the GPU.
@@ -1369,6 +1372,7 @@ fn tessellate_sub_local(
             fill_tris_low: wire.fill_tris_low,
             fill_is_3d: wire.fill_is_3d,
             fill_is_2d_solid: wire.fill_is_2d_solid,
+            solid_normal: wire.solid_normal,
             pick_tris: wire.pick_tris,
             pick_tris_low: wire.pick_tris_low,
             color: wire_color,
@@ -2178,6 +2182,9 @@ struct StyleKey {
     /// Part of the batch key so planar SOLID fills remain independently
     /// switchable after block geometry is merged by style.
     fill_is_2d_solid: bool,
+    /// Bit-cast direction a planar SOLID was drawn with, so solids drawn in
+    /// different directions stay in batches of their own.
+    solid_normal: Option<[u32; 3]>,
     fill_is_3d: bool,
     snap_only: bool,
     dash_closure: DashClosure,
@@ -2237,6 +2244,7 @@ struct BatchEntry {
     fill_tris_low: Vec<[f32; 3]>,
     fill_is_3d: bool,
     fill_is_2d_solid: bool,
+    solid_normal: Option<[f32; 3]>,
     snap_only: bool,
     dash_closure: DashClosure,
     region_boundary_click: bool,
@@ -2338,6 +2346,7 @@ impl BatchEntry {
             aci,
             plinegen,
             fill_is_2d_solid,
+            solid_normal: None,
             fill_is_3d,
             plot_visible,
             hide_unselected,
@@ -2433,6 +2442,7 @@ impl Batches {
                     plot_visible: b.plot_visible,
                     fill_is_3d: b.fill_is_3d,
                     fill_is_2d_solid: b.fill_is_2d_solid,
+                    solid_normal: b.solid_normal,
                     render_instance: None,
                     stub: None,
                     pick_tris: b.pick_tris,
@@ -2531,6 +2541,7 @@ fn style_key(
         plinegen,
         is_fill_only,
         fill_is_2d_solid,
+        solid_normal: None,
         fill_is_3d,
         snap_only: false,
         dash_closure: DashClosure::Open,
@@ -3725,6 +3736,7 @@ fn emit_wire(
                     plot_visible: lw.plot_visible,
                     fill_is_3d: false,
                     fill_is_2d_solid: false,
+                    solid_normal: None,
                     render_instance: None,
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
@@ -3869,6 +3881,7 @@ fn emit_wire(
         lw.hide_unselected,
         local_depth,
     );
+    key.solid_normal = lw.solid_normal.map(|normal| normal.map(f32::to_bits));
     // Never fold reference-only boundaries into a visible geometry batch.
     key.snap_only = lw.snap_only;
     // A closed path is a wire of its own: its pattern fits its whole length.
@@ -3920,6 +3933,7 @@ fn emit_wire(
         )
     });
     entry.local_depth = local_depth;
+    entry.solid_normal = lw.solid_normal;
     entry.snap_only = lw.snap_only;
     entry.dash_closure = dash_closure;
     entry.region_boundary_click = lw.region_boundary_click;

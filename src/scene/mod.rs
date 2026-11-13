@@ -6442,6 +6442,16 @@ impl Scene {
             _ => None,
         };
 
+        // A layout whose viewports are all numbered 2 and up has no sheet yet:
+        // they are content viewports added (e.g. by a script) before the layout
+        // was first opened, and opening it must still create its sheet.
+        if !document.entities().any(|entity| {
+            matches!(entity, EntityType::Viewport(vp)
+                if vp.common.owner_handle == layout.block_record && vp.id <= 1)
+        }) {
+            return Handle::NULL;
+        }
+
         // The ordered handles put the overall sheet viewport first. Some DWGs
         // number that viewport 2 and a model-content viewport 1, so an ID must
         // never override the drawing's stored order. `layout.viewport` is not

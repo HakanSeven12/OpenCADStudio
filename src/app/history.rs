@@ -2,7 +2,7 @@ use super::{
     tab_document::{
         DeltaSnapshot, HistoryLabel, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
         ParametricConstraintsEntryDelta, PendingHistorySnapshot, ReferenceDesignationDelta,
-        StructureSnapshot, TableEntryDelta,
+        ReferenceSessionState, StructureSnapshot, TableEntryDelta,
     },
     OpenCADStudio,
 };
@@ -235,6 +235,7 @@ impl OpenCADStudio {
             structure: (!objects.is_empty()).then_some(StructureSnapshot::Objects(objects)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: label.into(),
@@ -355,6 +356,9 @@ impl OpenCADStudio {
                 })
             })
             .collect();
+        let reference_session_after = self.reference_session_state(i);
+        let reference_session = (pending.reference_session_before != reference_session_after)
+            .then_some((pending.reference_session_before, reference_session_after));
         let visibility_after = self.tabs[i].scene.visibility_states.clone();
         let visibility_states = (pending.visibility_states_before != visibility_after)
             .then_some((pending.visibility_states_before, visibility_after));
@@ -405,6 +409,7 @@ impl OpenCADStudio {
             && visibility_states.is_none()
             && entities.is_empty()
             && reference_designations.is_empty()
+            && reference_session.is_none()
             && parametric_constraints.is_empty()
             && !structure_changed
             && pending.selected_before == selected_after
@@ -430,6 +435,7 @@ impl OpenCADStudio {
                 .then_some(StructureSnapshot::Full(pending.structure_before)),
             parametric_constraints,
             reference_designations,
+            reference_session,
             graph,
             named_parameters: None,
             label: pending.label,
@@ -481,6 +487,13 @@ impl OpenCADStudio {
                 .is_some_and(|pending| pending.plugin_owned)
     }
 
+    fn reference_session_state(&self, i: usize) -> ReferenceSessionState {
+        ReferenceSessionState {
+            xref_unloaded: self.tabs[i].xref_unloaded.clone(),
+            xref_stat_cache: self.tabs[i].xref_stat_cache.clone(),
+        }
+    }
+
     pub(super) fn push_undo_snapshot(&mut self, i: usize, label: impl Into<HistoryLabel>) {
         if self.graph_undo_open {
             return;
@@ -502,6 +515,7 @@ impl OpenCADStudio {
             structure_before,
             recorder,
             reference_designations_before: Vec::new(),
+            reference_session_before: self.reference_session_state(i),
             parametric_constraints_before: self.tabs[i].scene.parametric_constraints.clone(),
             plugin_owned: false,
             keep_empty: false,
@@ -713,6 +727,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::Layers(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: pending.label,
@@ -775,6 +790,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::TextStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: pending.label,
@@ -837,6 +853,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::DimStyles(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: pending.label,
@@ -919,6 +936,7 @@ impl OpenCADStudio {
             structure: Some(StructureSnapshot::Objects(entries)),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: pending.label,
@@ -960,6 +978,7 @@ impl OpenCADStudio {
             }),
             parametric_constraints: Vec::new(),
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters: None,
             label: "STYLE".into(),
@@ -1176,6 +1195,7 @@ impl OpenCADStudio {
             structure,
             parametric_constraints,
             reference_designations,
+            reference_session: None,
             graph: None,
             named_parameters,
             label: pending.label,
@@ -1357,6 +1377,11 @@ impl OpenCADStudio {
             self.apply_structure_state(i, structure, undo);
         }
         let mut changes = self.tabs[i].scene.apply_entity_delta(&d.entities, undo);
+        if let Some((before, after)) = &d.reference_session {
+            let state = if undo { before } else { after };
+            self.tabs[i].xref_unloaded = state.xref_unloaded.clone();
+            self.tabs[i].xref_stat_cache = state.xref_stat_cache.clone();
+        }
         let scene = &mut self.tabs[i].scene;
         // Designations: restore the chosen side's value on the scene-owned set
         // (the entity images above already applied, so a restored entity is
@@ -1463,6 +1488,37 @@ impl OpenCADStudio {
         }
     }
 
+    fn refresh_reference_session_history(&mut self, i: usize) {
+        self.tabs[i].scene.populate_images_from_document();
+        self.tabs[i].scene.reseed_underlays();
+        let hidden_images: Vec<Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::RasterImage(image)
+                    if image
+                        .definition_handle
+                        .is_some_and(|key| self.tabs[i].xref_unloaded.is_unloaded(key.value())) =>
+                {
+                    Some(entity.common().handle)
+                }
+                EntityType::Underlay(underlay)
+                    if self.tabs[i]
+                        .xref_unloaded
+                        .is_unloaded(underlay.definition_handle.value()) =>
+                {
+                    Some(entity.common().handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for handle in hidden_images {
+            self.tabs[i].scene.images.remove(&handle);
+        }
+        self.refresh_xref_report(i);
+    }
+
     /// Perform the one expensive cache/UI synchronization required after a
     /// batch of history steps. Intermediate states are never rendered, so
     /// rebuilding them only multiplies latency.
@@ -1472,6 +1528,7 @@ impl OpenCADStudio {
         had_full: bool,
         layer_panel_changed: bool,
         native_graph_changed: bool,
+        reference_session_changed: bool,
         changes: &[(Handle, crate::scene::ChangeKind)],
     ) {
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
@@ -1506,6 +1563,9 @@ impl OpenCADStudio {
                 scene.sync_native_parametric_graph();
             }
             scene.clear_preview_wire();
+        }
+        if reference_session_changed {
+            self.refresh_reference_session_history(i);
         }
         if had_full {
             self.control.note_history_changes(net_changes);
@@ -1560,6 +1620,7 @@ impl OpenCADStudio {
         let mut had_full = false;
         let mut layer_panel_changed = false;
         let mut native_graph_changed = false;
+        let mut reference_session_changed = false;
         let mut changes = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
@@ -1572,6 +1633,7 @@ impl OpenCADStudio {
                 HistorySnapshot::Delta(mut d) => {
                     native_graph_changed |=
                         !d.parametric_constraints.is_empty() || d.named_parameters.is_some();
+                    reference_session_changed |= d.reference_session.is_some();
                     // Symmetric: undo applies the before side, then the same
                     // delta rides to the redo stack (it still holds the after
                     // side) — no current-state capture needed.
@@ -1612,6 +1674,7 @@ impl OpenCADStudio {
             had_full,
             layer_panel_changed,
             native_graph_changed,
+            reference_session_changed,
             &changes,
         );
         self.restore_history_view(i, step_view);
@@ -1665,6 +1728,7 @@ impl OpenCADStudio {
         let mut had_full = false;
         let mut layer_panel_changed = false;
         let mut native_graph_changed = false;
+        let mut reference_session_changed = false;
         let mut changes = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
@@ -1677,6 +1741,7 @@ impl OpenCADStudio {
                 HistorySnapshot::Delta(mut d) => {
                     native_graph_changed |=
                         !d.parametric_constraints.is_empty() || d.named_parameters.is_some();
+                    reference_session_changed |= d.reference_session.is_some();
                     layer_panel_changed |= d.structure.as_ref().is_some_and(|structure| {
                         matches!(structure, StructureSnapshot::Layers(_)) || structure.is_full()
                     }) || d.active_layer.is_some()
@@ -1714,6 +1779,7 @@ impl OpenCADStudio {
             had_full,
             layer_panel_changed,
             native_graph_changed,
+            reference_session_changed,
             &changes,
         );
         self.restore_history_view(i, step_view);
@@ -1761,3 +1827,59 @@ pub(super) fn history_dropdown_labels(stack: &[HistorySnapshot]) -> Vec<String> 
 
 /// How many layer-property changes LAYERP can go back through.
 const LAYER_PREVIOUS_LIMIT: usize = 50;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_session_only_change_is_retained_and_replayed_on_a_dirty_tab() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let key = 0x42;
+        let before_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(10);
+        let after_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(20);
+        app.tabs[i].dirty = true;
+        app.tabs[i].xref_stat_cache.insert(key, before_time);
+        let undo_len = app.tabs[i].history.undo_stack.len();
+
+        // This is the image-unload shape: no entity/structure/selection/dirty
+        // change, only per-tab reference session state.
+        app.push_undo_snapshot(i, "XREF-UNLOAD");
+        app.tabs[i].xref_unloaded.add(key);
+        app.finish_pending_history(i);
+
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_len + 1);
+        let Some(HistorySnapshot::Delta(delta)) = app.tabs[i].history.undo_stack.last() else {
+            panic!("reference session change must produce a delta");
+        };
+        assert!(delta.reference_session.is_some());
+
+        app.undo_active_tab();
+        assert!(!app.tabs[i].xref_unloaded.is_unloaded(key));
+        assert_eq!(app.tabs[i].xref_stat_cache.get(&key), Some(before_time));
+        assert!(app.tabs[i].dirty);
+
+        app.redo_active_tab();
+        assert!(app.tabs[i].xref_unloaded.is_unloaded(key));
+        assert_eq!(app.tabs[i].xref_stat_cache.get(&key), Some(before_time));
+        assert!(app.tabs[i].dirty);
+
+        app.push_undo_snapshot(i, "XREF-RELOAD");
+        app.tabs[i].xref_unloaded.remove(&key);
+        app.tabs[i].xref_stat_cache.insert(key, after_time);
+        app.finish_pending_history(i);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_len + 2);
+
+        app.undo_active_tab();
+        assert!(app.tabs[i].xref_unloaded.is_unloaded(key));
+        assert_eq!(app.tabs[i].xref_stat_cache.get(&key), Some(before_time));
+        assert!(app.tabs[i].dirty);
+
+        app.redo_active_tab();
+        assert!(!app.tabs[i].xref_unloaded.is_unloaded(key));
+        assert_eq!(app.tabs[i].xref_stat_cache.get(&key), Some(after_time));
+        assert!(app.tabs[i].dirty);
+    }
+}

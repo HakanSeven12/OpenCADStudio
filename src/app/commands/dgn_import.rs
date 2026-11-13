@@ -658,28 +658,54 @@ impl OpenCADStudio {
     }
 
     /// The import: into a new drawing (or the current one), one undo step;
-    /// then the model's reference attachments as the request says.
+    /// then the model's reference attachments as the request says. The GUI and
+    /// positional command keep their command-line error reporting.
     pub(in crate::app) fn run_dgn_import(
         &mut self,
         i: usize,
         request: DgnImportRequest,
     ) -> Task<Message> {
+        match self.try_run_dgn_import(i, request) {
+            Ok((task, _)) => task,
+            Err(error) => {
+                match error {
+                    dgn_import::DgnImportError::InvalidDgn => self
+                        .command_line
+                        .push_error(crate::t!("Invalid or unsupported DGN file.").as_ref()),
+                    dgn_import::DgnImportError::EmptyModel => self.command_line.push_error(
+                        crate::t!("The DGN model has nothing that can be imported.").as_ref(),
+                    ),
+                    other => {
+                        let message = other.to_string();
+                        self.command_line.push_error(&message);
+                    }
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Fallible execution for semantic callers. On success the count is the
+    /// model's top-level converted entities, excluding block-definition members
+    /// and any reference entities attached afterwards.
+    pub(in crate::app) fn try_run_dgn_import(
+        &mut self,
+        i: usize,
+        request: DgnImportRequest,
+    ) -> Result<(Task<Message>, usize), dgn_import::DgnImportError> {
         let Some(import) = crate::scene::model::underlay_vector::dgn_import(
             &request.path,
             &request.model,
             request.code_page,
         ) else {
-            self.command_line
-                .push_error(crate::t!("Invalid or unsupported DGN file.").as_ref());
-            return Task::none();
+            return Err(dgn_import::DgnImportError::InvalidDgn);
         };
         let converted = dgn_import::convert(&import, request.sub_units, request.explode_text_nodes);
+        let entities = converted.entities.len();
         let no_references =
             request.references == ReferenceMode::Ignore || import.references.is_empty();
         if converted.entities.is_empty() && no_references {
-            self.command_line
-                .push_error(crate::t!("The DGN model has nothing that can be imported.").as_ref());
-            return Task::none();
+            return Err(dgn_import::DgnImportError::EmptyModel);
         }
         let mut task = Task::none();
         let i = if request.current_drawing {
@@ -722,7 +748,7 @@ impl OpenCADStudio {
         self.command_line.push_output("Regenerating model.");
         self.refresh_layer_panel();
         self.refresh_properties();
-        task
+        Ok((task, entities))
     }
 
     /// One reference attachment: its file translated to "<file>-<model>.dwg"

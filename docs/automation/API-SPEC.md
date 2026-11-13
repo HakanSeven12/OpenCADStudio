@@ -23,7 +23,7 @@ repeating either.
 | **Session** | One running editor process. Owns a session id, an event cursor and 1…N open documents. |
 | **Document** | One drawing (a tab). Identified by a stable `document_id`. Exactly one document is **active** at a time. |
 | **Handle** | Identity of every database object — a hexadecimal string (e.g. `"2A"`). Handles are stable across save/open and are the key for all read, edit, erase and clone operations. |
-| **Operation** | One atomic, undoable step. Validated in full before anything commits; a rejected request changes nothing. |
+| **Operation** | One atomic step. Data mutations are undoable unless identified as view state; reads are passive. A rejected request changes nothing. |
 | **Envelope** | The mutation wrapper: `"protocol":1`, a caller-generated `request_id`, and the `document_id` under edit. |
 | **Pick** | A human-in-the-loop operation (`user_select`, `getpoint`, §6.12): the operation stays pending while a *person* answers at the screen. |
 
@@ -37,9 +37,10 @@ Design rules, in priority order:
    `revision`/`geometry_revision` when you hold them) back on mutations. A
    refusal whose code is in the retryable set (§5.2) means "your snapshot is
    behind": refresh state and retry once with a *new* `request_id`.
-3. **Atomicity** — every operation is all-or-nothing and produces exactly one
-   undo step. Multi-step transactions are the client's `batch` op or a
-   sequence of ops against a held `revision`.
+3. **Atomicity** — every mutation is all-or-nothing. Document-data mutations
+   produce exactly one undo step; exceptions such as `layout_activate` only
+   change non-undoable view state. Multi-step transactions are the client's
+   `batch` op or a sequence of ops against a held `revision`.
 4. **Geometry stays in the engine** — measure, containment, intersection and
    ranking are computed by the built-in geometry kernel; clients never
    reimplement them.
@@ -55,7 +56,7 @@ Design rules, in priority order:
 | Distances, sizes | drawing units (millimetres only where a field is explicitly paper-space, e.g. `paper_width`) |
 | Colors | integer index `1–255` (`1` red … `7` white), `256` by-layer, `0` by-block; true color accepted where noted |
 | Handles | hexadecimal strings, case-insensitive, no `0x` prefix required |
-| Names | layer / block / style names are case-insensitively unique; `*`-prefixed names are reserved |
+| Names | layer / block / style / layout names are case-insensitively unique; `*`-prefixed names are reserved |
 | Booleans | JSON `true`/`false` |
 | Templates | a `*.dwt` file is written and read as DWG bytes — same container, template extension |
 | Paper sizes | catalog names, e.g. `"ISO_A4_(210.00_x_297.00_MM)"` (canonical name is echoed back in results) |
@@ -88,7 +89,7 @@ the machine, so the port alone is no credential.
 | `201` | A resource was created (document, entities, block, group, selection set, layout) |
 | `400` | Validation failure — the body keeps the symbolic `code` and message |
 | `401` | Missing or wrong bearer token (`code:"unauthorized"`) |
-| `404` | Unknown route or unknown handle (`code:"entity_absent"`) |
+| `404` | Unknown route, unknown handle (`code:"entity_absent"`), or unknown layout (`code:"layout_missing"`) |
 | `409` | State conflict (`stale_state`, `document_not_active`) or GUI required (`gui_required`) |
 | `503` | Dispatcher busy |
 
@@ -152,7 +153,7 @@ connection is closed.
 ### 3.5 AI-tool session (`--mcp`)
 
 Exposes 20 tools with JSON-Schema described arguments. Four are general-purpose
-facades: `ocs_sessions`, `ocs_read`, `ocs_execute` (all 36 mutation operations,
+facades: `ocs_sessions`, `ocs_read`, `ocs_execute` (all 57 mutation operations,
 §6), and `ocs_capture`. Sixteen are intent tools over the same operation paths:
 `ocs_inspect`, `ocs_query`, `ocs_find_text`, `ocs_audit`, `ocs_commands`,
 `ocs_measure`, `ocs_render`, `ocs_run`, `ocs_new`, `ocs_open`, `ocs_save`,
@@ -226,10 +227,10 @@ and stable; branch on it, not on message text.
 | `user_input_busy` | The person is mid-command or in a dialog; their keystrokes own Enter/Esc | wait, then retry |
 | `invalid_detail` | `user_select` `detail` outside `summary`/`geometry`/`full` | no |
 | `selection_changed` | Precondition `selection[]` no longer matches | re-read and confirm |
-| `name_required`, `entities_required`, `selection_required`, `app_required`, `path_required`, `handles_required`, `block_required` | Missing mandatory field | no |
-| `unknown_entity_type`, `invalid_radius`, `invalid_vertices`, `invalid_point`, `invalid_text`, `invalid_scale`, `invalid_paper`, `invalid_handle`, `invalid_xdata`, `invalid_sysvar_value` | Validation failures — nothing commits | no |
+| `name_required`, `window_required`, `entities_required`, `selection_required`, `app_required`, `path_required`, `handles_required`, `block_required` | Missing mandatory field | no |
+| `unknown_entity_type`, `invalid_radius`, `invalid_vertices`, `invalid_point`, `invalid_text`, `invalid_scale`, `invalid_paper`, `invalid_handle`, `invalid_xdata`, `invalid_sysvar_value`, `invalid_layout_name`, `invalid_orientation`, `invalid_area`, `invalid_offset`, `invalid_window` | Validation failures — nothing commits | no |
 | `unknown_sysvar` | Variable outside the registry (§6.7) | no |
-| `layout_exists`, `layout_missing`, `layer_failed`, `block_failed`, `block_missing`, `block_protected`, `block_cycle`, `selection_set_missing`, `template_missing`, `template_failed`, `save_failed` | Domain refusals, self-explanatory | no |
+| `layout_exists`, `layout_missing`, `layout_protected`, `layout_name_unchanged`, `layer_failed`, `block_failed`, `block_missing`, `block_protected`, `block_cycle`, `selection_set_missing`, `template_missing`, `template_failed`, `save_failed` | Domain refusals, self-explanatory | no |
 
 Unknown routes answer `code:"unknown_route"` (HTTP 404). A timed-out parked
 request answers `code:"response_timeout"`.
@@ -239,9 +240,11 @@ request answers `code:"response_timeout"`.
 ## 6. Operations reference
 
 Every mutation below is an envelope op (§1). Reads (`query`, `records`,
-`layers`, `header`, `xdata_get`, `capabilities`, …) need no envelope. All 36
-mutations are listed in the `capabilities` advertisement and in the MCP
-schema; the REST passthrough accepts any of them at `POST /api/v1/{op}`.
+`layers`, `layouts`, `xrefs`, `page_setup_get`, `header`, `xdata_get`,
+`capabilities`, …) need no envelope and are passive. All 57 mutations are
+listed in the MCP schema; `capabilities` advertises feature availability,
+including the layout and xref operations. The REST passthrough accepts every
+mutation at `POST /api/v1/{op}`.
 
 ### 6.1 Documents, session, lifecycle
 
@@ -290,6 +293,7 @@ Result: `{"handles":[…],"created":N,"layers_created":[…]}` → HTTP 201.
 
 | Op | Fields | Notes |
 |---|---|---|
+| `entities_set` | `handles` plus any of `layer`, `color`, `linetype`, `linetype_scale`, `invisible`, optional `label` | One validated flat patch and one undo step for all unique handles. Existing case-insensitive layer/linetype names; colors are ByLayer/ByBlock, ACI 0..256, `{Index:N}`, `{Rgb:{r,g,b}}` or `{rgb:[r,g,b]}`. Result `{requested,written,unchanged}`; no-op writes create no history. Unknown fields, missing/locked/non-native targets and invalid values are atomic refusals. |
 | `entities_delete` | `handles` | Every handle must exist; nothing is erased otherwise (`entity_absent` names them) |
 | `entities_transform` | `handles`, `action`, per-action params | `move`/`copy`: `vector:[dx,dy(,dz)]` (copy returns new handles in `result.created`); `rotate`: `center`, `angle_deg`; `scale`: `center`, `factor` (≠ 0); `mirror`: `axis:[[x1,y1],[x2,y2]]`, optional `copy:true`; `array`: `rows`, `columns`, `row_spacing`, `column_spacing` |
 | `entities_copy_to` | `handles`, `document_id` (target) | Cross-document clone; the dependencies the interactive copy carries travel along (layers, linetypes, styles, and the block definitions the source holds for the copied references); result `created[]` + `count` |
@@ -336,12 +340,15 @@ Parameters (all optional, combine freely — AND semantics):
 | `intersections` | `[h1,h2]` — exact intersection points of two planar curves (kernel) |
 | `where` | Property filter list over serialized entities (below) |
 
-`where` filters use JSON Pointer paths into the serialized entity
-(`"/radius"`, `"/common/layer"`) with the operators `eq`, `ne`, `lt`, `lte`,
-`gt`, `gte`, `contains`, `starts_with`, `ends_with`, `in`, `exists`,
-`not_exists`. Filters are validated up front; a bad pointer or unknown
-operator fails the query before any entity is inspected. On REST the same
-filter rides `GET /entities?where=<json-encoded>`.
+`where` filters use JSON Pointer paths into the returned entity JSON:
+`/layer` at every detail, geometry fields such as `/radius` with
+`detail:"geometry"`, and `/properties/common/color/Index` with
+`detail:"full"`. Legacy raw-property paths such as `/common/layer` remain a
+fallback. Operators are `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `contains`,
+`starts_with`, `ends_with`, `in`, `exists`, and `not_exists`. Filters are
+validated up front; a bad pointer or unknown operator fails the query before
+any entity is inspected. On REST the same filter rides
+`GET /entities?where=<json-encoded>`.
 
 Text entities return the raw string in `value` plus a formatting-free
 rendering in `text`; degenerate-width text bounds are widened with a
@@ -376,8 +383,8 @@ association the solver enforces is enumerable from every read surface. The
 `user_select` hand-over follows its `detail` too: `summary` leaves the array
 out.
 
-Companion reads: `entities` (alias), `layers`, `header`, `records`
-(paged, filterable database records), `record_schema` (generated type
+Companion reads: `entities` (alias), `layers`, `layouts`, `xrefs`, `header`,
+`records` (paged, filterable database records), `record_schema` (generated type
 registry with write rules), `properties`, `measure` (length/area/bounds),
 `xdata_get`, `get_selection` (§6.12).
 
@@ -393,14 +400,71 @@ REST: `POST /blocks`, `DELETE /blocks/{name}` (add `?force=true` to erase the re
 
 ### 6.6 Layouts and plotting
 
-| Op | Fields |
-|---|---|
-| `layout_create` | `name` — adds a layout with the default page setup and a sheet viewport; duplicates refused (`layout_exists`) |
-| `page_setup_set` | `layout` plus any of `paper` (catalog name), `orientation` (`portrait`/`landscape`), `fit:true` or `scale:"1:100"`, `center`, `window:[x0,y0,x1,y1]`, `plot_style`. Explicit fields win; the rest keeps the stored setup. The stored setup is what `plot` consumes by default. |
-| `plot` | `path` (`.pdf` or `.svg`), `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `shade`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `apply_plot_styles`, `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, `stamp`, SVG-only `non_scaling_stroke`, `text_as_outlines` and `layer_attributes` (all default `false`; outlines replace searchable text with glyph paths, layer attributes tag each drawn item with a `data-layer` group), and `"per_page":true` (with `layout:"all"` writes **one output file per layout**, returning `result.files`) |
+| Op | Request | Result and semantics |
+|---|---|---|
+| `layouts` (read) | none | `{current,count,layouts[]}`; every entry has `name`, `handle`, `current`, `model`, `tab_order`. Includes Model and paper layouts. |
+| `layout_create` | `name` | Adds a default page setup and sheet viewport, plus the normal initial model viewport when `LAYOUTCREATEVIEWPORT` is enabled; result has `layout` and the layout-name list. Does **not** activate the new layout. |
+| `layout_rename` | `name`, `new_name` | Renames a paper layout; result has canonical `name`, `new_name`, `current`, `layouts`. One undo step. |
+| `layout_activate` | `name` | Activates Model or a paper layout; result has canonical `layout`, `current`. Non-undoable view state. |
+| `layout_delete` | `name` | Deletes a paper layout; result has canonical `deleted`, `current`, `layouts`. Deleting the current layout falls back to Model. One undo step. |
+| `page_setup_get` (read) | `layout` | Returns canonical `layout` and the stored `page_setup` fields below, including for Model. |
+| `page_setup_set` | `layout` plus optional fields below | Updates the stored setup and returns its canonical layout, paper, scale, and plot style. One undo step. |
+| `plot` | `path` (`.pdf` or `.svg`), `layout` (`"Model"` default, a name, or `"all"`), `area` (`"extents"` default, `"display"`, `"limits"`, `"window"` + `window:[…]`, `"layout"`), `paper`, `orientation`, `shade`, `fit`/`scale`, `center`, `offset_x/offset_y`, `upside_down`, `plot_style` (CTB/STB), output toggles `apply_plot_styles`, `transparency`, `lineweights`, `scale_lineweights`, `paperspace_last`, `merge_lines`, `stamp`, SVG-only `non_scaling_stroke`, `text_as_outlines` and `layer_attributes` (all default `false`; outlines replace searchable text with glyph paths, layer attributes tag each drawn item with a `data-layer` group), and `"per_page":true` (with `layout:"all"` writes **one output file per layout**, returning `result.files`) | Writes PDF or SVG synchronously with no device dialogs; result reports `{path,pages,page_sizes}` (millimetres). |
 
-Plotting writes PDF or SVG synchronously, with no device dialogs; result
-reports `{path, pages, page_sizes}` (millimetres).
+The `page_setup` read object contains `initialized`, `paper`,
+`paper_width_mm`, `paper_height_mm`, `rotation` (0/90/180/270 degrees),
+`orientation`, `scale:{numerator,denominator,fit}`, `center`, `plot_style`,
+`area`, `view`, `window`, `offset_x`, and `offset_y`. `window` is
+`[x0,y0,x1,y1]` for a window plot and `null` otherwise.
+
+`page_setup_set` retains its compatible request shape: `layout`, `paper`
+(catalog name), `orientation` (`portrait`/`landscape`), `fit:true` or
+`scale:"1:100"`, `center`, `offset_x`/`offset_y` (finite millimetre values),
+`area` (`extents`/`display`/`limits`/`layout`/`window`),
+`window:[x0,y0,x1,y1]`, and `plot_style`. Explicit fields win; every omitted
+field keeps its stored value, so an orientation-only update preserves paper,
+scale, offsets, area, and all other settings. Orientation is the effective sheet
+orientation: a natively landscape medium uses rotation 0 for landscape and a
+quarter turn for portrait. `area:"window"` requires a finite, positive-size
+`window`; malformed windows are rejected on every transport. Creation and
+page-setup writes include any normal first-viewport initialization in their
+undo step, so activation never creates entities. The stored setup is what `plot`
+consumes when its own fields are absent.
+
+Names resolve case-insensitively and every response returns canonical spelling.
+Create names and `new_name` are trimmed and limited to 255 characters; blank
+values return `name_required`, while control characters, reserved punctuation,
+or excessive length return `invalid_layout_name`. Unknown names return
+`layout_missing` and duplicates return `layout_exists`. Model can be listed and
+activated, but rename/delete return `layout_protected`. Both reads are passive.
+
+Use structured operations instead of `-LAYOUT` command scripting. In
+particular, create and activate are separate so callers choose whether to
+change the current view:
+
+```json
+{"op":"layouts"}
+{"protocol":1,"op":"layout_create","request_id":"lc-1","document_id":1,"name":"PLAN"}
+{"protocol":1,"op":"layout_activate","request_id":"la-1","document_id":1,"name":"plan"}
+{"protocol":1,"op":"page_setup_set","request_id":"ps-1","document_id":1,"layout":"PLAN",
+ "paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","scale":"1:50",
+ "offset_x":12.5,"offset_y":-4,"area":"window","window":[0,0,210,297]}
+{"op":"page_setup_get","layout":"PLAN"}
+{"protocol":1,"op":"layout_rename","request_id":"lr-1","document_id":1,"name":"PLAN","new_name":"Floor Plan"}
+{"protocol":1,"op":"layout_delete","request_id":"ld-1","document_id":1,"name":"floor plan"}
+```
+
+Over MCP, `ocs_read` supports `layouts` and `page_setup_get` (the latter takes
+`parameters.layout`), and `ocs_execute` supports `layout_create`,
+`layout_rename`, `layout_activate`, `layout_delete`, and `page_setup_set`.
+`capabilities.operations` and the MCP schemas advertise these operations.
+
+REST exposes `GET /api/v1/layouts`, `POST /api/v1/layouts`,
+`PATCH /api/v1/layouts/{name}`, `DELETE /api/v1/layouts/{name}`,
+`POST /api/v1/layouts/{name}/activate`, `GET /api/v1/layouts/{name}/page-setup`,
+and `PUT /api/v1/layouts/{name}/page-setup`. Percent-encode each `{name}` path
+segment: `Floor Plan` becomes `Floor%20Plan`. GET routes return the read object
+directly; mutations use the normal REST `{ok,status,result,…}` envelope.
 
 ### 6.7 Metadata and variables
 
@@ -470,6 +534,61 @@ dedicated op needed:
 3. `embed_image` a replacement at the same `at`/`width` derived from the old
    bounds — embedded, so it cannot break again.
 
+### 6.9a DGN import — `dgn_import`
+
+`{path,model?,units?,mapping?,codepage?}` imports synchronously through the
+same conversion/placement path as `-DGNIMPORT`, with no prompt replay. Model
+lookup is case-insensitive and defaults to the first design model; units are
+`Master`/`Sub`, mapping is `Standard` with optional `;codepage=N`, and numeric
+`codepage` overrides suffix/stored settings (0/1252 select the default).
+`result.entities` counts top-level converted model entities, excluding block
+members and subsequent reference attachments; `model` is canonical and `path`
+echoes the resolved source spelling.
+Errors retain stable codes including `model_missing` (plus `available_models`),
+`invalid_units`, `invalid_mapping`, `invalid_codepage`, and `empty_dgn_model`.
+Target, text-node, naming and reference behavior inherit the command's saved
+import settings. The command/dialog fallback remains available. REST uses
+`POST /api/v1/dgn_import`; MCP uses `ocs_execute`.
+
+### 6.9b External references — `xrefs` and `xref_*`
+
+The passive `xrefs` read returns a fresh `{count,xrefs[]}` report from the same
+reference model as the Reference Manager. Each row contains `id`, `name`,
+`kind` (`dwg_xref`, `image`, `underlay`, or `point_cloud`), `format`,
+`reference_type` (`attach` or `overlay` where applicable), `status`, the raw
+stored `saved_path`, `resolved_path`, `parent_id`, `nested`, `size_bytes`, and
+`modified_unix_ms`. Direct rows have `parent_id:null` and `nested:false`;
+nested rows identify their direct host in `parent_id`. Embedded images are not
+external references and are omitted.
+
+Every mutation addresses one direct row by hexadecimal `id` and runs in the
+active document with one undo step when something changes:
+
+| Op | Request (beyond envelope) | Result and semantics |
+|---|---|---|
+| `xref_reload` | `id` | Reloads a direct DWG/DXF xref, underlay, or point cloud. A failed reload preserves prior content and returns diagnostics; image reload is unsupported. |
+| `xref_unload` | `id` | Unloads without deleting the definition. Result includes `session_only` and `unchanged`; repeating an unloaded row creates no history. |
+| `xref_detach` | `id` | Detaches the definition, its insertion, and owned dependent records. Result includes `detached`, `id`, and `name`. |
+| `xref_bind` | `id` | Converts a direct DWG/DXF xref into a local block; result includes `block` and `unremapped`. Other kinds are refused. |
+| `xref_set_path` | `id` plus exactly one of `path` or `path_type` (`full`, `relative`, `none`) | Updates the stored path without implicitly reloading. Result includes `old_path`, `saved_path`, `reload_required`, `unchanged`, and the fresh `reference`. |
+| `xref_set_type` | `id`, `reference_type` (`attach` or `overlay`) | Switches a direct DWG/DXF xref between attachment and overlay; result includes `reference` and `unchanged`. |
+
+Unknown IDs return `xref_missing`; nested rows return
+`xref_nested_read_only`; unsupported kind/action combinations return
+`xref_kind_unsupported`. Native protocol and REST requests reject unknown
+operation fields with `unknown_xref_field`; MCP preflight rejects them as tool
+validation errors before dispatch. Source and conversion failures use stable
+`xref_source_missing`, `xref_load_failed`, `xref_path_across_drives`,
+and `xref_path_unsaved_host` codes. No-op and rejected requests create no
+history or dirty state.
+
+Structured attach is intentionally not exposed yet because the existing
+XATTACH commit cannot roll back atomically if final INSERT creation fails.
+Use the existing `XATTACH` command to create a reference, then these operations
+to manage it. REST exposes `GET /api/v1/xrefs` and the six generic
+`POST /api/v1/{op}` routes; MCP uses `ocs_read` for `xrefs` and `ocs_execute`
+for the mutations.
+
 ### 6.10 Commands, batches, events
 
 | Op | Purpose |
@@ -493,7 +612,10 @@ dedicated op needed:
 | `GET /ready` · `/state` · `/capabilities` · `/openapi` | Readiness · full state · feature advertisement · OpenAPI 3 document |
 | `GET /documents` · `POST /documents` · `DELETE /documents/{id}?discard=` | List · open/template/new · close |
 | `GET /sysvars?names=` · `POST /sysvars` | Read · set |
-| `POST /layouts` · `PUT /layouts/{name}/page-setup` | Create · write plot configuration |
+| `GET /layouts` · `POST /layouts` | List structured layout entries · create without activating |
+| `PATCH /layouts/{name}` · `DELETE /layouts/{name}` · `POST /layouts/{name}/activate` | Rename · delete · activate (percent-encode `{name}`) |
+| `GET /layouts/{name}/page-setup` · `PUT /layouts/{name}/page-setup` | Read · write plot configuration (percent-encode `{name}`) |
+| `GET /xrefs` · `POST /xref_{reload,unload,detach,bind,set_path,set_type}` | Fresh structured reference report · direct-reference lifecycle writes |
 | `GET /entities` · `GET /entities/{h}` · `POST /entities` · `DELETE /entities?handles=` | Query (incl. `where`) · one entity · create · erase |
 | `POST /entities/transform` · `POST /entities/copy-to` | Modify · cross-document copy |
 | `GET/PUT/DELETE /entities/{h}/xdata[/{app}]` | Extended data |
@@ -666,14 +788,16 @@ code it describes.
 | Scope | Contents | Spec sections |
 |---|---|---|
 | **Core (upstream `main`)** | Transports `--serve` (stdio JSONL), `--serve --port` (TCP), `--mcp`; ops `new`, `open`, `save`, `activate`, `select`, `run`, `start`, `input`, `cancel`, `stop`, `action`, `property`, `set_properties`, `embed_image`, `capture`, `undo`, `redo`; reads `state`, `hello`, `capabilities`, `query`/`entities`, `records`, `record_schema`, `layers`, `header`, `properties`, `measure`, `history`; envelope conventions and the core error codes | §1–§5, §6.1, §6.4, §6.10 |
-| Piece A — entity CRUD | `entities_create`, `entities_delete`, `entities_transform`, `entities_copy_to` | §6.2, §6.3 |
+| Piece A — entity CRUD | `entities_create`, `entities_set`, `entities_delete`, `entities_transform`, `entities_copy_to` | §6.2, §6.3 |
 | Piece B — blocks & export | `block_define`, `block_delete`, `wblock` | §6.5 |
-| Piece C — publishing | `layout_create`, `page_setup_set`, `plot` (incl. `per_page`) | §6.6 |
+| Piece C — publishing | `layouts`, `layout_create`, `layout_rename`, `layout_activate`, `layout_delete`, `page_setup_get`/`page_setup_set`, `plot` (incl. `per_page`) | §6.6 |
 | Piece D — metadata | `sysvar`, `xdata_set`/`xdata_get`, `file_identity` | §6.7 |
 | Piece E — collections | `group_create`, `selection_set_save`/`load` | §6.8 |
 | Piece F — control plane | `batch`, `events`, `view_focus`, `close`, `where` filters | §6.4 (`where`), §6.10 |
 | Piece G — REST transport | `--http` headless server, `/api/v1` routes, OpenAPI 3 document | §3.1, §6.11, §7.1 |
 | Piece H — person-in-the-loop | GUI-hosted `--http` channel, `user_select`, `getpoint`, the on-screen pending signals | §3.2, §6.12, §7.2 |
+| Piece I — DGN import | `dgn_import` named options over the shared `-DGNIMPORT` conversion pipeline | §6.9a |
+| Piece J — external references | `xrefs`, `xref_reload`/`unload`/`detach`/`bind`/`set_path`/`set_type` | §6.9b |
 
 Sections §3.2/§6.12 (piece H) additionally require the desktop build; over a
 headless session every documented request still answers truthfully

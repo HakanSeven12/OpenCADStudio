@@ -5,7 +5,12 @@ import subprocess
 import sys
 
 
-TOOLS = {"ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"}
+TOOLS = {
+    "ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture",
+    "ocs_inspect", "ocs_query", "ocs_find_text", "ocs_audit", "ocs_commands",
+    "ocs_measure", "ocs_render", "ocs_run", "ocs_new", "ocs_open", "ocs_save",
+    "ocs_save_verified", "ocs_select", "ocs_undo", "ocs_redo", "ocs_cancel",
+}
 MODERN = "2026-07-28"
 
 
@@ -69,28 +74,33 @@ def legacy(server: Path) -> None:
     variants = [resolve(variant) for variant in variants]
     op_enum = execute_request["properties"]["op"]["enum"]
     assert len(variants) == len(op_enum)
-    for shipped in ("entities_create", "entities_delete", "entities_transform",
+    for shipped in ("entities_create", "entities_set", "entities_delete", "entities_transform",
                     "block_define", "block_delete", "file_identity", "xdata_set",
                     "view_focus", "wblock", "plot",
                     "entities_copy_to", "group_create", "selection_set_save",
                     "selection_set_load", "close", "sysvar", "layout_create",
-                    "page_setup_set", "text_replace"):
+                    "layout_rename", "layout_activate", "layout_delete",
+                    "page_setup_set", "text_replace", "dgn_import",
+                    "xref_reload", "xref_unload", "xref_detach", "xref_bind",
+                    "xref_set_path", "xref_set_type"):
         assert shipped in op_enum, shipped
-    assert "xdata_get" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
-    assert "text_search" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
-    assert "text_audit" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
+    read_ops = definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
+    for shipped in ("layouts", "xrefs", "page_setup_get", "xdata_get", "text_search", "text_audit"):
+        assert shipped in read_ops, shipped
     assert execute_request["properties"]["steps"]["maxItems"] == 64
     variant_map = {
         v["properties"]["op"].get("const") or v["properties"]["op"]["enum"][0]: v
         for v in variants
     }
     assert variant_map["run"]["properties"]["cmd"]["type"] == "string"
+    assert len(variant_map["xref_set_path"]["oneOf"]) == 2
     assert "set_properties" in execute_request["properties"]["op"]["enum"]
     assert "save_verified" in execute_request["properties"]["op"]["enum"]
     assert "record_schema" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
     assert "audit" in definitions["ocs_read"]["inputSchema"]["properties"]["op"]["enum"]
     read_parameters = definitions["ocs_read"]["inputSchema"]["properties"]["parameters"]["properties"]
-    assert {"collection", "where", "paths", "target_format", "target_version"} <= set(read_parameters)
+    assert {"collection", "where", "paths", "target_format", "target_version", "layout"} <= set(read_parameters)
+    assert read_parameters["layout"]["type"] == "string"
     assert variant_map["save_verified"]["properties"]["target_version"]["enum"][0] == "R14"
     assert variant_map["input"]["properties"]["kind"]["enum"] == [
         "text", "token", "point", "entity", "structure", "selection", "enter"

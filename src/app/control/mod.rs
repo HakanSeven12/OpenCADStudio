@@ -236,6 +236,7 @@ fn background_mutation(op: &str) -> bool {
         op,
         "set_properties"
             | "entities_create"
+            | "entities_set"
             | "entities_delete"
             | "entities_transform"
             | "text_replace"
@@ -698,6 +699,9 @@ impl OpenCADStudio {
                 | "tools"
                 | "entities"
                 | "layers"
+                | "layouts"
+                | "xrefs"
+                | "page_setup_get"
                 | "header"
                 | "history"
                 | "xdata_get"
@@ -1187,7 +1191,7 @@ impl OpenCADStudio {
         if self.tabs[self.active_tab].active_cmd.is_some() {
             self.control.owner = Some((self.tabs[self.active_tab].id, client));
         }
-        if matches!(op, "new" | "activate" | "switch_document")
+        if matches!(op, "new" | "activate" | "switch_document" | "dgn_import")
             && self
                 .control
                 .pending
@@ -1433,11 +1437,19 @@ impl OpenCADStudio {
             "panel_button" => self.control_panel_button(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
+            "dgn_import" => self.control_dgn_import(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "wblock" => self.control_wblock(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "plot" => self.control_plot(req)?,
             "entities_create" => self.control_entities_create(req)?,
+            "entities_set" => self.control_entities_set(req)?,
+            "xref_reload" => self.control_xref_reload(req)?,
+            "xref_unload" => self.control_xref_unload(req)?,
+            "xref_detach" => self.control_xref_detach(req)?,
+            "xref_bind" => self.control_xref_bind(req)?,
+            "xref_set_path" => self.control_xref_set_path(req)?,
+            "xref_set_type" => self.control_xref_set_type(req)?,
             "entities_delete" => self.control_entities_delete(req)?,
             "entities_transform" => self.control_entities_transform(req)?,
             "node_graph" => self.control_node_graph(req)?,
@@ -1454,6 +1466,9 @@ impl OpenCADStudio {
             "close" => self.control_close(req)?,
             "sysvar" => self.control_sysvar(req)?,
             "layout_create" => self.control_layout_create(req)?,
+            "layout_rename" => self.control_layout_rename(req)?,
+            "layout_activate" => self.control_layout_activate(req)?,
+            "layout_delete" => self.control_layout_delete(req)?,
             "page_setup_set" => self.control_page_setup_set(req)?,
             "file_identity" => self.control_file_identity(req)?,
             #[cfg(not(target_arch = "wasm32"))]
@@ -2255,13 +2270,16 @@ impl OpenCADStudio {
 mod actions;
 pub(crate) mod vision;
 pub(crate) use actions::{property_json, row_id};
+mod dgn_import;
 mod entities;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod http_bridge;
 mod interactive;
 mod node_graph;
 mod sheets;
+mod xrefs;
 pub(crate) use sheets::new_guid_v4;
+pub(crate) use sheets::{layout_listing, page_setup_read};
 pub(crate) mod block_ops;
 pub(crate) mod spellcheck;
 pub(crate) mod text_ops;

@@ -546,28 +546,41 @@ keep working while the client polls.
 | `GET  /api/v1/entities` | Query — `type`, `layer`, `detail`, `offset`, `limit`, `fields`, `handles`, `bounds`, `near`, `contains_point`, `intersections` (comma-separated) and `where` (a JSON-encoded property filter array, e.g. `[{"path":"/radius","op":"gt","value":2}]`). |
 | `GET  /api/v1/entities/{handle}` | One entity, `detail:"full"`. |
 | `POST /api/v1/entities` | Create a typed batch → **201** with `handles`. |
+| `POST /api/v1/entities_set` | Atomically patch common properties over unique handles in one undo step. |
 | `DELETE /api/v1/entities?handles=a,b` | Erase by handle (body `{"handles":[…]}` also accepted). |
 | `POST /api/v1/entities/transform` | move/copy/rotate/scale/mirror/array. |
 | `POST /api/v1/entities/copy-to` | Copy entities into another open document: `{"handles":[…],"document_id":target}` → **201** with the new handles. |
 | `GET  /api/v1/entities/{h}/xdata?app=` · `PUT …/xdata/{app}` · `DELETE …/xdata/{app}` | Read / replace / remove extended data. |
 | `POST /api/v1/blocks` | Define a block from entities (+ Insert); `"replace":true` drops a same-named definition first. |
-| `DELETE /api/v1/blocks/{name}` | Delete a block definition with its children, markers and every Insert referencing it. |
+| `DELETE /api/v1/blocks/{name}` | Delete a block definition and its children/markers; referenced blocks require `?force=true` to erase their INSERTs too. |
 | `POST /api/v1/file-identity` | Stable per-document GUID (`{"renew":true}` mints a fresh one). |
 | `POST /api/v1/groups` | Create a named group from handles → **201**. |
 | `POST /api/v1/selection-sets` · `GET /api/v1/selection-sets/{name}` | Save a named selection set → **201**; recall it (`?select=true` also makes it the current selection). |
 | `POST /api/v1/get_selection` | Read-only snapshot of the current selection (see [the GUI-hosted channel](#gui-hosted-rest-channel---http--file) below). |
 | `GET  /api/v1/sysvars?names=a,b` · `POST /api/v1/sysvars` | Read sysvars (`{"get":[…]}` in the body also works) / set them (`{"set":{"ltscale":2.5}}`). |
-| `POST /api/v1/layouts` | Create a layout with default page setup → **201**. |
-| `PUT  /api/v1/layouts/{name}/page-setup` | Write a layout's plot configuration (paper, orientation, fit/scale, center, window, plot style). |
+| `GET  /api/v1/layouts` | List Model and paper layouts with canonical names, handles, current flags, and tab order. |
+| `POST /api/v1/layouts` | Create a layout with default page setup without activating it → **201**. |
+| `PATCH /api/v1/layouts/{name}` | Rename a paper layout with `{"new_name":…}`. |
+| `DELETE /api/v1/layouts/{name}` | Delete a paper layout (one undo step). |
+| `POST /api/v1/layouts/{name}/activate` | Make Model or a paper layout current (non-undoable view state). |
+| `GET · PUT /api/v1/layouts/{name}/page-setup` | Read / write a layout's plot configuration (paper, orientation, fit/scale, center, offsets, area, window, plot style). |
+| `GET /api/v1/xrefs` · `POST /api/v1/xref_{reload,unload,detach,bind,set_path,set_type}` | Fresh external-reference report · direct-reference lifecycle writes. |
+| `POST /api/v1/dgn_import` | Direct, named-option DGN conversion without positional prompt replay. |
 | `POST /api/v1/plot` · `/api/v1/wblock` · `/api/v1/images` | PDF export (`"layout":"all","per_page":true` writes one PDF per layout) · DWG/DXF export (`"template"` bases the new database on a file, `"normalize":true` shifts the export to the origin) · attach picture. |
 | `POST /api/v1/commands` | Run one command line (`{"cmd":"LINE 0,0 10,10"}`). |
 | `POST /api/v1/undo` · `/redo` · `/save` | Lifecycle (`/save` to a `*.dwt` path writes the template — DWG bytes). |
 | `GET  /api/v1/layers` · `/header` · `/records?collection=…` | Database reads. |
 | `POST /api/v1/{op}` | Generic passthrough for any automation op. |
 
-Status codes: `200`/`201` on success; `400` validation; `404` unknown route
-or handle (`code:"entity_absent"`); `409` stale state or GUI required;
-`503` busy. Every failure body keeps the symbolic `code` and message, so
+Percent-encode every layout `{name}` path segment (for example, `Floor Plan` is
+`Floor%20Plan`). Names resolve case-insensitively and responses return canonical
+spelling; an unknown name returns `layout_missing`.
+
+Status codes: `200`/`201` on success; `400` validation; `404` unknown route,
+handle (`code:"entity_absent"`), layout (`code:"layout_missing"`), or reference
+(`code:"xref_missing"`); `409`
+stale state or GUI required; `503` busy. Every failure body keeps the symbolic
+`code` and message, so
 clients can branch on either. The server-generated `request_id` and the
 retry-on-stale-state dance happen inside the REST layer — callers just do
 HTTP.
@@ -620,13 +633,19 @@ curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/
   -H "Content-Type: application/json" -d '{"set":{"ltscale":2.5}}'
 curl -s -H "Authorization: Bearer $OCS_API_TOKEN" "http://127.0.0.1:8090/api/v1/sysvars?names=ltscale,mirrtext"
 
-# 9. Provision a sheet: create the layout, write its page setup, then
-#    plot every layout to its own PDF (one file per entry in result.files).
+# 9. Provision a sheet with structured ops (no -LAYOUT scripting). Create
+#    does not activate it, so make activation a separate explicit request.
+#    Spaces and other reserved characters in path names are percent-encoded.
 curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/layouts \
-  -H "Content-Type: application/json" -d '{"name":"PLAN"}'
-curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/layouts/PLAN/page-setup \
+  -H "Content-Type: application/json" -d '{"name":"Floor Plan"}'
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/layouts/Floor%20Plan/activate \
+  -H "Content-Type: application/json" -d '{}'
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X PUT http://127.0.0.1:8090/api/v1/layouts/Floor%20Plan/page-setup \
   -H "Content-Type: application/json" \
-  -d '{"paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","fit":true,"center":true}'
+  -d '{"paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","fit":true,"center":true,"offset_x":5,"offset_y":5,"area":"layout"}'
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" http://127.0.0.1:8090/api/v1/layouts/Floor%20Plan/page-setup
+curl -s -H "Authorization: Bearer $OCS_API_TOKEN" http://127.0.0.1:8090/api/v1/layouts
+# Plot every layout to its own PDF (one file per entry in result.files).
 curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X POST http://127.0.0.1:8090/api/v1/plot \
   -H "Content-Type: application/json" \
   -d '{"path":"C:/out/plan.pdf","layout":"all","per_page":true}'
@@ -657,7 +676,8 @@ curl -s -H "Authorization: Bearer $OCS_API_TOKEN" -X DELETE "http://127.0.0.1:80
 
 The same lifecycle — create → verify → transform → xdata → block →
 save → reopen → verify persisted → erase → undo, then where filters,
-sysvars, layout + page setup + per-page plotting, a `.dwt` template →
+sysvars, structured layout list/create/read/rename/activate/delete, page setup,
+percent-encoded names and per-page plotting, a `.dwt` template →
 new-from-template round trip, a cross-document copy, groups and selection
 sets, and a close-with-discard — runs as an automated black-box check:
 
@@ -695,6 +715,30 @@ Every definition also accepts `layer` and `color` (ACI index). Response:
 `{"handles":[…], "created":N, "layers_created":[…]}`. An invalid definition
 (`unknown_entity_type`, `invalid_radius`, `invalid_vertices`, …) aborts the
 whole batch with nothing committed.
+
+### `entities_set` — atomic common-property batches
+
+Apply one flat patch to every supplied handle in a single undo step:
+
+```json
+{"protocol":1,"op":"entities_set","request_id":"cleanup-1","document_id":1,
+ "handles":["2E2","32D"],"layer":"Hranice katastru","color":"ByLayer",
+ "linetype":"Continuous","linetype_scale":1.0,"invisible":false,
+ "label":"Cadastral cleanup"}
+```
+
+Fields that are absent stay unchanged; at least one editable field is required.
+`layer` and named `linetype` must already exist and resolve case-insensitively.
+Colors accept `"ByLayer"`/`"ByBlock"`, ACI `0..256`, `{"Index":5}`,
+`{"Rgb":{"r":24,"g":0,"b":0}}`, or `{"rgb":[24,0,0]}`. Handles must be unique
+and every target must exist and be editable. Unknown fields, a bad handle, a
+locked layer, or invalid values reject the entire request before history opens.
+
+The result is `{requested,written,unchanged}`; `written` counts actual changes.
+An identical repeat succeeds with `written:0` and creates no undo entry. One call
+handles thousands of entities without plugin IPC chunking, and `label` names the
+single undo group. Use generic REST `POST /api/v1/entities_set` or MCP
+`ocs_execute`; no `-PROPERTIES`/Python prompt scripting is needed.
 
 ### `entities_delete` — erase entities
 
@@ -786,6 +830,69 @@ seed, hex).
 Fits the entities into the view and selects them. Headless servers refuse
 with `code:"gui_required"`; REST clients get HTTP 409.
 
+### `dgn_import` — direct, prompt-free DGN conversion
+
+```json
+{"protocol":1,"op":"dgn_import","request_id":"dgn-1","document_id":1,
+ "path":"draco-dgn-in-7.dgn","model":"Default","units":"Master",
+ "mapping":"Standard","codepage":1250}
+```
+
+This invokes the same synchronous conversion and placement pipeline as
+`-DGNIMPORT`, without positional prompt answers. Model names resolve
+case-insensitively and omitted model selects the first design model. Units are
+`Master`/`Sub`; mapping is `Standard` (the command's `;codepage=N` suffix is
+accepted, with an explicit numeric `codepage` taking precedence). The result
+contains canonical `model`, `path`, and `entities`: the number of top-level
+converted model entities, excluding block-definition members and later
+reference attachments.
+
+Failures include `invalid_dgn`, `model_missing` (with `available_models`),
+`invalid_units`, `invalid_mapping`, `invalid_codepage`, and `empty_dgn_model`.
+Validation finishes before a new tab or undo entry is created. Target-drawing,
+text-node, duplicate-naming, and reference choices follow the same saved DGN
+import settings as the command. The positional command and dialog remain
+available as fallbacks. Use generic REST `POST /api/v1/dgn_import` or MCP
+`ocs_execute`.
+
+### `xrefs` / `xref_*` — structured external-reference lifecycle
+
+```json
+{"op":"xrefs"}
+{"protocol":1,"op":"xref_set_type","request_id":"xr-1","document_id":1,
+ "id":"8F","reference_type":"overlay"}
+{"protocol":1,"op":"xref_set_path","request_id":"xr-2","document_id":1,
+ "id":"8F","path_type":"relative"}
+{"protocol":1,"op":"xref_reload","request_id":"xr-3","document_id":1,"id":"8F"}
+```
+
+`xrefs` is a passive, fresh read returning `{count,xrefs[]}`. Rows expose
+`id`, `name`, `kind`, `format`, `reference_type`, `status`, raw `saved_path`,
+`resolved_path`, `parent_id`, `nested`, `size_bytes`, and `modified_unix_ms`.
+The list includes direct and nested drawing xrefs, linked raster images,
+underlays, and point clouds; embedded images are not external references.
+
+The six envelope mutations operate on one direct `id` in the active document:
+`xref_reload`, `xref_unload`, `xref_detach`, `xref_bind`, `xref_set_path`, and
+`xref_set_type`. Actual changes use one undo step. `xref_set_path` takes
+exactly one of `path` or `path_type` (`full`/`relative`/`none`) and never
+reloads implicitly; its result includes `reload_required`. `xref_set_type`
+takes `reference_type:"attach"` or `"overlay"`. `xref_unload` reports whether
+loadedness is `session_only`; bind reports the local `block` and `unremapped`
+count. Repeating an unchanged path, type, or unload creates no history.
+
+Nested rows are read-only (`xref_nested_read_only`), unknown IDs return
+`xref_missing`, and invalid kind/action pairs return `xref_kind_unsupported`.
+Native protocol and REST requests reject misspelled fields with
+`unknown_xref_field`; MCP preflight reports them as tool validation errors.
+Reload failures preserve existing content and include diagnostics. DWG/DXF
+xrefs support reload, bind, and type changes; raster reload and non-DWG
+bind/type changes are refused explicitly. Structured attach is not exposed
+until INSERT failure can be rolled back atomically; create references with the
+existing `XATTACH` command, then manage them with these operations. REST uses
+`GET /api/v1/xrefs` and `POST /api/v1/{operation}`; MCP uses `ocs_read` and
+`ocs_execute`.
+
 ### `action` — the UI toggles and the open dialogs
 
 ```json
@@ -848,26 +955,54 @@ active-document guard — they may address any open document.
 | `extmin` / `extmax` | model-space extents `[x,y,z]` | read-only |
 | `constraintstatus` | active space's constraint state: `{scope, constraint_count, enabled_count, dof}` | read-only |
 
-### `layout_create` / `page_setup_set` — layouts and page setups
+### Layouts and page setups
+
+Use the structured layout operations rather than scripting `-LAYOUT`. Creation
+adds a layout with the default page setup, a sheet viewport, and the normal
+initial model viewport when `LAYOUTCREATEVIEWPORT` is enabled, but deliberately
+does **not** activate it; compose `layout_create` with `layout_activate` when
+the new sheet should become current:
 
 ```json
+{"op":"layouts"}
 {"protocol":1,"op":"layout_create","request_id":"lc-1","document_id":1,"name":"PLAN"}
+{"protocol":1,"op":"layout_activate","request_id":"la-1","document_id":1,"name":"plan"}
 {"protocol":1,"op":"page_setup_set","request_id":"ps-1","document_id":1,"layout":"PLAN",
- "paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","fit":true,"center":true,
- "scale":"1:100","window":[0,0,210,297],"plot_style":"monochrome.ctb"}
+ "paper":"ISO_A4_(210.00_x_297.00_MM)","orientation":"landscape","scale":"1:100","center":true,
+ "offset_x":12.5,"offset_y":-4.0,"area":"window","window":[0,0,210,297],"plot_style":"monochrome.ctb"}
+{"op":"page_setup_get","layout":"PLAN"}
+{"protocol":1,"op":"layout_rename","request_id":"lr-1","document_id":1,"name":"PLAN","new_name":"Floor Plan"}
+{"protocol":1,"op":"layout_delete","request_id":"ld-1","document_id":1,"name":"floor plan"}
 ```
 
-`layout_create` adds a layout with the default page setup and a sheet
-viewport; duplicates are refused (`layout_exists`). `page_setup_set` writes
-the named layout's plot configuration — explicit fields win, the rest keeps
-the stored setup. `paper` resolves through the paper catalog
-(`invalid_paper` lists nothing — use a canonical catalog name);
-`orientation` is `portrait`/`landscape` (degrees of sheet rotation);
-sizing is `"fit":true` or `"scale":"paper:drawing"` like `"1:100"` (both
-parts positive — `nonsense` is refused with `invalid_scale`, it does not
-silently mean 1:1); `center` centers the plot; `window` sets a plot window;
-`plot_style` names a CTB/STB. Unknown layouts are `layout_missing`. The
-stored setup is what `plot` consumes when the op's own fields are absent.
+The passive `layouts` read returns `current`, `count`, and `layouts[]`; each
+entry contains `name`, `handle`, `current`, `model`, and `tab_order`.
+`page_setup_get` returns the canonical `layout` and a `page_setup` containing
+`initialized`, `paper`, `paper_width_mm`, `paper_height_mm`, `rotation`,
+`orientation`, `scale` (`numerator`, `denominator`, `fit`), `center`,
+`plot_style`, `area`, `view`, `window`, `offset_x`, and `offset_y`.
+
+`page_setup_set` keeps its existing request shape: explicit fields win and all
+others retain their stored values. In particular, `offset_x`/`offset_y` (mm),
+`area`, and `window` are applied, and an orientation-only update preserves the
+rest of the setup. `paper` resolves through the paper catalog; sizing is
+`"fit":true` or a positive `"scale":"paper:drawing"` ratio such as `"1:100"`.
+Orientation accounts for the medium's natural orientation. `area:"window"`
+requires a finite, positive-size `window` on every transport. Any normal initial
+viewport creation belongs to the undoable create/page-setup write, never to
+activation. The stored setup is what `plot` consumes when its own fields are absent.
+
+Layout names resolve case-insensitively and responses return their canonical
+spelling. Unknown names are `layout_missing`, duplicates are `layout_exists`,
+blank create names or `new_name` values are `name_required`, and invalid
+characters or excessive length are `invalid_layout_name`. Model appears in
+`layouts` and can be activated, but renaming or deleting it returns
+`layout_protected`. Rename and delete each create one undo step; activation is
+non-undoable view state, and both reads are passive.
+
+Over MCP, use `ocs_read` with `op:"layouts"` or `op:"page_setup_get"`
+(`parameters.layout`) and `ocs_execute` for the mutations. The operations are
+listed by `capabilities.operations` and in the MCP tool schemas.
 
 ### Templates — start from and save as `.dwt`
 
@@ -961,11 +1096,14 @@ Without `per_page` the result stays `{path, pages, page_sizes}`.
 
 ```json
 {"op":"query","type":"Circle","detail":"geometry",
- "where":[{"path":"/radius","op":"gt","value":2},{"path":"/common/layer","op":"eq","value":"Walls"}]}
+ "where":[{"path":"/radius","op":"gt","value":2},{"path":"/layer","op":"eq","value":"Walls"}]}
 ```
 
-`where` filters query results on serialized entity properties using RFC
-6901 JSON Pointer paths (`/radius`, `/common/layer`, …) and the operators
+`where` filters query results on the returned entity JSON using RFC 6901
+JSON Pointer paths: `/layer` works at every detail, geometry fields such as
+`/radius` use `detail:"geometry"`, and serialized fields such as
+`/properties/common/color/Index` use `detail:"full"`. Legacy raw-property paths
+such as `/common/layer` remain accepted as a fallback. Supported operators are
 `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `contains`, `starts_with`,
 `ends_with`, `in`, `exists`, `not_exists`. Filters combine with
 AND and are validated up front (a bad pointer or unknown operator fails the

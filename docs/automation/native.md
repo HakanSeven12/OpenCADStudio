@@ -33,8 +33,8 @@ Two request styles share the channel, told apart by the `protocol` field:
 
 | Style | Shape | Operations |
 |---|---|---|
-| protocol 1 | `{"protocol":1,"request_id":"…","document_id":N,"op":"…"}` — the same requests and replies as `ocs_execute` / `ocs_read`, described in the README | `new`, `open`, `save`, `save_verified`, `activate`, `select`, `run`, `start`, `input`, `cancel`, `stop`, `action`, `property`, `set_properties`, `embed_image`, `undo`, `redo`, `text_replace`; reads `state`, `capabilities`, `audit`, `text_audit`, `text_search`, `query`, `entities`, `records`, `record_schema`, `layers`, `header`, `properties`, `measure`, `history`, `commands`, `events`, `operation` |
-| legacy | `{"op":"…"}` without `protocol` | `new`, `open`, `run`, `entities`, `audit`, `query`, `records`, `record_schema`, `capabilities`, `layers`, `header`, `select`, `save`, `undo`, `redo` |
+| protocol 1 | `{"protocol":1,"request_id":"…","document_id":N,"op":"…"}` — the same requests and replies as `ocs_execute` / `ocs_read`, described in the README | `new`, `open`, `save`, `save_verified`, `activate`, `select`, `run`, `start`, `input`, `cancel`, `stop`, `action`, `property`, `set_properties`, `embed_image`, `dgn_import`, `entities_set`, `layout_create`, `layout_rename`, `layout_activate`, `layout_delete`, `page_setup_set`, `xref_reload`, `xref_unload`, `xref_detach`, `xref_bind`, `xref_set_path`, `xref_set_type`, `undo`, `redo`, `text_replace`; reads `state`, `capabilities`, `audit`, `text_audit`, `text_search`, `query`, `entities`, `records`, `record_schema`, `layers`, `layouts`, `xrefs`, `page_setup_get`, `header`, `properties`, `measure`, `history`, `commands`, `events`, `operation` |
+| legacy | `{"op":"…"}` without `protocol` | `new`, `open`, `run`, `entities`, `audit`, `query`, `records`, `record_schema`, `capabilities`, `layers`, `layouts`, `xrefs`, `page_setup_get`, `header`, `select`, `save`, `undo`, `redo` |
 
 The two styles differ in how a waiting command is treated. A protocol-1 `run`
 or `start` while a command is still active is refused with `command_busy`:

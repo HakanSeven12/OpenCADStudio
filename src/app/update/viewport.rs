@@ -9594,7 +9594,13 @@ properties={:.1}ms picked={}",
                 crate::app::block_editor::BlockEditContinuation::Layout(name),
             );
         }
-        self.on_layout_switch_inner(name, false)
+        self.on_layout_switch_inner(name, false, true)
+    }
+
+    /// Automation activation changes only view state. Interactive first-open
+    /// initialization belongs to the undoable create/page-setup operations.
+    pub(crate) fn on_layout_switch_view_only(&mut self, name: String) -> Task<Message> {
+        self.on_layout_switch_inner(name, false, false)
     }
 
     pub(crate) fn on_block_edit_switch(&mut self, name: String) -> Task<Message> {
@@ -9664,13 +9670,14 @@ properties={:.1}ms picked={}",
                 crate::app::block_editor::BlockEditContinuation::Layout(name),
             );
         }
-        self.on_layout_switch_inner(name, true)
+        self.on_layout_switch_inner(name, true, true)
     }
 
     fn on_layout_switch_inner(
         &mut self,
         name: String,
         preserve_active_command: bool,
+        initialize_layout: bool,
     ) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].is_start {
@@ -9729,7 +9736,9 @@ properties={:.1}ms picked={}",
         // periodic sync only fires on a tick, which may not have run
         // since the last pan/zoom).
         let perf_phase = Instant::now();
-        self.tabs[i].scene.sync_camera_to_document();
+        if initialize_layout {
+            self.tabs[i].scene.sync_camera_to_document();
+        }
         self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
         let sync_ms = perf_phase.elapsed().as_secs_f64() * 1000.0;
         // Cancel any pending rename and active viewport when switching.
@@ -9742,7 +9751,11 @@ properties={:.1}ms picked={}",
         // UCS follows the active model, layout, or floating viewport pane.
         let perf_phase = Instant::now();
         self.tabs[i].refresh_active_ucs();
-        self.tabs[i].scene.restore_saved_camera();
+        if initialize_layout {
+            self.tabs[i].scene.restore_saved_camera();
+        } else {
+            self.tabs[i].scene.restore_saved_camera_view_only();
+        }
         self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;
         // `deselect_all` invalidates the scene highlight, but grips and the
         // Properties panel are separate caches owned by the app.

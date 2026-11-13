@@ -1616,6 +1616,17 @@ impl Scene {
     /// Restore the camera from the file's saved view (called once on open).
     /// Falls back to fit_all() if no saved view is available.
     pub fn restore_saved_camera(&mut self) {
+        self.restore_saved_camera_inner(true);
+    }
+
+    /// Restore only camera/view state for automation's layout activation.
+    /// Unlike an interactive first open, this never initializes a page setup,
+    /// creates a viewport, or consumes the layout's unopened marker.
+    pub fn restore_saved_camera_view_only(&mut self) {
+        self.restore_saved_camera_inner(false);
+    }
+
+    fn restore_saved_camera_inner(&mut self, initialize_layout: bool) {
         let restored = if self.current_layout == "Model" {
             // Tiled-layout restore takes precedence — it sets the camera too.
             // Single-tile files fall through to the *Active branch.
@@ -1629,14 +1640,16 @@ impl Scene {
             // with no paper), or it was created in this session and not
             // opened yet. Its page setup is initialized and, with
             // LAYOUTCREATEVIEWPORT, it gets its first viewport.
-            let unopened = self.unopened_layouts.remove(&layout);
-            let initialized = self.initialize_layout_page_setup(&layout);
-            if unopened && !initialized {
-                self.fit_layout_sheet(&layout);
-            }
-            self.ensure_sheet_viewport(&layout);
-            if unopened || initialized {
-                self.add_layout_default_viewport(&layout);
+            if initialize_layout {
+                let unopened = self.unopened_layouts.remove(&layout);
+                let initialized = self.initialize_layout_page_setup(&layout);
+                if unopened && !initialized {
+                    self.fit_layout_sheet(&layout);
+                }
+                self.ensure_sheet_viewport(&layout);
+                if unopened || initialized {
+                    self.add_layout_default_viewport(&layout);
+                }
             }
             self.apply_sheet_viewport_camera()
         };

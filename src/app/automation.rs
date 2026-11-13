@@ -25,6 +25,7 @@ use serde_json::{json, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use sha2::{Digest, Sha256};
 
+use super::control::{layout_listing, page_setup_read};
 use super::OpenCADStudio;
 
 /// Run the headless JSON server. Default transport is stdin/stdout; with
@@ -1108,6 +1109,13 @@ impl OpenCADStudio {
             "records" => self.record_query(&req),
             "record_schema" => self.record_schema(&req),
             "capabilities" => self.record_capabilities(),
+            "layouts" => layout_listing(&self.tabs[self.active_tab].scene),
+            "xrefs" => self.control_xrefs(&req),
+            "page_setup_get" => page_setup_read(
+                &self.tabs[self.active_tab].scene,
+                req["layout"].as_str().unwrap_or(""),
+            )
+            .unwrap_or_else(|error| error),
             "layers" => {
                 let i = self.active_tab;
                 let offset = req["offset"].as_u64().unwrap_or(0) as usize;
@@ -1308,7 +1316,9 @@ impl OpenCADStudio {
                 };
                 if let Some(session) = &self.tabs[i].ifccad_session {
                     if let Err(error) = session.check_destination(
-                        path.extension().and_then(|ext| ext.to_str()).unwrap_or_default(),
+                        path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or_default(),
                     ) {
                         return err(format!("save: {error}"));
                     }
@@ -1581,9 +1591,21 @@ impl OpenCADStudio {
             {
                 continue;
             }
+            let to_json = || {
+                entity_json(
+                    &tab.scene.document,
+                    e,
+                    detail,
+                    crate::plugin::entity_labels::custom_entity_class_label(
+                        &self.disabled_plugins,
+                        e,
+                    ),
+                )
+            };
+            let entity = req["where"].as_array().map(|_| to_json());
             if let Some(filters) = req["where"].as_array() {
-                // Filters address  with RFC 6901 pointers, the
-                // same contract as the records op.
+                // Resolve against the record at the requested detail first,
+                // then raw properties for legacy paths such as /common/layer.
                 let properties = serde_json::to_value(e).ok().and_then(|wrapper| {
                     wrapper
                         .as_object()
@@ -1595,9 +1617,14 @@ impl OpenCADStudio {
                     let actual = if path.is_empty() {
                         properties.as_ref()
                     } else {
-                        properties
+                        entity
                             .as_ref()
-                            .and_then(|properties| properties.pointer(path))
+                            .and_then(|record| record.pointer(path))
+                            .or_else(|| {
+                                properties
+                                    .as_ref()
+                                    .and_then(|properties| properties.pointer(path))
+                            })
                     };
                     match crate::app::record_api::compare(
                         actual,
@@ -1650,12 +1677,7 @@ impl OpenCADStudio {
             if near.is_some() && nearest.is_none() {
                 continue;
             }
-            let mut entity = entity_json(
-                &tab.scene.document,
-                e,
-                detail,
-                crate::plugin::entity_labels::custom_entity_class_label(&self.disabled_plugins, e),
-            );
+            let mut entity = entity.unwrap_or_else(to_json);
             entity.as_object_mut().expect("entity JSON object").insert(
                 "space".into(),
                 space_names
@@ -3536,6 +3558,51 @@ DEAD
     }
 
     #[test]
+    fn query_where_resolves_summary_and_full_record_paths() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let created = mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"entities_create","request_id":"where-record-paths","document_id":{doc},"entities":[
+                {"type":"Line","start":[0,0],"end":[10,0],"color":1},
+                {"type":"Solid","corners":[[0,0,0],[2,0,0],[0,2,0]],"color":1},
+                {"type":"Solid","corners":[[3,0,0],[5,0,0],[3,2,0]],"color":2}
+            ]}"#,
+        );
+        assert_eq!(created["ok"], true, "{created}");
+
+        for detail in ["summary", "geometry", "full"] {
+            let q = app.automation_op(&format!(
+                r#"{{"op":"query","type":"Line","detail":"{detail}","where":[{{"path":"/layer","op":"eq","value":"0"}}]}}"#
+            ));
+            assert_eq!(q["ok"], true, "{q}");
+            assert_eq!(q["count"], 1, "{q}");
+            assert_eq!(q["entities"][0]["layer"], "0");
+        }
+
+        let q = app.automation_op(
+            r#"{"op":"query","type":"Solid","detail":"full","where":[{"path":"/properties/common/color/Index","op":"eq","value":1}]}"#,
+        );
+        assert_eq!(q["ok"], true, "{q}");
+        assert_eq!(q["count"], 1, "{q}");
+        assert_eq!(
+            q["entities"][0]["properties"]["common"]["color"]["Index"],
+            1
+        );
+
+        let q = app.automation_op(
+            r#"{"op":"query","detail":"full","where":[{"path":"/type","op":"eq","value":"Solid"},{"path":"/properties/common/color/Index","op":"eq","value":1}]}"#,
+        );
+        assert_eq!(q["ok"], true, "{q}");
+        assert_eq!(q["count"], 1, "{q}");
+
+        let q = app.automation_op(
+            r#"{"op":"query","type":"Solid","detail":"full","where":[{"path":"properties/common/color/Index","op":"eq","value":1}]}"#,
+        );
+        assert_eq!(q["ok"], false, "{q}");
+    }
+
+    #[test]
     fn text_entities_expose_plain_text_and_usable_bounds() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -3574,6 +3641,26 @@ DEAD
         assert_eq!(caps["operations"]["xdata_set"], true);
         assert_eq!(caps["operations"]["xdata_get"], true);
         assert_eq!(caps["operations"]["view_focus"], true);
+        assert_eq!(caps["operations"]["entities_set"], true);
+        assert_eq!(caps["operations"]["dgn_import"], true);
+        for operation in [
+            "layouts",
+            "page_setup_get",
+            "layout_create",
+            "layout_rename",
+            "layout_activate",
+            "layout_delete",
+            "page_setup_set",
+            "xrefs",
+            "xref_reload",
+            "xref_unload",
+            "xref_detach",
+            "xref_bind",
+            "xref_set_path",
+            "xref_set_type",
+        ] {
+            assert_eq!(caps["operations"][operation], true, "{operation}");
+        }
     }
 
     // ---------- entity operations (P0) ----------
@@ -3591,6 +3678,74 @@ DEAD
             r#"{{"op":"query","type":"{kind}","detail":"summary"}}"#
         ));
         q["count"].as_u64().unwrap()
+    }
+
+    fn entities_set_core(app: &mut OpenCADStudio, request: Value) -> Value {
+        match app.entities_set_for_test(&request) {
+            Ok(result) => json!({"ok":true,"result":result}),
+            Err(error) => error,
+        }
+    }
+
+    fn add_common_test_line(
+        app: &mut OpenCADStudio,
+        color: document::types::Color,
+    ) -> document::Handle {
+        let mut entity = document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
+        ));
+        entity.common_mut().color = color;
+        let i = app.active_tab;
+        app.tabs[i].scene.add_entity(entity)
+    }
+
+    fn add_test_layer(app: &mut OpenCADStudio, name: &str) -> document::Handle {
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        let mut layer = document::tables::Layer::new(name);
+        layer.handle = document.allocate_handle();
+        let handle = layer.handle;
+        document.layers.add(layer).unwrap();
+        handle
+    }
+
+    fn add_test_linetype(app: &mut OpenCADStudio, name: &str) -> document::Handle {
+        let i = app.active_tab;
+        let document = &mut app.tabs[i].scene.document;
+        if let Some(existing) = document.line_types.get(name) {
+            return existing.handle;
+        }
+        let mut linetype = document::tables::LineType::new(name);
+        linetype.handle = document.allocate_handle();
+        let handle = linetype.handle;
+        document.line_types.add(linetype).unwrap();
+        handle
+    }
+
+    fn handle_text(handle: document::Handle) -> String {
+        format!("{:X}", handle.value())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn add_bulk_test_lines(
+        app: &mut OpenCADStudio,
+        count: usize,
+        mut color: impl FnMut(usize) -> document::types::Color,
+    ) -> Vec<document::Handle> {
+        let entities = (0..count)
+            .map(|index| {
+                let x = index as f64 * 0.01;
+                let mut entity = document::EntityType::Line(document::entities::Line::from_points(
+                    document::types::Vector3::new(x, 0.0, 0.0),
+                    document::types::Vector3::new(x + 0.005, 0.0, 0.0),
+                ));
+                entity.common_mut().color = color(index);
+                entity
+            })
+            .collect();
+        let i = app.active_tab;
+        app.tabs[i].scene.add_entities(entities)
     }
 
     #[test]
@@ -3751,6 +3906,817 @@ DEAD
             r#"{"protocol":1,"op":"entities_create","request_id":"d8-style-ok","document_id":{doc},"entities":[{"type":"MText","value":"x","position":[0,0],"style":"OCSM_GB"}]}"#,
         );
         assert_eq!(created["ok"], true, "{created}");
+    }
+
+    #[test]
+    fn entities_set_applies_mixed_fields_and_all_color_forms() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let wall_handle = add_test_layer(&mut app, "Walls");
+        let dash_handle = add_test_linetype(&mut app, "DASHED");
+        let first = add_common_test_line(&mut app, document::types::Color::Index(1));
+        let second = add_common_test_line(&mut app, document::types::Color::Index(2));
+        let i = app.active_tab;
+        {
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity_mut(first)
+                .unwrap()
+                .common_mut();
+            common.color_name = Some("BOOK$OLD".into());
+            common.color_book_handle = Some(document::Handle::new(0xABCD));
+        }
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let request = json!({
+            "op":"entities_set",
+            "request_id":"mixed-common-properties",
+            "document_id":app.tabs[i].id,
+            "revision":app.tabs[i].edit_revision,
+            "geometry_revision":app.tabs[i].scene.geometry_epoch,
+            "camera_revision":app.tabs[i].scene.camera_generation,
+            "selection":[],
+            "client_id":"test",
+            "steps":[],
+            "protocol":1,
+            "session_id":"test-session",
+            "token":"test-token",
+            "active_only":false,
+            // A batch transport may leave resolved binding metadata on the
+            // dispatched step. It is transport data, not an editable field.
+            "bindings":{"handles":{"step":0,"path":"/result/handles"}},
+            "handles":[handle_text(first),handle_text(second)],
+            "layer":"wAlLs",
+            "color":{"Rgb":{"r":24,"g":0,"b":0}},
+            "linetype":"dAsHeD",
+            "linetype_scale":2.5,
+            "invisible":true,
+        });
+        let result = entities_set_core(&mut app, request);
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(
+            result["result"],
+            json!({"requested":2,"written":2,"unchanged":0})
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        assert_eq!(
+            app.tabs[i].history.undo_stack.last().unwrap().label(),
+            "ENTITIESSET"
+        );
+        let layer_handle = app.tabs[i]
+            .scene
+            .document
+            .get_entity(first)
+            .unwrap()
+            .common()
+            .layer_handle;
+        for handle in [first, second] {
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common();
+            assert_eq!(common.layer, "Walls");
+            assert_eq!(common.layer_handle, Some(wall_handle));
+            assert_eq!(
+                common.color,
+                document::types::Color::Rgb { r: 24, g: 0, b: 0 }
+            );
+            assert_eq!(common.color_name, None);
+            assert_eq!(common.color_book_handle, None);
+            assert_eq!(common.linetype, "DASHED");
+            assert_eq!(common.linetype_handle, Some(dash_handle));
+            assert_eq!(common.linetype_scale, 2.5);
+            assert!(common.invisible);
+        }
+        assert_eq!(layer_handle, Some(wall_handle));
+
+        let color_cases = [
+            (json!("ByLayer"), document::types::Color::ByLayer, 1),
+            (json!("ByBlock"), document::types::Color::ByBlock, 1),
+            (json!(0), document::types::Color::ByBlock, 0),
+            (json!(1), document::types::Color::Index(1), 1),
+            (json!(256), document::types::Color::ByLayer, 1),
+            (json!({"Index":0}), document::types::Color::ByBlock, 1),
+            (json!({"Index":256}), document::types::Color::ByLayer, 1),
+            (json!({"Index":5}), document::types::Color::Index(5), 1),
+            (
+                json!({"Rgb":{"r":24,"g":0,"b":0}}),
+                document::types::Color::Rgb { r: 24, g: 0, b: 0 },
+                1,
+            ),
+            (
+                json!({"rgb":[0,128,255]}),
+                document::types::Color::Rgb {
+                    r: 0,
+                    g: 128,
+                    b: 255,
+                },
+                1,
+            ),
+        ];
+        for (color, expected, written) in color_cases {
+            let result = entities_set_core(
+                &mut app,
+                json!({"handles":[handle_text(first)],"color":color}),
+            );
+            assert_eq!(result["ok"], true, "{result}");
+            assert_eq!(result["result"]["written"], written);
+            assert_eq!(result["result"]["unchanged"], 1 - written);
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity(first)
+                .unwrap()
+                .common();
+            assert_eq!(common.color, expected);
+            assert_eq!(common.color_name, None);
+            assert_eq!(common.color_book_handle, None);
+        }
+
+        let by_block = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first)],"linetype":"byblock"}),
+        );
+        assert_eq!(by_block["result"]["written"], 1);
+        let by_layer = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first)],"linetype":"BYLAYER"}),
+        );
+        assert_eq!(by_layer["result"]["written"], 1);
+        let common = app.tabs[i]
+            .scene
+            .document
+            .get_entity(first)
+            .unwrap()
+            .common();
+        assert_eq!(common.linetype, "");
+        assert_eq!(common.linetype_handle, None);
+        let repeated = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first)],"linetype":"ByLayer","invisible":false}),
+        );
+        assert_eq!(repeated["result"]["written"], 1);
+        assert!(
+            !app.tabs[i]
+                .scene
+                .document
+                .get_entity(first)
+                .unwrap()
+                .common()
+                .invisible
+        );
+        let exact_false = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first)],"invisible":false}),
+        );
+        assert_eq!(exact_false["result"]["written"], 0);
+        assert_eq!(exact_false["result"]["unchanged"], 1);
+    }
+
+    #[test]
+    fn entities_set_rejects_bad_handle_unknown_field_and_locked_layer_atomically() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        add_test_layer(&mut app, "Walls");
+        let locked_handle = add_test_layer(&mut app, "Locked");
+        let first = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let second = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let first_before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(first)
+            .unwrap()
+            .clone();
+        let second_before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(second)
+            .unwrap()
+            .clone();
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let revision_before = app.tabs[i].edit_revision;
+        let geometry_before = app.tabs[i].scene.geometry_epoch;
+
+        let missing = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first),"FFFFFFFFFFFFFFFF"],"color":1}),
+        );
+        assert_eq!(missing["ok"], false);
+        assert_eq!(missing["code"], "entity_absent");
+        let unknown = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first),handle_text(second)],"layer":"Walls","colour":1}),
+        );
+        assert_eq!(unknown["ok"], false);
+        assert_eq!(unknown["code"], "unknown_entity_field");
+        for handle in [first, second] {
+            assert_eq!(
+                app.tabs[i].scene.document.get_entity(handle).unwrap(),
+                if handle == first {
+                    &first_before
+                } else {
+                    &second_before
+                }
+            );
+        }
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].edit_revision, revision_before);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+        assert!(!app.tabs[i].dirty);
+
+        {
+            let document = &mut app.tabs[i].scene.document;
+            let common = document.get_entity_mut(second).unwrap().common_mut();
+            common.layer = "Locked".into();
+            common.layer_handle = Some(locked_handle);
+            document.layers.get_mut("Locked").unwrap().flags.locked = true;
+        }
+        let second_locked = app.tabs[i]
+            .scene
+            .document
+            .get_entity(second)
+            .unwrap()
+            .clone();
+        let locked = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(first),handle_text(second)],"layer":"Walls","color":3}),
+        );
+        assert_eq!(locked["ok"], false);
+        assert_eq!(locked["code"], "layer_locked");
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(first).unwrap(),
+            &first_before
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(second).unwrap(),
+            &second_locked
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].edit_revision, revision_before);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn entities_set_strictly_validates_values_without_writing() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .clone();
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let geometry_before = app.tabs[i].scene.geometry_epoch;
+        let text = handle_text(handle);
+        let cases = [
+            ("invalid_layer", json!({"layer":null})),
+            ("invalid_color", json!({"color":null})),
+            ("invalid_color", json!({"color":257})),
+            ("invalid_color", json!({"color":{"Index":257}})),
+            ("invalid_color", json!({"color":1.0})),
+            ("invalid_color", json!({"color":{"Index":5,"extra":true}})),
+            (
+                "invalid_color",
+                json!({"color":{"Rgb":{"r":1,"g":2,"b":3,"extra":0}}}),
+            ),
+            ("invalid_color", json!({"color":{"rgb":[1,2]}})),
+            ("invalid_linetype", json!({"linetype":null})),
+            ("invalid_linetype_scale", json!({"linetype_scale":0})),
+            ("invalid_linetype_scale", json!({"linetype_scale":"1"})),
+            ("invalid_invisible", json!({"invisible":null})),
+            ("invalid_invisible", json!({"invisible":0})),
+            ("invalid_label", json!({"color":1,"label":null})),
+            ("invalid_label", json!({"color":1,"label":""})),
+            ("layer_missing", json!({"layer":"NO_SUCH_LAYER"})),
+            ("linetype_missing", json!({"linetype":"NO_SUCH_LINETYPE"})),
+            ("unknown_entity_field", json!({"color":1,"stray":true})),
+        ];
+        for (code, patch) in cases {
+            let mut request = json!({"op":"entities_set","handles":[text.clone()]});
+            for (key, value) in patch.as_object().unwrap() {
+                request[key.as_str()] = value.clone();
+            }
+            let result = entities_set_core(&mut app, request);
+            assert_eq!(result["ok"], false, "{result}");
+            assert_eq!(result["code"], code, "{result}");
+            assert_eq!(
+                app.tabs[i].scene.document.get_entity(handle).unwrap(),
+                &before
+            );
+            assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+            assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+            assert!(!app.tabs[i].dirty);
+        }
+
+        for (code, request) in [
+            ("handles_required", json!({"handles":[],"color":1})),
+            (
+                "duplicate_handle",
+                json!({"handles":[text.clone(),text.clone()],"color":1}),
+            ),
+            (
+                "properties_required",
+                json!({"handles":[text.clone()],"label":"label alone"}),
+            ),
+        ] {
+            let result = entities_set_core(&mut app, request);
+            assert_eq!(result["code"], code, "{result}");
+            assert_eq!(
+                app.tabs[i].scene.document.get_entity(handle).unwrap(),
+                &before
+            );
+            assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+            assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+            assert!(!app.tabs[i].dirty);
+        }
+    }
+
+    #[test]
+    fn entities_set_all_noop_and_repeated_request_leave_no_history_or_dirty_state() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .clone();
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let redo_before = app.tabs[i].history.redo_stack.len();
+        let revision_before = app.tabs[i].edit_revision;
+        let geometry_before = app.tabs[i].scene.geometry_epoch;
+        let request = json!({
+            "op":"entities_set",
+            "request_id":"replayed-noop",
+            "handles":[handle_text(handle)],
+            "color":"ByLayer",
+        });
+        let first = entities_set_core(&mut app, request.clone());
+        let replay = entities_set_core(&mut app, request);
+        for result in [first, replay] {
+            assert_eq!(result["ok"], true, "{result}");
+            assert_eq!(
+                result["result"],
+                json!({"requested":1,"written":0,"unchanged":1})
+            );
+        }
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(handle).unwrap(),
+            &before
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].history.redo_stack.len(), redo_before);
+        assert!(app.tabs[i].history.pending.is_none());
+        assert_eq!(app.tabs[i].edit_revision, revision_before);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn entities_set_is_one_custom_labelled_undo_and_redo_step() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let result = entities_set_core(
+            &mut app,
+            json!({
+                "handles":[handle_text(handle)],
+                "color":{"Index":5},
+                "invisible":true,
+                "label":"Parcel cleanup",
+            }),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        assert_eq!(
+            app.tabs[i].history.undo_stack.last().unwrap().label(),
+            "Parcel cleanup"
+        );
+        assert!(app.tabs[i].dirty);
+
+        app.undo_active_tab();
+        let common = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .common();
+        assert_eq!(common.color, document::types::Color::ByLayer);
+        assert!(!common.invisible);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].history.redo_stack.len(), 1);
+        assert!(!app.tabs[i].dirty);
+
+        app.redo_active_tab();
+        let common = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .common();
+        assert_eq!(common.color, document::types::Color::Index(5));
+        assert!(common.invisible);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        assert!(app.tabs[i].history.redo_stack.is_empty());
+        assert!(app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn entities_set_protocol_envelope_replays_without_a_second_write() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let handle = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let request = format!(
+            r#"{{"protocol":1,"op":"entities_set","request_id":"entities-set-protocol","document_id":{{doc}},"handles":["{}"],"color":{{"Index":5}},"label":"Protocol cleanup"}}"#,
+            handle_text(handle)
+        );
+        let first = mutate(&mut app, &request);
+        assert_eq!(first["ok"], true, "{first}");
+        assert_eq!(first["result"]["written"], 1);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        let replay = mutate(&mut app, &request);
+        assert_eq!(replay, first);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+
+        let changed = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_set","request_id":"entities-set-protocol","document_id":{{doc}},"handles":["{}"],"color":2}}"#,
+                handle_text(handle)
+            ),
+        );
+        assert_eq!(changed["code"], "request_id_reused");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common()
+                .color,
+            document::types::Color::Index(5)
+        );
+        let missing = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_set","request_id":"entities-set-missing","document_id":{{doc}},"handles":["{}","FFFFFFFFFFFFFFFF"],"color":1}}"#,
+                handle_text(handle)
+            ),
+        );
+        assert_eq!(missing["code"], "entity_absent");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .unwrap()
+                .common()
+                .color,
+            document::types::Color::Index(5)
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+    }
+
+    #[test]
+    fn entities_set_preserves_construction_styling_and_refuses_plugin_owned_writes() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        add_test_layer(&mut app, "Walls");
+        add_test_linetype(&mut app, "DASHED");
+        let construction = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let ordinary = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let restricted = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let i = app.active_tab;
+        {
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity_mut(construction)
+                .unwrap()
+                .common_mut();
+            let mut record = document::xdata::ExtendedDataRecord::new("OCS_BLOCK_CONSTRUCTION");
+            record.add_value(document::xdata::XDataValue::Integer16(1));
+            record.add_value(document::xdata::XDataValue::Integer16(0));
+            common.extended_data.add_record(record);
+            common.invisible = true;
+        }
+        app.tabs[i].dirty = false;
+        let construction_before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(construction)
+            .unwrap()
+            .clone();
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let geometry_before = app.tabs[i].scene.geometry_epoch;
+        let unchanged = entities_set_core(
+            &mut app,
+            json!({
+                "handles":[handle_text(construction)],
+                "layer":"Walls",
+                "color":2,
+                "linetype":"DASHED",
+                "invisible":false,
+            }),
+        );
+        assert_eq!(unchanged["result"]["written"], 0);
+        assert_eq!(unchanged["result"]["unchanged"], 1);
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(construction).unwrap(),
+            &construction_before
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+        assert!(!app.tabs[i].dirty);
+
+        let ordinary_before = app.tabs[i]
+            .scene
+            .document
+            .get_entity(ordinary)
+            .unwrap()
+            .clone();
+        app.tabs[i]
+            .scene
+            .set_reference_only_membership(restricted, true);
+        let reference = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(ordinary),handle_text(restricted)],"color":4}),
+        );
+        assert_eq!(reference["code"], "reference_only");
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(ordinary).unwrap(),
+            &ordinary_before
+        );
+        app.tabs[i]
+            .scene
+            .set_reference_only_membership(restricted, false);
+
+        {
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity_mut(restricted)
+                .unwrap()
+                .common_mut();
+            let mut stamp = document::xdata::ExtendedDataRecord::new("CVIFC-CLASS:LINE");
+            stamp.add_value(document::xdata::XDataValue::Integer32(1));
+            stamp.add_value(document::xdata::XDataValue::String(String::new()));
+            stamp.add_value(document::xdata::XDataValue::Integer32(1));
+            common.extended_data.add_record(stamp);
+        }
+        let native_disabled = entities_set_core(
+            &mut app,
+            json!({"handles":[handle_text(ordinary),handle_text(restricted)],"color":4}),
+        );
+        assert_eq!(native_disabled["code"], "native_edit_disabled");
+        assert_eq!(
+            app.tabs[i].scene.document.get_entity(ordinary).unwrap(),
+            &ordinary_before
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_before);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn entities_set_invalidates_an_arbitrary_block_member() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let line = add_common_test_line(&mut app, document::types::Color::ByLayer);
+        let defined = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"block_define","request_id":"set-block-member","document_id":{{doc}},"name":"SET_MEMBER","base":[0,0,0],"handles":["{}"]}}"#,
+                handle_text(line)
+            ),
+        );
+        assert_eq!(defined["ok"], true, "{defined}");
+        let i = app.active_tab;
+        // BLOCK_DEFINE moves the source into the definition and may allocate a
+        // fresh member handle; address the stored member, not the erased source.
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| {
+                matches!(entity, document::EntityType::Line(_)).then(|| entity.common().handle)
+            })
+            .expect("block member line");
+        let member = handle_text(line);
+        let geometry_before = app.tabs[i].scene.geometry_epoch;
+        let result = entities_set_core(&mut app, json!({"handles":[member],"color":4}));
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"]["written"], 1);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .unwrap()
+                .common()
+                .color,
+            document::types::Color::Index(4)
+        );
+        assert!(app.tabs[i].scene.replay_since(geometry_before).is_none());
+        app.undo_active_tab();
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(line)
+                .unwrap()
+                .common()
+                .color,
+            document::types::Color::ByLayer
+        );
+    }
+
+    #[test]
+    fn entities_set_invalidates_a_top_level_dimension_picture_with_undo() {
+        use document::entities::{Dimension, DimensionLinear};
+        use document::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut linear =
+            DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        linear.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        linear.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        linear.base.block_name = "*D_TEST".into();
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Dimension(Box::new(
+                Dimension::Linear(linear),
+            )));
+        app.tabs[i].dirty = false;
+        let undo_before = app.tabs[i].history.undo_stack.len();
+
+        let changed =
+            entities_set_core(&mut app, json!({"handles":[handle_text(handle)],"color":4}));
+        assert_eq!(changed["ok"], true, "{changed}");
+        assert_eq!(changed["result"]["written"], 1);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        let Some(document::EntityType::Dimension(dimension)) =
+            app.tabs[i].scene.document.get_entity(handle)
+        else {
+            panic!("dimension missing after entities_set");
+        };
+        assert_eq!(dimension.base().block_name, "");
+        assert_eq!(
+            dimension.base().common.color,
+            document::types::Color::Index(4)
+        );
+
+        app.undo_active_tab();
+        let Some(document::EntityType::Dimension(dimension)) =
+            app.tabs[i].scene.document.get_entity(handle)
+        else {
+            panic!("dimension missing after undo");
+        };
+        assert_eq!(dimension.base().block_name, "*D_TEST");
+        assert_eq!(
+            dimension.base().common.color,
+            document::types::Color::ByLayer
+        );
+        app.redo_active_tab();
+        let Some(document::EntityType::Dimension(dimension)) =
+            app.tabs[i].scene.document.get_entity(handle)
+        else {
+            panic!("dimension missing after redo");
+        };
+        assert_eq!(dimension.base().block_name, "");
+        assert_eq!(
+            dimension.base().common.color,
+            document::types::Color::Index(4)
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn entities_set_moves_four_thousand_entities_in_one_call_and_one_undo() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let target_handle = add_test_layer(&mut app, "Bulk Target");
+        let handles = add_bulk_test_lines(&mut app, 4_000, |_| document::types::Color::ByLayer);
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let redo_before = app.tabs[i].history.redo_stack.len();
+        let handle_values: Vec<String> = handles.iter().copied().map(handle_text).collect();
+        let result = entities_set_core(
+            &mut app,
+            json!({"handles":handle_values,"layer":"bUlK tArGeT"}),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(
+            result["result"],
+            json!({"requested":4_000,"written":4_000,"unchanged":0})
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        assert!(app.tabs[i].history.pending.is_none());
+        assert!(app.tabs[i].dirty);
+        assert!(handles.iter().all(|handle| {
+            let common = app.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .unwrap()
+                .common();
+            common.layer == "Bulk Target" && common.layer_handle == Some(target_handle)
+        }));
+
+        app.undo_active_tab();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].history.redo_stack.len(), redo_before + 1);
+        assert!(handles.iter().all(|handle| {
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .unwrap()
+                .common()
+                .layer
+                == "0"
+        }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn entities_set_resets_ten_thousand_colors_in_one_call_and_one_undo() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let handles = add_bulk_test_lines(&mut app, 10_000, |index| match index % 3 {
+            0 => document::types::Color::Index(1),
+            1 => document::types::Color::Rgb { r: 24, g: 0, b: 0 },
+            _ => document::types::Color::Index(255),
+        });
+        let i = app.active_tab;
+        app.tabs[i].dirty = false;
+        let undo_before = app.tabs[i].history.undo_stack.len();
+        let redo_before = app.tabs[i].history.redo_stack.len();
+        let handle_values: Vec<String> = handles.iter().copied().map(handle_text).collect();
+        let request = json!({"handles":handle_values,"color":"ByLayer"});
+        let result = entities_set_core(&mut app, request.clone());
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(
+            result["result"],
+            json!({"requested":10_000,"written":10_000,"unchanged":0})
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before + 1);
+        assert!(app.tabs[i].history.pending.is_none());
+        assert!(app.tabs[i].dirty);
+        assert!(handles.iter().all(|handle| {
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .unwrap()
+                .common()
+                .color
+                == document::types::Color::ByLayer
+        }));
+
+        let history_after_write = app.tabs[i].history.undo_stack.len();
+        let geometry_after_write = app.tabs[i].scene.geometry_epoch;
+        let replay = entities_set_core(&mut app, request);
+        assert_eq!(
+            replay["result"],
+            json!({"requested":10_000,"written":0,"unchanged":10_000})
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), history_after_write);
+        assert_eq!(app.tabs[i].scene.geometry_epoch, geometry_after_write);
+
+        app.undo_active_tab();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo_before);
+        assert_eq!(app.tabs[i].history.redo_stack.len(), redo_before + 1);
+        assert!(handles.iter().all(|handle| {
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .unwrap()
+                .common()
+                .color
+                != document::types::Color::ByLayer
+        }));
     }
 
     #[test]
@@ -5106,7 +6072,11 @@ DEAD
         std::fs::write(&a, b"x").unwrap();
         std::fs::write(&b, b"x").unwrap();
         let finish = |app: &mut OpenCADStudio, path: &std::path::Path| {
-            let id = app.opening.as_ref().map(|o| o.id).expect("an open in flight");
+            let id = app
+                .opening
+                .as_ref()
+                .map(|o| o.id)
+                .expect("an open in flight");
             let mut doc = document::CadDocument::default();
             let mut style = document::tables::TextStyle::new("GONE");
             style.font_file = "ocs_no_such_font.shx".into();

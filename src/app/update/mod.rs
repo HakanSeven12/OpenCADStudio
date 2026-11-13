@@ -14605,13 +14605,8 @@ impl OpenCADStudio {
                         .is_none_or(|table| !table.name.eq_ignore_ascii_case(&selected_style));
 
                     if needs_load {
-                        let base = self.tabs[self.active_tab]
-                            .scene
-                            .document
-                            .source_path
-                            .as_deref()
-                            .map(std::path::Path::new)
-                            .and_then(std::path::Path::parent);
+                        let base =
+                            crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
                         match crate::io::plot_style::PlotStyleTable::load_named_at(
                             &selected_style,
                             base,

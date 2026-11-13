@@ -610,7 +610,11 @@ impl OpenCADStudio {
             }
             self.pump_plugin_requests();
             for entry in &self.command_line.history {
-                if entry.kind == crate::ui::command_line::EntryKind::Error {
+                if matches!(
+                    entry.kind,
+                    crate::ui::command_line::EntryKind::Error
+                        | crate::ui::command_line::EntryKind::Warning
+                ) {
                     eprintln!("{}", entry.text);
                 } else {
                     println!("{}", entry.text);

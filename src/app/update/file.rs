@@ -7654,13 +7654,7 @@ impl OpenCADStudio {
                     self.plot_dialog.style_missing = false;
                     self.plot_dialog.style_error = None;
                 } else {
-                    let base = self.tabs[self.active_tab]
-                        .scene
-                        .document
-                        .source_path
-                        .as_deref()
-                        .map(std::path::Path::new)
-                        .and_then(std::path::Path::parent);
+                    let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
                     match crate::io::plot_style::PlotStyleTable::load_named_at(&name, base) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
@@ -7989,13 +7983,7 @@ impl OpenCADStudio {
             self.plot_dialog.window = self.plot_window;
         }
         let mut style_error = None;
-        let drawing_base = self.tabs[self.active_tab]
-            .scene
-            .document
-            .source_path
-            .as_deref()
-            .map(std::path::Path::new)
-            .and_then(std::path::Path::parent);
+        let drawing_base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
         if !ps.current_style_sheet.is_empty()
             && self
                 .active_plot_style
@@ -8410,13 +8398,7 @@ impl OpenCADStudio {
         // object. After reopening a drawing the name may be correct while the
         // in-memory table is still the previous/default one. Plotting must not
         // silently ignore the selected CTB in that state.
-        let base = self.tabs[self.active_tab]
-            .scene
-            .document
-            .source_path
-            .as_deref()
-            .map(std::path::Path::new)
-            .and_then(std::path::Path::parent);
+        let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
         crate::io::plot_style::PlotStyleTable::load_named_at(&d.style_name, base).ok()
     }
 

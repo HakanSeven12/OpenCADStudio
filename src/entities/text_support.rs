@@ -23,11 +23,7 @@ fn resolve_font_reference_at(reference: &str, document: &Document) -> Option<Str
     if lff::is_builtin(reference) {
         return None;
     }
-    let base = document
-        .source_path
-        .as_deref()
-        .map(std::path::Path::new)
-        .and_then(std::path::Path::parent);
+    let base = crate::io::drawing_dir(document);
     crate::scene::text::sysfont::family_for_reference_at(reference, base)
 }
 

@@ -1100,6 +1100,15 @@ fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
     }
 }
 
+/// The folder of the drawing `doc` was read from, where resources stored
+/// relative to it are looked up first.
+pub(crate) fn drawing_dir(doc: &Document) -> Option<&Path> {
+    doc.source_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::parent)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_file(path: &Path) -> Result<Document, String> {
     load_file_with_progress(path, None).map(|outcome| outcome.document)

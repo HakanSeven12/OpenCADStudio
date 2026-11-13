@@ -1,8 +1,8 @@
 use document::entities::Tolerance;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{
     GlyphRun, RenderEntity, RenderObject, TextPlane, TextStroke,
 };

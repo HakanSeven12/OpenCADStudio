@@ -1,12 +1,12 @@
 use crate::t;
 use document::entities::{Polyline, Polyline2D, Polyline3D};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, format_area, format_length, parse_f64, ro_prop as ro, square_grip,
     stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;

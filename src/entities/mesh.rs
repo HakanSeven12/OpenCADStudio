@@ -3,12 +3,12 @@ use glam::Vec3;
 use kernel::geom2d::{triangulate, Tolerance};
 use kernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro, square_grip,
     stepper_prop as stepper,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;

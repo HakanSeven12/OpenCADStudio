@@ -2,12 +2,12 @@ use document::entities::Spline;
 use kernel::geom2d::Curve as KernelCurve;
 use kernel::space::{NurbsCurve3, Parameterization};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro,
     round_grip, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::t;

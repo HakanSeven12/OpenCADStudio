@@ -3,12 +3,12 @@ use document::types::Vector3;
 use glam::DVec3;
 use kernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, format_angle, format_length, parse_f64, ro_prop as ro,
     square_grip,
 };
 use crate::entities::traits::{Grippable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::t;

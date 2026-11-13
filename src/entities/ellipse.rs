@@ -7,12 +7,12 @@ use kernel::space::PlanarCurve;
 use crate::entities::curve::CurveSnap;
 use crate::t;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, format_area, format_length, oriented_triangle_grip, parse_f64,
     ro_prop as ro, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::TangentGeom;

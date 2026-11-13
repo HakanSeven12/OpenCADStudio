@@ -4691,6 +4691,53 @@ mod tests {
         );
     }
 
+    /// A row that names the data cell style is a data row wherever it is.
+    /// Drawn from its cells, the first and second rows of a table of data
+    /// rows take the data text height, as the rows below them do — also
+    /// when the table style has its three row styles and no cell styles to
+    /// look the name up in.
+    #[test]
+    fn rows_that_name_the_data_style_are_drawn_as_data_rows_wherever_they_are() {
+        use document::types::Vector3;
+        let mut document = document::Document::new();
+        let mut style = document::objects::TableStyle::standard();
+        style.title_row_style.text_height = 6.0;
+        style.header_row_style.text_height = 4.5;
+        style.data_row_style.text_height = 2.0;
+        assert!(
+            style.modern_overrides.is_empty(),
+            "the style has its three row styles only"
+        );
+        let handle = document.allocate_handle();
+        document
+            .objects
+            .insert(handle, document::objects::ObjectType::TableStyle(style));
+        let mut table = Table::new(Vector3::ZERO, 3, 1);
+        table.table_style_handle = Some(handle);
+        table.columns[0].width = 60.0;
+        for row in &mut table.rows {
+            row.height = 12.0;
+            // The data cell style, by its id.
+            row.style_id = 3;
+        }
+        // How high the text of `row` is drawn, alone in the table.
+        let drawn = |row: usize| {
+            let mut table = table.clone();
+            table.set_cell_text(row, 0, "H");
+            let wires = tessellate_table(&table, &document, false, [1.0; 4], 1.0, 1.0);
+            let text = wires
+                .iter()
+                .find(|wire| !wire.text_verts.is_empty())
+                .expect("the cell's text is drawn");
+            text.aabb[3] - text.aabb[1]
+        };
+        let (first, second, third) = (drawn(0), drawn(1), drawn(2));
+        assert!(
+            (first - third).abs() < 1e-3 && (second - third).abs() < 1e-3,
+            "the first rows' text is {first} and {second} high, a data row's {third}"
+        );
+    }
+
     /// Text wraps between the margins it is placed against: a long
     /// left-aligned line ends inside the cell, not past the
     /// cell's edge (with no table margin the text sits half its height in).

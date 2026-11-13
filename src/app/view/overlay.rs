@@ -5,7 +5,7 @@ mod mtext_tests;
 mod mtext_toolbar;
 use crate::t;
 use crate::ui::popup::context_menu::{
-    ContextMenu, MENU_PAD_TOP, MENU_ROW_H, MenuIcon, MenuItem, MenuRow,
+    ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
 };
 use crate::ui::popup::quad_menu::{QuadMsg, QuadPanel, QuadUi};
 use iced::advanced::layout;
@@ -15,8 +15,8 @@ use iced::advanced::renderer;
 use iced::advanced::widget;
 use iced::advanced::{Layout, Shell, Widget};
 use iced::widget::{
-    Space, button, checkbox, column, container, mouse_area, row, scrollable, stack, text,
-    text_input,
+    button, checkbox, column, container, mouse_area, row, scrollable, stack, text, text_input,
+    Space,
 };
 use iced::{
     Background, Border, Color, Element, Event, Fill, Length, Rectangle, Size, Theme, Vector,
@@ -452,13 +452,17 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 if length > 1.0 {
                     let along = edge / length;
                     let mut normal = iced::Vector::new(along.y, -along.x);
-                    if normal.x * (cell.corners[3].x - a.x) + normal.y * (cell.corners[3].y - a.y) > 0.0 { normal = -normal; }
+                    if normal.x * (cell.corners[3].x - a.x) + normal.y * (cell.corners[3].y - a.y) > 0.0 {
+                        normal = -normal;
+                    }
                     let ruler_line = Path::new(|p| {
-                        p.move_to(a + normal * 12.0); p.line_to(b + normal * 12.0);
+                        p.move_to(a + normal * 12.0);
+                        p.line_to(b + normal * 12.0);
                         let count = (length / 12.0).floor().clamp(1.0, 120.0) as usize;
                         for i in 0..=count {
                             let point = a + edge * (i as f32 / count as f32) + normal * 12.0;
-                            p.move_to(point); p.line_to(point + normal * if i % 5 == 0 { 7.0 } else { 3.5 });
+                            p.move_to(point);
+                            p.line_to(point + normal * if i % 5 == 0 { 7.0 } else { 3.5 });
                         }
                     });
                     frame.stroke(&ruler_line, Stroke::default().with_color(theme.palette().primary.base.color).with_width(1.0));
@@ -845,7 +849,12 @@ fn mtext_editor_content<'a>(
                     control: Element<'a, Message>|
      -> Element<'a, Message> {
         use super::super::mtext_editor::ValueOrigin;
-        if toolbar_only { return row![text(name).size(10), control].spacing(3).align_y(iced::Alignment::Center).into(); }
+        if toolbar_only {
+            return row![text(name).size(10), control]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into();
+        }
         let mark: Element<'a, Message> = match origin {
             Some(origin) => {
                 let (label, accent): (_, fn(&Theme) -> iced::Color) = match origin {
@@ -1062,7 +1071,15 @@ fn mtext_editor_content<'a>(
         let fields = scrollable(row1).direction(iced::widget::scrollable::Direction::Horizontal(
             iced::widget::scrollable::Scrollbar::new().width(3).scroller_width(3)
         )).width(width);
-        return column![fields, row![row2, mtext_toolbar::compact_status_bar(ed)].spacing(3).align_y(iced::Alignment::Center)].spacing(2).width(width).into();
+        return column![
+            fields,
+            row![row2, mtext_toolbar::compact_status_bar(ed)]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(2)
+        .width(width)
+        .into();
     }
 
     let preview_scale = ed.preview_scale();
@@ -1703,12 +1720,11 @@ pub(super) fn context_menu_editor_overlay(
         ]
         .into()
     };
-    let mut items: Vec<Element<'static, Message>> = vec![
-        text(crate::tr!("context-menu", "editor-title"))
+    let mut items: Vec<Element<'static, Message>> =
+        vec![text(crate::tr!("context-menu", "editor-title"))
             .size(12)
             .style(crate::ui::style::common::muted_style)
-            .into(),
-    ];
+            .into()];
     for row in rows {
         match row {
             // Repeat stays: it is the menu's default row.
@@ -2862,21 +2878,15 @@ mod measurement_tests {
                 ui.simulate([Event::Mouse(iced::mouse::Event::ButtonReleased(button))]);
             }
             let messages: Vec<_> = ui.into_messages().collect();
-            assert!(
-                messages
-                    .iter()
-                    .any(|m| matches!(m, Message::ViewportLeftPress))
-            );
-            assert!(
-                messages
-                    .iter()
-                    .any(|m| matches!(m, Message::ViewportRightPress))
-            );
-            assert!(
-                messages
-                    .iter()
-                    .any(|m| matches!(m, Message::ViewportMiddlePress))
-            );
+            assert!(messages
+                .iter()
+                .any(|m| matches!(m, Message::ViewportLeftPress)));
+            assert!(messages
+                .iter()
+                .any(|m| matches!(m, Message::ViewportRightPress)));
+            assert!(messages
+                .iter()
+                .any(|m| matches!(m, Message::ViewportMiddlePress)));
         }
     }
     #[test]
@@ -2974,8 +2984,6 @@ mod cell_editor_wheel_tests {
             ruler: None,
             rotation: (1.0, 0.0),
             cell: Some(cell),
-            inplace: false,
-            translucent: false,
         };
         let drawing =
             mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);
@@ -2991,10 +2999,9 @@ mod cell_editor_wheel_tests {
         ui.simulate([Event::Mouse(iced::mouse::Event::WheelScrolled {
             delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
         })]);
-        assert!(
-            ui.into_messages()
-                .any(|m| matches!(m, Message::ViewportScroll(_)))
-        );
+        assert!(ui
+            .into_messages()
+            .any(|m| matches!(m, Message::ViewportScroll(_))));
     }
 }
 
@@ -3095,20 +3102,16 @@ mod quad_view_tests {
         })]);
         ui.click("MO").expect("MO button should be clickable");
         let messages: Vec<_> = ui.into_messages().collect();
-        assert!(
-            messages
-                .iter()
-                .any(|m| matches!(m, Message::Quad(QuadMsg::Expand(true))))
-        );
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Expand(true)))));
         assert!(messages.iter().any(|m| matches!(
             m,
             Message::Quad(QuadMsg::Pick { panel_id, item_index: 0 }) if panel_id == "quad.primary"
         )));
-        assert!(
-            !messages
-                .iter()
-                .any(|m| matches!(m, Message::ViewportLeftPress))
-        );
+        assert!(!messages
+            .iter()
+            .any(|m| matches!(m, Message::ViewportLeftPress)));
     }
 
     #[test]
@@ -3164,16 +3167,12 @@ mod quad_view_tests {
     #[test]
     fn quad_outside_press_closes() {
         let messages = press_at(collapsed_quad(), iced::Point::new(40.0, 40.0));
-        assert!(
-            messages
-                .iter()
-                .any(|m| matches!(m, Message::Quad(QuadMsg::Close)))
-        );
-        assert!(
-            !messages
-                .iter()
-                .any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. })))
-        );
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Close))));
+        assert!(!messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))));
     }
 
     #[test]

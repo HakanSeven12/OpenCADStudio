@@ -186,6 +186,9 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
+        if self.mtext_editor.is_some() {
+            self.mtext_cancel();
+        }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
         }

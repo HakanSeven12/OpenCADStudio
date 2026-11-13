@@ -743,6 +743,9 @@ impl super::OpenCADStudio {
         if handle.is_some_and(|h| self.tabs[self.active_tab].scene.is_layer_locked(h)) {
             return;
         }
+        if self.mtext_editor.is_some() {
+            self.mtext_cancel();
+        }
         let mut state = MTextEditorState::new(pos, initial, height, handle);
         if let Some(p) = self.tabs[self.active_tab]
             .scene
@@ -1290,11 +1293,16 @@ impl super::OpenCADStudio {
         }
     }
 
+    /// Drop the draft only after restoring the source in its owning tab.
+    pub(in crate::app) fn close_mtext_editor(&mut self) {
+        self.restore_mtext_editor_source();
+        self.mtext_editor = None;
+    }
+
     /// Discard the editor without changing the drawing.
     pub(super) fn mtext_cancel(&mut self) {
-        self.restore_mtext_editor_source();
         self.close_table_cell_editor();
-        self.mtext_editor = None;
+        self.close_mtext_editor();
         self.command_mtext_input = false;
         self.pending_command_editor_text = None;
         self.reset_modal_geometry();

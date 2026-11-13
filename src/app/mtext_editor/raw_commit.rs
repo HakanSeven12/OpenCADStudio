@@ -237,7 +237,7 @@ impl crate::app::OpenCADStudio {
             } else {
                 self.pending_command_editor_text = Some(ed.build_mtext().value);
                 self.command_mtext_input = false;
-                self.mtext_editor = None;
+                self.close_mtext_editor();
                 self.refresh_properties();
             }
             return true;
@@ -259,7 +259,7 @@ impl crate::app::OpenCADStudio {
                     "MTEXT: an existing entity cannot be emptied here; use the drawing's delete command.",
                 );
             } else if !keep_open {
-                self.mtext_editor = None;
+                self.close_mtext_editor();
                 self.refresh_properties();
             }
             return false;
@@ -454,11 +454,12 @@ impl crate::app::OpenCADStudio {
             self.rebuild_mtext_preview();
             if matches!(self.tabs[i].scene.document.get_entity(handle), Some(EntityType::MText(_))) {
                 self.tabs[i].scene.set_mtext_editor_hidden(Some(handle));
-                if let Some(ed) = self.mtext_editor.as_mut() { ed.hidden_source_tab = Some(self.tabs[i].id); }
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.hidden_source_tab = Some(self.tabs[i].id);
+                }
             }
         } else {
-            self.restore_mtext_editor_source();
-            self.mtext_editor = None;
+            self.close_mtext_editor();
         }
         self.refresh_properties();
         true

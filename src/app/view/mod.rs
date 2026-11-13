@@ -9,11 +9,11 @@ use crate::t;
 use crate::ui::wrap_bar::DensitySwap;
 use crate::ui::wrap_bar::WrapFlow;
 use iced::widget::{
-    Row, Space, button, column, container, mouse_area, pane_grid, responsive, row, scrollable,
-    shader, stack, text,
+    button, column, container, mouse_area, pane_grid, responsive, row, scrollable, shader, stack,
+    text, Row, Space,
 };
 use iced::window;
-use iced::{Background, Border, Color, Element, Fill, Subscription, Task, Theme, keyboard};
+use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 use iced_aw::ContextMenu;
 
 #[cfg(test)]
@@ -290,7 +290,7 @@ use overlay::{
     mtext_editor_overlay, position_canvas_overlay, position_canvas_overlay_near_cursor,
     qselect_overlay, text_inline_overlay, viewport_context_menu_overlay, viewport_quad_overlay,
 };
-use viewcube::{UCS_PICKER_W, viewcube_nav_controls, viewcube_ucs_picker};
+use viewcube::{viewcube_nav_controls, viewcube_ucs_picker, UCS_PICKER_W};
 
 // Re-export the text-input element ids so sibling modules can address them at
 // the `view::` path as before the split.
@@ -1248,7 +1248,9 @@ bg={bg_ms:.1}ms n={view_count}"
                             let b = MTEXT_FRAME_BOUNDS.with(|cache| {
                                 let key = (tab.id, tab.scene.geometry_epoch, handle);
                                 if let Some((id, revision, h, bounds)) = *cache.borrow() {
-                                    if (id, revision, h) == key { return bounds; }
+                                    if (id, revision, h) == key {
+                                        return bounds;
+                                    }
                                 }
                                 let bounds = crate::entities::mtext::layout_of(mt, &tab.scene.document, false).local_bounds;
                                 *cache.borrow_mut() = Some((key.0, key.1, key.2, bounds));
@@ -1284,7 +1286,9 @@ bg={bg_ms:.1}ms n={view_count}"
                                 .into_iter().map(|(x,y)| crate::entities::common::square_grip(0,
                                     base + glam::DVec3::new(x * cos - y * sin, x * sin + y * cos, 0.0))).collect();
                             let projected: Vec<_> = project(&corners).into_iter().map(|g| g.1).collect();
-                            if projected.len() == 4 { boxes.push(projected); }
+                            if projected.len() == 4 {
+                                boxes.push(projected);
+                            }
                         }
                     }
                     let markers = screen_grips
@@ -2392,15 +2396,13 @@ bg={bg_ms:.1}ms n={view_count}"
             // Start tab: only the welcome widget over a flat background.
             // Skip every drawing-only overlay (selection markers, snap info,
             // mouse-area capturing draw clicks, viewcube, nav toolbar, …).
-            stack![
-                container(viewport_3d)
-                    .style(move |_: &Theme| container::Style {
-                        background: Some(Background::Color(bg_color)),
-                        ..Default::default()
-                    })
-                    .width(Fill)
-                    .height(Fill)
-            ]
+            stack![container(viewport_3d)
+                .style(move |_: &Theme| container::Style {
+                    background: Some(Background::Color(bg_color)),
+                    ..Default::default()
+                })
+                .width(Fill)
+                .height(Fill)]
             .width(Fill)
             .height(Fill)
         } else if thumbnail_capture_clean {
@@ -4065,7 +4067,8 @@ impl OpenCADStudio {
             } else {
                 std::time::Duration::from_millis(100)
             };
-            iced::time::every(interval).map(|_| Message::DrainPluginRequests)
+            iced::time::every(interval)
+                .map(|_| Message::DrainPluginRequests)
         } else {
             Subscription::none()
         };
@@ -4968,11 +4971,9 @@ fn start_page_content<'a>(
             .spacing(8)
             .width(Fill);
         for discussion in discussions {
-            let mut meta = iced::widget::row![
-                text(format!("#{}", discussion.number))
-                    .size(10)
-                    .style(start_muted_style),
-            ]
+            let mut meta = iced::widget::row![text(format!("#{}", discussion.number))
+                .size(10)
+                .style(start_muted_style),]
             .spacing(6)
             .align_y(iced::Center);
             if discussion.pinned {
@@ -5361,11 +5362,9 @@ fn recent_tiles<'a>(
     if large {
         column(recents.iter().map(tile)).spacing(6)
     } else {
-        column![
-            iced::widget::Row::with_children(recents.iter().map(tile))
-                .spacing(4)
-                .wrap()
-        ]
+        column![iced::widget::Row::with_children(recents.iter().map(tile))
+            .spacing(4)
+            .wrap()]
         .width(Fill)
     }
 }
@@ -5634,11 +5633,9 @@ pub(super) fn recent_files_panel<'a>(
 /// The open value list: a heading and one row per table row, the chosen row
 /// marked. Its width comes from the lines it shows, never from the canvas.
 fn value_list_panel(popup: &crate::app::visibility::TablePopup) -> Element<'_, Message> {
-    let mut col = column![
-        text(popup.header.clone())
-            .size(12)
-            .wrapping(iced::widget::text::Wrapping::None)
-    ]
+    let mut col = column![text(popup.header.clone())
+        .size(12)
+        .wrapping(iced::widget::text::Wrapping::None)]
     .spacing(2);
     for (idx, name) in popup.rows.iter().enumerate() {
         let mark: Element<'_, Message> = if popup.current == Some(idx) {
@@ -5782,9 +5779,9 @@ mod tests {
     /// with a fixed leading slot for the tick of the state in use.
     #[test]
     fn visibility_popup_left_aligns_its_state_entries() {
-        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
 
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
@@ -5874,16 +5871,12 @@ mod tests {
             Cursor::Unavailable,
             Cursor::Levitating(iced::Point::new(250.0, 200.0)),
         ] {
-            assert!(
-                ViewportPickSurface
-                    .update(&mut viewport, &press, bounds, hidden)
-                    .is_none()
-            );
-            assert!(
-                PaneDragSurface(2)
-                    .update(&mut pane, &press, bounds, hidden)
-                    .is_none()
-            );
+            assert!(ViewportPickSurface
+                .update(&mut viewport, &press, bounds, hidden)
+                .is_none());
+            assert!(PaneDragSurface(2)
+                .update(&mut pane, &press, bounds, hidden)
+                .is_none());
         }
     }
 

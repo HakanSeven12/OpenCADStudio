@@ -125,7 +125,7 @@ struct InstanceIn {
 };
 
 struct VertexOut {
-    @builtin(position) clip_pos:  vec4<f32>,
+    @invariant @builtin(position) clip_pos:  vec4<f32>,
     @location(0)       normal:    vec3<f32>,
     @location(1)       world_pos: vec3<f32>,
     @location(2)       uv_diffuse: vec2<f32>,
@@ -144,7 +144,7 @@ struct EdgeVertexIn {
 };
 
 struct EdgeVertexOut {
-    @builtin(position) clip_pos: vec4<f32>,
+    @invariant @builtin(position) clip_pos: vec4<f32>,
     @location(0) color: vec4<f32>,
 };
 

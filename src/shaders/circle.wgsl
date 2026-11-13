@@ -42,7 +42,7 @@ struct InstanceIn {
 }
 
 struct VertexOut {
-    @builtin(position) clip_pos:       vec4<f32>,
+    @invariant @builtin(position) clip_pos:       vec4<f32>,
     @location(0)       local_pos:      vec2<f32>,
     @location(1)       radius:         f32,
     @location(2) @interpolate(flat) hw_ends: vec2<f32>,

@@ -45,7 +45,7 @@ struct Uniforms {
 @group(0) @binding(2) var background_sampler: sampler;
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @invariant @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) ndc: vec2<f32>,
 };

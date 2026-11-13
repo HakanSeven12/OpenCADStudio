@@ -1,11 +1,11 @@
 //! The insertion-time `Edit Attributes` form that `ATTDIA` puts in front of the
-//! command-line prompt chain: the block being placed, one answered row per
-//! askable attribute, and the disabled slots the form keeps below them.
+//! command-line prompt chain: the block being placed and one answered row per
+//! askable attribute, fifteen to a page.
 
 use crate::app::Message;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::card_style;
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Element, Fill, Length};
 
 /// One attribute the operator answers while the block is being placed.
@@ -22,18 +22,41 @@ pub struct InsertAttrRow {
 pub struct InsertAttrState {
     pub block_name: String,
     pub rows: Vec<InsertAttrRow>,
+    /// The first row the page shows.
+    pub first: usize,
+}
+
+impl InsertAttrState {
+    /// One step forward; the last page always shows a full page, so its first
+    /// row is the fifteenth from the end.
+    pub fn next_page(&mut self) {
+        self.first = (self.first + PAGE).min(self.rows.len().saturating_sub(PAGE));
+    }
+
+    pub fn previous_page(&mut self) {
+        self.first = self.first.saturating_sub(PAGE);
+    }
+
+    fn has_previous(&self) -> bool {
+        self.first > 0
+    }
+
+    fn has_next(&self) -> bool {
+        self.first + PAGE < self.rows.len()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum InsertAttrMsg {
     Value(usize, String),
+    Previous,
+    Next,
     Ok,
     Help,
 }
 
-/// Empty slots kept below the answered attributes, as the form shows them.
-/// The reading counted fifteen; the picture of the same form shows fourteen.
-const SPARE_SLOTS: usize = 15;
+/// Rows a page shows; Previous and Next step through longer lists.
+pub const PAGE: usize = 15;
 
 /// Width of the label column; the block name and every field start after it.
 const LABEL_WIDTH: f32 = 175.0;
@@ -66,31 +89,31 @@ fn slot<'a>(value: &'a str, index: usize) -> Element<'a, Message> {
         .into()
 }
 
-fn empty_slot() -> Element<'static, Message> {
-    text_input("", "")
-        .size(12)
-        .padding([5, 8])
-        .width(Fill)
-        .style(field_style)
-        .into()
-}
-
 pub fn view(
     state: &InsertAttrState,
-    _sizing: crate::ui::modal::ModalSizing,
+    sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'_, Message> {
-    let mut body = column![line(
-        caption(&crate::t!("Block name")),
-        text(state.block_name.clone()).size(12).into()
-    )]
-    .spacing(6);
-    for (index, row) in state.rows.iter().enumerate() {
+    let total = state.rows.len();
+    let last = (state.first + PAGE).min(total);
+    let mut name = row![text(state.block_name.clone()).size(12)];
+    if total > PAGE {
+        name = name.push(Space::new().width(Fill)).push(
+            text(format!("{}–{} / {}", state.first + 1, last, total))
+                .size(11)
+                .style(crate::ui::style::readable::muted_style),
+        );
+    }
+    let mut body = column![line(caption(&crate::t!("Block name")), name.into())].spacing(6);
+    for (index, row) in state.rows.iter().enumerate().take(last).skip(state.first) {
         body = body.push(line(caption(&row.label), slot(&row.value, index)));
     }
-    for _ in 0..SPARE_SLOTS {
-        body = body.push(line(String::new(), empty_slot()));
-    }
-    // One block is being placed, so there is nothing to step between.
+    let step = |label: &str, go: bool, msg: InsertAttrMsg| {
+        dialog_button_styled_opt(
+            label.to_owned(),
+            go.then_some(Message::InsertAttrDialog(msg)),
+            button::secondary,
+        )
+    };
     let spread = || Space::new().width(Fill);
     let footer = row![
         dialog_button(
@@ -101,9 +124,9 @@ pub fn view(
         spread(),
         dialog_button(crate::t!("Cancel").into_owned(), Message::CloseModal, false),
         spread(),
-        dialog_button_styled_opt(crate::t!("Previous").into_owned(), None, button::secondary),
+        step(&crate::t!("Previous"), state.has_previous(), InsertAttrMsg::Previous),
         spread(),
-        dialog_button_styled_opt(crate::t!("Next").into_owned(), None, button::secondary),
+        step(&crate::t!("Next"), state.has_next(), InsertAttrMsg::Next),
         spread(),
         dialog_button(
             crate::t!("Help").into_owned(),
@@ -111,14 +134,17 @@ pub fn view(
             false,
         ),
     ];
+    // The rows scroll inside the frame so the footer is never pushed out of it.
     container(
         column![
-            container(body).padding([10, 8]),
+            scrollable(container(body).padding([10, 8])).height(sizing.height),
             container(footer).padding([10, 12]).width(Fill)
         ]
-        .spacing(8),
+        .spacing(8)
+        .height(sizing.height),
     )
     .style(card_style)
     .width(Fill)
+    .height(sizing.height)
     .into()
 }

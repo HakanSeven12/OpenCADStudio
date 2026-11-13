@@ -54,6 +54,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// block, base point, unit, object mode and path, and `dialog_ok` applies it.
 /// Native dock panels are driven through `panel_input` and `panel_button`:
 /// form-only input, then the declared synchronous document-bound command.
+/// The attribute form pages fifteen rows at a time: `dialog_page`.
 #[cfg(test)]
 const TOOL_SCHEMA_DIGEST: &str = "99bc4906b90c5076dcf1dd42fb2dd8e461e2c09a8a06295359d1b2b358908d88";
 const MAX_REQUEST: usize = 1_048_576;

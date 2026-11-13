@@ -13856,9 +13856,9 @@ impl Scene {
     ) -> InteractionCandidates {
         let direct = |index: &InteractionIndex, wires| match snap {
             Some(category) => index.query_snap_xy_with_category(wires, aabb, category),
-            None if pick_only => index.query_xy_selection(wires, aabb, true),
-            None if area_only => index.query_xy_area(wires, aabb),
-            None => index.query_xy(wires, aabb),
+            None if pick_only => index.query_xy_selection_for_materialize(wires, aabb, true),
+            None if area_only => index.query_xy_selection_for_materialize(wires, aabb, false),
+            None => index.query_xy_for_materialize(wires, aabb),
         };
         if let Some((base_epoch, base, changes)) = self.interaction_overlay_base() {
             // Nothing changed since the base was indexed: query its own
@@ -13897,54 +13897,62 @@ impl Scene {
             );
             let local_ms = t_local.elapsed().as_secs_f64() * 1000.0;
             let t_remap = iced::time::Instant::now();
-            let result = match (snap, base_parts, changed_parts) {
-                (Some(category), Some(base_parts), Some(changed_parts)) => {
-                    let mut result = base.query_remapped_snap_xy_from_parts_with_category(
-                        Arc::clone(&local),
-                        &base_slots,
-                        base_parts,
-                        aabb,
-                        category,
-                    );
-                    result.extend_indexed(
-                        changed_index.query_remapped_snap_xy_from_parts_with_category(
-                            local,
-                            &changed_slots,
-                            changed_parts,
+            // `indexed_interaction_candidates_xy` runs `materialize_stubs` next,
+            // which discards all primitive ref lists whenever any candidate
+            // wire is a stub, so skip remapping them in that case.
+            let result = if local.has_any_stub() {
+                InteractionCandidates::shared_indexed_all(local, Some(aabb))
+            } else {
+                match (snap, base_parts, changed_parts) {
+                    (Some(category), Some(base_parts), Some(changed_parts)) => {
+                        let mut result = base.query_remapped_snap_xy_from_parts_with_category(
+                            Arc::clone(&local),
+                            &base_slots,
+                            base_parts,
                             aabb,
                             category,
-                        ),
-                    );
-                    result
-                }
-                _ if area_only || pick_only => {
-                    let mut result = base.query_remapped_xy_area(
-                        Arc::clone(&local),
-                        &base_slots,
-                        aabb,
-                        pick_only,
-                    );
-                    let replacements = changed_index.query_remapped_xy_area(
-                        local,
-                        &changed_slots,
-                        aabb,
-                        pick_only,
-                    );
-                    if pick_only {
-                        result.extend_indexed(replacements);
-                    } else {
-                        result.extend_indexed_area(replacements);
+                        );
+                        result.extend_indexed(
+                            changed_index.query_remapped_snap_xy_from_parts_with_category(
+                                local,
+                                &changed_slots,
+                                changed_parts,
+                                aabb,
+                                category,
+                            ),
+                        );
+                        result
                     }
-                    result
-                }
-                _ => {
-                    let mut result = base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
-                    result.extend_indexed(changed_index.query_remapped_xy(
-                        local,
-                        &changed_slots,
-                        aabb,
-                    ));
-                    result
+                    _ if area_only || pick_only => {
+                        let mut result = base.query_remapped_xy_area(
+                            Arc::clone(&local),
+                            &base_slots,
+                            aabb,
+                            pick_only,
+                        );
+                        let replacements = changed_index.query_remapped_xy_area(
+                            local,
+                            &changed_slots,
+                            aabb,
+                            pick_only,
+                        );
+                        if pick_only {
+                            result.extend_indexed(replacements);
+                        } else {
+                            result.extend_indexed_area(replacements);
+                        }
+                        result
+                    }
+                    _ => {
+                        let mut result =
+                            base.query_remapped_xy(Arc::clone(&local), &base_slots, aabb);
+                        result.extend_indexed(changed_index.query_remapped_xy(
+                            local,
+                            &changed_slots,
+                            aabb,
+                        ));
+                        result
+                    }
                 }
             };
             let remap_ms = t_remap.elapsed().as_secs_f64() * 1000.0;

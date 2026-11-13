@@ -1897,8 +1897,10 @@ pub(crate) fn translated_prototype_wire(
     name: &str,
     delta: [f64; 3],
 ) -> WireModel {
-    let mut wire = source.clone();
-    wire.name = name.to_string();
+    if delta == [0.0, 0.0, 0.0] {
+        return source.clone_with_name(name);
+    }
+    let mut wire = source.clone_with_name(name);
     if let Some(stub) = &source.stub {
         wire.stub = Some(Arc::new(
             crate::scene::model::instance_model::InstanceStub {
@@ -1970,13 +1972,8 @@ pub(crate) fn translated_prototype_wire(
     wire
 }
 
-fn translate_double_single(points: &mut [[f32; 3]], lows: &mut Vec<[f32; 3]>, delta: [f64; 3]) {
-    if points.is_empty() {
-        return;
-    }
-    if lows.len() != points.len() {
-        lows.resize(points.len(), [0.0; 3]);
-    }
+#[inline]
+fn translate_ds_slice(points: &mut [[f32; 3]], lows: &mut [[f32; 3]], delta: [f64; 3]) {
     for (point, low) in points.iter_mut().zip(lows.iter_mut()) {
         for axis in 0..3 {
             let value = point[axis] as f64 + low[axis] as f64 + delta[axis];
@@ -1985,6 +1982,42 @@ fn translate_double_single(points: &mut [[f32; 3]], lows: &mut Vec<[f32; 3]>, de
             low[axis] = (value - high as f64) as f32;
         }
     }
+}
+
+fn translate_double_single(points: &mut [[f32; 3]], lows: &mut Vec<[f32; 3]>, delta: [f64; 3]) {
+    if points.is_empty() {
+        return;
+    }
+    if lows.len() != points.len() {
+        // Avoid allocating a zero-residual buffer unless some coordinate
+        // actually leaves a non-zero double-single remainder after translation.
+        if lows.is_empty() {
+            let point_count = points.len();
+            for (index, point) in points.iter_mut().enumerate() {
+                for axis in 0..3 {
+                    let value = point[axis] as f64 + delta[axis];
+                    let high = value as f32;
+                    let rem = (value - high as f64) as f32;
+                    point[axis] = high;
+                    if rem != 0.0 {
+                        lows.resize(point_count, [0.0; 3]);
+                        lows[index][axis] = rem;
+                        for rest_axis in (axis + 1)..3 {
+                            let v = point[rest_axis] as f64 + delta[rest_axis];
+                            let h = v as f32;
+                            point[rest_axis] = h;
+                            lows[index][rest_axis] = (v - h as f64) as f32;
+                        }
+                        translate_ds_slice(&mut points[index + 1..], &mut lows[index + 1..], delta);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+        lows.resize(points.len(), [0.0; 3]);
+    }
+    translate_ds_slice(points, lows, delta);
 }
 
 fn aabb_pixel_size(local_aabb: [f32; 4], world_per_pixel: f32) -> f32 {

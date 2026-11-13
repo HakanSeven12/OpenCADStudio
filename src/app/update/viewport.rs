@@ -1058,7 +1058,9 @@ impl OpenCADStudio {
             self.box_selection_handles(i, &edit_cam, bounds, local(anchor), local(p), crossing);
         handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
         self.filter_handles_reject_locked(i, &mut handles);
-        self.tabs[i].scene.set_box_hover_highlights(&handles);
+        self.tabs[i].scene.set_box_hover_highlights_limited(
+            &handles, self.model_space.selection_preview_limit as usize,
+        );
         let elapsed = crate::perf::elapsed_ms(started);
         if elapsed >= 4.0 {
             crate::perf_record!(

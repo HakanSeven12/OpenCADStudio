@@ -1392,6 +1392,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "WINDOWAREACOLOR",
         "CROSSINGAREACOLOR",
         "SELECTIONPREVIEW",
+        "SELECTIONPREVIEWLIMIT",
         "GRIPSIZE",
         "GRIPCOLOR",
         "GRIPHOT",

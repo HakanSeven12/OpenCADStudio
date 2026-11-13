@@ -8328,11 +8328,16 @@ impl Scene {
     /// Roll over everything a selection box still being drawn would catch,
     /// before the release commits it. An empty slice clears the preview.
     pub fn set_box_hover_highlights(&mut self, handles: &[Handle]) {
+        self.set_box_hover_highlights_limited(handles, usize::MAX);
+    }
+
+    pub fn set_box_hover_highlights_limited(&mut self, handles: &[Handle], limit: usize) {
         let handles = if handles.is_empty() {
             HashSet::default()
         } else {
             self.handles_expanded_for_selectable_groups(handles)
         };
+        let handles = if handles.len() > limit { HashSet::default() } else { handles };
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
             self.bump_selection();

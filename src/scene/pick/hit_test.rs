@@ -2052,7 +2052,7 @@ fn large_wire_screen_bounds(
         && view_rot.y_axis.w.abs() < 1e-9
         && view_rot.z_axis.w.abs() < 1e-9
         && (view_rot.w_axis.w - 1.0).abs() < 1e-6;
-    if !flat_ortho || wire.points.len() < 8192 || wire.point_marker.is_some()
+    if !flat_ortho || wire.points.len() < 256 || wire.point_marker.is_some()
         || wire.world_width != 0.0 || !wire.taper_widths.is_empty()
         || !wire.text_verts.is_empty() || !wire.fill_tris.is_empty()
         || !wire.pick_tris.is_empty() || aabb == WireModel::UNBOUNDED_AABB

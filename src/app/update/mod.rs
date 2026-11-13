@@ -12474,6 +12474,7 @@ impl OpenCADStudio {
                 self.model_space.selection_highlight_color = 0;
                 self.model_space.selection_effect = true;
                 self.model_space.selection_preview = 3;
+                self.model_space.selection_preview_limit = 20_000;
                 self.model_space.grip_size = 5;
                 self.model_space.grip_color = 0;
                 self.model_space.grip_hot = 0;

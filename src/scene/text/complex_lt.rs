@@ -659,7 +659,9 @@ impl StrokeBatches {
             return;
         }
         // NaN keeps individual strokes disconnected in the shared buffer.
-        const MAX_BATCH_POINTS: usize = 16_384;
+        // Keep bounds reasonably local so box-edge tests can skip distant
+        // pattern chunks without expanding every individual stroke.
+        const MAX_BATCH_POINTS: usize = 2_048;
         if !self.pending.is_empty() && self.pending.len() + points.len() + 1 > MAX_BATCH_POINTS {
             self.flush_pending();
         }
@@ -801,6 +803,27 @@ fn reads_upside_down(angle: f32) -> bool {
 mod upright_tests {
     use super::apply_along;
     use crate::io::linetypes::{ComplexLt, LtRotation, LtSegment};
+
+    #[test]
+    fn batched_strokes_preserve_breaks_across_chunks() {
+        let mut batches = super::StrokeBatches::default();
+        for i in 0..1000 {
+            batches.push(vec![[i as f32, 0.0, 0.0], [i as f32 + 0.5, 0.0, 0.0]], vec![]);
+        }
+        let batches = batches.finish();
+        assert!(batches.len() > 1);
+        let mut strokes = 0;
+        for (points, widths) in batches {
+            assert!(points.len() <= 2048);
+            assert!(widths.is_empty());
+            for stroke in points.split(|point| point[0].is_nan()) {
+                assert_eq!(stroke.len(), 2);
+                assert_eq!(stroke[1][0] - stroke[0][0], 0.5);
+                strokes += 1;
+            }
+        }
+        assert_eq!(strokes, 1000);
+    }
 
     /// Text vertices of one `GAS`-style repeat along `path`.
     fn text_xs(path: [[f32; 3]; 2], rot_mode: LtRotation) -> Vec<[f32; 2]> {

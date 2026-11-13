@@ -52,8 +52,10 @@ pub(crate) use log_file::write_line as write_log_line;
 pub(crate) use log_file::{
     log_file_folder_setting, log_file_mode, set_log_file_folder, set_log_file_mode,
 };
+mod anno_scale_prompt;
 mod hyperlink;
 pub(crate) use group_display::{group_display_mode, set_group_display_mode};
+pub(crate) use anno_scale_prompt::{annotation_scale_prompt, set_annotation_scale_prompt};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
 mod inquiry;
 mod layerprops;
@@ -158,6 +160,7 @@ impl OpenCADStudio {
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
         self.remember_selection_before_command(cmd);
         let task = self.dispatch_command_inner(cmd, false);
+        self.ask_annotation_scale_if_first();
         self.clear_idle_tool_highlight();
         task
     }
@@ -228,6 +231,7 @@ impl OpenCADStudio {
     /// and never get silent substitution.
     pub(super) fn dispatch_command_or_suggest(&mut self, cmd: &str) -> Task<Message> {
         let task = self.dispatch_command_inner(cmd, true);
+        self.ask_annotation_scale_if_first();
         self.clear_idle_tool_highlight();
         task
     }

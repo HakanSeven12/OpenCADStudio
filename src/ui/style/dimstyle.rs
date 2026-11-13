@@ -670,30 +670,8 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
                 (tr!("dim-style", "delete"), Some(msg(DsMsg::Delete(name.clone())))),
             ]));
         }
-        let key = style.name.to_lowercase();
-        for child in v
-            .styles
-            .iter()
-            .filter(listed)
-            .filter(|c| parent_of(&c.name).as_deref() == Some(key.as_str()))
-        {
-            let selected = child.name == v.selected && !d.overrides_selected;
-            let label = family_member(&child.name).map(|(_, l)| l).unwrap_or_default();
-            let child_name = child.name.clone();
-            rows.push(
-                mouse_area(list_cell(text(label).size(11).into(), selected, 18.0))
-                    .on_press(msg(DsMsg::Select(child_name.clone())))
-                    .on_right_press(msg(DsMsg::Context(Some(child_name.clone()))))
-                    .into(),
-            );
-            if d.context.as_deref() == Some(child.name.as_str()) {
-                rows.push(context_actions(vec![
-                    (tr!("dim-style", "set-current"), None),
-                    (tr!("dim-style", "rename"), None),
-                    (tr!("dim-style", "delete"), Some(msg(DsMsg::Delete(child_name)))),
-                ]));
-            }
-        }
+        // The current style's overrides come first under it, then its
+        // family members.
         if style.name.eq_ignore_ascii_case(v.current) && !v.overrides.is_empty() {
             let on = d.overrides_selected;
             rows.push(
@@ -719,6 +697,30 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
                         Some(msg(DsMsg::Delete(OVERRIDES.to_string()))),
                     ),
                     (tr!("dim-style", "save-to-current"), Some(msg(DsMsg::SaveOverrides))),
+                ]));
+            }
+        }
+        let key = style.name.to_lowercase();
+        for child in v
+            .styles
+            .iter()
+            .filter(listed)
+            .filter(|c| parent_of(&c.name).as_deref() == Some(key.as_str()))
+        {
+            let selected = child.name == v.selected && !d.overrides_selected;
+            let label = family_member(&child.name).map(|(_, l)| l).unwrap_or_default();
+            let child_name = child.name.clone();
+            rows.push(
+                mouse_area(list_cell(text(label).size(11).into(), selected, 18.0))
+                    .on_press(msg(DsMsg::Select(child_name.clone())))
+                    .on_right_press(msg(DsMsg::Context(Some(child_name.clone()))))
+                    .into(),
+            );
+            if d.context.as_deref() == Some(child.name.as_str()) {
+                rows.push(context_actions(vec![
+                    (tr!("dim-style", "set-current"), None),
+                    (tr!("dim-style", "rename"), None),
+                    (tr!("dim-style", "delete"), Some(msg(DsMsg::Delete(child_name)))),
                 ]));
             }
         }

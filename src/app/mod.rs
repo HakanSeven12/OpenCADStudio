@@ -953,6 +953,7 @@ pub(super) struct OpenCADStudio {
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
+    anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
     table_cell_warning: Option<(
         crate::ui::window::table_cell_dialog::CellFormatState,
         Vec<String>,
@@ -3245,6 +3246,8 @@ pub enum ModalKind {
     TableCellBlock,
     TableCellFormat,
     TableCellWarning,
+    /// The annotation scale asked for before a session's first annotative text.
+    AnnotationScalePrompt,
     /// A value typed into a cell that is not of the cell's data type.
     TableCellEntry,
     PdfShxSettings,
@@ -5889,6 +5892,7 @@ pub enum Message {
     DimInspect(crate::ui::window::dim_inspect_dialog::DimInspectMsg),
     /// An edit in a picked table cell window (Cell Borders, Cell Contents).
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
+    AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.
     Spell(crate::ui::window::spell_dialog::SpellMsg),
@@ -6177,6 +6181,7 @@ impl OpenCADStudio {
             table_cell_contents: None,
             table_cell_block: None,
             table_cell_format: None,
+            anno_scale_prompt: None,
             table_cell_warning: None,
             table_cell_entry: None,
             table_cell_entry_typed: false,

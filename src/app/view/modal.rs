@@ -72,6 +72,7 @@ impl OpenCADStudio {
             Some(K::TableCellBlock) => crate::tr!("table-cells", "block-title"),
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
+            Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
             Some(K::TableCellEntry) => crate::tr!("table-cells", "entry-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
@@ -606,6 +607,12 @@ impl OpenCADStudio {
                 let state = self.table_cell_block.as_ref()?;
                 sized_flow(ex, 470, 330, |flow| {
                     crate::ui::window::table_cell_dialog::view_block(state, flow)
+                })
+            }
+            super::super::ModalKind::AnnotationScalePrompt => {
+                let state = self.anno_scale_prompt.as_ref()?;
+                sized_flow(ex, 440, 250, |flow| {
+                    crate::ui::window::anno_scale_prompt::view(state, flow)
                 })
             }
             super::super::ModalKind::TableCellWarning => {

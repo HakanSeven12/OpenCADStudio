@@ -174,6 +174,7 @@ pub(super) const NAMES: &[&str] = &[
     "object_scale_dialog",
     "mleader_style_dialog",
     "dimstyle_dialog",
+    "anno_scale_prompt",
     "scale_list_dialog",
     "spell_dialog",
     "table_cell_tab",
@@ -3162,6 +3163,22 @@ impl OpenCADStudio {
             // "load_cancel", "reload=this|all|skip|skip_rest|cancel",
             // "text_styles", "ok", "cancel". Compare:
             // "first=<style>", "second=<style|none>", "copy", "compare_close".
+            // The annotation scale question: "pick=<scale>", "dont_ask=0|1",
+            // "ok".
+            "anno_scale_prompt" => {
+                use crate::ui::window::anno_scale_prompt::AnnoScaleMsg as A;
+                if !self.focus_dialog(crate::app::ModalKind::AnnotationScalePrompt) {
+                    return Err(failure("no_dialog", "The annotation scale question is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                Message::AnnoScalePrompt(match key {
+                    "pick" => A::Pick(value.to_string()),
+                    "dont_ask" => A::DontAsk(value == "1"),
+                    "ok" => A::Ok,
+                    _ => return Err(failure("invalid_value", spec)),
+                })
+            }
             "dimstyle_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::DimStyle) {
                     return Err(failure(

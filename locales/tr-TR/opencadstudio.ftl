@@ -9682,3 +9682,11 @@ dim-style =
     .short-diameter = Çap
     .short-ordinate = Koordinat
     .short-leaders = Kılavuz
+
+anno-scale-prompt =
+    .title = Açıklama Ölçeği
+    .heading = Açıklamalı bir nesne oluşturuyorsunuz.
+    .note = Açıklama ölçeğini, açıklamanın görüneceği ölçeğe ayarlayın.
+    .scale = Açıklama ölçeği
+    .dont-ask = Bir daha sorma
+    .ok = Tamam

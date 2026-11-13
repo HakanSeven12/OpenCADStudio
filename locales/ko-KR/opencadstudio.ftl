@@ -9752,3 +9752,11 @@ dim-style =
     .short-diameter = Diameter
     .short-ordinate = Ordinate
     .short-leaders = Leader
+
+anno-scale-prompt =
+    .title = Annotation Scale
+    .heading = You are creating an annotative object.
+    .note = Set the annotation scale to the scale at which the annotation is meant to show.
+    .scale = Annotation scale
+    .dont-ask = Don't ask again
+    .ok = OK

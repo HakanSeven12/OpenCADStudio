@@ -378,6 +378,7 @@ impl OpenCADStudio {
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
+            Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
             // Cancel drops the typed value; the cell keeps its value and type.
             Some(TableCellEntry) => self.table_cell_entry = None,
             Some(HatchBoundaryWarning) => self.close_hatch_boundary_warning(),
@@ -3093,6 +3094,7 @@ impl OpenCADStudio {
             Message::PdfPassword(message) => self.update_pdf_password(message),
             Message::DimInspect(message) => self.update_dim_inspect(message),
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
+            Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),

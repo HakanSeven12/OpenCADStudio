@@ -1110,11 +1110,7 @@ impl OpenCADStudio {
                     glam::DVec3::from_array(storage.y_axis),
                 );
                 let sources_started = crate::perf::enabled().then(iced::time::Instant::now);
-                let mut boundary_sources =
-                    self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
-                self.tabs[i]
-                    .scene
-                    .retain_sources_on_screen(&mut boundary_sources, plane);
+                let boundary_sources = self.tabs[i].scene.boundary_sources_on_screen(plane, 1.0e-6);
                 let sources_ms = crate::perf::elapsed_ms(sources_started);
                 let (source_count, segment_count, curve_count) = if perf_hatch {
                     (
@@ -1220,11 +1216,7 @@ impl OpenCADStudio {
             "GRADIENT" => {
                 use crate::modules::draw::draw::hatch::HatchCommand;
                 let plane = crate::command::WorkingPlane::default();
-                let mut boundary_sources =
-                    self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
-                self.tabs[i]
-                    .scene
-                    .retain_sources_on_screen(&mut boundary_sources, plane);
+                let boundary_sources = self.tabs[i].scene.boundary_sources_on_screen(plane, 1.0e-6);
                 let new_cmd = HatchCommand::new(boundary_sources, Vec::new(), None, plane)
                     .gradient()
                     .with_origin(self.tabs[i].scene.document.hatch_origin())
@@ -1248,10 +1240,7 @@ impl OpenCADStudio {
                 } else {
                     crate::command::WorkingPlane::default()
                 };
-                let mut sources = self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
-                self.tabs[i]
-                    .scene
-                    .retain_sources_on_screen(&mut sources, plane);
+                let sources = self.tabs[i].scene.boundary_sources_on_screen(plane, 1.0e-6);
                 let selected = self.tabs[i]
                     .scene
                     .selected_entities()

@@ -1513,6 +1513,7 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn on_command_escape(&mut self) -> Task<Message> {
         self.table_edit_command_line = false;
+        self.tabs[self.active_tab].multiple_cmd = None;
         self.tabs[self.active_tab].measurement.clear();
         // Escape also closes the overlapping-objects list.
         if self.cycle_candidates.take().is_some() {

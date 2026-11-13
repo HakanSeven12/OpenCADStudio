@@ -2888,6 +2888,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Nada para plotar: o espaço do modelo não contém geometria imprimível.
     .oops-nothing-to-restore = OOPS: nada para restaurar.
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ objetos restaurados.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio pronto.
     .open-discussions-on-github = Abrir Discussões no GitHub
     .open-file-title-case = Abrir arquivo

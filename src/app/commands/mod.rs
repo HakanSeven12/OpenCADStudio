@@ -1081,6 +1081,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "QLEADER",
         // Restore the last-erased objects.
         "OOPS",
+        // Repeat the next command until it is cancelled.
+        "MULTIPLE",
         // Plan (top) view.
         "PICKADD",
         "PICKDRAG",

@@ -2900,6 +2900,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = لا شيء للطباعة: لا تحتوي مساحة النموذج على هندسة قابلة للطباعة.
     .oops-nothing-to-restore = OOPS: لا شيء لاستعادته.
     .oops-restored-n-object-s = OOPS: استُعيد __ocs_fmt_0__ كائن.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio جاهز.
     .open-discussions-on-github = فتح المناقشات على GitHub
     .open-file-title-case = فتح ملف

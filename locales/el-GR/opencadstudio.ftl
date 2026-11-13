@@ -2887,6 +2887,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Τίποτα για εκτύπωση: ο χώρος μοντέλου δεν περιέχει εκτυπώσιμη γεωμετρία.
     .oops-nothing-to-restore = OOPS: δεν υπάρχει τίποτα για επαναφορά.
     .oops-restored-n-object-s = OOPS: επαναφέρθηκαν __ocs_fmt_0__ αντικείμενο(α).
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Το Open CAD Studio είναι έτοιμο.
     .open-discussions-on-github = Άνοιγμα συζητήσεων στο GitHub
     .open-file-title-case = Άνοιγμα αρχείου

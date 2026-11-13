@@ -2871,6 +2871,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Çizilecek bir şey yok: Model alanında yazdırılabilir geometri bulunmuyor.
     .oops-nothing-to-restore = OOPS: Geri yüklenecek bir şey yok.
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ nesne geri yüklendi.
+    .enter-command-name-to-repeat = Tekrarlanacak komut adını girin:
     .open-cad-studio-ready = Open CAD Studio hazır.
     .open-discussions-on-github = Tartışmaları GitHub'da Aç
     .open-file-title-case = Dosya Aç

@@ -2876,6 +2876,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = कुछ भी नहीं: मॉडल स्पेस में कोई प्रिंट करने योग्य ज्यामिति नहीं है।
     .oops-nothing-to-restore = OOPS: बहाल करने के लिए कुछ नहीं।
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ ऑब्जेक्ट (s) को पुनर्स्थापित किया गया।
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio तैयार है।
     .open-discussions-on-github = GitHub पर खुला चर्चा
     .open-file-title-case = ओपन फाइल

@@ -2898,6 +2898,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = ບໍ່ມີສິ່ງໃດໃຫ້ພິມ: ພື້ນທີ່ Model ບໍ່ມີຮູບຊົງທີ່ສາມາດພິມໄດ້.
     .oops-nothing-to-restore = OOPS: ບໍ່ມີຫຍັງໃຫ້ກູ້ຄືນ.
     .oops-restored-n-object-s = OOPS: ກູ້ຄືນວັດຖຸແລ້ວ __ocs_fmt_0__ ອັນ.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio ພ້ອມໃຊ້ງານແລ້ວ.
     .open-discussions-on-github = ເປີດຫົວຂໍ້ສົນທະນາເທິງ GitHub
     .open-file-title-case = ເປີດໄຟລ໌

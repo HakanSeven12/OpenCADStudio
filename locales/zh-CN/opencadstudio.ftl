@@ -2875,6 +2875,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = 无图:模型空间中没有可打印的几何.
     .oops-nothing-to-restore = OOPS:没有恢复。
     .oops-restored-n-object-s = OOPS:已恢复的__ocs_fmt_0__对象。
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio 已就绪。
     .open-discussions-on-github = 在 GitHub 上打开讨论
     .open-file-title-case = 打开文件

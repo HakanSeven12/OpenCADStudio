@@ -2891,6 +2891,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Нечего делать: модельное пространство не содержит печатной геометрии.
     .oops-nothing-to-restore = OOPS: не восстанавливать.
     .oops-restored-n-object-s = OOPS: восстановлено объектов: __ocs_fmt_0__.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio готова к работе.
     .open-discussions-on-github = Открытые дискуссии на GitHub
     .open-file-title-case = Открытый файл

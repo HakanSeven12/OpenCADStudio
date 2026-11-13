@@ -222,6 +222,8 @@ pub(super) struct DocumentTab {
     /// "Previous" keyword at any Select objects prompt (#426).
     pub(super) prev_selection: Vec<document::Handle>,
     pub(super) last_cmd: Option<String>,
+    /// MULTIPLE: the command started again each time it ends, until Escape.
+    pub(super) multiple_cmd: Option<String>,
     /// INSNAME: the last block inserted in this drawing, offered as `-INSERT`'s
     /// default. It belongs to the drawing, so a name remembered here is never
     /// offered in another one.
@@ -833,6 +835,7 @@ impl DocumentTab {
             layiso_state: None,
             layiso_mode: LayisoMode::Off,
             last_cmd: None,
+            multiple_cmd: None,
             insname: String::new(),
             last_draw_anchor: None,
             snap_result: None,

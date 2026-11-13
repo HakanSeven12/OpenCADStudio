@@ -2887,6 +2887,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = 플롯할 항목 없음: 모형 공간에는 인쇄 가능한 형상이 없습니다.
     .oops-nothing-to-restore = OOPS: 복원할 항목이 없습니다.
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ 개체를 복원했습니다.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio가 준비되었습니다.
     .open-discussions-on-github = GitHub에 대한 공개 토론
     .open-file-title-case = 파일 열기

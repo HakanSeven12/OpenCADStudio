@@ -2890,6 +2890,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Không có gì để in: không gian mô hình không chứa hình học có thể in.
     .oops-nothing-to-restore = OOPS: không có gì để khôi phục.
     .oops-restored-n-object-s = OOPS: đã khôi phục __ocs_fmt_0__ đối tượng.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio đã sẵn sàng.
     .open-discussions-on-github = Mở Thảo luận trên GitHub
     .open-file-title-case = Mở Tệp

@@ -1475,7 +1475,13 @@ impl OpenCADStudio {
             self.focus_cmd_input()
         };
         crate::ui::ribbon::keytip_note_command_finished();
-        Task::batch([dispatched, focus])
+        // MULTIPLE: the command ended without Escape, so it starts again.
+        let tab = &self.tabs[self.active_tab];
+        let again = match (&tab.active_cmd, &tab.multiple_cmd) {
+            (None, Some(cmd)) => Task::done(Message::Command(cmd.clone())),
+            _ => Task::none(),
+        };
+        Task::batch([dispatched, focus, again])
     }
 
     // --- C2a handlers: flow / lifecycle (thin-router targets, bodies moved verbatim) ---
@@ -1599,6 +1605,7 @@ impl OpenCADStudio {
     fn handle_cancel(&mut self, cancel: CmdResult) {
         crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
+        self.tabs[i].multiple_cmd = None;
         if self.tabs[i].pending_parameter_set_follow_up.is_some()
             || self.tabs[i].pending_xy_box_set.is_some()
             || self.tabs[i].pending_action_pair.is_some()

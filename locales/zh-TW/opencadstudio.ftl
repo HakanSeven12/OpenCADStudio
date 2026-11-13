@@ -2887,6 +2887,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = 無法出圖：模型空間中沒有可列印的幾何圖形。
     .oops-nothing-to-restore = OOPS：沒有可還原的項目。
     .oops-restored-n-object-s = OOPS：已還原 __ocs_fmt_0__ 個物件。
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio 已就緒。
     .open-discussions-on-github = 在 GitHub 上開啟討論
     .open-file-title-case = 開啟檔案

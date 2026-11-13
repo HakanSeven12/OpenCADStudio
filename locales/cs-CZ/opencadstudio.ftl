@@ -2892,6 +2892,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Není co vykreslit: modelový prostor neobsahuje žádnou vykreslitelnou geometrii.
     .oops-nothing-to-restore = OOPS: není co obnovit.
     .oops-restored-n-object-s = OOPS: obnoveno objektů: __ocs_fmt_0__.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio je připraveno.
     .open-discussions-on-github = Otevřít diskuze na GitHubu
     .open-file-title-case = Otevřít soubor

@@ -2878,6 +2878,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = 印刷対象がありません。モデル空間に印刷可能なジオメトリがありません。
     .oops-nothing-to-restore = OOPS: 復元するものがありません。
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ 個を復元しました。
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio の準備ができました。
     .open-discussions-on-github = GitHub でディスカッションを開く
     .open-file-title-case = ファイルを開く

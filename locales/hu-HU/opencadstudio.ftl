@@ -2881,6 +2881,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Nincs mit nyomtatni: a modelltér nem tartalmaz nyomtatható geometriát.
     .oops-nothing-to-restore = OOPS: nincs mit visszaállítani.
     .oops-restored-n-object-s = OOPS: __ocs_fmt_0__ objektum visszaállítva.
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio készen áll.
     .open-discussions-on-github = Beszélgetések megnyitása a GitHubon
     .open-file-title-case = Fájl megnyitása

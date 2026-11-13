@@ -2887,6 +2887,7 @@ file =
     .nothing-to-plot-model-space-contains-no-printa = Ei mitään piirrettävää: mallitila ei sisällä tulostettavaa geometriaa.
     .oops-nothing-to-restore = OOPS: ei mitään palautettavaa.
     .oops-restored-n-object-s = OOPS: palautettu __ocs_fmt_0__-objekti(t).
+    .enter-command-name-to-repeat = Enter command name to repeat:
     .open-cad-studio-ready = Open CAD Studio valmis.
     .open-discussions-on-github = Avaa keskustelut aiheesta GitHub
     .open-file-title-case = Avaa Tiedosto

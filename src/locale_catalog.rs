@@ -3058,6 +3058,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "OK" => Some(("common", "ok")),
         "OLE Frame" => Some(("properties", "ole-frame")),
         "OOPS: nothing to restore." => Some(("file", "oops-nothing-to-restore")),
+        "Enter command name to repeat:" => Some(("file", "enter-command-name-to-repeat")),
         "OOPS: restored {n} object(s)." => Some(("file", "oops-restored-n-object-s")),
         "OVERKILL: deleted {n} duplicate object(s)." => Some(("styles", "overkill-deleted-n-duplicate-object-s")),
         "OVERKILL: no duplicate objects found." => Some(("styles", "overkill-no-duplicate-objects-found")),

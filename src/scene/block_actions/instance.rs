@@ -68,6 +68,26 @@ pub(super) fn remove_cache(
     Ok(())
 }
 
+/// Write a visibility state's name into the reference's saved state record,
+/// the code 1 string other readers take the current state from. A reference
+/// with no saved record reads the first state and has nothing to update.
+pub(crate) fn save_visibility_name(doc: &mut Document, insert: Handle, id: i32, name: &str) {
+    let Ok(Some(handle)) = cache(doc, insert, id) else {
+        return;
+    };
+    let Some(ObjectType::XRecord(record)) = doc.objects.get_mut(&handle) else {
+        return;
+    };
+    if let Some(XRecordValue::String(value)) = record
+        .entries
+        .iter_mut()
+        .find(|e| e.code == 1 && matches!(e.value, XRecordValue::String(_)))
+        .map(|e| &mut e.value)
+    {
+        *value = name.to_string();
+    }
+}
+
 pub(crate) fn clear_canonical_inputs(doc: &mut Document, insert: Handle) {
     crate::scene::view::dispatch::set_entity_xdata(doc, insert, super::flip_graph::INPUTS, None);
 }

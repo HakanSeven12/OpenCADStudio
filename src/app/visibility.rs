@@ -732,6 +732,20 @@ impl OpenCADStudio {
         // flag the definition gave anything outside the set.
         {
             let doc = &mut self.tabs[i].scene.document;
+            let state = doc
+                .dynamic_visibility_for_insert(insert_handle)
+                .and_then(|(_, param)| {
+                    let name = param.states.get(state_idx)?.name.clone();
+                    Some((param.eval_node_id, name))
+                });
+            if let Some((id, name)) = state {
+                crate::scene::block_actions::instance::save_visibility_name(
+                    doc,
+                    insert_handle,
+                    id,
+                    &name,
+                );
+            }
             for (idx, h) in mapping.anon_handles.iter().enumerate() {
                 if !mapping.governed_idx.contains(&idx) {
                     continue;

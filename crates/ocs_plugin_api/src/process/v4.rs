@@ -20,6 +20,26 @@ use crate::process::{request_kind, request_timeout, PluginError};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
+/// Incoming-frame queue depth between the reader thread and the consumers
+/// (review finding 4): the reader BLOCKS on a full queue — a flood of
+/// plugin→host requests applies socket backpressure instead of growing host
+/// memory without bound while a call holds `call_lock`.
+const MAX_INCOMING_FRAMES: usize = 4096;
+
+/// Push `item` onto a bounded park queue with a drop-oldest policy (review
+/// finding 14): the overflow policy, cap and log live in exactly one place
+/// for every queue kind.
+fn park_bounded<T>(queue: &Mutex<VecDeque<T>>, cap: usize, what: &str, item: T) {
+    let mut queue = queue.lock().unwrap_or_else(|e| e.into_inner());
+    if queue.len() >= cap {
+        queue.pop_front();
+        eprintln!(
+            "[plugin] dropped the oldest parked V4 {what}: the queue exceeded {cap}"
+        );
+    }
+    queue.push_back(item);
+}
+
 /// Maximum deferred (wrong-tab) plugin requests kept between drain ticks.
 /// Beyond the cap the OLDEST is dropped: the runner waiting for it times out
 /// and the connection dies honestly instead of growing without bound.
@@ -94,7 +114,8 @@ impl V4Connection {
             alive: AtomicBool::new(true),
         });
 
-        let (incoming_tx, incoming_rx) = mpsc::channel();
+        let (incoming_tx, incoming_rx) = mpsc::sync_channel(MAX_INCOMING_FRAMES);
+
         let rate_limiter = RateLimiter::new(default_notify_rate_limit());
 
         let shared_for_thread = Arc::clone(&shared);
@@ -255,18 +276,12 @@ impl V4Connection {
                     {
                         // The answer to an outstanding coalesced move: park it
                         // for the poll instead of failing this call.
-                        let mut parked = self
-                            .deferred_responses
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        if parked.len() >= MAX_DEFERRED_RESPONSES {
-                            parked.pop_front();
-                            eprintln!(
-                                "[plugin] dropped the oldest parked V4 response: the queue \
-                                 exceeded {MAX_DEFERRED_RESPONSES}"
-                            );
-                        }
-                        parked.push_back((rid, payload));
+                        park_bounded(
+                            &self.deferred_responses,
+                            MAX_DEFERRED_RESPONSES,
+                            "response",
+                            (rid, payload),
+                        );
                         continue;
                     }
                     return Err(PluginError::UnexpectedResponse(Box::new(payload)));
@@ -392,16 +407,12 @@ impl V4Connection {
                     if tab_id.is_none_or(|request_tab| request_tab == current_tab_id) {
                         self.respond_to_plugin_request(host, id, payload, on_start_interactive)?;
                     } else {
-                        let mut deferred =
-                            self.deferred.lock().unwrap_or_else(|e| e.into_inner());
-                        if deferred.len() >= MAX_DEFERRED_REQUESTS {
-                            deferred.pop_front();
-                            eprintln!(
-                                "[plugin] dropped the oldest deferred foreign-tab request: the \
-                                 queue exceeded {MAX_DEFERRED_REQUESTS}"
-                            );
-                        }
-                        deferred.push_back((id, tab_id, payload));
+                        park_bounded(
+                            &self.deferred,
+                            MAX_DEFERRED_REQUESTS,
+                            "deferred foreign-tab request",
+                            (id, tab_id, payload),
+                        );
                     }
                 }
                 Ok(HostIncoming::Response { id, payload }) => {
@@ -415,18 +426,12 @@ impl V4Connection {
                         .unwrap_or_else(|e| e.into_inner())
                         .contains(&id)
                     {
-                        let mut parked = self
-                            .deferred_responses
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        if parked.len() >= MAX_DEFERRED_RESPONSES {
-                            parked.pop_front();
-                            eprintln!(
-                                "[plugin] dropped the oldest parked V4 response: the queue \
-                                 exceeded {MAX_DEFERRED_RESPONSES}"
-                            );
-                        }
-                        parked.push_back((id, payload));
+                        park_bounded(
+                            &self.deferred_responses,
+                            MAX_DEFERRED_RESPONSES,
+                            "response",
+                            (id, payload),
+                        );
                     }
                     continue;
                 }
@@ -575,18 +580,12 @@ impl V4Connection {
                         return Ok(Some((rid, payload)));
                     }
                     // Not ours (a late frame for a future call): park it.
-                    let mut parked = self
-                        .deferred_responses
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner());
-                    if parked.len() >= MAX_DEFERRED_RESPONSES {
-                        parked.pop_front();
-                        eprintln!(
-                            "[plugin] dropped the oldest parked V4 response: the queue \
-                             exceeded {MAX_DEFERRED_RESPONSES}"
-                        );
-                    }
-                    parked.push_back((rid, payload));
+                    park_bounded(
+                        &self.deferred_responses,
+                        MAX_DEFERRED_RESPONSES,
+                        "response",
+                        (rid, payload),
+                    );
                 }
                 Ok(HostIncoming::Request {
                     id: rid,
@@ -602,10 +601,15 @@ impl V4Connection {
                             true,
                         )?;
                     } else {
-                        self.deferred
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push_back((rid, tab_id, payload));
+                        // Same bounded park as the drain path (review
+                        // finding 7): a foreign-tab request flood during a
+                        // grip poll cannot grow the deferred queue forever.
+                        park_bounded(
+                            &self.deferred,
+                            MAX_DEFERRED_REQUESTS,
+                            "deferred foreign-tab request",
+                            (rid, tab_id, payload),
+                        );
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => return Ok(None),

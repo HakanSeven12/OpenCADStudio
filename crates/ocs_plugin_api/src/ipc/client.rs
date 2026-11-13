@@ -165,8 +165,20 @@ impl HostApi for PluginHostApi {
         // empty drawing (P2-7).
         match self.fetch_document() {
             Ok(doc) => {
-                self.document_cache.set(doc);
-                self.document_fetch_failed.set(false);
+                // Soundness: `document()` runs through `&self`, so an OCCUPIED
+                // cache (the degraded default) cannot be replaced here —
+                // `set` would silently no-op (review finding 2). Keep the
+                // degraded flag SET and keep retrying; the upgrade happens
+                // through `document_mut()` (or any mutating HostApi call,
+                // which resets the cell) as soon as the plugin mutates.
+                if self.document_cache.set(doc).is_ok() {
+                    self.document_fetch_failed.set(false);
+                } else {
+                    eprintln!(
+                        "[plugin] host document fetch succeeded but the degraded cached \
+                         snapshot is pinned; it upgrades on the next document_mut()/mutation"
+                    );
+                }
                 self.document_cache.get().expect("just initialized")
             }
             Err(e) => {
@@ -192,13 +204,24 @@ impl HostApi for PluginHostApi {
         // degraded flag so retries continue.
         match self.fetch_document() {
             Ok(doc) => {
+                // `self` is mutable here: a take-then-set actually REPLACES
+                // the degraded cached snapshot (the upgrade document() cannot
+                // perform). Locally made edits to the degraded doc are
+                // dropped and the replacement is loud.
+                let replaced = self.document_cache.take().is_some();
                 self.document_cache.set(doc);
                 self.document_fetch_failed.set(false);
+                if replaced {
+                    eprintln!(
+                        "[plugin] document snapshot upgraded after a degraded fetch (local \
+                         edits to the degraded snapshot were discarded)"
+                    );
+                }
             }
             Err(e) => {
                 eprintln!(
                     "[plugin] document_mut on an unreachable host serves the degraded cached \
-                     default; the next document() call retries: {e}"
+                     default; the next document()/document_mut() call retries: {e}"
                 );
                 self.document_fetch_failed.set(true);
                 self.document_cache.get_or_init(Document::default);

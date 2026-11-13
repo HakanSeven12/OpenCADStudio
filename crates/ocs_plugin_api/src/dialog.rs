@@ -83,6 +83,11 @@ thread_local! {
 /// Reset the per-thread decode budget at a frame boundary: call this right
 /// before decoding one whole wire frame so the node budget applies per frame
 /// rather than accumulating across frames.
+///
+/// The production callers (the wire transports) only exist in the `host`
+/// feature build; the feature-less data-contract build keeps the helper behind
+/// the same gate (review finding 15) while tests still reference it.
+#[cfg(any(feature = "host", test))]
 pub(crate) fn dialog_decode_frame_begin() {
     DIALOG_DECODE_BUDGET.with(|budget| {
         budget.set(DialogDecodeBudget { depth: 0, nodes: 0 });

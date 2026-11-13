@@ -163,9 +163,15 @@ pub fn handle_plugin_request(
         SetSystemVariable { name, value } => {
             PluginResponse::SystemVariableResult(host.set_system_variable(&name, value))
         }
-        UpdateEntitiesTransaction { label, entities } => PluginResponse::EntityTransactionResult(
-            host.update_entities_transaction(&label, entities),
-        ),
+        UpdateEntitiesTransaction { label, entities } => {
+            if entities.len() > MAX_BATCH_ENTITIES {
+                batch_budget_error("update_entities_transaction", entities.len(), MAX_BATCH_ENTITIES)
+            } else {
+                PluginResponse::EntityTransactionResult(
+                    host.update_entities_transaction(&label, entities),
+                )
+            }
+        }
         GetSelection => PluginResponse::Selection(host.selection()),
         SetSelection { handles } => {
             if handles.len() > MAX_BATCH_HANDLES {

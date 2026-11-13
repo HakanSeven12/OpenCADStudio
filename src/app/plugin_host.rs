@@ -655,6 +655,7 @@ impl<'a> HostSession<'a> {
                             &mut rollback_plain,
                             usize::MAX,
                         );
+                        self.discard_pending_transaction_scope();
                         return Err("transaction commit refused a nested attribute write after \
                                     validation; applied writes were rolled back"
                             .into());
@@ -677,6 +678,7 @@ impl<'a> HostSession<'a> {
                     &mut rollback_plain,
                     moved,
                 );
+                self.discard_pending_transaction_scope();
                 return Err(format!(
                     "transaction commit wrote {moved} of {expected} entities after \
                      validation; applied writes were rolled back"
@@ -699,19 +701,33 @@ impl<'a> HostSession<'a> {
         plain: &mut Vec<EntityType>,
         plain_applied: usize,
     ) {
-        // Reversed order: later before-images restore first, so writes that
-        // touched the same insert compose back to the original state.
-        for before in nested.drain(..).rev() {
-            let _ = self.app.tabs[self.tab].scene.update_entity_plugin(before);
-        }
+        // Exact reverse of the application order (plain entries ride the
+        // batched write AFTER the nested attribute writes, and one batch can
+        // contain BOTH a nested attribute of insert H and H itself): undo the
+        // plain writes first, then the nested attribute writes. Restoring in
+        // the other order would splice the pre-plain (but already
+        // attribute-mutated) before-image over the original content.
         if !plain.is_empty() {
             let applied = plain.len().min(plain_applied);
             let _ = self.app.tabs[self.tab]
                 .scene
                 .update_entities_plugin(plain.drain(..applied).collect());
         }
+        for before in nested.drain(..).rev() {
+            let _ = self.app.tabs[self.tab].scene.update_entity_plugin(before);
+        }
         self.app.sync_registered_layers(self.tab);
         self.publish_document_view();
+    }
+
+    /// Close a failed transaction's pending undo scope so subsequent plugin
+    /// writes cannot silently merge into it: the rollback above restored the
+    /// content, and the scope's delta records are dropped (net-zero change,
+    /// no undo entry).
+    fn discard_pending_transaction_scope(&mut self) {
+        if self.app.tabs[self.tab].history.pending.is_some() {
+            self.app.discard_last_undo_entry(self.tab);
+        }
     }
 
     pub fn selection(&self) -> Vec<Handle> {
@@ -3213,7 +3229,8 @@ impl<'a> HostSession<'a> {
     /// its own scope.
     fn ensure_xrecord_undo_scope(&mut self, label: &str) -> bool {
         if self.app.tabs[self.tab].history.pending.is_none() {
-            self.push_undo(label);
+        self.push_undo(label);
+
             true
         } else {
             false
@@ -3352,6 +3369,12 @@ impl<'a> HostSession<'a> {
         let epoch = self.geometry_epoch();
         self.app.tabs[self.tab].mark_plugin_record_dirty(handle, "NOD".to_string(), epoch);
         if own_scope {
+            // The dirty flag must flip BEFORE the scope closes:
+            // finish_pending_history snapshots `dirty_after` into the undo
+            // entry, and redo replays that — a clean-tab XRecord update that
+            // closes first would record dirty=false and redo silently loses
+            // the change on close (review finding 1).
+            self.set_dirty();
             self.app.finish_pending_history(self.tab);
         }
         Ok(handle)
@@ -3889,6 +3912,11 @@ impl<'a> HostSession<'a> {
             self.bump_geometry();
             self.set_dirty();
             self.publish_document_view();
+            // Close the staging scope before the error so follow-up plugin
+            // writes cannot silently merge into it (review finding 8).
+            if own_scope {
+                self.app.finish_pending_history(self.tab);
+            }
             return Err(format!(
                 "stamping the staged instance of class {:?} failed at entity {:?}; the whole \
                  staged instance was rolled back",

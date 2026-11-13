@@ -24,6 +24,11 @@ use crate::host::{HostApi, HostNotification, PluginNotification};
 use crate::process::{PluginError, PluginProcess};
 use crate::ribbon::owned::{to_shared_module, OwnedEntityClasses, SharedCadModule};
 
+/// Maximum notifications parked in the boot-window `attach.pending` queue
+/// (review finding 6): a plugin that never acks its ChannelReady cannot grow
+/// host memory without bound during the grace period.
+const MAX_PENDING_ATTACH: usize = 256;
+
 /// Callback the host installs to receive plugin-to-host notifications.
 pub type NotificationHandler = Arc<dyn Fn(&str, Option<u64>, PluginNotification) + Send + Sync>;
 
@@ -242,6 +247,21 @@ impl PluginManager {
                     // send path.
                     true
                 } else {
+                    // Bounded park (review finding 6): a never-acking plugin
+                    // during the boot grace cannot grow host memory without
+                    // bound; the OLDEST parked is dropped (the plugin's
+                    // listener never saw it anyway).
+                    if attach.pending.len() >= MAX_PENDING_ATTACH {
+                        attach.pending.remove(0);
+                        if crate::process::verbose() {
+                            eprintln!(
+                                "[plugin] dropped the oldest boot-window notification for {} \
+                                 ({} parked)",
+                                p.process.id(),
+                                attach.pending.len()
+                            );
+                        }
+                    }
                     attach.pending.push((command_id, notification.clone()));
                     if crate::process::verbose() {
                         eprintln!(

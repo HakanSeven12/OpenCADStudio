@@ -1278,38 +1278,15 @@ fn pump_stream_lines(
     plugin_id: &Arc<Mutex<String>>,
     last_stderr: &Arc<Mutex<String>>,
 ) {
-    let mut buffer = Vec::new();
-    let mut byte_buf = [0u8; 1];
-    'stream: loop {
-        buffer.clear();
-        let mut truncated = false;
-        // Assemble one line byte-by-byte with the cap enforced while reading,
-        // so neither memory nor the reader thread depend on line length.
-        'line: loop {
-            match reader.read(&mut byte_buf) {
-                Ok(0) => {
-                    // EOF: flush a trailing unterminated line, then finish.
-                    if !buffer.is_empty() || truncated {
-                        break 'line;
-                    }
-                    break 'stream;
-                }
-                Ok(_) => {
-                    let byte = byte_buf[0];
-                    if byte == b'\n' {
-                        break 'line;
-                    }
-                    if buffer.len() < MAX_IO_LINE_LEN {
-                        buffer.push(byte);
-                    } else {
-                        truncated = true;
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue 'line,
-                Err(_) => break 'stream,
-            }
-        }
-        let mut text = String::from_utf8_lossy(&buffer).into_owned();
+    fn emit(
+        buffer: &[u8],
+        truncated: bool,
+        source: IoStream,
+        io_tx: &mpsc::SyncSender<PluginIoLine>,
+        plugin_id: &Arc<Mutex<String>>,
+        last_stderr: &Arc<Mutex<String>>,
+    ) {
+        let mut text = String::from_utf8_lossy(buffer).into_owned();
         if truncated {
             text.push_str(" …[line truncated at 16 KiB]");
         }
@@ -1324,6 +1301,68 @@ fn pump_stream_lines(
             plugin_id: id,
             text,
         });
+    }
+
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 8192];
+    // Leftover bytes of a chunk already scanned past a newline, with the
+    // scan position into them (so one big read can yield several lines).
+    let mut carry: Option<(Vec<u8>, usize)> = None;
+    'stream: loop {
+        buffer.clear();
+        let mut truncated = false;
+        let mut line_done = false;
+        let mut eof_reached = false;
+        while !line_done {
+            // Next bytes to scan: the carry remainder, or a fresh chunk
+            // read (whole-chunk reads: one syscall per 8 KiB, not per byte).
+            let (data, mut pos) = match carry.take() {
+                Some((data, pos)) => (data, pos),
+                None => match reader.read(&mut chunk) {
+                    Ok(0) => {
+                        eof_reached = true;
+                        break;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => {
+                        eof_reached = true;
+                        break;
+                    }
+                    Ok(n) => (chunk[..n].to_vec(), 0),
+                },
+            };
+            while pos < data.len() {
+                let byte = data[pos];
+                pos += 1;
+                if byte == b'\n' {
+                    line_done = true;
+                    break;
+                }
+                if buffer.len() < MAX_IO_LINE_LEN {
+                    buffer.push(byte);
+                } else {
+                    truncated = true;
+                }
+            }
+            if pos < data.len() {
+                // Either a newline ended this line mid-chunk, or the reader
+                // is done for this iteration: keep the unscanned remainder.
+                carry = Some((data, pos));
+            }
+        }
+        if !buffer.is_empty() || truncated {
+            emit(
+                &buffer,
+                truncated,
+                source,
+                io_tx,
+                plugin_id,
+                last_stderr,
+            );
+        }
+        if eof_reached {
+            break 'stream;
+        }
     }
 }
 
@@ -1585,6 +1624,21 @@ fn distinct_runner_path(host: &Path) -> PathBuf {
     path
 }
 
+/// Constant-time equality for the presented auth token (review finding 11):
+/// no branch depends on WHERE a mismatch appears, so a local process probing
+/// the negotiated socket learns the token byte-at-a-time no faster than by
+/// trying full candidates.
+fn tokens_equal(presented: &str, expected: &str) -> bool {
+    let presented = presented.as_bytes();
+    let expected = expected.as_bytes();
+    presented.len() == expected.len()
+        && presented
+            .iter()
+            .zip(expected)
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
+}
+
 /// Verify that the runner's `handshake` presents `expected_token`.
 ///
 /// Returns `Ok(true)` for a V4 handshake, `Ok(false)` for a V3 handshake, and
@@ -1594,14 +1648,14 @@ fn verify_runner_handshake(
     expected_token: &str,
 ) -> Result<bool, PluginError> {
     match handshake {
-        RunnerHandshake::Token(ref presented) if presented == expected_token => {
+        RunnerHandshake::Token(ref presented) if tokens_equal(presented, expected_token) => {
             vlog!("[plugin] runner authenticated (V3)");
             Ok(false)
         }
         RunnerHandshake::TokenV4 {
             token: ref presented,
             protocol_version,
-        } if presented == expected_token => {
+        } if tokens_equal(presented, expected_token) => {
             if protocol_version != 4 {
                 return Err(PluginError::Runner(format!(
                     "unsupported V4 protocol version {protocol_version}"
@@ -1626,14 +1680,18 @@ fn generate_socket_name() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut bytes = [0u8; 8];
-    if getrandom::getrandom(&mut bytes).is_err() {
-        bytes = [0u8; 8];
+    // A CSPRNG failure never becomes a predictable all-zero suffix (that
+    // would re-open the guessing/squatting the suffix exists to close): the
+    // pid+counter name alone stays unique within this host process, matching
+    // the pre-hardening shape.
+    match getrandom::getrandom(&mut bytes) {
+        Ok(()) => format!(
+            "ocs_plugin_{}_{n}_{:016x}",
+            std::process::id(),
+            u64::from_le_bytes(bytes)
+        ),
+        Err(_) => format!("ocs_plugin_{}_{n}", std::process::id()),
     }
-    format!(
-        "ocs_plugin_{}_{n}_{:016x}",
-        std::process::id(),
-        u64::from_le_bytes(bytes)
-    )
 }
 
 /// Generate a 32-byte random token for runner authentication.

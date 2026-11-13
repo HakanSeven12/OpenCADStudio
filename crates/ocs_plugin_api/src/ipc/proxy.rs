@@ -21,6 +21,26 @@ use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
 const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The proxy per-direction read/write deadline (review finding 13):
+/// `OCS_PLUGIN_PROXY_TIMEOUT_SECS` overrides the default; `0` keeps the
+/// default (per-read timeouts cannot meaningfully be "off" on a proxy).
+fn proxy_timeout() -> Duration {
+    match std::env::var("OCS_PLUGIN_PROXY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        Some(secs) if secs > 0 => Duration::from_secs(secs),
+        _ => REQUEST_TIMEOUT,
+    }
+}
+
+/// Constant-time equality for the pre-framing auth token (review finding 11):
+/// no branch depends on where a mismatch appears, so a local process probing
+/// the port cannot learn the token byte-at-a-time from response timing.
+fn tokens_equal(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 /// Length of the pre-framing auth token exchanged when a child connects to
 /// the request proxy. Any local process can see the port, so the token (shared
 /// only with the spawned child via an environment variable) prevents arbitrary
@@ -189,7 +209,7 @@ impl ProxyPluginRequestSender {
         let mut stream = TcpStream::connect((host, port))?;
         stream.write_all(token)?;
         stream.flush()?;
-        stream.set_read_timeout(Some(REQUEST_TIMEOUT))?;
+        stream.set_read_timeout(Some(proxy_timeout()))?;
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
         })
@@ -226,7 +246,7 @@ impl ProxyPluginRequestSender {
 
         // P1-9: the polled request totals FOUR read-timeout budgets of wall
         // time instead of waiting forever between poll ticks.
-        let deadline = Instant::now() + REQUEST_TIMEOUT * 4;
+        let deadline = Instant::now() + proxy_timeout() * 4;
         let result = match recv_framed_with_poll(&mut *stream, poll, Some(deadline)) {
             Ok(resp) => Ok(resp),
             Err(PollError::Interrupted(e)) => {
@@ -290,7 +310,7 @@ fn verify_token(stream: &mut TcpStream, expected: &[u8; PROXY_TOKEN_LEN]) -> boo
             return false;
         }
     }
-    if buf != *expected {
+    if !tokens_equal(&buf, expected) {
         eprintln!("[plugin] proxy auth token mismatch; closing connection");
         return false;
     }
@@ -325,8 +345,8 @@ pub fn run_request_proxy(
             );
             continue;
         }
-        let _ = stream.set_read_timeout(Some(REQUEST_TIMEOUT));
-        let _ = stream.set_write_timeout(Some(REQUEST_TIMEOUT));
+        let _ = stream.set_read_timeout(Some(proxy_timeout()));
+        let _ = stream.set_write_timeout(Some(proxy_timeout()));
         let sender = Arc::clone(&sender);
         std::thread::spawn(move || {
             let _slot = HandlerSlot;
@@ -376,8 +396,8 @@ pub fn run_request_proxy_with_shutdown(
                     );
                     continue;
                 }
-                let _ = stream.set_read_timeout(Some(REQUEST_TIMEOUT));
-                let _ = stream.set_write_timeout(Some(REQUEST_TIMEOUT));
+                let _ = stream.set_read_timeout(Some(proxy_timeout()));
+                let _ = stream.set_write_timeout(Some(proxy_timeout()));
                 let sender = Arc::clone(&sender);
                 std::thread::spawn(move || {
                     let _slot = HandlerSlot;

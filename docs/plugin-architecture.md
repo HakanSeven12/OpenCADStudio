@@ -903,6 +903,13 @@ Two timeouts protect the host from a stuck runner:
 |---|---|---|---|---|
 | Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 90 s (a cold-start AV scan on Windows can legitimately take that long) | — | — |
 | Per-call | `OCS_PLUGIN_CALL_TIMEOUT_SECS` | 30 s | `GetManifest`/`GetRibbon` ≥ 5 s, `Dispatch` ≥ 10 s, interactive events/prompt/pick ≥ 2 s | UI-blocking preview ticks (`CursorMove`/`CustomGripMove`) ≤ 2 s, one-step interactive probes ≤ 10 s |
+| Proxy read/write (per direction) | `OCS_PLUGIN_PROXY_TIMEOUT_SECS` | 30 s | — | — |
+
+A request routed through the TCP request proxy (the external Python REPL is
+the documented consumer) is additionally bounded in TOTAL wall time: four
+times the proxy timeout (2 minutes at the default), after which it answers
+`TimedOut` ("proxy request exceeded its total deadline") instead of retrying
+forever.
 
 A call timeout covers the full round-trip, including any nested plugin→host
 requests handled inline. When it fires the host kills the runner's whole

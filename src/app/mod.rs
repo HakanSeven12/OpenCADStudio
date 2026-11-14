@@ -7373,14 +7373,22 @@ impl OpenCADStudio {
     fn boot_web() -> (Self, Task<Message>) {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut s = Self::new();
+        let embed_mode = crate::io::host_bridge::is_embed_mode();
+        if embed_mode {
+            s.donation_prompt_version = env!("OCS_APP_VERSION").to_string();
+            s.control.automation_seen = true;
+            s.control.enabled = crate::io::host_bridge::is_automation_allowed();
+            crate::io::host_bridge::install();
+        }
         // A web host that intends to automate can opt in before the first
         // control request by setting `opencadstudio.automation` to "1" in
         // localStorage (the same pre-load mechanism the settings use): the
         // startup donation prompt then never queues (#1349).
-        if web_sys::window()
-            .and_then(|window| window.local_storage().ok().flatten())
-            .and_then(|storage| storage.get_item("opencadstudio.automation").ok().flatten())
-            == Some("1".to_string())
+        if !embed_mode
+            && web_sys::window()
+                .and_then(|window| window.local_storage().ok().flatten())
+                .and_then(|storage| storage.get_item("opencadstudio.automation").ok().flatten())
+                == Some("1".to_string())
         {
             s.control.automation_seen = true;
         }
@@ -7402,13 +7410,21 @@ impl OpenCADStudio {
             crate::discussions::fetch_discussions_web(),
             Message::DiscussionsFetched,
         );
-        let thumbs_fetch = s.refresh_recent_thumbs();
+        let thumbs_fetch = if embed_mode {
+            Task::none()
+        } else {
+            s.refresh_recent_thumbs()
+        };
         // Crash-recovery scan: OPFS snapshots newer than a drawing's last
         // saved copy come back as a restore prompt (stale ones are deleted).
-        let autosave_scan = Task::perform(
-            crate::io::web_autosave::scan(),
-            Message::WebAutosavesScanned,
-        );
+        let autosave_scan = if embed_mode {
+            Task::none()
+        } else {
+            Task::perform(
+                crate::io::web_autosave::scan(),
+                Message::WebAutosavesScanned,
+            )
+        };
         // URL deep link (`?file=…`): a shareable/embeddable link that opens a
         // drawing at boot. An http(s) URL is fetched with the same capped
         // streaming reader the remote-image fetch uses and handed to the
@@ -7418,9 +7434,13 @@ impl OpenCADStudio {
         // same scheme gate the image fetch applies. Pure parsing/validation
         // lives in `io::web_link` and is unit-tested there.
         let deep_link: Task<Message> = {
-            let search = web_sys::window()
-                .and_then(|window| window.location().search().ok())
-                .unwrap_or_default();
+            let search = if embed_mode {
+                String::new()
+            } else {
+                web_sys::window()
+                    .and_then(|window| window.location().search().ok())
+                    .unwrap_or_default()
+            };
             match crate::io::web_link::parse_link(&search) {
                 crate::io::web_link::ParsedLink::Target(target) => {
                     // Opening a URL from the query string is an implicit trust
@@ -7539,13 +7559,15 @@ pub fn run_web() -> iced::Result {
     // Best-effort, fire-and-forget: ask the browser not to evict the origin's
     // storage under pressure — settings (localStorage) and the OPFS recent
     // copies / autosave snapshots live there. A denial changes nothing.
-    wasm_bindgen_futures::spawn_local(async {
-        if let Some(window) = web_sys::window() {
-            if let Ok(promise) = window.navigator().storage().persist() {
-                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    if !crate::io::host_bridge::is_embed_mode() {
+        wasm_bindgen_futures::spawn_local(async {
+            if let Some(window) = web_sys::window() {
+                if let Ok(promise) = window.navigator().storage().persist() {
+                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                }
             }
-        }
-    });
+        });
+    }
     iced::application(
         OpenCADStudio::boot_web,
         OpenCADStudio::update_root,

@@ -144,7 +144,8 @@ pub async fn open_dropped(
         .as_ref()
         .err()
         .is_some_and(|error| error.recovery_available);
-    let cache_bytes = result.is_ok().then(|| std::sync::Arc::clone(&bytes));
+    let cache_bytes = (result.is_ok() && !super::host_bridge::is_embed_mode())
+        .then(|| std::sync::Arc::clone(&bytes));
     crate::io::WebOpenOutcome {
         name,
         size_bytes,

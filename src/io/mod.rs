@@ -52,6 +52,9 @@ pub mod wmf_import;
 pub(crate) mod web_autosave;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_drop;
+// Registered on every target so the pure helpers and unit tests compile on
+// native CI; the postMessage listener and JS transfers inside are wasm-only.
+pub(crate) mod host_bridge;
 #[cfg(target_arch = "wasm32")]
 mod web_worker;
 // Same split as web_autosave: the ?file= deep-link parser (and its tests) are

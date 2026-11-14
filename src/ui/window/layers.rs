@@ -3,6 +3,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::kit;
+use crate::ui::palette_menu::{self, Item, Mark};
 use crate::ui::properties::{lw_options, LinetypeItem, LwItem};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::text as ui_text;
@@ -1670,7 +1671,7 @@ impl LayerPanel {
     /// the rest; a search icon that opens the field; under them the tree as
     /// a list with the node's count.
     fn compact_toolbar(&self, can_delete: bool, can_set_current: bool) -> Element<'_, Message> {
-        let more_items: Vec<Element<'_, Message>> = vec![
+        let more_items: Vec<Item> = vec![
             more_item(
                 t!("New Filter"),
                 Message::LayerFilterEdit(Some(String::new())),
@@ -1694,17 +1695,13 @@ impl LayerPanel {
             .padding((pm::TOOL_H - pm::ROW_ICON) / 2.0);
         // The overlay takes the "…" button's width unless it is given one,
         // and iced_aw's BottomStart opens it beside the button, not below.
-        let more = iced_aw::DropDown::new(
-            more_head,
-            container(iced::widget::Column::with_children(more_items).width(Length::Fill))
-                .padding([pm::MENU_PAD_Y, 0.0])
-                .style(crate::ui::palette_menu::frame_style),
-            self.more_menu,
-        )
-        .width(Length::Fixed(MORE_MENU_W))
-        .alignment(iced_aw::drop_down::Alignment::Bottom)
-        .offset(2.0)
-        .on_dismiss(Message::LayerMoreMenu(false));
+        let more_w = palette_menu::width(&more_items);
+        let more =
+            iced_aw::DropDown::new(more_head, palette_menu::menu(more_items), self.more_menu)
+                .width(Length::Fixed(more_w))
+                .alignment(iced_aw::drop_down::Alignment::Bottom)
+                .offset(2.0)
+                .on_dismiss(Message::LayerMoreMenu(false));
         let search_btn = button(kit::tool_icon(crate::ui::icons::SEARCH))
             .on_press(Message::LayerSearchOpen(!self.search_open))
             .style(kit::flat_button_style(self.search_open))
@@ -1812,14 +1809,8 @@ impl LayerPanel {
 }
 
 /// A line of the compact toolbar's "…" menu: runs its message and closes.
-fn more_item<'a>(label: Cow<'static, str>, msg: Message) -> Element<'a, Message> {
-    menu_item(
-        label,
-        Message::LayerMoreRun(Box::new(msg)),
-        0.0,
-        None,
-        false,
-    )
+fn more_item(label: Cow<'static, str>, msg: Message) -> Item {
+    Item::new(label, Message::LayerMoreRun(Box::new(msg)))
 }
 
 /// Every movable column with a tick to show it and arrows to move it; it
@@ -2484,132 +2475,30 @@ fn tree_line_style(theme: &Theme, status: button::Status, chosen: bool) -> butto
     }
 }
 
-/// A line of a right-click menu, with its key on the right when it has one.
-/// It acts on the press: the menu's content is built anew whenever the view
-/// is, which drops a button's pressed state before the release it would act
-/// on, so a button there did nothing.
-fn menu_item(
-    label: Cow<'static, str>,
-    msg: Message,
-    indent: f32,
-    key: Option<&'static str>,
-    ticked: bool,
-) -> Element<'static, Message> {
-    let line = move |hot: bool| {
-        let mut content = row![].spacing(pm::TOOL_GAP).align_y(iced::Center);
-        // The tick column, as in the mockup: groups the row is in.
-        if indent > 0.0 {
-            content = content.push(
-                container(if ticked {
-                    crate::ui::icons::themed(crate::ui::icons::CHECK, pm::BAR_ICON)
-                } else {
-                    iced::widget::Space::new().width(pm::BAR_ICON).into()
-                })
-                .width(pm::BAR_ICON),
-            );
-        }
-        content = content.push(
-            text(label.clone())
-                .size(ui_text::UI)
-                .line_height(ui_line())
-                .width(Fill),
-        );
-        if let Some(key) = key {
-            content = content.push(
-                text(key)
-                    .size(ui_text::UI)
-                    .line_height(ui_line())
-                    .style(muted_style),
-            );
-        }
-        container(content)
-            .width(Fill)
-            .height(pm::MENU_ITEM_H)
-            .align_y(iced::Center)
-            .padding(
-                Padding::ZERO
-                    .left(pm::MENU_CHECK_W + indent)
-                    .right(pm::MENU_PAD_X),
-            )
-            .style(move |theme: &Theme| container::Style {
-                background: hot.then_some(Background::Color(chrome::hover(theme))),
-                text_color: Some(chrome::text(theme)),
-                ..Default::default()
-            })
-    };
-    mouse_area(iced::widget::hover(line(false), line(true)))
-        .on_press(msg)
-        .interaction(iced::mouse::Interaction::Pointer)
-        .into()
-}
-
-fn menu_separator() -> Element<'static, Message> {
-    container(
-        container(iced::widget::Space::new().width(Fill).height(pm::line())).style(
-            |theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::border(theme))),
-                ..Default::default()
-            },
-        ),
-    )
-    .center_y(Length::Fixed(pm::MENU_SEPARATOR_H))
-    .width(Fill)
-    .into()
-}
-
-fn menu_frame(items: Vec<Element<'static, Message>>, width: f32) -> Element<'static, Message> {
-    container(
-        iced::widget::Column::with_children(items)
-            .spacing(0)
-            .width(Length::Fixed(width)),
-    )
-    .padding([pm::MENU_PAD_Y, 0.0])
-    .style(crate::ui::palette_menu::frame_style)
-    .into()
-}
-
 /// A filter tree node's right-click menu: one level (#2610).
 fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
-    let entry = |label: Cow<'static, str>, action: TreeAction| -> Element<'static, Message> {
-        menu_item(
-            label,
-            Message::LayerTreeAction(node.clone(), action),
-            0.0,
-            None,
-            false,
-        )
+    let entry = |label: Cow<'static, str>, action: TreeAction| {
+        Item::new(label, Message::LayerTreeAction(node.clone(), action))
     };
-    let mut items: Vec<Element<'static, Message>> = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
     match node {
         TreeNode::Filter(_) => {
             items.push(entry(t!("Edit…"), TreeAction::Edit));
-            items.push(menu_item(
-                t!("Rename"),
-                Message::LayerTreeAction(node.clone(), TreeAction::Rename),
-                0.0,
-                Some("F2"),
-                false,
-            ));
+            items.push(entry(t!("Rename"), TreeAction::Rename).shortcut("F2"));
             items.push(entry(t!("Delete"), TreeAction::Delete));
-            items.push(menu_separator());
+            items.push(Item::Separator);
         }
         TreeNode::Group(_) => {
-            items.push(menu_item(
-                t!("Rename"),
-                Message::LayerTreeAction(node.clone(), TreeAction::Rename),
-                0.0,
-                Some("F2"),
-                false,
-            ));
+            items.push(entry(t!("Rename"), TreeAction::Rename).shortcut("F2"));
             items.push(entry(
                 crate::tr!("layer-groups", "delete").into(),
                 TreeAction::Delete,
             ));
-            items.push(menu_separator());
+            items.push(Item::Separator);
         }
         TreeNode::Unused => {
             items.push(entry(t!("Delete with Purge…"), TreeAction::Purge));
-            items.push(menu_separator());
+            items.push(Item::Separator);
         }
         _ => {}
     }
@@ -2621,79 +2510,49 @@ fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
         entry(t!("Lock all"), TreeAction::Lock),
         entry(t!("Unlock all"), TreeAction::Unlock),
     ]);
-    menu_frame(items, TREE_MENU_W)
+    palette_menu::menu(items)
 }
 
 /// A layer row's right-click menu, as in the mockup. One level: the groups
 /// open under "Add to group", inside the menu, ticked where the layer is in
 /// one; "New group" closes that list.
 fn row_menu(name: &str, groups: &[(String, bool)], in_group: bool) -> Element<'static, Message> {
-    let entry = |label: Cow<'static, str>, action: LayerMenuAction, key: Option<&'static str>| {
-        menu_item(
-            label,
-            Message::LayerMenu(name.to_string(), action),
-            0.0,
-            key,
-            false,
-        )
+    let entry = |label: Cow<'static, str>, action: LayerMenuAction| {
+        Item::new(label, Message::LayerMenu(name.to_string(), action))
     };
-    let mut items: Vec<Element<'static, Message>> = vec![
-        entry(t!("Set Current"), LayerMenuAction::SetCurrent, None),
-        entry(t!("New"), LayerMenuAction::New, None),
-        entry(t!("Rename"), LayerMenuAction::Rename, Some("F2")),
-        entry(t!("Delete"), LayerMenuAction::Delete, Some("Del")),
-        menu_separator(),
-        entry(t!("Select Objects"), LayerMenuAction::SelectObjects, None),
-        entry(
-            t!("Filter objects..."),
-            LayerMenuAction::FilterObjects,
-            None,
-        ),
-        entry(
-            t!("Merge selected layers here"),
-            LayerMenuAction::MergeHere,
-            None,
-        ),
-        menu_separator(),
-        container(
-            row![
-                text(crate::tr!("layer-groups", "add-to"))
-                    .size(ui_text::UI)
-                    .line_height(ui_line())
-                    .width(Fill),
-                crate::ui::icons::themed_arrow_down(pm::CARET),
-            ]
-            .align_y(iced::Center),
-        )
-        .height(pm::MENU_ITEM_H)
-        .align_y(iced::Center)
-        .padding(Padding::ZERO.left(pm::MENU_CHECK_W).right(pm::MENU_PAD_X))
-        .into(),
+    let mut items: Vec<Item> = vec![
+        entry(t!("Set Current"), LayerMenuAction::SetCurrent),
+        entry(t!("New"), LayerMenuAction::New),
+        entry(t!("Rename"), LayerMenuAction::Rename).shortcut("F2"),
+        entry(t!("Delete"), LayerMenuAction::Delete).shortcut("Del"),
+        Item::Separator,
+        entry(t!("Select Objects"), LayerMenuAction::SelectObjects),
+        entry(t!("Filter objects..."), LayerMenuAction::FilterObjects),
+        entry(t!("Merge selected layers here"), LayerMenuAction::MergeHere),
+        Item::Separator,
+        Item::Heading(crate::tr!("layer-groups", "add-to")),
     ];
+    // The groups, ticked where the layer is in one.
     for (group, ticked) in groups {
-        items.push(menu_item(
-            Cow::Owned(group.clone()),
-            Message::LayerMenu(name.to_string(), LayerMenuAction::AddToGroup(group.clone())),
-            pm::INDENT,
-            None,
-            *ticked,
-        ));
+        items.push(
+            entry(
+                Cow::Owned(group.clone()),
+                LayerMenuAction::AddToGroup(group.clone()),
+            )
+            .mark(Mark::Check(*ticked)),
+        );
     }
-    items.push(menu_item(
+    items.push(entry(
         crate::tr!("layer-groups", "new-group").into(),
-        Message::LayerMenu(name.to_string(), LayerMenuAction::NewGroup),
-        pm::INDENT,
-        None,
-        false,
+        LayerMenuAction::NewGroup,
     ));
     if in_group {
         items.push(entry(
             crate::tr!("layer-groups", "remove").into(),
             LayerMenuAction::RemoveFromGroup,
-            None,
         ));
     }
-    menu_frame(items, ROW_MENU_W)
+    palette_menu::menu(items)
 }
 
 // ── Display helpers ───────────────────────────────────────────────────────
@@ -2731,13 +2590,8 @@ const COL_OBJECTS: f32 = 60.0;
 const COL_STATUS: f32 = 36.0;
 /// The eye button at the row's end.
 const COL_EYE: f32 = 30.0;
-/// The compact toolbar's "…" menu.
-const MORE_MENU_W: f32 = 190.0;
 /// Width of the tree's node list on a medium pallet's toolbar.
 const NODE_PICKER_W: f32 = 130.0;
-/// Widths of the tree's and the rows' right-click menus.
-const TREE_MENU_W: f32 = 200.0;
-const ROW_MENU_W: f32 = 230.0;
 /// Width of the column chooser.
 const COLUMN_CHOOSER_W: f32 = 220.0;
 /// Room around a name tooltip's text.

@@ -15,8 +15,7 @@ use crate::ui::style::{chrome, palette_metrics as pm, text as text_size};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style};
 use document::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
-    Space,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
 use iced::Padding;
 use iced::{Background, Border, Element, Fill, Length, Theme};
@@ -598,15 +597,12 @@ impl std::fmt::Display for Pick {
     }
 }
 
-fn menu_entry(label: String, m: Option<Message>) -> Element<'static, Message> {
-    palette_menu::entry(match m {
+/// A palette-menu item; `None` shows it disabled.
+fn menu_item(label: String, m: Option<Message>) -> Item {
+    match m {
         Some(m) => Item::new(label, m),
         None => Item::new(label, Message::Noop).enabled(false),
-    })
-}
-
-fn menu_separator() -> Element<'static, Message> {
-    palette_menu::entry(Item::Separator)
+    }
 }
 
 /// A row's right-click menu.
@@ -614,7 +610,7 @@ fn menu_separator() -> Element<'static, Message> {
 /// its subset, and only an empty subset can be removed.
 fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Message> {
     let entry = |label: &str, action: MenuAction, on: bool| {
-        menu_entry(
+        menu_item(
             t!(label).into_owned(),
             on.then(|| msg(SheetSetMsg::Menu(id.clone(), action))),
         )
@@ -623,10 +619,10 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
     match kind {
         ComponentKind::SheetSet => items.extend([
             entry("Close Sheet Set", MenuAction::Close, true),
-            menu_separator(),
+            Item::Separator,
         ]),
         ComponentKind::Sheet => {
-            items.extend([entry("Open", MenuAction::Open, true), menu_separator()])
+            items.extend([entry("Open", MenuAction::Open, true), Item::Separator])
         }
         ComponentKind::Subset => {}
     }
@@ -642,32 +638,19 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
     match kind {
         ComponentKind::SheetSet => {}
         ComponentKind::Subset => items.extend([
-            menu_separator(),
+            Item::Separator,
             entry("Rename Subset...", MenuAction::Properties, true),
             entry("Remove Subset", MenuAction::Remove, empty),
         ]),
         ComponentKind::Sheet => items.extend([
-            menu_separator(),
+            Item::Separator,
             entry("Rename & Renumber...", MenuAction::Rename, true),
             entry("Remove Sheet", MenuAction::Remove, true),
         ]),
     }
-    items.push(menu_separator());
+    items.push(Item::Separator);
     items.push(entry("Properties...", MenuAction::Properties, true));
-    menu_frame(items, ROW_MENU_W)
-}
-
-/// Widths of a sheet's and a view's right-click menus.
-const ROW_MENU_W: f32 = 220.0;
-const VIEW_MENU_W: f32 = 240.0;
-
-/// A right-click menu's frame: the palette menu's, `width` wide.
-fn menu_frame(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
-    container(iced::widget::Column::with_children(items).width(Fill))
-        .padding([pm::MENU_PAD_Y, 0.0])
-        .width(Length::Fixed(width))
-        .style(palette_menu::frame_style)
-        .into()
+    palette_menu::menu(items)
 }
 
 /// A small status badge after a sheet name.
@@ -721,64 +704,25 @@ fn plain_row<'a>(
     iced_aw::ContextMenu::new(area, move || menu_panel(&menu, open_sub.as_deref())).into()
 }
 
-fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
-    menu_frame(items, VIEW_MENU_W)
-}
-
-/// A row's right-click menu. A submenu expands in place below its entry
-/// while hovered (a click would close the menu).
+/// A row's right-click menu. A submenu opens beside its entry while
+/// hovered (a click would close the menu).
 fn menu_panel(menu: &[Mi], open: Option<&str>) -> Element<'static, Message> {
-    let mut items: Vec<Element<'static, Message>> = Vec::new();
-    for item in menu {
-        match item {
-            Mi::Sep => items.push(menu_separator()),
-            Mi::Entry(label, m) => items.push(menu_entry(label.clone(), m.clone())),
-            Mi::Sub(label, key, sub) => {
-                let expanded = open == Some(key.as_str());
-                let face = |hot: bool| {
-                    let arrow = if expanded {
-                        crate::ui::icons::themed_arrow_down(pm::CARET)
-                    } else {
-                        crate::ui::icons::themed_arrow_right(pm::CARET)
-                    };
-                    container(
-                        row![
-                            text(label.clone())
-                                .size(text_size::UI)
-                                .line_height(text_size::line())
-                                .width(Fill),
-                            arrow,
-                        ]
-                        .align_y(iced::Center),
-                    )
-                    .width(Fill)
-                    .height(Length::Fixed(pm::MENU_ITEM_H))
-                    .align_y(iced::Center)
-                    .padding(Padding::ZERO.left(pm::MENU_CHECK_W).right(pm::MENU_PAD_X))
-                    .style(move |theme: &Theme| container::Style {
-                        background: hot.then(|| Background::Color(chrome::hover(theme))),
-                        ..Default::default()
-                    })
-                };
-                let header = iced::widget::hover(face(expanded), face(true));
-                items.push(
-                    mouse_area(header)
-                        .on_enter(msg(SheetSetMsg::Submenu(Some(key.clone()))))
-                        .into(),
-                );
-                if expanded {
-                    for (l, m) in sub {
-                        items.push(
-                            container(menu_entry(l.clone(), m.clone()))
-                                .padding(Padding::ZERO.left(pm::INDENT))
-                                .into(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    menu_box(items)
+    let items = menu
+        .iter()
+        .map(|item| match item {
+            Mi::Sep => Item::Separator,
+            Mi::Entry(label, m) => menu_item(label.clone(), m.clone()),
+            Mi::Sub(label, key, sub) => Item::submenu(
+                label.clone(),
+                msg(SheetSetMsg::Submenu(Some(key.clone()))),
+                sub.iter()
+                    .map(|(l, m)| menu_item(l.clone(), m.clone()))
+                    .collect(),
+            )
+            .open(open == Some(key.as_str())),
+        })
+        .collect();
+    palette_menu::menu_with_submenus(items, msg(SheetSetMsg::Submenu(None)))
 }
 
 /// A menu item: translated label and message (an empty label is a separator).

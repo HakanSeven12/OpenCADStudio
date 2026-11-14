@@ -30,10 +30,22 @@ pub enum Item {
         on_press: Option<Box<Message>>,
         /// A tooltip beside the item (why a disabled item is disabled).
         tip: Option<String>,
+        /// A key that runs it too ("F2"), muted at the row's end.
+        shortcut: Option<String>,
     },
     Separator,
     /// A muted caption over the items after it ("EXPAND BY").
     Heading(String),
+    /// A row with a ▸ that opens `items` beside the menu: hovering or
+    /// pressing it sends `on_open` (`None` shows it disabled); the owner
+    /// keeps which one is `open`. See [`menu_with_submenus`].
+    Submenu {
+        label: String,
+        icon: Option<&'static [u8]>,
+        open: bool,
+        on_open: Option<Box<Message>>,
+        items: Vec<Item>,
+    },
 }
 
 impl Item {
@@ -46,7 +58,36 @@ impl Item {
             dirty: false,
             on_press: Some(Box::new(on_press)),
             tip: None,
+            shortcut: None,
         }
+    }
+
+    /// A row opening `items` beside the menu; hovering or pressing it sends
+    /// `on_open`.
+    pub fn submenu(label: impl Into<String>, on_open: Message, items: Vec<Item>) -> Self {
+        Item::Submenu {
+            label: label.into(),
+            icon: None,
+            open: false,
+            on_open: Some(Box::new(on_open)),
+            items,
+        }
+    }
+
+    /// The submenu shown open (its items beside the menu).
+    pub fn open(mut self, on: bool) -> Self {
+        if let Item::Submenu { open, .. } = &mut self {
+            *open = on;
+        }
+        self
+    }
+
+    /// The item with `key` muted at its end.
+    pub fn shortcut(mut self, key: impl Into<String>) -> Self {
+        if let Item::Action { shortcut, .. } = &mut self {
+            *shortcut = Some(key.into());
+        }
+        self
     }
 
     /// A greyed item that does nothing, with `reason` as its tooltip.
@@ -58,6 +99,7 @@ impl Item {
             dirty: false,
             on_press: None,
             tip: Some(reason.into()),
+            shortcut: None,
         }
     }
 
@@ -71,17 +113,23 @@ impl Item {
 
     /// The item with an icon before its label.
     pub fn icon(mut self, art: &'static [u8]) -> Self {
-        if let Item::Action { icon, .. } = &mut self {
-            *icon = Some(art);
+        match &mut self {
+            Item::Action { icon, .. } | Item::Submenu { icon, .. } => *icon = Some(art),
+            _ => {}
         }
         self
     }
 
     /// The item greyed out and inert unless `on`.
     pub fn enabled(mut self, on: bool) -> Self {
-        if let Item::Action { on_press, .. } = &mut self {
-            if !on {
-                *on_press = None;
+        if !on {
+            match &mut self {
+                Item::Action { on_press, .. } => *on_press = None,
+                Item::Submenu { on_open, open, .. } => {
+                    *on_open = None;
+                    *open = false;
+                }
+                _ => {}
             }
         }
         self
@@ -135,6 +183,68 @@ const ITEM_ICON: f32 = 16.0;
 /// For a menu built by hand (one with rows of its own between the items);
 /// [`menu`] builds the usual one.
 pub fn entry<'a>(it: Item) -> Element<'a, Message> {
+    entry_with(it, None)
+}
+
+/// The row of an item, pressable or not: lit while hovered (when it does
+/// something), muted when not. Pressed through a `mouse_area`, not a
+/// button: an `iced_aw::ContextMenu` rebuilds its overlay on every view
+/// pass, and a button there loses its press before the release lands.
+/// `on_enter` is sent when the pointer comes onto it (a menu with submenus
+/// closes the open one so).
+fn row_area<'a>(
+    content: iced::widget::Row<'a, Message>,
+    on_press: Option<Message>,
+    on_enter: Option<Message>,
+    lit: bool,
+    tip: Option<String>,
+) -> Element<'a, Message> {
+    let enabled = on_press.is_some();
+    let style = move |hovered: bool| {
+        move |theme: &Theme| container::Style {
+            background: (lit || (hovered && enabled))
+                .then(|| Background::Color(chrome::hover(theme))),
+            text_color: Some(if enabled {
+                chrome::text(theme)
+            } else {
+                chrome::muted(theme)
+            }),
+            ..Default::default()
+        }
+    };
+    let body = |hovered: bool| {
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(pm::MENU_ITEM_H))
+            .style(style(hovered))
+    };
+    let face = container(
+        content
+            .height(Length::Fixed(pm::MENU_ITEM_H))
+            .padding(iced::Padding::ZERO.right(pm::MENU_PAD_X)),
+    )
+    .width(Length::Fill)
+    .style(style(false));
+    let mut area = mouse_area(iced::widget::stack![
+        iced::widget::hover(body(false), body(true)),
+        face
+    ]);
+    if let Some(m) = on_press {
+        area = area
+            .on_press(m)
+            .interaction(iced::mouse::Interaction::Pointer);
+    }
+    if let Some(m) = on_enter {
+        area = area.on_enter(m);
+    }
+    match tip {
+        Some(tip) => crate::ui::kit::tooltip(area, tip, crate::ui::kit::TipPosition::Right),
+        None => area.into(),
+    }
+}
+
+/// [`entry`], with `on_enter` sent when the pointer comes onto a row.
+fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
     match it {
         Item::Separator => container(
             container(Space::new().width(Length::Fill).height(pm::line())).style(
@@ -166,6 +276,7 @@ pub fn entry<'a>(it: Item) -> Element<'a, Message> {
             dirty,
             on_press,
             tip,
+            shortcut,
         } => {
             let mut content = row![mark_cell(mark)].align_y(iced::Center);
             if let Some(art) = icon {
@@ -184,48 +295,47 @@ pub fn entry<'a>(it: Item) -> Element<'a, Message> {
             if dirty {
                 content = content.push(dot(pm::DIRTY_DOT, chrome::text));
             }
-            // Pressed through a `mouse_area`, not a button: an
-            // `iced_aw::ContextMenu` rebuilds its overlay on every view pass,
-            // and a button there loses its press before the release lands.
-            let enabled = on_press.is_some();
-            let lit = move |hovered: bool| {
-                move |theme: &Theme| container::Style {
-                    background: (hovered && enabled)
-                        .then(|| Background::Color(chrome::hover(theme))),
-                    text_color: Some(if enabled {
-                        chrome::text(theme)
-                    } else {
-                        chrome::muted(theme)
-                    }),
-                    ..Default::default()
-                }
-            };
-            let body = |hovered: bool| {
-                container(Space::new())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(pm::MENU_ITEM_H))
-                    .style(lit(hovered))
-            };
-            let face = container(
-                content
-                    .height(Length::Fixed(pm::MENU_ITEM_H))
-                    .padding(iced::Padding::ZERO.right(pm::MENU_PAD_X)),
-            )
-            .width(Length::Fill)
-            .style(lit(false));
-            let mut area = mouse_area(iced::widget::stack![
-                iced::widget::hover(body(false), body(true)),
-                face
-            ]);
-            if let Some(m) = on_press {
-                area = area
-                    .on_press(*m)
-                    .interaction(iced::mouse::Interaction::Pointer);
+            if let Some(key) = shortcut {
+                content = content.push(
+                    container(
+                        text(key)
+                            .size(ui_text::UI)
+                            .line_height(ui_text::line())
+                            .wrapping(iced::widget::text::Wrapping::None)
+                            .style(|theme: &Theme| iced::widget::text::Style {
+                                color: Some(chrome::muted(theme)),
+                            }),
+                    )
+                    .padding(iced::Padding::ZERO.left(pm::MENU_PAD_X)),
+                );
             }
-            match tip {
-                Some(tip) => crate::ui::kit::tooltip(area, tip, crate::ui::kit::TipPosition::Right),
-                None => area.into(),
+            row_area(content, on_press.map(|m| *m), on_enter, false, tip)
+        }
+        Item::Submenu {
+            label,
+            icon,
+            open,
+            on_open,
+            ..
+        } => {
+            let mut content = row![mark_cell(Mark::None)].align_y(iced::Center);
+            if let Some(art) = icon {
+                content = content.push(
+                    container(crate::ui::icons::tinted(art, ITEM_ICON, chrome::text))
+                        .padding(iced::Padding::ZERO.right(pm::TOOL_GAP)),
+                );
             }
+            content = content
+                .push(
+                    text(label)
+                        .size(ui_text::UI)
+                        .line_height(ui_text::line())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                        .width(Length::Fill),
+                )
+                .push(crate::ui::icons::themed_arrow_right(pm::CARET));
+            let open_msg = on_open.map(|m| *m);
+            row_area(content, open_msg.clone(), open_msg, open, None)
         }
     }
 }
@@ -239,6 +349,79 @@ pub fn menu<'a>(items: Vec<Item>) -> Element<'a, Message> {
         .padding([pm::MENU_PAD_Y, 0.0])
         .style(frame_style)
         .into()
+}
+
+/// A menu whose submenu rows open their items beside it: the open one's
+/// items hang from its row, and the menu keeps the width of its widest
+/// submenu either way (near the window edge the overlay is moved in to fit,
+/// and a width that changed with the submenu moved it out from under the
+/// pointer, #2258). Coming onto any other row sends `close`.
+pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, Message> {
+    let main_w = width(&items);
+    let flyout_w = items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Submenu { items, .. } => Some(width(items)),
+            _ => None,
+        })
+        .fold(0.0_f32, f32::max);
+    // Where the open submenu's row starts, and its items.
+    let mut top = pm::MENU_PAD_Y + pm::LINE;
+    let mut flyout: Option<(f32, Vec<Item>)> = None;
+    let mut rows: Vec<Element<'a, Message>> = Vec::new();
+    for it in items {
+        let h = item_height(&it);
+        match it {
+            Item::Submenu {
+                label,
+                icon,
+                open,
+                on_open,
+                items,
+            } => {
+                if open && on_open.is_some() {
+                    flyout = Some((top, items));
+                }
+                rows.push(entry_with(
+                    Item::Submenu {
+                        label,
+                        icon,
+                        open,
+                        on_open,
+                        items: Vec::new(),
+                    },
+                    None,
+                ));
+            }
+            it @ Item::Action { .. } => rows.push(entry_with(it, Some(close.clone()))),
+            it => rows.push(entry_with(it, None)),
+        }
+        top += h;
+    }
+    let main = container(column(rows).width(Length::Fill))
+        .width(Length::Fixed(main_w))
+        .padding([pm::MENU_PAD_Y, 0.0])
+        .style(frame_style);
+    let side: Element<'a, Message> = match flyout {
+        // The submenu's first item level with its row.
+        Some((at, items)) => column![
+            Space::new().height(Length::Fixed(at - pm::MENU_PAD_Y - pm::LINE)),
+            menu(items)
+        ]
+        .into(),
+        None => Space::new().width(Length::Fixed(flyout_w)).into(),
+    };
+    row![main, side]
+        .align_y(iced::alignment::Vertical::Top)
+        .into()
+}
+
+/// Height of one item's row.
+fn item_height(it: &Item) -> f32 {
+    match it {
+        Item::Separator => pm::MENU_SEPARATOR_H,
+        _ => pm::MENU_ITEM_H,
+    }
 }
 
 /// Width of a menu holding `items`: its longest item — the mark column,
@@ -255,7 +438,11 @@ pub fn width(items: &[Item]) -> f32 {
                         .ceil(),
             ),
             Item::Action {
-                icon, label, dirty, ..
+                icon,
+                label,
+                dirty,
+                shortcut,
+                ..
             } => {
                 let icon = if icon.is_some() {
                     ITEM_ICON + pm::TOOL_GAP
@@ -267,8 +454,21 @@ pub fn width(items: &[Item]) -> f32 {
                 } else {
                     0.0
                 };
+                let key = shortcut.as_deref().map_or(0.0, |key| {
+                    pm::MENU_PAD_X
+                        + crate::ui::style::text_metrics::width(key, ui_text::UI, false).ceil()
+                });
                 let text = crate::ui::style::text_metrics::width(label, ui_text::UI, false).ceil();
-                Some(pm::MENU_CHECK_W + icon + text + dot)
+                Some(pm::MENU_CHECK_W + icon + text + dot + key)
+            }
+            Item::Submenu { icon, label, .. } => {
+                let icon = if icon.is_some() {
+                    ITEM_ICON + pm::TOOL_GAP
+                } else {
+                    0.0
+                };
+                let text = crate::ui::style::text_metrics::width(label, ui_text::UI, false).ceil();
+                Some(pm::MENU_CHECK_W + icon + text + pm::TOOL_GAP + pm::CARET)
             }
         })
         .fold(0.0_f32, f32::max);
@@ -277,15 +477,7 @@ pub fn width(items: &[Item]) -> f32 {
 
 /// Height of a menu holding `items`, for keeping it on screen.
 pub fn height(items: &[Item]) -> f32 {
-    2.0 * pm::MENU_PAD_Y
-        + 2.0 * pm::LINE
-        + items
-            .iter()
-            .map(|i| match i {
-                Item::Separator => pm::MENU_SEPARATOR_H,
-                Item::Heading(_) | Item::Action { .. } => pm::MENU_ITEM_H,
-            })
-            .sum::<f32>()
+    2.0 * pm::MENU_PAD_Y + 2.0 * pm::LINE + items.iter().map(item_height).sum::<f32>()
 }
 
 /// The menu frame: the palette body with a 1 px edge, no rounding.
@@ -350,5 +542,34 @@ mod tests {
             .icon(crate::ui::icons::PLUS)
             .dirty(true)];
         assert!(width(&more) > width(&long));
+    }
+
+    #[test]
+    fn a_shortcut_and_a_submenu_caret_add_their_room() {
+        let plain = vec![Item::new("Rename", Message::Noop)];
+        let keyed = vec![Item::new("Rename", Message::Noop).shortcut("F2")];
+        assert!(width(&keyed) > width(&plain));
+        let sub = vec![Item::submenu(
+            "Rename",
+            Message::Noop,
+            vec![Item::new("A", Message::Noop)],
+        )];
+        assert!(width(&sub) > width(&plain));
+        assert_eq!(height(&sub), height(&plain));
+    }
+
+    #[test]
+    fn a_disabled_submenu_is_closed_and_inert() {
+        let item = Item::submenu("Change", Message::Noop, Vec::new())
+            .open(true)
+            .enabled(false);
+        assert!(matches!(
+            item,
+            Item::Submenu {
+                open: false,
+                on_open: None,
+                ..
+            }
+        ));
     }
 }

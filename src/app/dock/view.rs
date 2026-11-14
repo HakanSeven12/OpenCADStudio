@@ -814,62 +814,43 @@ impl OpenCADStudio {
             frame.bar_x(f) + self.dock_float_menu_at.x,
             frame.y + self.dock_float_menu_at.y,
         );
-        let menu_x = if at.x + DOCK_MENU_W <= ww {
-            at.x
-        } else {
-            at.x - DOCK_MENU_W
-        };
-        let menu_x = menu_x.clamp(0.0, (ww - DOCK_MENU_W).max(0.0));
-        let menu_y = at.y.min(wh - FLOAT_MENU_H).max(0.0);
-        let item =
-            |label: Element<'static, Message>, press: DockMsg| -> Element<'static, Message> {
-                button(label)
-                    .on_press(Message::Dock(press))
-                    .style(menu_row_style)
-                    .padding([5, 8])
-                    .width(Fill)
-                    .into()
-            };
-        let check: Element<'static, Message> = if f.docking {
-            crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
-        } else {
-            Space::new().width(12).height(12).into()
-        };
-        let docking =
-            row![text(t!("Allow docking")).size(12).width(Fill), check].align_y(iced::Center);
-        let separator = container(Space::new())
-            .width(Fill)
-            .height(Length::Fixed(crate::ui::style::palette_metrics::line()))
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.neutral.color)),
-                ..Default::default()
-            });
-        let menu = column![
-            item(docking.into(), DockMsg::FloatDockingToggle(id)),
-            container(separator).padding([3, 4]),
-            item(
-                text(t!("Dock left")).size(12).into(),
-                DockMsg::DockTo(id, DockSide::Left)
+        use crate::ui::palette_menu::{self, Item, Mark};
+        #[allow(unused_mut)]
+        let mut items = vec![
+            Item::new(
+                t!("Allow docking"),
+                Message::Dock(DockMsg::FloatDockingToggle(id)),
+            )
+            .mark(Mark::Check(f.docking)),
+            Item::Separator,
+            Item::new(
+                t!("Dock left"),
+                Message::Dock(DockMsg::DockTo(id, DockSide::Left)),
             ),
-            item(
-                text(t!("Dock right")).size(12).into(),
-                DockMsg::DockTo(id, DockSide::Right)
+            Item::new(
+                t!("Dock right"),
+                Message::Dock(DockMsg::DockTo(id, DockSide::Right)),
             ),
-        ]
-        .spacing(1)
-        .padding(4);
+        ];
         // Desktop: the pallet can leave the main window, onto another monitor.
         #[cfg(not(target_arch = "wasm32"))]
-        let menu = menu.push(item(
-            row![
-                text(t!("Open in its own window")).size(12).width(Fill),
-                crate::ui::icons::themed(crate::ui::icons::DETACH, 12.0),
-            ]
-            .align_y(iced::Center)
-            .into(),
-            DockMsg::Detach(id),
-        ));
-        Some(place_at(menu_frame(menu.into()), menu_x, menu_y))
+        items.push(
+            Item::new(
+                t!("Open in its own window"),
+                Message::Dock(DockMsg::Detach(id)),
+            )
+            .icon(crate::ui::icons::DETACH),
+        );
+        // At the pointer, kept inside the workspace.
+        let (menu_w, menu_h) = (palette_menu::width(&items), palette_menu::height(&items));
+        let menu_x = if at.x + menu_w <= ww {
+            at.x
+        } else {
+            at.x - menu_w
+        };
+        let menu_x = menu_x.clamp(0.0, (ww - menu_w).max(0.0));
+        let menu_y = at.y.min(wh - menu_h).max(0.0);
+        Some(place_at(palette_menu::menu(items), menu_x, menu_y))
     }
 
     /// The live drop preview for dragged panel `id`: a tint over the target
@@ -1341,11 +1322,6 @@ fn dock_divider(
         .into()
 }
 
-/// Width of the icon strip's pallet menu.
-const DOCK_MENU_W: f32 = crate::ui::style::palette_metrics::MENU_W;
-/// Rough height of a floating title bar's menu, to keep it on screen.
-const FLOAT_MENU_H: f32 = 140.0;
-
 /// Opacity of the accent on a lit group grip.
 const GRIP_LIT: f32 = 0.55;
 
@@ -1386,42 +1362,6 @@ fn dock_edge_menu_items(
         );
     }
     items
-}
-
-/// A menu row button: transparent until hovered.
-fn menu_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
-    button::Style {
-        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-            .then(|| Background::Color(palette.background.weak.color)),
-        text_color: palette.background.base.text,
-        border: Border {
-            radius: 3.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
-/// The raised box a dock menu sits in.
-fn menu_frame(rows: Element<'static, Message>) -> Element<'static, Message> {
-    container(rows)
-        .width(Length::Fixed(DOCK_MENU_W))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: crate::ui::style::palette_metrics::line(),
-                radius: 4.0.into(),
-            },
-            shadow: iced::Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
-            },
-            ..Default::default()
-        })
-        .into()
 }
 
 /// Draggable bar between two stacked pallets of group `gi`; double-click

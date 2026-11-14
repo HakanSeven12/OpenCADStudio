@@ -1342,109 +1342,9 @@ fn menu_item(label: String, msg: Option<Message>, gate: Option<String>) -> Item 
     }
 }
 
-const MENU_ROW_H: f32 = pm::MENU_ITEM_H;
-const MENU_SEP_H: f32 = pm::MENU_SEPARATOR_H;
-const MENU_PADDING: f32 = pm::MENU_PAD_Y;
-const MENU_SPACING: f32 = 0.0;
-/// Width of the right-click menu.
-const ROW_MENU_W: f32 = 220.0;
-
-/// A menu row's face: the label after the palette menu's check column,
-/// lit while `hot`.
-fn menu_face(
-    content: impl Into<Element<'static, Message>>,
-    hot: bool,
-) -> iced::widget::Container<'static, Message> {
-    container(content)
-        .padding(Padding::ZERO.left(pm::MENU_CHECK_W).right(pm::MENU_PAD_X))
-        .height(Length::Fixed(MENU_ROW_H))
-        .width(Fill)
-        .align_y(iced::Center)
-        .style(move |theme: &Theme| container::Style {
-            background: hot.then(|| Background::Color(chrome::hover(theme))),
-            text_color: Some(chrome::text(theme)),
-            ..Default::default()
-        })
-}
-
-fn menu_label(label: String) -> iced::widget::Text<'static> {
-    text(label)
-        .size(ui_text::UI)
-        .line_height(crate::ui::style::text::line())
-        .wrapping(iced::widget::text::Wrapping::None)
-}
-
-/// One right-click menu row, styled like the model-space context menu:
-/// borderless subtle text rows. Hovering a regular row dismisses any open flyout.
-///
-/// NOTE: this must stay a SINGLE interactive widget (`mouse_area` alone).
-/// Wrapping a `button` in a `mouse_area` here breaks click delivery inside
-/// the `ContextMenu` overlay: the overlay subtree state (including a button's
-/// press state) is wiped on every view rebuild, so a press → release button
-/// never publishes. `on_press` fires in the press batch itself and needs no
-/// saved state.
-fn menu_row(label: String, msg: Message) -> Element<'static, Message> {
-    mouse_area(iced::widget::hover(
-        menu_face(menu_label(label.clone()), false),
-        menu_face(menu_label(label), true),
-    ))
-    .on_press(msg)
-    .on_enter(Message::XrefRowChangePathLeave)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into()
-}
-
-/// A greyed menu row: shown, but takes no click.
-fn disabled_menu_row(label: String, keep_flyout: bool) -> Element<'static, Message> {
-    mouse_area(menu_face(
-        menu_label(label).style(|theme: &Theme| iced::widget::text::Style {
-            color: Some(chrome::muted(theme)),
-        }),
-        false,
-    ))
-    .on_enter(if keep_flyout {
-        Message::XrefRowChangePathEnter
-    } else {
-        Message::XrefRowChangePathLeave
-    })
-    .into()
-}
-
-/// One flyout submenu row: does not close the flyout on hover. Same
-/// single-`mouse_area` rule as [`menu_row`] — no nested `button`.
-fn submenu_row(label: String, msg: Message) -> Element<'static, Message> {
-    mouse_area(iced::widget::hover(
-        menu_face(menu_label(label.clone()), false),
-        menu_face(menu_label(label), true),
-    ))
-    .on_press(msg)
-    .on_enter(Message::XrefRowChangePathEnter)
-    .on_exit(Message::XrefRowChangePathLeave)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into()
-}
-
-fn menu_separator() -> Element<'static, Message> {
-    container(
-        container(iced::widget::Space::new().height(Length::Fixed(pm::line())))
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::border(theme))),
-                ..Default::default()
-            })
-            .width(Fill),
-    )
-    .center_y(Length::Fixed(MENU_SEP_H))
-    .width(Fill)
-    .into()
-}
-
-/// Per-row right-click menu. Eight items exactly: universal tools +
-/// path tools. No Bind, no Attach/Overlay — those are DWG-only and
-/// hidden entirely. Change Path Type shows a right triangle and a
-/// second list adjacent to "Change Path Type" on hover.
-/// Width of the Change Path Type flyout.
-const XREF_FLYOUT_W: f32 = 180.0;
-
+/// Per-row right-click menu, the palette menu: universal tools, then path
+/// tools. No Bind, no Attach/Overlay — those are DWG-only and hidden
+/// entirely. Change Path Type opens its list beside the menu on hover.
 /// `nested` greys everything but Open: a nested reference is changed in its
 /// host drawing. `current` is the path type the reference already has, which
 /// its flyout greys.
@@ -1454,114 +1354,48 @@ fn row_menu_for(
     nested: bool,
     current: Pathtype,
 ) -> Element<'static, Message> {
-    let change_path_open = change_path_open && !nested;
-    let item = |label: &str, op: XrefPaletteOp| -> Element<'static, Message> {
-        if nested && !matches!(op, XrefPaletteOp::Open) {
-            return disabled_menu_row(label.to_string(), false);
-        }
-        menu_row(label.to_string(), Message::XrefRowOp(id.clone(), op))
+    let op = |label: &str, op: XrefPaletteOp| {
+        let enabled = !nested || matches!(op, XrefPaletteOp::Open);
+        Item::new(label, Message::XrefRowOp(id.clone(), op)).enabled(enabled)
     };
-    let pathtype_item = |label: &str, pt: Pathtype| -> Element<'static, Message> {
-        if pt == current {
-            return disabled_menu_row(label.to_string(), true);
-        }
-        submenu_row(
-            label.to_string(),
+    let pathtype = |label: &str, pt: Pathtype| {
+        Item::new(
+            label,
             Message::XrefRowOp(id.clone(), XrefPaletteOp::Pathtype(pt)),
         )
+        .enabled(pt != current)
     };
-    let path_row = |label: String, msg: Message| -> Element<'static, Message> {
-        if nested {
-            disabled_menu_row(label, false)
-        } else {
-            menu_row(label, msg)
-        }
-    };
-    let change_path_row: Element<'static, Message> = if nested {
-        disabled_menu_row(crate::t!("Change Path Type").into_owned(), false)
-    } else {
-        mouse_area(menu_face(
-            row![
-                menu_label(crate::t!("Change Path Type").into_owned()).width(Fill),
-                crate::ui::icons::themed_arrow_right(pm::CARET),
-            ]
-            .align_y(iced::Center)
-            .spacing(pm::TOOL_GAP),
-            change_path_open,
-        ))
-        .on_enter(Message::XrefRowChangePathEnter)
-        .into()
-    };
-
-    let main: Element<'static, Message> = container(
-        column![
-            item(&crate::t!("Open").into_owned(), XrefPaletteOp::Open),
-            item(&crate::t!("Attach...").into_owned(), XrefPaletteOp::Attach),
-            item(&crate::t!("Unload").into_owned(), XrefPaletteOp::Unload),
-            item(&crate::t!("Reload").into_owned(), XrefPaletteOp::Reload),
-            item(&crate::t!("Detach").into_owned(), XrefPaletteOp::Detach),
-            menu_separator(),
-            change_path_row,
-            menu_separator(),
-            path_row(
-                crate::t!("Select New Path").into_owned(),
-                Message::XrefRowPathPick(id.clone()),
-            ),
-            path_row(
-                crate::t!("Find and Replace...").into_owned(),
-                Message::XrefRowFindReplacePrompt(id.clone()),
-            ),
-        ]
-        .spacing(MENU_SPACING)
-        .padding([MENU_PADDING, 0.0]),
-    )
-    .style(palette_menu::frame_style)
-    .width(Length::Fixed(ROW_MENU_W))
-    .into();
-
-    // The menu keeps one width with the flyout open or closed: near the
-    // window edge the overlay is moved in to fit, and a width that changed
-    // with the flyout moved it out from under the pointer, which closed the
-    // flyout and moved it back (#2258).
-    if !change_path_open {
-        return row![
-            main,
-            iced::widget::Space::new().width(Length::Fixed(XREF_FLYOUT_W))
-        ]
-        .into();
-    }
-
-    // Top offset so the flyout top border aligns directly with the "Change Path Type" row.
-    // The frame's padding, five items and a separator.
-    let flyout_offset =
-        MENU_PADDING + 5.0 * MENU_ROW_H + 5.0 * MENU_SPACING + MENU_SEP_H + MENU_SPACING;
-
-    // Plain container on purpose: each submenu row tracks hover itself
-    // (`on_enter` keeps the flyout open, `on_exit` closes it). Wrapping the
-    // clickable rows in an outer `mouse_area` would nest interactives and
-    // break click delivery inside the `ContextMenu` overlay — see `menu_row`.
-    let flyout: Element<'static, Message> = container(
-        column![
-            pathtype_item(&crate::t!("Make Absolute").into_owned(), Pathtype::Full),
-            pathtype_item(&crate::t!("Make Relative").into_owned(), Pathtype::Relative),
-            pathtype_item(&crate::t!("Remove Path").into_owned(), Pathtype::None),
-        ]
-        .spacing(MENU_SPACING)
-        .padding([MENU_PADDING, 0.0]),
-    )
-    .style(palette_menu::frame_style)
-    .width(Length::Fixed(XREF_FLYOUT_W))
-    .into();
-
-    let flyout_column = column![
-        iced::widget::Space::new().height(Length::Fixed(flyout_offset)),
-        flyout,
+    let items = vec![
+        op(&crate::t!("Open"), XrefPaletteOp::Open),
+        op(&crate::t!("Attach..."), XrefPaletteOp::Attach),
+        op(&crate::t!("Unload"), XrefPaletteOp::Unload),
+        op(&crate::t!("Reload"), XrefPaletteOp::Reload),
+        op(&crate::t!("Detach"), XrefPaletteOp::Detach),
+        Item::Separator,
+        Item::submenu(
+            crate::t!("Change Path Type"),
+            Message::XrefRowChangePathEnter,
+            vec![
+                pathtype(&crate::t!("Make Absolute"), Pathtype::Full),
+                pathtype(&crate::t!("Make Relative"), Pathtype::Relative),
+                pathtype(&crate::t!("Remove Path"), Pathtype::None),
+            ],
+        )
+        .open(change_path_open)
+        .enabled(!nested),
+        Item::Separator,
+        Item::new(
+            crate::t!("Select New Path"),
+            Message::XrefRowPathPick(id.clone()),
+        )
+        .enabled(!nested),
+        Item::new(
+            crate::t!("Find and Replace..."),
+            Message::XrefRowFindReplacePrompt(id.clone()),
+        )
+        .enabled(!nested),
     ];
-
-    row![main, flyout_column]
-        .spacing(0)
-        .align_y(iced::alignment::Vertical::Top)
-        .into()
+    palette_menu::menu_with_submenus(items, Message::XrefRowChangePathLeave)
 }
 
 fn xref_row<'a>(

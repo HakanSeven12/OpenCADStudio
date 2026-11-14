@@ -8361,8 +8361,7 @@ impl OpenCADStudio {
         {
             // Missing CRS or units means the ordinary plain-PDF fallback; only
             // malformed geospatial state or an unsupported frame fails here.
-            let _geopdf = self.geopdf_eligibility();
-            if let Err(error) = _geopdf {
+            if let Err(error) = self.geopdf_eligibility() {
                 self.command_line.push_error(&error);
                 return Task::none();
             }

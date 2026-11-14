@@ -211,16 +211,7 @@ impl OpenCADStudio {
                         );
                         return Some(Task::none());
                     }
-                    "BYLAYER" => Some(Color::ByLayer),
-                    "BYBLOCK" => Some(Color::ByBlock),
-                    "RED" => Some(Color::Index(1)),
-                    "YELLOW" => Some(Color::Index(2)),
-                    "GREEN" => Some(Color::Index(3)),
-                    "CYAN" => Some(Color::Index(4)),
-                    "BLUE" => Some(Color::Index(5)),
-                    "MAGENTA" => Some(Color::Index(6)),
-                    "WHITE" => Some(Color::Index(7)),
-                    n => n.parse::<i16>().ok().map(Color::from_index),
+                    other => command_color(other),
                 };
                 match color {
                     Some(c) => {
@@ -629,14 +620,8 @@ impl OpenCADStudio {
                             .push_error(crate::t!("CHPROP: no entities selected.").as_ref());
                     } else {
                         // Validate value early to give clear errors
-                        let color_val: Option<document::types::Color> = if prop == "COLOR" {
-                            value
-                                .parse::<i16>()
-                                .ok()
-                                .map(document::types::Color::from_index)
-                        } else {
-                            None
-                        };
+                        let color_val: Option<document::types::Color> =
+                            if prop == "COLOR" { command_color(&value) } else { None };
                         let ltscale_val: Option<f64> = if prop == "LTSCALE" {
                             value.parse().ok()
                         } else {
@@ -4869,6 +4854,24 @@ impl OpenCADStudio {
 
 /// A VSEDGECOLOR value: an index, a colour name or R,G,B, with BLACK (or 0)
 /// for the default black edges (`Some(None)`).
+/// A colour named the way the COLOR prompt accepts it: ByLayer, ByBlock, one
+/// of the seven named ACI colours, or an index.
+fn command_color(arg: &str) -> Option<document::types::Color> {
+    use document::types::Color;
+    match arg.trim().to_ascii_uppercase().as_str() {
+        "BYLAYER" => Some(Color::ByLayer),
+        "BYBLOCK" => Some(Color::ByBlock),
+        "RED" => Some(Color::Index(1)),
+        "YELLOW" => Some(Color::Index(2)),
+        "GREEN" => Some(Color::Index(3)),
+        "CYAN" => Some(Color::Index(4)),
+        "BLUE" => Some(Color::Index(5)),
+        "MAGENTA" => Some(Color::Index(6)),
+        "WHITE" => Some(Color::Index(7)),
+        index => index.parse::<i16>().ok().map(Color::from_index),
+    }
+}
+
 fn parse_edge_color(value: &str) -> Option<Option<[u8; 3]>> {
     let value = value.trim().trim_start_matches("RGB:");
     if value.eq_ignore_ascii_case("BLACK") || value == "0" {

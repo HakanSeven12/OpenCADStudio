@@ -8887,3 +8887,49 @@ mod text_mask_tests {
     }
 }
 
+#[cfg(test)]
+mod change_properties_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::{Color, Vector3};
+
+    fn color_of(app: &OpenCADStudio, handle: document::Handle) -> Color {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("the object stays")
+            .common()
+            .color
+    }
+
+    /// CHPROP's prompt offers "name / 1-255 / ByLayer", but its parser read
+    /// the value as a bare index, so every named colour and ByLayer itself was
+    /// rejected as invalid. The objects kept their old colour.
+    #[test]
+    fn chprop_color_accepts_the_names_and_bylayer_its_prompt_offers() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        app.tabs[i].scene.select_entities(&[line]);
+
+        let _ = app.run_command_line("CHPROP COLOR GREEN");
+        assert_eq!(color_of(&app, line), Color::Index(3), "a named colour");
+
+        let _ = app.run_command_line("CHPROP COLOR BYLAYER");
+        assert_eq!(color_of(&app, line), Color::ByLayer, "ByLayer itself");
+
+        let _ = app.run_command_line("CHPROP COLOR CHARTREUSE");
+        assert_eq!(
+            color_of(&app, line),
+            Color::ByLayer,
+            "an unknown colour leaves the object alone"
+        );
+    }
+}
+
+

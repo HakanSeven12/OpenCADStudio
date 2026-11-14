@@ -693,23 +693,25 @@ impl<'a> RenderSceneGraph<'a> {
     }
 }
 
-/// Whether a block member on `layer` is hidden by its layer. Frozen layers
-/// hide it; layer 0 being off does not, since a member on layer 0 shows on the
-/// layer of the reference that places it, which the caller has checked.
-/// (#1916) `walk` is the session LAYWALK visible set of the space being
-/// rendered; outside layers hide like frozen ones, but layer 0 defers with the
-/// same exemption the off flag gets — the reference's layer was already
-/// checked against the walk by the caller.
+/// Whether a block member on `layer` is hidden by its layer. An off or frozen
+/// layer hides it, except layer 0: a member on layer 0 shows on the layer of
+/// the reference that places it, which the caller has checked (#1916), so
+/// layer 0 being off or frozen leaves it to that layer. `walk` is the session
+/// LAYWALK visible set of the space being rendered; outside layers hide like
+/// frozen ones, and layer 0 defers there too — the reference's layer was
+/// already checked against the walk by the caller.
 pub(crate) fn block_member_layer_hidden(
     document: &Document,
     layer: &str,
     walk: Option<&FxHashSet<Handle>>,
 ) -> bool {
+    if crate::scene::view::render::is_effective_layer_zero(layer) {
+        return false;
+    }
     document.layers.get(layer).is_some_and(|record| {
-        let layer_zero = crate::scene::view::render::is_effective_layer_zero(layer);
         record.flags.frozen
-            || (record.flags.off && !layer_zero)
-            || (walk.is_some_and(|walk| !walk.contains(&record.handle)) && !layer_zero)
+            || record.flags.off
+            || walk.is_some_and(|walk| !walk.contains(&record.handle))
     })
 }
 
@@ -1422,8 +1424,10 @@ mod tests {
         assert_eq!(context.effective_layer("XREF|0"), "XREF|0");
     }
 
+    /// Off or frozen, layer 0 leaves a block member on it to the layer of the
+    /// reference that places it.
     #[test]
-    fn layer_zero_block_members_follow_the_reference_until_frozen() {
+    fn layer_zero_block_members_follow_the_reference_when_off_or_frozen() {
         use document::entities::Line;
         use document::tables::BlockRecord;
         let mut document = Document::new();
@@ -1447,7 +1451,61 @@ mod tests {
         document.layers.get_mut("0").unwrap().flags.off = true;
         assert_eq!(leaves(&document), 1);
         document.layers.get_mut("0").unwrap().flags.frozen = true;
-        assert_eq!(leaves(&document), 0);
+        assert_eq!(leaves(&document), 1);
+    }
+
+    /// Layer 0 frozen in the whole drawing hides what is drawn on layer 0 in a
+    /// space, not a reference placed on layer 0 inside another block, nor what
+    /// that reference holds.
+    #[test]
+    fn a_frozen_layer_zero_keeps_a_nested_reference_on_layer_zero() {
+        use document::entities::Line;
+        use document::tables::{BlockRecord, Layer};
+        let mut document = Document::new();
+        document.layers.add(Layer::new("REF")).unwrap();
+        let mut add_block = |name: &str| {
+            let mut record = BlockRecord::new(name);
+            record.handle = document.allocate_handle();
+            let handle = record.handle;
+            document.block_records.add(record).unwrap();
+            handle
+        };
+        let inner = add_block("INNER");
+        let outer = add_block("OUTER");
+        let mut member = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        member.common.owner_handle = inner;
+        member.common.layer = "0".into();
+        document.add_entity(EntityType::Line(member)).unwrap();
+        let mut nested = Insert::new("INNER", Vector3::ZERO);
+        nested.common.owner_handle = outer;
+        nested.common.layer = "0".into();
+        document.add_entity(EntityType::Insert(nested)).unwrap();
+        let mut placed = Insert::new("OUTER", Vector3::ZERO);
+        placed.common.layer = "REF".into();
+        document.add_entity(EntityType::Insert(placed)).unwrap();
+        let mut drawn_on_zero = Line::from_points(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
+        drawn_on_zero.common.layer = "0".into();
+        document
+            .add_entity(EntityType::Line(drawn_on_zero))
+            .unwrap();
+        document.layers.get_mut("0").unwrap().flags.frozen = true;
+        let model = document.header.model_space_block_handle;
+
+        let depths = FxHashMap::default();
+        let graph = RenderSceneGraph::new(&document, None, None, true, &depths);
+        let mut lines = 0;
+        graph.walk_root(
+            SceneRoot::Block(BlockRoot {
+                record: model,
+                role: BlockRootRole::ModelSpace,
+            }),
+            |_, _| true,
+            |entity, _| lines += usize::from(matches!(entity, EntityType::Line(_))),
+        );
+        assert_eq!(
+            lines, 1,
+            "only the line drawn on layer 0 in model space hides"
+        );
     }
 
     /// A viewport that freezes layer 0 hides what is drawn on layer 0 in its

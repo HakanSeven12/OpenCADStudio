@@ -3,8 +3,6 @@
 //! It opens where the tab row or the tool area is right-clicked; its two
 //! lists open beside it on hover.
 
-use std::time::Duration;
-
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, tree, Widget};
 use iced::advanced::{mouse, overlay, renderer, Shell};
@@ -17,7 +15,6 @@ use iced::{
 };
 
 use super::layout::QatItem;
-use super::widgets::{make_tip, tip_style};
 use super::{extras, Ribbon};
 use crate::app::Message;
 use crate::ui::icons;
@@ -587,10 +584,7 @@ fn item_row<'a>(row: Row) -> Element<'a, Message> {
         row.enabled.then_some(Message::RibbonMenu(row.action)),
     );
     match row.reason {
-        Some(reason) => tooltip(item, make_tip(reason), tooltip::Position::Right)
-            .delay(Duration::from_millis(400))
-            .style(tip_style)
-            .into(),
+        Some(reason) => crate::ui::kit::tooltip_gap(item, reason, tooltip::Position::Right, 0.0),
         None => item.into(),
     }
 }

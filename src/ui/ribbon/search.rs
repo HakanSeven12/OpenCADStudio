@@ -19,7 +19,7 @@ use iced::{
 
 use super::layout::{QatBuiltin, QatItem};
 use super::qat::FaceIcon;
-use super::widgets::{make_icon, make_tip, tip_style};
+use super::widgets::make_icon;
 use super::{app_menu, draw_panel, extras, Ribbon};
 use crate::app::Message;
 use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
@@ -863,10 +863,12 @@ impl Ribbon {
                     crate::tr!("ribbon-menu", "search-commands-keep"),
                 )
             };
-            let magnifier = tooltip(magnifier, make_tip(tip), tooltip::Position::Bottom)
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style);
+            let magnifier = crate::ui::kit::tooltip_gap(
+                magnifier,
+                tip,
+                tooltip::Position::Bottom,
+                crate::ui::style::ribbon_metrics::TIP_GAP,
+            );
             return PosReport::new(BOX_ID, magnifier).into();
         }
         let end = if self.layout.search_expanded {
@@ -960,21 +962,17 @@ impl Ribbon {
             End::None => None,
         };
         if let Some((path, collapse, tip)) = end_button {
-            content = content.push(
-                tooltip(
-                    box_button(
-                        icons::line_icon(path, metrics::STRIP_ICON),
-                        SearchMsg::Collapse(collapse),
-                        chrome::muted,
-                        chrome::strong,
-                    ),
-                    make_tip(tip),
-                    tooltip::Position::Bottom,
-                )
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style),
-            );
+            content = content.push(crate::ui::kit::tooltip_gap(
+                box_button(
+                    icons::line_icon(path, metrics::STRIP_ICON),
+                    SearchMsg::Collapse(collapse),
+                    chrome::muted,
+                    chrome::strong,
+                ),
+                tip,
+                tooltip::Position::Bottom,
+                crate::ui::style::ribbon_metrics::TIP_GAP,
+            ));
         }
         let overlay = end == End::None;
         container(content)

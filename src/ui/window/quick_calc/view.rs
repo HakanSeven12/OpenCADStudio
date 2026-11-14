@@ -174,14 +174,7 @@ pub(super) fn tip<'a>(
     content: impl Into<Element<'a, Message>>,
     label: String,
 ) -> Element<'a, Message> {
-    tooltip(
-        content,
-        crate::ui::ribbon::tooltip_content(label),
-        tooltip::Position::Bottom,
-    )
-    .delay(std::time::Duration::from_millis(400))
-    .style(crate::ui::ribbon::tooltip_style)
-    .into()
+    crate::ui::kit::tooltip_gap(content, label, tooltip::Position::Bottom, 0.0)
 }
 
 /// Full-strength text in the theme's text colour.

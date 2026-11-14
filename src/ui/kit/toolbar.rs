@@ -57,7 +57,7 @@ pub fn flat_button_style(active: bool) -> impl Fn(&Theme, button::Status) -> but
 }
 
 /// Corner radius of a lit or hovered button.
-const BUTTON_RADIUS: f32 = 2.0;
+pub(super) const BUTTON_RADIUS: f32 = 2.0;
 
 /// A toolbar button: `icon` centred in a 22 px square, its tooltip below.
 /// `None` for `message` shows it disabled.

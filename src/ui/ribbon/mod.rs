@@ -73,14 +73,6 @@ pub use qat::{QatMsg, QatOutcome, QAT_PICKER_INPUT};
 pub use ribbon_menu::{MenuTarget, RibbonMenuMsg, Submenu};
 pub use search::{results_scroll_id, SearchMsg, SearchOutcome, SEARCH_INPUT_ID};
 
-pub(crate) fn tooltip_content(text: String) -> Element<'static, Message> {
-    widgets::make_tip(text)
-}
-
-pub(crate) fn tooltip_style(theme: &Theme) -> container::Style {
-    widgets::tip_style(theme)
-}
-
 /// A line over the items of a split button whose face names the chosen item.
 fn dropdown_header(id: &str) -> Option<&'static str> {
     (id == "IMPORT_FILE").then_some("Import File — the face runs the last one chosen")
@@ -320,14 +312,12 @@ fn start_shield<'a>(colour: fn(&Theme) -> Color) -> Element<'a, Message> {
     )
     .on_press(Message::CloseRibbonDropdown)
     .interaction(iced::mouse::Interaction::Idle);
-    let shield = iced::widget::tooltip(
+    let shield = crate::ui::kit::tooltip_gap(
         shield,
-        make_tip(t!("Open or create a drawing to use ribbon commands.").into_owned()),
+        t!("Open or create a drawing to use ribbon commands.").into_owned(),
         iced::widget::tooltip::Position::Bottom,
-    )
-    .gap(6.0)
-    .delay(std::time::Duration::from_millis(400))
-    .style(tip_style);
+        crate::ui::style::ribbon_metrics::TIP_GAP,
+    );
     iced::widget::opaque(shield)
 }
 

@@ -3,7 +3,6 @@ use super::super::Message;
 use super::*;
 use iced::widget::{button, column, container, mouse_area, row, text, tooltip};
 use iced::{Background, Border, Element, Length, Theme};
-use std::time::Duration;
 
 fn viewport_tooltip<'a>(
     control: impl Into<Element<'a, Message>>,
@@ -11,15 +10,12 @@ fn viewport_tooltip<'a>(
     command: &'static str,
 ) -> Element<'a, Message> {
     let text = format!("{title}\n{} {command}", crate::t!("Command:"));
-    tooltip(
+    crate::ui::kit::tooltip_gap(
         control,
-        crate::ui::ribbon::tooltip_content(text),
+        text,
         tooltip::Position::Bottom,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
     )
-    .gap(6.0)
-    .delay(Duration::from_millis(400))
-    .style(crate::ui::ribbon::tooltip_style)
-    .into()
 }
 
 // ── Viewport control bar: the prototype's measurements ─────────────────────

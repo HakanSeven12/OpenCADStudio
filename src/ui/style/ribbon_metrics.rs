@@ -66,6 +66,8 @@ pub const QAT_PICKER_PATH_SIZE: f32 = 10.0;
 pub const QAT_PICKER_INPUT_SIZE: f32 = super::text::UI;
 pub const QAT_PICKER_INPUT_PAD: [f32; 2] = [4.0, 6.0];
 pub const QAT_PICKER_EMPTY_PAD: [f32; 2] = [6.0, 10.0];
+/// Gap between a ribbon control and its tooltip.
+pub const TIP_GAP: f32 = 6.0;
 /// Gap between two tabs: none, so a hovered tab meets the active one.
 pub const TAB_GAP: f32 = 0.0;
 /// The minimize split button after the last tab: this far from the tab,

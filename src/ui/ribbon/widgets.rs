@@ -3,7 +3,6 @@
 
 use rustc_hash::FxHashMap as HashMap;
 use std::cell::RefCell;
-use std::time::Duration;
 
 use document::types::{Color as AcadColor, LineWeight};
 use iced::advanced::{
@@ -12,7 +11,7 @@ use iced::advanced::{
 // Ribbon tooltips anchor to the right of their button so the cursor — which
 // rests on the button itself — never covers the tip text. (#143)
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, row, text, tooltip};
+use iced::widget::{button, column, container, row, text};
 use iced::{
     Background, Border, Color, Element, Event, Fill, Length, Padding, Pixels, Rectangle, Size,
     Theme, Vector,
@@ -499,12 +498,7 @@ pub(super) fn tool_btn_style(
     is_active: bool,
     status: button::Status,
 ) -> button::Style {
-    let mut style = split_part_style(theme, is_active, status);
-    if matches!(status, button::Status::Hovered | button::Status::Pressed) && !is_active {
-        style.border.color = chrome::hover_border(theme);
-        style.border.width = 1.0;
-    }
-    style
+    crate::ui::kit::flat_button_style(is_active)(theme, status)
 }
 
 /// One part of a split button. The parts fill on hover; the outline is the
@@ -719,10 +713,6 @@ pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
 
 // ── Tooltip helpers ────────────────────────────────────────────────────────
 
-pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
-    text(tip).size(ui_text::UI).into()
-}
-
 /// A tool's tooltip: its name, its description when one is known, and the
 /// command it runs.
 pub(super) fn tool_tip_text(label: &str, id: &str) -> String {
@@ -750,19 +740,6 @@ pub(super) fn tool_tip_text(label: &str, id: &str) -> String {
             format!("{label}\n{wrapped}\n{} {id}", t!("Command:"))
         }
         None => format!("{label}\n{} {id}", t!("Command:")),
-    }
-}
-
-pub(super) fn tip_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(chrome::panel(theme))),
-        border: Border {
-            color: chrome::border(theme),
-            width: crate::ui::icons::hairline(),
-            radius: BUTTON_RADIUS.into(),
-        },
-        text_color: Some(chrome::text(theme)),
-        ..Default::default()
     }
 }
 
@@ -806,10 +783,12 @@ fn labeled_tool<'a>(
         });
     super::keytips::anchor(
         t.id,
-        tooltip(btn, make_tip(tip_text), TipPos::Right)
-            .gap(6.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style),
+        crate::ui::kit::tooltip_gap(
+            btn,
+            tip_text,
+            TipPos::Right,
+            crate::ui::style::ribbon_metrics::TIP_GAP,
+        ),
     )
 }
 
@@ -869,10 +848,12 @@ fn small_button<'a>(
                 .padding(SMALL_PAD);
             super::keytips::anchor(
                 t.id,
-                tooltip(btn, make_tip(tip_text), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
+                crate::ui::kit::tooltip_gap(
+                    btn,
+                    tip_text,
+                    TipPos::Right,
+                    crate::ui::style::ribbon_metrics::TIP_GAP,
+                ),
             )
         }
 
@@ -947,14 +928,18 @@ fn small_button<'a>(
             .height(ROW_H)
             .padding(0);
 
-            let icon_with_tip = tooltip(icon_btn, make_tip(tip_text), TipPos::Right)
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style);
-            let arr_with_tip = tooltip(arr_btn, make_tip(arr_tip), TipPos::Right)
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style);
+            let icon_with_tip = crate::ui::kit::tooltip_gap(
+                icon_btn,
+                tip_text,
+                TipPos::Right,
+                crate::ui::style::ribbon_metrics::TIP_GAP,
+            );
+            let arr_with_tip = crate::ui::kit::tooltip_gap(
+                arr_btn,
+                arr_tip,
+                TipPos::Right,
+                crate::ui::style::ribbon_metrics::TIP_GAP,
+            );
 
             PosReport::new(
                 id,
@@ -1047,14 +1032,18 @@ fn small_button<'a>(
             let face_tip = tool_tip_text(&localized_label, last);
             let arrow_tip = format!("{} {}", localized_label, t!("options"));
             let parts = row![
-                tooltip(face_btn, make_tip(face_tip), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
-                tooltip(arrow, make_tip(arrow_tip), TipPos::Right)
-                    .gap(6.0)
-                    .delay(Duration::from_millis(400))
-                    .style(tip_style),
+                crate::ui::kit::tooltip_gap(
+                    face_btn,
+                    face_tip,
+                    TipPos::Right,
+                    crate::ui::style::ribbon_metrics::TIP_GAP
+                ),
+                crate::ui::kit::tooltip_gap(
+                    arrow,
+                    arrow_tip,
+                    TipPos::Right,
+                    crate::ui::style::ribbon_metrics::TIP_GAP
+                ),
             ]
             .spacing(0)
             .width(Fill)
@@ -1212,14 +1201,18 @@ pub(super) fn render_large_dropdown<'a>(
         left: 2.0,
     });
 
-    let top_with_tip = tooltip(top_btn, make_tip(tip_text), TipPos::Right)
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style);
-    let arr_with_tip = tooltip(arr_btn, make_tip(arr_tip), TipPos::Right)
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style);
+    let top_with_tip = crate::ui::kit::tooltip_gap(
+        top_btn,
+        tip_text,
+        TipPos::Right,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
+    );
+    let arr_with_tip = crate::ui::kit::tooltip_gap(
+        arr_btn,
+        arr_tip,
+        TipPos::Right,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
+    );
 
     // The arrow part starts at `LARGE_FACE_H` and runs to the bottom.
     let content = column![top_with_tip, arr_with_tip]
@@ -1246,19 +1239,17 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, SMALL_ICON);
             let msg = module_event_to_message(event);
-            let btn = tooltip(
+            let btn = crate::ui::kit::tooltip_gap(
                 button(icon_el)
                     .on_press(msg)
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
                     .width(SMALL_W)
                     .height(ROW_H)
                     .padding(SMALL_PAD),
-                make_tip(tip.to_string()),
+                tip.to_string(),
                 TipPos::Right,
-            )
-            .gap(4.0)
-            .delay(Duration::from_millis(400))
-            .style(tip_style);
+                crate::ui::style::palette_metrics::TOOL_GAP,
+            );
             super::ribbon_menu::tool_target(
                 super::ribbon_menu::tool_qat(t),
                 super::keytips::anchor(t.id, btn),
@@ -1352,14 +1343,12 @@ fn large_item<'a>(
             });
             super::keytips::anchor(
                 t.id,
-                tooltip(
+                crate::ui::kit::tooltip_gap(
                     automatic_large_button(label, btn.into()),
-                    make_tip(tip_text),
+                    tip_text,
                     TipPos::Right,
-                )
-                .gap(6.0)
-                .delay(Duration::from_millis(400))
-                .style(tip_style),
+                    crate::ui::style::ribbon_metrics::TIP_GAP,
+                ),
             )
         }
 
@@ -1759,9 +1748,7 @@ pub(super) fn layer_combo<'a>(
     .style(move |theme: &Theme, status| combo_btn_style(theme, open, status, 3.0))
     .padding([3, 8])
     .width(Fill);
-    let combo = tooltip(PosReport::new(id, combo), make_tip(tip), TipPos::Bottom)
-        .delay(Duration::from_millis(400))
-        .style(tip_style);
+    let combo = crate::ui::kit::tooltip_gap(PosReport::new(id, combo), tip, TipPos::Bottom, 0.0);
     super::keytips::anchor(id, super::qat::list_target(id, combo))
 }
 
@@ -1786,13 +1773,8 @@ fn text_find_box<'a>(value: &str) -> Element<'a, Message> {
     .on_press(Message::RibbonTextFindSubmit)
     .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
     .padding(3);
-    let search = tooltip(
-        search,
-        make_tip(t!("Find text").into_owned()),
-        TipPos::Bottom,
-    )
-    .delay(Duration::from_millis(400))
-    .style(tip_style);
+    let search =
+        crate::ui::kit::tooltip_gap(search, t!("Find text").into_owned(), TipPos::Bottom, 0.0);
     row![input, search]
         .spacing(2)
         .align_y(iced::Center)
@@ -1809,17 +1791,12 @@ fn text_height_box<'a>(value: &str) -> Element<'a, Message> {
         .size(ui_text::UI)
         .padding([3, 6])
         .width(Fill);
-    let input = tooltip(
+    let input = crate::ui::kit::tooltip_gap(
         input,
-        make_tip(format!(
-            "{}\n{} TEXTSIZE",
-            t!("Text Height"),
-            t!("Command:")
-        )),
+        format!("{}\n{} TEXTSIZE", t!("Text Height"), t!("Command:")),
         TipPos::Bottom,
-    )
-    .delay(Duration::from_millis(400))
-    .style(tip_style);
+        0.0,
+    );
     super::keytips::anchor(super::keytips::TEXT_HEIGHT, input)
 }
 
@@ -1884,14 +1861,12 @@ pub(super) fn quick_access_btn<'a>(
     let anchor = super::keytips::quick_access_anchor(&cmd);
     super::keytips::anchor_with(
         move || anchor,
-        tooltip(
+        crate::ui::kit::tooltip_gap(
             btn,
-            make_tip(super::qat::command_tip(&face.label, &cmd)),
+            super::qat::command_tip(&face.label, &cmd),
             TipPos::Bottom,
-        )
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style),
+            crate::ui::style::ribbon_metrics::TIP_GAP,
+        ),
     )
 }
 
@@ -1930,18 +1905,16 @@ pub(super) fn render_history_control<'a>(
         } else {
             btn
         };
-        tooltip(
+        crate::ui::kit::tooltip_gap(
             btn,
-            make_tip(format!(
+            format!(
                 "{}\n{}",
                 t!(label),
                 t!("%{count} steps available", count = count)
-            )),
+            ),
             TipPos::Right,
+            crate::ui::style::ribbon_metrics::TIP_GAP,
         )
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style)
     };
 
     let arrow_btn = {
@@ -1962,14 +1935,12 @@ pub(super) fn render_history_control<'a>(
         } else {
             btn
         };
-        tooltip(
+        crate::ui::kit::tooltip_gap(
             btn,
-            make_tip(format!("{}", t!("%{label} history", label = t!(label)))),
+            format!("{}", t!("%{label} history", label = t!(label))),
             TipPos::Right,
+            crate::ui::style::ribbon_metrics::TIP_GAP,
         )
-        .gap(6.0)
-        .delay(Duration::from_millis(400))
-        .style(tip_style)
     };
 
     // A split button: its hover outline goes round both parts, inside them,

@@ -31,8 +31,7 @@ pub fn tooltip_gap<'a>(
 ) -> Element<'a, Message> {
     iced_tooltip(
         content,
-        container(label(tip.into()).size(text::UI).line_height(text::line()))
-            .padding([pm::TOOL_GAP, pm::MENU_PAD_X]),
+        container(label(tip.into()).size(text::UI).line_height(text::line())).padding(pm::TIP_PAD),
         position,
     )
     .gap(gap)

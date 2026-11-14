@@ -94,6 +94,9 @@ pub const CELL_PAD_X: f32 = 4.0;
 pub const CARET: f32 = 10.0;
 /// Gap between controls at the top of a palette (object list, toolbar).
 pub const TOOL_GAP: f32 = 4.0;
+/// A tooltip's padding, vertical and horizontal: just enough to keep the
+/// text off its border (a tooltip lines up with nothing, so no indent).
+pub const TIP_PAD: [f32; 2] = [2.0, 5.0];
 /// Room above a palette's first band, under its title bar: as wide as the
 /// left inset.
 pub const TOP_INSET: f32 = GRID_INSET_L;

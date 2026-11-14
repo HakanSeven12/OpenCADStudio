@@ -1640,6 +1640,19 @@ fn reference_properties(references: &[document::objects::ProxyObjectReference]) 
 /// stations that decrease after it).
 fn alignment_properties(data: &document::classes::arch::ArchEntityData) -> Vec<crate::scene::model::object::Property> {
     let mut props = Vec::new();
+    if let Some(name) = data.alignment_name() {
+        props.push(ro_prop(t!("Name").as_ref(), "ext_civil_name", name));
+    }
+    if let Some(kind) = data.alignment_type() {
+        props.push(ro_prop(t!("Alignment Type").as_ref(), "ext_civil_alignment_type", format!("{kind:?}")));
+    }
+    if let Some(criteria) = data.alignment_criteria() {
+        props.push(ro_prop(t!("Criteria-Based Design").as_ref(), "ext_civil_criteria", yes_no(criteria.criteria_based_design)));
+    }
+    if let Some(offset) = data.alignment_offset_parameters() {
+        let side = if offset.left { t!("Left") } else { t!("Right") };
+        props.push(ro_prop(t!("Offset").as_ref(), "ext_civil_offset", format!("{:.3} {side}", offset.offset)));
+    }
     if let Some(start) = data.alignment_start_station() {
         props.push(ro_prop(t!("Start Station").as_ref(), "ext_civil_start_station", format!("{start:.3}")));
     }
@@ -1658,6 +1671,45 @@ fn alignment_properties(data: &document::classes::arch::ArchEntityData) -> Vec<c
         props.push(ro_prop(t!("Station Equations").as_ref(), "ext_civil_station_equations", text));
     }
     props
+}
+
+fn yes_no(flag: bool) -> String {
+    if flag { t!("Yes") } else { t!("No") }.into_owned()
+}
+
+/// What a Civil 3D object of `kind` keeps beyond its geometry: names,
+/// design settings, sample line stations.
+fn civil_properties(data: &document::classes::arch::ArchEntityData, kind: document::classes::civil::CivilKind) -> Vec<crate::scene::model::object::Property> {
+    use document::classes::civil::CivilKind;
+    let named = |(name, description): (String, String)| {
+        let mut props = vec![ro_prop(t!("Name").as_ref(), "ext_civil_name", name)];
+        if !description.is_empty() {
+            props.push(ro_prop(t!("Description").as_ref(), "ext_civil_description", description));
+        }
+        props
+    };
+    match kind {
+        CivilKind::Alignment => alignment_properties(data),
+        CivilKind::Profile => {
+            let mut props: Vec<_> = data.profile_name().map(|name| ro_prop(t!("Name").as_ref(), "ext_civil_name", name)).into_iter().collect();
+            if let Some(criteria) = data.profile_criteria() {
+                props.push(ro_prop(t!("Criteria-Based Design").as_ref(), "ext_civil_criteria", yes_no(criteria.criteria_based_design)));
+            }
+            props
+        }
+        CivilKind::Parcel => data.face_name().map(named).unwrap_or_default(),
+        CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => data.feature_line_name().map(named).unwrap_or_default(),
+        CivilKind::SampleLineGroup => data
+            .sample_lines()
+            .map(|lines| {
+                vec![
+                    ro_prop(t!("Stations").as_ref(), "ext_civil_stations", lines.stations.len().to_string()),
+                    ro_prop(t!("Swath Width").as_ref(), "ext_civil_swath", format!("{:.3} / {:.3}", lines.left, lines.right)),
+                ]
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
@@ -1685,8 +1737,8 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
                         .map_or_else(|| format!("{:?}", data.kind), |kind| format!("Civil 3D {kind:?}")),
                 ),
             ];
-            if data.civil_kind() == Some(document::classes::civil::CivilKind::Alignment) {
-                props.extend(alignment_properties(data));
+            if let Some(kind) = data.civil_kind() {
+                props.extend(civil_properties(data, kind));
             }
             vec![PropSection {
                 title: t!("Class").into_owned(),

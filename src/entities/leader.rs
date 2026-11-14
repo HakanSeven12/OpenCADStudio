@@ -494,17 +494,19 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
         for v in &mut entity.vertices {
             crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
         }
+        // Offsets from the last vertex reflect as directions.
+        let axis = p2 - p1;
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.block_offset.x,
             &mut entity.block_offset.y,
-            p1,
-            p2,
+            glam::DVec3::ZERO,
+            axis,
         );
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.annotation_offset.x,
             &mut entity.annotation_offset.y,
-            p1,
-            p2,
+            glam::DVec3::ZERO,
+            axis,
         );
     });
 }

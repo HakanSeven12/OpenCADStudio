@@ -234,7 +234,7 @@ fn color_selector_with_indicator<'a>(
 
     let popup = container(color_list_with_current(current, extras, on_select, on_more))
         .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::kit::DROPDOWN_PAD);
+        .padding(crate::ui::style::palette_metrics::DROPDOWN_PAD);
 
     // `DropDown` keeps the popup outside the surrounding form layout and
     // handles viewport placement, Escape, and outside-click dismissal.
@@ -248,12 +248,6 @@ fn color_selector_with_indicator<'a>(
             .offset(2.0)
             .on_dismiss(on_dismiss),
     )
-}
-
-/// A row of a dropdown list: the kit's dropdown option, lit under the
-/// pointer.
-pub(crate) fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    crate::ui::kit::dropdown_option_style(false)(theme, status)
 }
 
 /// The colour list shown inside a picker popup: named ACI colours (with
@@ -295,7 +289,7 @@ pub fn color_list_with_current<'a>(
         )
         .on_press(msg.clone())
         .style(crate::ui::kit::dropdown_option_style(is_current))
-        .padding([2.0, crate::ui::kit::DROPDOWN_ITEM_PAD_X])
+        .padding([2.0, crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X])
         .width(Length::Fill)
         .into();
         rows.push(DropdownRow::item(el, label_str, msg));
@@ -338,8 +332,8 @@ pub fn color_list_with_current<'a>(
     rows.push(DropdownRow::item(
         button(text(more_label.clone()).size(ui_text::UI))
             .on_press(on_more.clone())
-            .style(list_row_style)
-            .padding([2.0, crate::ui::kit::DROPDOWN_ITEM_PAD_X])
+            .style(crate::ui::kit::dropdown_row_style)
+            .padding([2.0, crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X])
             .width(Length::Fill),
         more_label,
         on_more,

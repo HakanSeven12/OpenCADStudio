@@ -7,7 +7,7 @@
 //! 4. Recent Colors row (up to 9 swatches)
 //! 5. "Select Color..." action to open the full Select Color dialog
 
-use super::widgets::{muted_text_style, popup_panel_style, popup_row_style};
+use super::widgets::muted_text_style;
 use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
@@ -187,7 +187,7 @@ fn logical_row<'a>(
             .align_y(iced::Center),
     )
     .on_press(Message::RibbonColorChanged(color))
-    .style(popup_row_style)
+    .style(crate::ui::kit::dropdown_row_style)
     .padding([3, 4])
     .width(Length::Fill)
     .into()
@@ -199,7 +199,7 @@ fn more_colors_row<'a>(active_color: AcadColor) -> Element<'a, Message> {
             crate::app::ColorPickTarget::Ribbon,
             active_color,
         ))
-        .style(popup_row_style)
+        .style(crate::ui::kit::dropdown_row_style)
         .padding([4, 4])
         .width(Length::Fill)
         .into()
@@ -314,7 +314,7 @@ fn color_panel<'a>(
             right: 12.0,
         })
         .width(Length::Fixed(PANEL_W))
-        .style(popup_panel_style)
+        .style(crate::ui::palette_menu::frame_style)
         .into()
 }
 

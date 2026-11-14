@@ -910,7 +910,7 @@ fn fill_picker<'a>(current: GraphicAttribute, open: bool) -> Element<'a, Message
             .align_y(iced::Center),
         )
         .on_press(msg(GraphicAttributesMsg::Fill(value)))
-        .style(crate::ui::color_select::list_row_style)
+        .style(crate::ui::kit::dropdown_row_style)
         .width(Fill)
         .height(pm::MENU_ITEM_H)
         .padding([0.0, pm::CELL_PAD_X])

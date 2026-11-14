@@ -15,10 +15,6 @@ use crate::app::Message;
 use crate::ui::dropdown_list::{DropdownList, DropdownRow};
 use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
 
-/// An option's side padding and the frame's padding around the list.
-pub const DROPDOWN_ITEM_PAD_X: f32 = 6.0;
-pub const DROPDOWN_PAD: f32 = pm::LINE;
-
 /// An option: lit under the pointer, and lit when it is the `current` value.
 pub fn dropdown_option_style(current: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme: &Theme, status: button::Status| button::Style {
@@ -28,6 +24,12 @@ pub fn dropdown_option_style(current: bool) -> impl Fn(&Theme, button::Status) -
         text_color: chrome::text(theme),
         ..Default::default()
     }
+}
+
+/// A row of a list in a dropdown or popup that is not a choice (a
+/// command, "Select Color..."): lit under the pointer.
+pub fn dropdown_row_style(theme: &Theme, status: button::Status) -> button::Style {
+    dropdown_option_style(false)(theme, status)
 }
 
 /// The head: `shown` on one line (in hint colour when `muted`, as for a
@@ -85,7 +87,7 @@ pub fn dropdown_option<'a>(
     )
     .on_press(message.clone())
     .style(dropdown_option_style(current))
-    .padding([2.0, DROPDOWN_ITEM_PAD_X])
+    .padding([2.0, pm::DROPDOWN_ITEM_PAD_X])
     .width(Length::Fill);
     DropdownRow::item(item, key.into(), message)
 }
@@ -96,7 +98,7 @@ pub fn dropdown_width<'s>(labels: impl Iterator<Item = &'s str>, field: f32) -> 
     let widest = labels
         .map(|label| crate::ui::style::text_metrics::width(label, ui_text::UI, false))
         .fold(0.0_f32, f32::max);
-    (widest + 2.0 * DROPDOWN_ITEM_PAD_X + 2.0 * DROPDOWN_PAD + pm::SCROLLBAR_W)
+    (widest + 2.0 * pm::DROPDOWN_ITEM_PAD_X + 2.0 * pm::DROPDOWN_PAD + pm::SCROLLBAR_W)
         .max(field)
         .ceil()
 }
@@ -112,7 +114,7 @@ pub fn dropdown<'a>(
 ) -> Element<'a, Message> {
     let popup = container(list)
         .style(crate::ui::palette_menu::frame_style)
-        .padding(DROPDOWN_PAD);
+        .padding(pm::DROPDOWN_PAD);
     crate::ui::color_select::editable_drop_down_below(
         head,
         popup.into(),

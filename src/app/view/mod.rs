@@ -4813,7 +4813,7 @@ fn start_page_content<'a>(
                         list = list.push(
                             button(text(name).size(crate::ui::style::text::UI_TITLE))
                                 .on_press(Message::NewFromTemplate(Some(path.clone())))
-                                .style(crate::ui::color_select::list_row_style)
+                                .style(crate::ui::kit::dropdown_row_style)
                                 .padding(crate::ui::style::start_metrics::ROW_PAD)
                                 .width(Fill),
                         );
@@ -4824,7 +4824,7 @@ fn start_page_content<'a>(
                                 tool_id: "NEW".to_string(),
                                 event: crate::modules::ModuleEvent::Command("NEW".to_string()),
                             })
-                            .style(crate::ui::color_select::list_row_style)
+                            .style(crate::ui::kit::dropdown_row_style)
                             .padding(crate::ui::style::start_metrics::ROW_PAD)
                             .width(Fill),
                     );

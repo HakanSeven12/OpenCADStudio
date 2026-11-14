@@ -53,8 +53,14 @@ const AUTOCOMPLETE_LIMIT: usize = 8;
 const LINE_PAD: [f32; 2] = [pm::LINE, pm::GRID_INSET_L];
 const ROW_PAD: [f32; 2] = [2.0 * pm::LINE, pm::GRID_INSET_L];
 /// An option pill's padding, and a small button's.
-const PILL_PAD: [f32; 2] = [pm::LINE, crate::ui::kit::DROPDOWN_ITEM_PAD_X];
-const BUTTON_PAD: [f32; 2] = [2.0 * pm::LINE, crate::ui::kit::DROPDOWN_ITEM_PAD_X];
+const PILL_PAD: [f32; 2] = [
+    pm::LINE,
+    crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X,
+];
+const BUTTON_PAD: [f32; 2] = [
+    2.0 * pm::LINE,
+    crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X,
+];
 /// Around the "Command:" prompt, and around the autocomplete list.
 const PROMPT_PAD: [f32; 2] = [5.0, pm::GRID_INSET_L];
 const LIST_PAD: [f32; 2] = [pm::TOOL_GAP, pm::GRID_INSET_L];

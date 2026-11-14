@@ -552,7 +552,7 @@ fn entry_row<'a>(
     button(line)
         .on_press(on_event(FontPickerEvent::Pick(entry.choice.clone())))
         .style(move |theme: &Theme, status| {
-            let style = crate::ui::color_select::list_row_style(theme, status);
+            let style = crate::ui::kit::dropdown_row_style(theme, status);
             if active && !matches!(status, button::Status::Hovered) {
                 let palette = theme.palette();
                 button::Style {
@@ -641,7 +641,7 @@ pub fn view<'a>(picker: FontPicker<'a>) -> Element<'a, Message> {
         rows.push(DropdownRow::item(
             button(text(crate::tf!("Use “{name}”")).size(11))
                 .on_press(msg.clone())
-                .style(crate::ui::color_select::list_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .padding([2, 6])
                 .height(ROW_H)
                 .width(Length::Fill),

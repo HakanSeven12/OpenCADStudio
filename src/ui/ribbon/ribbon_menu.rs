@@ -584,7 +584,7 @@ fn item_row<'a>(row: Row) -> Element<'a, Message> {
         row.enabled.then_some(Message::RibbonMenu(row.action)),
     );
     match row.reason {
-        Some(reason) => crate::ui::kit::tooltip_gap(item, reason, tooltip::Position::Right, 0.0),
+        Some(reason) => crate::ui::kit::tooltip(item, reason, tooltip::Position::Right),
         None => item.into(),
     }
 }

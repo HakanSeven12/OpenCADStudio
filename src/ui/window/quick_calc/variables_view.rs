@@ -414,7 +414,7 @@ fn row_of<'a>(
         lines.push(error.message.clone());
     }
     lines.push(crate::t!("Double-click to insert").into_owned());
-    crate::ui::kit::tooltip_gap(area, lines.join("\n"), tooltip::Position::Bottom, 0.0)
+    crate::ui::kit::tooltip(area, lines.join("\n"), tooltip::Position::Bottom)
 }
 
 pub(super) fn variables<'a>(

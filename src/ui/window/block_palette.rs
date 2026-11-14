@@ -1348,7 +1348,7 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
             r = r.push(
                 button(card)
                     .on_press(ribbon_command(format!("_BLOCKINSERT {}", block.name)))
-                    .style(crate::ui::ribbon::widgets::popup_row_style)
+                    .style(crate::ui::kit::dropdown_row_style)
                     .padding(GALLERY_CARD_PAD)
                     .width(Fill),
             );
@@ -1390,7 +1390,7 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
     let link = |label: std::borrow::Cow<'static, str>, tab: &str| -> Element<'_, Message> {
         button(text(label.into_owned()).size(crate::ui::style::text::UI))
             .on_press(ribbon_command(format!("_BLOCKSPALETTE {tab}")))
-            .style(crate::ui::ribbon::widgets::popup_row_style)
+            .style(crate::ui::kit::dropdown_row_style)
             .width(Fill)
             .padding([5, 10])
             .into()
@@ -1416,7 +1416,7 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
     )
     .padding(8)
     .width(Length::Fixed(GALLERY_W))
-    .style(crate::ui::ribbon::widgets::popup_panel_style)
+    .style(crate::ui::palette_menu::frame_style)
     .into()
 }
 

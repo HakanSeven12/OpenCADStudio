@@ -174,7 +174,7 @@ pub(super) fn tip<'a>(
     content: impl Into<Element<'a, Message>>,
     label: String,
 ) -> Element<'a, Message> {
-    crate::ui::kit::tooltip_gap(content, label, tooltip::Position::Bottom, 0.0)
+    crate::ui::kit::tooltip(content, label, tooltip::Position::Bottom)
 }
 
 /// Full-strength text in the theme's text colour.

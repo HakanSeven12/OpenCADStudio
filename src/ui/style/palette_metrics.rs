@@ -149,6 +149,10 @@ pub const MENU_PAD_Y: f32 = 0.0;
 pub const MENU_SEPARATOR_H: f32 = 7.0;
 /// Width of a menu.
 pub const MENU_W: f32 = 220.0;
+/// A dropdown option's side padding, and the frame's padding around a
+/// dropdown list.
+pub const DROPDOWN_ITEM_PAD_X: f32 = 6.0;
+pub const DROPDOWN_PAD: f32 = LINE;
 
 #[cfg(test)]
 mod tests {

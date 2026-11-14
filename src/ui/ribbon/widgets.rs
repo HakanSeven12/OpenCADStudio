@@ -694,17 +694,6 @@ pub(super) fn combo_btn_style(
     }
 }
 
-/// A row of a ribbon popup or dropdown. An idle row is clear, so it does
-/// not paint over the popup's border.
-pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    crate::ui::kit::dropdown_option_style(false)(theme, status)
-}
-
-/// A ribbon popup or dropdown: `panel` inside a 1 px `border`.
-pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
-    crate::ui::palette_menu::frame_style(theme)
-}
-
 pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(chrome::muted(theme)),
@@ -1748,7 +1737,7 @@ pub(super) fn layer_combo<'a>(
     .style(move |theme: &Theme, status| combo_btn_style(theme, open, status, 3.0))
     .padding([3, 8])
     .width(Fill);
-    let combo = crate::ui::kit::tooltip_gap(PosReport::new(id, combo), tip, TipPos::Bottom, 0.0);
+    let combo = crate::ui::kit::tooltip(PosReport::new(id, combo), tip, TipPos::Bottom);
     super::keytips::anchor(id, super::qat::list_target(id, combo))
 }
 
@@ -1773,8 +1762,7 @@ fn text_find_box<'a>(value: &str) -> Element<'a, Message> {
     .on_press(Message::RibbonTextFindSubmit)
     .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
     .padding(3);
-    let search =
-        crate::ui::kit::tooltip_gap(search, t!("Find text").into_owned(), TipPos::Bottom, 0.0);
+    let search = crate::ui::kit::tooltip(search, t!("Find text").into_owned(), TipPos::Bottom);
     row![input, search]
         .spacing(2)
         .align_y(iced::Center)
@@ -1791,11 +1779,10 @@ fn text_height_box<'a>(value: &str) -> Element<'a, Message> {
         .size(ui_text::UI)
         .padding([3, 6])
         .width(Fill);
-    let input = crate::ui::kit::tooltip_gap(
+    let input = crate::ui::kit::tooltip(
         input,
         format!("{}\n{} TEXTSIZE", t!("Text Height"), t!("Command:")),
         TipPos::Bottom,
-        0.0,
     );
     super::keytips::anchor(super::keytips::TEXT_HEIGHT, input)
 }

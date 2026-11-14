@@ -1244,7 +1244,7 @@ pub(crate) fn sample_list<'a>(
                             .align_y(iced::Center),
                     )
                     .on_press(message.clone())
-                    .style(crate::ui::color_select::list_row_style)
+                    .style(crate::ui::kit::dropdown_row_style)
                     .padding([2, 4])
                     .width(Fill)
                     .into();

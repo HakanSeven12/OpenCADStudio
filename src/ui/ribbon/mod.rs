@@ -1713,7 +1713,7 @@ impl Ribbon {
                     };
                     let btn = button(text(label.clone()).size(ui_text::UI))
                         .on_press(msg.clone())
-                        .style(popup_row_style)
+                        .style(crate::ui::kit::dropdown_row_style)
                         .width(Fill)
                         .padding([5, 10]);
                     DropdownRow::item(btn, label.clone(), msg)
@@ -1724,7 +1724,7 @@ impl Ribbon {
                 .selected(Some(0))
                 .on_escape(Message::CloseRibbonDropdown);
             let panel = container(list)
-                .style(popup_panel_style)
+                .style(crate::ui::palette_menu::frame_style)
                 .width(Length::Fixed(170.0));
 
             let (align_right, h_pad, top) = self.dd_anchor(open_id, 170.0, win.0);
@@ -1915,7 +1915,7 @@ impl Ribbon {
                 .align_y(iced::Center),
             )
             .on_press(msg.clone())
-            .style(popup_row_style)
+            .style(crate::ui::kit::dropdown_row_style)
             .width(Fill)
             .padding([3, 8])
             .into();
@@ -1942,7 +1942,7 @@ impl Ribbon {
                 .selected(initial_selected)
                 .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(popup_panel_style)
+            .style(crate::ui::palette_menu::frame_style)
             .padding(2)
             .width(Length::Fixed(W));
         let (align_right, h_pad, top) = self.dd_anchor(id, W, win.0);
@@ -1963,7 +1963,7 @@ impl Ribbon {
         let icon_btn = |bytes: &'static [u8], msg: Message| -> Element<'_, Message> {
             button(crate::ui::icons::tool(bytes, SMALL_ICON))
                 .on_press(msg)
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .padding([2, 4])
                 .into()
         };
@@ -2002,7 +2002,7 @@ impl Ribbon {
                     "LAYER_COLOR:{id}:{}",
                     info.name
                 )))
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .padding([2, 4]);
 
             let vis = icon_btn(
@@ -2035,7 +2035,7 @@ impl Ribbon {
             let select_msg = Message::RibbonLayerChanged(name.clone());
             let select = button(label)
                 .on_press(select_msg.clone())
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .padding([4, 4]);
 
@@ -2079,7 +2079,7 @@ impl Ribbon {
             .align_y(iced::Center),
         )
         .on_press(Message::LayerStateManagerOpen)
-        .style(popup_row_style)
+        .style(crate::ui::kit::dropdown_row_style)
         .width(Fill)
         .padding([6, 10]);
         // Saved layer states restore with one click, as the manager's
@@ -2087,7 +2087,7 @@ impl Ribbon {
         let states = column(self.layer_states.iter().map(|name| {
             button(text(name).size(ui_text::UI))
                 .on_press(Message::RibbonLayerStateRestore(name.clone()))
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .padding([4, 26])
                 .into()
@@ -2111,7 +2111,7 @@ impl Ribbon {
             ]
             .spacing(2),
         )
-        .style(popup_panel_style)
+        .style(crate::ui::palette_menu::frame_style)
         .width(Length::Fixed(300.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(id, 300.0, win.0);
@@ -2208,7 +2208,7 @@ impl Ribbon {
                         .align_y(iced::Center),
                 )
                 .on_press(msg.clone())
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .padding([4, 10]);
                 DropdownRow::item(btn, name.clone(), msg)
@@ -2221,7 +2221,7 @@ impl Ribbon {
             rows.push(DropdownRow::item(
                 button(text(label.clone()).size(ui_text::UI))
                     .on_press(msg.clone())
-                    .style(popup_row_style)
+                    .style(crate::ui::kit::dropdown_row_style)
                     .width(Fill)
                     .padding([4, 10]),
                 label,
@@ -2233,7 +2233,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(popup_panel_style)
+            .style(crate::ui::palette_menu::frame_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, LARGE_W * 2.3, win.0);
@@ -2308,7 +2308,7 @@ impl Ribbon {
                         .align_y(iced::Center),
                 )
                 .on_press(msg.clone())
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .padding([4, 6]);
                 DropdownRow::item(btn, disp, msg)
@@ -2320,7 +2320,7 @@ impl Ribbon {
                 .selected(initial_selected)
                 .on_escape(Message::CloseRibbonDropdown);
         let list = container(dd_list)
-            .style(popup_panel_style)
+            .style(crate::ui::palette_menu::frame_style)
             .width(Length::Fixed(220.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, 220.0, win.0);
@@ -2353,7 +2353,7 @@ impl Ribbon {
                         .align_y(iced::Center),
                 )
                 .on_press(msg.clone())
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .padding([4, 8]);
                 DropdownRow::item(btn, label, msg)
@@ -2364,7 +2364,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(popup_panel_style)
+            .style(crate::ui::palette_menu::frame_style)
             .width(Length::Fixed(140.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, 140.0, win.0);
@@ -2442,9 +2442,9 @@ fn dropdown_list<'a>(
         .on_press_maybe(msg.clone())
         .style(move |theme: &Theme, status| {
             if is_current && !matches!(status, button::Status::Hovered) {
-                popup_row_style(theme, button::Status::Hovered)
+                crate::ui::kit::dropdown_row_style(theme, button::Status::Hovered)
             } else {
-                popup_row_style(theme, status)
+                crate::ui::kit::dropdown_row_style(theme, status)
             }
         })
         .width(Fill)
@@ -2476,7 +2476,7 @@ fn dropdown_list<'a>(
         .selected(initial_selected)
         .on_escape(Message::CloseRibbonDropdown);
     let panel = container(list)
-        .style(popup_panel_style)
+        .style(crate::ui::palette_menu::frame_style)
         .width(Length::Fixed(panel_w));
     (panel.into(), panel_w)
 }

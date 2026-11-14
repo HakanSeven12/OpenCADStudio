@@ -500,6 +500,13 @@ impl PluginDialogState {
 
     /// Render the dialog into native iced widgets.
     pub fn view<'a>(&'a self) -> Element<'a, Message> {
+        self.view_sized(crate::ui::modal::ModalSizing::INTRINSIC)
+    }
+
+    /// The dialog laid out for one modal sizing pass. In the fill pass (the frame is capped by the
+    /// window) the rows scroll and the OK/Cancel row stays visible, so a dialog taller than the
+    /// window never hides its fields or its buttons.
+    pub fn view_sized<'a>(&'a self, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
         let mut body = column![].spacing(10);
 
         for r in &self.def.rows {
@@ -570,11 +577,23 @@ impl PluginDialogState {
         };
         let dialog_w = self.def.width.unwrap_or(default_width);
 
-        column![body, Space::new().height(6), actions]
+        let fill = sizing.height == Length::Fill;
+        let body: Element<'a, Message> = if fill {
+            scrollable(container(body).padding(iced::Padding::ZERO.right(10)))
+                .height(Length::Fill)
+                .into()
+        } else {
+            body.into()
+        };
+        let layout = column![body, Space::new().height(6), actions]
             .spacing(12)
             .padding(14)
-            .width(Length::Fixed(dialog_w))
-            .into()
+            .width(Length::Fixed(dialog_w));
+        if fill {
+            layout.height(Length::Fill).into()
+        } else {
+            layout.into()
+        }
     }
 
     fn view_field_item<'a>(

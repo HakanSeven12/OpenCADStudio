@@ -214,7 +214,7 @@ impl PanelId {
             PanelId::QuickCalc => crate::ui::window::quick_calc::ICON,
             PanelId::CommandHistory => include_bytes!("../../assets/icons/ui/list.svg"),
             PanelId::Assistant => crate::ui::window::assistant::ICON,
-            PanelId::Plugin(_) => crate::ui::icons::MORE,
+            PanelId::Plugin(_) => crate::ui::icons::PLUGIN_PANEL,
         }
     }
 

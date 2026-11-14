@@ -5285,13 +5285,19 @@ impl DynInputCanvas {
         }
     }
 
+    /// The prompt pill's width, measured with the font it is drawn in.
+    fn prompt_width(&self) -> f32 {
+        let font = iced::Font::default();
+        crate::ui::ribbon::text_width(&self.prompt, DYN_FONT, font) + DYN_PAD * 2.0
+    }
+
     /// Prompt pill at `pos`.
     fn draw_prompt(&self, frame: &mut canvas::Frame, pos: Point, theme: &Theme) {
         if self.prompt.is_empty() {
             return;
         }
         let palette = theme.palette();
-        let pw = (self.prompt.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
+        let pw = self.prompt_width();
         let rect = canvas::Path::rectangle(
             pos,
             Size {
@@ -5633,7 +5639,7 @@ impl DynInputCanvas {
         // value boxes a further gap below the prompt.
         let pad = DYN_OFFSET_X;
         let has_prompt = !self.prompt.is_empty();
-        let prompt_w = (self.prompt.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
+        let prompt_w = self.prompt_width();
         let block_w = total_w.max(if has_prompt { prompt_w } else { 0.0 });
         let mut bx = self.cursor_screen.x + pad;
         let mut py = self.cursor_screen.y + pad;
@@ -5727,7 +5733,7 @@ impl canvas::Program<Message> for DynInputCanvas {
         // No boxes — just the prompt pill near the cursor.
         if self.boxes.is_empty() {
             if !self.prompt.is_empty() {
-                let pw = (self.prompt.len() as f32 * DYN_CHAR_W) + DYN_PAD * 2.0;
+                let pw = self.prompt_width();
                 let mut px = self.cursor_screen.x + DYN_OFFSET_X;
                 let mut py = self.cursor_screen.y + DYN_OFFSET_X;
                 if px + pw > bounds.width {

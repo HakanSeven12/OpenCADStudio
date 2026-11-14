@@ -42,7 +42,7 @@ impl CadCommand for BlockPickBasePointCommand {
 /// Enforces standard command ordering: Base point is ALWAYS prompted before object selection.
 pub struct BlockOnScreenCommand {
     options: crate::scene::CreateBlockOptions,
-    ucs: crate::app::helpers::UcsXform,
+    ucs: crate::entities::ucs_xform::UcsXform,
     need_base: bool,
     need_objects: bool,
 }
@@ -50,7 +50,7 @@ pub struct BlockOnScreenCommand {
 impl BlockOnScreenCommand {
     pub fn new(
         options: crate::scene::CreateBlockOptions,
-        ucs: crate::app::helpers::UcsXform,
+        ucs: crate::entities::ucs_xform::UcsXform,
         need_base: bool,
         need_objects: bool,
     ) -> Self {
@@ -495,7 +495,7 @@ mod tests {
         };
 
         // When both base point and objects are to be specified on-screen:
-        let ucs = crate::app::helpers::UcsXform::identity();
+        let ucs = crate::entities::ucs_xform::UcsXform::identity();
         let mut cmd = BlockOnScreenCommand::new(dummy_options, ucs, true, true);
 
         // 1. Initial step must be insertion base point
@@ -551,7 +551,7 @@ mod tests {
         };
 
         // User picked objects upfront in dialog, but checked "Specify base point on screen"
-        let ucs = crate::app::helpers::UcsXform::identity();
+        let ucs = crate::entities::ucs_xform::UcsXform::identity();
         let mut cmd = BlockOnScreenCommand::new(initial_options, ucs, true, false);
 
         // Pick base point at (10, 10, 0) (end of the line in make_test_scene)

@@ -243,6 +243,8 @@ impl OpenCADStudio {
                 | CmdResult::SliceSurfaceEntities { .. }
                 // An array arrow keeps the array selected for the next arrow.
                 | CmdResult::EditAssocArray { .. }
+                // A parameter grip keeps its references selected, as other grips do.
+                | CmdResult::EvaluateBlockParameter { insert: Some(_), .. }
         );
         self.result_depth += 1;
         let task = self.apply_cmd_result_inner(result);

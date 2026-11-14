@@ -1,9 +1,9 @@
 use document::entities::{Viewport, ViewportRenderMode};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
+use crate::entities::transform::EntityTransform;
 
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 

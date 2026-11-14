@@ -7,12 +7,12 @@ use kernel::geom2d::{
     Parameterization, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
 };
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, circle_grip, edit_angle_prop as edit_angle, edit_prop as edit, parse_f64,
     ro_prop as ro,
 };
 use crate::entities::traits::{FallbackTess, Grippable, PropertyEditable, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::tess_util::FallbackGeometry;
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;

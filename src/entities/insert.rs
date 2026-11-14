@@ -3,11 +3,11 @@ use document::types::{Matrix3, Transform, Vector3};
 use document::{Document, EntityType, Handle};
 use glam::Vec3;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_angle_prop as edit_angle, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::Grippable;
+use crate::entities::transform::EntityTransform;
 
 use crate::scene::cache::block_cache;
 use crate::scene::convert::tessellate;

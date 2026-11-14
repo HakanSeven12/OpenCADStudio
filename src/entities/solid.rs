@@ -3,9 +3,9 @@
 use crate::t;
 use document::entities::Solid;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;

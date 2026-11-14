@@ -3,12 +3,12 @@ pub(crate) use cell_editor::{cell_picture, CellPicture};
 use document::entities::Table;
 use glam::Vec3;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{ro_prop as ro, square_grip};
 use crate::entities::text_support::{
     layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;

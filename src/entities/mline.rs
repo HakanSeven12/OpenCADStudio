@@ -3,9 +3,9 @@ use document::types::Vector3;
 use kernel::geom2d::{intersect::line_line, Vec2};
 use kernel::space::Plane;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::SnapHint;

@@ -1,9 +1,9 @@
 use crate::t;
 use document::entities::{SectionSymbol, ViewBorder};
 
-use crate::command::EntityTransform;
 use crate::entities::common::{edit_angle_prop, edit_prop, parse_f64, ro_prop, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
+use crate::entities::transform::EntityTransform;
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 
 fn handle_text(handle: document::Handle) -> String {

@@ -1,6 +1,6 @@
 use document::{Document, EntityType};
 
-use crate::command::EntityTransform;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::RenderEntity;
 use crate::scene::convert::tess_util::FallbackGeometry;
 use crate::scene::model::object::{GripApply, GripDef, GripMenuAction, GripMenuItem, PropSection};
@@ -314,7 +314,7 @@ macro_rules! impl_entity_basics {
             }
         }
         impl $crate::entities::traits::Transformable for $T {
-            fn apply_transform(&mut self, t: &$crate::command::EntityTransform) {
+            fn apply_transform(&mut self, t: &$crate::entities::transform::EntityTransform) {
                 apply_transform(self, t);
             }
         }
@@ -351,7 +351,7 @@ macro_rules! impl_entity_basics_with_text_styles {
             }
         }
         impl $crate::entities::traits::Transformable for $T {
-            fn apply_transform(&mut self, t: &$crate::command::EntityTransform) {
+            fn apply_transform(&mut self, t: &$crate::entities::transform::EntityTransform) {
                 apply_transform(self, t);
             }
         }

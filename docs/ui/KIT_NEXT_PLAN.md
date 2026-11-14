@@ -67,13 +67,14 @@ palette audit.
 | 2c | **Ribbon lists** (layer, annotation layer, linetype, lineweight, style, colour) on `kit::dropdown`. | `ribbon/mod.rs`, `ribbon/widgets.rs`, `ribbon/color_dropdown.rs` | L |
 | 3 | **Ribbon tooltips and buttons** through `kit::tooltip` and one flat button style (size as a parameter); literal sizes to `ribbon_metrics`. | `ribbon/*` | S |
 | 4 | **Palette remnants.** Sheet Set's dialogs, QuickCalc (and its two view files into the audit), Properties outside the grid, Count, the dock's ghosts and marks, Node Graph's nodes. | as listed in section 1 | M |
-| 5 | **The rest.** The command line bar, the Start page; the dialogs get a plan of their own. | `command_line.rs`, `app/view/mod.rs` | M–L |
+| 5 | **The rest.** The command line bar, the Start page. The dialogs are not part of this plan. | `command_line.rs`, `app/view/mod.rs` | M–L |
 
-**Status.** 1a–4 are done. Left for later: the lineweight and linetype
-rows stay searchable combo boxes in the kit's list style; QuickCalc keeps
-its own derived key colours; Sheet Set's dialogs and the literal sizes
-the audit still counts (`audit_counts.txt`) go with prompt 5 and the
-dialog plan.
+**Status.** 1a–5 are done. The command line bar and the Start page take
+their colours from `chrome`; the Start page keeps a larger scale of its
+own (`style::start_metrics`). Left as they are: the lineweight and
+linetype rows stay searchable combo boxes in the kit's list style;
+QuickCalc keeps its own derived key colours. The dialogs are out of this
+plan's scope.
 
 ## 3. Rules
 

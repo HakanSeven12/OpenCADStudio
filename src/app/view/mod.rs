@@ -4655,7 +4655,7 @@ fn start_muted_style(theme: &Theme) -> iced::widget::text::Style {
 
 fn start_primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().primary.base.color),
+        color: Some(crate::ui::style::chrome::accent(theme)),
     }
 }
 
@@ -4679,7 +4679,7 @@ fn pane_mouse_area<'a>(idx: usize) -> Element<'a, Message> {
     .into()
 }
 
-const START_ACTION_RADIUS: f32 = 6.0;
+const START_ACTION_RADIUS: f32 = crate::ui::style::start_metrics::ACTION_RADIUS;
 
 fn start_action_shape(mut style: button::Style) -> button::Style {
     style.border.radius = START_ACTION_RADIUS.into();
@@ -4741,25 +4741,32 @@ fn start_page_content<'a>(
     active: super::StartSection,
     templates: Option<&'a [std::path::PathBuf]>,
 ) -> Element<'a, Message> {
-    let headline = text("Open CAD Studio").size(40).style(start_primary_style);
+    let headline = text("Open CAD Studio")
+        .size(crate::ui::style::start_metrics::HEADLINE)
+        .style(start_primary_style);
 
     // Plain outlined button (Open / New / Help / Contribute).
     let outline_btn = |label: String, msg: Message| {
-        button(text(label).size(14))
+        button(text(label).size(crate::ui::style::start_metrics::ACTION_TEXT))
             .on_press(msg)
-            .padding([10, 22])
+            .padding(crate::ui::style::start_metrics::ACTION_PAD)
             .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
                 let pair = match status {
-                    button::Status::Hovered => palette.background.strong,
-                    _ => palette.background.weak,
+                    button::Status::Hovered => iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::hover(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    ),
+                    _ => iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::panel(theme),
+                        crate::ui::style::chrome::text(theme),
+                    ),
                 };
                 start_action_shape(button::Style {
                     background: Some(Background::Color(pair.color)),
                     text_color: pair.text,
                     border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
+                        color: crate::ui::style::chrome::border(theme),
+                        width: crate::ui::style::palette_metrics::line(),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -4772,7 +4779,8 @@ fn start_page_content<'a>(
         button(
             row![
                 crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 14.0),
-                text(crate::tr!("start", "donate")).size(14),
+                text(crate::tr!("start", "donate"))
+                    .size(crate::ui::style::start_metrics::ACTION_TEXT),
             ]
             .spacing(5)
             .align_y(iced::Center),
@@ -4781,7 +4789,7 @@ fn start_page_content<'a>(
             tool_id: "DONATE".to_string(),
             event: crate::modules::ModuleEvent::Command("DONATE".to_string()),
         })
-        .padding([10, 22])
+        .padding(crate::ui::style::start_metrics::ACTION_PAD)
         .style(|theme: &Theme, status| start_action_shape(button::danger(theme, status)))
     };
 
@@ -4803,30 +4811,34 @@ fn start_page_content<'a>(
                             .map(|stem| stem.to_string_lossy().into_owned())
                             .unwrap_or_default();
                         list = list.push(
-                            button(text(name).size(13))
+                            button(text(name).size(crate::ui::style::text::UI_TITLE))
                                 .on_press(Message::NewFromTemplate(Some(path.clone())))
                                 .style(crate::ui::color_select::list_row_style)
-                                .padding([4, 10])
+                                .padding(crate::ui::style::start_metrics::ROW_PAD)
                                 .width(Fill),
                         );
                     }
                     list = list.push(
-                        button(text(crate::t!("Browse...")).size(13))
+                        button(text(crate::t!("Browse...")).size(crate::ui::style::text::UI_TITLE))
                             .on_press(Message::RibbonToolClick {
                                 tool_id: "NEW".to_string(),
                                 event: crate::modules::ModuleEvent::Command("NEW".to_string()),
                             })
                             .style(crate::ui::color_select::list_row_style)
-                            .padding([4, 10])
+                            .padding(crate::ui::style::start_metrics::ROW_PAD)
                             .width(Fill),
                     );
-                    let height = ((templates.len() + 1) as f32 * 26.0).min(360.0);
+                    let height = ((templates.len() + 1) as f32
+                        * crate::ui::style::start_metrics::TEMPLATE_ROW_H)
+                        .min(360.0);
                     let popup = container(scrollable(list).height(height))
                         .style(crate::ui::palette_menu::frame_style)
                         .padding(2);
                     crate::ui::drop_down_fit::drop_down_fit(
                         iced_aw::DropDown::new(head, popup, true)
-                            .width(iced::Length::Fixed(260.0))
+                            .width(iced::Length::Fixed(
+                                crate::ui::style::start_metrics::TEMPLATE_LIST_W,
+                            ))
                             .alignment(iced_aw::drop_down::Alignment::Bottom)
                             .offset(2.0)
                             .on_dismiss(Message::StartTemplates(false)),
@@ -4838,7 +4850,7 @@ fn start_page_content<'a>(
         outline_btn(crate::tr!("start", "open-file"), Message::OpenFile).into(),
         donate_btn.into(),
     ])
-    .spacing_x(12.0)
+    .spacing_x(crate::ui::style::start_metrics::ACTION_GAP)
     .row_h(48.0)
     .report_natural_width(action_width_out.clone());
 
@@ -4862,28 +4874,28 @@ fn start_page_content<'a>(
     {
         // Filled with the active theme's primary colour.
         secondary_items.push(
-            button(text(crate::t!("OCS Web")).size(14))
+            button(text(crate::t!("OCS Web")).size(crate::ui::style::start_metrics::ACTION_TEXT))
                 .on_press(Message::RibbonToolClick {
                     tool_id: "WEBVERSION".to_string(),
                     event: crate::modules::ModuleEvent::Command("WEBVERSION".to_string()),
                 })
-                .padding([10, 22])
+                .padding(crate::ui::style::start_metrics::ACTION_PAD)
                 .style(|theme: &Theme, status| start_action_shape(button::primary(theme, status)))
                 .into(),
         );
     }
     #[cfg(target_arch = "wasm32")]
     secondary_items.push(
-        button(text(crate::t!("OCS Desktop")).size(14))
+        button(text(crate::t!("OCS Desktop")).size(crate::ui::style::start_metrics::ACTION_TEXT))
             .on_press(Message::OpenUrl(
                 "https://github.com/HakanSeven12/OpenCADStudio/releases/latest".to_string(),
             ))
-            .padding([10, 22])
+            .padding(crate::ui::style::start_metrics::ACTION_PAD)
             .style(|theme: &Theme, status| start_action_shape(button::primary(theme, status)))
             .into(),
     );
     let secondary_row = WrapFlow::new(secondary_items)
-        .spacing_x(12.0)
+        .spacing_x(crate::ui::style::start_metrics::ACTION_GAP)
         .row_h(44.0)
         .report_natural_width(action_width_out.clone());
 
@@ -4892,9 +4904,9 @@ fn start_page_content<'a>(
             iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                 "../../../assets/icons/reddit.svg"
             )))
-            .width(20)
-            .height(20),
-            text("r/OpenCADStudio").size(14),
+            .width(crate::ui::style::start_metrics::ACTION_ICON)
+            .height(crate::ui::style::start_metrics::ACTION_ICON),
+            text("r/OpenCADStudio").size(crate::ui::style::start_metrics::ACTION_TEXT),
         ]
         .spacing(7)
         .align_y(iced::Center),
@@ -4902,19 +4914,24 @@ fn start_page_content<'a>(
     .on_press(Message::OpenUrl(
         "https://www.reddit.com/r/OpenCADStudio/".to_string(),
     ))
-    .padding([10, 22])
+    .padding(crate::ui::style::start_metrics::ACTION_PAD)
     .style(|theme: &Theme, status| {
-        let palette = theme.palette();
         let pair = match status {
-            button::Status::Hovered => palette.background.strong,
-            _ => palette.background.weak,
+            button::Status::Hovered => iced::theme::palette::Pair::new(
+                crate::ui::style::chrome::hover(theme),
+                crate::ui::style::chrome::strong(theme),
+            ),
+            _ => iced::theme::palette::Pair::new(
+                crate::ui::style::chrome::panel(theme),
+                crate::ui::style::chrome::text(theme),
+            ),
         };
         start_action_shape(button::Style {
             background: Some(Background::Color(pair.color)),
             text_color: pair.text,
             border: Border {
                 color: Color::from_rgb8(255, 69, 0),
-                width: 1.0,
+                width: crate::ui::style::palette_metrics::line(),
                 ..Default::default()
             },
             ..Default::default()
@@ -4922,14 +4939,16 @@ fn start_page_content<'a>(
     });
 
     let sponsors = column![
-        text(crate::tr!("start", "sponsors")).size(15),
+        text(crate::tr!("start", "sponsors")).size(crate::ui::style::start_metrics::SECTION_TITLE),
         mouse_area(
             container(
                 iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                     "../../../assets/sponsors/openaec-logo-dark-on-light.svg"
                 )))
                 .width(Fill)
-                .height(iced::Length::Fixed(120.0))
+                .height(iced::Length::Fixed(
+                    crate::ui::style::start_metrics::SPONSOR_H
+                ))
                 .content_fit(iced::ContentFit::Contain),
             )
             .width(Fill.max(300.0)),
@@ -4937,7 +4956,7 @@ fn start_page_content<'a>(
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl("https://open-aec.com/".to_string())),
     ]
-    .spacing(10)
+    .spacing(crate::ui::style::start_metrics::GAP_L)
     .align_x(iced::alignment::Horizontal::Center)
     .width(Fill);
 
@@ -4946,9 +4965,9 @@ fn start_page_content<'a>(
         container(headline).center_x(Fill),
         Space::new().height(iced::Length::Fixed(22.0)),
         container(primary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(10.0)),
+        Space::new().height(iced::Length::Fixed(crate::ui::style::start_metrics::GAP_L)),
         container(secondary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(10.0)),
+        Space::new().height(iced::Length::Fixed(crate::ui::style::start_metrics::GAP_L)),
         container(reddit_btn).center_x(Fill),
         Space::new().height(iced::Length::Fixed(20.0)),
         sponsors,
@@ -5025,16 +5044,19 @@ fn start_page_content<'a>(
         // Derive the 16:9 cover box from the actual shared list width so the
         // whole thumbnail remains visible when that width changes.
         let thumb_h = (panel_w - VIDEO_PANEL_PADDING * 2.0 - VIDEO_SCROLL_GUTTER) * 9.0 / 16.0;
-        let mut list = column![text(crate::tr!("start", "tutorials")).size(15)]
-            .spacing(10)
-            .width(Fill)
-            // Keep the scrollbar off the thumbnails.
-            .padding(iced::Padding {
-                right: VIDEO_SCROLL_GUTTER,
-                ..iced::Padding::ZERO
-            });
+        let mut list = column![text(crate::tr!("start", "tutorials"))
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)]
+        .spacing(crate::ui::style::start_metrics::GAP_L)
+        .width(Fill)
+        // Keep the scrollbar off the thumbnails.
+        .padding(iced::Padding {
+            right: VIDEO_SCROLL_GUTTER,
+            ..iced::Padding::ZERO
+        });
         for v in videos {
-            let mut card = column![].spacing(6).width(Fill);
+            let mut card = column![]
+                .spacing(crate::ui::style::start_metrics::GAP)
+                .width(Fill);
             if let Some(handle) = video_thumbs.get(&v.id) {
                 card = card.push(
                     container(
@@ -5047,8 +5069,8 @@ fn start_page_content<'a>(
                     .height(iced::Length::Fixed(thumb_h))
                     .style(|theme: &Theme| container::Style {
                         border: Border {
-                            color: theme.palette().background.neutral.color,
-                            width: 1.0,
+                            color: crate::ui::style::chrome::border(theme),
+                            width: crate::ui::style::palette_metrics::line(),
                             radius: 6.0.into(),
                         },
                         ..Default::default()
@@ -5056,7 +5078,11 @@ fn start_page_content<'a>(
                     .clip(true),
                 );
             }
-            card = card.push(text(v.title.clone()).size(12).style(start_muted_style));
+            card = card.push(
+                text(v.title.clone())
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
             list = list.push(
                 mouse_area(card)
                     .interaction(iced::mouse::Interaction::Pointer)
@@ -5069,32 +5095,40 @@ fn start_page_content<'a>(
             } else {
                 crate::tr!("start", "videos-online")
             };
-            list = list.push(text(note).size(12).style(start_muted_style));
+            list = list.push(
+                text(note)
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
         }
         let playlist_btn = mouse_area(
-            container(text(crate::tr!("start", "open-playlist")).size(12))
-                .padding([6, 10])
-                .width(Fill)
-                .center_x(Fill)
-                .style(|theme: &Theme| {
-                    let pair = theme.palette().danger.base;
-                    container::Style {
-                        background: Some(Background::Color(pair.color)),
-                        border: Border {
-                            color: Color::TRANSPARENT,
-                            width: 0.0,
-                            radius: 6.0.into(),
-                        },
-                        text_color: Some(pair.text),
-                        ..Default::default()
-                    }
-                }),
+            container(
+                text(crate::tr!("start", "open-playlist")).size(crate::ui::style::text::UI_LARGE),
+            )
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
+            .width(Fill)
+            .center_x(Fill)
+            .style(|theme: &Theme| {
+                let pair = theme.palette().danger.base;
+                container::Style {
+                    background: Some(Background::Color(pair.color)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 6.0.into(),
+                    },
+                    text_color: Some(pair.text),
+                    ..Default::default()
+                }
+            }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl(crate::videos::PLAYLIST_URL.to_string()));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             playlist_btn,
         ])
         .width(match start_layout {
@@ -5106,17 +5140,14 @@ fn start_page_content<'a>(
         })
         .height(Fill)
         .padding(VIDEO_PANEL_PADDING)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5125,47 +5156,50 @@ fn start_page_content<'a>(
     // web builds read the CI-generated snapshot. Both sources mark pinned
     // discussions and sort them before the rest of the list.
     let discussions_panel: Element<'a, Message> = {
-        let mut list = column![text(crate::tr!("start", "discussions")).size(15)]
-            .spacing(8)
-            .width(Fill);
+        let mut list = column![text(crate::tr!("start", "discussions"))
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)]
+        .spacing(crate::ui::style::start_metrics::GAP_M)
+        .width(Fill);
         for discussion in discussions {
             let mut meta = iced::widget::row![text(format!("#{}", discussion.number))
-                .size(10)
+                .size(crate::ui::style::text::UI_SMALL)
                 .style(start_muted_style),]
-            .spacing(6)
+            .spacing(crate::ui::style::start_metrics::GAP)
             .align_y(iced::Center);
             if discussion.pinned {
                 meta = meta.push(
                     text(crate::tr!("start", "pinned"))
-                        .size(10)
+                        .size(crate::ui::style::text::UI_SMALL)
                         .style(start_primary_style),
                 );
             }
             if !discussion.author.is_empty() {
                 meta = meta.push(
                     text(format!("@{}", discussion.author))
-                        .size(10)
+                        .size(crate::ui::style::text::UI_SMALL)
                         .style(start_muted_style),
                 );
             }
-            let card =
-                container(column![text(discussion.title.clone()).size(12), meta,].spacing(4))
-                    .padding([8, 10])
-                    .width(Fill)
-                    .style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(Background::Color(
-                                palette.background.base.color.scale_alpha(0.42),
-                            )),
-                            border: Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 6.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    });
+            let card = container(
+                column![
+                    text(discussion.title.clone()).size(crate::ui::style::text::UI_LARGE),
+                    meta,
+                ]
+                .spacing(crate::ui::style::start_metrics::GAP_S),
+            )
+            .padding([8, 10])
+            .width(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    crate::ui::style::chrome::page(theme).scale_alpha(0.42),
+                )),
+                border: Border {
+                    color: crate::ui::style::chrome::border(theme),
+                    width: crate::ui::style::palette_metrics::line(),
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            });
             list = list.push(
                 mouse_area(card)
                     .interaction(iced::mouse::Interaction::Pointer)
@@ -5178,26 +5212,36 @@ fn start_page_content<'a>(
             } else {
                 crate::tr!("start", "discussions-online")
             };
-            list = list.push(text(note).size(12).style(start_muted_style));
+            list = list.push(
+                text(note)
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
         }
         let open_btn = mouse_area(
-            container(text(crate::tr!("start", "open-discussions")).size(12))
-                .padding([6, 10])
-                .width(Fill)
-                .center_x(Fill)
-                .style(|theme: &Theme| {
-                    let pair = theme.palette().primary.base;
-                    container::Style {
-                        background: Some(Background::Color(pair.color)),
-                        border: Border {
-                            color: Color::TRANSPARENT,
-                            width: 0.0,
-                            radius: 6.0.into(),
-                        },
-                        text_color: Some(pair.text),
-                        ..Default::default()
-                    }
-                }),
+            container(
+                text(crate::tr!("start", "open-discussions"))
+                    .size(crate::ui::style::text::UI_LARGE),
+            )
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
+            .width(Fill)
+            .center_x(Fill)
+            .style(|theme: &Theme| {
+                let pair = iced::theme::palette::Pair::new(
+                    crate::ui::style::chrome::accent(theme),
+                    crate::ui::style::chrome::on_accent(theme),
+                );
+                container::Style {
+                    background: Some(Background::Color(pair.color)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 6.0.into(),
+                    },
+                    text_color: Some(pair.text),
+                    ..Default::default()
+                }
+            }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl(
@@ -5205,7 +5249,9 @@ fn start_page_content<'a>(
         ));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             open_btn,
         ])
         .width(match start_layout {
@@ -5215,18 +5261,15 @@ fn start_page_content<'a>(
             | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
-        .padding(16)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .padding(crate::ui::style::start_metrics::CARD_PAD)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5236,10 +5279,13 @@ fn start_page_content<'a>(
     // shows, so the rail always invites support.
     let supporters: Element<'a, Message> = {
         let mut list = column![
-            text(crate::tr!("start", "supporters")).size(15),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            text(crate::tr!("start", "supporters"))
+                .size(crate::ui::style::start_metrics::SECTION_TITLE),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
         ]
-        .spacing(6)
+        .spacing(crate::ui::style::start_metrics::GAP)
         .padding(iced::Padding {
             right: 12.0,
             ..iced::Padding::ZERO
@@ -5251,22 +5297,28 @@ fn start_page_content<'a>(
             let amount = format!("${:.2}", *cents as f64 / 100.0);
             list = list.push(
                 iced::widget::row![
-                    text(name).size(12).style(start_muted_style).width(Fill),
-                    text(amount).size(12).style(start_muted_style),
+                    text(name)
+                        .size(crate::ui::style::text::UI_LARGE)
+                        .style(start_muted_style)
+                        .width(Fill),
+                    text(amount)
+                        .size(crate::ui::style::text::UI_LARGE)
+                        .style(start_muted_style),
                 ]
-                .spacing(6),
+                .spacing(crate::ui::style::start_metrics::GAP),
             );
         }
         let support_btn = mouse_area(
             container(
                 iced::widget::row![
                     crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 13.0),
-                    text(crate::tr!("start", "support-on-patreon")).size(12),
+                    text(crate::tr!("start", "support-on-patreon"))
+                        .size(crate::ui::style::text::UI_LARGE),
                 ]
-                .spacing(6)
+                .spacing(crate::ui::style::start_metrics::GAP)
                 .align_y(iced::Center),
             )
-            .padding([6, 10])
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
             .width(Fill)
             .center_x(Fill)
             .style(|theme: &Theme| {
@@ -5289,7 +5341,9 @@ fn start_page_content<'a>(
         ));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             support_btn,
         ])
         .width(match start_layout {
@@ -5299,18 +5353,15 @@ fn start_page_content<'a>(
             StartLayout::RecentAndWelcome | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
-        .padding(20)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .padding(crate::ui::style::start_metrics::PANEL_PAD)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5318,35 +5369,42 @@ fn start_page_content<'a>(
     let body: Element<'a, Message> = match start_layout {
         StartLayout::AllPanels => {
             iced::widget::row![recent, videos_panel, welcome, discussions_panel, supporters,]
-                .spacing(16)
+                .spacing(crate::ui::style::start_metrics::GAP_XL)
                 .height(Fill)
                 .into()
         }
         StartLayout::WithoutVideos => {
             iced::widget::row![recent, welcome, discussions_panel, supporters]
-                .spacing(16)
+                .spacing(crate::ui::style::start_metrics::GAP_XL)
                 .height(Fill)
                 .into()
         }
         StartLayout::WithoutVideosAndDiscussions => iced::widget::row![recent, welcome, supporters]
-            .spacing(16)
+            .spacing(crate::ui::style::start_metrics::GAP_XL)
             .height(Fill)
             .into(),
         StartLayout::RecentAndWelcome => iced::widget::row![recent, welcome]
-            .spacing(16)
+            .spacing(crate::ui::style::start_metrics::GAP_XL)
             .height(Fill)
             .into(),
         StartLayout::Compact => {
             let tab_btn = |label: String, section: super::StartSection| {
                 let is_active = active == section;
-                button(text(label).size(14))
+                button(text(label).size(crate::ui::style::start_metrics::ACTION_TEXT))
                     .on_press(Message::StartSectionSelect(section))
                     .padding([8, 18])
                     .style(move |theme: &Theme, status| {
-                        let palette = theme.palette();
                         let pair = match (is_active, status) {
-                            (true, _) => Some(palette.primary.weak),
-                            (false, button::Status::Hovered) => Some(palette.background.strong),
+                            (true, _) => Some(iced::theme::palette::Pair::new(
+                                crate::ui::style::chrome::lit(theme),
+                                crate::ui::style::chrome::strong(theme),
+                            )),
+                            (false, button::Status::Hovered) => {
+                                Some(iced::theme::palette::Pair::new(
+                                    crate::ui::style::chrome::hover(theme),
+                                    crate::ui::style::chrome::strong(theme),
+                                ))
+                            }
                             _ => None,
                         };
                         button::Style {
@@ -5356,7 +5414,7 @@ fn start_page_content<'a>(
                                 .unwrap_or(crate::ui::style::readable::muted_text(theme)),
                             border: Border {
                                 color: if is_active {
-                                    palette.primary.base.color
+                                    crate::ui::style::chrome::accent(theme)
                                 } else {
                                     Color::TRANSPARENT
                                 },
@@ -5386,7 +5444,7 @@ fn start_page_content<'a>(
                 )
                 .into(),
             ])
-            .spacing(6.0)
+            .spacing(crate::ui::style::start_metrics::GAP)
             .align_y(iced::Center)
             .wrap()
             .vertical_spacing(0.0);
@@ -5415,7 +5473,9 @@ fn start_page_content<'a>(
             };
             column![
                 container(tab_bar).center_x(Fill),
-                Space::new().height(iced::Length::Fixed(12.0)),
+                Space::new().height(iced::Length::Fixed(
+                    crate::ui::style::start_metrics::SECTION_GAP
+                )),
                 section_body,
             ]
             .width(Fill)
@@ -5426,7 +5486,7 @@ fn start_page_content<'a>(
 
     container(body)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
+            background: Some(Background::Color(crate::ui::style::chrome::page(theme))),
             ..Default::default()
         })
         .padding(iced::Padding {
@@ -5455,9 +5515,17 @@ fn recent_tiles<'a>(
     large: bool,
 ) -> iced::widget::Column<'a, Message> {
     let (thumb_w, thumb_h, name_chars) = if large {
-        (Fill, iced::Length::Fixed(180.0), 40)
+        (
+            Fill,
+            iced::Length::Fixed(crate::ui::style::start_metrics::TILE_PREVIEW_H),
+            40,
+        )
     } else {
-        (iced::Length::Fixed(72.0), iced::Length::Fixed(54.0), 11)
+        (
+            iced::Length::Fixed(crate::ui::style::start_metrics::SMALL_TILE_W),
+            iced::Length::Fixed(crate::ui::style::start_metrics::SMALL_TILE_H),
+            11,
+        )
     };
     let tile = |path: &'a std::path::PathBuf| -> Element<'a, Message> {
         let name = path
@@ -5478,15 +5546,16 @@ fn recent_tiles<'a>(
             .center_x(thumb_w)
             .center_y(thumb_h)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.base.color)),
+                background: Some(Background::Color(crate::ui::style::chrome::page(theme))),
                 border: Border {
-                    color: theme.palette().background.neutral.color,
-                    width: 1.0,
+                    color: crate::ui::style::chrome::border(theme),
+                    width: crate::ui::style::palette_metrics::line(),
                     radius: 4.0.into(),
                 },
                 ..Default::default()
             });
-        let mut label = column![text(crate::ui::text_util::elide(&name, name_chars)).size(12)];
+        let mut label = column![text(crate::ui::text_util::elide(&name, name_chars))
+            .size(crate::ui::style::text::UI_LARGE)];
         if large {
             let dir = path
                 .parent()
@@ -5494,34 +5563,37 @@ fn recent_tiles<'a>(
                 .unwrap_or_default();
             label = label.push(
                 text(crate::ui::text_util::elide(&dir, 52))
-                    .size(10)
+                    .size(crate::ui::style::text::UI_SMALL)
                     .style(start_muted_style),
             );
         }
-        button(column![picture, label.spacing(2)].spacing(4))
-            .on_press(Message::OpenRecent(path.clone()))
-            .padding(6)
-            .width(if large { Fill } else { iced::Length::Shrink })
-            .style(|theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: matches!(status, button::Status::Hovered)
-                        .then_some(Background::Color(palette.background.strong.color)),
-                    text_color: palette.background.base.text,
-                    border: Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
+        button(
+            column![
+                picture,
+                label.spacing(crate::ui::style::start_metrics::GAP_XS)
+            ]
+            .spacing(crate::ui::style::start_metrics::GAP_S),
+        )
+        .on_press(Message::OpenRecent(path.clone()))
+        .padding(6)
+        .width(if large { Fill } else { iced::Length::Shrink })
+        .style(|theme: &Theme, status| button::Style {
+            background: matches!(status, button::Status::Hovered)
+                .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+            text_color: crate::ui::style::chrome::text(theme),
+            border: Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
     };
     if large {
-        column(recents.iter().map(tile)).spacing(6)
+        column(recents.iter().map(tile)).spacing(crate::ui::style::start_metrics::GAP)
     } else {
         column![iced::widget::Row::with_children(recents.iter().map(tile))
-            .spacing(4)
+            .spacing(crate::ui::style::start_metrics::GAP_S)
             .wrap()]
         .width(Fill)
     }
@@ -5546,16 +5618,15 @@ pub(super) fn recent_files_panel<'a>(
                 .on_press(Message::SetRecentView(mode))
                 .padding([3, 5])
                 .style(move |theme: &Theme, status| {
-                    let palette = theme.palette();
                     let background = if active {
-                        Some(palette.primary.weak.color)
+                        Some(crate::ui::style::chrome::lit(theme))
                     } else {
                         matches!(status, button::Status::Hovered)
-                            .then_some(palette.background.strong.color)
+                            .then_some(crate::ui::style::chrome::hover(theme))
                     };
                     button::Style {
                         background: background.map(Background::Color),
-                        text_color: palette.background.base.text,
+                        text_color: crate::ui::style::chrome::text(theme),
                         border: Border {
                             radius: 3.0.into(),
                             ..Default::default()
@@ -5563,15 +5634,15 @@ pub(super) fn recent_files_panel<'a>(
                         ..Default::default()
                     }
                 }),
-            container(text(tip).size(11))
-                .padding([2, 6])
+            container(text(tip).size(crate::ui::style::text::UI))
+                .padding(crate::ui::style::start_metrics::CHIP_PAD)
                 .style(container::rounded_box),
             iced::widget::tooltip::Position::Bottom,
         )
     };
     let title = row![
         text(crate::tr!("start", "recent-documents"))
-            .size(15)
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)
             .width(Fill),
         mode_button(
             crate::ui::icons::MENU,
@@ -5589,13 +5660,13 @@ pub(super) fn recent_files_panel<'a>(
             crate::tr!("start", "view-preview"),
         ),
     ]
-    .spacing(2)
+    .spacing(crate::ui::style::start_metrics::GAP_XS)
     .align_y(iced::Center);
 
     let body: Element<'a, Message> = if recents.is_empty() {
         container(
             text(crate::tr!("start", "no-recent-files"))
-                .size(12)
+                .size(crate::ui::style::text::UI_LARGE)
                 .style(start_muted_style),
         )
         .height(Fill)
@@ -5646,10 +5717,13 @@ pub(super) fn recent_files_panel<'a>(
                         .width(Fill)
                         .height(Fill),
                 )
-                .width(46)
-                .height(34)
+                .width(crate::ui::style::start_metrics::THUMB_W)
+                .height(crate::ui::style::start_metrics::THUMB_H)
                 .into(),
-                None => iced::widget::Space::new().width(46).height(34).into(),
+                None => iced::widget::Space::new()
+                    .width(crate::ui::style::start_metrics::THUMB_W)
+                    .height(crate::ui::style::start_metrics::THUMB_H)
+                    .into(),
             };
 
             let path_for_open = path.clone();
@@ -5657,32 +5731,30 @@ pub(super) fn recent_files_panel<'a>(
                 row![
                     thumb,
                     column![
-                        text(crate::ui::text_util::elide(&name, 28)).size(12),
+                        text(crate::ui::text_util::elide(&name, 28))
+                            .size(crate::ui::style::text::UI_LARGE),
                         text(crate::ui::text_util::elide(&dir, 38))
-                            .size(10)
+                            .size(crate::ui::style::text::UI_SMALL)
                             .style(start_muted_style),
                     ]
-                    .spacing(2),
+                    .spacing(crate::ui::style::start_metrics::GAP_XS),
                 ]
-                .spacing(8)
+                .spacing(crate::ui::style::start_metrics::GAP_M)
                 .align_y(iced::Center),
             )
             .on_press(Message::OpenRecent(path_for_open))
             .padding([6, 12])
             .width(Fill)
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: matches!(status, button::Status::Hovered)
-                        .then_some(Background::Color(palette.background.strong.color)),
-                    text_color: palette.background.base.text,
-                    border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }
+            .style(move |theme: &Theme, status| button::Style {
+                background: matches!(status, button::Status::Hovered)
+                    .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+                text_color: crate::ui::style::chrome::text(theme),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
             });
 
             let path_for_remove = path.clone();
@@ -5717,73 +5789,73 @@ pub(super) fn recent_files_panel<'a>(
     // update handler clamps to [MIN, MAX] and persists (see `set_recent_limit`),
     // so an over-max entry snaps to the max.
     const STEP: usize = 5;
-    let step_style = |theme: &Theme, status: button::Status| {
-        let palette = theme.palette();
-        button::Style {
-            background: matches!(status, button::Status::Hovered)
-                .then_some(Background::Color(palette.background.strong.color)),
-            text_color: palette.background.base.text,
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        }
+    let step_style = |theme: &Theme, status: button::Status| button::Style {
+        background: matches!(status, button::Status::Hovered)
+            .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+        text_color: crate::ui::style::chrome::text(theme),
+        border: Border {
+            color: crate::ui::style::chrome::border(theme),
+            width: crate::ui::style::palette_metrics::line(),
+            radius: 4.0.into(),
+        },
+        ..Default::default()
     };
     // +/- step from whatever is currently shown in the box (mid-edit included).
     let shown = limit_input.parse::<usize>().unwrap_or(limit);
     let count_box = iced::widget::text_input("", limit_input)
         .on_input(Message::RecentLimitInput)
         .on_submit(Message::SetRecentLimit(shown))
-        .size(13)
-        .padding([2, 6])
-        .width(iced::Length::Fixed(46.0));
+        .size(crate::ui::style::text::UI_TITLE)
+        .padding(crate::ui::style::start_metrics::CHIP_PAD)
+        .width(iced::Length::Fixed(
+            crate::ui::style::start_metrics::THUMB_W,
+        ));
     let limit_row = row![
         text(crate::tr!("start", "keep-recent-files"))
-            .size(11)
+            .size(crate::ui::style::text::UI)
             .style(start_muted_style)
             .width(Fill),
         button(crate::ui::icons::themed(crate::ui::icons::MINUS, 11.0))
             .on_press(Message::SetRecentLimit(shown.saturating_sub(STEP)))
-            .padding([3, 6])
+            .padding(crate::ui::style::start_metrics::BADGE_PAD)
             .style(step_style),
         count_box,
         button(crate::ui::icons::themed(crate::ui::icons::PLUS, 11.0))
             .on_press(Message::SetRecentLimit(shown.saturating_add(STEP)))
-            .padding([3, 6])
+            .padding(crate::ui::style::start_metrics::BADGE_PAD)
             .style(step_style),
         text(format!("/ {}", super::recent::RECENT_MAX))
-            .size(11)
+            .size(crate::ui::style::text::UI)
             .style(start_muted_style),
     ]
-    .spacing(6)
+    .spacing(crate::ui::style::start_metrics::GAP)
     .align_y(iced::Center);
 
     container(
         column![
             title,
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             body,
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             limit_row,
         ]
         .width(Fill),
     )
     .width(width)
     .height(Fill)
-    .padding(20)
-    .style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(palette.background.weak.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        }
+    .padding(crate::ui::style::start_metrics::PANEL_PAD)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+        border: Border {
+            color: crate::ui::style::chrome::border(theme),
+            width: crate::ui::style::palette_metrics::line(),
+            radius: 8.0.into(),
+        },
+        ..Default::default()
     })
     .into()
 }

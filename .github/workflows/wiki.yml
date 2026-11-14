@@ -54,9 +54,9 @@ jobs:
     # publish job runs either way.
     needs: source
     runs-on: ubuntu-22.04
-    # Clippy, the test build, coverage and the replay of a week of commits
-    # (about 500, a few seconds each) take roughly an hour.
-    timeout-minutes: 150
+    # Clippy, the test build and coverage take about half an hour; the replay
+    # of a week of commits (about 500) has its own limit below.
+    timeout-minutes: 120
     permissions:
       contents: read
       pull-requests: read
@@ -90,15 +90,27 @@ jobs:
         continue-on-error: true
         run: python3 scripts/health.py measure --cargo --coverage --out health.json
 
+      # Uploaded before the replay, so the page is published even if the
+      # replay is slow or fails; it then only lacks the thanks list.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        continue-on-error: true
+        with:
+          name: health
+          path: health.json
+
       - name: Pull requests that improved a measure since the previous release
         continue-on-error: true
+        timeout-minutes: 45
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Without an earlier release tag there is no release to compare
           # with; replaying the whole history would take hours.
           if PREVIOUS=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null); then
-            python3 scripts/health.py credits "$PREVIOUS" HEAD > credits.json
+            # Written under another name first: a replay cut short must not
+            # leave a half-written credits.json.
+            python3 scripts/health.py credits "$PREVIOUS" HEAD > credits.partial
+            mv credits.partial credits.json
           else
             echo "[]" > credits.json
           fi
@@ -106,43 +118,49 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         continue-on-error: true
         with:
-          name: health
-          path: |
-            health.json
-            credits.json
+          name: health-credits
+          path: credits.json
 
   publish:
     needs: [source, health]
     if: always() && needs.source.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      LABEL: ${{ needs.source.outputs.label }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.source.outputs.ref }}
       - name: Check out the wiki
-        run: git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
-      - name: Build
-        run: python3 tools/wiki/build.py wiki
+        run: |
+          git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
+          git -C wiki config user.name "github-actions[bot]"
+          git -C wiki config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # The Code Health page is published on its own, before the reference
+      # pages are rebuilt, so neither can hold the other up.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
-          name: health
+          pattern: health*
+          merge-multiple: true
           path: health
       - name: Code Health page
         continue-on-error: true
-        env:
-          LABEL: ${{ needs.source.outputs.label }}
         run: |
           test -f health/health.json
           CREDITS=""; test -f health/credits.json && CREDITS="--credits health/credits.json"
           python3 tools/wiki/code_health.py wiki health/health.json $CREDITS --release "$LABEL"
+          cd wiki
+          git add -A
+          git diff --cached --quiet || git commit -m "Wiki: Code Health for $LABEL"
+          git push
+
+      - name: Build
+        run: python3 tools/wiki/build.py wiki
       - name: Publish
         working-directory: wiki
-        env:
-          LABEL: ${{ needs.source.outputs.label }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet || git commit -m "Wiki: rebuild for $LABEL"
           git push

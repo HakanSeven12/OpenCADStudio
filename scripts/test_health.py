@@ -288,6 +288,14 @@ class Credits(unittest.TestCase):
         self.assertEqual(found[1]["improved"], {"panic_sites": [1, 0]})
 
 
+class PullRequestNumbers(unittest.TestCase):
+    def test_only_merge_subjects_name_a_pull_request(self):
+        for subject, number in (("Merge pull request #3002 from a/b", 3002), ("Merge #2995: Entity code", 2995),
+                                ("Merge branch 'pr3003'", 3003), ("Merge the linetype stack (#2774, #2776)", None),
+                                ("HELP opens the wiki (#1049)", None), ("Fix crash in #12", None)):
+            self.assertEqual(health.merged_pr_number(subject), number, subject)
+
+
 class Milestones(unittest.TestCase):
     down = {"id": "x", "direction": "down", "target": 0}
 
@@ -351,6 +359,19 @@ class Page(unittest.TestCase):
             code_health.main([str(wiki), str(hj), "--release", "v2"])
         history = json.loads((wiki / "health" / "history.json").read_text())
         self.assertEqual([h["release"] for h in history], ["v1", "v2"])
+
+    def test_missing_or_broken_credits_are_reported_as_not_computed(self):
+        wiki = Path(tempfile.mkdtemp())
+        root = tree({"io/a.rs": "fn f() {}\n"})
+        hj = wiki / "h.json"
+        hj.write_text(json.dumps({"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}))
+        (wiki / "bad.json").write_text("")
+        (wiki / "none.json").write_text("[]")
+        for args, text in ((["--credits", str(wiki / "bad.json")], "was not computed"), ([], "was not computed"),
+                           (["--credits", str(wiki / "none.json")], "No merged pull request improved")):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(code_health.main([str(wiki), str(hj), "--release", "v1"] + args), 0)
+            self.assertIn(text, (wiki / "Code-Health.md").read_text())
 
     def test_goals_file_covers_every_source_measure(self):
         ids = {g["id"] for g in json.loads(code_health.GOALS.read_text())["measures"]}

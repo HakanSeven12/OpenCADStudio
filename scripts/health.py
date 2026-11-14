@@ -34,6 +34,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -44,14 +45,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arch_check  # noqa: E402
 
-# The source reader's two passes are pure functions of the file text, and one
+# Everything read from one file is a pure function of its text, and one
 # measurement reads every file several times (layering, module graph, items,
 # sizes); a replay of consecutive commits reads mostly unchanged files. Caching
-# them by text makes both fast. arch_check.measure looks the names up in its
-# module at call time, so it uses the cached versions too.
-arch_check.blank = functools.lru_cache(maxsize=None)(arch_check.blank)
-_drop = functools.lru_cache(maxsize=None)(arch_check.drop_test_blocks)
+# by text makes both fast. The cache is bounded (about two trees of files), so
+# a replay of hundreds of commits does not keep every old file in memory.
+# arch_check.measure looks the names up in its module at call time, so it uses
+# the cached versions too.
+CACHE_FILES = 2048
+
+
+def cached(fn):
+    return functools.lru_cache(maxsize=CACHE_FILES)(fn)
+
+
+arch_check.blank = cached(arch_check.blank)
+_drop = cached(arch_check.drop_test_blocks)
 arch_check.drop_test_blocks = lambda code: (lambda r: (r[0], list(r[1])))(_drop(code))
+_references = cached(lambda code, _read=arch_check.references: tuple(_read(code)))
+arch_check.references = lambda code: _references(code)
 
 LONG_FUNCTION = 150       # lines, signature to closing brace
 LARGE_FILE = 3000         # lines
@@ -98,7 +110,16 @@ def line_of(code: str, pos: int) -> int:
 
 
 def functions(code: str):
-    """Yield (name, first line, line count) for each fn with a body."""
+    """(name, first line, line count) for each fn with a body."""
+    return _functions(code)
+
+
+@cached
+def _functions(code: str):
+    return tuple(_scan_functions(code))
+
+
+def _scan_functions(code: str):
     for m in FN.finditer(code):
         j = m.end()
         depth = 0
@@ -169,6 +190,21 @@ def module_graph(root: Path, files=None):
     return graph
 
 
+@cached
+def line_findings(code: str, raw: str):
+    """One file's panic sites and undocumented unsafe, each as (line, text)."""
+    raw_lines = raw.split("\n")
+    panics, unsafe_undoc = [], []
+    for m in PANIC.finditer(code):
+        line = line_of(code, m.start())
+        panics.append((line, raw_lines[line - 1].strip()[:160]))
+    for m in UNSAFE.finditer(code):
+        line = line_of(code, m.start())
+        if not unsafe_documented(raw_lines, line, block=m.group(1) == "{"):
+            unsafe_undoc.append((line, raw_lines[line - 1].strip()[:160]))
+    return tuple(panics), tuple(unsafe_undoc)
+
+
 def measure_source(root: Path):
     """The source measures, with the findings behind each."""
     edges, unlayered = arch_check.measure(root)
@@ -188,18 +224,13 @@ def measure_source(root: Path):
             large[key] = n
     for rel, mod, raw, code in prod:
         key = f"src/{rel.as_posix()}"
-        raw_lines = raw.split("\n")
         if key not in skipped:
             for name, start, n in functions(code):
                 if n > LONG_FUNCTION:
                     long_fns.append({"file": key, "line": start, "name": name, "lines": n})
-        for m in PANIC.finditer(code):
-            line = line_of(code, m.start())
-            panics.append({"file": key, "line": line, "text": raw_lines[line - 1].strip()[:160]})
-        for m in UNSAFE.finditer(code):
-            line = line_of(code, m.start())
-            if not unsafe_documented(raw_lines, line, block=m.group(1) == "{"):
-                unsafe_undoc.append({"file": key, "line": line, "text": raw_lines[line - 1].strip()[:160]})
+        file_panics, file_unsafe = line_findings(code, raw)
+        panics += [{"file": key, "line": line, "text": text} for line, text in file_panics]
+        unsafe_undoc += [{"file": key, "line": line, "text": text} for line, text in file_unsafe]
 
     file_load = [x for x in panics if x["file"].startswith(tuple("src/" + p for p in FILE_LOAD))]
     values = {
@@ -252,6 +283,15 @@ def item_paths(rest: str, depth=0):
 
 def references_with_paths(code: str):
     """arch_check.references plus the full item paths of each reference."""
+    return _references_with_paths(code)
+
+
+@cached
+def _references_with_paths(code: str):
+    return tuple(_scan_references_with_paths(code))
+
+
+def _scan_references_with_paths(code: str):
     for m in arch_check.REF.finditer(code):
         tail = code[m.end():m.end() + 2000]
         yield m.group(1), arch_check.first_items(tail), item_paths(tail), line_of(code, m.start())
@@ -518,6 +558,33 @@ def pr_author(number: int):
     return r.stdout.strip() or None if r.returncode == 0 else None
 
 
+MERGE_SUBJECT = re.compile(r"^Merge (?:pull request #(\d+)\b|#(\d+)\b|branch '?pr-?(\d+)\b)", re.I)
+
+
+def merged_pr_number(subject: str):
+    """The pull request a merge commit merges, from GitHub's merge subjects
+    ("Merge pull request #12 from ...", "Merge #12: ...", "Merge branch
+    'pr12'"). Any other number in a subject may be an issue, so it is not
+    taken."""
+    m = MERGE_SUBJECT.search(subject)
+    return int(next(g for g in m.groups() if g)) if m else None
+
+
+def pr_for_commit(sha: str):
+    """The merged pull request a direct commit (for example a squash merge)
+    came from, from the GitHub API when the `gh` tool and a token are
+    available (as in CI); otherwise None, and no pull request is linked."""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo or not os.environ.get("GH_TOKEN"):
+        return None
+    try:
+        r = run(["gh", "api", f"repos/{repo}/commits/{sha}/pulls",
+                 "--jq", "[.[] | select(.merged_at != null) | .number][0] // empty"], ".", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else None
+
+
 def credits(rev_from: str, rev_to: str, repo: Path):
     """Per first-parent commit in FROM..TO, the source measures it improved."""
     revs = run(["git", "rev-list", "--first-parent", "--reverse", f"{rev_from}..{rev_to}"], repo).stdout.split()
@@ -530,7 +597,10 @@ def credits(rev_from: str, rev_to: str, repo: Path):
                                      check=True, capture_output=True).stdout
             with tarfile.open(fileobj=io.BytesIO(archive)) as t:
                 t.extractall(dest, filter="data")
-            return measure_source(dest)[0]
+            try:
+                return measure_source(dest)[0]
+            finally:
+                shutil.rmtree(dest)       # hundreds of trees would fill the disk
         prev = at(run(["git", "rev-parse", rev_from], repo).stdout.strip())
         for rev in revs:
             touched = run(["git", "diff", "--name-only", f"{rev}^1", rev, "--", "src"], repo).stdout.split()
@@ -544,11 +614,11 @@ def credits(rev_from: str, rev_to: str, repo: Path):
                 # A merge's own author is whoever merged; the pull request's
                 # author is on its second parent.
                 pr_side = run(["git", "log", "-1", "--format=%an", f"{rev}^2"], repo)
-                if pr_side.returncode == 0 and pr_side.stdout.strip():
+                merge = pr_side.returncode == 0 and bool(pr_side.stdout.strip())
+                if merge:
                     subj[1] = pr_side.stdout.strip()
-                pr = re.search(r"#(\d+)|\bpr-?(\d+)\b", subj[0], re.I)
-                login = re.search(r"from ([A-Za-z0-9-]+)/", subj[0])
-                number = int(pr.group(1) or pr.group(2)) if pr else None
+                number = merged_pr_number(subj[0]) if merge else pr_for_commit(rev)
+                login = re.search(r"^Merge pull request #\d+ from ([A-Za-z0-9-]+)/", subj[0]) if merge else None
                 login = login.group(1) if login else (pr_author(number) if number else None)
                 out.append({"commit": rev, "subject": subj[0], "pr": number,
                             "login": login, "author": subj[1], "improved": improved})

@@ -152,6 +152,8 @@ def cleanup_tasks(cur, commit):
 
 
 def thanks(credits):
+    if credits is None:
+        return ["The thanks list was not computed for this release.", ""]
     if not credits:
         return ["No merged pull request improved a measure in this release. Pick a task below to be the first.", ""]
     out = []
@@ -217,7 +219,12 @@ def main(argv):
     history = json.loads(hist_file.read_text()) if hist_file.exists() else []
     history = [h for h in history if h["release"] != release]
     history.append({"release": release, "commit": cur["commit"], "date": date.today().isoformat(), "values": cur["values"]})
-    credits = json.loads(credits_file.read_text()) if credits_file else []
+    # None when the replay did not finish: the page then says so, instead of
+    # claiming that nothing improved.
+    try:
+        credits = json.loads(credits_file.read_text()) if credits_file else None
+    except (OSError, ValueError):
+        credits = None
     hist_file.parent.mkdir(parents=True, exist_ok=True)
     hist_file.write_text(json.dumps(history, indent=1) + "\n")
     (wiki / "Code-Health.md").write_text(render(cur, goals, history, credits, release))

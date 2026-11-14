@@ -32,7 +32,7 @@ Goals, baselines and the reason for each measure are in [`health-goals.json`](he
 
 ## Thanks
 
-On each release the wiki job replays every commit merged since the previous release with the source measures (structure and robustness) and lists each pull request that improved one, with its author. Hygiene and test measures are compared release to release only, because rebuilding every commit would take hours.
+On each release the wiki job replays every commit merged since the previous release with the source measures (structure and robustness) and lists each pull request that improved one, with its author. Hygiene and test measures are compared release to release only, because rebuilding every commit would take hours. If the replay does not finish in its time limit, the page is still published and says the list was not computed.
 
 ## Running it yourself
 

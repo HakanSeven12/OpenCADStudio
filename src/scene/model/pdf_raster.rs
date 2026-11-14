@@ -1,12 +1,15 @@
 //! Cross-platform PDF underlay rasterisation.
 
 use std::collections::HashMap;
+use std::mem::size_of;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::palette::css::{TRANSPARENT, WHITE};
 use hayro::{RenderCache, RenderSettings};
+use lru::LruCache;
 
 /// One rasterised PDF page. `dpi` ties its pixel size to its physical size.
 pub struct PdfPage {
@@ -28,9 +31,77 @@ const MAX_PRINT_RASTER_PIXELS: f64 = 268_435_456.0;
 /// Source path, page, DPI bits and whether the page background is transparent.
 type PageKey = (String, String, u32, bool);
 
-fn page_cache() -> &'static Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<PageKey, Option<Arc<PdfPage>>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// Per-cache byte budget for the derived rasters (page and adjusted caches
+/// each get one). Every zoom band a page is shown at adds a full-page RGBA
+/// that would otherwise stay resident for the whole process lifetime; past
+/// the budget the least recently used rasters are dropped and re-rasterised
+/// on demand. Tunable with `OCS_PDF_RASTER_CACHE_MB`.
+fn raster_cache_budget_bytes() -> usize {
+    const DEFAULT_MIB: usize = 64;
+    std::env::var("OCS_PDF_RASTER_CACHE_MB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MIB)
+        .saturating_mul(1024 * 1024)
+}
+
+/// LRU memo with a byte budget, counted from each entry's reported cost.
+struct BudgetedRasterCache<K: std::hash::Hash + Eq, V> {
+    entries: LruCache<K, (V, usize)>,
+    bytes: usize,
+}
+
+impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
+    fn new() -> Self {
+        Self {
+            entries: LruCache::new(NonZeroUsize::new(4096).expect("nonzero cache capacity")),
+            bytes: 0,
+        }
+    }
+
+    fn get(&mut self, key: &K) -> Option<V> {
+        self.entries.get(key).map(|(value, _)| value.clone())
+    }
+
+    fn insert(&mut self, key: K, value: V, bytes: usize) {
+        let budget = raster_cache_budget_bytes();
+        if bytes > budget {
+            return;
+        }
+        if let Some((_, old_bytes)) = self.entries.pop(&key) {
+            self.bytes -= old_bytes;
+        }
+        while self.bytes > budget - bytes {
+            let Some((_, (_, old_bytes))) = self.entries.pop_lru() else {
+                break;
+            };
+            self.bytes -= old_bytes;
+        }
+        if let Some((_, (_, old_bytes))) = self.entries.push(key, (value, bytes)) {
+            self.bytes -= old_bytes;
+        }
+        self.bytes += bytes;
+    }
+
+    fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+        let stale: Vec<K> = self
+            .entries
+            .iter()
+            .filter(|(key, _)| !keep(key))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in stale {
+            if let Some((_, old_bytes)) = self.entries.pop(&key) {
+                self.bytes -= old_bytes;
+            }
+        }
+    }
+}
+
+fn page_cache() -> &'static Mutex<BudgetedRasterCache<PageKey, Option<Arc<PdfPage>>>> {
+    static CACHE: OnceLock<Mutex<BudgetedRasterCache<PageKey, Option<Arc<PdfPage>>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
 }
 
 fn source_cache() -> &'static Mutex<HashMap<String, Arc<Vec<u8>>>> {
@@ -60,11 +131,11 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .retain(|(cached_path, _, _, _), _| cached_path != path);
+        .retain(|(cached_path, _, _, _)| cached_path != path);
     adjusted_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .retain(|key, _| key.0 != path);
+        .retain(|key| key.0 != path);
 }
 
 /// Register bytes under a derived source name (a layer override of a
@@ -226,16 +297,19 @@ fn rasterize_cached(path: &str, page: &str, dpi: f32, transparent: bool) -> Opti
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(&key)
-        .cloned()
     {
         return hit;
     }
 
     let built = rasterize_uncached(path, page, dpi, transparent);
+    let bytes = size_of::<PageKey>()
+        + built
+            .as_ref()
+            .map_or(0, |raster| size_of::<PdfPage>() + raster.pixels.capacity());
     page_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .insert(key, built.clone());
+        .insert(key, built.clone(), bytes);
     built
 }
 
@@ -457,9 +531,9 @@ pub struct PageAdjust {
 
 type AdjustKey = (String, String, PageAdjust);
 
-fn adjusted_cache() -> &'static Mutex<HashMap<AdjustKey, Arc<Vec<u8>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<AdjustKey, Arc<Vec<u8>>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn adjusted_cache() -> &'static Mutex<BudgetedRasterCache<AdjustKey, Arc<Vec<u8>>>> {
+    static CACHE: OnceLock<Mutex<BudgetedRasterCache<AdjustKey, Arc<Vec<u8>>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
 }
 
 /// One colour (0..=1 channels) with the underlay's contrast / monochrome /
@@ -520,17 +594,17 @@ pub fn adjusted_pixels(
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(&key)
-        .cloned()
     {
         return hit;
     }
     let mut pixels = raster.pixels.as_ref().clone();
     adjust_in_place(&mut pixels, &adjust);
+    let bytes = size_of::<AdjustKey>() + pixels.capacity();
     let pixels = Arc::new(pixels);
     adjusted_cache()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .insert(key, pixels.clone());
+        .insert(key, pixels.clone(), bytes);
     pixels
 }
 
@@ -665,6 +739,202 @@ mod tests {
     use printpdf::{Mm, PdfDocument, PdfPage as OutputPage, PdfSaveOptions};
 
     use super::*;
+
+    /// Serialises the tests that shrink the process-wide raster budget: the
+    /// env override is shared by every test thread in this process.
+    static BUDGET_LOCK: Mutex<()> = Mutex::new(());
+
+    struct BudgetEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl BudgetEnvGuard {
+        fn set(mib: &str) -> Self {
+            let previous = std::env::var_os("OCS_PDF_RASTER_CACHE_MB");
+            std::env::set_var("OCS_PDF_RASTER_CACHE_MB", mib);
+            Self { previous }
+        }
+    }
+
+    impl Drop for BudgetEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("OCS_PDF_RASTER_CACHE_MB", value),
+                None => std::env::remove_var("OCS_PDF_RASTER_CACHE_MB"),
+            }
+        }
+    }
+
+    /// One square page with a filled rectangle: at 150 DPI a 100 mm page
+    /// rasterises to ~1.3 MiB, so a handful of zoom bands passes a 2 MiB
+    /// budget.
+    fn budget_test_pdf(side_mm: f32) -> Vec<u8> {
+        use printpdf::{
+            Color, LinePoint, Op, PaintMode, Point, Polygon, PolygonRing, Rgb, WindingOrder,
+        };
+        let mut document = PdfDocument::new("PDF underlay budget test");
+        let lo = side_mm * 0.1;
+        let hi = side_mm * 0.9;
+        let ops = vec![
+            Op::SetFillColor {
+                col: Color::Rgb(Rgb {
+                    r: 0.1,
+                    g: 0.4,
+                    b: 0.8,
+                    icc_profile: None,
+                }),
+            },
+            Op::DrawPolygon {
+                polygon: Polygon {
+                    rings: vec![PolygonRing {
+                        points: vec![
+                            LinePoint {
+                                p: Point {
+                                    x: Mm(lo).into(),
+                                    y: Mm(lo).into(),
+                                },
+                                bezier: false,
+                            },
+                            LinePoint {
+                                p: Point {
+                                    x: Mm(hi).into(),
+                                    y: Mm(lo).into(),
+                                },
+                                bezier: false,
+                            },
+                            LinePoint {
+                                p: Point {
+                                    x: Mm(hi).into(),
+                                    y: Mm(hi).into(),
+                                },
+                                bezier: false,
+                            },
+                            LinePoint {
+                                p: Point {
+                                    x: Mm(lo).into(),
+                                    y: Mm(hi).into(),
+                                },
+                                bezier: false,
+                            },
+                        ],
+                    }],
+                    mode: PaintMode::Fill,
+                    winding_order: WindingOrder::NonZero,
+                },
+            },
+        ];
+        document
+            .pages
+            .push(OutputPage::new(Mm(side_mm), Mm(side_mm), ops));
+        document.save(&PdfSaveOptions::default(), &mut Vec::new())
+    }
+
+    const SWEEP_BANDS: [f32; 6] = [106.066, 75.0, 53.033, 37.5, 26.517, 18.75];
+
+    #[test]
+    fn zoom_sweep_past_budget_evicts_the_oldest_page_raster() {
+        let _lock = BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = BudgetEnvGuard::set("2");
+        let path = "memory://pdf-budget-evict-page.pdf";
+        register_source(path, Arc::new(budget_test_pdf(100.0)));
+
+        let first = rasterize_page_display_at(path, "1", 150.0).expect("150 DPI raster");
+        for dpi in SWEEP_BANDS {
+            drop(rasterize_page_display_at(path, "1", dpi).expect("band raster"));
+        }
+
+        let refetched = rasterize_page_display_at(path, "1", 150.0).expect("refetched raster");
+        assert!(
+            !Arc::ptr_eq(&first, &refetched),
+            "the oldest raster must be evicted once the sweep passes the budget"
+        );
+    }
+
+    #[test]
+    fn zoom_sweep_past_budget_evicts_the_oldest_adjusted_copy() {
+        let _lock = BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = BudgetEnvGuard::set("2");
+        let path = "memory://pdf-budget-evict-adjust.pdf";
+        register_source(path, Arc::new(budget_test_pdf(100.0)));
+        let adjust = PageAdjust {
+            contrast: 50,
+            contrast_pivot: 500,
+            monochrome: false,
+            adjust_for_background: false,
+            dark_background: false,
+            fade_before_contrast: None,
+        };
+
+        let raster = rasterize_page_display_at(path, "1", 150.0).expect("150 DPI raster");
+        let first = adjusted_pixels(path, "1", &raster, adjust);
+        for dpi in SWEEP_BANDS {
+            let band = rasterize_page_display_at(path, "1", dpi).expect("band raster");
+            drop(adjusted_pixels(path, "1", &band, adjust));
+        }
+
+        let again = adjusted_pixels(path, "1", &raster, adjust);
+        assert!(
+            !Arc::ptr_eq(&first, &again),
+            "the oldest adjusted copy must be evicted once the sweep passes the budget"
+        );
+    }
+
+    /// A cache hit must promote the entry: a re-touched older raster survives
+    /// a sweep that evicts an untouched newer one. A 90 mm page keeps the
+    /// first two rasters (~1.6 MiB) safely inside the 2 MiB budget before the
+    /// sweep pushes past it.
+    #[test]
+    fn re_touching_an_older_raster_keeps_it_cached_past_the_budget() {
+        let _lock = BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = BudgetEnvGuard::set("2");
+        let path = "memory://pdf-budget-recency.pdf";
+        register_source(path, Arc::new(budget_test_pdf(90.0)));
+
+        let oldest = rasterize_page_display_at(path, "1", 150.0).expect("150 DPI raster");
+        let middle = rasterize_page_display_at(path, "1", 106.066).expect("106 DPI raster");
+        let touched = rasterize_page_display_at(path, "1", 150.0).expect("re-touch hit");
+        assert!(
+            Arc::ptr_eq(&oldest, &touched),
+            "re-touch reads the cached raster"
+        );
+        drop(touched);
+        for dpi in [75.0, 53.033] {
+            drop(rasterize_page_display_at(path, "1", dpi).expect("band raster"));
+        }
+
+        let refetched = rasterize_page_display_at(path, "1", 150.0).expect("refetched raster");
+        assert!(
+            Arc::ptr_eq(&oldest, &refetched),
+            "the re-touched raster survives eviction as the most recently used"
+        );
+        let middle_again = rasterize_page_display_at(path, "1", 106.066).expect("middle refetch");
+        assert!(
+            !Arc::ptr_eq(&middle, &middle_again),
+            "the untouched middle raster is the least recently used victim"
+        );
+    }
+
+    /// Regression guard (passes with and without eviction): a sweep that
+    /// stays inside the budget keeps its most recent raster cached.
+    #[test]
+    fn recent_raster_survives_a_sweep_within_budget() {
+        let _lock = BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = BudgetEnvGuard::set("128");
+        let path = "memory://pdf-budget-recent.pdf";
+        register_source(path, Arc::new(budget_test_pdf(100.0)));
+
+        let mut recent = None;
+        for dpi in [150.0].into_iter().chain(SWEEP_BANDS) {
+            recent = Some(rasterize_page_display_at(path, "1", dpi).expect("band raster"));
+        }
+        let recent = recent.expect("last band raster");
+
+        let refetched = rasterize_page_display_at(path, "1", 18.75).expect("refetched raster");
+        assert!(
+            Arc::ptr_eq(&recent, &refetched),
+            "the most recent raster stays cached while the sweep fits the budget"
+        );
+    }
 
     #[test]
     fn registered_pdf_bytes_render_without_a_filesystem_path() {

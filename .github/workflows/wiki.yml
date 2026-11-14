@@ -1,10 +1,18 @@
 name: Wiki
 
 # Rebuilds the GitHub wiki from docs/wiki and the command registry, so the
-# command and system variable reference follows every release (#1049).
+# command and system variable reference follows every release (#1049), and
+# the Code Health page from scripts/health.py (docs/architecture/HEALTH.md).
+#
+# The weekly release publishes with GITHUB_TOKEN, which raises no release
+# event, so this also runs when the Weekly release workflow finishes. It runs
+# after that workflow, never inside it, so it cannot delay the app build.
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: ["Weekly release"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -15,19 +23,126 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source:
+    # Which release to build: the published release, the latest release after
+    # a weekly run (a cancelled run is skipped; a failed build still leaves a
+    # published release), or the commit a manual run was started on.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      label: ${{ steps.pick.outputs.label }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          case "$EVENT" in
+            release)      REF="$RELEASE_TAG"; LABEL="$RELEASE_TAG" ;;
+            workflow_run) REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName); LABEL="$REF" ;;
+            *)            REF="$GITHUB_SHA"; LABEL="${GITHUB_REF_NAME}@${GITHUB_SHA::9}" ;;
+          esac
+          test -n "$REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+
+  health:
+    # Measures the release for the Code Health page. Its failure never stops
+    # the wiki from publishing: every step carries continue-on-error and the
+    # publish job runs either way.
+    needs: source
+    runs-on: ubuntu-22.04
+    # Clippy, the test build, coverage and the replay of a week of commits
+    # (about 500, a few seconds each) take roughly an hour.
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.source.outputs.ref }}
+          # The whole history and the tags, to replay the commits since the
+          # previous release for the thanks list.
+          fetch-depth: 0
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-llvm-cov,cargo-audit
+
+      - name: Measure
+        continue-on-error: true
+        run: python3 scripts/health.py measure --cargo --coverage --out health.json
+
+      - name: Pull requests that improved a measure since the previous release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Without an earlier release tag there is no release to compare
+          # with; replaying the whole history would take hours.
+          if PREVIOUS=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null); then
+            python3 scripts/health.py credits "$PREVIOUS" HEAD > credits.json
+          else
+            echo "[]" > credits.json
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        continue-on-error: true
+        with:
+          name: health
+          path: |
+            health.json
+            credits.json
+
   publish:
+    needs: [source, health]
+    if: always() && needs.source.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.source.outputs.ref }}
       - name: Check out the wiki
         run: git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
       - name: Build
         run: python3 tools/wiki/build.py wiki
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: health
+          path: health
+      - name: Code Health page
+        continue-on-error: true
+        env:
+          LABEL: ${{ needs.source.outputs.label }}
+        run: |
+          test -f health/health.json
+          CREDITS=""; test -f health/credits.json && CREDITS="--credits health/credits.json"
+          python3 tools/wiki/code_health.py wiki health/health.json $CREDITS --release "$LABEL"
       - name: Publish
         working-directory: wiki
+        env:
+          LABEL: ${{ needs.source.outputs.label }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || git commit -m "Wiki: rebuild for ${{ github.event.release.tag_name || github.sha }}"
+          git diff --cached --quiet || git commit -m "Wiki: rebuild for $LABEL"
           git push

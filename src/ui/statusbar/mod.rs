@@ -6,7 +6,7 @@ pub mod statusbar_config;
 pub mod statusbar_menu;
 
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, mouse_area, row, text, text_input, tooltip};
+use iced::widget::{button, container, mouse_area, row, text, text_input, tooltip};
 use iced::{Background, Border, Color, Element, Length, Theme};
 use iced_aw::ContextMenu;
 use std::sync::Arc;
@@ -1049,28 +1049,15 @@ fn osnap_btn<'a>(
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn layout_tab_context_menu(name: String) -> Element<'static, Message> {
-    let item = |label: std::borrow::Cow<'static, str>, message: Message| {
-        mouse_area(
-            container(text(label).size(12))
-                .padding([4, 12])
-                .width(Length::Fill),
-        )
-        .on_press(message)
-        .interaction(iced::mouse::Interaction::Pointer)
-    };
-    let items = column![
-        item(t!("New Layout"), Message::LayoutCreate),
-        item(t!("Copy"), Message::LayoutCopy(name.clone())),
-        item(t!("Rename"), Message::LayoutRenameStart(name.clone())),
-        item(t!("Delete"), Message::LayoutDelete(name.clone())),
-        item(t!("Page Setup"), Message::LayoutPageSetup(name.clone())),
-        item(t!("Plot"), Message::LayoutPlot(name)),
-    ];
-
-    container(items.spacing(0).width(160))
-        .style(container::bordered_box)
-        .padding([4, 0])
-        .into()
+    use crate::ui::palette_menu::{menu, Item};
+    menu(vec![
+        Item::new(t!("New Layout"), Message::LayoutCreate),
+        Item::new(t!("Copy"), Message::LayoutCopy(name.clone())),
+        Item::new(t!("Rename"), Message::LayoutRenameStart(name.clone())),
+        Item::new(t!("Delete"), Message::LayoutDelete(name.clone())),
+        Item::new(t!("Page Setup"), Message::LayoutPageSetup(name.clone())),
+        Item::new(t!("Plot"), Message::LayoutPlot(name)),
+    ])
 }
 
 /// A layout tab button.

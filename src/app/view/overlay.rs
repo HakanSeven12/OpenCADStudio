@@ -8,6 +8,7 @@ use crate::ui::popup::context_menu::{
     ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
 };
 use crate::ui::popup::quad_menu::{QuadMsg, QuadPanel, QuadUi};
+use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::overlay;
@@ -1550,12 +1551,14 @@ impl Widget<Message, Theme, iced::Renderer> for ClampedPin<'_> {
 /// Horizontal inset so the pointer rests inside the default row, not on the
 /// panel's border, when the menu opens.
 const MENU_CURSOR_INSET_X: f32 = 24.0;
+/// Width of the right-click menu's editor.
+const MENU_EDITOR_W: f32 = 300.0;
 /// Width of the icon gutter every row reserves so labels line up whether or
 /// not the row carries a glyph (object snaps, command icons).
 const MENU_GUTTER_W: f32 = 18.0;
-const MENU_ICON_SIZE: f32 = 14.0;
+const MENU_ICON_SIZE: f32 = pm::ROW_ICON;
 /// Trailing check mark of checked rows; sits in the submenu caret column.
-const MENU_CHECK_SIZE: f32 = 10.0;
+const MENU_CHECK_SIZE: f32 = pm::BAR_ICON;
 
 /// The gutter cell: the row's glyph, faded with a disabled row, or empty
 /// space of the same width.
@@ -1597,17 +1600,9 @@ pub(super) fn viewport_context_menu_overlay(
     menu: &ContextMenu,
     highlighted: Option<usize>,
 ) -> Element<'static, Message> {
-    let sep = || -> Element<'static, Message> {
-        container(iced::widget::Space::new().width(Fill).height(1))
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.weak.color)),
-                ..Default::default()
-            })
-            .width(Fill)
-            .height(1)
-            .padding([0, 6])
-            .into()
-    };
+    // The palette menu's separator: a hairline centred in the separator
+    // height the model counts (`MENU_SEP_H`).
+    let sep = || crate::ui::palette_menu::entry(crate::ui::palette_menu::Item::Separator);
 
     // Index into `menu.selectable()` of the row being rendered, so the
     // keyboard highlight lands on the same row the model counts.
@@ -1632,28 +1627,29 @@ pub(super) fn viewport_context_menu_overlay(
                 let is_hl = highlighted == Some(sel_idx);
                 let enabled = !children.is_empty();
                 let caret = if !enabled {
-                    crate::ui::icons::themed_disabled_arrow_right(9.0)
+                    crate::ui::icons::themed_disabled_arrow_right(pm::CARET)
                 } else if *open {
-                    crate::ui::icons::themed_arrow_down(9.0)
+                    crate::ui::icons::themed_arrow_down(pm::CARET)
                 } else {
-                    crate::ui::icons::themed_arrow_right(9.0)
+                    crate::ui::icons::themed_arrow_right(pm::CARET)
                 };
                 let content = row![
                     context_menu_gutter(*icon, enabled),
                     text(label.clone())
-                        .size(12)
+                        .size(ui_text::UI)
+                        .line_height(ui_text::line())
                         .wrapping(iced::widget::text::Wrapping::None),
                     iced::widget::Space::new().width(Fill),
                     caret,
                 ]
-                .spacing(4)
+                .spacing(pm::TOOL_GAP)
                 .align_y(iced::Center);
                 let mut btn = button(content)
                     .padding(iced::Padding {
-                        top: 3.0,
-                        right: 12.0,
-                        bottom: 3.0,
-                        left: 6.0,
+                        top: 0.0,
+                        right: pm::MENU_PAD_X,
+                        bottom: 0.0,
+                        left: pm::TOOL_GAP,
                     })
                     .width(Fill)
                     .height(Length::Fixed(MENU_ROW_H))
@@ -1668,7 +1664,7 @@ pub(super) fn viewport_context_menu_overlay(
                 if *open {
                     for child in children {
                         let is_hl = highlighted == Some(sel_idx);
-                        items.push(context_menu_row(child, 14.0, is_hl));
+                        items.push(context_menu_row(child, pm::INDENT, is_hl));
                         sel_idx += 1;
                     }
                 }
@@ -1681,12 +1677,16 @@ pub(super) fn viewport_context_menu_overlay(
         scrollable(menu_col)
             .height(Length::Shrink)
             .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(8).scroller_width(6),
-            ));
+                scrollable::Scrollbar::new()
+                    .width(pm::SCROLL_THUMB_W)
+                    .scroller_width(pm::SCROLL_THUMB_W),
+            ))
+            .style(crate::ui::kit::scroll_style);
 
+    // The palette menu's frame.
     let panel = container(menu_col)
-        .style(container::bordered_box)
-        .padding([MENU_PAD_TOP as u16, 0])
+        .style(crate::ui::palette_menu::frame_style)
+        .padding([MENU_PAD_TOP, 0.0])
         .width(Length::Fixed(menu.width));
 
     // Shift the panel so the default row's centre line is under the pointer.
@@ -1718,17 +1718,14 @@ pub(super) fn context_menu_editor_overlay(
             iced::widget::Space::new().width(indent),
             iced::widget::checkbox(on)
                 .label(label)
-                .text_size(12)
-                .size(13)
+                .text_size(ui_text::UI)
+                .size(pm::CHECK)
                 .on_toggle(move |_| Message::ContextMenuEdit(E::Toggle(key.clone()))),
         ]
         .into()
     };
     let mut items: Vec<Element<'static, Message>> =
-        vec![text(crate::tr!("context-menu", "editor-title"))
-            .size(12)
-            .style(crate::ui::style::common::muted_style)
-            .into()];
+        vec![crate::ui::kit::value_text(crate::tr!("context-menu", "editor-title"), true)];
     for row in rows {
         match row {
             // Repeat stays: it is the menu's default row.
@@ -1751,31 +1748,34 @@ pub(super) fn context_menu_editor_overlay(
                 let fixed = *id != crate::ui::popup::context_menu::SubmenuId::RecentInput;
                 for child in children.iter().filter(|_| fixed) {
                     let key = row_key(&MenuRow::Item(child.clone())).unwrap_or_default();
-                    items.push(tick(key, child.label.clone(), 18.0));
+                    items.push(tick(key, child.label.clone(), pm::INDENT));
                 }
             }
             MenuRow::Separator => {}
         }
     }
-    items.push(
-        text(crate::tr!("context-menu", "my-commands"))
-            .size(12)
-            .style(crate::ui::style::common::muted_style)
-            .into(),
-    );
+    items.push(crate::ui::kit::value_text(
+        crate::tr!("context-menu", "my-commands"),
+        true,
+    ));
     let small = |glyph: &'static str, msg: Message| {
-        button(text(glyph).size(11))
-            .on_press(msg)
-            .padding([1, 6])
-            .style(button::text)
+        button(
+            container(text(glyph).size(ui_text::UI).line_height(ui_text::line()))
+                .center(Fill),
+        )
+        .on_press(msg)
+        .width(Length::Fixed(pm::BAR_BUTTON))
+        .height(Length::Fixed(pm::BAR_BUTTON))
+        .padding(0)
+        .style(crate::ui::kit::flat_button_style(false))
     };
     for (index, (label, command)) in custom.custom.iter().enumerate() {
         items.push(
             row![
-                text(format!("{label}  ({command})"))
-                    .size(12)
-                    .width(Fill)
-                    .wrapping(iced::widget::text::Wrapping::None),
+                crate::ui::kit::one_line(text(format!("{label}  ({command})")))
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+                    .width(Fill),
                 small("↑", edit(E::Move(index, true))),
                 small("↓", edit(E::Move(index, false))),
                 small("×", edit(E::Remove(index))),
@@ -1789,37 +1789,44 @@ pub(super) fn context_menu_editor_overlay(
             iced::widget::text_input(&crate::tr!("context-menu", "command-placeholder"), draft)
                 .on_input(|typed| Message::ContextMenuEdit(E::Draft(typed)))
                 .on_submit(edit(E::Add))
-                .size(12)
-                .padding([3, 6])
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
+                .padding(crate::ui::kit::BOX_PAD)
+                .style(crate::ui::kit::combo_style)
                 .width(Fill),
-            button(text(crate::tr!("context-menu", "add")).size(12))
-                .on_press(edit(E::Add))
-                .padding([3, 8]),
+            crate::ui::kit::text_button(
+                crate::tr!("context-menu", "add"),
+                Some(edit(E::Add)),
+                false
+            ),
         ]
-        .spacing(4)
+        .spacing(pm::TOOL_GAP)
+        .align_y(iced::Center)
         .into(),
     );
     items.push(
         row![
             iced::widget::Space::new().width(Fill),
-            button(text(crate::tr!("context-menu", "done")).size(12))
-                .on_press(edit(E::Done))
-                .style(button::primary)
-                .padding([3, 12]),
+            crate::ui::kit::text_button(
+                crate::tr!("context-menu", "done"),
+                Some(edit(E::Done)),
+                true
+            ),
         ]
         .into(),
     );
     let body = scrollable(
         column(items)
-            .spacing(3)
-            .padding([4, 10])
-            .width(Length::Fixed(300.0)),
+            .spacing(pm::TOOL_GAP)
+            .padding([pm::TOOL_GAP, pm::GRID_INSET_L])
+            .width(Length::Fixed(MENU_EDITOR_W)),
     )
+    .style(crate::ui::kit::scroll_style)
     .height(Length::Shrink);
     let panel = container(body)
-        .style(container::bordered_box)
-        .padding([MENU_PAD_TOP as u16, 0])
-        .width(Length::Fixed(300.0));
+        .style(crate::ui::palette_menu::frame_style)
+        .padding([MENU_PAD_TOP, 0.0])
+        .width(Length::Fixed(MENU_EDITOR_W));
     position_canvas_overlay_clamped(
         pos,
         bottom_inset,
@@ -1837,7 +1844,8 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     // Rows have a fixed height: a long label must not wrap onto the next
     // row (#2170).
     let mut label_text = text(item.label.clone())
-        .size(12)
+        .size(ui_text::UI)
+        .line_height(ui_text::line())
         .wrapping(iced::widget::text::Wrapping::None);
     if item.default {
         label_text = label_text.font(iced::Font {
@@ -1847,21 +1855,21 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     }
     let enabled = item.enabled;
     let mut content = row![context_menu_gutter(item.icon, enabled), label_text]
-        .spacing(4)
+        .spacing(pm::TOOL_GAP)
         .align_y(iced::Center);
     if let Some(hint) = item.hint.as_ref() {
+        // Muted, as a palette menu item's shortcut.
         content = content.push(iced::widget::Space::new().width(Fill)).push(
-            text(hint.clone()).size(11).style(move |theme: &Theme| {
-                let palette = theme.palette();
-                let base = if highlighted {
-                    palette.primary.strong.text
-                } else {
-                    palette.background.base.text
-                };
-                iced::widget::text::Style {
-                    color: Some(base.scale_alpha(if enabled { 0.6 } else { 0.35 })),
-                }
-            }),
+            text(hint.clone())
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
+                .style(move |theme: &Theme| iced::widget::text::Style {
+                    color: Some(if enabled {
+                        chrome::muted(theme)
+                    } else {
+                        chrome::muted(theme).scale_alpha(0.6)
+                    }),
+                }),
         );
     }
     if item.checked {
@@ -1876,10 +1884,10 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     }
     let mut btn = button(content)
         .padding(iced::Padding {
-            top: 3.0,
-            right: 12.0,
-            bottom: 3.0,
-            left: 6.0 + indent,
+            top: 0.0,
+            right: pm::MENU_PAD_X,
+            bottom: 0.0,
+            left: pm::TOOL_GAP + indent,
         })
         .width(Fill)
         .height(Length::Fixed(MENU_ROW_H))
@@ -1890,28 +1898,18 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     btn.into()
 }
 
-/// Row colours: keyboard highlight uses the accent (as the grip popup does),
-/// hover the subtle background tint, disabled rows faded text.
+/// Row colours, the palette menu's: the keyboard highlight and the hovered
+/// row lit with `hover`, disabled rows muted.
 fn context_menu_row_style(
     theme: &Theme,
     status: button::Status,
     highlighted: bool,
 ) -> button::Style {
-    let palette = theme.palette();
-    let (background, text_color) = if highlighted {
-        (
-            Some(Background::Color(palette.primary.strong.color)),
-            palette.primary.strong.text,
-        )
-    } else {
-        match status {
-            button::Status::Hovered | button::Status::Pressed => (
-                Some(Background::Color(palette.background.weak.color)),
-                palette.background.weak.text,
-            ),
-            button::Status::Disabled => (None, palette.background.base.text.scale_alpha(0.42)),
-            button::Status::Active => (None, palette.background.base.text),
-        }
+    let lit = highlighted || matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let (background, text_color) = match status {
+        button::Status::Disabled => (None, chrome::muted(theme)),
+        _ if lit => (Some(Background::Color(chrome::hover(theme))), chrome::text(theme)),
+        _ => (None, chrome::text(theme)),
     };
     button::Style {
         background,

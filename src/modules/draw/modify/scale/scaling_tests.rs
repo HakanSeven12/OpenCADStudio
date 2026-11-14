@@ -20,7 +20,8 @@ fn table_scaling_interactive_preview_matches_commit_at_distant_bases() {
         let cursor = base + DVec3::new(0.25, 0.0, 0.0);
         let preview = command.on_preview_wires(cursor);
         let result = command.on_point(cursor);
-        let CmdResult::TransformSelected(_, EntityTransform::Scale { center, factor }) = result else {
+        let CmdResult::TransformSelected(_, EntityTransform::Scale { center, factor }) = result
+        else {
             panic!("scale transform");
         };
         assert_eq!(center, base);

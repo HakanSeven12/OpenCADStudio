@@ -45,7 +45,8 @@ impl OpenCADStudio {
         // Scaling a table rebuilds its picture block and its membership.
         let table_scale = matches!(
             transform,
-            crate::command::EntityTransform::Scale { .. } | crate::command::EntityTransform::Affine(_)
+            crate::command::EntityTransform::Scale { .. }
+                | crate::command::EntityTransform::Affine(_)
         ) && handles.iter().any(|h| {
             matches!(
                 self.tabs[i].scene.document.get_entity(*h),

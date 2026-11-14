@@ -9,7 +9,11 @@ fn scale_factor(t: &EntityTransform) -> f64 {
 
 /// Freeze inherited dimensions on this instance before scaling; shared table
 /// styles must retain their dimensions for every other table using them.
-pub(crate) fn prepare(table: &Table, doc: &document::Document, t: &EntityTransform) -> Option<Table> {
+pub(crate) fn prepare(
+    table: &Table,
+    doc: &document::Document,
+    t: &EntityTransform,
+) -> Option<Table> {
     let factor = scale_factor(t);
     if !factor.is_finite() || (factor - 1.0).abs() < 1e-12 {
         return None;
@@ -82,7 +86,10 @@ pub(crate) fn prepare(table: &Table, doc: &document::Document, t: &EntityTransfo
                     ci,
                     cell,
                     content,
-                    projection.as_ref().or(legacy).map(|style| style.text_height),
+                    projection
+                        .as_ref()
+                        .or(legacy)
+                        .map(|style| style.text_height),
                 )
                 .unwrap_or(height);
                 let target = &mut result.rows[ri].cells[ci].contents[index];

@@ -210,12 +210,17 @@ fn table_scaling_command_grip_and_affine_rebuild_picture_and_content() {
         let doc = &app.tabs[i].scene.document;
         let scaled = table(doc, h);
         assert!((scaled.total_width() - 80.0 * factor).abs() < 1e-6);
-        assert_eq!(widths(scaled), widths(content(doc, h)), "stale TABLECONTENT");
+        assert_eq!(
+            widths(scaled),
+            widths(content(doc, h)),
+            "stale TABLECONTENT"
+        );
         assert_table_scaling_picture_width(doc, h, 80.0 * factor);
         if path == 0 {
             for ext in ["dwg", "dxf"] {
                 let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
-                let reopened = crate::io::load_bytes(&format!("scaled-table.{ext}"), bytes).unwrap();
+                let reopened =
+                    crate::io::load_bytes(&format!("scaled-table.{ext}"), bytes).unwrap();
                 let saved = reopened
                     .entities()
                     .find_map(|entity| {
@@ -227,7 +232,10 @@ fn table_scaling_command_grip_and_affine_rebuild_picture_and_content() {
             }
         }
         app.undo_steps(1);
-        assert_eq!(widths(table(&app.tabs[i].scene.document, h)), widths(&before));
+        assert_eq!(
+            widths(table(&app.tabs[i].scene.document, h)),
+            widths(&before)
+        );
         assert_eq!(
             widths(content(&app.tabs[i].scene.document, h)),
             widths(&before)

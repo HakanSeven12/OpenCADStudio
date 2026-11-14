@@ -4972,8 +4972,11 @@ mod tests {
                 .insert(handle, document::objects::ObjectType::TableStyle(style));
             let mut table = Table::new(Vector3::ZERO, rows, 1);
             table.table_style_handle = Some(handle);
+            // Cells large enough for the text, so the band is not shrunk to fit them.
+            table.columns[0].width = 100.0;
             for row in &mut table.rows {
                 row.style_id = 3;
+                row.height = 30.0;
             }
             table_indicator(&table, &document, None)
                 .expect("the table has cells")

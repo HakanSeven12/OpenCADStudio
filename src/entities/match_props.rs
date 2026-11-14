@@ -184,7 +184,10 @@ pub fn match_special_props(
         dt.legacy_border_visibility = st.legacy_border_visibility.clone();
     }
 
-    if let (E::MLine(sm), E::MLine(dm)) = (src, dst as &mut E) {
+    // Multi-line style: the display switch, like the images below.
+    if let (true, E::MLine(sm), E::MLine(dm)) =
+        (opts.has(MatchOpts::DISPLAY), src, dst as &mut E)
+    {
         dm.style_handle = sm.style_handle;
         dm.style_name = sm.style_name.clone();
         dm.style_element_count = sm.style_element_count;
@@ -273,8 +276,10 @@ pub fn match_special_props(
     }
 
     // External-reference identity, placement and clip geometry stay. Only
-    // display controls/appearance are matched.
-    if let (E::RasterImage(si), E::RasterImage(di)) = (src, dst as &mut E) {
+    // display controls/appearance are matched, under the display switch.
+    if let (true, E::RasterImage(si), E::RasterImage(di)) =
+        (opts.has(MatchOpts::DISPLAY), src, dst as &mut E)
+    {
         di.flags = si.flags;
         di.clipping_enabled = si.clipping_enabled;
         di.brightness = si.brightness;
@@ -282,7 +287,9 @@ pub fn match_special_props(
         di.fade = si.fade;
         di.clip_boundary.clip_mode = si.clip_boundary.clip_mode;
     }
-    if let (E::Wipeout(sw), E::Wipeout(dw)) = (src, dst as &mut E) {
+    if let (true, E::Wipeout(sw), E::Wipeout(dw)) =
+        (opts.has(MatchOpts::DISPLAY), src, dst as &mut E)
+    {
         dw.flags = sw.flags;
         dw.clipping_enabled = sw.clipping_enabled;
         dw.brightness = sw.brightness;
@@ -290,7 +297,9 @@ pub fn match_special_props(
         dw.fade = sw.fade;
         dw.clip_mode = sw.clip_mode;
     }
-    if let (E::Underlay(su), E::Underlay(du)) = (src, dst as &mut E) {
+    if let (true, E::Underlay(su), E::Underlay(du)) =
+        (opts.has(MatchOpts::DISPLAY), src, dst as &mut E)
+    {
         du.flags = su.flags;
         du.contrast = su.contrast;
         du.fade = su.fade;
@@ -541,12 +550,15 @@ impl MatchOpts {
     pub const MLEADER: u32 = 32768;
     pub const TRANSPARENCY: u32 = 65536;
     pub const CENTER: u32 = 131072;
-    pub const ALL_BITS: u32 = 262143;
+    // Display controls of an image, wipeout, underlay or multi-line: the
+    // clip mode, the flags, the brightness and the fade.
+    pub const DISPLAY: u32 = 262144;
+    pub const ALL_BITS: u32 = 524287;
     /// Everything but the plot style.
-    pub const DEFAULT_MODE: u32 = 261631;
+    pub const DEFAULT_MODE: u32 = 523775;
 
     /// The order and names of the settings line (command-line tokens).
-    pub const NAMES: [(u32, &'static str); 17] = [
+    pub const NAMES: [(u32, &'static str); 18] = [
         (Self::COLOR, "Color"),
         (Self::LAYER, "Layer"),
         (Self::LTYPE, "Ltype"),
@@ -564,6 +576,7 @@ impl MatchOpts {
         (Self::MATERIAL, "Material"),
         (Self::MLEADER, "Multileader"),
         (Self::CENTER, "Center object"),
+        (Self::DISPLAY, "Display"),
     ];
 
     /// Every transfer enabled — what pasting with properties uses.
@@ -803,5 +816,60 @@ mod match_properties_kernel_tests {
             crate::scene::view::dispatch::entity_thickness(&dst) == Some(1.25),
             "enabled thickness must still copy"
         );
+    }
+
+    /// The display transfer is a switch like the others. With every bit off
+    /// the kernel must not repaint an image, wipeout or underlay; the
+    /// default profile keeps the whole transfer on.
+    #[test]
+    fn display_only_transfers_are_gated_by_the_display_bit() {
+        use document::entities::{Wipeout, WipeoutClipMode, WipeoutDisplayFlags};
+
+        let mut src_w = Wipeout::default();
+        src_w.brightness = 20;
+        src_w.clip_mode = WipeoutClipMode::Inside;
+        src_w.flags = source_display_flags();
+        let dst_w = {
+            let mut w = Wipeout::default();
+            w.brightness = 80;
+            w.clip_mode = WipeoutClipMode::Outside;
+            w.flags = WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY;
+            w
+        };
+
+        let src = EntityType::Wipeout(src_w);
+        let mut dst = EntityType::Wipeout(dst_w.clone());
+        match_properties_kernel(&src, &mut dst, &MatchOpts(0));
+        let EntityType::Wipeout(dst) = &dst else {
+            unreachable!()
+        };
+        assert_eq!(dst.brightness, 80);
+        assert_eq!(dst.clip_mode, WipeoutClipMode::Outside);
+        assert_eq!(dst.flags, WipeoutDisplayFlags::USE_CLIPPING_BOUNDARY);
+
+        let mut dst = EntityType::Wipeout(dst_w);
+        match_properties_kernel(&src, &mut dst, &MatchOpts::all());
+        let EntityType::Wipeout(dst) = &dst else {
+            unreachable!()
+        };
+        assert_eq!(dst.brightness, 20);
+        assert_eq!(dst.clip_mode, WipeoutClipMode::Inside);
+        assert_eq!(dst.flags, source_display_flags());
+
+        // The default profile carries the display switch.
+        assert_ne!(MatchOpts::DEFAULT_MODE & MatchOpts::DISPLAY, 0);
+    }
+
+    fn source_display_flags() -> document::entities::WipeoutDisplayFlags {
+        document::entities::WipeoutDisplayFlags::SHOW_IMAGE
+            | document::entities::WipeoutDisplayFlags::TRANSPARENCY_ON
+    }
+
+    #[test]
+    fn display_settings_appear_in_the_settings_line() {
+        let line = super::active_settings_line(super::MatchOpts::DEFAULT_MODE);
+        assert!(line.contains("Display"), "{line}");
+        let off = super::active_settings_line(0);
+        assert!(!off.contains("Display"), "{off}");
     }
 }

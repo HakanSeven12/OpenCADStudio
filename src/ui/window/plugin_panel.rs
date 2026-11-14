@@ -640,7 +640,8 @@ impl PluginPanelState {
                 let cid = id.clone();
                 let mut cb = checkbox(current)
                     .label(label)
-                    .size(14);
+                    .size(14)
+                    .text_size(12);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
                         Message::PluginPanelBoolToggle(pid.clone(), cid.clone(), checked)
@@ -948,7 +949,8 @@ impl PluginPanelState {
                 let cid = id.clone();
                 let mut cb = checkbox(current)
                     .label(label)
-                    .size(14);
+                    .size(14)
+                    .text_size(12);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
                         Message::PluginPanelBoolToggle(pid.clone(), cid.clone(), checked)

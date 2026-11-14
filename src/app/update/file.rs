@@ -6914,6 +6914,10 @@ impl OpenCADStudio {
         // Small margin so the outermost strokes aren't clipped flush to the edge.
         let mx = ((x1 - x0) * 0.02).max(0.0);
         let my = ((y1 - y0) * 0.02).max(0.0);
+        // Window selection is needed to run this one job, but QuickPrint must
+        // not change the user's saved Plot-area choice. The export helper has
+        // built its page before returning, so restoring here is final.
+        let previous_area = self.plot_dialog.area.clone();
         self.plot_dialog.area = "Window".into();
         self.plot_window = Some((
             (x0 - mx) as f64,
@@ -6922,7 +6926,9 @@ impl OpenCADStudio {
             (y1 + my) as f64,
         ));
         let path = self.quick_print_path();
-        self.on_plot_window_export_path_some(path)
+        let task = self.on_plot_window_export_path_some(path);
+        self.plot_dialog.area = previous_area;
+        task
     }
 
     /// Auto output path for quick print: the drawing's folder + name + a
@@ -8291,7 +8297,10 @@ impl OpenCADStudio {
             && (!d.file_svg || cfg!(target_arch = "wasm32"))
             && d.area != "Layout"
         {
-            if let Err(error) = self.geopdf_eligibility() {
+            // Missing CRS or units means the ordinary plain-PDF fallback; only
+            // malformed geospatial state or an unsupported frame fails here.
+            let _geopdf = self.geopdf_eligibility();
+            if let Err(error) = _geopdf {
                 self.command_line.push_error(&error);
                 return Task::none();
             }
@@ -8568,7 +8577,12 @@ impl OpenCADStudio {
             .then_some((x0, y0, x1, y1))
     }
 
-    fn geopdf_eligibility(&self) -> Result<crate::io::crs::CrsDefinition, String> {
+    /// `Ok(None)` means the drawing has no CRS, or a projected CRS without the
+    /// drawing units needed to georeference it. Those drawings still export as
+    /// plain PDF. Malformed GEODATA and unsupported plot frames remain errors.
+    fn geopdf_eligibility(
+        &self,
+    ) -> Result<Option<crate::io::crs::CrsDefinition>, String> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout != "Model"
             || scene.block_edit_block.is_some()
@@ -8588,15 +8602,16 @@ impl OpenCADStudio {
             return Err("GeoPDF export requires a top-down orthographic XY scene".to_string());
         }
         drop(camera);
-        let crs = crate::io::crs::document_crs(&scene.document)?
-            .ok_or_else(|| "GeoPDF export requires a drawing CRS in GEODATA".to_string())?;
+        let Some(crs) = crate::io::crs::document_crs(&scene.document)? else {
+            return Ok(None);
+        };
         if !crs.is_geographic()
             && crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)
                 .is_none()
         {
-            return Err("GeoPDF export requires explicit drawing units".to_string());
+            return Ok(None);
         }
-        Ok(crs)
+        Ok(Some(crs))
     }
 
     fn geopdf_frame_for_window(
@@ -8606,7 +8621,9 @@ impl OpenCADStudio {
         if !self.plot_dialog.geopdf {
             return Ok(None);
         }
-        let crs = self.geopdf_eligibility()?;
+        let Some(crs) = self.geopdf_eligibility()? else {
+            return Ok(None);
+        };
         let units = crate::app::properties::insunits_to_mm(
             self.tabs[self.active_tab]
                 .scene
@@ -8618,7 +8635,8 @@ impl OpenCADStudio {
     }
 
     /// `area_plot_job` has an established Option-returning API, so its callers
-    /// explicitly turn a missing opted-in frame into an export error.
+    /// explicitly validate a missing opted-in frame. Missing CRS/units select
+    /// the plain-PDF fallback; every other missing frame remains an error.
     pub(in crate::app) fn validate_geopdf_page(&self, page: &PdfPageInput) -> Result<(), String> {
         let scene = &self.tabs[self.active_tab].scene;
         if !self.plot_dialog.geopdf
@@ -8628,9 +8646,12 @@ impl OpenCADStudio {
         {
             return Ok(());
         }
-        Err(self.geopdf_eligibility().err().unwrap_or_else(|| {
-            "The selected model window cannot be represented as a GeoPDF frame".to_string()
-        }))
+        match self.geopdf_eligibility()? {
+            Some(_) => Err(
+                "The selected model window cannot be represented as a GeoPDF frame".to_string(),
+            ),
+            None => Ok(()),
+        }
     }
 
     /// Render a selected rectangle through one shared Model/Paper path. The
@@ -8852,6 +8873,23 @@ mod plot_paper_tests {
             .unwrap();
     }
 
+    fn remove_crs(app: &mut OpenCADStudio) {
+        let document = &mut app.tabs[app.active_tab].scene.document;
+        let handle = crate::io::crs::model_space_geo_data_handle(document).unwrap();
+        assert!(document.objects.remove(&handle).is_some());
+        // Removing a GEODATA through the native owner graph also detaches the
+        // extension-dictionary entry, leaving no stale link behind.
+        let model_space = document.block_records.get("*Model_Space").unwrap().handle;
+        let dictionary = document.extension_dictionary_handle(model_space).unwrap();
+        if let Some(document::objects::ObjectType::Dictionary(dictionary)) =
+            document.objects.get_mut(&dictionary)
+        {
+            dictionary
+                .entries
+                .retain(|(key, _)| !key.eq_ignore_ascii_case(crate::io::crs::GEODATA_DICTIONARY_KEY));
+        }
+    }
+
     fn geopdf_model_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -8930,7 +8968,7 @@ mod plot_paper_tests {
     }
 
     #[test]
-    fn geopdf_rejects_missing_crs_units_and_unsupported_scenes() {
+    fn geopdf_missing_crs_or_units_falls_back_but_unsupported_scenes_are_errors() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.plot_dialog.geopdf = true;
@@ -8940,10 +8978,12 @@ mod plot_paper_tests {
             GEO_ORIGIN[0] + 1.0,
             GEO_ORIGIN[1] + 1.0,
         );
-        assert!(app
-            .geopdf_frame_for_window(window)
-            .unwrap_err()
-            .contains("GEODATA"));
+        assert!(app.geopdf_frame_for_window(window).unwrap().is_none());
+        // A GEODATA that stops carrying a CRS (or exists with none) keeps the
+        // same fallback: the export proceeds as a plain PDF.
+        set_epsg(&mut app, 5514);
+        remove_crs(&mut app);
+        assert!(app.geopdf_frame_for_window(window).unwrap().is_none());
 
         set_epsg(&mut app, 5514);
         app.tabs[app.active_tab]
@@ -8951,16 +8991,16 @@ mod plot_paper_tests {
             .document
             .header
             .insertion_units = 0;
-        assert!(app
-            .geopdf_frame_for_window(window)
-            .unwrap_err()
-            .contains("units"));
+        assert!(app.geopdf_frame_for_window(window).unwrap().is_none());
         app.tabs[app.active_tab]
             .scene
             .document
             .header
             .insertion_units = 6;
-        assert!(app.geopdf_frame_for_window(window).is_ok());
+        assert!(app
+            .geopdf_frame_for_window(window)
+            .unwrap()
+            .is_some());
 
         let original_rotation = app.tabs[app.active_tab].scene.camera.borrow().rotation;
         app.tabs[app.active_tab]
@@ -8999,7 +9039,7 @@ mod plot_paper_tests {
     }
 
     #[test]
-    fn invalid_geopdf_opt_in_is_reported_before_opening_a_file_dialog() {
+    fn geopdf_opt_in_falls_back_to_plain_pdf_without_crs_or_units() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.tabs[app.active_tab]
@@ -9014,20 +9054,18 @@ mod plot_paper_tests {
         app.plot_dialog.to_file = true;
         app.plot_dialog.file_svg = false;
         app.plot_dialog.area = "Extents".into();
-        let old_error_revision = app.command_line.error_revision;
-
         let _ = app.on_plot_dlg(PlotDlgMsg::Commit);
 
-        assert!(app.command_line.error_revision > old_error_revision);
-
         let path = std::env::temp_dir().join(format!(
-            "ocs-geopdf-missing-crs-{}.pdf",
+            "ocs-geopdf-plain-fallback-{}.pdf",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
-        let error = app.export_pdf_direct(&path, false).unwrap_err();
-        assert!(error.contains("GEODATA"), "{error}");
-        assert!(!path.exists());
+        app.export_pdf_direct(&path, false)
+            .expect("missing CRS must fall back to plain PDF");
+        assert!(path.exists());
+        assert_eq!(vp_by_page(std::fs::read(&path).expect("fallback PDF")), [false]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -9064,7 +9102,7 @@ mod plot_paper_tests {
     }
 
     #[test]
-    fn quick_print_uses_its_actual_window_for_geopdf_validation() {
+    fn quick_print_preserves_the_plot_area_instead_of_setting_window_permanently() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let line = app.tabs[app.active_tab]
@@ -9077,17 +9115,17 @@ mod plot_paper_tests {
             ));
         app.plot_dialog.geopdf = true;
         app.plot_dialog.file_svg = true;
-        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.area = "Extents".into();
         app.plot_dialog.background = false;
         app.plot_dialog.open_when_done = false;
         let old_error_revision = app.command_line.error_revision;
 
         let _ = app.on_quick_print_handles(vec![line]);
 
-        assert_eq!(app.plot_dialog.area, "Window");
-        assert!(
-            app.command_line.error_revision > old_error_revision,
-            "QuickPrint must report the missing CRS instead of silently writing plain PDF"
+        assert_eq!(app.plot_dialog.area, "Extents");
+        assert_eq!(
+            app.command_line.error_revision, old_error_revision,
+            "QuickPrint with missing CRS falls back to ordinary PDF output"
         );
     }
 

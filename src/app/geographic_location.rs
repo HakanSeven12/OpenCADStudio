@@ -161,10 +161,13 @@ mod tests {
         assert_eq!(geo(&app).version, 3);
         assert_eq!(geo(&app).coordinate_type, 2);
         assert!(!geo(&app).coordinate_system_definition.is_empty());
-        assert_eq!(
-            geo(&app).coordinate_system_definition,
-            geo(&app).coordinate_system_wkt
-        );
+        // Version 2/3 keeps the interoperable MapGuide XML definition next to
+        // the authored WKT; both resolve to the same EPSG code.
+        assert!(geo(&app).coordinate_system_definition.starts_with("<?xml"));
+        assert!(geo(&app)
+            .coordinate_system_definition
+            .contains(r#"<Alias id="5514" type="CoordinateSystem">"#));
+        assert!(geo(&app).coordinate_system_wkt.starts_with("PROJCS["));
         assert_eq!(
             CrsDefinition::from_geodata(geo(&app)).unwrap().code(),
             Some(5514)

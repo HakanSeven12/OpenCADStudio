@@ -152,7 +152,7 @@ impl PdfAttachCommand {
             extra_pages: Vec::new(),
             preset_scale: None,
             preset_rotation: None,
-            auto_place: true,
+            auto_place: false,
             page: "1".to_string(),
             page_count: 0,
             items: Vec::new(),
@@ -473,6 +473,23 @@ impl PdfAttachCommand {
         let [x0, y0, x1, y1] = self.rect;
         let corners = [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1), at(x0, y0)];
         corners.iter().map(|p| p.to_array()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_line_defaults_to_manual_placement_but_dialogs_can_opt_in() {
+        let mut command = PdfAttachCommand::new(6);
+        assert!(!command.auto_place, "-PDFATTACH must ask manual prompts");
+        command.set_auto_place(true);
+        assert!(command.auto_place, "interactive dialogs explicitly opt in");
+        let mut non_pdf = PdfAttachCommand::for_kind(UnderlayType::Dgn, 6);
+        assert!(!non_pdf.auto_place);
+        non_pdf.set_auto_place(true);
+        assert!(non_pdf.auto_place);
     }
 }
 

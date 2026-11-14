@@ -5871,8 +5871,16 @@ mod tests {
         }
     }
 
+    fn vp_by_page(bytes: Vec<u8>) -> Vec<bool> {
+        let pdf = hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+        pdf.pages()
+            .iter()
+            .map(|page| page.raw().contains_key(b"VP"))
+            .collect()
+    }
+
     #[test]
-    fn plot_op_geopdf_rejects_invalid_pdf_frames_without_blocking_svg() {
+    fn plot_op_geopdf_missing_crs_falls_back_to_plain_pdf_and_blocks_nothing() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 100,80"}));
@@ -5884,14 +5892,16 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&pdf);
 
+        // A drawing without a CRS exports as an ordinary plain PDF; the
+        // GeoPDF opt-in neither fails the plot nor writes geospatial metadata.
         let response = request(
             &mut app,
             json!({"op":"plot","path":pdf.to_string_lossy()}),
         );
-        assert_eq!(response["status"], "failed", "{response}");
-        assert_eq!(response["code"], "plot_failed");
-        assert!(response["error"].as_str().unwrap().contains("GEODATA"));
-        assert!(!pdf.exists());
+        assert_eq!(response["status"], "completed", "{response}");
+        assert!(pdf.exists(), "{response}");
+        assert_eq!(vp_by_page(std::fs::read(&pdf).expect("fallback PDF")), [false]);
+        let _ = std::fs::remove_file(&pdf);
 
         let svg = std::env::temp_dir().join(format!(
             "ocs-geopdf-control-missing-crs-{}.svg",

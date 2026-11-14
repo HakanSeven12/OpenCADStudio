@@ -80,7 +80,18 @@ pub(crate) fn fit_affine(points: &[([f64; 2], [f64; 2])]) -> Result<Affine, Stri
         return Err("GeoPDF registration produced a non-finite affine".to_string());
     }
 
-    let tolerance = 1e-9 * output_span.max(1.0) + 1e-6;
+    // Real PDFs often store GPTS real numbers as f32, so a fit cannot require
+    // f64-accurate registration. Keep the threshold tied to coordinate size,
+    // not a blanket slack: at f32 ULP this stays several orders below the
+    // residual introduced by moving one registration point.
+    let coordinate_magnitude = points.iter().fold(1.0_f64, |magnitude, (source, target)| {
+        magnitude
+            .max(source[0].abs())
+            .max(source[1].abs())
+            .max(target[0].abs())
+            .max(target[1].abs())
+    });
+    let tolerance = 3.0 * f64::from(f32::EPSILON) * coordinate_magnitude;
     for (source, target) in points {
         let mapped = affine * kurbo::Point::new(source[0], source[1]);
         let residual = (mapped.x - target[0]).hypot(mapped.y - target[1]);
@@ -192,7 +203,7 @@ mod tests {
             close(actual, expected);
         }
         let mut bad = points.clone();
-        bad[3].1[0] += 1.0;
+        bad[3].1[0] += 10.0;
         assert!(fit_affine(&bad).is_err());
         assert!(fit_affine(&points[..2]).is_err());
         assert!(fit_affine(&[
@@ -201,6 +212,34 @@ mod tests {
             ([2.0, 2.0], [2.0, 2.0]),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn accepts_f32_serialized_registration_and_rejects_a_moved_point() {
+        let transform = Affine::new([
+            0.25,
+            0.0,
+            0.0,
+            -0.4,
+            742_925.271_389_167_2,
+            1_043_020.310_123_933_5,
+        ]);
+        let points: Vec<_> = [[100.0, 20.0], [400.0, 20.0], [100.0, 180.0], [400.0, 180.0]]
+            .into_iter()
+            .map(|source| {
+                let mapped = transform * kurbo::Point::new(source[0], source[1]);
+                let target = [mapped.x as f32 as f64, mapped.y as f32 as f64];
+                (source.map(|value| value as f32 as f64), target)
+            })
+            .collect();
+        fit_affine(&points).expect("f32 GeoPDF registration must fit");
+
+        let mut moved = points.clone();
+        moved[3].1[0] += 10.0;
+        assert!(
+            fit_affine(&moved).is_err(),
+            "a visibly relocated f32 point is not affine"
+        );
     }
 
     #[test]

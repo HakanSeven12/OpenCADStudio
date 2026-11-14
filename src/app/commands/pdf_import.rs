@@ -335,8 +335,13 @@ fn auto_pdf_placements(
         && scene.block_edit_block.is_none())
     .then(|| {
         let crs = crate::io::crs::document_crs(&scene.document).ok()??;
-        let unit_mm =
-            crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)?;
+        // Drawing XY for a geographic CRS are already longitude/latitude.
+        // Only a projected CRS needs INSUNITS to scale source map metres.
+        let unit_mm = if crs.is_geographic() {
+            1.0
+        } else {
+            crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)?
+        };
         Some((crs, unit_mm))
     })
     .flatten();
@@ -620,6 +625,59 @@ mod geo_attach_tests {
         assert!(attached(&app).is_empty());
         let command = app.tabs[i].active_cmd.as_ref().expect("manual fallback");
         assert_eq!(command.prompt(), "Specify insertion point:");
+    }
+
+    fn unit_geographic_pdf() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /VP << /Type /Viewport /BBox [0 0 100 50] /Measure << /Type /Measure /Subtype /GEO /GCS << /Type /GEOGCS /EPSG 4326 >> /LPTS [0 0 1 0 0 1 1 1] /GPTS [10 20 10 21 11 20 11 21] >> >> >>".to_string(),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend(b"0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    #[test]
+    fn unitless_geographic_crs_still_auto_places() {
+        let mut app = app();
+        let i = app.active_tab;
+        crate::io::crs::set_document_crs(
+            &mut app.tabs[i].scene.document,
+            &crate::io::crs::CrsDefinition::from_epsg(4326).unwrap(),
+        )
+        .unwrap();
+        let path = "unitless-geographic-geopdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(unit_geographic_pdf()));
+        let sample = pages(DVec3::new(10.0, 20.0, 0.0))
+            .into_iter()
+            .take(1)
+            .collect::<Vec<_>>();
+        let placements =
+            auto_pdf_placements(&app.tabs[i].scene, UnderlayType::Pdf, path, &sample, true);
+        assert_eq!(placements.len(), sample.len());
+        assert!(placements.iter().all(Option::is_some), "{placements:?}");
+        let placement = placements[0].expect("geographic placement");
+        assert!((placement.rotation - 0.0).abs() < 1e-8);
+        assert!(placement.insertion[0].is_finite() && placement.insertion[1].is_finite());
+        assert!(placement.x_scale > 0.0 && placement.y_scale > 0.0);
     }
 
     #[test]

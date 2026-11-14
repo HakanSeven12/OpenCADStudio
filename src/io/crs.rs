@@ -71,7 +71,9 @@ impl CrsDefinition {
             return Err("Enter an EPSG code, WKT, or PROJ definition".to_string());
         }
         if input.starts_with('<') {
-            return Err("MapGuide XML CRS definitions are not supported yet".to_string());
+            let code = mapguide_xml_epsg_code(input)
+                .ok_or_else(|| "The GEODATA XML has no EPSG CoordinateSystem alias".to_string())?;
+            return Self::from_epsg(code);
         }
         if input.starts_with('+') {
             return Self::from_parts(None, input.to_string(), None);
@@ -136,6 +138,25 @@ impl CrsDefinition {
         })
     }
 
+    /// Preserve the authored operation in WKT while putting the standard
+    /// MapGuide XML expected by GEODATA v2 into `coordinate_system_definition`
+    /// when an EPSG authority is known. `from_geodata` reads the XML alias.
+    fn geodata_definition(&self) -> String {
+        match self.code {
+            Some(code) => format_geodata_xml(
+                code,
+                self.name(),
+                self.is_geographic(),
+                &self.axis(),
+                self.units(),
+            ),
+            None => self
+                .wkt
+                .clone()
+                .expect("from_parts requires WKT metadata for a non-EPSG definition"),
+        }
+    }
+
     /// Replace only the CRS fields. Design/reference points, north/up vectors,
     /// unit scales, meshes, and all other GEODATA state remain untouched.
     pub fn apply_to_geodata(&self, geo: &mut GeoData) -> Result<(), String> {
@@ -144,10 +165,33 @@ impl CrsDefinition {
             .as_ref()
             .ok_or_else(|| "GEODATA requires an EPSG or WKT coordinate system".to_string())?;
         geo.coordinate_type = if self.is_geographic() { 3 } else { 2 };
-        // Version 1 writes the WKT field; versions 2/3 serialize only the
-        // definition field. Keep both views consistent in memory as well.
-        geo.coordinate_system_definition = wkt.clone();
+        // Version 1 persists its separate WKT field; versions 2/3 persist the
+        // XML/id definition instead. Keep both views consistent in memory.
+        geo.coordinate_system_definition = self.geodata_definition();
         geo.coordinate_system_wkt = wkt.clone();
+        Ok(())
+    }
+
+    /// Valid initial GEODATA fields for a newly created document CRS. A
+    /// unitless drawing still uses unit scale 1 rather than invalid zeros.
+    pub fn apply_to_geodata_for_new(
+        &self,
+        geo: &mut GeoData,
+        insertion_units: i16,
+    ) -> Result<(), String> {
+        self.apply_to_geodata(geo)?;
+        let valid = crate::app::properties::insunits_to_mm(insertion_units).is_some()
+            && (1..=24).contains(&insertion_units);
+        geo.horizontal_unit_scale = crate::app::properties::insunits_to_mm(insertion_units)
+            .map(|millimetres| millimetres / 1_000.0)
+            .unwrap_or(1.0);
+        geo.vertical_unit_scale = geo.horizontal_unit_scale;
+        geo.horizontal_units = if valid { i32::from(insertion_units) } else { 0 };
+        geo.vertical_units = geo.horizontal_units;
+        geo.north_direction = document::types::Vector2::new(0.0, 1.0);
+        geo.up_direction = document::types::Vector3::UNIT_Z;
+        geo.scale_estimation_method = 1;
+        geo.user_scale_factor = 1.0;
         Ok(())
     }
 
@@ -347,12 +391,14 @@ pub fn model_space_geo_data_handle(document: &Document) -> Option<Handle> {
     let ObjectType::Dictionary(dictionary) = document.objects.get(&dictionary)? else {
         return None;
     };
+    // A deleted GEODATA can leave a stale entry behind (undo or an external
+    // writer); skip it instead of letting it shadow a re-created object.
     dictionary
         .entries
         .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(GEODATA_DICTIONARY_KEY))
+        .filter(|(key, _)| key.eq_ignore_ascii_case(GEODATA_DICTIONARY_KEY))
         .map(|(_, handle)| *handle)
-        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::GeoData(_))))
+        .find(|handle| matches!(document.objects.get(handle), Some(ObjectType::GeoData(_))))
 }
 
 pub fn model_space_geo_data(document: &Document) -> Option<&GeoData> {
@@ -389,8 +435,9 @@ pub fn set_document_crs(document: &mut Document, crs: &CrsDefinition) -> Result<
     }
 
     // Validate before allocating handles or changing the owner graph.
+    let insertion_units = document.header.insertion_units;
     let mut geo = GeoData::default();
-    crs.apply_to_geodata(&mut geo)?;
+    crs.apply_to_geodata_for_new(&mut geo, insertion_units)?;
     let dictionary = document.ensure_extension_dictionary(model_space);
     let handle = document.allocate_handle();
     geo.handle = handle;
@@ -399,10 +446,110 @@ pub fn set_document_crs(document: &mut Document, crs: &CrsDefinition) -> Result<
     geo.version = 3;
     geo.host_block = model_space;
     document.objects.insert(handle, ObjectType::GeoData(geo));
+    // Replace a stale entry in place instead of appending a shadowing
+    // duplicate under the same key.
     if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary) {
-        dictionary.add_entry(GEODATA_DICTIONARY_KEY, handle);
+        dictionary.insert(GEODATA_DICTIONARY_KEY, handle);
     }
     Ok(handle)
+}
+
+fn xml_attribute(input: &str, name: &str) -> Option<String> {
+    let prefix = format!("{name}=\"");
+    let lower = input.to_ascii_lowercase();
+    let start = lower.find(&prefix.to_ascii_lowercase())? + prefix.len();
+    let end = input[start..].find('"')?;
+    Some(input[start..start + end].to_string())
+}
+
+/// Read only the documented EPSG `CoordinateSystem` alias. A malformed or
+/// unrelated XML definition must not silently become an EPSG code.
+fn mapguide_xml_epsg_code(input: &str) -> Option<u16> {
+    let lower = input.to_ascii_lowercase();
+    let alias_start = lower.find("<alias")?;
+    let _ = lower.find("</alias")?;
+    let close_offset = lower[alias_start..].find("</alias>")? + alias_start + "</alias>".len() - 1;
+    let alias = &input[alias_start..=close_offset];
+    if xml_attribute(alias, "type")?.to_ascii_lowercase() != "coordinatesystem" {
+        return None;
+    }
+    let lower_alias = alias.to_ascii_lowercase();
+    if !lower_alias.contains("<namespace>epsg code</namespace>") {
+        return None;
+    }
+    xml_attribute(alias, "id")?.parse::<u16>().ok()
+}
+
+fn xml_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// A minimal MapGuide XML document with exactly what readers such as ezdxf
+/// query: the coordinate-system alias carrying its EPSG code, and the first two
+/// axes so their CAD-visualized ordering is explicit.
+fn format_geodata_xml(
+    code: u16,
+    name: &str,
+    geographic: bool,
+    axes: &[u8; 3],
+    unit: &str,
+) -> String {
+    let axis_description = |abbrev: u8| match abbrev {
+        b'e' => ("East", "Easting", "East"),
+        b'w' => ("West", "Westing", "West"),
+        b'n' => ("North", "Northing", "North"),
+        b's' => ("South", "Southing", "South"),
+        _ => ("Unknown", "Unknown", "unknown"),
+    };
+    let (first_direction, first_name, _) = axis_description(axes[0]);
+    let (second_direction, second_name, _) = axis_description(axes[1]);
+    let root = if geographic {
+        "GeographicCoordinateSystem"
+    } else {
+        "ProjectedCoordinateSystem"
+    };
+    let id = format!("EPSG:{code}");
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-16\" standalone=\"no\" ?>\n",
+            "<Dictionary version=\"1.0\" xmlns=\"http://www.osgeo.org/mapguide/coordinatesystem\">\n",
+            "<{root} id=\"{id}\">\n",
+            "<Name>{name}</Name>\n",
+            "<Axis uom=\"{unit}\">\n",
+            "<CoordinateSystemAxis>\n<AxisOrder>1</AxisOrder>\n",
+            "<AxisName>{first_name}</AxisName>\n",
+            "<AxisAbbreviation>{first_abbrev}</AxisAbbreviation>\n",
+            "<AxisDirection>{first_direction}</AxisDirection>\n",
+            "</CoordinateSystemAxis>\n",
+            "<CoordinateSystemAxis>\n<AxisOrder>2</AxisOrder>\n",
+            "<AxisName>{second_name}</AxisName>\n",
+            "<AxisAbbreviation>{second_abbrev}</AxisAbbreviation>\n",
+            "<AxisDirection>{second_direction}</AxisDirection>\n",
+            "</CoordinateSystemAxis>\n",
+            "</Axis>\n",
+            "</{root}>\n",
+            "<Alias id=\"{code}\" type=\"CoordinateSystem\">\n",
+            "<ObjectId>{id}</ObjectId>\n",
+            "<Namespace>EPSG Code</Namespace>\n",
+            "</Alias>\n",
+            "</Dictionary>"
+        ),
+        root = root,
+        id = xml_text(&id),
+        name = xml_text(name),
+        unit = xml_text(unit),
+        first_name = first_name,
+        first_direction = first_direction,
+        first_abbrev = axes[0].to_ascii_uppercase() as char,
+        second_name = second_name,
+        second_direction = second_direction,
+        second_abbrev = axes[1].to_ascii_uppercase() as char,
+        code = code,
+    )
 }
 
 fn finite_pair(x: f64, y: f64) -> Result<(f64, f64), String> {
@@ -421,25 +568,48 @@ fn crs_name(wkt: &str) -> Option<String> {
     Some(rest[..end].trim().to_string()).filter(|name| !name.is_empty())
 }
 
-/// The final root AUTHORITY/ID in WKT1/WKT2, when it names an EPSG code.
+/// The EPSG AUTHORITY/ID directly on the root WKT node. A nested GEOGCS
+/// authority (even the common EPSG:4326 fallback) is not the root CRS code.
 fn root_epsg_code(wkt: &str) -> Option<u16> {
     let compact = wkt
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect::<String>()
         .to_ascii_uppercase();
+    let root_open = compact.find('[')?;
+    let bytes = compact.as_bytes();
+    let mut quoted = false;
+    let mut depth = 0usize;
     let mut result = None;
-    for prefix in ["AUTHORITY[\"EPSG\",\"", "ID[\"EPSG\","] {
-        let mut offset = 0;
-        while let Some(found) = compact[offset..].find(prefix) {
-            let start = offset + found + prefix.len();
-            let digits = compact[start..]
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>();
-            result = digits.parse::<u16>().ok().or(result);
-            offset = start;
+    let mut index = root_open;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if quoted && bytes.get(index + 1) == Some(&b'"') => index += 1,
+            b'"' => quoted = !quoted,
+            b'[' if !quoted => depth += 1,
+            b']' if !quoted => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return result;
+                }
+            }
+            _ if quoted || depth != 1 => {}
+            _ => {
+                for prefix in [r#"AUTHORITY["EPSG",""#, r#"ID["EPSG","#] {
+                    let rest = &compact[index..];
+                    if rest.starts_with(prefix) {
+                        let digits = rest[prefix.len()..]
+                            .chars()
+                            .take_while(char::is_ascii_digit)
+                            .collect::<String>();
+                        result = digits.parse::<u16>().ok().or(result);
+                        break;
+                    }
+                }
+            }
         }
+        index += 1;
     }
     result
 }
@@ -453,6 +623,21 @@ mod tests {
             (actual - expected).abs() <= tolerance,
             "{actual} differs from {expected} by more than {tolerance}"
         );
+    }
+
+    #[test]
+    fn only_the_root_wkt_node_supplies_an_epsg_code() {
+        let nested_only = r#"PROJCS["Custom TM",GEOGCS["WGS 84",DATUM["WGS_1984"],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"]]"#;
+        assert_eq!(root_epsg_code(nested_only), None);
+        let nested_and_root = format!(
+            "{},AUTHORITY[\"EPSG\",\"5514\"]]",
+            nested_only
+                .strip_suffix(']')
+                .expect("one closing root bracket")
+        );
+        assert_eq!(root_epsg_code(&nested_and_root), Some(5514));
+        let wkt2_root = r#"PROJCRS["Custom",GEOGCRS["S-JTSK",ID["EPSG",4156]],ID["EPSG",5514]]"#;
+        assert_eq!(root_epsg_code(wkt2_root), Some(5514));
     }
 
     #[test]
@@ -472,13 +657,60 @@ mod tests {
         geo.north_direction.x = 0.5;
         crs.apply_to_geodata(&mut geo).unwrap();
         assert_eq!(geo.coordinate_type, 2);
-        assert_eq!(geo.coordinate_system_definition, crs.wkt().unwrap());
+        let definition = geo.coordinate_system_definition.clone();
+        assert!(definition.starts_with(r#"<?xml version="1.0""#));
+        assert!(definition.contains(r#"<ProjectedCoordinateSystem id="EPSG:5514">"#));
+        assert!(definition.contains("<AxisAbbreviation>E</AxisAbbreviation>"));
+        assert!(definition.contains(r#"<Alias id="5514" type="CoordinateSystem""#));
+        assert!(definition.contains("<ObjectId>EPSG:5514</ObjectId>"));
+        assert!(definition.contains("<Namespace>EPSG Code</Namespace>"));
         assert_eq!(geo.coordinate_system_wkt, crs.wkt().unwrap());
         assert_eq!(geo.north_direction.x, 0.5);
         assert_eq!(
             CrsDefinition::from_geodata(&geo).unwrap().code(),
             Some(5514)
         );
+        assert_eq!(
+            CrsDefinition::from_text(&definition).unwrap().code(),
+            Some(5514)
+        );
+        let unaliased = definition
+            .replace(
+                "<Namespace>EPSG Code</Namespace>",
+                "<Namespace>Other</Namespace>",
+            )
+            .replace(r#"type="CoordinateSystem""#, r#"type="Datum""#);
+    }
+
+    #[test]
+    fn geodata_xml_escapes_object_ids_and_names() {
+        let xml = format_geodata_xml(5514, "Odd <CRS> & Name", false, b"enu", "m");
+        assert!(xml.contains("<Name>Odd &lt;CRS&gt; &amp; Name</Name>"));
+        assert!(xml.contains("<ObjectId>EPSG:5514</ObjectId>"));
+        mapguide_xml_epsg_code(&xml).expect("aliased escaped XML");
+    }
+
+    #[test]
+    fn a_new_geodata_has_usable_direction_and_units() {
+        let crs = CrsDefinition::from_epsg(5514).unwrap();
+        for (code, unit_code, scale) in [(4, 4, 0.001), (6, 6, 1.0), (0, 0, 1.0)] {
+            let mut geo = GeoData::default();
+            crs.apply_to_geodata_for_new(&mut geo, code).unwrap();
+            assert_eq!(geo.north_direction, document::types::Vector2::new(0.0, 1.0));
+            assert_eq!(geo.up_direction, document::types::Vector3::UNIT_Z);
+            assert_eq!(geo.horizontal_units, unit_code, "code {code}");
+            assert_eq!(geo.vertical_units, unit_code, "code {code}");
+            assert!(
+                (geo.horizontal_unit_scale - scale).abs() < 1e-14,
+                "code {code}"
+            );
+            assert!(
+                (geo.vertical_unit_scale - scale).abs() < 1e-14,
+                "code {code}"
+            );
+            assert_eq!(geo.scale_estimation_method, 1);
+            assert!((geo.user_scale_factor - 1.0).abs() < 1e-14);
+        }
     }
 
     #[test]
@@ -565,5 +797,45 @@ mod tests {
             .unwrap()
             .apply_to_geodata(&mut GeoData::default())
             .is_err());
+    }
+
+    #[test]
+    fn a_deleted_geodata_does_not_shadow_a_recreated_crs() {
+        let mut document = document::Document::new();
+        let crs = CrsDefinition::from_epsg(5514).unwrap();
+        let first = set_document_crs(&mut document, &crs).unwrap();
+
+        // Undo-style removal: the object goes away while the extension
+        // dictionary keeps pointing at it.
+        assert!(document.objects.remove(&first).is_some());
+        assert_eq!(model_space_geo_data_handle(&document), None);
+
+        // Recreating the CRS must replace the stale entry instead of letting
+        // it shadow the new GEODATA under the same dictionary key.
+        let second = set_document_crs(&mut document, &crs).unwrap();
+        assert_eq!(model_space_geo_data_handle(&document), Some(second));
+        assert_eq!(document_crs(&document).unwrap().unwrap().code(), Some(5514));
+        let model_space = document
+            .block_records
+            .get("*Model_Space")
+            .expect("model space")
+            .handle;
+        let dictionary = document
+            .extension_dictionary_handle(model_space)
+            .expect("extension dictionary");
+        let Some(document::objects::ObjectType::Dictionary(dictionary)) =
+            document.objects.get(&dictionary)
+        else {
+            unreachable!("the extension dictionary is a dictionary object")
+        };
+        assert_eq!(
+            dictionary
+                .entries
+                .iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case(GEODATA_DICTIONARY_KEY))
+                .count(),
+            1,
+            "one GEODATA dictionary entry"
+        );
     }
 }

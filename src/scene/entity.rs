@@ -2573,14 +2573,10 @@ impl Scene {
                 model.draw_depth =
                     context.draw_depth(source_hatch.common.handle, depth_map.as_ref());
                 for clip in &context.clips {
-                    let clip: Vec<[f32; 2]> = clip
-                        .iter()
-                        .map(|point| [point[0] as f32, point[1] as f32])
-                        .collect();
                     let clipped = pick::xclip::clip_hatch_boundary(
                         &model.boundary,
                         model.world_origin,
-                        &clip,
+                        clip,
                     );
                     if clipped.is_empty() {
                         return;
@@ -2758,11 +2754,7 @@ impl Scene {
                 };
                 let (world_origin, mut boundary) = Self::wipeout_boundary_2d(&wipeout);
                 for clip in &context.clips {
-                    let clip: Vec<[f32; 2]> = clip
-                        .iter()
-                        .map(|point| [point[0] as f32, point[1] as f32])
-                        .collect();
-                    boundary = pick::xclip::clip_hatch_boundary(&boundary, world_origin, &clip);
+                    boundary = pick::xclip::clip_hatch_boundary(&boundary, world_origin, clip);
                 }
                 if boundary.len() < 3 {
                     return;

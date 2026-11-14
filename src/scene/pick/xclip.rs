@@ -679,21 +679,27 @@ pub fn frame_wire(
 ///
 /// `boundary` is a hatch's NaN-separated loops in f32 offsets from
 /// `world_origin` (the [`HatchModel`](crate::scene::model::hatch_model::HatchModel)
-/// representation); `poly` is the clip ring in the same world space the hatch
-/// occupies. Each loop is intersected with the clip polygon independently —
-/// the even-odd island structure is preserved because intersecting every loop
-/// with the same region distributes over the even-odd fill. Returns the
-/// clipped loops in offsets from `world_origin`; empty if nothing survives.
+/// representation); `poly` is the clip ring in absolute world coordinates.
+/// The ring is lowered into the loops' `world_origin`-relative space in f64
+/// first, so the clip keeps its precision far from the origin (at UTM
+/// northings an absolute f32 is only good to half a unit). Each loop is
+/// intersected with the clip polygon independently — the even-odd island
+/// structure is preserved because intersecting every loop with the same
+/// region distributes over the even-odd fill. Returns the clipped loops in
+/// offsets from `world_origin`; empty if nothing survives.
 pub fn clip_hatch_boundary(
     boundary: &[[f32; 2]],
     world_origin: [f64; 2],
-    poly: &[[f32; 2]],
+    poly: &[[f64; 2]],
 ) -> Vec<[f32; 2]> {
     if poly.len() < 3 {
         return boundary.to_vec();
     }
-    let (ox, oy) = (world_origin[0] as f32, world_origin[1] as f32);
-    let pieces = convex_pieces(poly);
+    let local: Vec<[f32; 2]> = poly
+        .iter()
+        .map(|p| [(p[0] - world_origin[0]) as f32, (p[1] - world_origin[1]) as f32])
+        .collect();
+    let pieces = convex_pieces(&local);
     let mut out: Vec<[f32; 2]> = Vec::new();
     let mut i = 0;
     while i < boundary.len() {
@@ -705,24 +711,15 @@ pub fn clip_hatch_boundary(
         while i < boundary.len() && boundary[i][0].is_finite() && boundary[i][1].is_finite() {
             i += 1;
         }
-        // Lift the loop into the clip polygon's world space.
-        let loop_abs: Vec<[f32; 2]> = boundary[start..i]
-            .iter()
-            .map(|p| [p[0] + ox, p[1] + oy])
-            .collect();
         // A concave clip is cut into convex pieces with disjoint interiors, so
         // the even-odd count of every point still comes from one piece.
         for piece in &pieces {
-            let clipped = clip_polygon_2d(&loop_abs, piece);
+            let clipped = clip_polygon_2d(&boundary[start..i], piece);
             if clipped.len() >= 3 {
                 if !out.is_empty() {
                     out.push([f32::NAN, f32::NAN]);
                 }
-                // Lower back into the loop's `world_origin`-relative space so the
-                // result keeps the same f32-precision anchor the renderer adds back.
-                for p in clipped {
-                    out.push([p[0] - ox, p[1] - oy]);
-                }
+                out.extend(clipped);
             }
         }
     }
@@ -1216,7 +1213,7 @@ mod tests {
 
     #[test]
     fn hatch_boundary_clipped_kept_and_dropped() {
-        let clip = square(); // 0..10
+        let clip: Vec<[f64; 2]> = square().iter().map(|p| p.map(f64::from)).collect(); // 0..10
                              // Hatch loop straddling the right edge → clipped to x<=10.
         let straddle = [[5.0, 5.0], [15.0, 5.0], [15.0, 8.0], [5.0, 8.0]];
         let out = clip_hatch_boundary(&straddle, [0.0, 0.0], &clip);
@@ -1250,6 +1247,25 @@ mod tests {
         assert!(!out.is_empty());
         // Offsets must stay <= 10 (i.e. world x <= 1010).
         assert!(out.iter().all(|p| p[0].is_nan() || p[0] <= 10.0 + 1e-3));
+    }
+
+    #[test]
+    fn hatch_boundary_clip_keeps_its_precision_at_utm() {
+        // A 0.2-unit clip at a UTM northing, where an absolute f32 steps by 0.5.
+        let origin = [292884.0, 4718791.0];
+        let clip = vec![
+            [292884.1, 4718791.1],
+            [292884.3, 4718791.1],
+            [292884.3, 4718791.3],
+            [292884.1, 4718791.3],
+        ];
+        let hatch = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let out = clip_hatch_boundary(&hatch, origin, &clip);
+        assert_eq!(out.len(), 4);
+        for p in out {
+            assert!((0.1 - 1e-4..=0.3 + 1e-4).contains(&p[0]), "{p:?}");
+            assert!((0.1 - 1e-4..=0.3 + 1e-4).contains(&p[1]), "{p:?}");
+        }
     }
 
     #[test]

@@ -13732,14 +13732,10 @@ impl Scene {
                             return;
                         };
                         for clip in &context.clips {
-                            let clip: Vec<[f32; 2]> = clip
-                                .iter()
-                                .map(|point| [point[0] as f32, point[1] as f32])
-                                .collect();
                             let clipped = pick::xclip::clip_hatch_boundary(
                                 &model.boundary,
                                 model.world_origin,
-                                &clip,
+                                clip,
                             );
                             if clipped.is_empty() {
                                 return;

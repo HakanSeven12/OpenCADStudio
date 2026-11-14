@@ -169,6 +169,22 @@ panel, with each write carrying the newest draft values). Measured in the
 `digest-bench` wall-clock simulation of the gate logic shipped with the
 example plugin's unit tests.
 
+Live-host roundtrip (`schoeller.example_panel` 0.3.0 on the v22 build,
+2026-11-14 session, 3 entities: 2 Lines + 1 Circle, digest revision seen
+climbing 1→7 across the run):
+
+| Operation | Wall time (single automation roundtrip) | Result |
+|-----------|------------------------------------------|--------|
+| `EPL_APPLY_SELECTION` | 0.94 s | all 3 entities at `Rgb{46,125,50}` (#2E7D32 draft green), one undo group |
+| `EPL_REVERT_SELECTION` | 0.93 s | untampered handles restored to ByLayer; a foreign `entities_set` recolor (`Rgb{10,10,10}`) survives as a reported conflict, never clobbered |
+| digest → gated label write | immediate (≤16 ms window) | summary label tracked `sel 3 rev 2 … rev 7` newest-wins |
+| host Undo/Redo | ≤2 ops | entity colours follow the host stack with NO plugin re-apply and no clobbering |
+
+(A pure no-op re-apply on an already-green selection writes nothing —
+"nothing to apply" and no journal — so a later revert honestly reports
+"nothing to revert"; this was verified and initially misread as a restore
+bug.)
+
 ## Host lifecycle on a developer machine
 
 - The plugin runner holds the cdylib (`LoadLibrary`) — **the host must be

@@ -378,6 +378,7 @@ fn break_reference(
         first_point: document::types::Vector3::new(first.x, first.y, first.z),
         second_point: document::types::Vector3::new(second.x, second.y, second.z),
         trailing_version: 0,
+        ..Default::default()
     }
 }
 

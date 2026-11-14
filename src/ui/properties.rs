@@ -25,24 +25,6 @@ use iced::{
 // ── Row-height-derived constants ─────────────────────────────────────────
 /// Height of a property row: the palette grid's.
 const ROW_H: f32 = crate::ui::style::palette_metrics::ROW_H;
-/// Horizontal padding of an option in a choice row's list, and the list's
-/// own padding.
-const CHOICE_ITEM_PAD_X: f32 = 6.0;
-const CHOICE_POPUP_PAD: f32 = crate::ui::style::palette_metrics::LINE;
-
-/// An option of a Properties list, as an item of the kit's dropdown list
-/// (`kit::pick_menu_style`): square, lit like a palette menu item under the
-/// pointer, the current one lit too.
-fn choice_option_style(current: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    use crate::ui::style::chrome;
-    move |theme: &Theme, status: button::Status| button::Style {
-        background: (current
-            || matches!(status, button::Status::Hovered | button::Status::Pressed))
-        .then(|| Background::Color(chrome::hover(theme))),
-        text_color: chrome::text(theme),
-        ..Default::default()
-    }
-}
 /// Width of the Quick Properties panel.
 const QUICK_W: f32 = 260.0;
 const PATTERN_CARD_W: f32 = 158.0;
@@ -1099,68 +1081,34 @@ impl PropertiesPanel {
                 let quick = self.rendering_quick.get();
                 let open = self.open_block_picker == Some((key, quick));
                 let shown = choice_cell_text(options, *selected);
-                let caret = button(
-                    container(if open {
-                        crate::ui::icons::themed_arrow_up(9.0)
-                    } else {
-                        crate::ui::icons::themed_arrow_down(9.0)
+                let head = crate::ui::kit::dropdown_head(
+                    shown,
+                    false,
+                    open,
+                    Message::PropBlockPickerToggle { key, quick },
+                );
+                let rows = options
+                    .iter()
+                    .enumerate()
+                    .map(|(index, option)| {
+                        crate::ui::kit::dropdown_option(
+                            option.as_str(),
+                            option.as_str(),
+                            Message::PropBlockChoice { key, index },
+                            index == *selected,
+                        )
                     })
-                    .align_y(iced::Center),
-                )
-                .on_press(Message::PropBlockPickerToggle { key, quick })
-                .style(crate::ui::kit::cell_button_style)
-                .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X]);
-                let caret = crate::ui::kit::on_selected_row(caret);
-                let head = container(
-                    row![
-                        crate::ui::kit::one_line(text(shown))
-                            .size(ui_text::UI)
-                            .line_height(crate::ui::style::text::line())
-                            .width(Length::Fill),
-                        caret
-                    ]
-                    .align_y(iced::Center),
-                )
-                .style(crate::ui::kit::combo_container_style)
-                .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X])
-                .width(Length::Fill);
-                // A choice cell opens on a click anywhere in it, not only on
-                // the caret.
-                let head = mouse_area(head).on_press(Message::PropBlockPickerToggle { key, quick });
-                // The list is part of the panel's own state, so opening and
-                // closing it needs no widget-tree handle and the keys it
-                // consumes always match the list on screen.
-                use crate::ui::dropdown_list::{DropdownList, DropdownRow};
-                let mut rows = Vec::with_capacity(options.len());
-                for (index, option) in options.iter().enumerate() {
-                    let msg = Message::PropBlockChoice { key, index };
-                    let btn = button(
-                        crate::ui::kit::one_line(text(option.as_str()))
-                            .size(ui_text::UI)
-                            .line_height(crate::ui::style::text::line()),
-                    )
-                    .on_press(msg.clone())
-                    .style(choice_option_style(index == *selected))
-                    .padding([2.0, CHOICE_ITEM_PAD_X])
-                    .width(Length::Fill);
-                    rows.push(DropdownRow::item(btn, option.clone(), msg));
-                }
-                let list = DropdownList::new(rows)
+                    .collect();
+                let list = crate::ui::dropdown_list::DropdownList::new(rows)
                     .selected((*selected < options.len()).then_some(*selected))
                     .on_escape(Message::PropBlockPickerDismiss { key, quick });
-                let popup = container(list)
-                    .style(crate::ui::palette_menu::frame_style)
-                    .padding(CHOICE_POPUP_PAD);
                 // The overlay reports its own Escape before the global shortcut
                 // repeats it; a distinct dismiss message lets the later repeat
                 // be swallowed with the list already closed.
-                let value = crate::ui::color_select::editable_drop_down_below(
-                    head.into(),
-                    popup.into(),
-                    Some(Length::Fixed(
-                        self.list_width(options.iter().map(String::as_str)),
-                    )),
-                    Length::Shrink,
+                let value = crate::ui::kit::dropdown(
+                    head,
+                    list,
+                    self.list_width(options.iter().map(String::as_str)),
                     Message::PropBlockPickerDismiss { key, quick },
                     open,
                 );
@@ -1563,18 +1511,13 @@ impl PropertiesPanel {
     /// runs out over the drawing, starting at the field's left edge.
     fn list_width<'s>(&self, labels: impl Iterator<Item = &'s str>) -> f32 {
         use crate::ui::style::palette_metrics as pm;
-        let widest = labels
-            .map(|label| crate::ui::style::text_metrics::width(label, ui_text::UI, false))
-            .fold(0.0_f32, f32::max);
         let field = self.rendering_width.get()
             - pm::GRID_INSET_L
             - pm::GRID_INSET_R
             - pm::INDENT
             - pm::NAME_COL_W
             - 3.0 * pm::LINE;
-        (widest + 2.0 * CHOICE_ITEM_PAD_X + 2.0 * CHOICE_POPUP_PAD + pm::SCROLLBAR_W)
-            .max(field)
-            .ceil()
+        crate::ui::kit::dropdown_width(labels, field)
     }
 
     fn render_choice_row<'a>(
@@ -1592,37 +1535,14 @@ impl PropertiesPanel {
         } else {
             LocalizedChoice::new(current.to_string()).to_string()
         };
-        let caret = button(
-            container(if open {
-                crate::ui::icons::themed_arrow_up(9.0)
-            } else {
-                crate::ui::icons::themed_arrow_down(9.0)
-            })
-            .align_y(iced::Center),
-        )
-        .on_press(Message::PropChoiceToggle { field, quick })
-        .style(crate::ui::kit::cell_button_style)
-        .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X]);
-        let caret = crate::ui::kit::on_selected_row(caret);
-        let label_text = crate::ui::kit::one_line(text(shown))
-            .size(ui_text::UI)
-            .line_height(crate::ui::style::text::line())
-            .width(Length::Fill);
-        let label_text = if varies {
-            label_text.style(hint_text_style)
-        } else {
-            label_text
-        };
-        let head = container(row![label_text, caret].align_y(iced::Center))
-            .style(crate::ui::kit::combo_container_style)
-            .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X])
-            .width(Length::Fill);
-        // A click anywhere in the cell opens the list, not only on the caret.
-        let head = mouse_area(head).on_press(Message::PropChoiceToggle { field, quick });
-
+        let head = crate::ui::kit::dropdown_head(
+            shown,
+            varies,
+            open,
+            Message::PropChoiceToggle { field, quick },
+        );
         // The shared list owns the highlight, the arrows, Enter and type-ahead;
         // a picked row still publishes the message a click sends.
-        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         let mut rows = Vec::with_capacity(options.len());
         let mut selected = None;
         let mut labels = Vec::with_capacity(options.len());
@@ -1636,32 +1556,23 @@ impl PropertiesPanel {
                 field,
                 value: option.clone(),
             };
-            let btn = button(
-                crate::ui::kit::one_line(text(label.clone()))
-                    .size(ui_text::UI)
-                    .line_height(crate::ui::style::text::line()),
-            )
-            .on_press(msg.clone())
-            .style(choice_option_style(is_current))
-            .padding([2.0, CHOICE_ITEM_PAD_X])
-            .width(Length::Fill);
-            labels.push(label.clone());
-            rows.push(DropdownRow::item(btn, label, msg));
+            rows.push(crate::ui::kit::dropdown_option(
+                label.clone(),
+                label.clone(),
+                msg,
+                is_current,
+            ));
+            labels.push(label);
         }
         let list_w = self.list_width(labels.iter().map(String::as_str));
-        let list = DropdownList::new(rows)
+        let list = crate::ui::dropdown_list::DropdownList::new(rows)
             .selected(selected)
             .select_first_by_default(selected.is_some())
             .on_escape(Message::PropChoiceDismiss { field, quick });
-        let popup = container(list)
-            .style(crate::ui::palette_menu::frame_style)
-            .padding(CHOICE_POPUP_PAD);
-
-        let value = crate::ui::color_select::editable_drop_down_below(
-            head.into(),
-            popup.into(),
-            Some(Length::Fixed(list_w)),
-            Length::Shrink,
+        let value = crate::ui::kit::dropdown(
+            head,
+            list,
+            list_w,
             Message::PropChoiceDismiss { field, quick },
             open,
         );
@@ -1809,7 +1720,7 @@ impl PropertiesPanel {
 
         // Transparency presets remain available while entering a custom value.
         // Definition/name fields still filter their potentially long lists.
-        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+        use crate::ui::dropdown_list::DropdownList;
         let filter = typed
             .filter(|_| field != "transparency")
             .map(|s| s.to_lowercase());
@@ -1826,19 +1737,15 @@ impl PropertiesPanel {
                 field,
                 value: value.clone(),
             };
-            let btn = button(
-                crate::ui::kit::one_line(text(opt.as_str()))
-                    .size(ui_text::UI)
-                    .line_height(crate::ui::style::text::line()),
-            )
-            .on_press(msg.clone())
-            .style(choice_option_style(false))
-            .padding([2.0, CHOICE_ITEM_PAD_X])
-            .width(Length::Fill);
             if typed.is_some_and(|t| t.eq_ignore_ascii_case(opt.as_str())) {
                 initial_selected = Some(rows.len());
             }
-            rows.push(DropdownRow::item(btn, value, msg));
+            rows.push(crate::ui::kit::dropdown_option(
+                opt.as_str(),
+                value,
+                msg,
+                false,
+            ));
         }
         let select_first = field != "transparency" || filter.is_none();
         let list = DropdownList::new(rows)
@@ -1846,19 +1753,12 @@ impl PropertiesPanel {
             .select_first_by_default(select_first)
             .query(filter.unwrap_or_default())
             .on_escape(Message::PropEditChoiceToggle(field));
-        let popup = container(list)
-            .style(crate::ui::palette_menu::frame_style)
-            .padding(CHOICE_POPUP_PAD);
-
         prop_row_with_active(
             label,
-            crate::ui::color_select::editable_drop_down_below(
+            crate::ui::kit::dropdown(
                 head.into(),
-                popup.into(),
-                Some(Length::Fixed(
-                    self.list_width(options.iter().map(|o| o.as_str())),
-                )),
-                Length::Shrink,
+                list,
+                self.list_width(options.iter().map(|o| o.as_str())),
                 Message::PropEditChoiceToggle(field),
                 open,
             ),

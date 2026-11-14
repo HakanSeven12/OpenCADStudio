@@ -307,6 +307,9 @@ impl OpenCADStudio {
         let movement = self.dock_drag.and_then(|d| d.movement());
         let move_target = movement.and_then(|(_, _, target)| target);
         let dragging = move_target.is_some();
+        // While a pallet or group is moved the cursor stays a closed hand,
+        // over the tabs too.
+        let moving = movement.is_some();
         let target_group = match move_target {
             Some(DropTarget::Join { side: s, group, .. }) if s == side => Some(group),
             _ => None,
@@ -408,7 +411,11 @@ impl OpenCADStudio {
                     .on_right_press(Message::Dock(DockMsg::EdgeMenuAtPointer(side)))
                     .on_enter(Message::Dock(DockMsg::Hover(id)))
                     .on_exit(Message::Dock(DockMsg::HoverEnd(id)))
-                    .interaction(iced::mouse::Interaction::Pointer);
+                    .interaction(if moving {
+                        iced::mouse::Interaction::Grabbing
+                    } else {
+                        iced::mouse::Interaction::Pointer
+                    });
                 cells.push(cell.into());
             }
 
@@ -425,10 +432,19 @@ impl OpenCADStudio {
                         ..Default::default()
                     }),
             )
-            .on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
             .on_enter(Message::Dock(DockMsg::GripHover(side, gi)))
-            .on_exit(Message::Dock(DockMsg::GripHoverEnd(side, gi)))
-            .interaction(iced::mouse::Interaction::Grab);
+            .on_exit(Message::Dock(DockMsg::GripHoverEnd(side, gi)));
+            // The band takes a press, and shows the open hand, only once it
+            // has lit; until then a press goes to the tab under it.
+            let grip_ready = !moving && self.dock_grip_lit == Some((side, gi));
+            let band = if moving {
+                band.interaction(iced::mouse::Interaction::Grabbing)
+            } else if grip_ready {
+                band.on_press(Message::Dock(DockMsg::GroupGrab(side, gi)))
+                    .interaction(iced::mouse::Interaction::Grab)
+            } else {
+                band
+            };
             let band = container(band)
                 .width(Length::Fixed(pm::STRIP_BODY_W))
                 .height(Length::Fixed(row_h))

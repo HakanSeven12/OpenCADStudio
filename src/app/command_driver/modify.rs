@@ -494,6 +494,7 @@ impl OpenCADStudio {
                             common.transparency = value;
                         }
                     }
+                    self.tabs[i].scene.refresh_fill_model(handle);
                     self.tabs[i]
                         .scene
                         .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
@@ -590,6 +591,7 @@ impl OpenCADStudio {
                             }
                         }
                     }
+                    self.tabs[i].scene.refresh_fill_model(handle);
                     self.tabs[i]
                         .scene
                         .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);

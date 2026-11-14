@@ -106,7 +106,7 @@ impl CadCommand for ZoomWindowCommand {
             upper
                 if upper.ends_with('X')
                     || upper.ends_with("XP")
-                    || crate::app::expr_eval::eval_number(upper).is_some() =>
+                    || crate::entities::expr_eval::eval_number(upper).is_some() =>
             {
                 return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
             }

@@ -10,6 +10,7 @@ pub mod dim_inspect;
 pub mod dim_override;
 pub mod dimension;
 pub mod ellipse;
+pub(crate) mod expr_eval;
 pub mod extended;
 pub mod field;
 pub mod hatch;

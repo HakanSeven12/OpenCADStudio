@@ -1064,6 +1064,23 @@ fn fallback_content_centers(
     result
 }
 
+/// What a cell shows: each content's value, field or formula result.
+#[cfg(test)]
+pub(crate) fn shown_cell_text(
+    document: &document::Document,
+    table: &Table,
+    row: usize,
+    column: usize,
+) -> String {
+    table.cell(row, column).map_or_else(String::new, |cell| {
+        cell.contents
+            .iter()
+            .map(|content| content_display_value(document, table, content))
+            .collect::<Vec<_>>()
+            .join("|")
+    })
+}
+
 fn content_display_value(
     document: &document::Document,
     table: &Table,

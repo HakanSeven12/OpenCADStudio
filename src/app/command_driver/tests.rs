@@ -4955,7 +4955,7 @@ mod mission_m055_tests {
                 {
                     Some((
                         (vp.center.x * 1000.0).round() as i64,
-                        (vp.center.z * 1000.0).round() as i64,
+                        (vp.center.y * 1000.0).round() as i64,
                         (vp.width * 1000.0).round() as i64,
                         (vp.height * 1000.0).round() as i64,
                     ))
@@ -4974,6 +4974,7 @@ mod mission_m055_tests {
         enter_layout(&mut app);
 
         let _ = app.run_command_line("VPORTS 4");
+        let _ = app.feed_active_cmd("F");
         assert_eq!(viewport_rects(&app).len(), 4, "{}", all_output(&app));
         let saved = viewport_rects(&app);
 
@@ -5013,6 +5014,7 @@ mod mission_m055_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS 2V");
+        let _ = app.feed_active_cmd("F");
         let _ = app.run_command_line("VPORTS SAVE TWO");
 
         let _ = app.run_command_line("VPORTS LIST");
@@ -5107,6 +5109,7 @@ mod mission_m058_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS 2H");
+        let _ = app.feed_active_cmd("F");
         let handles = viewports(&app);
         assert_eq!(handles.len(), 2, "{}", all_output(&app));
         let (target, other) = (handles[0], handles[1]);
@@ -5173,6 +5176,7 @@ mod mission_m058_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
 
         let _ = app.run_command_line("VPMIN");
 
@@ -6420,6 +6424,7 @@ mod batch4_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
         let handles = layout_viewport_handles(&app);
         assert_eq!(handles.len(), 1, "{}", out(&app));
 
@@ -6451,6 +6456,7 @@ mod batch4_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
         let handles = layout_viewport_handles(&app);
         assert_eq!(handles.len(), 1, "{}", out(&app));
 
@@ -8929,6 +8935,223 @@ mod change_properties_tests {
             Color::ByLayer,
             "an unknown colour leaves the object alone"
         );
+    }
+}
+
+#[cfg(test)]
+mod table_style_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::objects::ObjectType;
+
+    fn style(app: &OpenCADStudio, name: &str) -> document::objects::TableStyle {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                    Some(style.clone())
+                }
+                _ => None,
+            })
+            .expect("the style exists")
+    }
+
+    /// TABLESTYLE could create a style and make it current but every style it
+    /// created kept the standard margins and text height: SET took the name and
+    /// ignored the rest, so a style could not be authored from the command
+    /// line at all.
+    #[test]
+    fn tablestyle_set_authors_the_style_properties() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("TABLESTYLE NEW LEDGER");
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER HMARGIN 0.25");
+        assert_eq!(style(&app, "LEDGER").horizontal_margin, 0.25);
+
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER TEXTHEIGHT 3.5");
+        let ledger = style(&app, "LEDGER");
+        assert_eq!(ledger.data_row_style.text_height, 3.5);
+        assert_eq!(ledger.header_row_style.text_height, 3.5);
+        assert_eq!(ledger.title_row_style.text_height, 3.5);
+
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER ANNOTATIVE YES");
+        assert!(style(&app, "LEDGER").annotative);
+
+        // Without a property, SET still picks the style new tables take.
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER");
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_table_style_name,
+            "LEDGER"
+        );
+    }
+}
+
+#[cfg(test)]
+mod layer_command_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::types::Color;
+
+    fn layer_color(app: &OpenCADStudio, name: &str) -> Color {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .map(|layer| layer.color)
+            .expect("the layer exists")
+    }
+
+    /// The layer manager's colour prompt accepts a name as readily as an ACI
+    /// index, and the layer may come before or after the colour. The plain
+    /// LAYER command used to take a number only, in name-first order, so
+    /// `LAYER COLOR WALLS RED` and `LAYER COLOR 3 WALLS` both failed.
+    #[test]
+    fn layer_color_takes_the_names_and_either_order() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LAYER NEW WALLS");
+
+        let _ = app.run_command_line("LAYER COLOR WALLS RED");
+        assert_eq!(layer_color(&app, "WALLS"), Color::Index(1));
+
+        let _ = app.run_command_line("LAYER COLOR 3 WALLS");
+        assert_eq!(layer_color(&app, "WALLS"), Color::Index(3));
+
+        let _ = app.run_command_line("LAYER COLOR WALLS CHARTREUSE");
+        assert_eq!(
+            layer_color(&app, "WALLS"),
+            Color::Index(3),
+            "an unknown colour leaves the layer alone"
+        );
+    }
+}
+
+#[cfg(test)]
+mod layer_tool_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn draw_on(app: &mut OpenCADStudio, layer: &str, x: f64) -> document::Handle {
+        let mut line = Line::from_points(
+            Vector3::new(x, 0.0, 0.0),
+            Vector3::new(x, 10.0, 0.0),
+        );
+        line.common.layer = layer.to_string();
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(line))
+    }
+
+    fn layer(app: &OpenCADStudio, name: &str) -> document::tables::Layer {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .cloned()
+            .expect("the layer exists")
+    }
+
+    /// LAYOFF and LAYFRZ pick the layers of the selection; the layer new
+    /// objects are drawn on has to survive, exactly as `-LAYER OFF` and
+    /// `-LAYER FREEZE` refuse the current layer. The plain commands used to
+    /// hide it like any other, leaving no visible layer for the next line.
+    #[test]
+    fn layer_tools_leave_the_current_layer_alone() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        let _ = app.run_command_line("-LAYER NEW DIMS");
+        let _ = app.run_command_line("-LAYER SET WALLS");
+        let current = draw_on(&mut app, "WALLS", 0.0);
+        let other = draw_on(&mut app, "DIMS", 5.0);
+        let i = app.active_tab;
+
+        app.tabs[i].scene.select_entities(&[current, other]);
+        let _ = app.run_command_line("LAYFRZ");
+        assert!(
+            !layer(&app, "WALLS").flags.frozen,
+            "the current layer must stay thawed"
+        );
+        assert!(
+            layer(&app, "DIMS").flags.frozen,
+            "the picked layer still freezes"
+        );
+
+        let _ = app.run_command_line("-LAYER THAW DIMS");
+        app.tabs[i].scene.select_entities(&[current, other]);
+        let _ = app.run_command_line("LAYOFF");
+        assert!(
+            !layer(&app, "WALLS").flags.off,
+            "the current layer must stay on"
+        );
+        assert!(layer(&app, "DIMS").flags.off, "the picked layer still turns off");
+
+        // The one-at-a-time pick path refuses the same layer.
+        let _ = app.run_command_line("-LAYER ON DIMS");
+        app.set_layer_on_from_command(i, "WALLS", false);
+        assert!(
+            !layer(&app, "WALLS").flags.off,
+            "a pick on the current layer must leave it on"
+        );
+    }
+}
+
+#[cfg(test)]
+mod attedit_one_at_a_time_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeEntity, Insert};
+    use document::types::Vector3;
+
+    fn two_typed_references() -> (OpenCADStudio, document::Handle, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut make = |name: &str, value: &str| {
+            let mut insert = Insert::new(name, Vector3::ZERO);
+            insert
+                .attributes
+                .push(AttributeEntity::new("NUMBER".into(), value.into()));
+            app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Insert(insert))
+        };
+        let alpha = make("ALPHA", "111");
+        let beta = make("BETA", "222");
+        (app, alpha, beta)
+    }
+
+    /// The one-at-a-time branch still asks for the block, tag and value
+    /// specifications, so it must edit the reference those specs name —
+    /// not fall back to a bare `ATTEDIT` that re-asks for a pick despite
+    /// the selection and the specs.
+    #[test]
+    fn attedit_one_at_a_time_opens_the_editor_on_the_specified_reference() {
+        let (mut app, alpha, beta) = two_typed_references();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entities(&[alpha, beta]);
+
+        let _ = app.run_command_line("-ATTEDIT");
+        let _ = app.feed_script_line("Y");
+        let _ = app.feed_script_line("BETA");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+
+        assert_eq!(
+            app.attr_editor_handle,
+            Some(beta),
+            "the editor must open on the reference the block name specification names"
+        );
+        assert_eq!(app.attr_editor_rows.len(), 1);
     }
 }
 

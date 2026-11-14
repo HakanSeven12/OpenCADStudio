@@ -74,6 +74,7 @@ impl CadCommand for AtteditCommand {
 /// specifications match the block name, the tag and the current value.
 #[derive(Clone, Debug)]
 pub struct AttributeCandidate {
+    pub handle: document::Handle,
     pub block: String,
     pub tag: String,
     pub value: String,
@@ -121,6 +122,8 @@ pub struct DashAtteditCommand {
     value_spec: String,
     old: String,
     candidates: Vec<AttributeCandidate>,
+    /// The reference one-at-a-time selected, awaiting the attribute editor.
+    pending_handle: Option<document::Handle>,
 }
 
 impl DashAtteditCommand {
@@ -134,6 +137,7 @@ impl DashAtteditCommand {
             value_spec: "*".to_string(),
             old: String::new(),
             candidates,
+            pending_handle: None,
         }
     }
 
@@ -212,7 +216,15 @@ impl CadCommand for DashAtteditCommand {
             DashStep::ValueSpec => {
                 self.value_spec = spec(&answer);
                 if self.one_at_a_time {
-                    CmdResult::Dispatch("ATTEDIT".to_string())
+                    match self.candidates.iter().find(|c| self.matches(c)) {
+                        Some(candidate) => {
+                            self.pending_handle = Some(candidate.handle);
+                            CmdResult::NeedPoint
+                        }
+                        None => CmdResult::ReportError(
+                            "ATTEDIT: no attributes match the specifications.".to_string(),
+                        ),
+                    }
                 } else {
                     self.step = DashStep::OldString;
                     CmdResult::ReportMeasurement(format!(
@@ -251,6 +263,10 @@ impl CadCommand for DashAtteditCommand {
 
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
+    }
+
+    fn attedit_pending_handle(&self) -> Option<document::Handle> {
+        self.pending_handle
     }
 }
 

@@ -386,6 +386,12 @@ pub enum PluginRequest {
     PanelSnapshot {
         panel_id: String,
     },
+    /// V22 (additive): create or update the model-space GEODATA object.
+    SetGeoLocation {
+        location: crate::host::GeoLocation,
+    },
+    /// V22 (additive): remove the model-space GEODATA object.
+    RemoveGeoLocation,
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -478,6 +484,10 @@ pub enum PluginResponse {
     ValidateParametricChainResult(Result<(), String>),
     /// Additive: current state of an owned dock panel.
     PanelSnapshot(Result<crate::dialog::PanelSnapshot, String>),
+    /// V22 (additive): the GEODATA handle written by `SetGeoLocation`.
+    GeoLocationSet(Result<crate::host::Handle, String>),
+    /// V22 (additive): whether `RemoveGeoLocation` removed an object.
+    GeoLocationRemoved(Result<bool, String>),
 }
 
 /// Messages sent from the host to the plugin runner.

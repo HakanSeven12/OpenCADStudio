@@ -356,6 +356,7 @@ impl OpenCADStudio {
             Some(Rename) => self.rename_dialog = None,
             Some(Purge) => self.purge_dialog = None,
             Some(DrawingProperties) => self.drawing_properties = None,
+            Some(GeographicLocation) => self.geographic_location = None,
             Some(SelectSimilarSettings) => self.select_similar_settings = None,
             Some(BlockSaveAs) => self.block_save_as = None,
             Some(BlockVisibility) => self.block_visibility = None,
@@ -14317,6 +14318,7 @@ impl OpenCADStudio {
             Message::Rename(msg) => self.on_rename_dialog(msg),
             Message::Purge(msg) => self.on_purge_dialog(msg),
             Message::DwgProps(msg) => self.on_drawing_properties(msg),
+            Message::GeographicLocation(msg) => self.on_geographic_location(msg),
             Message::SelectSimilarSettingsToggle(bit) => {
                 if let Some(mode) = self.select_similar_settings.as_mut() {
                     *mode ^= bit;

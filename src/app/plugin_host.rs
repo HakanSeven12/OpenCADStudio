@@ -2418,6 +2418,8 @@ impl<'a> HostSession<'a> {
 
     fn finish_layout_change(&mut self) {
         self.app.tabs[self.tab].dirty = true;
+        // The layout tab bar reads `cached_layout_names`, keyed on this epoch.
+        self.app.tabs[self.tab].scene.bump_layout_epoch();
         self.app.tabs[self.tab].scene.bump_geometry();
         self.publish_document_view();
     }
@@ -3429,6 +3431,78 @@ impl<'a> HostSession<'a> {
             self.app.finish_pending_history(self.tab);
         }
         Ok(removed)
+    }
+
+    /// Create or update the model-space GEODATA object (API v22, additive):
+    /// the CRS through the same path as GEOGRAPHICLOCATION, then the plugin's
+    /// design/reference points and north. Every refusal happens before the
+    /// undo scope is touched.
+    pub fn set_geo_location(
+        &mut self,
+        location: &ocs_plugin_api::host::GeoLocation,
+    ) -> Result<Handle, String> {
+        use document::objects::ObjectType;
+        use document::types::{Vector2, Vector3};
+        let crs = crate::io::crs::CrsDefinition::from_text(&location.coordinate_system)?;
+        crs.apply_to_geodata(&mut document::objects::GeoData::default())?;
+        let values = location
+            .design_point
+            .iter()
+            .chain(&location.reference_point)
+            .chain(&location.north_direction);
+        if !values.into_iter().all(|value| value.is_finite()) {
+            return Err("geographic location values must be finite".to_owned());
+        }
+        let [nx, ny] = location.north_direction;
+        let length = nx.hypot(ny);
+        if length < 1e-12 {
+            return Err("north direction must not be zero".to_owned());
+        }
+        if !self.document().block_records.contains("*Model_Space") {
+            return Err("The drawing has no model-space block record".to_owned());
+        }
+        let own_scope = self.ensure_xrecord_undo_scope("Set Geographic Location");
+        let handle = crate::io::crs::set_document_crs(self.document_mut(), &crs)?;
+        if let Some(ObjectType::GeoData(geo)) = self.document_mut().objects.get_mut(&handle) {
+            let [x, y, z] = location.design_point;
+            geo.design_point = Vector3::new(x, y, z);
+            let [x, y, z] = location.reference_point;
+            geo.reference_point = Vector3::new(x, y, z);
+            geo.north_direction = Vector2::new(nx / length, ny / length);
+        }
+        self.app.tabs[self.tab].scene.refresh_object_data_cache();
+        self.app.tabs[self.tab].scene.bump_geometry();
+        self.set_dirty();
+        self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
+        Ok(handle)
+    }
+
+    /// Remove the model-space GEODATA object and its extension-dictionary
+    /// entry (API v22, additive). `Ok(false)` when there was none.
+    pub fn remove_geo_location(&mut self) -> Result<bool, String> {
+        use document::objects::ObjectType;
+        let Some(handle) = crate::io::crs::model_space_geo_data_handle(self.document()) else {
+            return Ok(false);
+        };
+        let own_scope = self.ensure_xrecord_undo_scope("Remove Geographic Location");
+        let document = self.document_mut();
+        document.objects.remove(&handle);
+        for object in document.objects.values_mut() {
+            if let ObjectType::Dictionary(dictionary) = object {
+                dictionary.entries.retain(|(_, value)| *value != handle);
+            }
+        }
+        self.app.tabs[self.tab].scene.refresh_object_data_cache();
+        self.app.tabs[self.tab].scene.bump_geometry();
+        self.set_dirty();
+        self.publish_document_view();
+        if own_scope {
+            self.app.finish_pending_history(self.tab);
+        }
+        Ok(true)
     }
 
     /// List the XRecord names under the dictionary addressed by
@@ -4953,6 +5027,15 @@ impl HostApi for HostSession<'_> {
     fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
         self.list_xrecords(dictionary_path)
     }
+    fn set_geo_location(
+        &mut self,
+        location: &ocs_plugin_api::host::GeoLocation,
+    ) -> Result<Handle, String> {
+        self.set_geo_location(location)
+    }
+    fn remove_geo_location(&mut self) -> Result<bool, String> {
+        self.remove_geo_location()
+    }
     fn set_reference_only(&mut self, handle: Handle, reference_only: bool) -> Result<(), String> {
         self.set_reference_only(handle, reference_only)
     }
@@ -5942,6 +6025,49 @@ mod tests {
             panic!("the insert is gone");
         };
         assert_eq!(insert.attributes[0].common.linetype, "Rails");
+    }
+
+    /// A layout a plugin creates, renames or deletes shows in the layout tab
+    /// bar at once, as one made from the tab bar does.
+    #[test]
+    fn plugin_layout_changes_reach_the_layout_tab_bar() {
+        use ocs_plugin_api::host::TableOperation as Op;
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let tabs = |app: &OpenCADStudio| app.tabs[0].scene.cached_layout_names().to_vec();
+        let before = tabs(&app);
+        assert!(!before.iter().any(|n| n == "Plugin Sheet"));
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutCreate {
+            name: "Plugin Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        assert!(
+            tabs(&app).iter().any(|n| n == "Plugin Sheet"),
+            "the new layout is missing from the tab bar: {:?}",
+            tabs(&app)
+        );
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutRename {
+            from: "Plugin Sheet".to_owned(),
+            to: "Renamed Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        let names = tabs(&app);
+        assert!(names.iter().any(|n| n == "Renamed Sheet"), "{names:?}");
+        assert!(!names.iter().any(|n| n == "Plugin Sheet"), "{names:?}");
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutDelete {
+            name: "Renamed Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        assert_eq!(tabs(&app), before);
     }
 
     #[test]

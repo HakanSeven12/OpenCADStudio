@@ -2712,6 +2712,9 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
 fn shared_dimension_blocks(doc: &Document) -> rustc_hash::FxHashSet<String> {
     let mut seen = rustc_hash::FxHashSet::default();
     let mut shared = rustc_hash::FxHashSet::default();
+    // The layout records hold the drawing's own entities again; count each
+    // dimension once.
+    let mut counted = rustc_hash::FxHashSet::default();
     let nested = doc
         .block_records
         .iter()
@@ -2721,6 +2724,9 @@ fn shared_dimension_blocks(doc: &Document) -> rustc_hash::FxHashSet<String> {
         let EntityType::Dimension(d) = entity else {
             continue;
         };
+        if !counted.insert(d.base().common.handle) {
+            continue;
+        }
         let name = d.base().block_name.to_ascii_uppercase();
         if name.starts_with("*D") && !seen.insert(name.clone()) {
             shared.insert(name);

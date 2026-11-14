@@ -169,7 +169,9 @@
 /// reference-only staging behavior.
 /// v21 adds `PluginGrip::xy_plane`: every custom-grip event is constrained to
 /// the grip's original world-XY plane. The default preserves legacy behavior.
-pub const API_VERSION: u32 = 21;
+/// v22 adds `HostApi::set_geo_location` / `remove_geo_location`, writing the
+/// drawing's model-space GEODATA object (appended requests).
+pub const API_VERSION: u32 = 22;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

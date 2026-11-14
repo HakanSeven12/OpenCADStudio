@@ -165,6 +165,16 @@ mod tests {
     }
 
     #[test]
+    fn geopdf_defaults_off_and_copies_with_plot_preferences() {
+        let mut source = PlotDialogState::default();
+        assert!(!source.geopdf);
+        source.geopdf = true;
+        let mut restored = PlotDialogState::default();
+        restored.copy_settings_from(&source);
+        assert!(restored.geopdf);
+    }
+
+    #[test]
     fn named_view_display_preserves_the_saved_plot_area() {
         let name = "Plan: north";
         let choice = PlotChoice::localized(format!("View: {name}"));
@@ -200,6 +210,9 @@ pub enum PlotFlag {
     /// SVG only: tag each drawn item with its drawing layer (`data-layer`),
     /// letting SVG consumers toggle layers dynamically.
     LayerAttributes,
+    /// PDF file only: register an orthographic model-space plot frame in ISO
+    /// GeoPDF metadata. Never affects preview or ordinary printing.
+    GeoPdf,
     /// Hidden-line removal for paper-space objects (the page setup's
     /// "plot hidden" flag).
     HidePaperspace,
@@ -548,6 +561,9 @@ pub struct PlotDialogState {
     #[serde(default)]
     pub text_as_outlines: bool,
     pub layer_attributes: bool,
+    /// PDF-only ISO geospatial metadata for an eligible model plot frame.
+    #[serde(default)]
+    pub geopdf: bool,
     pub paper: String,
     #[serde(skip)]
     pub paper_width_mm: f64,
@@ -671,6 +687,7 @@ impl Default for PlotDialogState {
             text_as_outlines: false,
             non_scaling_stroke: false,
             layer_attributes: false,
+            geopdf: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
             paper_width_mm: 297.0,
             paper_height_mm: 210.0,
@@ -731,6 +748,7 @@ impl PlotDialogState {
         self.text_as_outlines = o.text_as_outlines;
         self.non_scaling_stroke = o.non_scaling_stroke;
         self.layer_attributes = o.layer_attributes;
+        self.geopdf = o.geopdf;
         self.paper = o.paper.clone();
         self.paper_width_mm = o.paper_width_mm;
         self.paper_height_mm = o.paper_height_mm;
@@ -1882,6 +1900,19 @@ pub fn view_window(
         } else {
             Space::new().height(0).into()
         };
+    let pdf_geopdf_option: Element<'_, Message> = if to_file
+        && (!s.file_svg || cfg!(target_arch = "wasm32"))
+        && !s.paper_space
+        && s.area != "Layout"
+    {
+        check(
+            crate::tr!("plot", "geopdf").into(),
+            s.geopdf,
+            PlotFlag::GeoPdf,
+        )
+    } else {
+        Space::new().height(0).into()
+    };
     let options_panel = panel(
         column![
             section_label(t!("Plot options")),
@@ -1917,6 +1948,7 @@ pub fn view_window(
                         s.merge_lines,
                         PlotFlag::MergeLines
                     ),
+                    pdf_geopdf_option,
                     svg_layer_option,
                     svg_text_option,
                     svg_stroke_option,
@@ -2055,6 +2087,46 @@ mod sidebar_layout_tests {
             state.file_svg = true;
             assert!(visible(&state, label), "SVG output shows {label}");
         }
+    }
+
+    #[test]
+    fn geopdf_checkbox_is_visible_only_for_model_pdf_file_output() {
+        let _lock = crate::headless_ui_lock();
+        let mut renderer = iced::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut visible = |state: &PlotDialogState| {
+            let mut ui = iced_test::runtime::user_interface::UserInterface::build(
+                view_window(state, false, crate::ui::modal::ModalSizing::FILL),
+                iced::Size::new(1100.0, 800.0),
+                iced_test::runtime::user_interface::Cache::default(),
+                &mut renderer,
+            );
+            let mut find = iced_test::Selector::find("Geospatial PDF (GeoPDF)");
+            ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+            matches!(
+                widget::Operation::finish(&find),
+                widget::operation::Outcome::Some(Some(target))
+                    if target.visible_bounds().is_some()
+            )
+        };
+
+        let mut state = PlotDialogState::default();
+        assert!(!visible(&state), "printer output hides GeoPDF");
+        state.to_file = true;
+        assert!(visible(&state), "model PDF output shows GeoPDF");
+        state.file_svg = true;
+        assert!(!visible(&state), "SVG output hides GeoPDF");
+        state.file_svg = false;
+        state.paper_space = true;
+        assert!(!visible(&state), "paper space hides GeoPDF");
+        state.paper_space = false;
+        state.area = "Layout".into();
+        assert!(!visible(&state), "Layout area hides GeoPDF");
     }
 
     #[test]

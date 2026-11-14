@@ -1231,6 +1231,7 @@ impl OpenCADStudio {
                     super::block_editor::normalize_allocation(document, next);
                 }
                 tab.scene.invalidate_dependency_index();
+                tab.scene.refresh_object_data_cache();
                 tab.scene.bump_layout_epoch();
                 tab.scene.bump_scale_epoch();
                 tab.scene.bump_ucs_epoch();
@@ -1294,6 +1295,7 @@ impl OpenCADStudio {
             StructureSnapshot::Objects(entries) => {
                 let mut layout_touched = false;
                 let mut scale_touched = false;
+                let mut geo_data_touched = false;
                 for entry in entries {
                     let value = if undo {
                         entry.before.clone()
@@ -1312,6 +1314,11 @@ impl OpenCADStudio {
                     scale_touched |=
                         matches!(entry.before, Some(document::objects::ObjectType::Scale(_)))
                             || matches!(entry.after, Some(document::objects::ObjectType::Scale(_)));
+                    geo_data_touched |=
+                        matches!(
+                            entry.before,
+                            Some(document::objects::ObjectType::GeoData(_))
+                        ) || matches!(entry.after, Some(document::objects::ObjectType::GeoData(_)));
                     if let Some(object) = value {
                         self.tabs[i]
                             .scene
@@ -1330,6 +1337,10 @@ impl OpenCADStudio {
                 }
                 if scale_touched {
                     self.tabs[i].scene.bump_scale_epoch();
+                }
+                if geo_data_touched {
+                    self.tabs[i].scene.refresh_object_data_cache();
+                    self.tabs[i].scene.bump_geometry();
                 }
             }
             StructureSnapshot::Styles {

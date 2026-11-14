@@ -76,6 +76,7 @@ fn text_and_dim_reach_pdf_export() {
         clip: None,
         options: PdfPlotOptions::default(),
         plot_style: None,
+        geopdf: None,
     };
     export_pdf(&page, &p_text).expect("export with text");
     let with_text = std::fs::read(&p_text).expect("read pdf");

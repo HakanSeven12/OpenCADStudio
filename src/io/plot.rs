@@ -185,6 +185,9 @@ pub struct PlotPage {
     pub clip: Option<(f32, f32, f32, f32)>,
     pub options: PlotOptions,
     pub plot_style: Option<PlotStyleTable>,
+    /// Explicit model-space GeoPDF registration. Plot-file export may consume
+    /// this; preview and ordinary printing always ignore it.
+    pub geopdf: Option<crate::io::geopdf_export::GeoPdfFrame>,
 }
 
 impl Default for PlotOptions {

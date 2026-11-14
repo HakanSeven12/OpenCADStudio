@@ -633,7 +633,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `EXIT` | — | Exits the application window after confirming unsaved changes. |
 | `FILEASSOC` | — | Registers the app as the handler of DWG/DXF files. † |
 | `FINDNONPURGEABLE` | — | Ribbon: Find Non-\nPurgeable Items. |
-| `GEOGRAPHICLOCATION` | — | Assigns real-world GIS coordinates and loads live aerial satellite maps directly under your CAD geometry. *Tip:* Enables accurate civil, site layout, and sun-study simulations aligned with real geographic coordinates. |
+| `GEOGRAPHICLOCATION` | — | Sets the root drawing coordinate reference system in GEODATA from an EPSG code or WKT. Geometry and drawing units are unchanged; the setting is undoable and persists in DWG/DXF. |
 | `HYPERLINKBASE` | — | Sets the base path for relative hyperlinks. † |
 | `HYPERLINKOPTIONS` | — | Sets hyperlink cursor and tooltip display. † |
 | `IM` | — | Alias of IMAGE. † |

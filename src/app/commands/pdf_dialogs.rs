@@ -99,6 +99,12 @@ impl OpenCADStudio {
         let mut state = PdfAttachState::new(existing);
         state.kind = kind;
         self.load_pdf_attach_file(&mut state, path);
+        let plane = if self.tabs[i].editing_model_space() {
+            self.tabs[i].ucs_xform().working_plane()
+        } else {
+            crate::command::WorkingPlane::default()
+        };
+        Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
         self.pdf_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::PdfAttach);
     }
@@ -120,6 +126,25 @@ impl OpenCADStudio {
         state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
+    }
+
+    fn refresh_pdf_attach_geopdf(
+        scene: &crate::scene::Scene,
+        plane: crate::command::WorkingPlane,
+        state: &mut PdfAttachState,
+    ) {
+        let was_available = state.geopdf_available;
+        state.geopdf_available = super::pdf_import::fully_georeferenced_pdf_pages(
+            scene,
+            state.kind,
+            &state.path,
+            &state.page_labels(),
+            plane,
+        )
+        .is_some();
+        // Preserve a deliberate manual choice while eligibility stays true.
+        // A newly eligible selection starts in automatic mode again.
+        state.geopdf_auto = state.geopdf_available && (state.geopdf_auto || !was_available);
     }
 
     /// POINTCLOUDATTACH after the file is chosen: the Attach Point Cloud
@@ -563,11 +588,22 @@ impl OpenCADStudio {
                 };
                 if let Some((_, path)) = state.existing.iter().find(|(n, _)| *n == name).cloned() {
                     self.load_pdf_attach_file(&mut state, &path);
+                    let plane = if self.tabs[i].editing_model_space() {
+                        self.tabs[i].ucs_xform().working_plane()
+                    } else {
+                        crate::command::WorkingPlane::default()
+                    };
+                    Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
                 }
                 self.pdf_attach = Some(state);
             }
             PdfDialogMsg::AttachPage(page) => {
                 let (ctrl, shift) = (self.ctrl_down, self.shift_down);
+                let plane = if self.tabs[i].editing_model_space() {
+                    self.tabs[i].ucs_xform().working_plane()
+                } else {
+                    crate::command::WorkingPlane::default()
+                };
                 if let Some(state) = self.pdf_attach.as_mut() {
                     if state.kind == document::entities::UnderlayType::Pdf {
                         click_page(&mut state.selected, &mut state.anchor, page, ctrl, shift);
@@ -579,6 +615,7 @@ impl OpenCADStudio {
                     let first = state.page_labels().into_iter().next().unwrap_or_default();
                     state.page_size = item_size_text(state.kind, &state.path, &first);
                     state.sub_per_master = sub_per_master(state.kind, &state.path, &first);
+                    Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, state);
                 }
             }
             PdfDialogMsg::AttachPathType(choice) => {
@@ -590,6 +627,13 @@ impl OpenCADStudio {
                     &self.pdf_stored_path(&state.path, choice.0),
                 );
                 self.pdf_attach = Some(state);
+            }
+            PdfDialogMsg::AttachGeoPdfAuto(on) => {
+                if let Some(state) = self.pdf_attach.as_mut() {
+                    if state.geopdf_available {
+                        state.geopdf_auto = on;
+                    }
+                }
             }
             PdfDialogMsg::AttachInsertOnScreen(on) => {
                 if let Some(s) = self.pdf_attach.as_mut() {
@@ -950,8 +994,26 @@ impl OpenCADStudio {
         let Some(state) = self.pdf_attach.as_ref() else {
             return Task::none();
         };
+        let plane = if self.tabs[i].editing_model_space() {
+            self.tabs[i].ucs_xform().working_plane()
+        } else {
+            crate::command::WorkingPlane::default()
+        };
+        let automatic = if state.geopdf_auto {
+            super::pdf_import::fully_georeferenced_pdf_pages(
+                &self.tabs[i].scene,
+                state.kind,
+                &state.path,
+                &state.page_labels(),
+                plane,
+            )
+        } else {
+            None
+        };
         let number = |s: &str| s.trim().parse::<f64>().ok();
-        let insertion = if state.insert_on_screen {
+        let insertion = if automatic.is_some() {
+            None
+        } else if state.insert_on_screen {
             None
         } else {
             match (
@@ -966,7 +1028,9 @@ impl OpenCADStudio {
                 }
             }
         };
-        let scale = if state.scale_on_screen {
+        let scale = if automatic.is_some() {
+            None
+        } else if state.scale_on_screen {
             None
         } else {
             match number(&state.scale).filter(|v| *v > 0.0) {
@@ -978,7 +1042,9 @@ impl OpenCADStudio {
                 }
             }
         };
-        let rotation = if state.rotation_on_screen {
+        let rotation = if automatic.is_some() {
+            None
+        } else if state.rotation_on_screen {
             None
         } else {
             match number(&state.rotation) {
@@ -1009,6 +1075,16 @@ impl OpenCADStudio {
             state.sub_units,
             insunits,
         );
+        command.set_auto_place(state.geopdf_auto);
+        if let Some(pages) = automatic {
+            self.tabs[i].active_cmd = Some(Box::new(command));
+            return self.apply_cmd_result(crate::command::CmdResult::AttachPdfPages {
+                kind: state.kind,
+                path: stored,
+                pages,
+                auto_place: false,
+            });
+        }
         match insertion {
             Some(point) => {
                 let result = command.on_point(point);

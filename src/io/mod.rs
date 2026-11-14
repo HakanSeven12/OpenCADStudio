@@ -9,10 +9,13 @@ pub mod edit_lock;
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
 pub mod brep_build;
+pub mod crs;
 pub mod fbx;
 pub mod file_association;
 pub mod font_repo;
 pub(crate) mod fs_access;
+pub mod geopdf;
+pub mod geopdf_export;
 pub mod georef;
 pub mod iges_import;
 pub mod iges_surfaces;

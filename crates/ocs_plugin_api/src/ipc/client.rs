@@ -1002,6 +1002,29 @@ impl HostApi for PluginHostApi {
         }
     }
 
+    fn set_geo_location(
+        &mut self,
+        location: &crate::host::GeoLocation,
+    ) -> Result<crate::host::Handle, String> {
+        match self.client.request(PluginRequest::SetGeoLocation {
+            location: location.clone(),
+        }) {
+            Ok(PluginResponse::GeoLocationSet(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected SetGeoLocation response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn remove_geo_location(&mut self) -> Result<bool, String> {
+        match self.client.request(PluginRequest::RemoveGeoLocation) {
+            Ok(PluginResponse::GeoLocationRemoved(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!("unexpected RemoveGeoLocation response: {other:?}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     fn panel_snapshot(&self, panel_id: &str) -> Result<crate::dialog::PanelSnapshot, String> {
         match self.client.request(PluginRequest::PanelSnapshot {
             panel_id: panel_id.to_string(),

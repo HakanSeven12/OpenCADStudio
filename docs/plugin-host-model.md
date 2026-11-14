@@ -27,6 +27,7 @@ without it keeps working, and the default `HostApi` methods refuse.
 | Solids | `solid_operation` | Kernel-backed create, transform, booleans, extrude, region and surface from a profile, picture embedding. Every result is verified to lift back from its ACIS payload without loss; a refusal leaves the operands untouched. |
 | Tables | `table_operation` | Layers, text and dimension styles, blocks and their contents, linetypes, layouts (see below). |
 | Objects | `create_xrecord`, `read_xrecord`, `update_xrecord`, `delete_xrecord`, `list_xrecords` | Name-addressed XRecords under the drawing's named-object dictionary (API v8, see below): a non-graphical record carrier with strict create-vs-update semantics and one undo step per change. |
+| Geographic location | `set_geo_location`, `remove_geo_location` | Write or remove the drawing's model-space GEODATA object (API v22): CRS (`EPSG:<code>`, WKT or MapGuide XML), design point, reference point and north, with its `ACAD_GEOGRAPHICDATA` entry, as one undo step; GEOGRAPHICLOCATION's storage, so other CAD programs open the drawing georeferenced. |
 | Commands | `run_command` | Drives the real OCS command one step at a time (see below). |
 | Settings | `system_variable`, `set_system_variable` | `CLAYER`, `SNAPANG`, and a read-only `CTAB` (the current layout). |
 

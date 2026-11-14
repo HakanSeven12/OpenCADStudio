@@ -209,6 +209,65 @@ impl CadCommand for OverkillCommand {
     }
 }
 
+/// A closed polyline drawn from the other end is the same geometry. Turn
+/// its vertices so the lowest one leads and the direction that compares
+/// smaller comes first, so two copies of the same loop compare equal. Arcs
+/// and varying widths carry direction-dependent data and are left alone.
+fn normalize_closed_polyline(p: &mut document::entities::LwPolyline) {
+    use std::cmp::Ordering;
+    let count = p.vertices.len();
+    if count < 3 || !p.is_closed {
+        return;
+    }
+    if p.vertices
+        .iter()
+        .any(|v| v.bulge != 0.0 || v.start_width != 0.0 || v.end_width != 0.0)
+    {
+        return;
+    }
+    let axis_order = |a: &document::entities::LwVertex, b: &document::entities::LwVertex| {
+        a.location
+            .x
+            .partial_cmp(&b.location.x)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| {
+                a.location
+                    .y
+                    .partial_cmp(&b.location.y)
+                    .unwrap_or(Ordering::Equal)
+            })
+    };
+    let Some(lowest) = p
+        .vertices
+        .iter()
+        .enumerate()
+        .min_by(|a, b| axis_order(a.1, b.1))
+        .map(|(index, _)| index)
+    else {
+        return;
+    };
+    let forward: Vec<_> = (0..count)
+        .map(|offset| p.vertices[(lowest + offset) % count].clone())
+        .collect();
+    let reversed: Vec<_> = std::iter::once(forward[0].clone())
+        .chain(forward[1..].iter().rev().cloned())
+        .collect();
+    let smaller = |a: &[document::entities::LwVertex], b: &[document::entities::LwVertex]| {
+        a.iter()
+            .zip(b.iter())
+            .find_map(|(x, y)| match axis_order(x, y) {
+                Ordering::Equal => None,
+                ordering => Some(ordering),
+            })
+            .unwrap_or(Ordering::Equal)
+    };
+    p.vertices = if smaller(&reversed, &forward) == Ordering::Less {
+        reversed
+    } else {
+        forward
+    };
+}
+
 /// The entity without its identity and storage fields (handle, owner, reactors,
 /// extension dictionary, raw DWG bytes) and without the ignored properties, so
 /// two copies of the same geometry compare equal however they were created.
@@ -257,6 +316,9 @@ pub fn normalized(entity: &EntityType, ignore: u16) -> EntityType {
     if ignore & 256 != 0 {
         common.material_flags = 0;
         common.material_handle = None;
+    }
+    if let EntityType::LwPolyline(p) = &mut e {
+        normalize_closed_polyline(p);
     }
     if ignore & 32 != 0 {
         match &mut e {
@@ -585,6 +647,46 @@ mod tests {
             unreachable!()
         };
         assert_eq!(styled.vertices.len(), 3);
+    }
+
+    /// A closed loop is one geometry however it was drawn. This is the same
+    /// square, written from its other three vertices and in both windings;
+    /// seen from either end it used to produce three different signatures,
+    /// so OVERKILL kept all three.
+    #[test]
+    fn closed_polyline_seen_from_either_end_is_a_duplicate() {
+        let square = |handle, points: Vec<(f64, f64)>| {
+            let mut poly = LwPolyline::from_points(
+                points
+                    .into_iter()
+                    .map(|(x, y)| Vector2::new(x, y))
+                    .collect(),
+            );
+            poly.is_closed = true;
+            let mut entity = EntityType::LwPolyline(poly);
+            if let EntityType::LwPolyline(poly) = &mut entity {
+                poly.common.handle = Handle::new(handle);
+            }
+            (Handle::new(handle), entity)
+        };
+        let mut items = vec![
+            square(1, vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+            square(2, vec![(10.0, 10.0), (0.0, 10.0), (0.0, 0.0), (10.0, 0.0)]),
+            square(3, vec![(0.0, 10.0), (10.0, 10.0), (10.0, 0.0), (0.0, 0.0)]),
+            square(4, vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]),
+        ];
+        let signature = |entity: &EntityType| {
+            serde_json::to_value(normalized(entity, 0)).unwrap()
+        };
+        assert_eq!(signature(&items[0].1), signature(&items[1].1));
+        assert_eq!(signature(&items[0].1), signature(&items[2].1));
+        assert_eq!(signature(&items[0].1), signature(&items[3].1));
+
+        let (_, removed) = crate::modules::draw::modify::overkill::run(
+            &mut items,
+            &Settings::default(),
+        );
+        assert_eq!(removed.len(), 3);
     }
 
     #[test]

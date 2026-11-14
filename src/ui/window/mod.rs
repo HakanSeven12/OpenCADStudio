@@ -27,6 +27,7 @@ pub mod drawing_units;
 pub mod extraction_outdated;
 pub mod field_dialog;
 pub mod find_replace;
+pub mod geographic_location;
 pub mod geometric_tolerance;
 pub mod gradient_editor;
 pub mod graphic_attributes;

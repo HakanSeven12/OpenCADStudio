@@ -52,4 +52,8 @@ A template (`.dwt`) is a drawing kept as a starting point: units, layers, text a
 
 ## Geographic location
 
-When a drawing carries geographic data (a coordinate system and a location on the earth), the status bar shows the coordinate system's name; hover it for the details. Georeferenced images (with geo tags or a world file) can be attached at their own location; see [References and Underlays](References-and-Underlays).
+`GEOGRAPHICLOCATION` sets the root drawing's coordinate reference system (CRS) in native `GEODATA`, using an EPSG code such as `EPSG:5514`, a WKT definition, or a MapGuide XML definition carrying an EPSG alias. It preserves the other geographic metadata, works as one undo step, and persists in DWG and DXF. A `GEODATA` the dialog creates defaults north to +Y, up to +Z, and sets its unit scales from `INSUNITS` (a unitless drawing keeps a 1.0 scale); the XML the drawing stores follows the MapGuide shape so external CAD libraries can read it back.
+
+This declaration does not reproject geometry or change drawing units. In particular, an EPSG:5514 drawing already containing Krovak east/north metres keeps those coordinates, including negative values. Missing or unreadable CRS metadata must be chosen explicitly; OCS does not infer it from coordinates or `INSUNITS`.
+
+When a drawing carries geographic data, the status bar shows the coordinate system's name; hover it for the details. Georeferenced images (with geo tags or a world file) can be attached at their own location; see [References and Underlays](References-and-Underlays). Interactive `PDFATTACH` offers automatic GeoPDF placement when every selected page has a CRS equivalent to the drawing CRS and an affine representable without shear or reflection. The option can be cleared for manual placement; unsupported or mixed selections use the manual controls.

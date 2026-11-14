@@ -61,7 +61,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Fresh xref reads joined the read facade; six direct-reference lifecycle
 /// writes joined execute with operation-local unknown-field rejection.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "b1853a8a1ea97abf449d69198915c52ab5ebf2f8e437bbe755ae5d973d48db99";
+const TOOL_SCHEMA_DIGEST: &str = "94a391814c5e2b2e2e97a3c92fbb1e5ce784722cca248a5c65a83542efbcb959";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

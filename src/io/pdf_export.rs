@@ -522,7 +522,7 @@ fn append_pdf_page(
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
     let plot_style = page.plot_style.as_ref().or(fallback_plot_style);
     let options = page.options;
-    let line_step = vector_step(options);
+    let line_step = vector_step(options, scale);
     let mut ops: Vec<Op> = Vec::new();
     let mut named_styles: std::collections::HashMap<String, Option<PlotStyleTable>> =
         std::collections::HashMap::new();
@@ -1439,12 +1439,15 @@ fn visible_station_ranges(
     ranges
 }
 
-/// One vector DPI step in points, for `PlotOptions::vector_dpi`.
-fn vector_step(options: PdfPlotOptions) -> Option<f32> {
+/// One vector DPI step in the pre-CTM coordinate space, for
+/// `PlotOptions::vector_dpi`. The geometry is drawn under a CTM that scales it
+/// by the plot `scale`, so the grid is divided by it to land on 1/dpi inch of
+/// paper; without that a large plot scale quantised far coarser than asked.
+fn vector_step(options: PdfPlotOptions, scale: f32) -> Option<f32> {
     options
         .vector_dpi
         .filter(|&dpi| dpi > 0)
-        .map(|dpi| 72.0 / dpi as f32)
+        .map(|dpi| 72.0 / dpi as f32 / scale.max(1e-6))
 }
 
 fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step: Option<f32>) {
@@ -1908,7 +1911,7 @@ fn emit_hatch(
                 },
             ];
             let dot_radius = Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6)));
-            flush_line(ops, &points, Some(dot_radius), vector_step(options));
+            flush_line(ops, &points, Some(dot_radius), vector_step(options, scale));
         }
         return;
     }
@@ -2895,6 +2898,18 @@ pub(crate) fn pdf_stream_text(bytes: &[u8]) -> String {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    #[test]
+    fn vector_step_is_one_dpi_step_on_paper_at_any_plot_scale() {
+        let mut options = super::PdfPlotOptions::default();
+        assert_eq!(super::vector_step(options, 1.0), None);
+        options.vector_dpi = Some(600);
+        for scale in [0.01_f32, 1.0, 10.0, 1000.0] {
+            let step = super::vector_step(options, scale).unwrap();
+            // Under the CTM the step grows by `scale`: it must stay 1/600 in.
+            assert!((step * scale - 72.0 / 600.0).abs() < 1e-5, "scale {scale}");
+        }
+    }
+
     #[test]
     fn dash_ranges_align_a_run_on_its_end_dashes() {
         let mut pattern = [0.0; 8];

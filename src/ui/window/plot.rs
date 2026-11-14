@@ -1516,18 +1516,22 @@ pub fn view_window(
         ];
         let folder_choice = folders.get(s.output_folder as usize).cloned();
         let name_choice = names.get(s.output_name as usize).cloned();
+        let raster_hint = crate::tr!("plot", "dpi-hint-native");
+        let vector_hint = crate::tr!("plot", "dpi-hint-full");
         let dpi = row![
-            field_row(
+            form::labeled_field_hint(
                 crate::tr!("plot", "raster-dpi").into(),
                 &s.raster_dpi,
-                PlotDlgMsg::RasterDpi,
-                60
+                &raster_hint,
+                |v| Message::PlotDlg(PlotDlgMsg::RasterDpi(v)),
+                60.0,
             ),
-            field_row(
+            form::labeled_field_hint(
                 crate::tr!("plot", "vector-dpi").into(),
                 &s.vector_dpi,
-                PlotDlgMsg::VectorDpi,
-                60
+                &vector_hint,
+                |v| Message::PlotDlg(PlotDlgMsg::VectorDpi(v)),
+                60.0,
             ),
         ]
         .spacing(8);

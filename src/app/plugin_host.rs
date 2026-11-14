@@ -2418,6 +2418,8 @@ impl<'a> HostSession<'a> {
 
     fn finish_layout_change(&mut self) {
         self.app.tabs[self.tab].dirty = true;
+        // The layout tab bar reads `cached_layout_names`, keyed on this epoch.
+        self.app.tabs[self.tab].scene.bump_layout_epoch();
         self.app.tabs[self.tab].scene.bump_geometry();
         self.publish_document_view();
     }
@@ -5942,6 +5944,49 @@ mod tests {
             panic!("the insert is gone");
         };
         assert_eq!(insert.attributes[0].common.linetype, "Rails");
+    }
+
+    /// A layout a plugin creates, renames or deletes shows in the layout tab
+    /// bar at once, as one made from the tab bar does.
+    #[test]
+    fn plugin_layout_changes_reach_the_layout_tab_bar() {
+        use ocs_plugin_api::host::TableOperation as Op;
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let tabs = |app: &OpenCADStudio| app.tabs[0].scene.cached_layout_names().to_vec();
+        let before = tabs(&app);
+        assert!(!before.iter().any(|n| n == "Plugin Sheet"));
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutCreate {
+            name: "Plugin Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        assert!(
+            tabs(&app).iter().any(|n| n == "Plugin Sheet"),
+            "the new layout is missing from the tab bar: {:?}",
+            tabs(&app)
+        );
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutRename {
+            from: "Plugin Sheet".to_owned(),
+            to: "Renamed Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        let names = tabs(&app);
+        assert!(names.iter().any(|n| n == "Renamed Sheet"), "{names:?}");
+        assert!(!names.iter().any(|n| n == "Plugin Sheet"), "{names:?}");
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.layout_operation(Op::LayoutDelete {
+            name: "Renamed Sheet".to_owned(),
+        })
+        .unwrap();
+        drop(host);
+        assert_eq!(tabs(&app), before);
     }
 
     #[test]

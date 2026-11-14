@@ -3,10 +3,9 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, text, tooltip, Space};
-use iced::{Background, Border, Color, Element, Fill, Font, Length, Padding, Theme};
+use iced::widget::{button, container};
+use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 
-use super::widgets::{make_tip, popup_panel_style, popup_row_style, tip_style};
 use super::{minimize::MINIMIZE_MENU_ID, Ribbon};
 use crate::app::Message;
 use crate::ui::icons;
@@ -22,8 +21,6 @@ pub(super) const LOGO_PAD: f32 = 6.0;
 const COMPACT_W: f32 = 38.0;
 const COMPACT_H: f32 = 18.0;
 const MENU_W: f32 = 300.0;
-const ROW_H: f32 = 28.0;
-const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
 /// How many recent drawings the menu lists.
 const RECENT_LIMIT: usize = 9;
 
@@ -90,50 +87,37 @@ impl Ribbon {
     /// The application menu under the logo: the file commands and Options,
     /// then the recent drawings.
     pub(super) fn app_menu(&self, recent: &[PathBuf], win: (f32, f32)) -> Element<'_, Message> {
-        let mut rows: Vec<Element<'_, Message>> = commands()
+        use crate::ui::palette_menu::{self, Item};
+        let mut items: Vec<Item> = commands()
             .into_iter()
             .map(|(icon, label, shortcut, command)| {
-                menu_row(icon, label, shortcut, Message::Command(command.to_string()))
+                let item = Item::new(label, Message::Command(command.to_string())).icon(icon);
+                if shortcut.is_empty() {
+                    item
+                } else {
+                    item.shortcut(shortcut)
+                }
             })
             .collect();
         if !recent.is_empty() {
-            rows.push(separator());
-            rows.push(
-                container(
-                    text(crate::tr!("ribbon-menu", "recent-drawings").to_uppercase())
-                        .size(crate::ui::style::text::UI_SMALL)
-                        .style(|theme: &Theme| text::Style {
-                            color: Some(chrome::muted(theme)),
-                        }),
-                )
-                .padding(Padding {
-                    top: 4.0,
-                    right: 10.0,
-                    bottom: 2.0,
-                    left: 10.0,
-                })
-                .into(),
-            );
-            rows.extend(recent.iter().take(RECENT_LIMIT).map(|path| {
+            items.push(Item::Separator);
+            items.push(Item::Heading(
+                crate::tr!("ribbon-menu", "recent-drawings").to_uppercase(),
+            ));
+            items.extend(recent.iter().take(RECENT_LIMIT).map(|path| {
                 let name = path
                     .file_name()
                     .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy())
                     .into_owned();
-                let row = menu_row(icons::DOC, name, "", Message::OpenRecent(path.clone()));
-                tooltip(
-                    row,
-                    make_tip(path.display().to_string()),
-                    tooltip::Position::Right,
-                )
-                .delay(std::time::Duration::from_millis(600))
-                .style(tip_style)
-                .into()
+                Item::new(name, Message::OpenRecent(path.clone()))
+                    .icon(icons::DOC)
+                    .tip(path.display().to_string())
             }));
         }
-        let panel = container(column(rows).padding([2, 0]))
-            .style(popup_panel_style)
-            .width(Length::Fixed(MENU_W));
-        self.place_dropdown(APP_MENU_ID, panel.into(), MENU_W, win.0)
+        // The palette menu, at least as wide as it always was.
+        let width = palette_menu::width(&items).max(MENU_W);
+        let panel = container(palette_menu::menu(items)).width(Length::Fixed(width));
+        self.place_dropdown(APP_MENU_ID, panel.into(), width, win.0)
     }
 }
 
@@ -183,49 +167,6 @@ pub(super) fn commands() -> [(&'static [u8], String, &'static str, &'static str)
             "OPTIONS",
         ),
     ]
-}
-
-/// A 28 px menu row: icon, label, and the shortcut right-aligned in muted
-/// monospace.
-fn menu_row<'a>(
-    icon: &'static [u8],
-    label: String,
-    shortcut: &'static str,
-    on_press: Message,
-) -> Element<'a, Message> {
-    button(
-        row![
-            icons::chrome(icon, ICON),
-            text(label).size(12),
-            Space::new().width(Fill),
-            text(shortcut)
-                .size(11)
-                .font(Font::MONOSPACE)
-                .style(|theme: &Theme| text::Style {
-                    color: Some(chrome::muted(theme)),
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
-    )
-    .on_press(on_press)
-    .style(popup_row_style)
-    .width(Fill)
-    .height(ROW_H)
-    .padding([0, 10])
-    .into()
-}
-
-fn separator<'a>() -> Element<'a, Message> {
-    container(
-        container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::border(theme))),
-            ..Default::default()
-        }),
-    )
-    .padding([3, 0])
-    .width(Fill)
-    .into()
 }
 
 #[cfg(test)]

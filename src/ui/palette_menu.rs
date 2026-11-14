@@ -135,6 +135,14 @@ impl Item {
         self
     }
 
+    /// The item with `tip` beside it while the pointer rests on it.
+    pub fn tip(mut self, text: impl Into<String>) -> Self {
+        if let Item::Action { tip, .. } = &mut self {
+            *tip = Some(text.into());
+        }
+        self
+    }
+
     /// The item with a dirty dot after its label.
     pub fn dirty(mut self, on: bool) -> Self {
         if let Item::Action { dirty, .. } = &mut self {

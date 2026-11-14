@@ -393,6 +393,10 @@ pub fn handle_plugin_request(
         PanelSnapshot { panel_id } => {
             PluginResponse::PanelSnapshot(host.panel_snapshot_for_plugin(plugin_id, &panel_id))
         }
+        SetGeoLocation { location } => {
+            PluginResponse::GeoLocationSet(host.set_geo_location(&location))
+        }
+        RemoveGeoLocation => PluginResponse::GeoLocationRemoved(host.remove_geo_location()),
     }
 }
 

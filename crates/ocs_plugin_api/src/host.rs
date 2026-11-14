@@ -2135,6 +2135,22 @@ pub trait HostApi {
     ) -> Result<crate::dialog::PanelSnapshot, String> {
         Err("Authenticated panel snapshots are not supported by this host".to_owned())
     }
+
+    /// Create or update the drawing's geographic location (API v22,
+    /// additive): the model-space GEODATA object and its
+    /// `ACAD_GEOGRAPHICDATA` extension-dictionary entry, so other CAD
+    /// programs open the drawing georeferenced. Returns the object's handle.
+    /// A refusal (unknown CRS, non-finite point, zero north) changes nothing.
+    /// Undo composition follows [`HostApi::delete_xrecord`].
+    fn set_geo_location(&mut self, _location: &GeoLocation) -> Result<Handle, String> {
+        Err("Geographic location writes are not supported by this host".to_owned())
+    }
+
+    /// Remove the drawing's geographic location (API v22, additive). Returns
+    /// `false` when the drawing had none (no undo step is recorded then).
+    fn remove_geo_location(&mut self) -> Result<bool, String> {
+        Err("Geographic location writes are not supported by this host".to_owned())
+    }
 }
 
 /// **Parametric-chain staging types (api 14, the v2 generic shapes).**
@@ -2521,6 +2537,25 @@ impl PluginDisplayDescriptor {
             Self::ParametricChain(_) => "ParametricChain",
         }
     }
+}
+
+/// The drawing's geographic location (API v22, additive): what
+/// [`HostApi::set_geo_location`] writes into the model-space GEODATA object.
+///
+/// Drawing units, the up direction and the scale method follow the drawing
+/// (INSUNITS) when the object is first created; an existing object keeps them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeoLocation {
+    /// `EPSG:<code>`, a WKT definition, or a MapGuide XML definition with an
+    /// EPSG alias. Geographic CRSs make the object geographic (type 3),
+    /// projected ones a projected grid (type 2).
+    pub coordinate_system: String,
+    /// The point in drawing coordinates that is placed at `reference_point`.
+    pub design_point: [f64; 3],
+    /// The same point in CRS coordinates (easting/northing, or lon/lat).
+    pub reference_point: [f64; 3],
+    /// North in drawing XY; `[0.0, 1.0]` is drawing +Y.
+    pub north_direction: [f64; 2],
 }
 
 /// One XRecord addressed by dictionary path + name (API v13, additive).

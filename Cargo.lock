@@ -2625,7 +2625,7 @@ dependencies = [
 [[package]]
 name = "iced_aw"
 version = "0.14.1"
-source = "git+https://github.com/HakanSeven12/iced_aw.git?branch=agent%2Ffix-iced-fonts#9bff59df71c215abe91710870634886967fc9f1c"
+source = "git+https://github.com/HakanSeven12/iced_aw.git?branch=agent%2Ffix-iced-fonts#cf24e6498265ed6a5f91a8c5b0c92734c0c4c925"
 dependencies = [
  "iced_core",
  "iced_fonts_macros",

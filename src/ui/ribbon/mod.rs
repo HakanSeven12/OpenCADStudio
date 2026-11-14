@@ -262,8 +262,11 @@ const DD_PAD: Padding = Padding {
 const DD_GAP: f32 = 6.0;
 /// The least width of a list with a header, which wraps within it.
 const DD_HEADER_MIN_W: f32 = 190.0;
-/// Width of the accent outline of a contextual tab.
-const TAB_OUTLINE: f32 = 1.5;
+/// Width of the accent outline of a contextual tab: a hairline, one
+/// physical pixel like every other line.
+fn tab_outline_w() -> f32 {
+    crate::ui::style::palette_metrics::line()
+}
 
 /// The contextual tab, which the tool area's accent line leaves a gap
 /// under.
@@ -281,15 +284,15 @@ fn tab_outline(tab: Element<'_, Message>) -> Element<'_, Message> {
     };
     iced::widget::stack![
         tab,
-        container(line(Fill, Length::Fixed(TAB_OUTLINE)))
+        container(line(Fill, Length::Fixed(tab_outline_w())))
             .width(Fill)
             .height(Fill)
             .align_top(Fill),
-        container(line(Length::Fixed(TAB_OUTLINE), Fill))
+        container(line(Length::Fixed(tab_outline_w()), Fill))
             .width(Fill)
             .height(Fill)
             .align_left(Fill),
-        container(line(Length::Fixed(TAB_OUTLINE), Fill))
+        container(line(Length::Fixed(tab_outline_w()), Fill))
             .width(Fill)
             .height(Fill)
             .align_right(Fill),
@@ -329,11 +332,6 @@ fn panel_height(titles: bool) -> f32 {
         TOOL_BAR_H_UNTITLED
     }
 }
-
-/// The width of a contextual tab's outline and of the line along the top of
-/// its tool area. The design's 1.5 px draws as one faint pixel on a 1x
-/// screen; 2 px stays crisp.
-const CONTEXTUAL_LINE: f32 = 2.0;
 
 /// Whether module `id`'s tab is contextual: shown only while its context
 /// lasts (a block being edited).
@@ -1620,7 +1618,7 @@ impl Ribbon {
                 container(
                     iced::widget::Space::new()
                         .width(width)
-                        .height(CONTEXTUAL_LINE),
+                        .height(tab_outline_w()),
                 )
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(chrome::accent(theme))),
@@ -1630,9 +1628,9 @@ impl Ribbon {
             let line: Element<'_, Message> =
                 match crate::ui::wrap_bar::recent_bounds(CONTEXTUAL_TAB_ID) {
                     Some(tab) => row![
-                        line(Length::Fixed((tab.x + TAB_OUTLINE).max(0.0))),
+                        line(Length::Fixed((tab.x + tab_outline_w()).max(0.0))),
                         iced::widget::Space::new()
-                            .width(Length::Fixed((tab.width - 2.0 * TAB_OUTLINE).max(0.0))),
+                            .width(Length::Fixed((tab.width - 2.0 * tab_outline_w()).max(0.0))),
                         line(Fill),
                     ]
                     .into(),

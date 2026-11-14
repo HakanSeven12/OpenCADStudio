@@ -14,7 +14,6 @@ use document::types::{Color as AcadColor, LineWeight};
 use document::Handle;
 use iced::widget::{
     button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
-    tooltip,
 };
 use iced::Padding;
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
@@ -983,14 +982,6 @@ impl LayerPanel {
             .width(Length::Fixed(TREE_W))
             .height(Length::Fill)
             .padding(Padding::ZERO.left(pm::GRID_INSET_L).top(pm::TOOL_GAP))
-            .style(|theme: &Theme| container::Style {
-                border: Border {
-                    color: chrome::border(theme),
-                    width: pm::line(),
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
             .into()
     }
 
@@ -1383,7 +1374,7 @@ impl LayerPanel {
 
         // The room the table has: beside the tree on a wide pallet.
         let table_w = if band == WidthBand::Wide && !self.columns_menu {
-            (inner_w - TREE_W - 2.0 * pm::LINE).max(0.0)
+            (inner_w - TREE_W - pm::LINE).max(0.0)
         } else {
             inner_w
         };
@@ -1552,7 +1543,21 @@ impl LayerPanel {
             // A wide pallet has the tree beside the table.
             column![
                 toolbar,
-                row![self.tree(), grid].height(Length::Fill),
+                // No frame round the tree: one line parts it from the table.
+                row![
+                    self.tree(),
+                    container(
+                        iced::widget::Space::new()
+                            .width(pm::line())
+                            .height(Length::Fill)
+                    )
+                    .style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(chrome::border(theme))),
+                        ..Default::default()
+                    }),
+                    grid
+                ]
+                .height(Length::Fill),
                 self.tree_footer(),
             ]
             .height(Length::Fill)
@@ -1916,7 +1921,7 @@ fn with_tip<'a>(
     compact: bool,
 ) -> Element<'a, Message> {
     if compact {
-        tooltip(content, name_tip_owned(label), tooltip::Position::Bottom).into()
+        crate::ui::kit::tooltip(content, label, crate::ui::kit::TipPosition::Bottom)
     } else {
         content.into()
     }
@@ -2019,22 +2024,6 @@ fn toolbar_btn_cond<'a>(
 }
 
 // ── Layer row ─────────────────────────────────────────────────────────────
-
-/// Hover popup showing a layer's full name when the cell truncates it.
-fn name_tip<'a>(name: &'a str) -> Element<'a, Message> {
-    container(text(name).size(ui_text::UI).line_height(ui_line()))
-        .padding(TIP_PAD)
-        .style(crate::ui::palette_menu::frame_style)
-        .into()
-}
-
-/// A tooltip with owned text, for the toolbar's icon-only buttons.
-fn name_tip_owned<'a>(label: Cow<'static, str>) -> Element<'a, Message> {
-    container(text(label).size(ui_text::UI).line_height(ui_line()))
-        .padding(TIP_PAD)
-        .style(crate::ui::palette_menu::frame_style)
-        .into()
-}
 
 /// A column header cell `width` wide: its title, then the line to the
 /// next column with a grip sending `grab` to size it.
@@ -2177,12 +2166,11 @@ fn layer_row<'a>(
         // When the name is truncated, reveal the full text on hover so the
         // user can still read it without widening the column.
         if layer.name.chars().count() > name_budget {
-            tooltip(
+            crate::ui::kit::tooltip(
                 name_btn,
-                name_tip(&layer.name),
-                tooltip::Position::FollowCursor,
+                layer.name.clone(),
+                crate::ui::kit::TipPosition::FollowCursor,
             )
-            .into()
         } else {
             name_btn.into()
         }
@@ -2305,12 +2293,11 @@ fn layer_row<'a>(
         .width(w(LayerSortCol::Objects))
         .align_x(iced::alignment::Horizontal::Right);
     let objects_cell: Element<'_, Message> = if layer.in_blocks > 0 {
-        tooltip(
+        crate::ui::kit::tooltip(
             objects_text,
-            name_tip_owned(crate::tf!("{} of them in blocks", layer.in_blocks)),
-            tooltip::Position::FollowCursor,
+            crate::tf!("{} of them in blocks", layer.in_blocks),
+            crate::ui::kit::TipPosition::FollowCursor,
         )
-        .into()
     } else {
         objects_text.into()
     };
@@ -2594,14 +2581,6 @@ const COL_EYE: f32 = 30.0;
 const NODE_PICKER_W: f32 = 130.0;
 /// Width of the column chooser.
 const COLUMN_CHOOSER_W: f32 = 220.0;
-/// Room around a name tooltip's text.
-const TIP_PAD: Padding = Padding {
-    top: pm::LINE * 2.0,
-    bottom: pm::LINE * 2.0,
-    left: pm::CELL_PAD_X * 2.0,
-    right: pm::CELL_PAD_X * 2.0,
-};
-
 #[cfg(test)]
 mod column_layout_tests {
     use super::*;

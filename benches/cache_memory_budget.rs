@@ -20,10 +20,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use document::entities::RasterImage;
+use document::entities::{Line, RasterImage};
+use document::objects::{Material, MaterialMap, ObjectType};
 use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 use serde::{Deserialize, Serialize};
 use OpenCADStudio::scene::model::image_model::{self, ImageModel};
+use OpenCADStudio::scene::model::material_model;
 use OpenCADStudio::scene::model::pdf_raster::{self, PageAdjust};
 
 struct CountingAllocator;
@@ -102,7 +105,11 @@ struct Report {
     elapsed_ms: f64,
 }
 
-const SCENARIOS: &[&str] = &["pdf_underlay_zoom", "image_decode_retention"];
+const SCENARIOS: &[&str] = &[
+    "pdf_underlay_zoom",
+    "image_decode_retention",
+    "material_texture_retention",
+];
 
 /// Half-octave DPI bands from the display ceiling down to the floor, the same
 /// quantisation the underlay display path applies to the zoom (`quantize_wpp`
@@ -312,11 +319,107 @@ fn image_decode_retention() -> Report {
     }
 }
 
+/// One deterministic synthetic texture, encoded as PNG on disk. The pixel
+/// pattern is a pure function of (seed, x, y), so the compressed bytes — and
+/// therefore the decoded RGBA the material cache retains — are identical on
+/// every run. Smooth gradients keep the compressed source small so the
+/// measurement is dominated by the decoded pixel buffers, not the PNG bytes.
+fn bench_texture_png(seed: u32, side: u32) -> Vec<u8> {
+    let mut img = image::RgbaImage::new(side, side);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        let r = ((x * 255) / side) as u8;
+        let g = ((y * 255) / side) as u8;
+        let b = ((seed * 11) & 0xFF) as u8;
+        *px = image::Rgba([r, g, b, 255]);
+    }
+    let mut bytes = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .expect("bench texture encode");
+    bytes
+}
+
+/// A drawing whose materials each reference a distinct texture file. Every
+/// material is resolved through the public entry point (decode into the
+/// per-path material texture cache), then the resolved mesh material is
+/// dropped — everything still live afterwards is cache retention. The
+/// revisit pass re-resolves the same materials: with an unbounded cache it is
+/// all hits and retention stays at the full working set.
+fn material_texture_retention() -> Report {
+    let started = Instant::now();
+    let mut steps = Vec::new();
+
+    const COUNT: u32 = 40;
+    const SIDE: u32 = 1024;
+    let dir = std::env::temp_dir().join(format!("ocs-material-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("bench texture dir");
+    let mut document = Document::new();
+    let mut entities = Vec::new();
+    for i in 0..COUNT {
+        let path = dir.join(format!("texture-{i}.png"));
+        std::fs::write(&path, bench_texture_png(i, SIDE)).expect("bench texture write");
+        let mut material = Material::new();
+        material.name = format!("bench-material-{i}");
+        material.diffuse_map = MaterialMap {
+            source: 1,
+            file_name: path.to_string_lossy().into_owned(),
+            ..MaterialMap::default()
+        };
+        let handle = Handle::new(u64::from(i) + 1);
+        document
+            .objects
+            .insert(handle, ObjectType::Material(material));
+        let mut line = Line::new();
+        line.common.material_flags = 3;
+        line.common.material_handle = Some(handle);
+        entities.push(EntityType::Line(line));
+    }
+    steps.push(Step {
+        label: "written-textures".to_string(),
+        live_bytes: live(),
+    });
+
+    for pass in ["load", "revisit"] {
+        for (i, entity) in entities.iter().enumerate() {
+            let material = material_model::resolve_material_with_base(
+                &document,
+                entity,
+                [1.0, 1.0, 1.0, 1.0],
+                None,
+                Some(&dir),
+            );
+            assert!(
+                material.diffuse_map.image.is_some(),
+                "bench texture {i} must decode"
+            );
+            black_box(&material);
+            drop(material);
+            steps.push(Step {
+                label: format!("{pass} mat{i}"),
+                live_bytes: live(),
+            });
+        }
+    }
+
+    let report = Report {
+        scenario: "material_texture_retention".to_string(),
+        final_live_bytes: live(),
+        peak_live_bytes: PEAK.load(Ordering::Relaxed),
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        steps,
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    report
+}
+
 fn run_scenario(name: &str) -> Report {
     allocator_self_test();
     match name {
         "pdf_underlay_zoom" => pdf_underlay_zoom(),
         "image_decode_retention" => image_decode_retention(),
+        "material_texture_retention" => material_texture_retention(),
         other => panic!("unknown scenario: {other}"),
     }
 }

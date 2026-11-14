@@ -255,6 +255,27 @@ pub fn labeled_field<'a>(
     .into()
 }
 
+/// A `label : text field` row whose empty field shows `hint`.
+pub fn labeled_field_hint<'a>(
+    label: Cow<'static, str>,
+    value: &'a str,
+    hint: &str,
+    on_input: impl Fn(String) -> Message + 'a,
+    width: impl Into<Length>,
+) -> Element<'a, Message> {
+    row![
+        row_label(label),
+        text_input(hint, value)
+            .on_input(on_input)
+            .style(field_style)
+            .size(12)
+            .width(width),
+    ]
+    .spacing(8)
+    .align_y(iced::Center)
+    .into()
+}
+
 /// A `label : text field` row that renders read-only when `enabled` is false.
 pub fn labeled_field_enabled<'a>(
     label: Cow<'static, str>,

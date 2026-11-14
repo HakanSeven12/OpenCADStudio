@@ -20,7 +20,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use document::entities::RasterImage;
+use document::types::Vector3;
 use serde::{Deserialize, Serialize};
+use OpenCADStudio::scene::model::image_model::{self, ImageModel};
 use OpenCADStudio::scene::model::pdf_raster::{self, PageAdjust};
 
 struct CountingAllocator;
@@ -99,7 +102,7 @@ struct Report {
     elapsed_ms: f64,
 }
 
-const SCENARIOS: &[&str] = &["pdf_underlay_zoom"];
+const SCENARIOS: &[&str] = &["pdf_underlay_zoom", "image_decode_retention"];
 
 /// Half-octave DPI bands from the display ceiling down to the floor, the same
 /// quantisation the underlay display path applies to the zoom (`quantize_wpp`
@@ -234,10 +237,86 @@ fn pdf_underlay_zoom() -> Report {
     }
 }
 
+/// One deterministic synthetic raster, encoded as PNG in-process. The pixel
+/// pattern is a pure function of (seed, x, y), so the compressed bytes — and
+/// therefore the decoded RGBA the caches retain — are identical on every run.
+/// Smooth gradients keep the compressed source small so the measurement is
+/// dominated by the decoded and adjusted pixel buffers, not the PNG bytes.
+fn bench_image_png(seed: u32, side: u32) -> Vec<u8> {
+    let mut img = image::RgbaImage::new(side, side);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        let r = ((x * 255) / side) as u8;
+        let g = ((y * 255) / side) as u8;
+        let b = ((seed * 7) & 0xFF) as u8;
+        *px = image::Rgba([r, g, b, 255]);
+    }
+    let mut bytes = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .expect("bench PNG encode");
+    bytes
+}
+
+/// A drawing that references many distinct raster images. Each is registered
+/// (compressed bytes), resolved (decoded into the per-path image cache) and
+/// built into an `ImageModel` with a non-neutral brightness/contrast (so the
+/// adjusted-pixel cache stores a recoloured copy). The frame's handles are
+/// dropped after every step, so everything still live is cache retention.
+/// The revisit pass re-reads the same references: with unbounded caches it is
+/// all hits and retention stays at the full working set.
+fn image_decode_retention() -> Report {
+    let started = Instant::now();
+    let mut steps = Vec::new();
+
+    const COUNT: u32 = 40;
+    const SIDE: u32 = 1024;
+    let paths: Vec<String> = (0..COUNT)
+        .map(|i| format!("memory://image-retention-bench-{i}.png"))
+        .collect();
+    for (i, path) in paths.iter().enumerate() {
+        image_model::register_source(path, Arc::new(bench_image_png(i as u32, SIDE)));
+    }
+    steps.push(Step {
+        label: "registered-sources".to_string(),
+        live_bytes: live(),
+    });
+
+    for pass in ["load", "revisit"] {
+        for (i, path) in paths.iter().enumerate() {
+            let mut entity = RasterImage::new(
+                path,
+                Vector3::new(0.0, 0.0, 0.0),
+                f64::from(SIDE),
+                f64::from(SIDE),
+            );
+            entity.brightness = 60;
+            entity.contrast = 40;
+            let model = ImageModel::from_raster_image(&entity).expect("bench image must decode");
+            black_box(&model);
+            drop(model);
+            steps.push(Step {
+                label: format!("{pass} img{i}"),
+                live_bytes: live(),
+            });
+        }
+    }
+
+    Report {
+        scenario: "image_decode_retention".to_string(),
+        final_live_bytes: live(),
+        peak_live_bytes: PEAK.load(Ordering::Relaxed),
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        steps,
+    }
+}
+
 fn run_scenario(name: &str) -> Report {
     allocator_self_test();
     match name {
         "pdf_underlay_zoom" => pdf_underlay_zoom(),
+        "image_decode_retention" => image_decode_retention(),
         other => panic!("unknown scenario: {other}"),
     }
 }

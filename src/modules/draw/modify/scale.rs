@@ -234,20 +234,17 @@ impl CadCommand for ScaleCommand {
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
-        let (base, factor): (DVec3, f32) = match &self.step {
+        let (base, factor): (DVec3, f64) = match &self.step {
             // Default flow: scale live by cursor distance from the base.
-            Step::Factor { base } => (*base, base.distance(pt).max(1e-6) as f32),
+            Step::Factor { base } => (*base, base.distance(pt)),
             // Reference flow, new-length step: factor = cursor_dist / ref_dist.
-            Step::RefNew { base, ref_dist } => (*base, (base.distance(pt) / ref_dist) as f32),
+            Step::RefNew { base, ref_dist } => (*base, base.distance(pt) / ref_dist),
             // The reference length is measured between two points independent
             // of the scale base.
             Step::RefSecond { first, .. } => {
-                return vec![WireModel::solid(
+                return vec![WireModel::solid_f64(
                     "rubber_band".into(),
-                    vec![
-                        [first.x as f32, first.y as f32, first.z as f32],
-                        [pt.x as f32, pt.y as f32, pt.z as f32],
-                    ],
+                    vec![first.to_array(), pt.to_array()],
                     WireModel::CYAN,
                     false,
                 )];
@@ -257,14 +254,11 @@ impl CadCommand for ScaleCommand {
         let mut out: Vec<WireModel> = self
             .wire_models
             .iter()
-            .map(|w| w.scaled(base.as_vec3(), factor))
+            .map(|w| w.scaled_precise(base, factor))
             .collect();
-        out.push(WireModel::solid(
+        out.push(WireModel::solid_f64(
             "rubber_band".into(),
-            vec![
-                [base.x as f32, base.y as f32, base.z as f32],
-                [pt.x as f32, pt.y as f32, pt.z as f32],
-            ],
+            vec![base.to_array(), pt.to_array()],
             WireModel::CYAN,
             false,
         ));
@@ -318,3 +312,7 @@ impl CadCommand for ScaleCommand {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "scale/scaling_tests.rs"]
+mod scaling_tests;

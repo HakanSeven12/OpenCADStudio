@@ -4498,11 +4498,20 @@ impl OpenCADStudio {
                 .filter(|s| s.snap_type == crate::snap::SnapType::Tangent)
                 .and_then(|s| s.tangent_obj);
             let mut modifier_hidden = None;
+            let parameter_preview = self.block_parameter_geometry_preview(i, effective);
             let mut previews = if let Some((wires, hidden)) =
                 self.point_modifier_preview(i, effective, modifier_tangent)
             {
                 modifier_hidden = Some(hidden);
                 wires
+            } else if let Some(preview) = parameter_preview {
+                // Same branch as refresh_active_cmd_preview: without it the
+                // move pass and the dwell tick alternate frames (#3010).
+                self.tabs[i]
+                    .scene
+                    .set_command_preview_hatches(preview.hatches);
+                modifier_hidden = Some(preview.hidden);
+                preview.wires
             } else if needs_structure {
                 let mut p = self.tabs[i]
                     .active_cmd

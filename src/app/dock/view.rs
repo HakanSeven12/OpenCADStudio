@@ -11,7 +11,7 @@ use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 /// One row of the edge (+) pallet menu: a built-in panel, or a panel a
 /// plugin registered, identified by its numeric dock id and carrying the
 /// title the plugin authored (a `PanelId::Plugin(_)` literal is not a title).
-pub(super) enum MenuPanel {
+pub(in crate::app) enum MenuPanel {
     Builtin(crate::ui::dock::PanelId),
     Plugin(u32, String),
 }

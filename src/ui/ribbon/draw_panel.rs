@@ -19,7 +19,7 @@ use crate::app::Message;
 use crate::modules::IconKind;
 use crate::t;
 use crate::ui::icons;
-use crate::ui::style::{chrome, ribbon_metrics as metrics};
+use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
 /// The title strip at the bottom of a panel and the line over it, which an
@@ -609,7 +609,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
         };
         let msg = Message::RibbonTextLayer(value);
         let item: Element<'a, Message> = button(
-            row![swatch, text(label.clone()).size(11)]
+            row![swatch, text(label.clone()).size(ui_text::UI)]
                 .spacing(6)
                 .align_y(iced::Center),
         )
@@ -648,7 +648,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
             metrics::SMALL_ICON
         ),
         text(t!("Text Layer"))
-            .size(11)
+            .size(ui_text::UI)
             .style(|theme: &Theme| text::Style {
                 color: Some(chrome::muted(theme)),
             }),
@@ -805,12 +805,12 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
         switch,
         keytips::label_anchor(
             || keytips::label_id(&keytips::item_anchor(panel_id, keytips::XREF_FADE)),
-            text(t!("Xref fading")).size(11),
+            text(t!("Xref fading")).size(ui_text::UI),
         ),
         iced::widget::slider(0..=90u8, amount, Message::XrefFadeSlide)
             .on_release(Message::XrefFadeCommit)
             .width(Fill),
-        text(amount.to_string()).size(11).width(22),
+        text(amount.to_string()).size(ui_text::UI).width(22),
     ]
     .spacing(6)
     .align_y(iced::Center)
@@ -923,7 +923,7 @@ fn options_list<'a>(
                 dropdown_id: command,
                 cmd,
             };
-            let item = button(text(translated.clone()).size(11))
+            let item = button(text(translated.clone()).size(ui_text::UI))
                 .on_press(msg.clone())
                 .style(popup_row_style)
                 .width(Fill)

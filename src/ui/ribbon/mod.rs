@@ -49,7 +49,7 @@ mod ribbon_menu;
 mod search;
 mod stretch_column;
 use crate::t;
-use crate::ui::style::{chrome, ribbon_metrics as metrics};
+use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
@@ -1723,7 +1723,7 @@ impl Ribbon {
                     } else {
                         Message::RedoMany(step)
                     };
-                    let btn = button(text(label.clone()).size(11))
+                    let btn = button(text(label.clone()).size(ui_text::UI))
                         .on_press(msg.clone())
                         .style(popup_row_style)
                         .width(Fill)
@@ -1921,7 +1921,7 @@ impl Ribbon {
                 row![
                     crate::ui::icons::themed_check_cell(on),
                     swatch,
-                    text(label.clone()).size(11)
+                    text(label.clone()).size(ui_text::UI)
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
@@ -2040,7 +2040,7 @@ impl Ribbon {
             // the displayed one (the selection's layer).
             let checkmark: Element<'_, Message> =
                 crate::ui::icons::themed_check_cell(info.name == self.current_layer);
-            let label = text(&info.name).size(11);
+            let label = text(&info.name).size(ui_text::UI);
 
             // The label area selects the layer as active; the
             // icon buttons above handle their own toggles.
@@ -2076,7 +2076,7 @@ impl Ribbon {
         let search = iced::widget::text_input(t!("Search layers…").as_ref(), &self.layer_filter)
             .id(iced::widget::Id::new(widgets::LAYER_SEARCH_ID))
             .on_input(Message::RibbonLayerFilterChanged)
-            .size(11)
+            .size(ui_text::UI)
             .padding([4, 6]);
         let list = DropdownList::with_options(rows, Length::Fixed(list_h), Length::Fill, 0.0, 0.0)
             .selected(initial_selected)
@@ -2085,7 +2085,7 @@ impl Ribbon {
         let state_manager = button(
             row![
                 crate::ui::icons::themed_arrow_right(9.0),
-                text(t!("Layer State Manager…")).size(11),
+                text(t!("Layer State Manager…")).size(ui_text::UI),
             ]
             .spacing(7)
             .align_y(iced::Center),
@@ -2097,7 +2097,7 @@ impl Ribbon {
         // Saved layer states restore with one click, as the manager's
         // Restore does.
         let states = column(self.layer_states.iter().map(|name| {
-            button(text(name).size(11))
+            button(text(name).size(ui_text::UI))
                 .on_press(Message::RibbonLayerStateRestore(name.clone()))
                 .style(popup_row_style)
                 .width(Fill)
@@ -2215,7 +2215,7 @@ impl Ribbon {
                 };
                 let checkmark: Element<Message> = crate::ui::icons::themed_check_cell(is_sel);
                 let btn = button(
-                    row![checkmark, text(name.clone()).size(11),]
+                    row![checkmark, text(name.clone()).size(ui_text::UI),]
                         .spacing(4)
                         .align_y(iced::Center),
                 )
@@ -2231,7 +2231,7 @@ impl Ribbon {
             let label = t!("Manage…").into_owned();
             let msg = Message::Command(mgr.to_string());
             rows.push(DropdownRow::item(
-                button(text(label.clone()).size(11))
+                button(text(label.clone()).size(ui_text::UI))
                     .on_press(msg.clone())
                     .style(popup_row_style)
                     .width(Fill)
@@ -2309,7 +2309,9 @@ impl Ribbon {
                 }
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let disp = linetype_display_name(&lt.name);
-                let name_col = text(disp.clone()).size(11).width(Length::Fixed(90.0));
+                let name_col = text(disp.clone())
+                    .size(ui_text::UI)
+                    .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
                 let msg = Message::RibbonLinetypeChanged(lt.name);
                 let btn = button(
@@ -2358,7 +2360,7 @@ impl Ribbon {
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let msg = Message::RibbonLineweightChanged(item.0);
                 let btn = button(
-                    row![check, text(label.clone()).size(11)]
+                    row![check, text(label.clone()).size(ui_text::UI)]
                         .spacing(5)
                         .align_y(iced::Center),
                 )
@@ -2416,7 +2418,12 @@ fn dropdown_list<'a>(
     let mut rows: Vec<DropdownRow<Message>> = Vec::with_capacity(items.len() + 1);
     if let Some(header) = &header {
         rows.push(DropdownRow::header(
-            container(text(header.clone()).size(10).style(muted_text_style)).padding([4, 10]),
+            container(
+                text(header.clone())
+                    .size(ui_text::UI_SMALL)
+                    .style(muted_text_style),
+            )
+            .padding([4, 10]),
         ));
     }
     let mut initial_selected: Option<usize> = None;

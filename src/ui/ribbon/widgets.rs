@@ -23,7 +23,7 @@ use crate::modules::{IconKind, ModuleEvent, RibbonItem, StyleKey, ToolDef};
 use crate::t;
 use crate::ui::icons;
 use crate::ui::properties::{acad_color_display, linetype_display_name, LwItem};
-use crate::ui::style::{chrome, ribbon_metrics as metrics};
+use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::PosReport;
 
 use super::LayerInfo;
@@ -612,10 +612,10 @@ pub(super) fn layer_combo_face<'a>(
     let label: Element<'a, Message> = if keytip_label {
         super::keytips::label_anchor(
             || super::keytips::label_id(id),
-            text(active_layer_label).size(11),
+            text(active_layer_label).size(ui_text::UI),
         )
     } else {
-        text(active_layer_label).size(11).into()
+        text(active_layer_label).size(ui_text::UI).into()
     };
 
     let combo_btn = button(
@@ -703,30 +703,12 @@ pub(super) fn combo_btn_style(
 /// A row of a ribbon popup or dropdown. An idle row is clear, so it does
 /// not paint over the popup's border.
 pub(crate) fn popup_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-    button::Style {
-        background: hovered.then(|| Background::Color(chrome::hover(theme))),
-        text_color: if hovered {
-            chrome::strong(theme)
-        } else {
-            chrome::text(theme)
-        },
-        ..Default::default()
-    }
+    crate::ui::kit::dropdown_option_style(false)(theme, status)
 }
 
 /// A ribbon popup or dropdown: `panel` inside a 1 px `border`.
 pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(chrome::panel(theme))),
-        text_color: Some(chrome::text(theme)),
-        border: Border {
-            color: chrome::border(theme),
-            width: crate::ui::icons::hairline(),
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
+    crate::ui::palette_menu::frame_style(theme)
 }
 
 pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
@@ -738,7 +720,7 @@ pub(super) fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
 // ── Tooltip helpers ────────────────────────────────────────────────────────
 
 pub(super) fn make_tip(tip: String) -> Element<'static, Message> {
-    text(tip).size(11).into()
+    text(tip).size(ui_text::UI).into()
 }
 
 /// A tool's tooltip: its name, its description when one is known, and the
@@ -1509,7 +1491,7 @@ fn large_item<'a>(
                         swatch_el,
                         container(super::keytips::label_anchor(
                             || super::keytips::label_id(dd_id),
-                            text(label).size(11),
+                            text(label).size(ui_text::UI),
                         ))
                         .width(Fill)
                         .clip(true),
@@ -1589,7 +1571,7 @@ fn large_item<'a>(
                 row![
                     container(super::keytips::label_anchor(
                         || super::keytips::label_id(combo_id),
-                        text(active.clone()).size(11),
+                        text(active.clone()).size(ui_text::UI),
                     ))
                     .width(Fill)
                     .clip(true),
@@ -1757,9 +1739,13 @@ pub(super) fn layer_combo<'a>(
                 12.0
             ),
             swatch,
-            container(text(label).size(11).wrapping(advanced_text::Wrapping::None))
-                .width(Fill)
-                .clip(true),
+            container(
+                text(label)
+                    .size(ui_text::UI)
+                    .wrapping(advanced_text::Wrapping::None)
+            )
+            .width(Fill)
+            .clip(true),
             if open {
                 icons::themed_arrow_up(9.0)
             } else {
@@ -1790,7 +1776,7 @@ fn text_find_box<'a>(value: &str) -> Element<'a, Message> {
         .id(iced::widget::Id::new(TEXT_FIND_ID))
         .on_input(Message::RibbonTextFind)
         .on_submit(Message::RibbonTextFindSubmit)
-        .size(11)
+        .size(ui_text::UI)
         .padding([3, 6])
         .width(Fill);
     let search = button(make_icon(
@@ -1820,7 +1806,7 @@ fn text_height_box<'a>(value: &str) -> Element<'a, Message> {
         .id(iced::widget::Id::new(TEXT_HEIGHT_ID))
         .on_input(Message::RibbonTextHeight)
         .on_submit(Message::RibbonTextHeightSubmit)
-        .size(11)
+        .size(ui_text::UI)
         .padding([3, 6])
         .width(Fill);
     let input = tooltip(

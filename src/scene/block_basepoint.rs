@@ -156,7 +156,7 @@ fn move_attributes(document: &mut Document, name: &str, old: Vector3, new: Vecto
             crate::scene::annotative::transform_insert_attribute_contexts(
                 document,
                 &before,
-                &crate::command::EntityTransform::Affine(transform),
+                &crate::entities::transform::EntityTransform::Affine(transform),
             );
         }
     }

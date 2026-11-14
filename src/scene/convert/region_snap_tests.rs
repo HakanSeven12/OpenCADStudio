@@ -131,7 +131,7 @@ use glam::{DVec3, Mat4, Vec3};
 use iced::{Point, Rectangle};
 use kernel::geom2d::{Circle, Curve, Line};
 
-use crate::command::WorkingPlane;
+use crate::entities::transform::WorkingPlane;
 use crate::scene::model::{presspull_model::region_from_loops, wire_model::WireModel};
 use crate::scene::pick::interaction_index::{InteractionIndex, WireSource};
 use crate::snap::{SnapResult, SnapType, Snapper};

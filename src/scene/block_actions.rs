@@ -1976,7 +1976,7 @@ fn evaluate_impl(
             _ => None,
         };
         let transform = match kind {
-            Kind::Move => crate::command::EntityTransform::Translate(
+            Kind::Move => crate::entities::transform::EntityTransform::Translate(
                 move_translation
                     .flatten()
                     .ok_or("This Move action uses unsupported parameter connections.")?,
@@ -1987,16 +1987,18 @@ fn evaluate_impl(
                 };
                 let delta = action_move_delta(&q, base, end, &action.connections)
                     .ok_or("This Stretch action uses unsupported parameter connections.")?;
-                crate::command::EntityTransform::Translate(options::displacement(
+                crate::entities::transform::EntityTransform::Translate(options::displacement(
                     &action.offsets,
                     delta,
                 )?)
             }
-            Kind::PolarStretch => crate::command::EntityTransform::Translate(end - q.end),
+            Kind::PolarStretch => {
+                crate::entities::transform::EntityTransform::Translate(end - q.end)
+            }
             Kind::Rotate => {
                 let a = end - base;
                 let b = q.end - q.base;
-                crate::command::EntityTransform::Rotate {
+                crate::entities::transform::EntityTransform::Rotate {
                     center: options::pivot(
                         options::base(baseline, *action_handle)
                             .ok_or("The Rotate action base is unavailable.")?,
@@ -2008,7 +2010,7 @@ fn evaluate_impl(
             }
             Kind::Flip => {
                 if value(&staged, &q)? == Value::Flip(false) {
-                    crate::command::EntityTransform::Translate(DVec3::ZERO)
+                    crate::entities::transform::EntityTransform::Translate(DVec3::ZERO)
                 } else {
                     let (p1, p2) = if let Some(frame) = active_frames
                         .get(&q.handle)
@@ -2018,7 +2020,7 @@ fn evaluate_impl(
                     } else {
                         (q.base, q.end)
                     };
-                    crate::command::EntityTransform::Mirror {
+                    crate::entities::transform::EntityTransform::Mirror {
                         p1,
                         p2,
                         working_normal: DVec3::Z,
@@ -2030,7 +2032,7 @@ fn evaluate_impl(
                 if !factor.is_finite() || factor < 1e-9 {
                     return Err("Specify a positive scale distance.");
                 }
-                crate::command::EntityTransform::Scale {
+                crate::entities::transform::EntityTransform::Scale {
                     center: options::pivot(
                         options::base(baseline, *action_handle)
                             .ok_or("The Scale action base is unavailable.")?,
@@ -2090,8 +2092,8 @@ fn evaluate_impl(
                 continue;
             }
             match &prepared[&action].3 {
-                crate::command::EntityTransform::Translate(delta) => point += *delta,
-                crate::command::EntityTransform::Mirror {
+                crate::entities::transform::EntityTransform::Translate(delta) => point += *delta,
+                crate::entities::transform::EntityTransform::Mirror {
                     p1,
                     p2,
                     working_normal,
@@ -2132,7 +2134,8 @@ fn evaluate_impl(
         };
         match &object.data {
             DynamicBlockData::StretchAction(action) => {
-                let crate::command::EntityTransform::Translate(delta) = transform else {
+                let crate::entities::transform::EntityTransform::Translate(delta) = transform
+                else {
                     unreachable!()
                 };
                 stretch::apply(entity, action, *delta)?;
@@ -2163,7 +2166,7 @@ fn evaluate_impl(
             };
             super::view::dispatch::apply_transform(
                 entity,
-                &crate::command::EntityTransform::Translate(translation),
+                &crate::entities::transform::EntityTransform::Translate(translation),
             );
         }
         let bounds = entity.as_entity().bounding_box();

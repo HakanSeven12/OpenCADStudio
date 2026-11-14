@@ -235,7 +235,7 @@ pub(super) fn displaced(source: &EntityType, delta: DVec3) -> Result<EntityType,
     let mut copy = source.clone();
     super::super::view::dispatch::apply_transform(
         &mut copy,
-        &crate::command::EntityTransform::Translate(delta),
+        &crate::entities::transform::EntityTransform::Translate(delta),
     );
     let bounds = copy.as_entity().bounding_box();
     if !v(bounds.min).is_finite() || !v(bounds.max).is_finite() {

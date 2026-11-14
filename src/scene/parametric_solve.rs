@@ -967,7 +967,7 @@ fn apply_spatial_concentric_constraints(
         };
         crate::scene::view::dispatch::apply_transform(
             &mut entity,
-            &crate::command::EntityTransform::Translate(translation),
+            &crate::entities::transform::EntityTransform::Translate(translation),
         );
         if let Some((_, current)) = results
             .iter_mut()

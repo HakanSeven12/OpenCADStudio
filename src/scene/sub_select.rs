@@ -11,7 +11,7 @@ use kernel::geom2d::{Curve, Polyline};
 use kernel::space::PlanarCurve;
 
 use super::Scene;
-use crate::command::EntityTransform;
+use crate::entities::transform::EntityTransform;
 
 /// The polyline whose segments a pick indexes, with the entity vertex each
 /// of its vertices is: an LWPOLYLINE, or a heavy 2D POLYLINE along the curve

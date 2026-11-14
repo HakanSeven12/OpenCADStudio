@@ -2784,7 +2784,7 @@ impl Scene {
         handle: Handle,
         field: &str,
         value: &str,
-        plane: crate::command::WorkingPlane,
+        plane: crate::entities::transform::WorkingPlane,
     ) -> Option<bool> {
         let axis = match field {
             "s3d_px" | "rgn_px" | "bdy_px" | "srf_px" => 0,
@@ -2876,7 +2876,7 @@ impl Scene {
             if let GripApply::Translate(delta) = apply {
                 self.transform_entities(
                     &[handle],
-                    &crate::command::EntityTransform::Translate(delta),
+                    &crate::entities::transform::EntityTransform::Translate(delta),
                 );
             }
             return;
@@ -3019,7 +3019,7 @@ impl Scene {
                     if let Some(annotation) = self.document.get_entity_mut(annotation_handle) {
                         view::dispatch::apply_transform(
                             annotation,
-                            &crate::command::EntityTransform::Translate(delta),
+                            &crate::entities::transform::EntityTransform::Translate(delta),
                         );
                     }
 
@@ -3434,7 +3434,7 @@ mod define_transformed_block_xdict_tests {
         let name = scene
             .define_transformed_block(
                 &subs,
-                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+                &crate::entities::transform::EntityTransform::Translate(glam::DVec3::ZERO),
             )
             .expect("clone block must be created");
         let record = scene.document.block_records.get(&name).unwrap();
@@ -3478,7 +3478,7 @@ mod define_transformed_block_xdict_tests {
         let name = scene
             .define_transformed_block(
                 &subs,
-                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+                &crate::entities::transform::EntityTransform::Translate(glam::DVec3::ZERO),
             )
             .expect("clone block must be created");
         assert!(
@@ -3573,7 +3573,7 @@ mod add_entity_clone_xdict_tests {
 #[cfg(test)]
 mod copy_entities_xdict_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::objects::{
         Dictionary, ObjectType, ProxyObjectReference, ProxyReferenceKind, XRecord, XRecordValue,
     };
@@ -4313,7 +4313,7 @@ mod copy_entities_xdict_tests {
 #[cfg(test)]
 mod copy_entities_subhandle_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::{
         AttributeEntity, Insert, PolyfaceFace, PolyfaceMesh, PolyfaceVertex, PolygonMeshEntity,
         PolygonMeshVertex,
@@ -4449,7 +4449,7 @@ mod copy_entities_subhandle_tests {
 #[cfg(test)]
 mod copy_viewport_clip_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::{LwPolyline, Viewport};
     use glam::DVec3;
 
@@ -4505,7 +4505,7 @@ mod copy_viewport_clip_tests {
 #[cfg(test)]
 mod copy_field_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::objects::{Dictionary, Field, ObjectType};
     use glam::DVec3;
 
@@ -4672,7 +4672,8 @@ mod copy_field_tests {
 
 #[cfg(test)]
 mod table_picture_ownership_tests {
-    use crate::command::{CadCommand, CmdResult, EntityTransform};
+    use crate::command::{CadCommand, CmdResult};
+    use crate::entities::transform::EntityTransform;
     use crate::modules::annotate::table_cmd::TableCellEditCommand;
     use crate::scene::Scene;
     use document::entities::Table;

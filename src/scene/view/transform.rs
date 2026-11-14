@@ -1,7 +1,7 @@
 use document::types::{Transform, Vector3};
 use glam::DVec3;
 
-use crate::command::EntityTransform;
+use crate::entities::transform::EntityTransform;
 
 #[inline]
 fn to_v3(v: DVec3) -> Vector3 {
@@ -283,8 +283,8 @@ pub fn wcs_point_to_ocs(wcs: (f64, f64, f64), normal: (f64, f64, f64)) -> (f64, 
 #[cfg(test)]
 mod mirror_delegation_tests {
     use super::*;
-    use crate::command::EntityTransform;
     use crate::entities::traits::Transformable;
+    use crate::entities::transform::EntityTransform;
     use document::entities::hatch::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
     use document::entities::Hatch;
     use document::types::Vector2;

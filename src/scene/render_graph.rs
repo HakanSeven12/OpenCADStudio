@@ -840,14 +840,14 @@ pub(crate) fn dimension_picture_placement(
 /// the dimension would be applied again on top of the moved subs.
 pub(crate) fn dim_picture_placement(
     entity: &EntityType,
-) -> Option<crate::command::EntityTransform> {
+) -> Option<crate::entities::transform::EntityTransform> {
     let EntityType::Dimension(d) = entity else {
         return None;
     };
     if d.base().block_name.trim().is_empty() {
         return None;
     }
-    dimension_picture_placement(d.base()).map(crate::command::EntityTransform::Affine)
+    dimension_picture_placement(d.base()).map(crate::entities::transform::EntityTransform::Affine)
 }
 
 /// Reset a dimension's picture placement to the identity once its subs carry

@@ -986,7 +986,7 @@ pub fn polysolid(
         PolysolidJustification::Right => -width,
     };
     let profile_origin = start + side * offset;
-    let profile_plane = crate::command::WorkingPlane::new(
+    let profile_plane = crate::entities::transform::WorkingPlane::new(
         glam::DVec3::from_array(profile_origin.to_array()),
         glam::DVec3::from_array(side.to_array()),
         glam::DVec3::from_array(normal.to_array()),

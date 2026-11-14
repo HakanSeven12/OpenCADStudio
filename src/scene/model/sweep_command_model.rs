@@ -398,7 +398,7 @@ fn placed_sweep_record(
     let mut moved = profile.clone();
     crate::scene::view::dispatch::apply_transform(
         &mut moved,
-        &crate::command::EntityTransform::Affine(transform),
+        &crate::entities::transform::EntityTransform::Affine(transform),
     );
     let (sweep_entity, _) = embedded_sweep_profile(&moved)?;
     record.sweep_entity = Some(sweep_entity);

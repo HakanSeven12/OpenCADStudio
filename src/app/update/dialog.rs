@@ -228,7 +228,7 @@ impl OpenCADStudio {
                 // would resurrect it after the remove, so defer to the round's
                 // end (the same guard the save flow uses).
                 #[cfg(target_arch = "wasm32")]
-                {
+                if !crate::io::host_bridge::is_embed_mode() {
                     let key = Self::web_autosave_key(&self.tabs[idx]);
                     if self.web_autosave_in_flight {
                         self.web_autosave_clear_after.push(key);

@@ -3558,6 +3558,9 @@ impl OpenCADStudio {
         let bytes = match result {
             Ok(bytes) => bytes,
             Err(error) => {
+                if crate::io::host_bridge::is_embed_mode() {
+                    crate::io::host_bridge::emit_error("save_failed", &error);
+                }
                 self.command_line
                     .push_error(crate::tf!("Save failed: {error}").as_ref());
                 crate::io::fs_access::end_web_save(tab_id);
@@ -3623,7 +3626,23 @@ impl OpenCADStudio {
         }
         // The download is the only artifact of the save — fire it even if the
         // tab was closed while serialization was in flight.
-        crate::sys::download_bytes(&filename, &bytes);
+        if crate::io::host_bridge::is_embed_mode() {
+            if let Some(fmt) = crate::io::host_bridge::cad_save_format(&filename) {
+                crate::io::host_bridge::emit_save(
+                    &filename,
+                    fmt,
+                    &bytes,
+                    tab_id,
+                    geometry_epoch,
+                    edit_revision,
+                    camera_generation,
+                );
+            } else {
+                crate::sys::download_bytes(&filename, &bytes);
+            }
+        } else {
+            crate::sys::download_bytes(&filename, &bytes);
+        }
         self.finalize_web_save(
             tab_id,
             filename,
@@ -3691,19 +3710,25 @@ impl OpenCADStudio {
         // The save settled (download or in-place write): release the
         // in-flight slot the on_save_file guard refuses against.
         crate::io::fs_access::end_web_save(tab_id);
-        let cache_name = std::path::Path::new(&filename)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| filename.clone());
-        let path = std::path::PathBuf::from(cache_name);
-        let mut recent_task = Task::perform(
-            async move {
-                crate::io::web_recent::store(&path.to_string_lossy(), &bytes)
-                    .await
-                    .map(|_| path)
-            },
-            Message::WebRecentStored,
-        );
+        let embed_mode = crate::io::host_bridge::is_embed_mode();
+        let hold_for_host_ack = crate::io::host_bridge::holds_dirty_for_ack(&filename);
+        let mut recent_task = if embed_mode {
+            Task::none()
+        } else {
+            let cache_name = std::path::Path::new(&filename)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| filename.clone());
+            let path = std::path::PathBuf::from(cache_name);
+            Task::perform(
+                async move {
+                    crate::io::web_recent::store(&path.to_string_lossy(), &bytes)
+                        .await
+                        .map(|_| path)
+                },
+                Message::WebRecentStored,
+            )
+        };
         let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return recent_task;
         };
@@ -3721,7 +3746,7 @@ impl OpenCADStudio {
         let snapshot_is_current = self.tabs[i].scene.geometry_epoch == geometry_epoch
             && self.tabs[i].edit_revision == edit_revision
             && self.tabs[i].scene.camera_generation == camera_generation;
-        if snapshot_is_current {
+        if snapshot_is_current && !hold_for_host_ack {
             self.tabs[i].dirty = false;
             self.tabs[i].scene.note_tables_saved();
         }
@@ -3731,30 +3756,34 @@ impl OpenCADStudio {
         // writing the same key: its write would land AFTER the remove and
         // resurrect the snapshot (with a newer mtime, so the next scan would
         // offer it as recoverable). Defer the removes to the end of the round.
-        let new_key = self.tabs[i]
-            .current_path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if self.web_autosave_in_flight {
-            self.web_autosave_clear_after.push(autosave_key);
-            if !new_key.is_empty() {
-                self.web_autosave_clear_after.push(new_key);
+        if !embed_mode {
+            let new_key = self.tabs[i]
+                .current_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if self.web_autosave_in_flight {
+                self.web_autosave_clear_after.push(autosave_key);
+                if !new_key.is_empty() {
+                    self.web_autosave_clear_after.push(new_key);
+                }
+            } else {
+                recent_task = Task::batch([
+                    recent_task,
+                    Task::perform(
+                        async move {
+                            let _ = crate::io::web_autosave::remove(&autosave_key).await;
+                            let _ = crate::io::web_autosave::remove(&new_key).await;
+                        },
+                        |_| Message::Noop,
+                    ),
+                ]);
             }
-        } else {
-            recent_task = Task::batch([
-                recent_task,
-                Task::perform(
-                    async move {
-                        let _ = crate::io::web_autosave::remove(&autosave_key).await;
-                        let _ = crate::io::web_autosave::remove(&new_key).await;
-                    },
-                    |_| Message::Noop,
-                ),
-            ]);
         }
-        self.command_line
-            .push_output(crate::tf!("Saved: {filename}").as_ref());
+        if !hold_for_host_ack {
+            self.command_line
+                .push_output(crate::tf!("Saved: {filename}").as_ref());
+        }
         Task::batch([recent_task, self.finish_web_save(true)])
     }
 
@@ -4589,6 +4618,13 @@ impl OpenCADStudio {
             return Task::none();
         }
         if self.read_only {
+            #[cfg(target_arch = "wasm32")]
+            if crate::io::host_bridge::is_embed_mode() {
+                crate::io::host_bridge::emit_error(
+                    "read_only",
+                    "Read-only session: saving is disabled.",
+                );
+            }
             self.command_line.push_error(
                 crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
             );
@@ -4807,7 +4843,9 @@ impl OpenCADStudio {
             // A registered host save hook takes the bytes through the
             // download path, so no file picker opens.
             let route = crate::io::fs_access::save_route(
-                crate::io::fs_access::supported() && crate::sys::save_hook().is_none(),
+                crate::io::fs_access::supported()
+                    && crate::sys::save_hook().is_none()
+                    && !crate::io::host_bridge::is_embed_mode(),
                 self.save_plain_reuse_fs_handle,
                 crate::io::fs_access::handle_ext(tab_id).as_deref(),
                 ext,
@@ -5689,6 +5727,9 @@ impl OpenCADStudio {
     /// skipped, with the active index remapped onto the filtered list.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn persist_web_session(&self) {
+        if crate::io::host_bridge::is_embed_mode() {
+            return;
+        }
         let mut names: Vec<String> = Vec::new();
         let mut active = 0;
         for (index, tab) in self.tabs.iter().enumerate() {
@@ -5720,7 +5761,7 @@ impl OpenCADStudio {
         // path; anything the teardown race leaves behind is caught by the
         // next boot scan.
         #[cfg(target_arch = "wasm32")]
-        {
+        if !crate::io::host_bridge::is_embed_mode() {
             let mut keys = std::mem::take(&mut self.web_autosave_clear_after);
             // An in-flight round may still be writing snapshots right now;
             // its late writes would land AFTER these removes and resurrect
@@ -8739,6 +8780,135 @@ impl OpenCADStudio {
             },
             Message::PlotStylePanelSavePath,
         )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn poll_embed_bridge(&mut self) -> Task<Message> {
+        use crate::io::host_bridge::{self, HostCommand};
+
+        if !host_bridge::is_embed_mode() {
+            return Task::none();
+        }
+        let Some(cmd) = host_bridge::take_command() else {
+            return Task::none();
+        };
+        match cmd {
+            HostCommand::Open {
+                name,
+                bytes,
+                read_only,
+            } => {
+                if self.opening.is_some() {
+                    host_bridge::requeue_front(HostCommand::Open {
+                        name,
+                        bytes,
+                        read_only,
+                    });
+                    return Task::none();
+                }
+                for tab in &self.tabs {
+                    if !tab.is_start {
+                        crate::modules::draw::draw::attdef::session().forget_place_of(tab.id);
+                        crate::modules::annotate::text::forget_place_of(tab.id);
+                        crate::io::fs_access::drop_handle(tab.id);
+                    }
+                }
+                self.tabs.retain(|t| t.is_start);
+                if self.tabs.is_empty() {
+                    self.tabs
+                        .push(crate::app::tab_document::DocumentTab::new_start());
+                }
+                self.active_tab = 0;
+                host_bridge::clear_pending_saves();
+                self.read_only = read_only;
+                self.active_modal = None;
+                self.update(Message::WebFileDropped(name, bytes, None))
+            }
+            HostCommand::RequestSave { format } => {
+                if self.read_only {
+                    host_bridge::emit_error("read_only", "Read-only session: saving is disabled.");
+                    return Task::none();
+                }
+                let Some(fmt) = format.filter(|f| {
+                    f.eq_ignore_ascii_case("dxf") || f.eq_ignore_ascii_case("dwg")
+                }) else {
+                    return self.on_save_file();
+                };
+                if let Some(busy_tab) = crate::io::fs_access::web_save_in_flight() {
+                    if self.tabs.iter().any(|tab| tab.id == busy_tab) {
+                        self.command_line
+                            .push_info(crate::t!("Save already running for this drawing.").as_ref());
+                        return Task::none();
+                    }
+                    crate::io::fs_access::end_web_save(busy_tab);
+                }
+                let Some(tab) = self.tabs.get(self.active_tab) else {
+                    return Task::none();
+                };
+                let is_dxf = fmt.eq_ignore_ascii_case("dxf");
+                let ext = if is_dxf { "dxf" } else { "dwg" };
+                self.save_plain_reuse_fs_handle = false;
+                self.save_dialog_format =
+                    crate::io::format_for_version(tab.scene.document.version, is_dxf);
+                let stem = tab
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| tab.tab_display_name());
+                self.save_dialog_filename = format!("{stem}.{ext}");
+                self.aec_drop_acknowledged = false;
+                self.on_save_dialog_confirm()
+            }
+            HostCommand::SaveAck {
+                save_id,
+                ok,
+                name,
+                error,
+            } => {
+                let matched = host_bridge::take_pending_save(save_id.as_deref());
+                if ok {
+                    let saved_label = host_bridge::saved_label_from_ack(
+                        name.as_deref(),
+                        matched.as_ref().map(|p| p.filename.as_str()),
+                    );
+                    if let Some(p) = matched {
+                        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == p.tab_id) {
+                            if let Some(ref label) = saved_label {
+                                tab.current_path = Some(std::path::PathBuf::from(label));
+                            }
+                            if tab.scene.geometry_epoch == p.geometry_epoch
+                                && tab.edit_revision == p.edit_revision
+                                && tab.scene.camera_generation == p.camera_generation
+                            {
+                                tab.dirty = false;
+                                tab.scene.note_tables_saved();
+                            }
+                        }
+                    }
+                    host_bridge::emit_dirty(
+                        self.tabs.get(self.active_tab).is_some_and(|t| t.dirty),
+                    );
+                    if let Some(filename) = saved_label {
+                        self.command_line
+                            .push_output(crate::tf!("Saved: {filename}").as_ref());
+                    }
+                } else {
+                    if let Some(p) = matched {
+                        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == p.tab_id) {
+                            tab.dirty = true;
+                        }
+                    }
+                    host_bridge::emit_dirty(
+                        self.tabs.get(self.active_tab).is_some_and(|t| t.dirty),
+                    );
+                    let msg = error.as_deref().unwrap_or("Host save failed");
+                    self.command_line.push_error(msg);
+                    host_bridge::emit_error("host_save_failed", msg);
+                }
+                Task::none()
+            }
+        }
     }
 }
 

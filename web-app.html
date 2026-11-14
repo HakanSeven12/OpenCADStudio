@@ -69,7 +69,7 @@
       // A sandboxed iframe without allow-same-origin has an opaque origin:
       // there even reading navigator.serviceWorker throws (#2257).
       (() => {
-        if (self.origin === "null" || !("serviceWorker" in navigator)) return;
+        if (self.origin === "null" || !("serviceWorker" in navigator) || new URLSearchParams(location.search).get("embed") === "1") return;
         try {
           navigator.serviceWorker.register("sw.js").catch(error => {
             console.warn("service worker registration failed; offline support disabled:", error);

@@ -37,6 +37,10 @@ impl OpenCADStudio {
     /// late. Cached per path (a `None` result is cached too); safe to call
     /// repeatedly.
     pub(super) fn refresh_recent_thumbs(&mut self) -> iced::Task<crate::app::Message> {
+        #[cfg(target_arch = "wasm32")]
+        if crate::io::host_bridge::is_embed_mode() {
+            return iced::Task::none();
+        }
         let missing: Vec<std::path::PathBuf> = self
             .recent_files
             .iter()
@@ -125,15 +129,19 @@ fn remove_cached_copies(paths: impl IntoIterator<Item = PathBuf>) {
     let _ = paths;
 
     #[cfg(target_arch = "wasm32")]
-    for path in paths {
-        let Some(name) = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-        else {
-            continue;
-        };
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = crate::io::web_recent::remove(&name).await;
-        });
+    if !crate::io::host_bridge::is_embed_mode() {
+        for path in paths {
+            let Some(name) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+            else {
+                continue;
+            };
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = crate::io::web_recent::remove(&name).await;
+            });
+        }
+    } else {
+        let _ = paths;
     }
 }

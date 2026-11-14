@@ -1421,7 +1421,8 @@ impl OpenCADStudio {
                 for note in crate::scene::model::image_model::take_decode_refusals() {
                     self.command_line.push_error(&note);
                 }
-                Task::batch([control, dropped])
+                let embed_task = self.poll_embed_bridge();
+                Task::batch([control, dropped, embed_task])
             }
             #[cfg(not(target_arch = "wasm32"))]
             Message::PollWebControl => Task::none(),
@@ -1496,11 +1497,12 @@ impl OpenCADStudio {
             // drawing text discovery. Each script has one shared store entry.
             Message::PollWebFonts => {
                 #[cfg(target_arch = "wasm32")]
-                let autosave = if web_autosave_due(self.savetime_min) {
-                    self.on_autosave()
-                } else {
-                    Task::none()
-                };
+                let autosave =
+                    if !crate::io::host_bridge::is_embed_mode() && web_autosave_due(self.savetime_min) {
+                        self.on_autosave()
+                    } else {
+                        Task::none()
+                    };
                 #[cfg(not(target_arch = "wasm32"))]
                 let autosave = Task::none();
                 let pending = crate::scene::text::web_font::take_pending();
@@ -2052,7 +2054,11 @@ impl OpenCADStudio {
                     }
                     opening.recovery_bytes = outcome.recovery_bytes.take();
                 }
-                if let Some(bytes) = outcome.cache_bytes.take() {
+                if let Some(bytes) = outcome
+                    .cache_bytes
+                    .take()
+                    .filter(|_| !crate::io::host_bridge::is_embed_mode())
+                {
                     let name = outcome.name.clone();
                     return Task::perform(
                         async move {
@@ -2097,7 +2103,15 @@ impl OpenCADStudio {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
                 }
+                #[cfg(target_arch = "wasm32")]
+                let loaded_name = name.clone();
                 let task = self.on_file_opened(name, path, doc, caches, ifccad_session);
+                #[cfg(target_arch = "wasm32")]
+                if crate::io::host_bridge::is_embed_mode() {
+                    crate::io::host_bridge::emit_loaded(&loaded_name);
+                    let dirty = self.tabs.get(self.active_tab).is_some_and(|tab| tab.dirty);
+                    crate::io::host_bridge::emit_dirty(dirty);
+                }
                 // DXEVAL: an open compares the drawing's extraction tables.
                 let task = match self.evaluate_extraction_tables(
                     self.active_tab,
@@ -2132,6 +2146,10 @@ impl OpenCADStudio {
             Message::FileOpened(open_id, Err(e)) => {
                 if self.opening.as_ref().map(|opening| opening.id) != Some(open_id) {
                     return Task::none();
+                }
+                #[cfg(target_arch = "wasm32")]
+                if crate::io::host_bridge::is_embed_mode() {
+                    crate::io::host_bridge::emit_error("open_failed", &e.message);
                 }
                 // An automation open has nobody to answer the recovery
                 // prompt, so it takes the recovery read straight away, as a

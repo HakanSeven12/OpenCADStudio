@@ -1052,7 +1052,7 @@ impl OpenCADStudio {
                                 document::EntityType::Viewport(vp)
                                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                                 {
-                                    Some((vp.center.x, vp.center.z, vp.width, vp.height))
+                                    Some((vp.center.x, vp.center.y, vp.width, vp.height))
                                 }
                                 _ => None,
                             })
@@ -1065,7 +1065,7 @@ impl OpenCADStudio {
                         }
                         let value = rects
                             .iter()
-                            .map(|(x, z, w, h)| format!("{x:.9},{z:.9},{w:.9},{h:.9}"))
+                            .map(|(x, y, w, h)| format!("{x:.9},{y:.9},{w:.9},{h:.9}"))
                             .collect::<Vec<_>>()
                             .join(";");
                         let key = vports_config_key(name);
@@ -1318,60 +1318,24 @@ impl OpenCADStudio {
                         }
                     }
                 } else {
-                    // ── Preset viewport layout ───────────────────────────
-                    let ((x0, y0), (x1, y1)) = scene
+                    // ── Preset arrangement: new viewports in an area ─────
+                    // Asks for the area (Fit = the printable area) and adds
+                    // the viewports there; existing ones stay.
+                    use crate::modules::layout::mview::MviewCommand;
+                    let layout = scene.current_layout.clone();
+                    let paper_bounds = scene
                         .printable_area_limits()
+                        .or_else(|| scene.paper_limits())
                         .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
-                    let uw = (x1 - x0).max(1.0);
-                    let uh = (y1 - y0).max(1.0);
-                    let gap = 2.0 * scene.paper_space_unit_factor();
-                    let rects: Vec<(f64, f64, f64, f64)> = match sub.as_str() {
-                        "2H" => {
-                            // Two viewports side by side (horizontal split)
-                            let vw = (uw - gap) / 2.0;
-                            vec![
-                                (x0 + vw / 2.0, y0 + uh / 2.0, vw, uh),
-                                (x0 + vw + gap + vw / 2.0, y0 + uh / 2.0, vw, uh),
-                            ]
+                    match MviewCommand::with_tiles(layout, paper_bounds, &sub) {
+                        Some(new_cmd) => {
+                            self.command_line.push_info(&new_cmd.prompt());
+                            self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                         }
-                        "2V" => {
-                            // Two viewports stacked (vertical split)
-                            let vh = (uh - gap) / 2.0;
-                            vec![
-                                (x0 + uw / 2.0, y0 + vh + gap + vh / 2.0, uw, vh),
-                                (x0 + uw / 2.0, y0 + vh / 2.0, uw, vh),
-                            ]
-                        }
-                        "4" => {
-                            // Four equal viewports (2×2 grid)
-                            let vw = (uw - gap) / 2.0;
-                            let vh = (uh - gap) / 2.0;
-                            vec![
-                                (x0 + vw / 2.0, y0 + vh + gap + vh / 2.0, vw, vh),
-                                (x0 + vw + gap + vw / 2.0, y0 + vh + gap + vh / 2.0, vw, vh),
-                                (x0 + vw / 2.0, y0 + vh / 2.0, vw, vh),
-                                (x0 + vw + gap + vw / 2.0, y0 + vh / 2.0, vw, vh),
-                            ]
-                        }
-                        "SINGLE" | "1" => {
-                            // Single full-page viewport
-                            vec![(x0 + uw / 2.0, y0 + uh / 2.0, uw, uh)]
-                        }
-                        _ => {
-                            self.command_line.push_error(
-                                crate::t!(
-                                    "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE"
-                                )
+                        None => self.command_line.push_error(
+                            crate::t!("VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE")
                                 .as_ref(),
-                            );
-                            vec![]
-                        }
-                    };
-                    if !rects.is_empty() {
-                        let n = self.apply_viewport_rects(i, &rects, &sub);
-                        self.command_line.push_output(
-                            crate::tf!("VPORTS: created {n} viewport(s) [{}].", sub).as_ref(),
-                        );
+                        ),
                     }
                 }
             }
@@ -1809,9 +1773,9 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, label);
         self.tabs[i].scene.erase_entities(&to_erase);
         let mut created = 0usize;
-        for (cx, cz, w, h) in rects {
+        for (cx, cy, w, h) in rects {
             let mut vp = document::entities::Viewport::new();
-            vp.center = document::types::Vector3::new(*cx, 0.0, *cz);
+            vp.center = document::types::Vector3::new(*cx, *cy, 0.0);
             vp.width = *w;
             vp.height = *h;
             vp.id = 2; // re-numbered below

@@ -4955,7 +4955,7 @@ mod mission_m055_tests {
                 {
                     Some((
                         (vp.center.x * 1000.0).round() as i64,
-                        (vp.center.z * 1000.0).round() as i64,
+                        (vp.center.y * 1000.0).round() as i64,
                         (vp.width * 1000.0).round() as i64,
                         (vp.height * 1000.0).round() as i64,
                     ))
@@ -4974,6 +4974,7 @@ mod mission_m055_tests {
         enter_layout(&mut app);
 
         let _ = app.run_command_line("VPORTS 4");
+        let _ = app.feed_active_cmd("F");
         assert_eq!(viewport_rects(&app).len(), 4, "{}", all_output(&app));
         let saved = viewport_rects(&app);
 
@@ -5013,6 +5014,7 @@ mod mission_m055_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS 2V");
+        let _ = app.feed_active_cmd("F");
         let _ = app.run_command_line("VPORTS SAVE TWO");
 
         let _ = app.run_command_line("VPORTS LIST");
@@ -5107,6 +5109,7 @@ mod mission_m058_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS 2H");
+        let _ = app.feed_active_cmd("F");
         let handles = viewports(&app);
         assert_eq!(handles.len(), 2, "{}", all_output(&app));
         let (target, other) = (handles[0], handles[1]);
@@ -5173,6 +5176,7 @@ mod mission_m058_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
 
         let _ = app.run_command_line("VPMIN");
 
@@ -6420,6 +6424,7 @@ mod batch4_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
         let handles = layout_viewport_handles(&app);
         assert_eq!(handles.len(), 1, "{}", out(&app));
 
@@ -6451,6 +6456,7 @@ mod batch4_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         enter_layout(&mut app);
         let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
         let handles = layout_viewport_handles(&app);
         assert_eq!(handles.len(), 1, "{}", out(&app));
 

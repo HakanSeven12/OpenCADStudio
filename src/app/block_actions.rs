@@ -1037,15 +1037,26 @@ impl OpenCADStudio {
 }
 
 impl OpenCADStudio {
+    /// Parameter grips of every selected dynamic block reference; the
+    /// alignment markers only for a single selected reference.
     fn refresh_reference_action_grips(&mut self, wo: [f64; 3]) {
         let i = self.active_tab;
-        let tab = &self.tabs[i];
-        if tab.active_block_edit_session().is_some() || tab.scene.selected.len() != 1 {
+        if self.tabs[i].active_block_edit_session().is_some() {
             return;
         }
-        let Some(handle) = tab.selected_handle else {
+        let handles = self.tabs[i].scene.selected_handles_in_order();
+        let limit = self.grip_object_limit;
+        if limit > 0 && handles.len() > limit as usize {
             return;
-        };
+        }
+        let single = handles.len() == 1;
+        for handle in handles {
+            self.push_reference_action_grips(handle, single, wo);
+        }
+    }
+    fn push_reference_action_grips(&mut self, handle: Handle, alignment: bool, wo: [f64; 3]) {
+        let i = self.active_tab;
+        let tab = &self.tabs[i];
         let Some(def) = actions::instance::definition(&tab.scene.document, handle) else {
             return;
         };
@@ -1090,7 +1101,9 @@ impl OpenCADStudio {
                 });
             }
         }
-        grips.extend(self.alignment_grip_markers(handle, wo));
+        if alignment {
+            grips.extend(self.alignment_grip_markers(handle, wo));
+        }
         for grip in grips {
             self.tabs[i].selected_grips.push(grip);
             self.tabs[i].selected_grip_handles.push(handle);
@@ -1099,7 +1112,7 @@ impl OpenCADStudio {
     fn start_reference_action_grip(&mut self, handle: Handle, id: usize) -> bool {
         let i = self.active_tab;
         let tab = &self.tabs[i];
-        if tab.active_block_edit_session().is_some() || tab.selected_handle != Some(handle) {
+        if tab.active_block_edit_session().is_some() || !tab.scene.selected.contains(&handle) {
             return false;
         }
         let Some(def) = actions::instance::definition(&tab.scene.document, handle) else {

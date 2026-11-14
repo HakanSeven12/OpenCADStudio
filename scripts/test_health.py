@@ -241,7 +241,8 @@ def git_repo():
     """A repository with: a base commit; a pull request (author Alice) that
     removes an upward dependency, merged by Merger as `Merge #7: ...`; a
     pull request (author Bob) that removes a panic site, merged as
-    `Merge branch 'pr9'`; then a direct commit that adds a panic site."""
+    `Merge branch 'pr9'`; a direct commit that adds a panic site; then a
+    direct commit (author Cara) that adds a test under tests/."""
     temp = tempfile.TemporaryDirectory()
     _TEMP.append(temp)
     root = Path(temp.name)
@@ -275,6 +276,10 @@ def git_repo():
     git("merge", "-q", "--no-ff", "pr9", "-m", "Merge branch 'pr9'")
     write("io/a.rs", "fn f() { a.unwrap(); }\n")
     git("commit", "-q", "-am", "Add a panic site (#8)")
+    (root / "tests").mkdir()
+    (root / "tests" / "t.rs").write_text("#[test]\nfn a() {}\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "Add a roundtrip test (#10)", author="Cara")
     return root
 
 
@@ -282,18 +287,140 @@ class Credits(unittest.TestCase):
     def test_credits_the_pull_request_author_and_skips_regressions(self):
         root = git_repo()
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}, clear=True):
-            found = health.credits("main~3", "main", root)
-        self.assertEqual([(c["pr"], c["login"], c["author"]) for c in found], [(7, None, "Alice"), (9, None, "Bob")])
+            found = health.credits("main~4", "main", root)
+        # #10 is in a direct commit's subject, where it may be an issue: not taken.
+        self.assertEqual([(c["pr"], c["login"], c["author"]) for c in found],
+                         [(7, None, "Alice"), (9, None, "Bob"), (None, None, "Cara")])
+        self.assertEqual(found[2]["improved"], {"test_functions": [0, 1]})
         self.assertEqual(found[0]["improved"], {"upward_pairs": [1, 0], "upward_files": [1, 0]})
         self.assertEqual(found[1]["improved"], {"panic_sites": [1, 0]})
 
 
-class PullRequestNumbers(unittest.TestCase):
-    def test_only_merge_subjects_name_a_pull_request(self):
-        for subject, number in (("Merge pull request #3002 from a/b", 3002), ("Merge #2995: Entity code", 2995),
-                                ("Merge branch 'pr3003'", 3003), ("Merge the linetype stack (#2774, #2776)", None),
-                                ("HELP opens the wiki (#1049)", None), ("Fix crash in #12", None)):
-            self.assertEqual(health.merged_pr_number(subject), number, subject)
+def full_tree(files):
+    """Like tree(), but paths are relative to the checkout root."""
+    temp = tempfile.TemporaryDirectory()
+    _TEMP.append(temp)
+    root = Path(temp.name)
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(text), encoding="utf-8")
+    return root
+
+
+class TestFunctions(unittest.TestCase):
+    def test_counted_in_src_tests_and_crates_but_not_comments_or_target(self):
+        root = full_tree({
+            "src/io/a.rs": "#[cfg(test)]\nmod t {\n    #[test]\n    fn a() {}\n    // #[test] in a comment\n}\n",
+            "tests/roundtrip.rs": "#[test]\nfn b() {}\n#[test]\nfn c() {}\n",
+            "crates/x/src/lib.rs": '#[test]\nfn d() {}\nconst S: &str = "#[test]";\n',
+            "crates/x/target/gen.rs": "#[test]\nfn e() {}\n",
+        })
+        self.assertEqual(health.count_test_functions(root),
+                         {"src/io/a.rs": 1, "tests/roundtrip.rs": 2, "crates/x/src/lib.rs": 1})
+        self.assertEqual(health.measure_source(root)[0]["test_functions"], 4)
+
+    def test_adding_tests_is_thanked_and_removing_them_is_worse(self):
+        base = full_tree({"src/io/a.rs": "fn f() {}\n", "tests/t.rs": "#[test]\nfn a() {}\n"})
+        more = full_tree({"src/io/a.rs": "fn f() {}\n", "tests/t.rs": "#[test]\nfn a() {}\n#[test]\nfn b() {}\n"})
+        _, out = run_in(more, ["diff", str(base), "--markdown"])
+        self.assertIn("Thank you: this pull request improves", out)
+        self.assertIn("test functions (#[test]): 1 → 2", out)
+        _, out = run_in(base, ["diff", str(more), "--markdown"])
+        self.assertIn("**Made worse**", out)
+        self.assertIn("test functions (#[test]): 2 → 1", out)
+        self.assertIn("Files with fewer test functions (1)", out)
+        self.assertIn("`tests/t.rs`: 2 → 1", out)
+
+
+def lcov(records):
+    """lcov text from {path: {line: hits}}."""
+    out = []
+    for path, lines in records.items():
+        out.append(f"SF:{path}")
+        out += [f"DA:{n},{c}" for n, c in sorted(lines.items())]
+        out.append("end_of_record")
+    return "\n".join(out) + "\n"
+
+
+class Coverage(unittest.TestCase):
+    cfg = {"layers": {0, 1, 2, 3, 4}, "exclude": ["src/perf.rs"]}
+
+    def setUp(self):
+        self.root = tree({
+            # layer 1; lines 5-7 are an inline test module
+            "entities/a.rs": "fn f() {\n    1;\n}\n#[cfg(test)]\nmod t {\n    fn g() {}\n}\n",
+            "entities/tests.rs": "fn h() {}\n",                              # a test file
+            "entities/gen.rs": "//! Generated table.\nfn x() {}\n",          # generated
+            "perf.rs": "fn p() {}\n",                                        # excluded
+            "ui/a.rs": "fn u() {}\n",                                        # layer 5, outside the target
+            "io/a.rs": "fn i() {}\nfn j() {}\n",                            # layer 2, never run
+        })
+        src = self.root / "src"
+        self.text = lcov({
+            str(src / "entities/a.rs"): {1: 1, 2: 1, 3: 0, 6: 5},
+            str(src / "entities/tests.rs"): {1: 1},
+            str(src / "entities/gen.rs"): {2: 0},
+            str(src / "perf.rs"): {1: 0},
+            str(src / "ui/a.rs"): {1: 1},
+            str(src / "io/a.rs"): {1: 0, 2: 0},
+            "/elsewhere/crates/x/src/lib.rs": {1: 1},
+        })
+
+    def test_production_lines_of_the_core_layers_only(self):
+        v, d = health.coverage_from_lcov(self.root, self.text, self.cfg)
+        self.assertEqual(d["coverage_files"]["src/entities/a.rs"],
+                         {"layer": 1, "lines": 3, "covered": 2, "uncovered_lines": [3]})
+        self.assertEqual(set(d["coverage_files"]), {"src/entities/a.rs", "src/io/a.rs"})
+        self.assertEqual(v["coverage_core"], 40.0)          # 2 of 5
+        self.assertEqual((v["coverage_layer_1"], v["coverage_layer_2"]), (66.7, 0.0))
+        self.assertIsNone(v["coverage_layer_0"])            # only an excluded file there
+        self.assertEqual(v["coverage_all"], 42.9)           # 3 of 7: adds perf and ui, not tests or generated
+        self.assertEqual(d["untested_files"], ["src/io/a.rs"])
+
+    def test_an_exclusion_is_a_folder_or_one_exact_file(self):
+        pats = ["src/scene/pipeline/", "src/perf.rs"]
+        self.assertTrue(health.excluded("src/scene/pipeline/mod.rs", pats))
+        self.assertTrue(health.excluded("src/perf.rs", pats))
+        self.assertFalse(health.excluded("src/perfect.rs", pats))
+        self.assertFalse(health.excluded("src/scene/pipeline_notes.rs", pats))
+        self.assertFalse(health.excluded("src/perf.rs", ["src/perf"]))      # not a prefix match
+
+    def test_goals_file_exclusions_each_match_a_file_in_the_tree(self):
+        repo = HERE.parent
+        if not (repo / "src").is_dir():
+            self.skipTest("not in a full checkout")
+        files = [p.relative_to(repo).as_posix() for p in (repo / "src").rglob("*.rs")]
+        for pat in health.coverage_config()["exclude"]:
+            self.assertTrue(any(health.excluded(f, [pat]) for f in files), f"{pat} matches nothing")
+
+    def test_milestones_step_five_points_up_to_100(self):
+        g = {"id": "coverage_core", "direction": "up", "target": 100}
+        def ms(now):
+            return tuple(round(x, 6) for x in code_health.milestone(g, 58.7, now))
+        self.assertEqual(ms(60.0), (58.7, 63.7))
+        self.assertEqual(ms(97.0), (93.7, 98.7))
+        self.assertEqual(ms(99.0), (98.7, 100))
+
+
+class Churn(unittest.TestCase):
+    def test_counts_landings_on_main_once_per_merge(self):
+        self.assertEqual(health.churn(git_repo()),
+                         {"src/entities/a.rs": 2, "src/scene/a.rs": 2, "src/io/a.rs": 2})
+
+
+class UntestedNote(unittest.TestCase):
+    def test_only_edited_untested_files_are_noted(self):
+        base = tree({"io/a.rs": "fn f() {}\n", "io/b.rs": "fn g() {}\n"})
+        head = tree({"io/a.rs": "fn f() { }\n", "io/b.rs": "fn g() {}\n"})
+        listed = Path(tempfile.mkdtemp()) / "untested.json"
+        listed.write_text(json.dumps(["src/io/a.rs", "src/io/b.rs"]))
+        _, out = run_in(head, ["diff", str(base), "--markdown", "--untested", str(listed)])
+        self.assertIn("**No tests yet**", out)
+        self.assertIn("- `src/io/a.rs`", out)
+        self.assertNotIn("- `src/io/b.rs`", out)
+        _, out = run_in(head, ["diff", str(base), "--markdown"])
+        self.assertNotIn("No tests yet", out)
 
 
 class Milestones(unittest.TestCase):
@@ -308,6 +435,11 @@ class Milestones(unittest.TestCase):
     def test_rising_measures_step_up(self):
         self.assertEqual(code_health.milestone({"id": "tests", "direction": "up"}, 1000, 1050), (1000, 1100))
         self.assertEqual(code_health.milestone({"id": "coverage", "direction": "up"}, 40.0, 46.0), (45.0, 50.0))
+
+    def test_watched_measures_have_no_milestones(self):
+        g = {"id": "dependencies_total", "direction": "down", "target": None, "milestones": False}
+        self.assertEqual(code_health.progress(g, 790, 785), "keep at or below 790")
+        self.assertEqual(code_health.progress(g, 790, 800), "above the baseline (790)")
 
     def test_progress_text(self):
         self.assertEqual(code_health.progress(self.down, 180, 135), "`▰▰▰▰▰▱▱▱▱▱` 50% to 90")
@@ -326,8 +458,8 @@ class Page(unittest.TestCase):
         page = code_health.render(cur, goals, hist, credits, "v2")
         for heading in ("## Scorecard", "## Thanks", "## Pick up a cleanup", "## History", "## Why these measures"):
             self.assertIn(heading, page)
-        self.assertIn("[someone](https://github.com/someone)", page)
-        self.assertIn("unwrap/expect/panic! in production code 3 → 1", page)
+        self.assertIn("- [someone](https://github.com/someone): unwrap/expect/panic! in production code −2 "
+                      f"([#12](https://github.com/{code_health.REPO}/pull/12))", page)
         self.assertIn("Move `ui::overlay::DASH`", page)
         self.assertIn("better (-2)", page)
         self.assertIn("| Measure | v2 | v1 |", page)
@@ -359,6 +491,75 @@ class Page(unittest.TestCase):
             code_health.main([str(wiki), str(hj), "--release", "v2"])
         history = json.loads((wiki / "health" / "history.json").read_text())
         self.assertEqual([h["release"] for h in history], ["v1", "v2"])
+
+    def test_coverage_table_tasks_and_untested_list(self):
+        root = tree({"entities/a.rs": "fn f() {}\n", "io/a.rs": "fn i() {}\n"})
+        cur = {"commit": "a" * 40, **dict(zip(("values", "details"), health.measure_source(root)))}
+        cur["values"].update({"coverage_core": 50.0, "coverage_layer_1": 80.0, "coverage_layer_2": 10.0})
+        cur["details"].update({
+            "coverage_files": {"src/entities/big.rs": {"layer": 1, "lines": 100, "covered": 80, "uncovered_lines": []},
+                               "src/io/busy.rs": {"layer": 2, "lines": 20, "covered": 10, "uncovered_lines": []},
+                               "src/io/none.rs": {"layer": 2, "lines": 40, "covered": 0, "uncovered_lines": []}},
+            "untested_files": ["src/io/none.rs"],
+            "churn_28d": {"src/io/busy.rs": 9}})
+        goals = json.loads(code_health.GOALS.read_text())
+        page = code_health.render(cur, goals, [{"release": "v1", "commit": "a" * 40, "values": cur["values"]}], [], "v1")
+        self.assertIn("### Coverage by layer", page)
+        self.assertIn("| 2 File formats and rendering | 10.0% | 50 |", page)
+        tasks = page[page.index("### Add tests here"):]
+        # busy.rs: 10 uncovered x (1 + 9 changes) = 100 outranks none.rs (40) and big.rs (20)
+        order = [tasks.index(f) for f in ("src/io/busy.rs", "src/io/none.rs", "src/entities/big.rs")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("**No tests yet:** 1 core-layer file is not run by any test", tasks)
+        cur["values"]["coverage_layer_0"] = None
+        self.assertIn("| 0 Foundations | — | 0 |", code_health.render(cur, goals, [], [], "v1"))
+        wiki = Path(tempfile.mkdtemp())
+        hj = wiki / "h.json"
+        hj.write_text(json.dumps(cur))
+        with contextlib.redirect_stdout(io.StringIO()):
+            code_health.main([str(wiki), str(hj), "--release", "v1"])
+        self.assertEqual(json.loads((wiki / "health" / "untested.json").read_text()), ["src/io/none.rs"])
+        cur["details"].pop("coverage_files")
+        hj.write_text(json.dumps(cur))
+        (wiki / "health" / "untested.json").write_text('["kept"]')
+        with contextlib.redirect_stdout(io.StringIO()):
+            code_health.main([str(wiki), str(hj), "--release", "v2"])
+        self.assertEqual(json.loads((wiki / "health" / "untested.json").read_text()), ["kept"])
+
+    def test_only_merge_subjects_name_a_pull_request(self):
+        for subject, number in (("Merge pull request #3002 from a/b", 3002), ("Merge #2995: Entity code", 2995),
+                                ("Merge branch 'pr3003'", 3003), ("Merge the linetype stack (#2774, #2776)", None),
+                                ("HELP opens the wiki (#1049)", None), ("Fix crash in #12", None)):
+            self.assertEqual(health.merged_pr_number(subject), number, subject)
+
+    def test_one_line_per_person_even_when_only_some_entries_have_a_login(self):
+        credits = [{"commit": "1" * 40, "pr": 3, "login": "tj", "author": "T J", "improved": {"upward_files": [5, 4]}},
+                   {"commit": "2" * 40, "pr": 4, "login": None, "author": "T J", "improved": {"upward_files": [4, 2]}}]
+        lines = [l for l in code_health.thanks(credits) if l]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("- [tj](https://github.com/tj): upward dependencies (files) −3"))
+
+    def test_long_pull_request_lists_are_shortened(self):
+        credits = [{"commit": f"{i:040d}", "pr": 100 + i, "login": "a", "author": "A",
+                    "improved": {"test_functions": [i, i + 1]}} for i in range(11)]
+        line = [l for l in code_health.thanks(credits) if l][0]
+        self.assertEqual(line.count("](https://github.com/"), 9)    # the person and 8 pull requests
+        self.assertTrue(line.endswith("and 3 more)"))
+
+    def test_thanks_group_by_contributor_alphabetically_with_totals(self):
+        credits = [
+            {"commit": "1" * 40, "pr": 5, "login": "zed", "author": "Zed", "improved": {"test_functions": [10, 12]}},
+            {"commit": "2" * 40, "pr": None, "login": None, "author": "Ann", "improved": {"panic_sites": [9, 6]}},
+            {"commit": "3" * 40, "pr": 7, "login": "zed", "author": "Zed",
+             "improved": {"test_functions": [12, 13], "upward_files": [4, 2]}},
+            {"commit": "4" * 40, "pr": None, "login": None, "author": "Ann", "improved": {"test_functions": [13, 14]}},
+        ]
+        lines = [l for l in code_health.thanks(credits) if l]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "- Ann: unwrap/expect/panic! in production code −3; test functions (#[test]) +1 (2 direct commits)")
+        self.assertTrue(lines[1].startswith("- [zed](https://github.com/zed): test functions (#[test]) +3; "
+                                            "upward dependencies (files) −2 ([#5]("))
+        self.assertIn("[#7](", lines[1])
 
     def test_missing_or_broken_credits_are_reported_as_not_computed(self):
         wiki = Path(tempfile.mkdtemp())

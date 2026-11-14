@@ -9,13 +9,16 @@ to read the results.
       Measure this checkout and write JSON (to stdout, or FILE). The source
       measures take seconds. --cargo adds clippy, rustfmt, compiler warnings,
       the test count, dependencies and RustSec advisories (minutes);
-      --coverage adds line coverage with cargo-llvm-cov (as long as the tests).
+      --coverage adds line coverage of the core layers with cargo-llvm-cov
+      (production lines only; as long as the tests) and how often each file
+      changed in the last 28 days.
 
-  python3 scripts/health.py diff BASE_DIR [--markdown]
+  python3 scripts/health.py diff BASE_DIR [--markdown] [--untested FILE]
       Compare this checkout with another one (for CI, the pull request's base
       commit) on the source measures: what got better, what got worse, and
       where. Never fails; in GitHub Actions it also writes warnings on the
-      lines that made a measure worse.
+      lines that made a measure worse. FILE is the list of untested files the
+      Code Health wiki page publishes; edited files on it get a note.
 
   python3 scripts/health.py lint CLIPPY_JSON FMT_LIST CHANGED_FILES [--markdown]
       Report the clippy warnings (from `cargo clippy --message-format=json`)
@@ -71,13 +74,19 @@ PANIC = re.compile(r"\.unwrap\(\)|\.expect\(|\bpanic!\s*\(")
 UNSAFE = re.compile(r"\bunsafe\s*(\{|fn\b|impl\b)")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 GENERATED = re.compile(r"^\s*//[!/]?\s*(?:@generated\b|Generated\b)", re.M)
+TEST_FN = re.compile(r"#\[test\]")
+TEST_ROOTS = ("src", "tests", "crates")   # where test functions are counted
+GOALS = Path(__file__).resolve().parent.parent / "docs" / "architecture" / "health-goals.json"
 FILE_LOAD = ("io/",)      # file import and export: a panic here is a crash on a bad file
 
 # Source measures: fast, per pull request, credited to the pull request.
 SOURCE_MEASURES = [
     "upward_pairs", "upward_files", "mutual_pairs", "large_files", "long_functions",
     "message_variants", "panic_sites", "panic_sites_file_load", "unsafe_undocumented",
+    "test_functions",
 ]
+# Measures where a higher number is better; every other measure should fall.
+UP_MEASURES = {"test_functions", "tests", "coverage_core", "coverage_all"}
 
 
 # ---- Reading a checkout ------------------------------------------------------
@@ -166,6 +175,23 @@ def unsafe_documented(raw_lines, line: int, block: bool) -> bool:
     return False
 
 
+def count_test_functions(root: Path):
+    """{file: number of #[test] functions} over src/, tests/ and the workspace
+    crates; comments and strings are ignored."""
+    out = {}
+    for top in TEST_ROOTS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for p in sorted(base.rglob("*.rs")):
+            if "target" in p.relative_to(root).parts:
+                continue
+            n = len(TEST_FN.findall(arch_check.blank(p.read_text(encoding="utf-8", errors="replace"))))
+            if n:
+                out[p.relative_to(root).as_posix()] = n
+    return out
+
+
 def message_variants(root: Path):
     path = root / "src" / "app" / "mod.rs"
     if not path.exists():
@@ -233,6 +259,7 @@ def measure_source(root: Path):
         unsafe_undoc += [{"file": key, "line": line, "text": text} for line, text in file_unsafe]
 
     file_load = [x for x in panics if x["file"].startswith(tuple("src/" + p for p in FILE_LOAD))]
+    test_fns = count_test_functions(root)
     values = {
         "upward_pairs": len(edges),
         "upward_files": sum(len(f) for f in edges.values()),
@@ -243,6 +270,7 @@ def measure_source(root: Path):
         "panic_sites": len(panics),
         "panic_sites_file_load": len(file_load),
         "unsafe_undocumented": len(unsafe_undoc),
+        "test_functions": sum(test_fns.values()),
     }
     details = {
         "upward": {pair: dict(sorted(fs.items())) for pair, fs in sorted(edges.items())},
@@ -254,6 +282,7 @@ def measure_source(root: Path):
         "long_functions": sorted(long_fns, key=lambda f: -f["lines"]),
         "panic_sites": panics,
         "unsafe_undocumented": unsafe_undoc,
+        "test_functions": test_fns,
     }
     return values, details
 
@@ -396,12 +425,111 @@ def measure_cargo(root: Path, coverage: bool):
         details["advisories_error"] = "cargo-audit not available"
 
     if coverage:
-        cov = run(["cargo", "llvm-cov", "--workspace", "--locked", "--summary-only", "--json"], root)
-        try:
-            values["coverage"] = round(json.loads(cov.stdout)["data"][0]["totals"]["lines"]["percent"], 1)
-        except (ValueError, KeyError, IndexError):
-            details["coverage_error"] = "cargo-llvm-cov not available"
+        with tempfile.TemporaryDirectory() as tmp:
+            lcov = Path(tmp) / "coverage.lcov"
+            # --ignore-run-fail: one failing (or flaky) test must not cost the
+            # whole week's measurement.
+            cov = run(["cargo", "llvm-cov", "--workspace", "--locked", "--ignore-run-fail",
+                       "--lcov", "--output-path", str(lcov)], root)
+            if lcov.exists():
+                v, d = coverage_from_lcov(root, lcov.read_text(), coverage_config())
+                values.update(v)
+                details.update(d)
+            else:
+                details["coverage_error"] = (cov.stderr.strip()[-300:] or "cargo-llvm-cov not available")
+        details["churn_28d"] = churn(root)
     return values, details
+
+
+def coverage_config():
+    """Scope of the coverage goal from health-goals.json: layers and
+    excluded path prefixes."""
+    try:
+        cfg = json.loads(GOALS.read_text()).get("coverage", {})
+    except (OSError, ValueError):
+        cfg = {}
+    return {"layers": set(cfg.get("layers", [0, 1, 2, 3, 4])),
+            "exclude": [e["path"] for e in cfg.get("exclude", [])]}
+
+
+def excluded(key: str, patterns) -> bool:
+    """An exclusion is a folder (ends with "/") or one exact file, so a new
+    file with a similar name is never excluded by accident."""
+    return any(key.startswith(p) if p.endswith("/") else key == p for p in patterns)
+
+
+def parse_lcov(text: str):
+    """{source path: {line: hit count}} from lcov DA records."""
+    cov, cur = {}, None
+    for line in text.splitlines():
+        if line.startswith("SF:"):
+            cur = cov.setdefault(line[3:].strip(), {})
+        elif line.startswith("DA:") and cur is not None:
+            n, c = line[3:].split(",")[:2]
+            cur[int(n)] = max(cur.get(int(n), 0), int(c))
+        elif line == "end_of_record":
+            cur = None
+    return cov
+
+
+def coverage_from_lcov(root: Path, text: str, cfg):
+    """Line coverage of production code: test files, lines inside inline
+    test modules, generated files and excluded paths are left out. Returns
+    the core-layer and whole-crate percentages, one percentage per core
+    layer, and per-file counts for the core layers."""
+    cov = {}
+    for path, lines in parse_lcov(text).items():
+        p = Path(path)
+        try:
+            rel = (p if p.is_absolute() else root / p).resolve().relative_to((root / "src").resolve())
+        except ValueError:
+            continue                      # another workspace crate
+        cov[rel] = lines
+    files, all_lines, all_hit = {}, 0, 0
+    for rel, mod, raw, code in production_files(root):
+        if rel not in cov or generated(raw):
+            continue
+        kept = code.split("\n")
+        test_lines = {i + 1 for i, (a, b) in enumerate(zip(arch_check.blank(raw).split("\n"), kept)) if a != b}
+        da = {n: c for n, c in cov[rel].items() if n not in test_lines}
+        n, hit = len(da), sum(1 for c in da.values() if c)
+        all_lines, all_hit = all_lines + n, all_hit + hit
+        key = f"src/{rel.as_posix()}"
+        layer = arch_check.LAYERS.get(mod) if mod else None
+        if layer in cfg["layers"] and not excluded(key, cfg["exclude"]) and n:
+            files[key] = {"layer": layer, "lines": n, "covered": hit,
+                          "uncovered_lines": sorted(k for k, c in da.items() if not c)}
+
+    def pct(hit, n):
+        return round(100.0 * hit / n, 1) if n else None
+
+    core_n = sum(f["lines"] for f in files.values())
+    core_hit = sum(f["covered"] for f in files.values())
+    values = {"coverage_core": pct(core_hit, core_n), "coverage_all": pct(all_hit, all_lines)}
+    for layer in sorted(cfg["layers"]):
+        fs = [f for f in files.values() if f["layer"] == layer]
+        values[f"coverage_layer_{layer}"] = pct(sum(f["covered"] for f in fs), sum(f["lines"] for f in fs))
+    details = {"coverage_files": dict(sorted(files.items())),
+               "untested_files": sorted(k for k, f in files.items() if not f["covered"])}
+    return values, details
+
+
+def churn(root: Path, days: int = 28):
+    """{src file: landings on main's first-parent line} in the `days` days
+    before HEAD's commit date (a merged pull request counts once)."""
+    head = run(["git", "log", "-1", "--format=%cI", "HEAD"], root).stdout.strip()
+    if not head:
+        return {}
+    from datetime import datetime, timedelta
+    since = (datetime.fromisoformat(head) - timedelta(days=days)).isoformat()
+    log = run(["git", "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", f"--since={since}",
+               "--numstat", "--format=@%H", "HEAD", "--", "src"], root).stdout
+    out = Counter()
+    for line in log.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[2].endswith(".rs"):
+            out[parts[2]] += 1
+    return dict(out)
 
 
 def measure(root: Path, cargo=False, coverage=False):
@@ -423,6 +551,7 @@ LABELS = {
     "panic_sites": "unwrap/expect/panic! in production code",
     "panic_sites_file_load": "unwrap/expect/panic! in file import and export (src/io)",
     "unsafe_undocumented": "unsafe without a SAFETY comment",
+    "test_functions": "test functions (#[test])",
 }
 
 
@@ -457,16 +586,36 @@ def compare(base, head):
         "large_files": [f for f in hd["large_files"] if f not in bd["large_files"]],
         "mutual_pairs": [p for p in hd["mutual_pairs"] if p not in bd["mutual_pairs"]],
     }
+    bt, ht = bd.get("test_functions", {}), hd.get("test_functions", {})
+    added["fewer_tests"] = sorted((f, bt[f], ht.get(f, 0)) for f in bt if ht.get(f, 0) < bt[f])
     removed_upward = sorted((p, f) for p, fs in bd["upward"].items() for f in fs if f not in hd["upward"].get(p, {}))
     return deltas, added, removed_upward
 
 
 def better(k, a, b):
-    return b < a
+    return b > a if k in UP_MEASURES else b < a
 
 
-def diff(base_dir: str, markdown: bool) -> int:
+def edited_files(base_root: Path, head_root: Path):
+    """src files that differ between the two checkouts (added or changed)."""
+    out = []
+    for p in sorted((head_root / "src").rglob("*.rs")):
+        rel = p.relative_to(head_root)
+        other = base_root / rel
+        if not other.exists() or other.read_bytes() != p.read_bytes():
+            out.append(rel.as_posix())
+    return out
+
+
+def diff(base_dir: str, markdown: bool, untested_file=None) -> int:
     base, head = measure(Path(base_dir)), measure(Path.cwd())
+    untested = []
+    if untested_file:
+        try:
+            listed = set(json.loads(Path(untested_file).read_text()))
+        except (OSError, ValueError):
+            listed = set()
+        untested = [f for f in edited_files(Path(base_dir), Path.cwd()) if f in listed]
     deltas, added, removed_upward = compare(base, head)
     good = [(k, a, b) for k, (a, b) in deltas.items() if better(k, a, b)]
     bad = [(k, a, b) for k, (a, b) in deltas.items() if not better(k, a, b)]
@@ -492,6 +641,8 @@ def diff(base_dir: str, markdown: bool) -> int:
             ("Functions now over 150 lines", [f"`{x['file']}:{x['line']}` `{x['name']}` ({x['lines']} lines)" for x in added["long_functions"]]),
             ("Files now over 3,000 lines", [f"`{f}` ({head['details']['large_files'][f]:,} lines)" for f in added["large_files"]]),
             ("Modules that now use each other", [f"`{a}` and `{b}`" for a, b in added["mutual_pairs"]]),
+            ("Files with fewer test functions", [f"`{f}`: {a} → {b}" for f, a, b in added["fewer_tests"]]
+             if deltas.get("test_functions", (0, 0))[1] < deltas.get("test_functions", (0, 0))[0] else []),
         ]
         for title, items in sections:
             if items:
@@ -499,6 +650,12 @@ def diff(base_dir: str, markdown: bool) -> int:
                 for i in items:
                     print(f"- {i}")
                 print("\n</details>\n")
+        if untested:
+            print("**No tests yet** in these files you edited, as of the last release. A test here counts "
+                  "toward the coverage goal on the Code Health wiki page:\n")
+            for f in untested:
+                print(f"- `{f}`")
+            print()
         print("This report never blocks merging. Goals and reasons: "
               "`docs/architecture/health-goals.json`; how to read it: `docs/architecture/HEALTH.md`.")
     else:
@@ -573,7 +730,8 @@ def merged_pr_number(subject: str):
 def pr_for_commit(sha: str):
     """The merged pull request a direct commit (for example a squash merge)
     came from, from the GitHub API when the `gh` tool and a token are
-    available (as in CI); otherwise None, and no pull request is linked."""
+    available (as in CI); otherwise None, and the commit is listed as a
+    direct commit."""
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo or not os.environ.get("GH_TOKEN"):
         return None
@@ -585,6 +743,20 @@ def pr_for_commit(sha: str):
     return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else None
 
 
+def commit_author(sha: str):
+    """The GitHub login of a commit's author, under the same conditions as
+    pr_author. Works for direct commits, and in a fork, where the pull
+    request numbers of the parent repository do not exist."""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo or not os.environ.get("GH_TOKEN"):
+        return None
+    try:
+        r = run(["gh", "api", f"repos/{repo}/commits/{sha}", "--jq", ".author.login // empty"], ".", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
 def credits(rev_from: str, rev_to: str, repo: Path):
     """Per first-parent commit in FROM..TO, the source measures it improved."""
     revs = run(["git", "rev-list", "--first-parent", "--reverse", f"{rev_from}..{rev_to}"], repo).stdout.split()
@@ -593,7 +765,9 @@ def credits(rev_from: str, rev_to: str, repo: Path):
         def at(rev):
             dest = Path(tmp) / rev
             dest.mkdir()
-            archive = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", rev, "src"],
+            present = set(run(["git", "ls-tree", "--name-only", rev], repo).stdout.split())
+            paths = [t for t in TEST_ROOTS if t in present]
+            archive = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", rev, *paths],
                                      check=True, capture_output=True).stdout
             with tarfile.open(fileobj=io.BytesIO(archive)) as t:
                 t.extractall(dest, filter="data")
@@ -603,23 +777,26 @@ def credits(rev_from: str, rev_to: str, repo: Path):
                 shutil.rmtree(dest)       # hundreds of trees would fill the disk
         prev = at(run(["git", "rev-parse", rev_from], repo).stdout.strip())
         for rev in revs:
-            touched = run(["git", "diff", "--name-only", f"{rev}^1", rev, "--", "src"], repo).stdout.split()
+            touched = run(["git", "diff", "--name-only", f"{rev}^1", rev, "--", *TEST_ROOTS], repo).stdout.split()
             if not touched:
                 continue
             cur = at(rev)
             improved = {k: [prev[k], cur[k]] for k in SOURCE_MEASURES
-                        if prev[k] is not None and cur[k] is not None and cur[k] < prev[k]}
+                        if prev[k] is not None and cur[k] is not None and prev[k] != cur[k]
+                        and better(k, prev[k], cur[k])}
             if improved:
                 subj = run(["git", "log", "-1", "--format=%s%x00%an", rev], repo).stdout.strip().split("\0")
                 # A merge's own author is whoever merged; the pull request's
                 # author is on its second parent.
-                pr_side = run(["git", "log", "-1", "--format=%an", f"{rev}^2"], repo)
+                pr_side = run(["git", "log", "-1", "--format=%an%x00%H", f"{rev}^2"], repo)
+                authored = rev
                 merge = pr_side.returncode == 0 and bool(pr_side.stdout.strip())
                 if merge:
-                    subj[1] = pr_side.stdout.strip()
+                    subj[1], authored = pr_side.stdout.strip().split("\0")
                 number = merged_pr_number(subj[0]) if merge else pr_for_commit(rev)
                 login = re.search(r"^Merge pull request #\d+ from ([A-Za-z0-9-]+)/", subj[0]) if merge else None
-                login = login.group(1) if login else (pr_author(number) if number else None)
+                login = (login.group(1) if login else None) or commit_author(authored) \
+                    or (pr_author(number) if number else None)
                 out.append({"commit": rev, "subject": subj[0], "pr": number,
                             "login": login, "author": subj[1], "improved": improved})
             prev = cur
@@ -632,7 +809,7 @@ def main(argv) -> int:
     flags, args, options, i = set(), [], {}, 0
     while i < len(argv):
         a = argv[i]
-        if a in ("--out", "--repo") and i + 1 < len(argv):
+        if a in ("--out", "--repo", "--untested") and i + 1 < len(argv):
             options[a] = argv[i + 1]
             i += 2
             continue
@@ -648,7 +825,7 @@ def main(argv) -> int:
             sys.stdout.write(text)
         return 0
     if args[:1] == ["diff"] and len(args) == 2:
-        return diff(args[1], "--markdown" in flags)
+        return diff(args[1], "--markdown" in flags, options.get("--untested"))
     if args[:1] == ["lint"] and len(args) == 4:
         return lint(args[1], args[2], args[3], "--markdown" in flags)
     if args[:1] == ["credits"] and len(args) == 3:

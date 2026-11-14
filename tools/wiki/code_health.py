@@ -51,15 +51,22 @@ def milestone(goal, baseline, now):
         if now <= floor:
             return None
         return start, m
-    step = (lambda x: x + 5) if goal["id"] == "coverage" else (lambda x: x * 1.1)
+    step = (lambda x: x + 5) if goal["id"].startswith("coverage") else (lambda x: x * 1.1)
     start, m = baseline, step(baseline)
     while now >= m:
         start, m = m, step(m)
-    cap = 100 if goal["id"] == "coverage" else None
+    cap = 100 if goal["id"].startswith("coverage") else None
     return start, (min(m, cap) if cap else math.ceil(m))
 
 
 def progress(goal, baseline, now):
+    if goal.get("milestones") is False:
+        # A measure to watch, not to drive down or up: only flag drift.
+        if baseline is None or now is None:
+            return ""
+        drifted = now > baseline if goal["direction"] == "down" else now < baseline
+        return (f"{'above' if goal['direction'] == 'down' else 'below'} the baseline ({fmt(baseline)})"
+                if drifted else f"keep {'at or below' if goal['direction'] == 'down' else 'at or above'} {fmt(baseline)}")
     ms = milestone(goal, baseline, now)
     if ms is None:
         if baseline is not None and now is not None and goal.get("target") is not None and now <= goal["target"]:
@@ -94,6 +101,67 @@ def change(goal, before, now):
 def link(path, commit, line=None):
     url = f"{BLOB}/{commit}/{path}" + (f"#L{line}" if line else "")
     return f"[`{path}{':' + str(line) if line else ''}`]({url})"
+
+
+LAYER_NAMES = {0: "Foundations", 1: "Drawing model and geometry", 2: "File formats and rendering",
+               3: "Tool contract and plugin runtime", 4: "Features (modules)"}
+
+
+def ranked_test_targets(cur):
+    """Core files ranked by uncovered lines weighted by how often they
+    changed in the last 28 days: (score, file, uncovered, lines, landings)."""
+    d = cur["details"]
+    churn = d.get("churn_28d", {})
+    out = []
+    for f, c in d.get("coverage_files", {}).items():
+        unc = c["lines"] - c["covered"]
+        if unc:
+            out.append((unc * (1 + churn.get(f, 0)), f, unc, c["lines"], churn.get(f, 0)))
+    return sorted(out, key=lambda t: (-t[0], t[1]))
+
+
+def test_tasks(cur, commit):
+    d = cur["details"]
+    files = d.get("coverage_files")
+    if not files:
+        return []
+    out = ["### Add tests here", "",
+           "Core-layer files with the most lines no test runs, weighted by how often the file changed in the "
+           "last 28 days, so a test here protects code that is actively changing. *Size: one test or more.*", "",
+           "| File | Lines not run by tests | Coverage | Changes in 28 days |", "| --- | ---: | ---: | ---: |"]
+    for _, f, unc, n, landings in ranked_test_targets(cur)[:10]:
+        out.append(f"| {link(f, commit)} | {unc:,} | {100.0 * (n - unc) / n:.1f}% | {landings} |")
+    out.append("")
+    untested = d.get("untested_files", [])
+    if untested:
+        biggest = sorted(untested, key=lambda f: -files[f]["lines"])
+        out += [f"**No tests yet:** {len(untested)} core-layer {'file is' if len(untested) == 1 else 'files are'} "
+                "not run by any test. The largest:", ""]
+        out += [f"- {link(f, commit)}: {files[f]['lines']:,} lines" for f in biggest[:8]]
+        out.append("")
+    return out
+
+
+def coverage_by_layer(cur, prev, history):
+    v = cur["values"]
+    keys = sorted(k for k in v if k.startswith("coverage_layer_"))
+    if not keys:
+        return []
+    files = cur["details"].get("coverage_files", {})
+    out = ["### Coverage by layer", "",
+           "Line coverage of production code in each core layer (test code, generated files and the "
+           f"[excluded paths]({BLOB}/main/docs/architecture/health-goals.json) are left out).", "",
+           "| Layer | Coverage | Lines not run by tests | Since last release | Trend |",
+           "| --- | ---: | ---: | --- | --- |"]
+    up = {"id": "coverage_layer", "direction": "up"}
+    for k in keys:
+        layer = int(k.rsplit("_", 1)[1])
+        unc = sum(f["lines"] - f["covered"] for f in files.values() if f["layer"] == layer)
+        before = prev["values"].get(k) if prev else None
+        trend = spark([h["values"].get(k) for h in history[-12:]])
+        shown = f"{fmt(v[k])}%" if v[k] is not None else "—"
+        out.append(f"| {layer} {LAYER_NAMES.get(layer, '')} | {shown} | {unc:,} | {change(up, before, v[k])} | {trend} |")
+    return out + [""]
 
 
 def cleanup_tasks(cur, commit):
@@ -142,6 +210,7 @@ def cleanup_tasks(cur, commit):
                 "`cargo clippy --fix --workspace --all-targets -- -A clippy::all -W <lint>`, then check the diff. "
                 "*Size: mechanical.*", "", "| Lint | Fixable warnings |", "| --- | ---: |"]
         out += [f"| `{code}` | {n:,} |" for code, n in fixable[:10]] + [""]
+    out += test_tasks(cur, commit)
     long_fns = d.get("long_functions", [])
     if long_fns:
         out += ["### Discuss splitting a long function", "",
@@ -152,16 +221,41 @@ def cleanup_tasks(cur, commit):
 
 
 def thanks(credits):
+    """One line per contributor, in alphabetical order (never a ranking):
+    what their merged work improved in this release, summed per measure, and
+    the pull requests it came from."""
     if credits is None:
         return ["The thanks list was not computed for this release.", ""]
     if not credits:
         return ["No merged pull request improved a measure in this release. Pick a task below to be the first.", ""]
-    out = []
+    # A merge's subject may carry a login and another merge by the same
+    # person may not: give every entry the login seen for its author's name,
+    # so each contributor gets one line.
+    login_of = {c["author"].lower(): c["login"] for c in credits if c.get("login") and c.get("author")}
+    people = {}
     for c in credits:
-        who = f"[{c['login']}](https://github.com/{c['login']})" if c.get("login") else c.get("author", "")
-        pr = f"[#{c['pr']}](https://github.com/{REPO}/pull/{c['pr']})" if c.get("pr") else f"`{c['commit'][:9]}`"
-        what = "; ".join(f"{LABELS.get(k, k)} {fmt(a)} → {fmt(b)}" for k, (a, b) in c["improved"].items())
-        out.append(f"- {who}, {pr}: {what}")
+        c = dict(c, login=c.get("login") or login_of.get((c.get("author") or "").lower()))
+        name = c.get("login") or c.get("author") or "unknown"
+        person = people.setdefault(name.lower(), {"name": name, "login": c.get("login"), "totals": {}, "prs": [], "direct": 0})
+        person["login"] = person["login"] or c.get("login")
+        for k, (a, b) in c["improved"].items():
+            person["totals"][k] = person["totals"].get(k, 0) + (b - a)
+        if c.get("pr"):
+            if c["pr"] not in person["prs"]:
+                person["prs"].append(c["pr"])
+        else:
+            person["direct"] += 1
+    out = []
+    for key in sorted(people):
+        person = people[key]
+        who = f"[{person['name']}](https://github.com/{person['login']})" if person["login"] else person["name"]
+        what = "; ".join(f"{LABELS.get(k, k)} {'+' if d > 0 else '−'}{fmt(abs(d))}" for k, d in person["totals"].items())
+        where = [f"[#{n}](https://github.com/{REPO}/pull/{n})" for n in person["prs"][:8]]
+        if len(person["prs"]) > 8:
+            where.append(f"and {len(person['prs']) - 8} more")
+        if person["direct"]:
+            where.append(f"{person['direct']} direct commit{'' if person['direct'] == 1 else 's'}")
+        out.append(f"- {who}: {what} ({', '.join(where)})")
     return out + [""]
 
 
@@ -194,7 +288,8 @@ def render(cur, goals, history, credits, release):
                          f"| {fmt(now)} | {change(g, before, now)} | {progress(g, base, now)} | {trend} "
                          f"| {fmt(g['target']) if g['target'] is not None else ('lower' if g['direction'] == 'down' else 'higher')} |")
         lines.append("")
-    lines += ["## Thanks", "", "Merged pull requests that improved a measure in this release:", ""] + thanks(credits)
+    lines += coverage_by_layer(cur, prev, history)
+    lines += ["## Thanks", "", "Contributors whose merged work improved a measure in this release, in alphabetical order:", ""] + thanks(credits)
     lines += ["## Pick up a cleanup", ""] + cleanup_tasks(cur, commit)
     recent = history[-6:][::-1]
     lines += ["## History", "", "| Measure | " + " | ".join(h["release"] for h in recent) + " |",
@@ -228,6 +323,10 @@ def main(argv):
     hist_file.parent.mkdir(parents=True, exist_ok=True)
     hist_file.write_text(json.dumps(history, indent=1) + "\n")
     (wiki / "Code-Health.md").write_text(render(cur, goals, history, credits, release))
+    # For the pull request job's "no tests yet" note: kept only when this
+    # release measured coverage, so a failed coverage run keeps the last list.
+    if cur["details"].get("coverage_files"):
+        (wiki / "health" / "untested.json").write_text(json.dumps(cur["details"]["untested_files"], indent=0) + "\n")
     print(f"wrote {wiki / 'Code-Health.md'}")
     return 0
 

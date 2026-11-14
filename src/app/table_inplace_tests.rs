@@ -513,24 +513,38 @@ fn table_in(document: &document::Document, handle: Handle) -> &Table {
     }
 }
 
-/// The glyphs drawn for a table: each text vertex's place relative to the
-/// table's insertion point and its atlas spot (which glyph), sorted.
+/// The glyphs the scene really draws for a table (its picture block when it
+/// has one, else its cells): each text vertex's place relative to the table's
+/// insertion point and its atlas spot (which glyph), sorted.
 fn drawn_glyphs(document: &document::Document, table: &Table) -> Vec<[f64; 4]> {
     let origin = table.insertion_point;
-    let mut glyphs: Vec<[f64; 4]> =
-        crate::entities::table::tessellate_table(table, document, false, [1.0; 4], 1.0, 1.0)
-            .iter()
-            .flat_map(|wire| wire.text_verts.iter())
-            .map(|v| {
-                let at = |k: usize| f64::from(v.pos[k]) + f64::from(v.pos_low[k]);
-                [
-                    at(0) - origin.x,
-                    at(1) - origin.y,
-                    f64::from(v.uv[0]),
-                    f64::from(v.uv[1]),
-                ]
-            })
-            .collect();
+    let none = std::collections::HashSet::default();
+    let mut glyphs: Vec<[f64; 4]> = crate::scene::tessellate_entity(
+        document,
+        &none,
+        None,
+        [0.0, 0.0, 0.0, 1.0],
+        1.0,
+        None,
+        &EntityType::Table(Box::new(table.clone())),
+        None,
+        None,
+        None,
+        None,
+        &none,
+    )
+    .iter()
+    .flat_map(|wire| wire.text_verts.iter())
+    .map(|v| {
+        let at = |k: usize| f64::from(v.pos[k]) + f64::from(v.pos_low[k]);
+        [
+            at(0) - origin.x,
+            at(1) - origin.y,
+            f64::from(v.uv[0]),
+            f64::from(v.uv[1]),
+        ]
+    })
+    .collect();
     glyphs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     glyphs
 }
@@ -657,6 +671,36 @@ fn copy_mismatches(
         {
             out.push(format!("the copy lists the source's FIELD {shared:?}"));
         }
+    }
+    if b.block_name.is_empty() || (same_drawing && b.block_name == a.block_name) {
+        out.push(format!(
+            "the copy's picture block name {:?} is empty or the source's {:?}",
+            b.block_name, a.block_name
+        ));
+    } else if !copy_doc
+        .block_records
+        .get(&b.block_name)
+        .is_some_and(|r| !r.entity_handles.is_empty())
+    {
+        out.push(format!(
+            "the copy's picture block {:?} is missing or empty",
+            b.block_name
+        ));
+    }
+    if a.block_record_handle.is_none() != b.block_record_handle.is_none() {
+        out.push(format!(
+            "the source is drawn from {}, the copy from {}",
+            if a.block_record_handle.is_none() {
+                "its cells"
+            } else {
+                "its picture"
+            },
+            if b.block_record_handle.is_none() {
+                "its cells"
+            } else {
+                "its picture"
+            },
+        ));
     }
     let (glyphs_a, glyphs_b) = (drawn_glyphs(source_doc, a), drawn_glyphs(copy_doc, b));
     if glyphs_a.len() != glyphs_b.len() {

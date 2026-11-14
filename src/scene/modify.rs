@@ -743,8 +743,15 @@ impl Scene {
             EntityType::Table(table) => {
                 // A table exclusively owns its anonymous picture block. The
                 // codec also resolves by name, so detach both references.
+                // A table drawn from its cells (no handle, the name kept)
+                // keeps the name as that mark: the scene gives the copy a
+                // block of its own and goes on drawing it from its cells.
+                let from_cells =
+                    table.block_record_handle.is_none() && !table.block_name.is_empty();
                 table.block_record_handle = None;
-                table.block_name.clear();
+                if !from_cells {
+                    table.block_name.clear();
+                }
             }
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {

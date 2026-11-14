@@ -40,17 +40,54 @@ pub struct CloudPoints {
     pub bounds: Option<[[f64; 3]; 2]>,
 }
 
+/// Per-cache byte budget for decoded scan clouds. Every distinct scan file a
+/// drawing references decodes to a full point set that would otherwise stay
+/// resident for the whole process lifetime; past the budget the least recently
+/// used clouds are dropped and re-decoded on demand. Tunable with
+/// `OCS_POINTCLOUD_CACHE_MB`.
+fn point_cloud_cache_budget_bytes() -> usize {
+    const DEFAULT_MIB: usize = 64;
+    std::env::var("OCS_POINTCLOUD_CACHE_MB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MIB)
+        .saturating_mul(1024 * 1024)
+}
+
+/// Bytes a cached cloud retains: its point arrays dominate. Per-entry Arc,
+/// hash-table and per-scan string overhead is left uncharged.
+fn cloud_cost(path: &Path, cloud: &Option<Arc<CloudPoints>>) -> usize {
+    let arrays = cloud.as_ref().map_or(0, |cloud| {
+        cloud.positions.capacity() * std::mem::size_of::<[f64; 3]>()
+            + cloud.colors.capacity() * std::mem::size_of::<[u8; 3]>()
+            + cloud.intensity.capacity()
+            + cloud.normals.capacity() * std::mem::size_of::<[f32; 3]>()
+            + cloud.scan_ranges.capacity() * std::mem::size_of::<ScanRange>()
+            + cloud
+                .preview
+                .as_ref()
+                .map_or(0, |preview| preview.capacity())
+    });
+    arrays + std::mem::size_of::<CloudPoints>() + path.as_os_str().len()
+}
+
 /// Scan points by file path and modification time. A file that fails to
 /// decode is remembered too, so it is not re-read on every tessellate.
 pub fn load(path: &Path) -> Option<Arc<CloudPoints>> {
-    type Cache = Mutex<FxHashMap<PathBuf, (SystemTime, Option<Arc<CloudPoints>>)>>;
+    use super::pdf_raster::BudgetedRasterCache;
+    type Cache = Mutex<BudgetedRasterCache<PathBuf, (SystemTime, Option<Arc<CloudPoints>>)>>;
     static CACHE: OnceLock<Cache> = OnceLock::new();
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
-    let mut cache = CACHE.get_or_init(Default::default).lock().ok()?;
-    if let Some((stamp, cloud)) = cache.get(path) {
-        if *stamp == modified {
-            return cloud.clone();
+    let key = path.to_path_buf();
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
+        .lock()
+        .ok()?;
+    if let Some((stamp, cloud)) = cache.get(&key) {
+        if stamp == modified {
+            return cloud;
         }
+        cache.pop(&key);
     }
     let started = crate::perf::enabled().then(iced::time::Instant::now);
     let cloud = decode(path).map(Arc::new);
@@ -60,7 +97,11 @@ pub fn load(path: &Path) -> Option<Arc<CloudPoints>> {
         cloud.as_ref().map_or(0, |cloud| cloud.positions.len()),
         path.display(),
     ));
-    cache.insert(path.to_path_buf(), (modified, cloud.clone()));
+    let budget = point_cloud_cache_budget_bytes();
+    let cost = cloud_cost(path, &cloud);
+    if cost <= budget {
+        cache.insert_with_budget(key, (modified, cloud.clone()), cost, budget);
+    }
     cloud
 }
 
@@ -957,4 +998,259 @@ pub(crate) fn setting_value(document: &Document, setting: Setting) -> i64 {
     crate::io::drawing_variable(document, setting.name)
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(setting.default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serialises the tests that shrink the process-wide point-cloud budget:
+    /// the env override is shared by every test thread in this process.
+    static POINTCLOUD_BUDGET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct PointCloudBudgetEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl PointCloudBudgetEnvGuard {
+        fn set(mib: &str) -> Self {
+            let previous = std::env::var_os("OCS_POINTCLOUD_CACHE_MB");
+            std::env::set_var("OCS_POINTCLOUD_CACHE_MB", mib);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PointCloudBudgetEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("OCS_POINTCLOUD_CACHE_MB", value),
+                None => std::env::remove_var("OCS_POINTCLOUD_CACHE_MB"),
+            }
+        }
+    }
+
+    /// A minimal single-node indexed scan ("ADOCT") with `points` deterministic
+    /// points, laid out exactly as `rcs::decode` reads it: header transforms and
+    /// flags, a two-entry section directory, one 368-byte node record with every
+    /// octree level empty, then 16-byte records of three 18-bit millimetre
+    /// offsets. Each decoded cloud is a pure function of (seed, index).
+    fn scan_bytes(seed: u32, points: u32) -> Vec<u8> {
+        const DIR: usize = 0x15D;
+        const NODE_RECORD: usize = 368;
+        let data = DIR + 8 + NODE_RECORD;
+        let n = points as usize;
+        let block_size = n * 20;
+        let mut b = vec![0u8; data + block_size];
+        b[0..5].copy_from_slice(b"ADOCT");
+        let put_f64 =
+            |b: &mut [u8], at: usize, v: f64| b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+        let put_u32 =
+            |b: &mut [u8], at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let put_u64 =
+            |b: &mut [u8], at: usize, v: u64| b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+        put_f64(&mut b, 0x40, 1.0);
+        put_f64(&mut b, 0x48, 1.0);
+        put_f64(&mut b, 0x50, 1.0);
+        put_f64(&mut b, 0xB8, 256.0);
+        put_f64(&mut b, 0xC0, 256.0);
+        put_f64(&mut b, 0xC8, 256.0);
+        b[0xE0] = 1; // RGB
+        b[0xE2] = 1; // intensity
+        b[0xE3..0xE3 + 6].copy_from_slice(b"{test}");
+        put_u32(&mut b, 0x129, 2);
+        put_u64(&mut b, 0x12D, 2);
+        put_u64(&mut b, 0x12D + 8, DIR as u64);
+        put_u64(&mut b, 0x12D + 16, (8 + NODE_RECORD) as u64);
+        put_u64(&mut b, 0x12D + 24, 1);
+        put_u64(&mut b, 0x12D + 32, data as u64);
+        put_u64(&mut b, 0x12D + 40, block_size as u64);
+        put_u64(&mut b, DIR, 1);
+        let rec = DIR + 8;
+        put_u32(&mut b, rec + 100, points);
+        put_u32(&mut b, rec + 104, block_size as u32);
+        let records = data + n * 4;
+        for i in 0..n {
+            let at = records + i * 16;
+            let x = (i as u32 + seed) % 200_000;
+            let y = (i as u32 * 7 + seed) % 200_000;
+            let z = (i as u32 * 13 + seed) % 200_000;
+            let v = u64::from(x) | (u64::from(y) << 18) | (u64::from(z) << 36);
+            b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+            b[at + 8] = (i % 256) as u8;
+            b[at + 9] = (seed % 256) as u8;
+            b[at + 10] = ((i * 3) % 256) as u8;
+            b[at + 11] = ((i * 5) % 256) as u8;
+        }
+        b
+    }
+
+    /// A 7000-point scan decodes to ~280 KiB of point arrays, so three distinct
+    /// clouds fit a 1 MiB budget and four do not — the window the recency test
+    /// needs to tell a promoting hit from a non-promoting peek.
+    fn budget_scan(tag: &str, points: u32) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "ocs-pointcloud-budget-{tag}-{}-{}.rcs",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, scan_bytes(0, points)).expect("write budget scan");
+        path
+    }
+
+    fn set_modified(path: &Path, time: SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open scan for mtime")
+            .set_modified(time)
+            .expect("set scan mtime");
+    }
+
+    #[test]
+    fn scan_sweep_past_budget_evicts_the_oldest() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("1");
+        let a = budget_scan("sweep-a", 7000);
+        let oldest = load(&a).expect("decode A");
+        let mut pushed = Vec::new();
+        for tag in ["sweep-b", "sweep-c", "sweep-d", "sweep-e"] {
+            let path = budget_scan(tag, 7000);
+            drop(load(&path).expect("sweep decode"));
+            pushed.push(path);
+        }
+        let again = load(&a).expect("re-decode A");
+        assert!(
+            !Arc::ptr_eq(&oldest, &again),
+            "the oldest cloud must be evicted once the sweep passes the budget"
+        );
+        for path in std::iter::once(a).chain(pushed) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// A cache hit must promote the entry: a re-touched older cloud survives a
+    /// sweep that evicts an untouched newer one. Three ~280 KiB clouds fit the
+    /// 1 MiB budget before the sweep pushes past it.
+    #[test]
+    fn re_touching_an_older_cloud_keeps_it_cached_past_the_budget() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("1");
+        let a = budget_scan("recency-a", 7000);
+        let b = budget_scan("recency-b", 7000);
+        let c = budget_scan("recency-c", 7000);
+        let d = budget_scan("recency-d", 7000);
+        let oldest = load(&a).expect("decode A");
+        let middle = load(&b).expect("decode B");
+        let touched = load(&a).expect("re-touch A");
+        assert!(
+            Arc::ptr_eq(&oldest, &touched),
+            "re-touch reads the cached cloud"
+        );
+        drop(touched);
+        for path in [&c, &d] {
+            drop(load(path).expect("push decode"));
+        }
+        let b_again = load(&b).expect("re-decode B");
+        let b_cached = Arc::ptr_eq(&middle, &b_again);
+        let a_again = load(&a).expect("re-decode A");
+        let a_cached = Arc::ptr_eq(&oldest, &a_again);
+        // Recency under a shared budget: A must outlive B, not absolutely
+        // survive — probing B re-inserts it and may evict A in turn.
+        assert!(
+            a_cached || !b_cached,
+            "the re-touched cloud outlives the untouched one under eviction"
+        );
+        for path in [a, b, c, d] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn recent_cloud_survives_a_sweep_within_budget() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("128");
+        let a = budget_scan("within-a", 7000);
+        let b = budget_scan("within-b", 7000);
+        let first = load(&a).expect("decode A");
+        drop(load(&b).expect("decode B"));
+        let again = load(&a).expect("re-read A");
+        assert!(
+            Arc::ptr_eq(&first, &again),
+            "a cloud within the budget stays cached across a sweep"
+        );
+        for path in [a, b] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn a_cloud_larger_than_the_budget_is_not_retained() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("1");
+        let big = budget_scan("oversized", 40_000);
+        let first = load(&big).expect("decode oversized");
+        let again = load(&big).expect("re-decode oversized");
+        assert!(
+            !Arc::ptr_eq(&first, &again),
+            "a cloud larger than the budget must not be retained"
+        );
+        let _ = std::fs::remove_file(big);
+    }
+
+    /// The budget must not defeat modification-time invalidation: a cloud whose
+    /// file stamp changes re-decodes even when it still fits the budget.
+    #[test]
+    fn a_changed_modification_time_re_decodes_within_budget() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("128");
+        let path = budget_scan("mtime", 7000);
+        let first = load(&path).expect("decode");
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        set_modified(&path, stamp + std::time::Duration::from_secs(2));
+        let again = load(&path).expect("re-decode");
+        assert!(
+            !Arc::ptr_eq(&first, &again),
+            "a new modification time must invalidate the cached cloud"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A memoised decode failure must not outlive its eviction: a corrupt file
+    /// caches `None`, and once the budget sweeps that entry away a file that has
+    /// since been fixed decodes. The stamp is held constant across the fix so
+    /// only eviction — not modification-time invalidation — can trigger retry.
+    #[test]
+    fn an_evicted_decode_failure_retries_when_the_file_is_fixed() {
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("1");
+        let path = budget_scan("late-arrival", 7000);
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, b"not a scan").expect("write corrupt scan");
+        set_modified(&path, stamp);
+        assert!(load(&path).is_none(), "corrupt file stays None");
+        for i in 0..6 {
+            let push = budget_scan(&format!("late-push-{i}"), 7000);
+            drop(load(&push).expect("push decode"));
+            let _ = std::fs::remove_file(push);
+        }
+        std::fs::write(&path, scan_bytes(99, 7000)).expect("write fixed scan");
+        set_modified(&path, stamp);
+        let loaded = load(&path).expect("the evicted failure must retry");
+        assert_eq!(loaded.positions.len(), 7000);
+        let _ = std::fs::remove_file(path);
+    }
 }

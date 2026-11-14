@@ -1225,8 +1225,12 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
             .padding([6, 10])
             .width(Fill)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().danger.weak.color)),
-                text_color: Some(theme.palette().danger.weak.text),
+                background: Some(Background::Color(crate::ui::style::chrome::mix(
+                    crate::ui::style::chrome::palette_body(theme),
+                    crate::ui::style::chrome::danger(theme),
+                    0.2,
+                ))),
+                text_color: Some(crate::ui::style::chrome::strong(theme)),
                 border: Border {
                     radius: 4.0.into(),
                     ..Default::default()

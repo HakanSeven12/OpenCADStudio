@@ -12,7 +12,7 @@ use crate::ui::style::palette_metrics as pm;
 use document::count::{BlockInstance, CountKey};
 use document::{Document, Handle};
 use iced::widget::{button, checkbox, column, container, row, text, tooltip, Space};
-use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
+use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 const BLOCK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/block.svg");
 const AREA_ICON: &[u8] = include_bytes!("../../../assets/icons/shapes/rect.svg");
@@ -687,10 +687,10 @@ pub fn toolbar<'a>(mode: &CountMode, doc: &Document) -> Element<'a, Message> {
     let bar = container(bar)
         .padding([4, 10])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
                 radius: 4.0.into(),
             },
             ..Default::default()
@@ -707,9 +707,9 @@ pub fn border<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(Fill))
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
+        .style(|theme: &Theme| container::Style {
             border: Border {
-                color: Color::from_rgb(0.18, 0.52, 0.95),
+                color: crate::ui::style::chrome::accent(theme),
                 width: 2.0,
                 radius: 0.0.into(),
             },

@@ -384,6 +384,18 @@ pub fn read_only_field<'a>(value: &str) -> Element<'a, Message> {
 
 /// A small square button in a cell (a combo caret, the `...` of a pick):
 /// flat, lit by `chrome::hover`.
+/// The fill and text of a button that sits in a value cell like a field
+/// (a step arrow, a Yes / No switch, a link): the field's colours, the
+/// bar's under the pointer.
+pub fn cell_field_pair(theme: &Theme, status: button::Status) -> iced::theme::palette::Pair {
+    let fill = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        chrome::palette_bar(theme)
+    } else {
+        chrome::palette_body(theme)
+    };
+    iced::theme::palette::Pair::new(fill, chrome::text(theme))
+}
+
 pub fn cell_button_style(theme: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: matches!(status, button::Status::Hovered | button::Status::Pressed)

@@ -117,7 +117,6 @@ impl canvas::Program<Message> for HatchPatternPreview {
         use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let palette = theme.palette();
         let pad = self.padding;
         let sample = canvas::Path::rectangle(
             Point::new(pad, pad),
@@ -126,14 +125,17 @@ impl canvas::Program<Message> for HatchPatternPreview {
                 (bounds.height - pad * 2.0).max(0.0),
             ),
         );
-        frame.fill(&sample, palette.background.base.color);
+        frame.fill(&sample, crate::ui::style::chrome::palette_body(theme));
 
         match &self.pattern {
             HatchPattern::Solid => {
-                frame.fill(&sample, palette.background.base.text.scale_alpha(0.72));
+                frame.fill(
+                    &sample,
+                    crate::ui::style::chrome::text(theme).scale_alpha(0.72),
+                );
             }
             HatchPattern::Gradient { .. } => {
-                frame.fill(&sample, palette.primary.weak.color);
+                frame.fill(&sample, crate::ui::style::chrome::lit(theme));
             }
             HatchPattern::Pattern(_) => {
                 let model = HatchModel {
@@ -165,7 +167,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
                     draw_depth: 0.0,
                 };
                 let stroke = canvas::Stroke::default()
-                    .with_color(palette.background.base.text)
+                    .with_color(crate::ui::style::chrome::text(theme))
                     .with_width(1.0);
                 for segment in model.pattern_segments() {
                     frame.stroke(
@@ -182,7 +184,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
         frame.stroke(
             &sample,
             canvas::Stroke::default()
-                .with_color(palette.background.neutral.color)
+                .with_color(crate::ui::style::chrome::border(theme))
                 .with_width(1.0),
         );
         vec![frame.into_geometry()]
@@ -313,23 +315,31 @@ pub(crate) fn hatch_pattern_picker_content<'a>(
             )
             .on_press(on_changed(name))
             .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 let pair = if selected {
-                    palette.primary.weak
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::lit(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    )
                 } else if hovered || focused {
-                    palette.background.strong
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::hover(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    )
                 } else {
-                    palette.background.weak
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::palette_bar(theme),
+                        crate::ui::style::chrome::text(theme),
+                    )
                 };
                 button::Style {
                     background: Some(Background::Color(pair.color)),
                     text_color: pair.text,
                     border: Border {
                         color: if selected || focused {
-                            palette.primary.base.color
+                            crate::ui::style::chrome::accent(theme)
                         } else {
-                            palette.background.neutral.color
+                            crate::ui::style::chrome::border(theme)
                         },
                         width: if selected || focused { 2.0 } else { 1.0 },
                         radius: 4.0.into(),
@@ -1667,16 +1677,17 @@ impl PropertiesPanel {
         )
         .on_press(Message::PropEditChoiceToggle(field))
         .style(|theme: &Theme, status| {
-            let palette = theme.palette();
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(Background::Color(palette.background.weak.color))
-                }
+                button::Status::Hovered | button::Status::Pressed => Some(Background::Color(
+                    crate::ui::style::chrome::palette_bar(theme),
+                )),
                 _ => None,
             };
             let text_color = match status {
-                button::Status::Hovered | button::Status::Pressed => palette.background.weak.text,
-                _ => palette.background.base.text,
+                button::Status::Hovered | button::Status::Pressed => {
+                    crate::ui::style::chrome::strong(theme)
+                }
+                _ => crate::ui::style::chrome::text(theme),
             };
             button::Style {
                 background: bg,
@@ -1700,14 +1711,15 @@ impl PropertiesPanel {
         };
         let head = container(row![input, caret].align_y(iced::Center))
             .style(move |theme: &Theme| {
-                let palette = theme.palette();
                 let border_color = if active {
-                    palette.primary.base.color
+                    crate::ui::style::chrome::accent(theme)
                 } else {
-                    palette.background.neutral.color
+                    crate::ui::style::chrome::border(theme)
                 };
                 container::Style {
-                    background: Some(Background::Color(palette.background.base.color)),
+                    background: Some(Background::Color(crate::ui::style::chrome::palette_body(
+                        theme,
+                    ))),
                     border: Border {
                         color: border_color,
                         width: crate::ui::style::palette_metrics::line(),
@@ -1913,9 +1925,9 @@ impl PropertiesPanel {
         let active = name_active || formula_active;
         let bg = move |theme: &Theme| {
             if active {
-                Background::Color(theme.palette().primary.weak.color)
+                Background::Color(crate::ui::style::chrome::lit(theme))
             } else {
-                Background::Color(theme.palette().background.base.color)
+                Background::Color(crate::ui::style::chrome::palette_body(theme))
             }
         };
         let content = container(
@@ -1980,20 +1992,19 @@ impl PropertiesPanel {
         )
         .on_press(Message::PropHatchPatternPickerToggle(current.to_string()))
         .style(move |theme: &Theme, status| {
-            let palette = theme.palette();
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
                 background: Some(Background::Color(if hovered {
-                    palette.background.weak.color
+                    crate::ui::style::chrome::palette_bar(theme)
                 } else {
-                    palette.background.base.color
+                    crate::ui::style::chrome::palette_body(theme)
                 })),
-                text_color: palette.background.base.text,
+                text_color: crate::ui::style::chrome::text(theme),
                 border: Border {
                     color: if self.hatch_pattern_picker_open && self.picker_here() {
-                        palette.primary.base.color
+                        crate::ui::style::chrome::accent(theme)
                     } else {
-                        palette.background.neutral.color
+                        crate::ui::style::chrome::border(theme)
                     },
                     width: crate::ui::style::palette_metrics::line(),
                     radius: 2.0.into(),
@@ -2047,15 +2058,11 @@ fn render_stepper_row<'a>(label: &'a str, display: &'a str) -> Element<'a, Messa
         .on_press(Message::PropVertexStep(delta))
         .padding([0, 6])
         .style(|theme: &Theme, status| {
-            let palette = theme.palette();
-            let pair = match status {
-                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-                _ => palette.background.base,
-            };
+            let pair = crate::ui::kit::cell_field_pair(theme, status);
             button::Style {
                 background: Some(Background::Color(pair.color)),
                 border: Border {
-                    color: palette.background.neutral.color,
+                    color: crate::ui::style::chrome::border(theme),
                     width: crate::ui::style::palette_metrics::line(),
                     radius: 2.0.into(),
                 },
@@ -2095,14 +2102,11 @@ fn render_bool_row<'a>(label: &'a str, field: &'static str, value: bool) -> Elem
     .on_press(Message::PropBoolToggle(field))
     .style(move |theme: &Theme, status| {
         let palette = theme.palette();
-        let pair = match status {
-            button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-            _ => palette.background.base,
-        };
+        let pair = crate::ui::kit::cell_field_pair(theme, status);
         button::Style {
             background: Some(Background::Color(pair.color)),
             border: Border {
-                color: palette.background.neutral.color,
+                color: crate::ui::style::chrome::border(theme),
                 width: crate::ui::style::palette_metrics::line(),
                 radius: 2.0.into(),
             },
@@ -2314,15 +2318,12 @@ fn render_entity_link_row<'a>(
         let pair = if conflicting {
             palette.danger.weak
         } else {
-            match status {
-                button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-                _ => palette.background.base,
-            }
+            crate::ui::kit::cell_field_pair(theme, status)
         };
         button::Style {
             background: Some(Background::Color(pair.color)),
             border: Border {
-                color: palette.background.neutral.color,
+                color: crate::ui::style::chrome::border(theme),
                 width: crate::ui::style::palette_metrics::line(),
                 radius: 2.0.into(),
             },
@@ -2391,15 +2392,11 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
     )
     .on_press(Message::ShowConstraintValuesChanged(!value))
     .style(move |theme: &Theme, status| {
-        let palette = theme.palette();
-        let pair = match status {
-            button::Status::Hovered | button::Status::Pressed => palette.background.weak,
-            _ => palette.background.base,
-        };
+        let pair = crate::ui::kit::cell_field_pair(theme, status);
         button::Style {
             background: Some(Background::Color(pair.color)),
             border: Border {
-                color: palette.background.neutral.color,
+                color: crate::ui::style::chrome::border(theme),
                 width: crate::ui::style::palette_metrics::line(),
                 radius: 2.0.into(),
             },

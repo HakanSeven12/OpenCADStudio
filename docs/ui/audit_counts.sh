@@ -28,6 +28,8 @@ src/ui/window/parameters_manager.rs
 src/ui/window/count_palette.rs
 src/ui/window/layer_walk.rs
 src/ui/window/quick_calc/view.rs
+src/ui/window/quick_calc/variables_view.rs
+src/ui/window/quick_calc/keypad_view.rs
 src/ui/window/block_palette.rs
 src/ui/window/xref_manager.rs
 src/ui/window/layers.rs

@@ -873,7 +873,7 @@ impl OpenCADStudio {
                 .height(Fill)
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(
-                        theme.palette().primary.weak.color.scale_alpha(0.35),
+                        crate::ui::style::chrome::lit(theme).scale_alpha(0.35),
                     )),
                     ..Default::default()
                 });
@@ -1014,8 +1014,10 @@ impl OpenCADStudio {
                     .center_x(Length::Fixed(BADGE_W))
                     .padding([2, 6])
                     .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(theme.palette().primary.base.color)),
-                        text_color: Some(theme.palette().primary.base.text),
+                        background: Some(Background::Color(crate::ui::style::chrome::accent(
+                            theme,
+                        ))),
+                        text_color: Some(crate::ui::style::chrome::on_accent(theme)),
                         border: Border {
                             radius: 9.0.into(),
                             ..Default::default()
@@ -1037,13 +1039,13 @@ impl OpenCADStudio {
 /// The glowing accent used by the strip's drop lines.
 fn dock_drop_line_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(theme.palette().primary.base.color)),
+        background: Some(Background::Color(crate::ui::style::chrome::accent(theme))),
         border: Border {
             radius: 2.0.into(),
             ..Default::default()
         },
         shadow: iced::Shadow {
-            color: theme.palette().primary.base.color.scale_alpha(0.8),
+            color: crate::ui::style::chrome::accent(theme).scale_alpha(0.8),
             offset: iced::Vector::new(0.0, 0.0),
             blur_radius: 6.0,
         },
@@ -1085,19 +1087,16 @@ fn dock_icon_ghost(icons: &[crate::ui::dock::PanelId]) -> Element<'static, Messa
         })
         .collect();
     container(column(glyphs))
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(
-                    palette.primary.base.color.scale_alpha(0.22),
-                )),
-                border: Border {
-                    color: palette.primary.base.color,
-                    width: 1.5,
-                    radius: 6.0.into(),
-                },
-                ..Default::default()
-            }
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                crate::ui::style::chrome::accent(theme).scale_alpha(0.22),
+            )),
+            border: Border {
+                color: crate::ui::style::chrome::accent(theme),
+                width: 1.5,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
         })
         .into()
 }
@@ -1402,31 +1401,25 @@ fn dock_ghost(id: crate::ui::dock::PanelId, w: f32, h: f32) -> Element<'static, 
     .width(Fill)
     .padding([5, 8])
     .clip(true)
-    .style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(palette.primary.base.color)),
-            text_color: Some(palette.primary.base.text),
-            ..Default::default()
-        }
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(crate::ui::style::chrome::accent(theme))),
+        text_color: Some(crate::ui::style::chrome::on_accent(theme)),
+        ..Default::default()
     });
     container(column![header, Space::new()])
         .width(Length::Fixed(w.max(1.0)))
         .height(Length::Fixed(h.max(1.0)))
         .clip(true)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(
-                    palette.background.base.color.scale_alpha(0.85),
-                )),
-                border: Border {
-                    color: palette.primary.base.color,
-                    width: 2.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            }
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                crate::ui::style::chrome::palette_body(theme).scale_alpha(0.85),
+            )),
+            border: Border {
+                color: crate::ui::style::chrome::accent(theme),
+                width: 2.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
         })
         .into()
 }

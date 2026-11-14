@@ -1404,8 +1404,8 @@ impl Graph {
         ]
         .height(HEADER_H);
         let header = container(header).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().primary.weak.color)),
-            text_color: Some(theme.palette().primary.weak.text),
+            background: Some(Background::Color(crate::ui::style::chrome::lit(theme))),
+            text_color: Some(crate::ui::style::chrome::strong(theme)),
             ..Default::default()
         });
         let driven = self.driven_fields(id, &sections);
@@ -1462,9 +1462,11 @@ impl Graph {
             container(col)
                 .width(NODE_W)
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(theme.palette().background.base.color)),
+                    background: Some(Background::Color(crate::ui::style::chrome::palette_body(
+                        theme,
+                    ))),
                     border: Border {
-                        color: theme.palette().background.strong.color,
+                        color: crate::ui::style::chrome::border(theme),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -1670,17 +1672,15 @@ fn port_dot<'a>(linked: bool) -> Element<'a, Message> {
         container(Space::new())
             .width(8.0)
             .height(8.0)
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: linked.then_some(Background::Color(palette.primary.base.color)),
-                    border: Border {
-                        color: palette.primary.base.color,
-                        width: 1.5,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
+            .style(move |theme: &Theme| container::Style {
+                background: linked
+                    .then_some(Background::Color(crate::ui::style::chrome::accent(theme))),
+                border: Border {
+                    color: crate::ui::style::chrome::accent(theme),
+                    width: 1.5,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
             }),
     )
     .width(PORT_W)
@@ -1716,15 +1716,14 @@ impl canvas::Program<Message> for Wires {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let palette = theme.palette();
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.fill_rectangle(
             Point::ORIGIN,
             bounds.size(),
-            palette.background.base.color.scale_alpha(0.6),
+            crate::ui::style::chrome::palette_body(theme).scale_alpha(0.6),
         );
         let stroke = canvas::Stroke::default()
-            .with_color(palette.primary.base.color)
+            .with_color(crate::ui::style::chrome::accent(theme))
             .with_width(self.width);
         for (a, b) in &self.wires {
             frame.stroke(&wire_path(*a, *b), stroke);
@@ -1732,7 +1731,7 @@ impl canvas::Program<Message> for Wires {
         if let Some((a, b)) = self.pending {
             frame.stroke(
                 &wire_path(a, b),
-                stroke.with_color(palette.primary.weak.color),
+                stroke.with_color(crate::ui::style::chrome::lit(theme)),
             );
         }
         vec![frame.into_geometry()]

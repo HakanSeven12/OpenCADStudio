@@ -1813,7 +1813,7 @@ impl Scene {
     /// refused to reach it. `SANE_EXTENT` and the finite test are the only
     /// filters now; the ±1e6 display segments that motivated the old heuristic
     /// come from XLine / Ray, which are handled explicitly below.
-    pub(super) fn visible_block_bounds(&self, block: Handle) -> Option<(glam::DVec3, glam::DVec3)> {
+    pub(crate) fn visible_block_bounds(&self, block: Handle) -> Option<(glam::DVec3, glam::DVec3)> {
         if block.is_null() {
             return None;
         }

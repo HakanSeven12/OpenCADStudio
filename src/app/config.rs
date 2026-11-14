@@ -824,6 +824,18 @@ mod tests {
     }
 
     #[test]
+    fn geopdf_config_defaults_off_and_round_trips() {
+        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
+        assert!(!old.plot.geopdf);
+
+        let mut original = AppConfig::default();
+        original.plot.geopdf = true;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.plot.geopdf);
+    }
+
+    #[test]
     fn ribbon_layout_defaults_and_round_trips() {
         use crate::ui::ribbon::{MinimizePref, RibbonMinimize};
 

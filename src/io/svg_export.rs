@@ -1421,6 +1421,7 @@ mod tests {
             clip: None,
             options: PlotOptions::default(),
             plot_style: None,
+            geopdf: None,
         }
     }
 

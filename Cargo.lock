@@ -17,6 +17,7 @@ dependencies = [
  "clap",
  "console_error_panic_hook",
  "cosmic-text 0.15.0",
+ "crs-definitions",
  "dwg-thumbnailer",
  "encoding_rs",
  "env_logger",
@@ -40,6 +41,7 @@ dependencies = [
  "kurbo 0.13.1",
  "libloading",
  "log",
+ "lopdf",
  "lru",
  "lyon_tessellation",
  "md-5",
@@ -58,6 +60,8 @@ dependencies = [
  "opencadkernel-constraints",
  "pollster",
  "printpdf",
+ "proj4rs",
+ "proj4wkt",
  "rayon",
  "resvg",
  "rfd",
@@ -1186,6 +1190,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_log"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86919cef3e37b9356ccf54d4421208c17ecfda01beae61393e7ffd72916c0ef1"
+dependencies = [
+ "log",
+ "web-sys",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1349,6 +1363,12 @@ name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
+name = "crs-definitions"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed764c927c2a19ec1cb85deb88e93560872c04653b0e9e63fbdf6a8edf968bcb"
 
 [[package]]
 name = "crunchy"
@@ -5001,6 +5021,44 @@ checksum = "4488a4a36b9a4ba6b9334a32a39971f77c1436ec82c38707bce707699cc3bbcb"
 dependencies = [
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "proj4rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c237a4e4da4e0f2eae7a5d078df926894ccf1b315043dbccebc413888487d562"
+dependencies = [
+ "console_log",
+ "crs-definitions",
+ "js-sys",
+ "proj4rs-geodesic",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "proj4rs-geodesic"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdb2ff6e4d7329dc428ca2cb40f4c1ea85ef6c10aa6bd410294a1c835cd55567"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "proj4wkt"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58c81c82adeaefed1216edce88aae980cba2c1eff3e8be8fc0f405b04765f82a"
+dependencies = [
+ "console_log",
+ "js-sys",
+ "nom 8.0.0",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

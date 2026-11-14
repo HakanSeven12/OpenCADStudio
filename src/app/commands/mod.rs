@@ -1072,6 +1072,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "LAYDEL",
         "LAYTRANS",
         "DWGUNITS",
+        "GEOGRAPHICLOCATION",
         "LAYMRG",
         "LAYERSTATE",
         "LAS",

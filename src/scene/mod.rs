@@ -3931,14 +3931,14 @@ impl Scene {
         }
     }
 
-    /// The drawing's geographic location (GEODATA), when it has one.
+    /// The root drawing's geographic location (GEODATA), when it has one.
+    /// Xref and paper-space GEODATA never become the scene CRS by handle order.
     pub(crate) fn geo_data(&self) -> Option<&document::objects::GeoData> {
-        crate::entities::object_data::geo_objects(&self.object_data_cache)
-            .iter()
-            .find_map(|handle| match self.document.objects.get(handle) {
-                Some(document::objects::ObjectType::GeoData(geo)) => Some(geo),
-                _ => None,
-            })
+        crate::io::crs::model_space_geo_data(&self.document)
+    }
+
+    pub(crate) fn refresh_object_data_cache(&mut self) {
+        self.object_data_cache = crate::entities::object_data::build_cache(&self.document);
     }
 
     pub(super) fn world_per_pixel(&self) -> Option<f32> {

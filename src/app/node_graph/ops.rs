@@ -1031,7 +1031,7 @@ impl AppHost<'_> {
                     .collect();
                 let i = self.i;
                 self.app
-                    .attach_pdf_pages(i, "PDFATTACH".into(), kind, &path, pages);
+                    .attach_pdf_pages(i, "PDFATTACH".into(), kind, &path, pages, false);
                 let added: Vec<Handle> = self
                     .scene()
                     .document

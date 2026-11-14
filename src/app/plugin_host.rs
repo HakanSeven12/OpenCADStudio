@@ -5825,6 +5825,16 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .ok()
             .flatten()
     }
+    fn on_dialog_action(
+        &mut self,
+        event: ocs_plugin_api::dialog::DialogEvent,
+    ) -> ocs_plugin_api::dialog::DialogActionResponse {
+        // A runner without `DialogAction` answers with an error; the host
+        // then falls back to the panel-action notification.
+        self.process
+            .dialog_action(self.command_id, event)
+            .unwrap_or(ocs_plugin_api::dialog::DialogActionResponse::None)
+    }
     fn on_dialog_response(
         &mut self,
         response: ocs_plugin_api::dialog::DialogResponse,

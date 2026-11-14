@@ -137,6 +137,294 @@ impl UcsXform {
     }
 }
 
+#[cfg(test)]
+mod ucs_xform_tests {
+    use super::*;
+    use glam::DVec3;
+
+    const EPS: f64 = 1e-9;
+
+    // A UCS that is both moved and tilted, with axes written out by hand so
+    // the expected values below do not come from the code under test.
+    const ORIGIN: DVec3 = DVec3::new(10.0, -20.0, 5.0);
+    const X: DVec3 = DVec3::new(0.6, 0.8, 0.0);
+    const Y: DVec3 = DVec3::new(-0.48, 0.36, 0.8);
+    const Z: DVec3 = DVec3::new(0.64, -0.48, 0.6);
+
+    fn close(a: DVec3, b: DVec3) -> bool {
+        (a - b).length() < EPS
+    }
+
+    fn vector3(v: DVec3) -> document::types::Vector3 {
+        document::types::Vector3::new(v.x, v.y, v.z)
+    }
+
+    fn dvec3(v: document::types::Vector3) -> DVec3 {
+        DVec3::new(v.x, v.y, v.z)
+    }
+
+    fn ucs(origin: DVec3, x: DVec3, y: DVec3) -> Ucs {
+        let mut ucs = Ucs::new("TEST");
+        ucs.origin = vector3(origin);
+        ucs.x_axis = vector3(x);
+        ucs.y_axis = vector3(y);
+        ucs
+    }
+
+    fn tilted() -> UcsXform {
+        UcsXform::from_ucs(&ucs(ORIGIN, X, Y))
+    }
+
+    fn assert_right_handed_orthonormal(xf: &UcsXform) {
+        let (_, x, y, z) = xf.axes();
+        for (name, axis) in [("X", x), ("Y", y), ("Z", z)] {
+            assert!((axis.length() - 1.0).abs() < EPS, "{name} is not unit");
+        }
+        assert!(x.dot(y).abs() < EPS, "X and Y are not perpendicular");
+        assert!(close(x.cross(y), z), "Z is not X cross Y");
+    }
+
+    /// The fixture itself has to be a valid frame, or every expected value
+    /// below is wrong.
+    #[test]
+    fn the_fixture_axes_are_right_handed_and_orthonormal() {
+        for axis in [X, Y, Z] {
+            assert!((axis.length() - 1.0).abs() < EPS);
+        }
+        assert!(X.dot(Y).abs() < EPS);
+        assert!(close(X.cross(Y), Z));
+    }
+
+    #[test]
+    fn identity_is_plain_wcs() {
+        let xf = UcsXform::identity();
+        let p = DVec3::new(1.0, 2.0, 3.0);
+        assert!(xf.is_identity());
+        assert_eq!(
+            xf.axes(),
+            (DVec3::ZERO, DVec3::X, DVec3::Y, DVec3::Z),
+            "the identity is the world frame"
+        );
+        assert_eq!(xf.to_wcs(p), p);
+        assert_eq!(xf.to_ucs(p), p);
+        assert_eq!(xf.vec_to_wcs(p), p);
+        assert_eq!(xf.vec_to_ucs(p), p);
+    }
+
+    #[test]
+    fn no_active_ucs_is_the_identity() {
+        assert_eq!(UcsXform::from_active(None), UcsXform::identity());
+        assert_eq!(
+            UcsXform::from_active(Some(&ucs(ORIGIN, X, Y))),
+            tilted(),
+            "an active UCS is used as given"
+        );
+    }
+
+    #[test]
+    fn a_world_aligned_ucs_at_the_origin_is_the_identity() {
+        let world = UcsXform::from_ucs(&ucs(DVec3::ZERO, DVec3::X, DVec3::Y));
+        assert!(world.is_identity());
+        assert_eq!(world, UcsXform::identity());
+    }
+
+    /// `is_identity` lets callers skip the conversion, so a UCS that is only
+    /// moved, or only turned, must not pass for the world frame.
+    #[test]
+    fn a_moved_or_turned_ucs_is_not_the_identity() {
+        let moved = UcsXform::from_ucs(&ucs(ORIGIN, DVec3::X, DVec3::Y));
+        let turned = UcsXform::from_ucs(&ucs(DVec3::ZERO, DVec3::Y, DVec3::NEG_X));
+        assert!(!moved.is_identity(), "moved only");
+        assert!(!turned.is_identity(), "turned only");
+        assert!(!tilted().is_identity(), "moved and tilted");
+    }
+
+    #[test]
+    fn axes_report_the_ucs_origin_and_axes() {
+        let (origin, x, y, z) = tilted().axes();
+        assert!(close(origin, ORIGIN), "origin {origin:?}");
+        assert!(close(x, X), "X {x:?}");
+        assert!(close(y, Y), "Y {y:?}");
+        assert!(close(z, Z), "Z {z:?}");
+    }
+
+    /// A stored UCS need not be clean: axes can be any length, and Y only has
+    /// to lie somewhere in the XY plane.
+    #[test]
+    fn from_ucs_normalises_and_squares_up_the_axes() {
+        let scaled = UcsXform::from_ucs(&ucs(ORIGIN, X * 3.0, Y * 0.5));
+        let skewed = UcsXform::from_ucs(&ucs(ORIGIN, X, Y + X * 0.7));
+        for (name, xf) in [("scaled", scaled), ("skewed", skewed)] {
+            let (_, x, y, z) = xf.axes();
+            assert!(close(x, X), "{name}: X {x:?}");
+            assert!(close(y, Y), "{name}: Y {y:?}");
+            assert!(close(z, Z), "{name}: Z {z:?}");
+        }
+    }
+
+    /// Axes that do not span a plane still have to give a usable frame, with
+    /// X kept as given wherever it has a direction.
+    #[test]
+    fn from_ucs_survives_degenerate_axes() {
+        let parallel = UcsXform::from_ucs(&ucs(ORIGIN, X, X * 2.0));
+        assert_right_handed_orthonormal(&parallel);
+        assert!(close(parallel.axes().1, X), "X is kept");
+
+        let parallel_along_z = UcsXform::from_ucs(&ucs(ORIGIN, DVec3::Z, DVec3::Z));
+        assert_right_handed_orthonormal(&parallel_along_z);
+        assert!(close(parallel_along_z.axes().1, DVec3::Z), "X is kept");
+
+        let zero_y = UcsXform::from_ucs(&ucs(ORIGIN, X, DVec3::ZERO));
+        assert_right_handed_orthonormal(&zero_y);
+        assert!(close(zero_y.axes().1, X), "X is kept");
+
+        let zero_axes = UcsXform::from_ucs(&ucs(ORIGIN, DVec3::ZERO, DVec3::ZERO));
+        assert_right_handed_orthonormal(&zero_axes);
+        assert!(close(zero_axes.axes().0, ORIGIN), "the origin is kept");
+    }
+
+    #[test]
+    fn points_convert_between_ucs_and_wcs() {
+        let xf = tilted();
+        let local = DVec3::new(1.0, 2.0, 3.0);
+        // ORIGIN + 1·X + 2·Y + 3·Z, worked out by hand.
+        let world = DVec3::new(11.56, -19.92, 8.4);
+        assert!(close(xf.to_wcs(local), world), "{:?}", xf.to_wcs(local));
+        assert!(close(xf.to_ucs(world), local), "{:?}", xf.to_ucs(world));
+        assert!(
+            close(xf.to_wcs(DVec3::ZERO), ORIGIN),
+            "local zero is the origin"
+        );
+        assert!(
+            close(xf.to_ucs(ORIGIN), DVec3::ZERO),
+            "the origin is local zero"
+        );
+    }
+
+    #[test]
+    fn point_conversions_undo_each_other() {
+        let xf = tilted();
+        for p in [
+            DVec3::ZERO,
+            DVec3::new(1.0, 2.0, 3.0),
+            DVec3::new(-7.5, 0.25, 1.0e6),
+            DVec3::new(500_000.0, 4_000_000.0, -12.0),
+        ] {
+            let tolerance = EPS * p.length().max(1.0);
+            assert!((xf.to_ucs(xf.to_wcs(p)) - p).length() < tolerance, "{p:?}");
+            assert!((xf.to_wcs(xf.to_ucs(p)) - p).length() < tolerance, "{p:?}");
+        }
+    }
+
+    /// Directions turn with the axes but never pick up the origin: this is
+    /// what keeps a relative offset relative.
+    #[test]
+    fn directions_turn_but_do_not_move() {
+        let xf = tilted();
+        let local = DVec3::new(1.0, 2.0, 3.0);
+        // 1·X + 2·Y + 3·Z, worked out by hand.
+        let world = DVec3::new(1.56, 0.08, 3.4);
+        assert!(close(xf.vec_to_wcs(local), world));
+        assert!(close(xf.vec_to_ucs(world), local));
+        assert!(close(xf.vec_to_wcs(DVec3::ZERO), DVec3::ZERO));
+        assert!(close(xf.vec_to_ucs(DVec3::ZERO), DVec3::ZERO));
+
+        let same_axes_elsewhere = UcsXform::from_ucs(&ucs(DVec3::new(1.0, 1.0, 1.0), X, Y));
+        assert!(close(same_axes_elsewhere.vec_to_wcs(local), world));
+        assert!(close(same_axes_elsewhere.vec_to_ucs(world), local));
+    }
+
+    #[test]
+    fn working_plane_is_the_same_frame() {
+        let xf = tilted();
+        let plane = xf.working_plane();
+        assert!(close(plane.origin, ORIGIN));
+        assert!(close(plane.x, X));
+        assert!(close(plane.y, Y));
+        assert!(close(plane.z, Z));
+        let p = DVec3::new(1.0, 2.0, 3.0);
+        assert!(close(plane.to_world(p), xf.to_wcs(p)));
+        assert!(close(plane.to_local(p), xf.to_ucs(p)));
+    }
+
+    /// The matrix handed to the f32 screen layer: its columns are the axes
+    /// and it carries no translation.
+    #[test]
+    fn rotation_mat_has_the_axes_as_columns() {
+        let m = tilted().rotation_mat();
+        assert!(m.x_axis.abs_diff_eq(X.as_vec3().extend(0.0), 1e-6));
+        assert!(m.y_axis.abs_diff_eq(Y.as_vec3().extend(0.0), 1e-6));
+        assert!(m.z_axis.abs_diff_eq(Z.as_vec3().extend(0.0), 1e-6));
+        assert_eq!(m.w_axis, glam::Vec4::W, "no translation");
+        let turned = m.transform_vector3(glam::Vec3::new(1.0, 2.0, 3.0));
+        assert!(turned.abs_diff_eq(glam::Vec3::new(1.56, 0.08, 3.4), 1e-5));
+    }
+
+    /// The pair a block definition stores: local zero is the picked base
+    /// point, not the UCS origin, and the axes are the UCS axes.
+    #[test]
+    fn transforms_at_a_base_point_use_the_ucs_axes() {
+        let xf = tilted();
+        let base = DVec3::new(3.0, 4.0, 5.0);
+        let local = DVec3::new(1.0, 2.0, 3.0);
+        // base + 1·X + 2·Y + 3·Z, worked out by hand.
+        let world = DVec3::new(4.56, 4.08, 8.4);
+
+        let to_wcs = xf.to_wcs_transform_at(base);
+        let to_ucs = xf.to_ucs_transform_at(base);
+        assert!(close(dvec3(to_wcs.apply(vector3(local))), world));
+        assert!(close(dvec3(to_ucs.apply(vector3(world))), local));
+        assert!(close(dvec3(to_wcs.apply(vector3(DVec3::ZERO))), base));
+        assert!(close(dvec3(to_ucs.apply(vector3(base))), DVec3::ZERO));
+
+        // The rotation part alone turns directions the way `vec_to_*` does.
+        let direction = DVec3::new(1.56, 0.08, 3.4);
+        assert!(close(
+            dvec3(to_wcs.apply_rotation(vector3(local))),
+            direction
+        ));
+        assert!(close(
+            dvec3(to_ucs.apply_rotation(vector3(direction))),
+            local
+        ));
+    }
+
+    #[test]
+    fn transforms_at_a_base_point_undo_each_other() {
+        let xf = tilted();
+        let base = DVec3::new(3.0, 4.0, 5.0);
+        let to_wcs = xf.to_wcs_transform_at(base);
+        let to_ucs = xf.to_ucs_transform_at(base);
+        for p in [
+            DVec3::ZERO,
+            DVec3::new(1.0, 2.0, 3.0),
+            DVec3::new(-40.0, 12.5, 7.0),
+        ] {
+            let there_and_back = to_ucs.apply(to_wcs.apply(vector3(p)));
+            assert!(close(dvec3(there_and_back), p), "{p:?}");
+            let back_and_there = to_wcs.apply(to_ucs.apply(vector3(p)));
+            assert!(close(dvec3(back_and_there), p), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn to_ucs_transform_matches_to_ucs() {
+        let xf = tilted();
+        let transform = xf.to_ucs_transform();
+        for p in [
+            ORIGIN,
+            DVec3::new(11.56, -19.92, 8.4),
+            DVec3::new(-3.0, 8.0, 0.5),
+        ] {
+            assert!(
+                close(dvec3(transform.apply(vector3(p))), xf.to_ucs(p)),
+                "{p:?}"
+            );
+        }
+        assert!(close(dvec3(transform.apply(vector3(ORIGIN))), DVec3::ZERO));
+    }
+}
+
 // ── UCS ↔ WCS transforms (thin wrappers over `UcsXform`) ────────────────────
 
 /// Rotate a UCS-local offset into WCS without applying the origin

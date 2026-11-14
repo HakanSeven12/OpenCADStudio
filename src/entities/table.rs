@@ -1693,7 +1693,14 @@ impl RenderConvertible for Table {
             let row_style = named_row_style.as_ref().or(legacy_row_style);
 
             for (ci, cell) in row.cells.iter().enumerate() {
-                let text = cell.text_value();
+                // What the cell shows (a field's value, a formula's result),
+                // as for a table drawn from its cells outside a block.
+                let shown = cell
+                    .contents
+                    .first()
+                    .map(|content| content_display_value(document, self, content))
+                    .unwrap_or_default();
+                let text = shown.as_str();
                 if text.is_empty() {
                     continue;
                 }
@@ -5331,6 +5338,32 @@ mod tests {
                 "{expression}"
             );
         }
+    }
+
+    /// A table inside a block is drawn by `to_render`: a formula cell shows
+    /// its result there too, not the formula as typed.
+    #[test]
+    fn a_table_drawn_inside_a_block_shows_a_formula_result() {
+        let document = document::Document::new();
+        let drawn = |third: &str| -> Vec<[u64; 3]> {
+            let mut table = Table::new(document::types::Vector3::ZERO, 2, 2);
+            table.set_cell_text(0, 0, "2");
+            table.set_cell_text(0, 1, "3");
+            table.set_cell_text(1, 0, third);
+            match table.to_render(&document).map(|entity| entity.object) {
+                Some(RenderObject::Lines(points)) => points
+                    .iter()
+                    .map(|p| [p[0].to_bits(), p[1].to_bits(), p[2].to_bits()])
+                    .collect(),
+                _ => panic!("a table draws as lines"),
+            }
+        };
+        assert_ne!(
+            drawn("6"),
+            drawn("7"),
+            "the cell text is part of the drawing"
+        );
+        assert_eq!(drawn("=A1*B1"), drawn("6"));
     }
 
     /// The same expression reaches the rendered cell text: `content_display_value`

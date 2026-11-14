@@ -882,3 +882,58 @@ fn a_table_copy_keeps_every_kind_of_cell_by_every_route() {
         report.join("\n")
     );
 }
+
+/// A table in an associative array is a member of the array's block: it shows
+/// what its source showed and owns the fields its cells name (the source is
+/// erased).
+#[test]
+fn a_table_in_an_associative_array_keeps_its_fields() {
+    let (mut app, original) = table_of_every_kind();
+    let (pristine, source) = table_of_every_kind();
+    let i = app.active_tab;
+    crate::scene::assoc_array::create_from_spec(
+        &mut app.tabs[i].scene,
+        &[original],
+        DVec3::ZERO,
+        &crate::scene::assoc_array::AssocArraySpec::Rectangular {
+            columns: 3,
+            rows: 1,
+            column_spacing: 200.0,
+            row_spacing: 50.0,
+        },
+    )
+    .expect("the array is made");
+    let doc = &app.tabs[i].scene.document;
+    let pristine_doc = &pristine.tabs[pristine.active_tab].scene.document;
+    assert!(
+        doc.get_entity(original).is_none(),
+        "the source moved into the array"
+    );
+    let members: Vec<Handle> = doc
+        .block_records
+        .iter()
+        .flat_map(|record| record.entity_handles.iter().copied())
+        .filter(|h| matches!(doc.get_entity(*h), Some(EntityType::Table(_))))
+        .collect();
+    assert_eq!(members.len(), 1, "one table, in the array's source block");
+    let member = members[0];
+    let mut found = copy_mismatches(pristine_doc, source, doc, member, false);
+    let fields = crate::scene::table_fields::table_fields(doc, table_in(doc, member));
+    assert!(!fields.is_empty(), "the table has a field cell");
+    for field in &fields {
+        if field.owner != member && !doc.objects.contains_key(&field.owner) {
+            found.push(format!(
+                "field {:?} is owned by {:?}, which is not in the drawing",
+                field.handle, field.owner
+            ));
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "{}",
+        found.join(
+            "
+"
+        )
+    );
+}

@@ -5105,6 +5105,42 @@ mod tests {
         );
     }
 
+    /// An empty row keeps the height of one line of its text and its
+    /// margins, like a row with text: a row grip dragged onto the row above
+    /// must not squeeze it to nothing, or its grips sit on the neighbour's
+    /// and it can no longer be dragged back.
+    #[test]
+    fn an_empty_row_squeezed_by_its_grip_keeps_one_line() {
+        let document = document::Document::new();
+        let mut table = Table::new(document::types::Vector3::ZERO, 2, 1);
+        table.columns[0].width = 20.0;
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        table.set_cell_text(0, 0, "x");
+        let (origin, _, down) = grip_frame(&table);
+        apply_cell_grip(
+            &mut table,
+            (1, 0, 1, 0),
+            CELL_GRIP_BOTTOM,
+            origin + down * 10.0,
+        );
+        assert!(table.rows[1].height < 1e-3, "the drag squeezes the row");
+        settle_table(&mut table, &document);
+        let mut one_line = Table::new(document::types::Vector3::ZERO, 1, 1);
+        one_line.columns[0].width = 20.0;
+        one_line.rows[0].height = 1e-6;
+        one_line.set_cell_text(0, 0, "x");
+        settle_table(&mut one_line, &document);
+        let need = one_line.rows[0].height;
+        assert!(need > 0.1, "a line of text needs {need}");
+        assert!(
+            (table.rows[1].height - need).abs() < 1e-9,
+            "the empty row is {} high, a line needs {need}",
+            table.rows[1].height
+        );
+    }
+
     /// A file keeps where each cell's text sat when it was saved. That
     /// placement holds only while the table is as the file left it: once
     /// the table is edited (its picture block dropped), the cell's
@@ -6389,7 +6425,6 @@ struct CellTextExtent {
     last_row: usize,
     last_column: usize,
     height: f64,
-    empty: bool,
     ink: [f64; 2],
     margins: [f64; 4],
     /// Top and bottom margins the text is drawn between (half the text
@@ -6399,8 +6434,15 @@ struct CellTextExtent {
 
 /// Lays out the text of every text cell in its wrapped width. A cell
 /// whose text content is empty has no ink: no width, one text height.
+/// With `blank_cells`, a cell without any content counts as such an empty
+/// one (row fitting); without, it is left out (stored cell geometry).
 // ponytail: lays out every text cell; cache per cell if large tables slow edits.
-fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTextExtent> {
+fn cell_text_extents(
+    table: &Table,
+    document: &document::Document,
+    blank_cells: bool,
+) -> Vec<CellTextExtent> {
+    let blank = document::entities::table::CellContent::new();
     use document::entities::table::CellStylePropertyFlags as P;
     let table_style =
         table
@@ -6422,12 +6464,11 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
             if r0 != ri || c0 != ci {
                 continue;
             }
-            let Some(content) = cell
-                .contents
-                .first()
-                .filter(|content| content.block_handle.is_none())
-            else {
-                continue;
+            let content = match cell.contents.first() {
+                Some(content) if content.block_handle.is_some() => continue,
+                Some(content) => content,
+                None if blank_cells => &blank,
+                None => continue,
             };
             let text = cell.text_value();
             let role = table_style.map(|ts| {
@@ -6530,7 +6571,6 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
                 last_row: r1,
                 last_column: c1,
                 height: height + (lines - 1.0) * layout.line_height as f64,
-                empty: text.trim().is_empty(),
                 ink,
                 margins: [
                     margin(P::MARGIN_LEFT, h_margin),
@@ -6558,8 +6598,10 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
 /// lines 15, four 30).
 fn fitted_row_heights(table: &Table, document: &document::Document) -> Vec<f64> {
     let mut needed = vec![0.0f64; table.rows.len()];
-    for extent in cell_text_extents(table, document) {
-        if extent.last_row == extent.row && !extent.empty {
+    // A cell without content counts as one blank line, so an empty row
+    // keeps the height of a line and its margins.
+    for extent in cell_text_extents(table, document, true) {
+        if extent.last_row == extent.row {
             let need = extent.height + extent.drawn_margins[0] + extent.drawn_margins[1];
             needed[extent.row] = needed[extent.row].max(need);
         }
@@ -6592,7 +6634,7 @@ pub(crate) fn store_cell_geometry(
     let title_suppressed = resolved_title_suppressed(table, table_style.as_ref());
     let header_suppressed = resolved_header_suppressed(table, table_style.as_ref());
     let mut placed = Vec::new();
-    for extent in cell_text_extents(table, document) {
+    for extent in cell_text_extents(table, document, false) {
         let row = &table.rows[extent.row];
         let cell = &row.cells[extent.column];
         let role = table_style.as_ref().map(|ts| {

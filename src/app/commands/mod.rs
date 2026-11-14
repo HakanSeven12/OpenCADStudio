@@ -981,6 +981,7 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "ABOUT"
             | "PLUGINS"
             | "PLUGINMANAGER"
+            | "APPLOAD"
             | "DONATE"
             | "WEBVERSION"
             | "HELP"

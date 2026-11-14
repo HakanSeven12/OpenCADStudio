@@ -101,6 +101,34 @@ window.openCadStudioSaveFile = (name, bytes) => {
 While it is defined, Save, Save As, the save-before-close prompt and the exports call it
 with the file name and the bytes, and no file picker opens. Without it nothing changes.
 
+## Embedding in a same-origin iframe (`?embed=1`)
+
+Loading the app with `?embed=1` turns on a `postMessage` bridge for a parent page on the
+same origin, and the app stops using its own browser storage (recent files, autosave
+snapshots, the restored session, the service worker, `?file=` links). `window.ocsControl`
+stays off unless `&automation=1` is added too.
+
+Messages from the parent carry `source: "opencadstudio-host"`, messages from the app
+`source: "opencadstudio-embed"`; others are ignored.
+
+| Parent → app | Fields |
+|---|---|
+| `ocs:open` | `name`, `buffer` (ArrayBuffer), `readOnly` (default `true`) |
+| `ocs:request-save` | `format` (`"dwg"`/`"dxf"`, optional) |
+| `ocs:saved` | `ok`, `saveId`, `name`, `error` |
+
+| App → parent | Fields |
+|---|---|
+| `ocs:ready` | `version`, `capabilities` |
+| `ocs:loaded` | `name` |
+| `ocs:dirty` | `dirty` |
+| `ocs:save` | `name`, `format`, `saveId`, `buffer` |
+| `ocs:error` | `code` (`open_failed`, `read_only`, `save_failed`, `host_save_failed`), `message` |
+
+A DWG/DXF save is sent as `ocs:save`; the drawing stays modified until the parent answers
+`ocs:saved` with `ok: true` and the same `saveId`, and only if nothing changed in between.
+Other exports still download (or go to `openCadStudioSaveFile`).
+
 ## Startup dialogs
 
 A dialog can be open when the page is ready. The donation prompt appears once per

@@ -171,6 +171,10 @@
 /// the grip's original world-XY plane. The default preserves legacy behavior.
 /// v22 adds `HostApi::set_geo_location` / `remove_geo_location`, writing the
 /// drawing's model-space GEODATA object (appended requests).
+/// v22 also adds `HostNotification::SelectionChangedDigest`: an O(1) selection
+/// notification (`tab_id`, monotonic per-tab `revision`, exact `count`) routed
+/// INSTEAD OF the legacy handle-list selection variants to plugins that report
+/// v22+; older plugins keep the exact legacy streams.
 pub const API_VERSION: u32 = 22;
 
 /// Oldest plugin API major the current host still loads. This keeps previously

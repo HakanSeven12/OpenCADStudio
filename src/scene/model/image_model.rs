@@ -4,7 +4,10 @@
 // from the RasterImage entity's insertion point, u/v vectors, and pixel size.
 
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use super::pdf_raster::BudgetedRasterCache;
 
 /// One textured triangle vertex of an image's visible region: an RTE-split
 /// world position (`pos` high half / `pos_low` low half) plus its texture UV.
@@ -672,9 +675,23 @@ pub struct DecodedImage {
 
 type ImageCacheEntry = Arc<OnceLock<Option<DecodedImage>>>;
 
-fn image_cache() -> &'static Mutex<HashMap<String, ImageCacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, ImageCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// Per-cache byte budget for the decoded-image caches (the per-path decode
+/// memo and the brightness/contrast copies each get one). A drawing's raster
+/// attachments decode to full RGBA that would otherwise stay resident for the
+/// whole process lifetime; past the budget the least recently used images are
+/// dropped and re-decoded on demand. Tunable with `OCS_IMAGE_CACHE_MB`.
+fn image_cache_budget_bytes() -> usize {
+    const DEFAULT_MIB: usize = 64;
+    std::env::var("OCS_IMAGE_CACHE_MB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MIB)
+        .saturating_mul(1024 * 1024)
+}
+
+fn image_cache() -> &'static Mutex<BudgetedRasterCache<String, ImageCacheEntry>> {
+    static CACHE: OnceLock<Mutex<BudgetedRasterCache<String, ImageCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
 }
 
 /// Insertion order of the source cache's keys, so by-name resolution has a
@@ -730,7 +747,7 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
         sources.insert(path.to_string(), bytes);
     }
     if let Ok(mut cache) = image_cache().lock() {
-        cache.retain(|cached, _| !same_file_name(cached, path));
+        cache.retain(|cached| !same_file_name(cached, path));
     }
 }
 
@@ -871,16 +888,16 @@ fn adjusted_image_pixels(
     }
     type Key = (String, usize, u8, u8);
     type Entry = (Arc<Vec<u8>>, Arc<Vec<u8>>);
-    static CACHE: OnceLock<Mutex<HashMap<Key, Entry>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<BudgetedRasterCache<Key, Entry>>> = OnceLock::new();
     let key = (
         path.to_string(),
         Arc::as_ptr(pixels) as usize,
         brightness,
         contrast,
     );
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()));
     if let Some((_, hit)) = cache.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
-        return Arc::clone(hit);
+        return hit;
     }
     let lut = brightness_contrast_lut(brightness, contrast);
     let mut out = pixels.as_ref().clone();
@@ -890,12 +907,17 @@ fn adjusted_image_pixels(
         }
     }
     let out = Arc::new(out);
-    let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
-    // ponytail: cleared wholesale past 64 entries; an LRU if many images are adjusted.
-    if cache.len() > 64 {
-        cache.clear();
-    }
-    cache.insert(key, (Arc::clone(pixels), Arc::clone(&out)));
+    // The entry pins both buffers, so the budget is charged for both.
+    let cost = size_of::<Key>() + pixels.capacity() + out.capacity();
+    cache
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert_with_budget(
+            key,
+            (Arc::clone(pixels), Arc::clone(&out)),
+            cost,
+            image_cache_budget_bytes(),
+        );
     out
 }
 
@@ -913,17 +935,45 @@ pub fn resolve_image(path: &str) -> Option<DecodedImage> {
     if path.is_empty() {
         return None;
     }
-    let entry = {
+    let key = path.to_string();
+    let budget = image_cache_budget_bytes();
+    let (entry, fresh) = {
         let mut cache = image_cache()
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        Arc::clone(
-            cache
-                .entry(path.to_string())
-                .or_insert_with(|| Arc::new(OnceLock::new())),
-        )
+        match cache.get(&key) {
+            Some(entry) => (entry, false),
+            None => {
+                let entry = Arc::new(OnceLock::new());
+                cache.insert_with_budget(key.clone(), Arc::clone(&entry), 0, budget);
+                (entry, true)
+            }
+        }
     };
-    entry.get_or_init(|| decode_reference(path)).clone()
+    let decoded = entry.get_or_init(|| decode_reference(path)).clone();
+    if fresh {
+        // A hit's cost is already settled; only a fresh decode needs re-registering.
+        let cost = size_of::<String>()
+            + decoded.as_ref().map_or(0, |image| {
+                size_of::<DecodedImage>() + image.pixels.capacity()
+            });
+        let mut cache = image_cache()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        // Invalidation may have dropped our entry while the decode ran.
+        let ours = cache
+            .get(&key)
+            .is_some_and(|cached| Arc::ptr_eq(&cached, &entry));
+        if ours {
+            if cost > budget {
+                // Too big to budget: drop the placeholder instead of retaining it uncounted.
+                cache.pop(&key);
+            } else {
+                cache.insert_with_budget(key, entry, cost, budget);
+            }
+        }
+    }
+    decoded
 }
 
 /// Decode a reference to RGBA pixels. Priority: registered bytes (picked or
@@ -1842,6 +1892,151 @@ mod tests {
         assert!(!same_file_name("site.png", "site.jpg"));
         assert!(!same_file_name("", ""));
         assert!(!same_file_name("C:\\dir\\", "dir"));
+    }
+
+    // ── Decoded-image cache byte budgets ─────────────────────────────────
+
+    /// Serialises the tests that shrink the process-wide image budget: the
+    /// env override is shared by every test thread in this process.
+    static IMAGE_BUDGET_LOCK: Mutex<()> = Mutex::new(());
+
+    struct ImageBudgetEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ImageBudgetEnvGuard {
+        fn set(mib: &str) -> Self {
+            let previous = std::env::var_os("OCS_IMAGE_CACHE_MB");
+            std::env::set_var("OCS_IMAGE_CACHE_MB", mib);
+            Self { previous }
+        }
+    }
+
+    impl Drop for ImageBudgetEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("OCS_IMAGE_CACHE_MB", value),
+                None => std::env::remove_var("OCS_IMAGE_CACHE_MB"),
+            }
+        }
+    }
+
+    /// A registered 256×256 image decodes to 256 KiB of RGBA, so a handful of
+    /// distinct references passes a 1 MiB budget.
+    fn budget_image(tag: &str) -> String {
+        let path = format!("memory://image-budget-{tag}.png");
+        register_source(&path, Arc::new(png_bytes(256, 256, 0x7f)));
+        path
+    }
+
+    #[test]
+    fn decode_sweep_past_budget_evicts_the_oldest_image() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("1");
+        let oldest = budget_image("evict-oldest");
+        let first = resolve_image(&oldest).expect("first decode");
+        for i in 0..8 {
+            let path = budget_image(&format!("evict-sweep-{i}"));
+            drop(resolve_image(&path).expect("sweep decode"));
+        }
+        let again = resolve_image(&oldest).expect("re-decode");
+        assert!(
+            !Arc::ptr_eq(&first.pixels, &again.pixels),
+            "the oldest decoded image must be evicted once the sweep passes the budget"
+        );
+    }
+
+    #[test]
+    fn adjusted_sweep_past_budget_evicts_the_oldest_copy() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("1");
+        // Distinct source buffers: the adjusted key embeds the buffer address,
+        // and each entry pins its source, so equal contents still differ.
+        let sources: Vec<Arc<Vec<u8>>> = (0..6)
+            .map(|_| Arc::new(vec![0x40u8; 256 * 256 * 4]))
+            .collect();
+        let first = adjusted_image_pixels("memory://adj-oldest.png", &sources[0], 60, 40);
+        for (i, src) in sources.iter().enumerate().skip(1) {
+            drop(adjusted_image_pixels(
+                &format!("memory://adj-sweep-{i}.png"),
+                src,
+                60,
+                40,
+            ));
+        }
+        let again = adjusted_image_pixels("memory://adj-oldest.png", &sources[0], 60, 40);
+        assert!(
+            !Arc::ptr_eq(&first, &again),
+            "the oldest adjusted copy must be evicted once the sweep passes the budget"
+        );
+    }
+
+    /// A cache hit must promote the entry: a re-touched older image survives a
+    /// sweep that evicts an untouched newer one. Two 256 KiB decodes fit the
+    /// 1 MiB budget before the sweep pushes past it.
+    #[test]
+    fn re_touching_an_older_image_keeps_it_cached_past_the_budget() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("1");
+        let a = budget_image("recency-a");
+        let b = budget_image("recency-b");
+        let oldest = resolve_image(&a).expect("decode A");
+        let middle = resolve_image(&b).expect("decode B");
+        let touched = resolve_image(&a).expect("re-touch A");
+        assert!(
+            Arc::ptr_eq(&oldest.pixels, &touched.pixels),
+            "re-touch reads the cached decode"
+        );
+        drop(touched);
+        for i in 0..2 {
+            let path = budget_image(&format!("recency-push-{i}"));
+            drop(resolve_image(&path).expect("push decode"));
+        }
+        let b_again = resolve_image(&b).expect("re-decode B");
+        let b_cached = Arc::ptr_eq(&middle.pixels, &b_again.pixels);
+        let a_again = resolve_image(&a).expect("re-decode A");
+        let a_cached = Arc::ptr_eq(&oldest.pixels, &a_again.pixels);
+        // Recency under a shared budget: A must outlive B, not absolutely survive.
+        assert!(
+            a_cached || !b_cached,
+            "the re-touched image outlives the untouched one under eviction"
+        );
+    }
+
+    /// Regression guard (passes with and without eviction): a sweep that stays
+    /// inside the budget keeps its most recent image cached.
+    #[test]
+    fn recent_image_survives_a_sweep_within_budget() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("128");
+        let mut recent = None;
+        let mut last_path = String::new();
+        for i in 0..8 {
+            last_path = budget_image(&format!("within-{i}"));
+            recent = Some(resolve_image(&last_path).expect("decode"));
+        }
+        let recent = recent.expect("last decode");
+        let again = resolve_image(&last_path).expect("re-decode");
+        assert!(
+            Arc::ptr_eq(&recent.pixels, &again.pixels),
+            "the most recent image stays cached while the sweep fits the budget"
+        );
+    }
+
+    /// An image whose decode exceeds the whole budget must not linger in the
+    /// cache at zero accounted cost: it is returned once, then re-decoded.
+    #[test]
+    fn an_image_larger_than_the_budget_is_not_retained() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("1");
+        let path = "memory://image-budget-oversized.png".to_string();
+        register_source(&path, Arc::new(png_bytes(1024, 1024, 0x7f)));
+        let first = resolve_image(&path).expect("first decode");
+        let again = resolve_image(&path).expect("second decode");
+        assert!(
+            !Arc::ptr_eq(&first.pixels, &again.pixels),
+            "an image bigger than the budget must not linger in the cache"
+        );
     }
 
     // ── Display-LOD budgets ──────────────────────────────────────────────

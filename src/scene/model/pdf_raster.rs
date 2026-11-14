@@ -46,25 +46,34 @@ fn raster_cache_budget_bytes() -> usize {
 }
 
 /// LRU memo with a byte budget, counted from each entry's reported cost.
-struct BudgetedRasterCache<K: std::hash::Hash + Eq, V> {
+pub(crate) struct BudgetedRasterCache<K: std::hash::Hash + Eq, V> {
     entries: LruCache<K, (V, usize)>,
     bytes: usize,
 }
 
 impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             entries: LruCache::new(NonZeroUsize::new(4096).expect("nonzero cache capacity")),
             bytes: 0,
         }
     }
 
-    fn get(&mut self, key: &K) -> Option<V> {
+    pub(crate) fn get(&mut self, key: &K) -> Option<V> {
         self.entries.get(key).map(|(value, _)| value.clone())
     }
 
+    pub(crate) fn pop(&mut self, key: &K) -> Option<V> {
+        let (value, old_bytes) = self.entries.pop(key)?;
+        self.bytes -= old_bytes;
+        Some(value)
+    }
+
     fn insert(&mut self, key: K, value: V, bytes: usize) {
-        let budget = raster_cache_budget_bytes();
+        self.insert_with_budget(key, value, bytes, raster_cache_budget_bytes());
+    }
+
+    pub(crate) fn insert_with_budget(&mut self, key: K, value: V, bytes: usize, budget: usize) {
         if bytes > budget {
             return;
         }
@@ -83,7 +92,7 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
         self.bytes += bytes;
     }
 
-    fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
         let stale: Vec<K> = self
             .entries
             .iter()
@@ -95,6 +104,11 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> BudgetedRasterCache<K, V> {
                 self.bytes -= old_bytes;
             }
         }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
     }
 }
 

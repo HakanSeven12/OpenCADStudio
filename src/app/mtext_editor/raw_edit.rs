@@ -63,14 +63,25 @@ impl MTextEditorState {
 
 impl crate::app::OpenCADStudio {
     /// The edited MTEXT hosts native FIELDs the editor could not locate.
+    /// For a table cell only that cell counts: a field in another cell of
+    /// the table leaves this one editable.
     pub(super) fn unlocated_field_host(&self) -> bool {
         let doc = &self.tabs[self.active_tab].scene.document;
         self.mtext_editor.as_ref().is_some_and(|ed| {
             ed.field_host.is_none()
-                && ed
-                    .editing
-                    .and_then(|h| doc.get_entity(h))
-                    .is_some_and(|entity| crate::entities::field::hosts_field(doc, entity))
+                && ed.editing.is_some_and(|h| {
+                    let Some(entity) = doc.get_entity(h) else {
+                        return false;
+                    };
+                    match (self.table_cell_editor.as_ref(), entity) {
+                        (Some(cell), document::EntityType::Table(table)) if cell.handle == h => {
+                            table.cell(cell.row, cell.column).is_some_and(|c| {
+                                c.contents.iter().any(|item| item.field_handle.is_some())
+                            })
+                        }
+                        _ => crate::entities::field::hosts_field(doc, entity),
+                    }
+                })
         })
     }
 

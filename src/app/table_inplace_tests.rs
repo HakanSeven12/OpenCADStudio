@@ -446,3 +446,47 @@ fn cursor_hover_keeps_the_draft_open_and_an_outside_viewport_click_commits() {
     assert!(app.table_cell_editor.is_none());
     assert_eq!(source(&app, handle), "draft!");
 }
+
+#[test]
+fn a_field_in_one_cell_leaves_the_other_cells_editable() {
+    use crate::ui::window::field_dialog::{FieldDialogMsg, CATEGORIES};
+    let (mut app, handle) = fixture("prefix ");
+    let i = app.active_tab;
+    app.tabs[i].scene.document.summary_info.custom_properties =
+        vec![("Job No".into(), "42".into())];
+    start(&mut app, handle);
+    let _ = app.run_action("FIND");
+    let category = CATEGORIES
+        .iter()
+        .position(|(name, _)| *name == "Document")
+        .unwrap();
+    let _ = app.on_field_dialog(FieldDialogMsg::Category(category));
+    let pick = app
+        .field_dialog
+        .as_ref()
+        .unwrap()
+        .entries()
+        .into_iter()
+        .find(|e| e.0 == "Job No")
+        .unwrap();
+    let _ = app.on_field_dialog(pick.2);
+    let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+    assert!(app.commit_table_cell_editor());
+    let _ = app.dispatch_command("TABLEDIT");
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(
+        30.0, -15.0, 0.0,
+    )));
+    let cell = app.table_cell_editor.as_ref().map(|c| (c.row, c.column));
+    assert_eq!(cell, Some((1, 1)), "the plain cell B2 must be open");
+    app.mtext_type("typed");
+    assert_eq!(
+        app.mtext_editor.as_ref().unwrap().content.text(),
+        "typed",
+        "a field in A1 must not lock the plain cell B2"
+    );
+    assert!(app.commit_table_cell_editor());
+    let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity(handle) else {
+        panic!("table")
+    };
+    assert_eq!(table.cell_text(1, 1), Some("typed"));
+}

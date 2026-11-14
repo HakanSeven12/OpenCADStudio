@@ -1674,6 +1674,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
     /// The group grip that has been hovered long enough to light.
     pub(crate) dock_grip_lit: Option<(crate::app::config::DockSide, usize)>,
+    /// Counts grip hovers, so only the latest hover's timer lights a grip.
+    pub(crate) dock_grip_gen: u32,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -6555,6 +6557,7 @@ impl OpenCADStudio {
             dock_strip_pointer_y: 0.0,
             dock_grip_hover: None,
             dock_grip_lit: None,
+            dock_grip_gen: 0,
             dock_icon_hover: None,
             xref_col_drag: None,
             xref_col_last: None,

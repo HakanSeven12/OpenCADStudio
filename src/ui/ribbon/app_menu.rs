@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use iced::widget::{button, container};
-use iced::{Background, Border, Color, Element, Length, Padding, Theme};
+use iced::widget::button;
+use iced::{Background, Border, Color, Element, Padding, Theme};
 
 use super::{minimize::MINIMIZE_MENU_ID, Ribbon};
 use crate::app::Message;
@@ -116,8 +116,8 @@ impl Ribbon {
         }
         // The palette menu, at least as wide as it always was.
         let width = palette_menu::width(&items).max(MENU_W);
-        let panel = container(palette_menu::menu(items)).width(Length::Fixed(width));
-        self.place_dropdown(APP_MENU_ID, panel.into(), width, win.0)
+        let panel = palette_menu::menu_at_least(items, MENU_W);
+        self.place_dropdown(APP_MENU_ID, panel, width, win.0)
     }
 }
 

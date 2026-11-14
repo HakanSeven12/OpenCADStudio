@@ -25,6 +25,10 @@ impl OpenCADStudio {
                 self.dock_begin(DockDrag::moving(id, None), Some(id));
             }
             DockMsg::GroupGrab(side, gi) => {
+                // The strips are rebuilt under the drag's capture layer, so
+                // the grip never hears the pointer leave: unlight it now.
+                self.dock_grip_hover = None;
+                self.dock_grip_lit = None;
                 if let Some(&id) = self.dock_group_visible(side, gi).first() {
                     self.dock_begin(DockDrag::moving(id, Some((side, gi))), Some(id));
                 }
@@ -72,9 +76,11 @@ impl OpenCADStudio {
             }
             DockMsg::GripHover(side, gi) => {
                 self.dock_grip_hover = Some((side, gi));
+                self.dock_grip_gen = self.dock_grip_gen.wrapping_add(1);
+                let gen = self.dock_grip_gen;
                 return iced::Task::perform(
                     crate::app::update::rest(crate::ui::dock::GRIP_LIT_DELAY),
-                    move |()| Message::Dock(crate::ui::dock::DockMsg::GripLit(side, gi)),
+                    move |()| Message::Dock(crate::ui::dock::DockMsg::GripLit(side, gi, gen)),
                 );
             }
             DockMsg::GripHoverEnd(side, gi) => {
@@ -83,8 +89,8 @@ impl OpenCADStudio {
                     self.dock_grip_lit = None;
                 }
             }
-            DockMsg::GripLit(side, gi) => {
-                if self.dock_grip_hover == Some((side, gi)) {
+            DockMsg::GripLit(side, gi, gen) => {
+                if gen == self.dock_grip_gen && self.dock_grip_hover == Some((side, gi)) {
                     self.dock_grip_lit = Some((side, gi));
                 }
             }

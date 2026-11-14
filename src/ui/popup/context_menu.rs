@@ -322,7 +322,9 @@ impl ContextMenu {
     /// Vertical offset from the panel's top edge to the top of the default
     /// row, using the renderer's fixed row metrics.
     pub fn default_row_y(&self) -> f32 {
-        let mut y = MENU_PAD_TOP;
+        // The rows start inside the panel's border.
+        let first = MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE;
+        let mut y = first;
         for row in &self.rows {
             match row {
                 MenuRow::Item(item) => {
@@ -345,7 +347,7 @@ impl ContextMenu {
                 }
             }
         }
-        MENU_PAD_TOP
+        first
     }
 
     /// Total panel height (rows plus the panel's vertical padding and its
@@ -1284,9 +1286,15 @@ mod tests {
     #[test]
     fn default_row_y_accounts_for_separators() {
         let menu = build_context_menu(&line_ctx(), None);
-        assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
+        assert_eq!(
+            menu.default_row_y(),
+            MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE
+        );
         let menu = build_context_menu(&idle_ctx(false), None);
-        assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
+        assert_eq!(
+            menu.default_row_y(),
+            MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE
+        );
         // 12 items (Filter... among them) + 3 submenu headers + 6
         // separators, plus panel padding. No saved filters: no submenu.
         let expected = MENU_PAD_TOP * 2.0

@@ -3002,3 +3002,34 @@ fn docking_by_drag_leaves_no_strip_cell_lit() {
     ));
     assert_eq!(app.dock_icon_hover, None, "docked by double-click");
 }
+
+#[test]
+fn a_group_grip_lights_only_after_its_latest_hover_rests() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::DockMsg;
+    let mut app = dock_app();
+    let grip = (DockSide::Left, 0);
+    // A timer that reports while the pointer is still there lights it.
+    let _ = app.on_dock(DockMsg::GripHover(grip.0, grip.1));
+    let first = app.dock_grip_gen;
+    let _ = app.on_dock(DockMsg::GripLit(grip.0, grip.1, first));
+    assert_eq!(app.dock_grip_lit, Some(grip));
+    // Leaving unlights it.
+    let _ = app.on_dock(DockMsg::GripHoverEnd(grip.0, grip.1));
+    assert_eq!(app.dock_grip_lit, None);
+    // Back within the delay: the first visit's timer does not light it.
+    let _ = app.on_dock(DockMsg::GripHover(grip.0, grip.1));
+    let _ = app.on_dock(DockMsg::GripLit(grip.0, grip.1, first));
+    assert_eq!(app.dock_grip_lit, None);
+    // Nor does a timer after the pointer left.
+    let second = app.dock_grip_gen;
+    let _ = app.on_dock(DockMsg::GripHoverEnd(grip.0, grip.1));
+    let _ = app.on_dock(DockMsg::GripLit(grip.0, grip.1, second));
+    assert_eq!(app.dock_grip_lit, None);
+    // Grabbing a lit grip unlights it: the drag hides the pointer leaving.
+    let _ = app.on_dock(DockMsg::GripHover(grip.0, grip.1));
+    let third = app.dock_grip_gen;
+    let _ = app.on_dock(DockMsg::GripLit(grip.0, grip.1, third));
+    let _ = app.on_dock(DockMsg::GroupGrab(grip.0, grip.1));
+    assert_eq!((app.dock_grip_hover, app.dock_grip_lit), (None, None));
+}

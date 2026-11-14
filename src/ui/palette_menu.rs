@@ -364,7 +364,12 @@ pub fn inset(pad_y: f32) -> iced::Padding {
 }
 
 pub fn menu<'a>(items: Vec<Item>) -> Element<'a, Message> {
-    let width = width(&items);
+    menu_at_least(items, 0.0)
+}
+
+/// [`menu`], at least `min_width` wide.
+pub fn menu_at_least<'a>(items: Vec<Item>, min_width: f32) -> Element<'a, Message> {
+    let width = width(&items).max(min_width);
     container(column(items.into_iter().map(entry)).width(Length::Fill))
         .width(Length::Fixed(width))
         .padding(inset(pm::MENU_PAD_Y))

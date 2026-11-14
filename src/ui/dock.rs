@@ -68,8 +68,10 @@ pub enum DockMsg {
     GripHover(DockSide, usize),
     /// The pointer left that edge band.
     GripHoverEnd(DockSide, usize),
-    /// The pointer has rested on that band for [`GRIP_LIT_DELAY`].
-    GripLit(DockSide, usize),
+    /// The pointer has rested on that band for [`GRIP_LIT_DELAY`]; the
+    /// number is the hover it was armed for, so a timer from an earlier
+    /// visit cannot light it early.
+    GripLit(DockSide, usize, u32),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar (or its menu's Dock left /

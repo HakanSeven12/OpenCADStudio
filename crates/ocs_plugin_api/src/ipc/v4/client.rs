@@ -244,9 +244,9 @@ fn reader_thread(
                         });
                         queue.push_front((envelope.command_id, envelope.payload));
                     } else if queue.len() >= notify_queue_size() {
-                        // Full: drop the NEWEST (same policy as a bounded
-                        // channel's `try_send` on a full queue).
-                        let _ = queue.pop_front();
+                        // Full: drop the newest (this one), as a bounded
+                        // channel's `try_send` does; the queued items, a
+                        // fronted selection change among them, stay.
                         let now = Instant::now();
                         let should_log = last_drop_log
                             .map(|t| now.duration_since(t) >= DROP_LOG_INTERVAL)

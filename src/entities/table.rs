@@ -5080,6 +5080,31 @@ mod tests {
         assert!(text.aabb[0] >= 0.0, "text starts at {}", text.aabb[0]);
     }
 
+    /// A row fitted to wrapped text holds every line: the last line ends
+    /// above the cell's bottom edge, as the text is placed against the
+    /// same margins it is fitted with.
+    #[test]
+    fn fitted_row_holds_all_wrapped_lines() {
+        let document = document::Document::new();
+        let mut table = Table::new(document::types::Vector3::ZERO, 1, 1);
+        table.columns[0].width = 2.0;
+        table.rows[0].height = 0.1;
+        table.set_cell_text(0, 0, &"l ".repeat(40));
+        assert!(settle_table(&mut table, &document));
+        let wires = tessellate_table(&table, &document, false, [1.0; 4], 1.0, 1.0);
+        let text = wires
+            .iter()
+            .find(|wire| !wire.text_verts.is_empty())
+            .expect("the cell's text is drawn");
+        let bottom = f64::from(text.aabb[1]);
+        let height = table.rows[0].height;
+        assert!(
+            bottom >= -height,
+            "text reaches {bottom}, below the cell's bottom edge at {}",
+            -height
+        );
+    }
+
     /// A file keeps where each cell's text sat when it was saved. That
     /// placement holds only while the table is as the file left it: once
     /// the table is edited (its picture block dropped), the cell's
@@ -6367,6 +6392,9 @@ struct CellTextExtent {
     empty: bool,
     ink: [f64; 2],
     margins: [f64; 4],
+    /// Top and bottom margins the text is drawn between (half the text
+    /// height where none is set), which a row is fitted with.
+    drawn_margins: [f64; 2],
 }
 
 /// Lays out the text of every text cell in its wrapped width. A cell
@@ -6510,6 +6538,14 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
                     margin(P::MARGIN_TOP, v_margin),
                     margin(P::MARGIN_BOTTOM, v_margin),
                 ],
+                drawn_margins: [P::MARGIN_TOP, P::MARGIN_BOTTOM].map(|property| {
+                    let set = margin(property, 0.0);
+                    if set > 1e-6 {
+                        set
+                    } else {
+                        side_margin(v_margin, height)
+                    }
+                }),
             });
         }
     }
@@ -6524,7 +6560,7 @@ fn fitted_row_heights(table: &Table, document: &document::Document) -> Vec<f64> 
     let mut needed = vec![0.0f64; table.rows.len()];
     for extent in cell_text_extents(table, document) {
         if extent.last_row == extent.row && !extent.empty {
-            let need = extent.height + extent.margins[2] + extent.margins[3];
+            let need = extent.height + extent.drawn_margins[0] + extent.drawn_margins[1];
             needed[extent.row] = needed[extent.row].max(need);
         }
     }

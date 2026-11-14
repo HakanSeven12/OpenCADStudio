@@ -13,6 +13,36 @@ use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use glam::DVec3;
 
+/// The option prompt's keywords, in the order of its bracket list.
+const OPTIONS: [&str; 11] = [
+    "FACE", "OBJECT", "WORLD", "VIEW", "3POINT", "Z", "X", "Y", "ORIGIN", "SAVE", "DELETE",
+];
+
+/// The option a label of the localized prompt names (`M`, `Monde` for World
+/// in French): its bracket list lines up with [`OPTIONS`]. A `_` prefix
+/// keeps the typed text as an international keyword.
+fn localized_option(typed: &str) -> Option<&'static str> {
+    if typed.starts_with('_') {
+        return None;
+    }
+    let prompt = t!(
+        "UCS  specify new origin or [Face/OBject/World/View/3Point/Z/X/Y/Origin/Save/Delete] or name:"
+    );
+    let labels = prompt.split_once('[')?.1.split_once(']')?.0;
+    let labels: Vec<&str> = labels.split('/').collect();
+    if labels.len() != OPTIONS.len() {
+        return None;
+    }
+    if typed == "3" {
+        return Some("3POINT");
+    }
+    labels
+        .iter()
+        .zip(OPTIONS)
+        .find(|(label, _)| crate::command::keyword_matches(label, label, typed))
+        .map(|(_, option)| option)
+}
+
 #[derive(Default)]
 pub struct UcsCommand {
     /// The chosen option keyword (uppercased), once entered; `None` until then.
@@ -129,22 +159,9 @@ impl CadCommand for UcsCommand {
                     // Bare Enter → list (delegate to inline `UCS`).
                     return Some(CmdResult::Dispatch("UCS LIST".into()));
                 }
-                let up = t.to_uppercase();
-                // Accept the Spanish labels shown by the localized prompt as
-                // well as international option keywords. Only normalize the
-                // option token, never the value/name supplied in the next step.
-                let up = match up.trim_start_matches('_') {
-                    "UNIVERSAL" | "U" => "WORLD",
-                    "VISTA" => "VIEW",
-                    "CARA" => "FACE",
-                    "OBJETO" => "OBJECT",
-                    "ORIGEN" => "ORIGIN",
-                    "GUARDAR" | "G" => "SAVE",
-                    "ELIMINAR" | "E" => "DELETE",
-                    "3" | "3PUNTOS" | "3 PUNTOS" => "3POINT",
-                    value => value,
-                }
-                .to_owned();
+                let up = localized_option(t)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| t.trim_start_matches('_').to_uppercase());
                 if Self::is_zero_arg(&up) {
                     Some(CmdResult::Dispatch(format!("UCS {up}")))
                 } else if Self::takes_value(&up) || Self::takes_point(&up) {

@@ -832,7 +832,7 @@ impl<'a> PromptAnswers<'a> {
 /// A typed option matches its full keyword or label, or the label's
 /// capitalised letters (`LA` in `LAyers`, `ST` in `textSTyles`) followed by
 /// more of the same word.
-fn keyword_matches(label: &str, keyword: &str, typed: &str) -> bool {
+pub(crate) fn keyword_matches(label: &str, keyword: &str, typed: &str) -> bool {
     let typed = typed.trim().to_uppercase();
     if typed.is_empty() {
         return false;

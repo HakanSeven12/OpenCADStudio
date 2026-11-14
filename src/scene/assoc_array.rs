@@ -1438,15 +1438,17 @@ pub fn create(
             let first = placements[0].1;
             let turn = first.x_axis.y.atan2(first.x_axis.x);
             vec![
-                crate::command::EntityTransform::Translate(-first.w_axis.truncate()),
-                crate::command::EntityTransform::Rotate {
+                crate::entities::transform::EntityTransform::Translate(-first.w_axis.truncate()),
+                crate::entities::transform::EntityTransform::Rotate {
                     center: DVec3::ZERO,
                     axis: DVec3::Z,
                     angle_rad: -turn,
                 },
             ]
         }
-        _ => vec![crate::command::EntityTransform::Translate(-source_point)],
+        _ => vec![crate::entities::transform::EntityTransform::Translate(
+            -source_point,
+        )],
     };
     for entity in &mut entities {
         for transform in &to_block {
@@ -2261,7 +2263,7 @@ mod tests {
         let insert = create_from_spec(&mut scene, &[source], DVec3::ZERO, &spec).unwrap();
         scene.transform_entities(
             &[path, insert],
-            &crate::command::EntityTransform::Translate(DVec3::new(0.0, 20.0, 0.0)),
+            &crate::entities::transform::EntityTransform::Translate(DVec3::new(0.0, 20.0, 0.0)),
         );
 
         let document = &scene.document;
@@ -2586,7 +2588,7 @@ mod xdict_tests {
 #[cfg(test)]
 mod copy_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::{Circle, Line};
 
     fn circle(scene: &mut crate::scene::Scene) -> Handle {

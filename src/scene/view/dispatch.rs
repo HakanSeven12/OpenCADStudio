@@ -3,8 +3,8 @@
 use document::types::{Color as AcadColor, LineWeight, Transparency};
 use document::{EntityType, Handle};
 
-use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
+use crate::entities::transform::EntityTransform;
 use crate::scene::cache::properties;
 use crate::scene::model::object::{GripDef, PropSection};
 
@@ -119,7 +119,7 @@ pub fn properties_sectioned(
 
 pub fn entity_in_working_plane(
     entity: &EntityType,
-    plane: crate::command::WorkingPlane,
+    plane: crate::entities::transform::WorkingPlane,
 ) -> EntityType {
     let mut local = entity.clone();
     if !plane.is_identity() {
@@ -135,7 +135,7 @@ pub fn apply_geom_prop_in_working_plane(
     entity: &mut EntityType,
     field: &str,
     value: &str,
-    plane: crate::command::WorkingPlane,
+    plane: crate::entities::transform::WorkingPlane,
 ) {
     if plane.is_identity() {
         apply_geom_prop(entity, field, value);

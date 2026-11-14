@@ -1182,7 +1182,7 @@ pub(crate) fn translate_insert_attribute_contexts(
 pub(crate) fn transform_insert_attribute_contexts(
     doc: &mut Document,
     attributes_before: &[document::entities::AttributeEntity],
-    transform: &crate::command::EntityTransform,
+    transform: &crate::entities::transform::EntityTransform,
 ) -> bool {
     let mut changed = false;
     for attribute in attributes_before {
@@ -1688,7 +1688,7 @@ pub fn translate_annotation_contexts(
     transform_annotation_contexts(
         doc,
         entity_handle,
-        &crate::command::EntityTransform::Translate(delta),
+        &crate::entities::transform::EntityTransform::Translate(delta),
     )
 }
 
@@ -1698,7 +1698,7 @@ pub fn translate_annotation_contexts(
 pub fn transform_annotation_contexts(
     doc: &mut Document,
     entity_handle: Handle,
-    t: &crate::command::EntityTransform,
+    t: &crate::entities::transform::EntityTransform,
 ) -> bool {
     let Some(base_entity) = doc.get_entity(entity_handle).cloned() else {
         return false;
@@ -1729,7 +1729,7 @@ pub fn transform_annotation_contexts(
         // while the complete per-segment list is a separate persisted field.
         if let (
             EntityType::MultiLeader(mleader),
-            crate::command::EntityTransform::Translate(delta),
+            crate::entities::transform::EntityTransform::Translate(delta),
         ) = (&mut placed, t)
         {
             let offset = Vector3::new(delta.x, delta.y, delta.z);

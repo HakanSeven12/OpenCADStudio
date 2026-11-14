@@ -208,7 +208,7 @@ fn block_actions_rotate_flip_saved_values_compose_copy_and_roundtrip() {
         scene.document = next;
         let c = scene.copy_entities(
             &[a],
-            &crate::command::EntityTransform::Translate(DVec3::new(40., 0., 0.)),
+            &crate::entities::transform::EntityTransform::Translate(DVec3::new(40., 0., 0.)),
         )[0];
         let next = instance::evaluate_value(&scene.document, c, f, Value::Flip(false))
             .unwrap()
@@ -725,7 +725,7 @@ fn block_actions_saved_references_independent_absolute_and_roundtrip() {
         scene.document = next.clone();
         let c = scene.copy_entities(
             &[a],
-            &crate::command::EntityTransform::Translate(DVec3::new(40., 0., 0.)),
+            &crate::entities::transform::EntityTransform::Translate(DVec3::new(40., 0., 0.)),
         )[0];
         let copy = instance::evaluate(&scene.document, c, q, DVec3::new(7., 8., 0.))
             .unwrap()
@@ -1399,7 +1399,7 @@ fn block_actions_stretch_saved_reference_independence_copy_and_reopen() {
     scene.document = doc;
     let c = scene.copy_entities(
         &[a],
-        &crate::command::EntityTransform::Translate(DVec3::new(60., 0., 0.)),
+        &crate::entities::transform::EntityTransform::Translate(DVec3::new(60., 0., 0.)),
     )[0];
     let mut doc = scene.document;
     let EntityType::Insert(ins) = doc.get_entity(a).unwrap() else {
@@ -1747,7 +1747,7 @@ fn block_actions_retarget_refresh_resets_old_targets_and_keeps_each_reference_va
     scene.document = doc;
     let copied = scene.copy_entities(
         &[first],
-        &crate::command::EntityTransform::Translate(DVec3::new(80., 0., 0.)),
+        &crate::entities::transform::EntityTransform::Translate(DVec3::new(80., 0., 0.)),
     )[0];
     let mut doc = scene.document;
     let original_line = doc.get_entity(targets[0]).unwrap().clone();

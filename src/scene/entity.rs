@@ -4291,7 +4291,9 @@ mod image_definition_graph_tests {
         scene.begin_undo_recording();
         let copies = scene.copy_entities(
             &[source],
-            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+            &crate::entities::transform::EntityTransform::Translate(glam::DVec3::new(
+                20.0, 0.0, 0.0,
+            )),
         );
         assert_eq!(copies.len(), 1);
         let copy = copies[0];
@@ -4327,7 +4329,9 @@ mod image_definition_graph_tests {
         let source = scene.add_entity(image("shared.png"));
         let copy = scene.copy_entities(
             &[source],
-            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+            &crate::entities::transform::EntityTransform::Translate(glam::DVec3::new(
+                20.0, 0.0, 0.0,
+            )),
         )[0];
         let definition = raster(&scene, source).definition_handle.unwrap();
         let source_reactor = assert_reactor(&scene, source, definition);
@@ -4372,7 +4376,9 @@ mod image_definition_graph_tests {
         let source = scene.add_entity(image("shared.png"));
         let copy = scene.copy_entities(
             &[source],
-            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+            &crate::entities::transform::EntityTransform::Translate(glam::DVec3::new(
+                20.0, 0.0, 0.0,
+            )),
         )[0];
         let definition = raster(&scene, source).definition_handle.unwrap();
         let source_reactor = assert_reactor(&scene, source, definition);
@@ -4696,7 +4702,9 @@ mod attribute_identity_tests {
         scene.begin_undo_recording();
         let copies = scene.copy_entities(
             &[source],
-            &crate::command::EntityTransform::Translate(glam::DVec3::new(20.0, 0.0, 0.0)),
+            &crate::entities::transform::EntityTransform::Translate(glam::DVec3::new(
+                20.0, 0.0, 0.0,
+            )),
         );
         assert_eq!(copies.len(), 1);
         copies[0]

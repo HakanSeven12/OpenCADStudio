@@ -876,7 +876,7 @@ pub use pipeline::viewcube::{
 use view::camera::Camera;
 pub use view::camera::Projection;
 
-use crate::command::EntityTransform;
+use crate::entities::transform::EntityTransform;
 use document::entities::{Block, BlockEnd, Insert as DxfInsert};
 use document::entities::{
     BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid,
@@ -19863,7 +19863,7 @@ mod viewport_hidden_handles_tests {
 #[cfg(test)]
 mod delta_undo_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::Line;
     use document::types::Vector3;
     use glam::DVec3;

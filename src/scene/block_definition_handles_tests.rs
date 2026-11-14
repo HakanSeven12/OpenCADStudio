@@ -108,7 +108,7 @@ fn a_copied_definition_also_ends_after_its_body() {
     let name = scene
         .define_transformed_block(
             &[line(1.0), line(2.0)],
-            &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+            &crate::entities::transform::EntityTransform::Translate(glam::DVec3::ZERO),
         )
         .expect("the copy's definition is created");
     assert_ends_after_body(&scene.document, &name);

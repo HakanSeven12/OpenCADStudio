@@ -236,12 +236,24 @@ impl OpenCADStudio {
         if inserts.is_empty() {
             return;
         }
+        // A definition that hosts a field hands it to every reference's
+        // attribute. The rebuild below creates fresh attributes, which do not
+        // carry the definition's field dictionary, so the field has to be
+        // copied onto each reference after its attributes exist.
+        let attribute_fields = crate::entities::field::block_has_attribute_fields(doc, block);
         if undo {
             self.push_undo_snapshot(i, "ATTSYNC");
         }
         let mut changes = Vec::new();
         for handle in inserts {
-            if self.rebuild_block_attributes(i, handle, &attdefs, base) {
+            let rebuilt = self.rebuild_block_attributes(i, handle, &attdefs, base);
+            let fielded = attribute_fields
+                && !crate::entities::field::attach_attribute_fields(
+                    &mut self.tabs[i].scene.document,
+                    handle,
+                )
+                .is_empty();
+            if rebuilt || fielded {
                 changes.push((handle, crate::scene::ChangeKind::Modified));
             }
         }

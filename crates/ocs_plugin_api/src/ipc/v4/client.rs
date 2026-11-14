@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,7 +36,15 @@ const DROP_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Bounded queue of host→plugin notifications delivered to the plugin runner
 /// loop and/or `HostApi::try_recv_notification`.
-type NotificationQueue = mpsc::Receiver<(Option<u64>, HostNotification)>;
+///
+/// A shared deque instead of an `mpsc::sync_channel` so the reader can give
+/// latest-wins priority to selection-change notifications: the firetest
+/// diag round (-08..-13, 2026-11-14) showed an op-driven load flood can park
+/// a `SelectionChangedV4` message behind hundreds of stale Document/Drawing
+/// events for the whole poll window, so the plugin's panel refresh never saw
+/// the selection change. The deque lets the reader coalesce and front-place
+/// those messages; see the enqueue site in `reader_thread`.
+type NotificationQueue = VecDeque<(Option<u64>, HostNotification)>;
 
 /// Shared state between the plugin main thread, the reader thread, and any
 /// cloned `V4PluginHostApi` proxies.
@@ -89,7 +97,6 @@ impl V4Client {
             )))
         })?;
 
-        let (notify_tx, notify_rx) = mpsc::sync_channel(notify_queue_size());
         let (runner_tx, runner_rx) = mpsc::channel();
 
         let shared = Arc::new(Shared {
@@ -99,12 +106,16 @@ impl V4Client {
         });
 
         let shared_for_reader = Arc::clone(&shared);
-        let notifications = Arc::new(Mutex::new(notify_rx));
-        std::thread::spawn(move || reader_thread(reader, shared_for_reader, notify_tx, runner_tx));
+        let notifications =
+            Arc::new(Mutex::new(VecDeque::<(Option<u64>, HostNotification)>::new()));
+        let notifications_for_loop = Arc::clone(&notifications);
+        std::thread::spawn(move || {
+            reader_thread(reader, shared_for_reader, runner_tx, notifications)
+        });
 
         Ok(Self {
             shared,
-            notifications,
+            notifications: notifications_for_loop,
             runner_queue: runner_rx,
         })
     }
@@ -125,11 +136,8 @@ impl V4Client {
 
     /// Non-blocking poll for host-to-plugin notifications.
     pub fn try_recv_notification(&self) -> Option<(Option<u64>, HostNotification)> {
-        self.notifications
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .try_recv()
-            .ok()
+        let mut queue = self.notifications.lock().unwrap_or_else(|e| e.into_inner());
+        queue.pop_front()
     }
 
     /// Send a plugin response for a host request.
@@ -201,8 +209,8 @@ fn notify_queue_size() -> usize {
 fn reader_thread(
     mut reader: Stream,
     shared: Arc<Shared>,
-    notify_tx: mpsc::SyncSender<(Option<u64>, HostNotification)>,
     runner_tx: mpsc::Sender<RunnerFrame>,
+    notifications: Arc<Mutex<NotificationQueue>>,
 ) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut last_drop_log: Option<Instant> = None;
@@ -221,10 +229,24 @@ fn reader_thread(
                     }
                 }
                 Ok(HostToPluginV4::Notification(envelope)) => {
-                    if notify_tx
-                        .try_send((envelope.command_id, envelope.payload))
-                        .is_err()
-                    {
+                    let is_sel4 = matches!(&envelope.payload, HostNotification::SelectionChangedV4 { .. });
+                    let mut queue = notifications.lock().unwrap_or_else(|e| e.into_inner());
+                    if is_sel4 {
+                        // Latest-wins, head-priority: a selection change is
+                        // superseded by any newer one, and a refresh only needs
+                        // the current selection (the handler re-reads it from
+                        // the host). Without this, an op-driven load flood can
+                        // park the message behind hundreds of stale
+                        // Document/Drawing events and the panel refresh misses
+                        // the poll window (2026-11-14 firetest diag).
+                        queue.retain(|(_, n)| {
+                            !matches!(n, HostNotification::SelectionChangedV4 { .. })
+                        });
+                        queue.push_front((envelope.command_id, envelope.payload));
+                    } else if queue.len() >= notify_queue_size() {
+                        // Full: drop the NEWEST (same policy as a bounded
+                        // channel's `try_send` on a full queue).
+                        let _ = queue.pop_front();
                         let now = Instant::now();
                         let should_log = last_drop_log
                             .map(|t| now.duration_since(t) >= DROP_LOG_INTERVAL)
@@ -233,6 +255,8 @@ fn reader_thread(
                             eprintln!("[plugin] V4 notification queue full; dropping newest");
                             last_drop_log = Some(now);
                         }
+                    } else {
+                        queue.push_back((envelope.command_id, envelope.payload));
                     }
                 }
                 Ok(HostToPluginV4::Request { id, payload }) => {
@@ -673,11 +697,8 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn try_recv_notification(&mut self) -> Option<(Option<u64>, HostNotification)> {
-        self.notifications
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .try_recv()
-            .ok()
+        let mut queue = self.notifications.lock().unwrap_or_else(|e| e.into_inner());
+        queue.pop_front()
     }
 
     fn plugin_request_sender(&self) -> Option<Box<dyn PluginRequestSender>> {
@@ -1432,7 +1453,6 @@ impl V4Client {
     /// and starts the reader thread without performing a handshake.
     pub(crate) fn from_stream_for_test(stream: Stream) -> Self {
         let reader = stream.try_clone().expect("try_clone");
-        let (notify_tx, notify_rx) = mpsc::sync_channel(notify_queue_size());
         let (runner_tx, runner_rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             writer: Mutex::new(stream),
@@ -1440,11 +1460,15 @@ impl V4Client {
             in_flight: Mutex::new(HashMap::new()),
         });
         let shared_for_reader = Arc::clone(&shared);
-        let notifications = Arc::new(Mutex::new(notify_rx));
-        std::thread::spawn(move || reader_thread(reader, shared_for_reader, notify_tx, runner_tx));
+        let notifications =
+            Arc::new(Mutex::new(VecDeque::<(Option<u64>, HostNotification)>::new()));
+        let notifications_for_loop = Arc::clone(&notifications);
+        std::thread::spawn(move || {
+            reader_thread(reader, shared_for_reader, runner_tx, notifications)
+        });
         Self {
             shared,
-            notifications,
+            notifications: notifications_for_loop,
             runner_queue: runner_rx,
         }
     }

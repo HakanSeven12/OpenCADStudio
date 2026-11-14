@@ -165,10 +165,16 @@ fn run_v4(
         // the rest of the queue waits for the next pass (the queue itself is
         // count-bounded by the transport layer).
         let drain_deadline = std::time::Instant::now() + DRAIN_WALL_BUDGET;
-        while let Some((command_id, notification)) = client.try_recv_notification() {
-            if std::time::Instant::now() >= drain_deadline {
+        // Bounds BEFORE popping: the wall budget is what limits how much new
+        // work this pass takes on. Evaluating it only after `try_recv` had popped
+        // an item used to DROP that item without dispatching whenever a
+        // preceding callback had already run the pass over budget — a silent
+        // notification loss that the 2026-11-14 firetest diag round measured
+        // at ~16 lost SelectionChangedV4 in one run.
+        while std::time::Instant::now() < drain_deadline {
+            let Some((command_id, notification)) = client.try_recv_notification() else {
                 break;
-            }
+            };
             if notification_api_version(&notification) > api_version {
                 continue;
             }

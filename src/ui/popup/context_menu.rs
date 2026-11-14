@@ -348,9 +348,10 @@ impl ContextMenu {
         MENU_PAD_TOP
     }
 
-    /// Total panel height (rows plus the panel's vertical padding).
+    /// Total panel height (rows plus the panel's vertical padding and its
+    /// border, which the rows stay inside).
     pub fn height(&self) -> f32 {
-        let mut h = MENU_PAD_TOP * 2.0;
+        let mut h = MENU_PAD_TOP * 2.0 + 2.0 * crate::ui::style::palette_metrics::LINE;
         for row in &self.rows {
             match row {
                 MenuRow::Item(_) => h += MENU_ROW_H,
@@ -1288,7 +1289,10 @@ mod tests {
         assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
         // 12 items (Filter... among them) + 3 submenu headers + 6
         // separators, plus panel padding. No saved filters: no submenu.
-        let expected = MENU_PAD_TOP * 2.0 + 15.0 * MENU_ROW_H + 6.0 * MENU_SEP_H;
+        let expected = MENU_PAD_TOP * 2.0
+            + 2.0 * crate::ui::style::palette_metrics::LINE
+            + 15.0 * MENU_ROW_H
+            + 6.0 * MENU_SEP_H;
         assert_eq!(menu.height(), expected);
     }
 

@@ -350,11 +350,24 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
 
 /// The menu: its items in a raised frame as wide as its longest item
 /// (see [`width`]).
+/// The padding inside a menu frame: `pad_y` above and below, and the
+/// border's width all round, so a lit row stops inside the border and the
+/// border stays on top of it.
+pub fn inset(pad_y: f32) -> iced::Padding {
+    let line = pm::line();
+    iced::Padding {
+        top: pad_y + line,
+        bottom: pad_y + line,
+        left: line,
+        right: line,
+    }
+}
+
 pub fn menu<'a>(items: Vec<Item>) -> Element<'a, Message> {
     let width = width(&items);
     container(column(items.into_iter().map(entry)).width(Length::Fill))
         .width(Length::Fixed(width))
-        .padding([pm::MENU_PAD_Y, 0.0])
+        .padding(inset(pm::MENU_PAD_Y))
         .style(frame_style)
         .into()
 }
@@ -408,7 +421,7 @@ pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, M
     }
     let main = container(column(rows).width(Length::Fill))
         .width(Length::Fixed(main_w))
-        .padding([pm::MENU_PAD_Y, 0.0])
+        .padding(inset(pm::MENU_PAD_Y))
         .style(frame_style);
     let side: Element<'a, Message> = match flyout {
         // The submenu's first item level with its row.

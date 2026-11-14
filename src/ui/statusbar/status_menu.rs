@@ -54,7 +54,8 @@ pub fn menu_bar<'a>(
         .collect();
     let menu = Menu::new(items)
         .width(Length::Fixed(width))
-        .padding(0)
+        // The rows stay inside the border, so it draws over a lit row.
+        .padding(crate::ui::style::palette_metrics::line())
         .spacing(0)
         .offset(1.0)
         .close_on_background_click(true);

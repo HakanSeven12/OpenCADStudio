@@ -191,7 +191,7 @@ impl Panel {
         .center_y(HEADER_H);
         container(column![header, column(self.rows).spacing(0).width(Fill)])
             .width(self.width)
-            .padding([pm::MENU_PAD_Y, 0.0])
+            .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
             .style(crate::ui::palette_menu::frame_style)
             .into()
     }

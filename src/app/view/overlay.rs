@@ -1672,7 +1672,7 @@ pub(super) fn viewport_context_menu_overlay(
         }
     }
 
-    let menu_col = column(items).spacing(0).width(Length::Fixed(menu.width));
+    let menu_col = column(items).spacing(0).width(Length::Fill);
     let menu_col =
         scrollable(menu_col)
             .height(Length::Shrink)
@@ -1686,7 +1686,7 @@ pub(super) fn viewport_context_menu_overlay(
     // The palette menu's frame.
     let panel = container(menu_col)
         .style(crate::ui::palette_menu::frame_style)
-        .padding([MENU_PAD_TOP, 0.0])
+        .padding(crate::ui::palette_menu::inset(MENU_PAD_TOP))
         .width(Length::Fixed(menu.width));
 
     // Shift the panel so the default row's centre line is under the pointer.
@@ -1825,7 +1825,7 @@ pub(super) fn context_menu_editor_overlay(
     .height(Length::Shrink);
     let panel = container(body)
         .style(crate::ui::palette_menu::frame_style)
-        .padding([MENU_PAD_TOP, 0.0])
+        .padding(crate::ui::palette_menu::inset(MENU_PAD_TOP))
         .width(Length::Fixed(MENU_EDITOR_W));
     position_canvas_overlay_clamped(
         pos,

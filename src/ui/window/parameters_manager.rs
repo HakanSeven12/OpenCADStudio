@@ -583,7 +583,7 @@ fn filter_menu(panel: &Panel) -> Element<'static, Message> {
     }
     container(list)
         .style(crate::ui::palette_menu::frame_style)
-        .padding([pm::MENU_PAD_Y, 0.0])
+        .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
         .width(Fill)
         .into()
 }
@@ -637,7 +637,7 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
     }
     container(list)
         .style(crate::ui::palette_menu::frame_style)
-        .padding([pm::MENU_PAD_Y, 0.0])
+        .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
         .width(Fill)
         .into()
 }

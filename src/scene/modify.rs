@@ -1352,6 +1352,21 @@ impl Scene {
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
                 Self::adopt_attributes(&mut self.document, h);
+                // A copied table evaluates its own fields, not the source's.
+                let fields = match self.document.get_entity(src_handle) {
+                    Some(EntityType::Table(table)) => {
+                        super::table_fields::table_fields(&self.document, table)
+                    }
+                    _ => Vec::new(),
+                };
+                if !fields.is_empty() {
+                    super::table_fields::adopt_table_fields(
+                        &mut self.document,
+                        h,
+                        src_handle,
+                        &fields,
+                    );
+                }
                 // Deep-clone the extension-dictionary tree so edits on the
                 // copy never touch the source. A dangling or missing root
                 // leaves the copy without one — never shared.

@@ -98,6 +98,7 @@ mod layout_viewport_tests;
 mod limits;
 mod modify;
 pub(crate) mod table_content;
+pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;
 pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;

@@ -2653,6 +2653,10 @@ pub struct ClipboardDeps {
     /// the same name, so it never names an object of the source drawing.
     #[serde(with = "dim_style_refs_serde", default)]
     pub dim_style_refs: rustc_hash::FxHashMap<document::Handle, String>,
+    /// The FIELD objects the copied tables' cells use, nested fields
+    /// included, by source handle. A paste gives each pasted table its own
+    /// clones of them, in this drawing or another.
+    pub table_fields: Vec<document::objects::Field>,
 }
 
 mod dim_style_refs_serde {
@@ -3026,6 +3030,16 @@ impl ClipboardDeps {
             app_ids,
             dim_style_refs,
             mleader_styles,
+            table_fields: entities
+                .iter()
+                .filter_map(|e| match e {
+                    EntityType::Table(table) => {
+                        Some(crate::scene::table_fields::table_fields(doc, table))
+                    }
+                    _ => None,
+                })
+                .flatten()
+                .collect(),
         }
     }
 

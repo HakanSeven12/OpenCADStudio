@@ -9105,4 +9105,54 @@ mod layer_tool_tests {
     }
 }
 
+#[cfg(test)]
+mod attedit_one_at_a_time_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeEntity, Insert};
+    use document::types::Vector3;
+
+    fn two_typed_references() -> (OpenCADStudio, document::Handle, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut make = |name: &str, value: &str| {
+            let mut insert = Insert::new(name, Vector3::ZERO);
+            insert
+                .attributes
+                .push(AttributeEntity::new("NUMBER".into(), value.into()));
+            app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Insert(insert))
+        };
+        let alpha = make("ALPHA", "111");
+        let beta = make("BETA", "222");
+        (app, alpha, beta)
+    }
+
+    /// The one-at-a-time branch still asks for the block, tag and value
+    /// specifications, so it must edit the reference those specs name —
+    /// not fall back to a bare `ATTEDIT` that re-asks for a pick despite
+    /// the selection and the specs.
+    #[test]
+    fn attedit_one_at_a_time_opens_the_editor_on_the_specified_reference() {
+        let (mut app, alpha, beta) = two_typed_references();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entities(&[alpha, beta]);
+
+        let _ = app.run_command_line("-ATTEDIT");
+        let _ = app.feed_script_line("Y");
+        let _ = app.feed_script_line("BETA");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+
+        assert_eq!(
+            app.attr_editor_handle,
+            Some(beta),
+            "the editor must open on the reference the block name specification names"
+        );
+        assert_eq!(app.attr_editor_rows.len(), 1);
+    }
+}
+
 

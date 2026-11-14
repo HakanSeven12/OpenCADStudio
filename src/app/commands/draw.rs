@@ -172,10 +172,12 @@ impl OpenCADStudio {
                                     insert.insert_point.z,
                                 ),
                             );
+                            let handle = insert.common.handle;
                             insert
                                 .attributes
                                 .iter()
                                 .map(move |attr| AttributeCandidate {
+                                    handle,
                                     block: insert.block_name.clone(),
                                     tag: attr.tag.clone(),
                                     value: attr.get_value().to_string(),

@@ -2465,10 +2465,10 @@
   normal: (0.000000000, 0.000000000, 1.000000000)
 == shape / mirror
   insertion_point: (3.600000000, 0.200000000, 0.000000000)
-  size: 2.000000000
-  rotation: 0.300000000
-  relative_x_scale: 1.500000000
-  oblique_angle: 0.200000000
+  size: 1.960133156
+  rotation: 5.055890089
+  relative_x_scale: -1.530508267
+  oblique_angle: -0.200000000
   normal: (0.000000000, 0.000000000, 1.000000000)
 == shape / affine_tilted
   insertion_point: (-52.000000000, 28.000000000, 100.000000000)
@@ -2479,10 +2479,10 @@
   normal: (1.000000000, 0.000000000, 0.000000000)
 == shape / mirror_offset
   insertion_point: (6.769230769, -2.846153846, 0.000000000)
-  size: 2.000000000
-  rotation: 0.300000000
-  relative_x_scale: 1.500000000
-  oblique_angle: 0.200000000
+  size: 1.960133156
+  rotation: 4.807180100
+  relative_x_scale: -1.530508267
+  oblique_angle: -0.200000000
   normal: (0.000000000, 0.000000000, 1.000000000)
 == shape / mirror_tilted
   insertion_point: (2.000000000, 103.000000000, -50.000000000)

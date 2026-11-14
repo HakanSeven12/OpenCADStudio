@@ -7,6 +7,7 @@ struct TextOrient {
     rotation: f64,
     oblique: f64,
     x_scale: f64,
+    size: f64,
 }
 
 pub(crate) fn inverse_affine(
@@ -55,16 +56,19 @@ fn capture_text_orient(e: &EntityType) -> Option<TextOrient> {
             rotation: t.rotation,
             oblique: t.oblique_angle,
             x_scale: 0.0,
+            size: 0.0,
         }),
         EntityType::MText(m) => Some(TextOrient {
             rotation: m.rotation,
             oblique: 0.0,
             x_scale: 0.0,
+            size: 0.0,
         }),
         EntityType::Shape(s) => Some(TextOrient {
             rotation: s.rotation,
             oblique: s.oblique_angle,
             x_scale: s.relative_x_scale,
+            size: s.size,
         }),
         _ => None,
     }
@@ -91,6 +95,7 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
             s.rotation = o.rotation;
             s.oblique_angle = o.oblique;
             s.relative_x_scale = o.x_scale;
+            s.size = o.size;
         }
         _ => {}
     }

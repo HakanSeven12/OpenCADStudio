@@ -329,12 +329,16 @@ impl PropertyEditable for Shape {
 impl Transformable for Shape {
     fn apply_transform(&mut self, t: &EntityTransform) {
         transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            transform::reflect_xy_point(
-                &mut entity.insertion_point.x,
-                &mut entity.insertion_point.y,
-                p1,
-                p2,
+            // The codec mirror flips the rotation, oblique angle and x scale
+            // with the insertion point; MIRRTEXT off restores them afterwards.
+            let mut wrapped = document::entities::EntityType::Shape(entity.clone());
+            wrapped.mirror(
+                document::types::Vector3::new(p1.x, p1.y, p1.z),
+                document::types::Vector3::new(p2.x, p2.y, p2.z),
             );
+            if let document::entities::EntityType::Shape(mirrored) = wrapped {
+                *entity = mirrored;
+            }
         });
     }
 }

@@ -1853,6 +1853,10 @@ pub(super) struct OpenCADStudio {
     /// `SelectionChangedV4` fires once per real change rather than per message.
     #[cfg(not(target_arch = "wasm32"))]
     last_plugin_selection: Option<(u64, u64)>,
+    /// Monotonic per-tab selection revisions, bumped only on an actual
+    /// selection change; carried by the v22 `SelectionChangedDigest`.
+    #[cfg(not(target_arch = "wasm32"))]
+    selection_revision_by_tab: rustc_hash::FxHashMap<u64, u64>,
     /// `(tab id, geometry epoch)` last published to the V4 document view.
     /// Built-in edits bypass HostSession, so this is checked at message
     /// boundaries as well as after plugin-initiated writes.
@@ -6594,6 +6598,8 @@ impl OpenCADStudio {
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            selection_revision_by_tab: rustc_hash::FxHashMap::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_document: None,
             external_plugins: Vec::new(),

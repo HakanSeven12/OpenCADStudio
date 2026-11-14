@@ -174,7 +174,7 @@ fn run_v4(
         while std::time::Instant::now() < drain_deadline {
             let Some((command_id, notification)) = client.try_recv_notification() else {
                 break;
-            }
+            };
             if notification_api_version(&notification) > api_version {
                 continue;
             }

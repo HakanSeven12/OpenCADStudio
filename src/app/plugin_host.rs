@@ -13,6 +13,11 @@ use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
 
+/// Pallet-menu listing cap: the first N plugin panels per edge, sorted by
+/// title. Registration beyond the cap still works (commands, value updates)
+/// and reports itself on stderr (gui.log); see docs/plugin-pallet-menu.md.
+pub(crate) const PLUGIN_PALLET_MENU_MAX_ROWS: usize = 32;
+
 /// Session adapter: one active document tab, command line, undo.
 pub(crate) struct HostSession<'a> {
     app: &'a mut OpenCADStudio,
@@ -5163,6 +5168,16 @@ impl HostApi for HostSession<'_> {
 
         let state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
         self.app.plugin_panels.insert(id.clone(), state);
+
+        // Pallet-menu listing is capped per edge so a plugin cannot widen
+        // the palette beyond a bounded length (see docs/plugin-pallet-menu.md).
+        if self.app.plugin_panels.len() > PLUGIN_PALLET_MENU_MAX_ROWS {
+            eprintln!(
+                "[plugin] {id}: registered beyond the {}-row pallet-menu cap; \
+                 the edge (+) menu lists the first {} plugin panels only",
+                PLUGIN_PALLET_MENU_MAX_ROWS, PLUGIN_PALLET_MENU_MAX_ROWS
+            );
+        }
 
         // Keep command line autocomplete updated with dynamic panel commands
         if let Some(ref c) = cmd_opt {

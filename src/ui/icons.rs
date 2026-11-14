@@ -101,6 +101,9 @@ pub static DOT: &[u8] = include_bytes!("../../assets/icons/ui/dot.svg");
 pub static DIRTY_DOT: &[u8] = include_bytes!("../../assets/icons/ui/dirty_dot.svg");
 pub static ARROW_LONG_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/arrow_long_right.svg");
 pub static MORE: &[u8] = include_bytes!("../../assets/icons/ui/more.svg");
+/// A docked side panel outline with the sidebar field filled: the generic
+/// icon of plugin-registered pallets (`PanelId::Plugin`).
+pub static PLUGIN_PANEL: &[u8] = include_bytes!("../../assets/icons/ui/plugin_panel.svg");
 pub static INFO: &[u8] = include_bytes!("../../assets/icons/ui/info.svg");
 pub static MESH: &[u8] = include_bytes!("../../assets/icons/ui/mesh.svg");
 pub static ALERT: &[u8] = include_bytes!("../../assets/icons/ui/alert.svg");

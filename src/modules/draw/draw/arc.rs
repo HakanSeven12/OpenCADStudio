@@ -1980,7 +1980,7 @@ impl CadCommand for ArcCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         // A coordinate typed at an angle, length, direction or radius prompt
         // is a point, read like a pick: the comma is never a decimal mark.
-        if crate::app::helpers::parse_coord(text).is_some() {
+        if crate::entities::coord_parse::parse_coord(text).is_some() {
             return None;
         }
         let upper = text.trim().to_uppercase();

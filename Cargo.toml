@@ -405,6 +405,10 @@ harness = false
 name = "blk_cache_wires_build"
 harness = false
 
+[[bench]]
+name = "cache_memory_budget"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

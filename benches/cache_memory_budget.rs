@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use OpenCADStudio::scene::model::image_model::{self, ImageModel};
 use OpenCADStudio::scene::model::material_model;
 use OpenCADStudio::scene::model::pdf_raster::{self, PageAdjust};
+use OpenCADStudio::scene::model::point_cloud;
 
 struct CountingAllocator;
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -109,6 +110,7 @@ const SCENARIOS: &[&str] = &[
     "pdf_underlay_zoom",
     "image_decode_retention",
     "material_texture_retention",
+    "point_cloud_retention",
 ];
 
 /// Half-octave DPI bands from the display ceiling down to the floor, the same
@@ -414,12 +416,115 @@ fn material_texture_retention() -> Report {
     report
 }
 
+/// A minimal single-node indexed scan (.rcs, "ADOCT" v3) with `points`
+/// deterministic points. The layout mirrors `point_cloud::rcs::decode`:
+/// header transforms/flags, a two-entry section directory, one 368-byte node
+/// record (all octree levels empty so the block is just the point records),
+/// then 16-byte records carrying three 18-bit millimetre offsets. The decoded
+/// positions/colours are a pure function of (seed, index), so the retained
+/// cloud is byte-identical on every run.
+fn bench_rcs_bytes(seed: u32, points: u32) -> Vec<u8> {
+    const DIR: usize = 0x15D;
+    const NODE_RECORD: usize = 368;
+    let data = DIR + 8 + NODE_RECORD;
+    let n = points as usize;
+    let block_size = n * 20;
+    let mut b = vec![0u8; data + block_size];
+    b[0..5].copy_from_slice(b"ADOCT");
+    let put_f64 = |b: &mut [u8], at: usize, v: f64| b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    let put_u32 = |b: &mut [u8], at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    let put_u64 = |b: &mut [u8], at: usize, v: u64| b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    put_f64(&mut b, 0x40, 1.0);
+    put_f64(&mut b, 0x48, 1.0);
+    put_f64(&mut b, 0x50, 1.0);
+    put_f64(&mut b, 0xB8, 256.0);
+    put_f64(&mut b, 0xC0, 256.0);
+    put_f64(&mut b, 0xC8, 256.0);
+    b[0xE0] = 1; // RGB
+    b[0xE2] = 1; // intensity
+    b[0xE3..0xE3 + 7].copy_from_slice(b"{bench}");
+    put_u32(&mut b, 0x129, 2);
+    put_u64(&mut b, 0x12D, 2);
+    put_u64(&mut b, 0x12D + 8, DIR as u64);
+    put_u64(&mut b, 0x12D + 16, (8 + NODE_RECORD) as u64);
+    put_u64(&mut b, 0x12D + 24, 1);
+    put_u64(&mut b, 0x12D + 32, data as u64);
+    put_u64(&mut b, 0x12D + 40, block_size as u64);
+    put_u64(&mut b, DIR, 1);
+    let rec = DIR + 8;
+    put_u32(&mut b, rec + 100, points);
+    put_u32(&mut b, rec + 104, block_size as u32);
+    let records = data + n * 4;
+    for i in 0..n {
+        let at = records + i * 16;
+        let x = (i as u32 + seed) % 200_000;
+        let y = (i as u32 * 7 + seed) % 200_000;
+        let z = (i as u32 * 13 + seed) % 200_000;
+        let v = u64::from(x) | (u64::from(y) << 18) | (u64::from(z) << 36);
+        b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+        b[at + 8] = (i % 256) as u8;
+        b[at + 9] = (seed % 256) as u8;
+        b[at + 10] = ((i * 3) % 256) as u8;
+        b[at + 11] = ((i * 5) % 256) as u8;
+    }
+    b
+}
+
+/// A drawing references several distinct scan files. Each is decoded into the
+/// per-path point-cloud cache, then the frame's handle is dropped — everything
+/// still live afterwards is cache retention. The revisit pass re-loads the same
+/// paths: with an unbounded cache it is all hits and retention stays at the full
+/// working set.
+fn point_cloud_retention() -> Report {
+    let started = Instant::now();
+    let mut steps = Vec::new();
+
+    const COUNT: u32 = 16;
+    const POINTS: u32 = 200_000;
+    let dir = std::env::temp_dir().join(format!("ocs-pointcloud-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("bench scan dir");
+    let mut paths = Vec::new();
+    for i in 0..COUNT {
+        let path = dir.join(format!("scan-{i}.rcs"));
+        std::fs::write(&path, bench_rcs_bytes(i, POINTS)).expect("bench scan write");
+        paths.push(path);
+    }
+    steps.push(Step {
+        label: "written-scans".to_string(),
+        live_bytes: live(),
+    });
+
+    for pass in ["load", "revisit"] {
+        for (i, path) in paths.iter().enumerate() {
+            let cloud = point_cloud::load(path).expect("bench scan must decode");
+            assert_eq!(cloud.positions.len(), POINTS as usize);
+            black_box(&cloud);
+            drop(cloud);
+            steps.push(Step {
+                label: format!("{pass} scan{i}"),
+                live_bytes: live(),
+            });
+        }
+    }
+
+    let report = Report {
+        scenario: "point_cloud_retention".to_string(),
+        final_live_bytes: live(),
+        peak_live_bytes: PEAK.load(Ordering::Relaxed),
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        steps,
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    report
+}
+
 fn run_scenario(name: &str) -> Report {
     allocator_self_test();
     match name {
         "pdf_underlay_zoom" => pdf_underlay_zoom(),
         "image_decode_retention" => image_decode_retention(),
         "material_texture_retention" => material_texture_retention(),
+        "point_cloud_retention" => point_cloud_retention(),
         other => panic!("unknown scenario: {other}"),
     }
 }

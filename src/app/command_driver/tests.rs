@@ -8991,4 +8991,45 @@ mod table_style_tests {
     }
 }
 
+#[cfg(test)]
+mod layer_command_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::types::Color;
+
+    fn layer_color(app: &OpenCADStudio, name: &str) -> Color {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .map(|layer| layer.color)
+            .expect("the layer exists")
+    }
+
+    /// The layer manager's colour prompt accepts a name as readily as an ACI
+    /// index, and the layer may come before or after the colour. The plain
+    /// LAYER command used to take a number only, in name-first order, so
+    /// `LAYER COLOR WALLS RED` and `LAYER COLOR 3 WALLS` both failed.
+    #[test]
+    fn layer_color_takes_the_names_and_either_order() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LAYER NEW WALLS");
+
+        let _ = app.run_command_line("LAYER COLOR WALLS RED");
+        assert_eq!(layer_color(&app, "WALLS"), Color::Index(1));
+
+        let _ = app.run_command_line("LAYER COLOR 3 WALLS");
+        assert_eq!(layer_color(&app, "WALLS"), Color::Index(3));
+
+        let _ = app.run_command_line("LAYER COLOR WALLS CHARTREUSE");
+        assert_eq!(
+            layer_color(&app, "WALLS"),
+            Color::Index(3),
+            "an unknown colour leaves the layer alone"
+        );
+    }
+}
+
 

@@ -135,38 +135,60 @@ impl OpenCADStudio {
                             .push_output(crate::t!("LAYER: layers unlocked.").as_ref());
                     }
                     "COLOR" | "C" => {
-                        // LAYER COLOR <name> <aci_index>
-                        let layer_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
-                        let color_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
-                        if let Ok(idx) = color_str.parse::<i16>() {
-                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name)
-                            {
-                                l.color = document::types::Color::from_index(idx);
-                                l.color_name = None;
-                                l.book_name = None;
-                                self.push_undo_snapshot(i, "LAYER COLOR");
-                                self.tabs[i].dirty = true;
-                                // By-layer colour is baked into every wire on
-                                // this layer. The dependency index maps block
-                                // children back to their top-level INSERTs, so
-                                // unrelated entities stay warm.
-                                self.tabs[i].scene.invalidate_layer_dependencies(
-                                    std::slice::from_ref(&layer_name),
-                                );
-                                self.command_line.push_output(
-                                    crate::tf!("LAYER: '{}' color set to ACI {}.", layer_name, idx)
-                                        .as_ref(),
-                                );
-                            } else {
-                                self.command_line.push_error(
-                                    crate::tf!("LAYER: '{}' not found.", layer_name).as_ref(),
-                                );
-                            }
+                        use document::types::Color;
+                        // LAYER COLOR <name> <colour>  |  LAYER COLOR <colour> <name>
+                        // The colour is an ACI index or one of the names the
+                        // layer manager offers (RED, BYLAYER, ...), the same
+                        // values `-LAYER COLOR` takes.
+                        let first = parts.get(1).map(|s| s.trim()).unwrap_or("");
+                        let second = parts.get(2).map(|s| s.trim()).unwrap_or("");
+                        let exists = |name: &str| {
+                            self.tabs[i].scene.document.layers.contains(name)
+                        };
+                        let parsed = if !first.is_empty() && exists(first) {
+                            crate::ui::window::attman_dialog::parse_color(second)
+                                .map(|color| (first.to_string(), color))
                         } else {
+                            crate::ui::window::attman_dialog::parse_color(first)
+                                .filter(|_| !second.is_empty() && exists(second))
+                                .map(|color| (second.to_string(), color))
+                        };
+                        let Some((layer_name, color)) = parsed else {
                             self.command_line.push_error(
-                                crate::t!("Usage: LAYER COLOR <name> <aci_index>").as_ref(),
+                                crate::t!("Usage: LAYER COLOR <name> <color>").as_ref(),
                             );
-                        }
+                            return Some(Task::none());
+                        };
+                        let Some(layer) =
+                            self.tabs[i].scene.document.layers.get_mut(&layer_name)
+                        else {
+                            self.command_line.push_error(
+                                crate::tf!("LAYER: '{}' not found.", layer_name).as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        layer.color = color;
+                        layer.color_name = None;
+                        layer.book_name = None;
+                        self.push_undo_snapshot(i, "LAYER COLOR");
+                        self.tabs[i].dirty = true;
+                        // By-layer colour is baked into every wire on this
+                        // layer. The dependency index maps block children back
+                        // to their top-level INSERTs, so unrelated entities
+                        // stay warm.
+                        self.tabs[i]
+                            .scene
+                            .invalidate_layer_dependencies(std::slice::from_ref(&layer_name));
+                        let shown = match color {
+                            Color::Index(idx) => crate::tf!("ACI {idx}"),
+                            Color::ByLayer => crate::tf!("ByLayer"),
+                            Color::ByBlock => crate::tf!("ByBlock"),
+                            Color::None => crate::tf!("None"),
+                            Color::Rgb { r, g, b } => crate::tf!("RGB {r},{g},{b}"),
+                        };
+                        self.command_line.push_output(
+                            crate::tf!("LAYER: '{}' color set to {}.", layer_name, shown).as_ref(),
+                        );
                     }
                     "SET" | "S" | "CURRENT" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
@@ -182,7 +204,7 @@ impl OpenCADStudio {
                     }
                     _ => {
                         self.command_line.push_info(
-                            crate::t!("Usage: LAYER LIST | NEW <name> | ON/OFF/FREEZE/THAW/LOCK/UNLOCK <name> | COLOR <name> <aci> | SET <name>").as_ref()
+                            crate::t!("Usage: LAYER LIST | NEW <name> | ON/OFF/FREEZE/THAW/LOCK/UNLOCK <name> | COLOR <name> <color> | SET <name>").as_ref()
                         );
                     }
                 }

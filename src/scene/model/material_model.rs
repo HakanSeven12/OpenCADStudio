@@ -523,13 +523,27 @@ pub fn resolve_material_handle_with_base(
     }
 }
 
+/// Decoded material textures are resident for the whole process lifetime;
+/// past the budget the least recently used ones are dropped and re-decoded
+/// on demand. Tunable with `OCS_MATERIAL_CACHE_MB`.
+#[cfg(not(target_arch = "wasm32"))]
+fn material_cache_budget_bytes() -> usize {
+    const DEFAULT_MIB: usize = 64;
+    std::env::var("OCS_MATERIAL_CACHE_MB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MIB)
+        .saturating_mul(1024 * 1024)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn load_map_image(map: &MaterialMap, base_dir: Option<&Path>) -> Option<Arc<MaterialImage>> {
-    use std::collections::HashMap;
+    use super::pdf_raster::BudgetedRasterCache;
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
 
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<Arc<MaterialImage>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<BudgetedRasterCache<PathBuf, Option<Arc<MaterialImage>>>>> =
+        OnceLock::new();
 
     if map.source != 1 || map.file_name.trim().is_empty() {
         return None;
@@ -551,8 +565,8 @@ fn load_map_image(map: &MaterialMap, base_dir: Option<&Path>) -> Option<Arc<Mate
     }
     let path = candidates.into_iter().find(|path| path.is_file())?;
     let path = path.canonicalize().unwrap_or(path);
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(hit) = cache.lock().ok()?.get(&path).cloned() {
+    let cache = CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()));
+    if let Some(hit) = cache.lock().ok()?.get(&path) {
         return hit;
     }
     let loaded = std::fs::read(&path)
@@ -567,7 +581,17 @@ fn load_map_image(map: &MaterialMap, base_dir: Option<&Path>) -> Option<Arc<Mate
                 path: path.to_string_lossy().into_owned(),
             })
         });
-    cache.lock().ok()?.insert(path, loaded.clone());
+    // The pixel buffer dominates; per-entry Arc/struct overhead is left uncharged.
+    let cost = std::mem::size_of::<MaterialImage>()
+        + path.as_os_str().len()
+        + loaded.as_ref().map_or(0, |image| image.rgba.capacity());
+    let budget = material_cache_budget_bytes();
+    if cost <= budget {
+        cache
+            .lock()
+            .ok()?
+            .insert_with_budget(path, loaded.clone(), cost, budget);
+    }
     loaded
 }
 
@@ -629,5 +653,198 @@ mod tests {
             mapper.map_position([4.0, 22.0, 42.0], [0.0; 3]),
             [1.0, 2.0, 3.0]
         );
+    }
+
+    // ── Material texture cache byte budgets ──────────────────────────────
+
+    /// Serialises the tests that shrink the process-wide material budget:
+    /// the env override is shared by every test thread in this process.
+    static MATERIAL_BUDGET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct MaterialBudgetEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl MaterialBudgetEnvGuard {
+        fn set(mib: &str) -> Self {
+            let previous = std::env::var_os("OCS_MATERIAL_CACHE_MB");
+            std::env::set_var("OCS_MATERIAL_CACHE_MB", mib);
+            Self { previous }
+        }
+    }
+
+    impl Drop for MaterialBudgetEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("OCS_MATERIAL_CACHE_MB", value),
+                None => std::env::remove_var("OCS_MATERIAL_CACHE_MB"),
+            }
+        }
+    }
+
+    /// A registered 256×256 texture decodes to 256 KiB of RGBA, so a handful
+    /// of distinct files passes a 1 MiB budget.
+    fn budget_texture(tag: &str, side: u32) -> (MaterialMap, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let img = image::RgbaImage::from_fn(side, side, |x, y| {
+            image::Rgba([x as u8, y as u8, 0x7f, 0xff])
+        });
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode budget texture");
+        let path = std::env::temp_dir().join(format!(
+            "ocs-material-budget-{tag}-{}-{}.png",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, bytes).expect("write budget texture");
+        let map = MaterialMap {
+            source: 1,
+            file_name: path.to_string_lossy().into_owned(),
+            ..MaterialMap::default()
+        };
+        (map, path)
+    }
+
+    fn load_texture(map: &MaterialMap) -> Option<Arc<MaterialImage>> {
+        load_map_image(map, None)
+    }
+
+    #[test]
+    fn texture_sweep_past_budget_evicts_the_oldest() {
+        let _lock = MATERIAL_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = MaterialBudgetEnvGuard::set("1");
+        let (a, pa) = budget_texture("sweep-a", 256);
+        let (b, pb) = budget_texture("sweep-b", 256);
+        let (c, pc) = budget_texture("sweep-c", 256);
+        let (d, pd) = budget_texture("sweep-d", 256);
+        let (e, pe) = budget_texture("sweep-e", 256);
+        let oldest = load_texture(&a).expect("decode A");
+        for map in [&b, &c, &d, &e] {
+            drop(load_texture(map).expect("sweep decode"));
+        }
+        let again = load_texture(&a).expect("re-decode A");
+        assert!(
+            !Arc::ptr_eq(&oldest, &again),
+            "the oldest texture must be evicted once the sweep passes the budget"
+        );
+        for path in [pa, pb, pc, pd, pe] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// A cache hit must promote the entry: a re-touched older texture survives
+    /// a sweep that evicts an untouched newer one. Two 256 KiB decodes fit the
+    /// 1 MiB budget before the sweep pushes past it.
+    #[test]
+    fn re_touching_an_older_texture_keeps_it_cached_past_the_budget() {
+        let _lock = MATERIAL_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = MaterialBudgetEnvGuard::set("1");
+        let (a, pa) = budget_texture("recency-a", 256);
+        let (b, pb) = budget_texture("recency-b", 256);
+        let (c, pc) = budget_texture("recency-c", 256);
+        let (d, pd) = budget_texture("recency-d", 256);
+        let oldest = load_texture(&a).expect("decode A");
+        let middle = load_texture(&b).expect("decode B");
+        let touched = load_texture(&a).expect("re-touch A");
+        assert!(
+            Arc::ptr_eq(&oldest, &touched),
+            "re-touch reads the cached decode"
+        );
+        drop(touched);
+        for map in [&c, &d] {
+            drop(load_texture(map).expect("push decode"));
+        }
+        let b_again = load_texture(&b).expect("re-decode B");
+        let b_cached = Arc::ptr_eq(&middle, &b_again);
+        let a_again = load_texture(&a).expect("re-decode A");
+        let a_cached = Arc::ptr_eq(&oldest, &a_again);
+        // Recency under a shared budget: A must outlive B, not absolutely
+        // survive — probing B re-inserts it and may evict A in turn.
+        assert!(
+            a_cached || !b_cached,
+            "the re-touched texture outlives the untouched one under eviction"
+        );
+        for path in [pa, pb, pc, pd] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn recent_texture_survives_a_sweep_within_budget() {
+        let _lock = MATERIAL_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = MaterialBudgetEnvGuard::set("128");
+        let (a, pa) = budget_texture("within-a", 256);
+        let (b, pb) = budget_texture("within-b", 256);
+        let first = load_texture(&a).expect("decode A");
+        drop(load_texture(&b).expect("decode B"));
+        let again = load_texture(&a).expect("re-read A");
+        assert!(
+            Arc::ptr_eq(&first, &again),
+            "a texture within the budget stays cached across a sweep"
+        );
+        for path in [pa, pb] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn a_texture_larger_than_the_budget_is_not_retained() {
+        let _lock = MATERIAL_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = MaterialBudgetEnvGuard::set("1");
+        let (big, path) = budget_texture("oversized", 1024);
+        let first = load_texture(&big).expect("decode oversized");
+        let again = load_texture(&big).expect("re-decode oversized");
+        assert!(
+            !Arc::ptr_eq(&first, &again),
+            "a decode larger than the budget must not be retained"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A memoised decode failure must not outlive its eviction: a corrupt file
+    /// caches `None`, and once the budget sweeps that entry away a file that
+    /// has since been fixed decodes instead of staying broken.
+    #[test]
+    fn an_evicted_decode_failure_retries_when_the_file_is_fixed() {
+        let _lock = MATERIAL_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = MaterialBudgetEnvGuard::set("1");
+        let (broken, path) = budget_texture("late-arrival", 256);
+        // The file exists but is not an image, so the decode fails and the
+        // `None` is memoised (a missing file would never reach the cache).
+        std::fs::write(&path, b"not an image").expect("write corrupt texture");
+        assert!(load_texture(&broken).is_none(), "corrupt file stays None");
+        for i in 0..5 {
+            let (push, p) = budget_texture(&format!("late-push-{i}"), 256);
+            drop(load_texture(&push).expect("push decode"));
+            let _ = std::fs::remove_file(p);
+        }
+        let img = image::RgbaImage::from_fn(8, 8, |_, _| image::Rgba([1, 2, 3, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode late texture");
+        std::fs::write(&path, bytes).expect("write fixed texture");
+        let loaded = load_texture(&broken).expect("the evicted failure must retry");
+        assert_eq!((loaded.width, loaded.height), (8, 8));
+        let _ = std::fs::remove_file(path);
     }
 }

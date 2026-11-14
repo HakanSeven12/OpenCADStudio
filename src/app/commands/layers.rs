@@ -23,6 +23,18 @@ impl OpenCADStudio {
     /// A command turned one layer off (or back on): one undo step, and the
     /// command stays for its next pick.
     pub(in crate::app) fn set_layer_on_from_command(&mut self, i: usize, layer: &str, on: bool) {
+        // The current layer cannot be turned off: the next object drawn would
+        // land on a hidden layer. `-LAYER` refuses the same request.
+        if !on && layer == self.tabs[i].scene.document.header.current_layer_name {
+            self.command_line.push_error(
+                crate::tf!("Cannot turn off layer \"{}\". It is the CURRENT layer.", layer)
+                    .as_ref(),
+            );
+            if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+                self.command_line.push_info(&prompt);
+            }
+            return;
+        }
         let names = vec![layer.to_string()];
         let undo = self.begin_layer_undo(i, "LAYOFF", &names);
         if let Some(record) = self.tabs[i].scene.document.layers.get_mut(layer) {
@@ -76,12 +88,28 @@ impl OpenCADStudio {
                         .into_iter()
                         .map(|(_, e)| e.common().layer.clone())
                         .collect();
-                    let names: Vec<String> = layers.iter().cloned().collect();
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_layer_name
+                        .clone();
+                    if layers.contains(&current) {
+                        self.command_line.push_error(
+                            crate::tf!(
+                                "Cannot turn off layer \"{}\". It is the CURRENT layer.",
+                                current
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    let names: Vec<String> = layers
+                        .iter()
+                        .filter(|name| name.as_str() != "0" && name.as_str() != current)
+                        .cloned()
+                        .collect();
                     let undo = self.begin_layer_undo(i, "LAYOFF", &names);
-                    for name in &layers {
-                        if name == "0" {
-                            continue;
-                        }
+                    for name in &names {
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                             dl.turn_off();
                         }
@@ -114,12 +142,28 @@ impl OpenCADStudio {
                         .into_iter()
                         .map(|(_, e)| e.common().layer.clone())
                         .collect();
-                    let names: Vec<String> = layers.iter().cloned().collect();
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_layer_name
+                        .clone();
+                    if layers.contains(&current) {
+                        self.command_line.push_error(
+                            crate::tf!(
+                                "Cannot freeze layer \"{}\". It is the CURRENT layer.",
+                                current
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    let names: Vec<String> = layers
+                        .iter()
+                        .filter(|name| name.as_str() != "0" && name.as_str() != current)
+                        .cloned()
+                        .collect();
                     let undo = self.begin_layer_undo(i, "LAYFRZ", &names);
-                    for name in &layers {
-                        if name == "0" {
-                            continue;
-                        }
+                    for name in &names {
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                             dl.freeze();
                         }

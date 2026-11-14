@@ -9032,4 +9032,77 @@ mod layer_command_tests {
     }
 }
 
+#[cfg(test)]
+mod layer_tool_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn draw_on(app: &mut OpenCADStudio, layer: &str, x: f64) -> document::Handle {
+        let mut line = Line::from_points(
+            Vector3::new(x, 0.0, 0.0),
+            Vector3::new(x, 10.0, 0.0),
+        );
+        line.common.layer = layer.to_string();
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(line))
+    }
+
+    fn layer(app: &OpenCADStudio, name: &str) -> document::tables::Layer {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .cloned()
+            .expect("the layer exists")
+    }
+
+    /// LAYOFF and LAYFRZ pick the layers of the selection; the layer new
+    /// objects are drawn on has to survive, exactly as `-LAYER OFF` and
+    /// `-LAYER FREEZE` refuse the current layer. The plain commands used to
+    /// hide it like any other, leaving no visible layer for the next line.
+    #[test]
+    fn layer_tools_leave_the_current_layer_alone() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        let _ = app.run_command_line("-LAYER NEW DIMS");
+        let _ = app.run_command_line("-LAYER SET WALLS");
+        let current = draw_on(&mut app, "WALLS", 0.0);
+        let other = draw_on(&mut app, "DIMS", 5.0);
+        let i = app.active_tab;
+
+        app.tabs[i].scene.select_entities(&[current, other]);
+        let _ = app.run_command_line("LAYFRZ");
+        assert!(
+            !layer(&app, "WALLS").flags.frozen,
+            "the current layer must stay thawed"
+        );
+        assert!(
+            layer(&app, "DIMS").flags.frozen,
+            "the picked layer still freezes"
+        );
+
+        let _ = app.run_command_line("-LAYER THAW DIMS");
+        app.tabs[i].scene.select_entities(&[current, other]);
+        let _ = app.run_command_line("LAYOFF");
+        assert!(
+            !layer(&app, "WALLS").flags.off,
+            "the current layer must stay on"
+        );
+        assert!(layer(&app, "DIMS").flags.off, "the picked layer still turns off");
+
+        // The one-at-a-time pick path refuses the same layer.
+        let _ = app.run_command_line("-LAYER ON DIMS");
+        app.set_layer_on_from_command(i, "WALLS", false);
+        assert!(
+            !layer(&app, "WALLS").flags.off,
+            "a pick on the current layer must leave it on"
+        );
+    }
+}
+
 

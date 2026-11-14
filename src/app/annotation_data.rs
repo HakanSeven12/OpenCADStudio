@@ -809,6 +809,21 @@ pub(in crate::app) fn current_table_style(
     (current < styles.len()).then(|| styles.swap_remove(current))
 }
 
+/// The table PASTESPEC places for `cells`: data rows in the current table
+/// style at the column width TABLE uses, as after typing the cells — text
+/// read as their data type, each row as high as its wrapped text needs.
+pub(in crate::app) fn pasted_table(
+    doc: &Document,
+    cells: &[Vec<String>],
+) -> document::entities::Table {
+    use crate::modules::annotate::table_cmd;
+    let style = current_table_style(doc);
+    let width = table_cmd::session().cell_width(doc.header.measurement == 1);
+    let mut table = table_cmd::data_table(style.as_ref(), cells, width);
+    crate::entities::table::settle_table(&mut table, doc);
+    table
+}
+
 fn table_style_handle(doc: &Document, name: &str) -> Option<Handle> {
     doc.objects
         .iter()
@@ -1819,6 +1834,39 @@ impl OpenCADStudio {
         self.command_line
             .push_info(&crate::command::CadCommand::prompt(&command));
         self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
+    /// PASTESPEC's Link format: read the cells a copied range was copied
+    /// from and go on as DATALINK does with a table of them — the table is
+    /// linked to those cells of the file when it is placed.
+    pub(in crate::app) fn place_linked_table(
+        &mut self,
+        source: crate::sys::clipboard_link::SourceLink,
+    ) {
+        let i = self.active_tab;
+        let rows = match read_tabular_file(
+            Path::new(&source.file),
+            Some(&source.sheet),
+            LinkRange::CellRange,
+            Some(&source.cells),
+        ) {
+            Ok(rows) => rows,
+            Err(error) => {
+                self.command_line
+                    .push_error(crate::tf!("PASTESPEC: {error}").as_ref());
+                return;
+            }
+        };
+        let table = pasted_table(&self.tabs[i].scene.document, &rows);
+        let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::of_cells(
+            table,
+            &source.file,
+            &source.sheet,
+            &source.cells,
+        );
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        self.push_ucs_to_cmd(i);
     }
 
     pub(super) fn open_data_link_manager(&mut self, from_table: bool) {

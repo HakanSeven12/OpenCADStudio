@@ -720,6 +720,22 @@ impl Scene {
     /// Used by `active_viewports` to render model-space content through each
     /// content viewport's own view direction and scale.
     pub(super) fn camera_for_viewport(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
+        let mut camera = self.viewport_view_camera(vp_handle)?;
+        // The view decides where the camera looks; its depth range must still
+        // hold the whole model. Sized from the view height alone (64 times
+        // it, around the target), a viewport whose target sits far above or
+        // below the geometry lost it: a top view with its target 808 above
+        // the drawing and a view height under 12.6 showed nothing, although
+        // a view straight down sees the drawing wherever the target is.
+        if let Some((min, max)) = self.model_space_extents() {
+            camera.fit_depth_to_bounds_f64(min.as_dvec3(), max.as_dvec3());
+        }
+        Some(camera)
+    }
+
+    /// The camera a floating viewport's view (or its auto-fit) aims, before
+    /// its depth range is sized to the model.
+    fn viewport_view_camera(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
         let vp = match self.document.get_entity(vp_handle) {
             Some(EntityType::Viewport(vp)) => vp,
             _ => return None,
@@ -874,7 +890,49 @@ impl Scene {
             Some(vp_handle),
         );
         self.viewport_complex_lt.set(None);
-        wires
+        self.without_viewport_frozen_members(wires, &frozen)
+    }
+
+    /// `wires` without the block lines on a layer the viewport freezes.
+    ///
+    /// The resident set leaves out the objects on those layers, but a block
+    /// reference is drawn from definitions shared by every viewport, so the
+    /// lines its members draw on a frozen layer came along. Each such line
+    /// knows the layer it shows on (`effective_layer`); a copy of a block
+    /// drawn as a stub is expanded only when its definition holds one.
+    fn without_viewport_frozen_members(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        frozen: &rustc_hash::FxHashSet<Handle>,
+    ) -> Arc<Vec<WireModel>> {
+        if frozen.is_empty() {
+            return wires;
+        }
+        let sig = Self::frozen_layers_sig(frozen);
+        if let Some((source, kept)) = self.viewport_frozen_member_cache.borrow().get(&sig) {
+            if source
+                .upgrade()
+                .is_some_and(|source| Arc::ptr_eq(&source, &wires))
+            {
+                return Arc::clone(kept);
+            }
+        }
+        let layer_frozen = |layer: &str| {
+            !crate::scene::view::render::is_effective_layer_zero(layer)
+                && self
+                    .document
+                    .layers
+                    .get(layer)
+                    .is_some_and(|record| frozen.contains(&record.handle))
+        };
+        let kept = match crate::scene::model::instance_model::without_layers(&wires, layer_frozen) {
+            Some(kept) => Arc::new(kept),
+            None => Arc::clone(&wires),
+        };
+        self.viewport_frozen_member_cache
+            .borrow_mut()
+            .insert(sig, (Arc::downgrade(&wires), Arc::clone(&kept)));
+        kept
     }
 
     /// PSLTSCALE's factor on linetypes in a viewport: 1 / viewport scale, which

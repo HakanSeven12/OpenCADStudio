@@ -78,6 +78,20 @@ impl CadCommand for RayCommand {
         }
     }
 
+    // Through points are drawn from the start point, so ortho / polar keep
+    // measuring from it rather than from the last through point (#2984).
+    fn on_point_with_tangent(
+        &mut self,
+        pt: DVec3,
+        _tangent: Option<crate::command::TangentObject>,
+    ) -> Option<CmdResult> {
+        Some(self.on_point(pt))
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        self.base
+    }
+
     fn on_enter(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
@@ -303,6 +317,23 @@ impl CadCommand for XLineCommand {
                 CmdResult::NeedPoint
             }
             _ => CmdResult::Cancel,
+        }
+    }
+
+    // A point or bisect xline passes through its root, so ortho / polar
+    // keep measuring from it rather than from the last through point (#2984).
+    fn on_point_with_tangent(
+        &mut self,
+        pt: DVec3,
+        _tangent: Option<crate::command::TangentObject>,
+    ) -> Option<CmdResult> {
+        Some(self.on_point(pt))
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        match self.mode {
+            XLineMode::Points | XLineMode::Bisect if self.value_origin.is_none() => self.base,
+            _ => None,
         }
     }
 

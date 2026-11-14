@@ -24,6 +24,11 @@ use crate::host::{HostApi, HostNotification, PluginNotification};
 use crate::process::{PluginError, PluginProcess};
 use crate::ribbon::owned::{to_shared_module, OwnedEntityClasses, SharedCadModule};
 
+/// Maximum notifications parked in the boot-window `attach.pending` queue
+/// (review finding 6): a plugin that never acks its ChannelReady cannot grow
+/// host memory without bound during the grace period.
+const MAX_PENDING_ATTACH: usize = 256;
+
 /// Callback the host installs to receive plugin-to-host notifications.
 pub type NotificationHandler = Arc<dyn Fn(&str, Option<u64>, PluginNotification) + Send + Sync>;
 
@@ -31,6 +36,14 @@ pub type NotificationHandler = Arc<dyn Fn(&str, Option<u64>, PluginNotification)
 pub struct PluginManager {
     plugins: Vec<LoadedPlugin>,
     notification_handler: Option<NotificationHandler>,
+    /// Ids of plugins whose spawn/bootstrap is IN FLIGHT (`load_with_expected_id`
+    /// began and has not returned): owner-scoped declarations (entity classes,
+    /// quad panels, custom grips) arrive as nested requests during that window —
+    /// the host is actively authenticated with the very process making them —
+    /// but the registry entry does not exist until the load returns, and the
+    /// empty-identity manifest call used to refuse them. Cleared when the load
+    /// finishes (entry inserted) or fails, so a marker never outlives a plugin.
+    booting: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 struct LoadedPlugin {
@@ -111,6 +124,7 @@ impl PluginManager {
         Self {
             plugins: Vec::new(),
             notification_handler: None,
+            booting: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -129,23 +143,72 @@ impl PluginManager {
         cdylib_path: &Path,
         host: &mut dyn HostApi,
     ) -> Result<String, PluginError> {
+        self.load_with_expected_id(cdylib_path, None, host)
+    }
+
+    /// Like [`PluginManager::load`], but with the package's expected plugin id:
+    /// the runner's self-declared manifest id must match (the transport stays
+    /// the verified identity), the id must not collide with an already-loaded
+    /// plugin, and the spawn bootstrap's declaration window carries it.
+    pub fn load_with_expected_id(
+        &mut self,
+        cdylib_path: &Path,
+        expected_id: Option<&str>,
+        host: &mut dyn HostApi,
+    ) -> Result<String, PluginError> {
+        if let Some(expected) = expected_id {
+            if self
+                .plugins
+                .iter()
+                .any(|p| p.process.id().eq_ignore_ascii_case(expected))
+            {
+                return Err(PluginError::Runner(format!(
+                    "a plugin with id `{expected}` is already loaded; refusing duplicate \
+                     registration"
+                )));
+            }
+        }
         let handler: NotificationHandler = match self.notification_handler.as_ref() {
             Some(h) => Arc::clone(h),
             None => Arc::new(|_id, _cmd, _notif| {}),
         };
-        let process = PluginProcess::spawn(cdylib_path, host, handler)?;
-        let id = process.id().to_string();
-        let name = process.manifest().name.clone();
-        let module = to_shared_module(id.clone(), name, process.ribbon().to_vec());
-        self.plugins.push(LoadedPlugin {
-            process: Arc::new(process),
-            module,
-            attach: std::sync::Mutex::new(NotificationAttach {
-                grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
-                ..Default::default()
-            }),
-        });
-        Ok(id)
+        // The spawn bootstrap IS the declaration window: quad panels/classes/
+        // grips register while GetManifest is still in flight (the spawn
+        // attributes them to the package-declared id). Mark the boot so the
+        // declaration law sees a live transport; every exit path closes it.
+        let booting: Option<String> = expected_id.map(str::to_string);
+        if let Some(id) = &booting {
+            self.begin_boot(id);
+        }
+        let load = (|| {
+            let process = PluginProcess::spawn(cdylib_path, host, handler, expected_id)?;
+            let id = process.id().to_string();
+            if self
+                .plugins
+                .iter()
+                .any(|p| p.process.id().eq_ignore_ascii_case(&id))
+            {
+                process.shutdown();
+                return Err(PluginError::Runner(format!(
+                    "a plugin with id `{id}` is already loaded; refusing duplicate registration"
+                )));
+            }
+            let name = process.manifest().name.clone();
+            let module = to_shared_module(id.clone(), name, process.ribbon().to_vec());
+            self.plugins.push(LoadedPlugin {
+                process: Arc::new(process),
+                module,
+                attach: std::sync::Mutex::new(NotificationAttach {
+                    grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
+                    ..Default::default()
+                }),
+            });
+            Ok(id)
+        })();
+        if let Some(id) = &booting {
+            self.end_boot(id);
+        }
+        load
     }
 
     /// Fan out a host notification to every alive V4 plugin. Per-process errors
@@ -207,6 +270,21 @@ impl PluginManager {
                     // send path.
                     true
                 } else {
+                    // Bounded park (review finding 6): a never-acking plugin
+                    // during the boot grace cannot grow host memory without
+                    // bound; the OLDEST parked is dropped (the plugin's
+                    // listener never saw it anyway).
+                    if attach.pending.len() >= MAX_PENDING_ATTACH {
+                        attach.pending.remove(0);
+                        if crate::process::verbose() {
+                            eprintln!(
+                                "[plugin] dropped the oldest boot-window notification for {} \
+                                 ({} parked)",
+                                p.process.id(),
+                                attach.pending.len()
+                            );
+                        }
+                    }
                     attach.pending.push((command_id, notification.clone()));
                     if crate::process::verbose() {
                         eprintln!(
@@ -398,6 +476,45 @@ impl PluginManager {
                 p.process.is_alive(),
             )
         })
+    }
+
+    /// Mark a plugin's boot as in flight: between this and [`Self::end_boot`],
+    /// the owner-scoped declaration laws treat `id` as a live, authenticated
+    /// transport (the spawn is actively talking to that process — see the
+    /// struct docs for `booting`). Callers must pair this with `end_boot` on
+    /// every return path (a leaked marker would make a never-loaded id
+    /// declare owner-scoped state forever).
+    pub fn begin_boot(&self, id: &str) {
+        self.booting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string());
+    }
+
+    /// Close the in-flight boot marker for `id` (idempotent).
+    pub fn end_boot(&self, id: &str) {
+        self.booting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+    }
+
+    /// Whether owner-scoped declarations from `id` are attributable to a real,
+    /// current transport: either the loaded registry entry is alive, or the
+    /// plugin's spawn/bootstrap is in flight right now (its manifest will
+    /// confirm the id before the load returns). This is the declaration law's
+    /// gate ONLY — grip event routing keeps the stricter live-channel check.
+    pub fn declaration_endpoint_alive(&self, id: &str) -> bool {
+        if self
+            .grip_endpoint(id)
+            .is_some_and(|(_, _, alive)| alive)
+        {
+            return true;
+        }
+        self.booting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id)
     }
 
     /// Command names advertised by every alive, non-disabled plugin: each

@@ -7,6 +7,7 @@ struct TextOrient {
     rotation: f64,
     oblique: f64,
     x_scale: f64,
+    size: f64,
 }
 
 pub(crate) fn inverse_affine(
@@ -55,16 +56,19 @@ fn capture_text_orient(e: &EntityType) -> Option<TextOrient> {
             rotation: t.rotation,
             oblique: t.oblique_angle,
             x_scale: 0.0,
+            size: 0.0,
         }),
         EntityType::MText(m) => Some(TextOrient {
             rotation: m.rotation,
             oblique: 0.0,
             x_scale: 0.0,
+            size: 0.0,
         }),
         EntityType::Shape(s) => Some(TextOrient {
             rotation: s.rotation,
             oblique: s.oblique_angle,
             x_scale: s.relative_x_scale,
+            size: s.size,
         }),
         _ => None,
     }
@@ -91,6 +95,7 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
             s.rotation = o.rotation;
             s.oblique_angle = o.oblique;
             s.relative_x_scale = o.x_scale;
+            s.size = o.size;
         }
         _ => {}
     }
@@ -206,9 +211,9 @@ impl Scene {
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
         // Never transform objects on a locked layer (defense-in-depth: the pick
         // path already excludes them, but programmatic callers may not).
-        let handles: Vec<Handle> = handles
-            .iter()
-            .copied()
+        let handles: Vec<Handle> = self
+            .without_sheet_viewports(handles)
+            .into_iter()
             .filter(|&h| !self.is_layer_locked(h))
             .collect();
         let handles = &handles[..];
@@ -1226,7 +1231,8 @@ impl Scene {
     }
 
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
-        let copy_handles = self.handles_expanded_for_leader_annotations(handles);
+        let handles = self.without_sheet_viewports(handles);
+        let copy_handles = self.handles_expanded_for_leader_annotations(&handles);
 
         // Objects on a locked layer can be selected but not copied.
         let clones: Vec<(Handle, EntityType, Vec<Handle>, Option<Handle>)> = copy_handles
@@ -2783,7 +2789,7 @@ impl Scene {
         handle: Handle,
         field: &str,
         value: &str,
-        plane: crate::command::WorkingPlane,
+        plane: crate::entities::transform::WorkingPlane,
     ) -> Option<bool> {
         let axis = match field {
             "s3d_px" | "rgn_px" | "bdy_px" | "srf_px" => 0,
@@ -2875,7 +2881,7 @@ impl Scene {
             if let GripApply::Translate(delta) = apply {
                 self.transform_entities(
                     &[handle],
-                    &crate::command::EntityTransform::Translate(delta),
+                    &crate::entities::transform::EntityTransform::Translate(delta),
                 );
             }
             return;
@@ -3018,7 +3024,7 @@ impl Scene {
                     if let Some(annotation) = self.document.get_entity_mut(annotation_handle) {
                         view::dispatch::apply_transform(
                             annotation,
-                            &crate::command::EntityTransform::Translate(delta),
+                            &crate::entities::transform::EntityTransform::Translate(delta),
                         );
                     }
 
@@ -3433,7 +3439,7 @@ mod define_transformed_block_xdict_tests {
         let name = scene
             .define_transformed_block(
                 &subs,
-                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+                &crate::entities::transform::EntityTransform::Translate(glam::DVec3::ZERO),
             )
             .expect("clone block must be created");
         let record = scene.document.block_records.get(&name).unwrap();
@@ -3477,7 +3483,7 @@ mod define_transformed_block_xdict_tests {
         let name = scene
             .define_transformed_block(
                 &subs,
-                &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+                &crate::entities::transform::EntityTransform::Translate(glam::DVec3::ZERO),
             )
             .expect("clone block must be created");
         assert!(
@@ -3572,7 +3578,7 @@ mod add_entity_clone_xdict_tests {
 #[cfg(test)]
 mod copy_entities_xdict_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::objects::{
         Dictionary, ObjectType, ProxyObjectReference, ProxyReferenceKind, XRecord, XRecordValue,
     };
@@ -4312,7 +4318,7 @@ mod copy_entities_xdict_tests {
 #[cfg(test)]
 mod copy_entities_subhandle_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::{
         AttributeEntity, Insert, PolyfaceFace, PolyfaceMesh, PolyfaceVertex, PolygonMeshEntity,
         PolygonMeshVertex,
@@ -4448,7 +4454,7 @@ mod copy_entities_subhandle_tests {
 #[cfg(test)]
 mod copy_viewport_clip_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::entities::{LwPolyline, Viewport};
     use glam::DVec3;
 
@@ -4504,7 +4510,7 @@ mod copy_viewport_clip_tests {
 #[cfg(test)]
 mod copy_field_tests {
     use super::*;
-    use crate::command::EntityTransform;
+    use crate::entities::transform::EntityTransform;
     use document::objects::{Dictionary, Field, ObjectType};
     use glam::DVec3;
 
@@ -4671,7 +4677,8 @@ mod copy_field_tests {
 
 #[cfg(test)]
 mod table_picture_ownership_tests {
-    use crate::command::{CadCommand, CmdResult, EntityTransform};
+    use crate::command::{CadCommand, CmdResult};
+    use crate::entities::transform::EntityTransform;
     use crate::modules::annotate::table_cmd::TableCellEditCommand;
     use crate::scene::Scene;
     use document::entities::Table;

@@ -48,5 +48,15 @@
     "repo": "Macchecaspita/opencad-raster-plugin",
     "name": "Raster Tools",
     "description": "Raster images: insert by size, width, DPI or pixel; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent; relink and find moved image files. English and Italian."
+  },
+  {
+    "repo": "Macchecaspita/opencad-rilievo-plugin",
+    "name": "Rilievo",
+    "description": "Architectural survey from tape and laser measures: draw rooms by eye as closed polylines, type the measured sides, diagonals and wall thicknesses, and a least-squares adjustment recomputes the true shape with the residual of every measure. Dimensions, a table and a CSV measure book. English and Italian."
+  },
+  {
+    "repo": "AwayZz20/Property-Lines",
+    "name": "Property Lines",
+    "description": "Property boundaries from survey distances, quadrant bearings, arcs, and sketching, with segment tags, area labels, North block, and Rumbos y Distancias tables."
   }
 ]

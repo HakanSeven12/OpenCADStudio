@@ -883,6 +883,54 @@ impl WireModel {
     /// Rollover (hover) highlight — orange, distinct from the blue selection.
     pub const HOVER: [f32; 4] = [0.95, 0.55, 0.10, 1.0];
 
+    /// Clone every geometry/style field while assigning `name`, avoiding a
+    /// throwaway heap clone of `self.name` on prototype leaf instantiation.
+    pub(crate) fn clone_with_name(&self, name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            effective_layer: self.effective_layer.clone(),
+            points: self.points.clone(),
+            points_low: self.points_low.clone(),
+            point_marker: self.point_marker,
+            color: self.color,
+            bg_adapt: self.bg_adapt.clone(),
+            selected: self.selected,
+            pattern_length: self.pattern_length,
+            pattern: self.pattern,
+            line_weight_px: self.line_weight_px,
+            world_width: self.world_width,
+            taper_widths: self.taper_widths.clone(),
+            pattern_stations: self.pattern_stations.clone(),
+            aci: self.aci,
+            snap_pts: self.snap_pts.clone(),
+            tangent_geoms: self.tangent_geoms.clone(),
+            key_vertices: self.key_vertices.clone(),
+            aabb: self.aabb,
+            plinegen: self.plinegen,
+            dash_from_start: self.dash_from_start,
+            element_linetype: self.element_linetype.clone(),
+            element_color: self.element_color,
+            dash_closure: self.dash_closure,
+            fill_tris: self.fill_tris.clone(),
+            fill_tris_low: self.fill_tris_low.clone(),
+            pick_tris: self.pick_tris.clone(),
+            pick_tris_low: self.pick_tris_low.clone(),
+            text_verts: self.text_verts.clone(),
+            searchable_text: self.searchable_text.clone(),
+            depth_override: self.depth_override,
+            display_visible: self.display_visible,
+            snap_only: self.snap_only,
+            region_boundary_click: self.region_boundary_click,
+            reference_only: self.reference_only,
+            plot_visible: self.plot_visible,
+            fill_is_3d: self.fill_is_3d,
+            fill_is_2d_solid: self.fill_is_2d_solid,
+            solid_normal: self.solid_normal,
+            render_instance: self.render_instance.clone(),
+            stub: self.stub.clone(),
+        }
+    }
+
     /// Drawn underlay content: shown and plotted, never picked or snapped.
     pub fn is_display_only(&self) -> bool {
         self.snap_only && self.display_visible

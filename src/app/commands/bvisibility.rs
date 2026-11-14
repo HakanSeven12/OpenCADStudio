@@ -139,7 +139,7 @@ impl OpenCADStudio {
         if let Some(error) = option_error {
             self.command_line.push_error(crate::t!(error).as_ref());
         }
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].scene.clear_preview_wire();
@@ -337,7 +337,7 @@ impl OpenCADStudio {
         if let Some(error) = option_error {
             self.command_line.push_error(crate::t!(error).as_ref());
         }
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].scene.clear_preview_wire();
@@ -473,7 +473,7 @@ impl OpenCADStudio {
         if let Some(error) = option_error {
             self.command_line.push_error(crate::t!(error).as_ref());
         }
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].scene.clear_preview_wire();
@@ -527,7 +527,7 @@ impl OpenCADStudio {
             document::types::Vector3::new(location.x, location.y, location.z),
         )
         .expect("validated visibility placement");
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_block_definition(definition);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.finish_pending_history(i);
@@ -598,9 +598,15 @@ impl OpenCADStudio {
         parameter: Handle,
         state: usize,
     ) {
-        visibility::apply_state(&mut self.tabs[i].scene.document, parameter, state);
+        let changed = visibility::apply_state_changes(&mut self.tabs[i].scene.document, parameter, state);
         self.tabs[i].scene.visibility_states.insert(block, state);
-        self.tabs[i].scene.bump_geometry();
+        let delta: Vec<(Handle, crate::scene::ChangeKind)> = changed
+            .into_iter()
+            .map(|h| (h, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.tabs[i]
+            .scene
+            .bump_entities_with_block_deps(&delta, &[block], &[], false);
         self.tabs[i].dirty = true;
         if let Some(name) =
             visibility::state_names(&self.tabs[i].scene.document, parameter).get(state)

@@ -93,6 +93,9 @@ pub struct PluginHostApi {
     /// Shared-memory document view information, lazily fetched on first
     /// `document_reader()` access.
     doc_view: RefCell<Option<DocumentViewInfo>>,
+    /// A failed document fetch left the cache degraded (P2-7): document
+    /// access keeps retrying instead of pinning an empty drawing.
+    document_fetch_failed: Cell<bool>,
 }
 
 impl PluginHostApi {
@@ -105,19 +108,44 @@ impl PluginHostApi {
             next_command_id: Cell::new(1),
             record_cache: RefCell::new(HashMap::new()),
             doc_view: RefCell::new(None),
+            document_fetch_failed: Cell::new(false),
         }
     }
 
-    fn fetch_document(&self) -> Document {
+    /// Fetch the host document snapshot. `Err` NO LONGER caches an empty
+    /// document: a transport failure would have pinned an empty cached
+    /// drawing for the plugin's whole session (P2-7) — the honest answer is
+    /// the retry-friendly degraded default below.
+    fn fetch_document(&self) -> Result<Document, String> {
         match self.client.request(PluginRequest::DocumentSnapshot) {
-            Ok(PluginResponse::Document(doc)) => *doc,
+            Ok(PluginResponse::Document(doc)) => Ok(*doc),
             Ok(other) => {
-                eprintln!("[plugin] unexpected DocumentSnapshot response: {other:?}");
-                Document::default()
+                let error = format!("unexpected DocumentSnapshot response: {other:?}");
+                eprintln!("[plugin] {error}");
+                Err(error)
             }
             Err(e) => {
-                eprintln!("[plugin] failed to fetch document snapshot: {e}");
-                Document::default()
+                let error = format!("failed to fetch document snapshot: {e}");
+                eprintln!("[plugin] {error}");
+                Err(error)
+            }
+        }
+    }
+
+    /// Fetch (never cache) the CURRENT document view info from the host.
+    fn fetch_document_view(&self) -> Option<DocumentViewInfo> {
+        match self.client.request(PluginRequest::OpenDocumentView) {
+            Ok(PluginResponse::DocumentView { path, version }) => Some(DocumentViewInfo {
+                path,
+                version,
+            }),
+            Ok(other) => {
+                eprintln!("[plugin] unexpected OpenDocumentView response: {other:?}");
+                None
+            }
+            Err(e) => {
+                eprintln!("[plugin] OpenDocumentView request failed: {e}");
+                None
             }
         }
     }
@@ -129,13 +157,77 @@ impl HostApi for PluginHostApi {
     }
 
     fn document(&self) -> &Document {
-        self.document_cache.get_or_init(|| self.fetch_document())
+        if let (false, Some(doc)) = (self.document_fetch_failed.get(), self.document_cache.get()) {
+            return doc;
+        }
+        // Cache empty, or degraded: attempt one re-fetch; upgrade on success
+        // so a transient transport failure cannot strand the plugin on an
+        // empty drawing (P2-7).
+        match self.fetch_document() {
+            Ok(doc) => {
+                // Soundness: `document()` runs through `&self`, so an OCCUPIED
+                // cache (the degraded default) cannot be replaced here —
+                // `set` would silently no-op (review finding 2). Keep the
+                // degraded flag SET and keep retrying; the upgrade happens
+                // through `document_mut()` (or any mutating HostApi call,
+                // which resets the cell) as soon as the plugin mutates.
+                if self.document_cache.set(doc).is_ok() {
+                    self.document_fetch_failed.set(false);
+                } else {
+                    eprintln!(
+                        "[plugin] host document fetch succeeded but the degraded cached \
+                         snapshot is pinned; it upgrades on the next document_mut()/mutation"
+                    );
+                }
+                self.document_cache.get().expect("just initialized")
+            }
+            Err(e) => {
+                eprintln!(
+                    "[plugin] serving the previous document snapshot (degraded); the next \
+                     document() call retries: {e}"
+                );
+                if let Some(doc) = self.document_cache.get() {
+                    return doc;
+                }
+                static DEGRADED: std::sync::OnceLock<Document> = std::sync::OnceLock::new();
+                DEGRADED.get_or_init(Document::default)
+            }
+        }
     }
 
     fn document_mut(&mut self) -> &mut Document {
-        if self.document_cache.get().is_none() {
-            let doc = self.fetch_document();
-            let _ = self.document_cache.set(doc);
+        if self.document_cache.get().is_some() && !self.document_fetch_failed.get() {
+            return self.document_cache.get_mut().expect("document initialized");
+        }
+        // First fetch, or a retry after a degraded one. The &mut answer shape
+        // demands a document; a failed fetch caches the default and keeps the
+        // degraded flag so retries continue.
+        match self.fetch_document() {
+            Ok(doc) => {
+                // `self` is mutable here: a take-then-set actually REPLACES
+                // the degraded cached snapshot (the upgrade document() cannot
+                // perform). Locally made edits to the degraded doc are
+                // dropped and the replacement is loud.
+                let replaced = self.document_cache.take().is_some();
+                // Always succeeds right after take; ignore the Result instead
+                // of tripping the unused_must_use lint.
+                let _ = self.document_cache.set(doc);
+                self.document_fetch_failed.set(false);
+                if replaced {
+                    eprintln!(
+                        "[plugin] document snapshot upgraded after a degraded fetch (local \
+                         edits to the degraded snapshot were discarded)"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[plugin] document_mut on an unreachable host serves the degraded cached \
+                     default; the next document()/document_mut() call retries: {e}"
+                );
+                self.document_fetch_failed.set(true);
+                self.document_cache.get_or_init(Document::default);
+            }
         }
         self.document_cache.get_mut().expect("document initialized")
     }
@@ -402,34 +494,40 @@ impl HostApi for PluginHostApi {
         {
             let mut view = self.doc_view.borrow_mut();
             if view.is_none() {
-                match self.client.request(PluginRequest::OpenDocumentView) {
-                    Ok(PluginResponse::DocumentView { path, version }) => {
-                        *view = Some(DocumentViewInfo { path, version });
-                    }
-                    Ok(other) => {
-                        eprintln!("[plugin] unexpected OpenDocumentView response: {other:?}");
-                    }
-                    Err(e) => {
-                        eprintln!("[plugin] OpenDocumentView request failed: {e}");
-                    }
-                }
+                *view = self.fetch_document_view();
             }
         }
-        match self.doc_view.borrow().as_ref() {
-            Some(info) => {
-                match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
-                    Ok(reader) => Box::new(reader),
-                    Err(e) => {
+        // Two attempts: a resize moved the snapshot to a NEW path, so the
+        // cached view info goes stale; re-ask the host once before serving
+        // the empty reader. Every failure stays logged (P2-7): the caller
+        // still receives the contract answer shape.
+        for attempt in 0..2 {
+            let info = self.doc_view.borrow().clone();
+            let Some(info) = info else {
+                return Box::new(EmptyDocumentReader);
+            };
+            match SharedDocumentReader::<DocumentViewData>::open(Path::new(&info.path)) {
+                Ok(reader) => return Box::new(reader),
+                Err(e) => {
+                    eprintln!(
+                        "[plugin] failed to open document view at {}: {e}",
+                        info.path
+                    );
+                    if attempt == 0 {
+                        let refreshed = self.fetch_document_view();
                         eprintln!(
-                            "[plugin] failed to open document view at {}: {e}",
-                            info.path
+                            "[plugin] retrying the document view with refreshed view info: {}",
+                            refreshed
+                                .as_ref()
+                                .map(|v| v.path.clone())
+                                .unwrap_or_else(|| "none".to_string())
                         );
-                        Box::new(EmptyDocumentReader)
+                        *self.doc_view.borrow_mut() = refreshed;
                     }
                 }
             }
-            None => Box::new(EmptyDocumentReader),
         }
+        Box::new(EmptyDocumentReader)
     }
 
     fn document_path(&self, tab_id: u64) -> Option<std::path::PathBuf> {

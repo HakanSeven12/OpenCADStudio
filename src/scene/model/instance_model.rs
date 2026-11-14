@@ -107,6 +107,60 @@ pub fn expand_stubs(wires: &[WireModel]) -> std::borrow::Cow<'_, [WireModel]> {
     std::borrow::Cow::Owned(out)
 }
 
+/// `wires` without the ones shown on a layer `hidden` names, through stubs:
+/// a stub whose prototype holds such a wire is expanded and filtered, the
+/// others are kept as they are. `None` when no wire is on such a layer.
+pub fn without_layers(
+    wires: &[WireModel],
+    hidden: impl Fn(&str) -> bool,
+) -> Option<Vec<WireModel>> {
+    let own = |wire: &WireModel| {
+        wire.effective_layer
+            .as_deref()
+            .is_some_and(|layer| hidden(layer))
+    };
+    // A prototype is shared by every copy of its block: decide it once.
+    let mut checked: std::collections::HashMap<*const Vec<WireModel>, bool> =
+        std::collections::HashMap::new();
+    fn holds(
+        wire: &WireModel,
+        own: &dyn Fn(&WireModel) -> bool,
+        checked: &mut std::collections::HashMap<*const Vec<WireModel>, bool>,
+    ) -> bool {
+        let Some(stub) = wire.stub.as_ref() else {
+            return own(wire);
+        };
+        let key = Arc::as_ptr(&stub.prototype);
+        if let Some(&known) = checked.get(&key) {
+            return known;
+        }
+        let found = stub
+            .prototype
+            .iter()
+            .any(|child| holds(child, own, checked));
+        checked.insert(key, found);
+        found
+    }
+    let touched: Vec<bool> = wires
+        .iter()
+        .map(|wire| holds(wire, &own, &mut checked))
+        .collect();
+    if !touched.contains(&true) {
+        return None;
+    }
+    let mut kept = Vec::with_capacity(wires.len());
+    for (wire, touched) in wires.iter().zip(touched) {
+        if !touched {
+            kept.push(wire.clone());
+        } else if wire.stub.is_some() {
+            let mut copies = Vec::new();
+            expand_stub_into(wire, &mut copies);
+            kept.extend(copies.into_iter().filter(|copy| !own(copy)));
+        }
+    }
+    Some(kept)
+}
+
 /// Append the translated copies a stub wire stands for.
 pub fn expand_stub_into(stub_wire: &WireModel, out: &mut Vec<WireModel>) {
     expand_stub_near_into(stub_wire, None, out);

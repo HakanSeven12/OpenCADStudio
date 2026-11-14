@@ -61,7 +61,8 @@ impl OpenCADStudio {
                     if name == "REVCLOUDGRIPS" {
                         revcloud::set_grips_on(on);
                         // The grips of selected clouds follow at once.
-                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].scene.bump_selection();
+                        self.refresh_selected_grips();
                     } else {
                         revcloud::set_arc_variance(on);
                     }

@@ -1592,17 +1592,18 @@ impl OpenCADStudio {
                             return Some(Task::none());
                         }
                         self.push_undo_snapshot(i, "MLEADERSTYLE APPLY");
-                        let applied = handles
-                            .iter()
-                            .filter(|handle| {
-                                crate::scene::annotative::apply_mleader_style_to_object(
-                                    &mut self.tabs[i].scene.document,
-                                    **handle,
-                                    &style,
-                                )
-                            })
-                            .count();
-                        self.tabs[i].scene.bump_geometry();
+                        let mut changed_handles = Vec::new();
+                        for &handle in &handles {
+                            if crate::scene::annotative::apply_mleader_style_to_object(
+                                &mut self.tabs[i].scene.document,
+                                handle,
+                                &style,
+                            ) {
+                                changed_handles.push(handle);
+                            }
+                        }
+                        let applied = changed_handles.len();
+                        self.invalidate_property_targets_or_blocks(i, &changed_handles);
                         self.tabs[i].dirty = true;
                         self.command_line.push_output(
                             crate::tf!(

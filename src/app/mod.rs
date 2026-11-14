@@ -11,6 +11,8 @@ mod annotation_data;
 mod array_grips;
 mod block_action_bars;
 mod block_actions;
+#[doc(hidden)]
+pub use block_actions::BlockBenchHarness;
 mod block_alignment;
 mod block_authoring_edit;
 mod block_constraint_status;
@@ -54,7 +56,6 @@ mod dock;
 mod drafting_settings;
 mod drawing_properties;
 mod geographic_location;
-pub(crate) mod expr_eval;
 pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
@@ -89,6 +90,7 @@ mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
 mod quick_calc;
+mod assistant;
 mod recent;
 mod record_api;
 mod rename_dialog;
@@ -132,6 +134,11 @@ mod viewport_dimension_tests;
 mod visibility;
 
 pub use style_ops::StyleKind;
+
+// The expression evaluator lives in `entities::expr_eval`. This private
+// import keeps `crate::app::expr_eval` working for the code in `app`, and
+// only for it: code outside `app` uses the `entities` path.
+use crate::entities::expr_eval;
 
 /// The Quad display-option message. Defined in `update/context_menu.rs` next
 /// to the quad glue and re-exported so the whole crate reaches it as
@@ -191,6 +198,25 @@ pub struct HoverDwell {
     pub point: iced::Point,
     pub tile_size: (f32, f32),
     pub tab: usize,
+}
+
+/// Raw (unfiltered) box hits from the last preview. This is only used for
+/// an unchanged, indexed, flat model view; all other views use a full pick.
+struct BoxPreviewCache {
+    tab_id: u64,
+    geometry_epoch: u64,
+    camera_generation: u64,
+    anchor: iced::Point,
+    cursor: iced::Point,
+    crossing: bool,
+    bounds: iced::Rectangle,
+    view: glam::Mat4,
+    eye: glam::DVec3,
+    wires: Arc<Vec<crate::scene::WireModel>>,
+    index: Arc<crate::scene::pick::interaction_index::InteractionIndex>,
+    handles: rustc_hash::FxHashSet<document::Handle>,
+    #[cfg(test)]
+    incremental: bool,
 }
 
 /// What the last executed settled-rollover pick saw, so a re-armed tick can
@@ -1457,6 +1483,11 @@ pub(super) struct OpenCADStudio {
     /// positions the cursor had long left. A superseded position is overwritten
     /// here unanswered, and `MoveCoalesceTick` answers the last one.
     move_owed: Option<(iced::Point, usize)>,
+    /// Latest box-preview position awaiting a frame, and its tab.
+    box_preview_pending: Option<(iced::Point, usize, u64)>,
+    /// Adaptive earliest time for the next expensive preview calculation.
+    box_preview_due: Option<Instant>,
+    box_preview_cache: Option<BoxPreviewCache>,
     /// When the next full pointer-move pass may run, set only after a pass
     /// expensive enough to be worth coalescing (`MOVE_COALESCE_FROM_MS`).
     /// `None` means every move runs its pass, as before.
@@ -1573,6 +1604,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
+    /// The Assistant pallet (ASSISTANT): chat with an external AI agent about this drawing.
+    pub(crate) assistant: crate::ui::window::assistant::AssistantPalette,
     /// Sheet Set Manager palette, the open sheet sets and their dialogs.
     pub(crate) sheet_set: crate::ui::window::sheet_set::SheetSetManager,
     /// A sheet opened from the manager: its drawing (path key) and layout,
@@ -1936,6 +1969,9 @@ pub(super) struct OpenCADStudio {
     /// Cursor-anchored one-shot snap override menu (Shift+RMB): the canvas
     /// point it opened at, or `None` when closed (#337).
     snap_override_popup: Option<iced::Point>,
+    /// The Shift+letter temporary override held during a point prompt
+    /// (#3016): the typed key and what it changed, undone on release.
+    held_override: Option<(char, crate::app::update::viewport_snap::HeldOverride)>,
     /// Hard axis lock (#312): the WCS direction captured when Shift went down
     /// during a rubber-band point pick. While `Some`, every candidate point —
     /// osnap hits included — projects onto this ray from `last_point` (or the
@@ -3472,9 +3508,13 @@ pub enum Message {
     PasteShortcut,
     /// Which text input held focus when `PasteShortcut` arrived.
     PasteShortcutResolved(PasteFocus),
-    /// Completion of the system clipboard read PASTESPEC starts: its text
-    /// and its picture.
-    PasteSpecial(Option<String>, Option<crate::io::ole_embed::EmbeddedImage>),
+    /// Completion of the system clipboard read PASTESPEC starts: its text,
+    /// its picture and the source a copied range of cells links to.
+    PasteSpecial(
+        Option<String>,
+        Option<crate::io::ole_embed::EmbeddedImage>,
+        Option<crate::sys::clipboard_link::SourceLink>,
+    ),
     /// Completion of the system text clipboard read PASTEASHYPERLINK starts.
     PasteAsHyperlink(Option<String>),
     /// Completion of a system text clipboard read requested by PASTECLIP.
@@ -4186,6 +4226,8 @@ pub enum Message {
     /// itself isn't focused (focus parked on viewport / button / etc.)
     /// so typing still routes to the command line.
     CommandAppendChar(String),
+    /// A character key went up: ends a held Shift+letter override.
+    HeldOverrideRelease,
     /// Pop the trailing character off the command-line input — backspace
     /// counterpart to `CommandAppendChar`.
     CommandBackspace,
@@ -4526,6 +4568,7 @@ pub enum Message {
     /// Frame pulse while a coalesced pointer move is owed an answer; runs the
     /// full pass at the position the gate withheld.
     MoveCoalesceTick,
+    BoxPreviewTick,
     /// Large projected interaction index finished preparing off the UI thread.
     InteractionIndexReady {
         tab_id: u64,
@@ -5909,6 +5952,8 @@ pub enum Message {
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.
     QuickCalc(crate::ui::window::quick_calc::QuickCalcMsg),
+    /// The Assistant pallet.
+    Assistant(crate::ui::window::assistant::AssistantMsg),
     SheetSet(crate::ui::window::sheet_set::SheetSetMsg),
     ToolPalettes(crate::ui::window::tool_palettes::ToolPalettesMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -6394,6 +6439,9 @@ impl OpenCADStudio {
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
             move_owed: None,
+            box_preview_pending: None,
+            box_preview_due: None,
+            box_preview_cache: None,
             move_pass_due: None,
             move_withheld: 0,
             snap_dwell: None,
@@ -6438,6 +6486,7 @@ impl OpenCADStudio {
             pc_manager: Default::default(),
             count_palette: Default::default(),
             quick_calc: Default::default(),
+            assistant: Default::default(),
             sheet_set: Default::default(),
             sheet_set_pending_layout: None,
             sheet_set_import_parent: None,
@@ -6593,6 +6642,7 @@ impl OpenCADStudio {
             pending_command_editor_text: None,
             text_inline: None,
             snap_override_popup: None,
+            held_override: None,
             axis_lock_dir: None,
             angle_override: None,
             drag_move: None,

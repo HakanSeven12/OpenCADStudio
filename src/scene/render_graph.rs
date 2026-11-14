@@ -672,9 +672,15 @@ impl<'a> RenderSceneGraph<'a> {
         {
             return false;
         }
+        // A viewport's frozen layer 0 hides what its space draws on layer 0.
+        // A block member on layer 0 shows on the layer of the reference that
+        // places it, which the walk has already checked against the viewport.
+        let defers_to_reference =
+            member && crate::scene::view::render::is_effective_layer_zero(&common.layer);
         if self.frozen_layers.is_some_and(|frozen| {
             frozen.contains(&common.handle)
-                || layer.is_some_and(|layer| frozen.contains(&layer.handle))
+                || (!defers_to_reference
+                    && layer.is_some_and(|layer| frozen.contains(&layer.handle)))
         }) {
             return false;
         }
@@ -687,23 +693,25 @@ impl<'a> RenderSceneGraph<'a> {
     }
 }
 
-/// Whether a block member on `layer` is hidden by its layer. Frozen layers
-/// hide it; layer 0 being off does not, since a member on layer 0 shows on the
-/// layer of the reference that places it, which the caller has checked.
-/// (#1916) `walk` is the session LAYWALK visible set of the space being
-/// rendered; outside layers hide like frozen ones, but layer 0 defers with the
-/// same exemption the off flag gets — the reference's layer was already
-/// checked against the walk by the caller.
+/// Whether a block member on `layer` is hidden by its layer. An off or frozen
+/// layer hides it, except layer 0: a member on layer 0 shows on the layer of
+/// the reference that places it, which the caller has checked (#1916), so
+/// layer 0 being off or frozen leaves it to that layer. `walk` is the session
+/// LAYWALK visible set of the space being rendered; outside layers hide like
+/// frozen ones, and layer 0 defers there too — the reference's layer was
+/// already checked against the walk by the caller.
 pub(crate) fn block_member_layer_hidden(
     document: &Document,
     layer: &str,
     walk: Option<&FxHashSet<Handle>>,
 ) -> bool {
+    if crate::scene::view::render::is_effective_layer_zero(layer) {
+        return false;
+    }
     document.layers.get(layer).is_some_and(|record| {
-        let layer_zero = crate::scene::view::render::is_effective_layer_zero(layer);
         record.flags.frozen
-            || (record.flags.off && !layer_zero)
-            || (walk.is_some_and(|walk| !walk.contains(&record.handle)) && !layer_zero)
+            || record.flags.off
+            || walk.is_some_and(|walk| !walk.contains(&record.handle))
     })
 }
 
@@ -834,14 +842,14 @@ pub(crate) fn dimension_picture_placement(
 /// the dimension would be applied again on top of the moved subs.
 pub(crate) fn dim_picture_placement(
     entity: &EntityType,
-) -> Option<crate::command::EntityTransform> {
+) -> Option<crate::entities::transform::EntityTransform> {
     let EntityType::Dimension(d) = entity else {
         return None;
     };
     if d.base().block_name.trim().is_empty() {
         return None;
     }
-    dimension_picture_placement(d.base()).map(crate::command::EntityTransform::Affine)
+    dimension_picture_placement(d.base()).map(crate::entities::transform::EntityTransform::Affine)
 }
 
 /// Reset a dimension's picture placement to the identity once its subs carry
@@ -1416,8 +1424,10 @@ mod tests {
         assert_eq!(context.effective_layer("XREF|0"), "XREF|0");
     }
 
+    /// Off or frozen, layer 0 leaves a block member on it to the layer of the
+    /// reference that places it.
     #[test]
-    fn layer_zero_block_members_follow_the_reference_until_frozen() {
+    fn layer_zero_block_members_follow_the_reference_when_off_or_frozen() {
         use document::entities::Line;
         use document::tables::BlockRecord;
         let mut document = Document::new();
@@ -1441,7 +1451,116 @@ mod tests {
         document.layers.get_mut("0").unwrap().flags.off = true;
         assert_eq!(leaves(&document), 1);
         document.layers.get_mut("0").unwrap().flags.frozen = true;
-        assert_eq!(leaves(&document), 0);
+        assert_eq!(leaves(&document), 1);
+    }
+
+    /// Layer 0 frozen in the whole drawing hides what is drawn on layer 0 in a
+    /// space, not a reference placed on layer 0 inside another block, nor what
+    /// that reference holds.
+    #[test]
+    fn a_frozen_layer_zero_keeps_a_nested_reference_on_layer_zero() {
+        use document::entities::Line;
+        use document::tables::{BlockRecord, Layer};
+        let mut document = Document::new();
+        document.layers.add(Layer::new("REF")).unwrap();
+        let mut add_block = |name: &str| {
+            let mut record = BlockRecord::new(name);
+            record.handle = document.allocate_handle();
+            let handle = record.handle;
+            document.block_records.add(record).unwrap();
+            handle
+        };
+        let inner = add_block("INNER");
+        let outer = add_block("OUTER");
+        let mut member = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        member.common.owner_handle = inner;
+        member.common.layer = "0".into();
+        document.add_entity(EntityType::Line(member)).unwrap();
+        let mut nested = Insert::new("INNER", Vector3::ZERO);
+        nested.common.owner_handle = outer;
+        nested.common.layer = "0".into();
+        document.add_entity(EntityType::Insert(nested)).unwrap();
+        let mut placed = Insert::new("OUTER", Vector3::ZERO);
+        placed.common.layer = "REF".into();
+        document.add_entity(EntityType::Insert(placed)).unwrap();
+        let mut drawn_on_zero = Line::from_points(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
+        drawn_on_zero.common.layer = "0".into();
+        document
+            .add_entity(EntityType::Line(drawn_on_zero))
+            .unwrap();
+        document.layers.get_mut("0").unwrap().flags.frozen = true;
+        let model = document.header.model_space_block_handle;
+
+        let depths = FxHashMap::default();
+        let graph = RenderSceneGraph::new(&document, None, None, true, &depths);
+        let mut lines = 0;
+        graph.walk_root(
+            SceneRoot::Block(BlockRoot {
+                record: model,
+                role: BlockRootRole::ModelSpace,
+            }),
+            |_, _| true,
+            |entity, _| lines += usize::from(matches!(entity, EntityType::Line(_))),
+        );
+        assert_eq!(
+            lines, 1,
+            "only the line drawn on layer 0 in model space hides"
+        );
+    }
+
+    /// A viewport that freezes layer 0 hides what is drawn on layer 0 in its
+    /// space, not the members of a block on layer 0: those show on the layer
+    /// of the reference that places them. A fill in a block placed on layer 0
+    /// inside another reference kept vanishing from such viewports.
+    #[test]
+    fn a_viewport_freezing_layer_zero_keeps_a_nested_reference_on_layer_zero() {
+        use document::entities::Line;
+        use document::tables::{BlockRecord, Layer};
+        let mut document = Document::new();
+        document.layers.add(Layer::new("REF")).unwrap();
+        document.layers.add(Layer::new("GREEN")).unwrap();
+        let mut add_block = |name: &str| {
+            let mut record = BlockRecord::new(name);
+            record.handle = document.allocate_handle();
+            let handle = record.handle;
+            document.block_records.add(record).unwrap();
+            handle
+        };
+        let inner = add_block("INNER");
+        let outer = add_block("OUTER");
+        let mut fill_edge = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        fill_edge.common.owner_handle = inner;
+        fill_edge.common.layer = "GREEN".into();
+        document.add_entity(EntityType::Line(fill_edge)).unwrap();
+        let mut nested = Insert::new("INNER", Vector3::ZERO);
+        nested.common.owner_handle = outer;
+        nested.common.layer = "0".into();
+        document.add_entity(EntityType::Insert(nested)).unwrap();
+        let mut placed = Insert::new("OUTER", Vector3::ZERO);
+        placed.common.layer = "REF".into();
+        document.add_entity(EntityType::Insert(placed)).unwrap();
+        let model = document.header.model_space_block_handle;
+
+        let leaves = |frozen_layer: &str| {
+            let frozen: FxHashSet<Handle> =
+                std::iter::once(document.layers.get(frozen_layer).unwrap().handle).collect();
+            let depths = FxHashMap::default();
+            let graph = RenderSceneGraph::new(&document, Some(&frozen), None, true, &depths);
+            let mut count = 0;
+            graph.walk_root(
+                SceneRoot::Block(BlockRoot {
+                    record: model,
+                    role: BlockRootRole::ModelSpace,
+                }),
+                |_, _| true,
+                |_, _| count += 1,
+            );
+            count
+        };
+
+        assert_eq!(leaves("0"), 1, "the viewport froze layer 0 only");
+        assert_eq!(leaves("GREEN"), 0, "the member's own layer is frozen");
+        assert_eq!(leaves("REF"), 0, "the reference's layer is frozen");
     }
 
     /// Only block definitions count: an object of the kind in model space

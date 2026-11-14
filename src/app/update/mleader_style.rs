@@ -770,7 +770,9 @@ impl OpenCADStudio {
         );
         // Entities drawn with a reloaded linetype take its new pattern.
         if reloaded > 0 {
-            self.tabs[self.active_tab].scene.bump_geometry();
+            self.tabs[self.active_tab]
+                .scene
+                .invalidate_linetype_dependencies(&reload);
         }
     }
 

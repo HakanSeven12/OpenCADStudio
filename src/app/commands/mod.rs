@@ -981,6 +981,7 @@ pub fn start_allowed(cmd: &str) -> bool {
             | "ABOUT"
             | "PLUGINS"
             | "PLUGINMANAGER"
+            | "APPLOAD"
             | "DONATE"
             | "WEBVERSION"
             | "HELP"
@@ -1082,6 +1083,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "QLEADER",
         // Restore the last-erased objects.
         "OOPS",
+        // Repeat the next command until it is cancelled.
+        "MULTIPLE",
         // Plan (top) view.
         "PICKADD",
         "PICKDRAG",
@@ -1178,6 +1181,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "VISUALSTYLES",
         "QUICKCALC",
         "QC",
+        "ASSISTANT",
         "COMMANDHISTORY",
         "HYPERLINK",
         "XOPEN",

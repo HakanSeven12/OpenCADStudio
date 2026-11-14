@@ -3,6 +3,167 @@
 
 use super::*;
 
+fn validated_layout_name(raw: &str) -> Result<String, Value> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(failure("name_required", "Supply a layout name"));
+    }
+    if name.chars().count() > 255 {
+        return Err(failure(
+            "invalid_layout_name",
+            "A layout name is limited to 255 characters",
+        ));
+    }
+    if let Some(bad) = name
+        .chars()
+        .find(|c| "<>/\\\":;?*|=`".contains(*c) || c.is_control())
+    {
+        return Err(failure(
+            "invalid_layout_name",
+            format!("A layout name cannot contain {bad:?}"),
+        ));
+    }
+    Ok(name.to_owned())
+}
+
+fn canonical_layout_name(scene: &crate::scene::Scene, name: &str) -> Result<String, Value> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(failure("name_required", "Supply a layout name"));
+    }
+    scene
+        .layout_names()
+        .into_iter()
+        .find(|existing| existing.eq_ignore_ascii_case(name))
+        .ok_or_else(|| failure("layout_missing", format!("Layout '{name}' does not exist")))
+}
+
+fn page_is_landscape(ps: &document::objects::PlotSettings) -> bool {
+    use document::objects::PlotRotation;
+    let natural_landscape = ps.paper_width > ps.paper_height;
+    let quarter_turn = matches!(
+        ps.rotation,
+        PlotRotation::Degrees90 | PlotRotation::Degrees270
+    );
+    natural_landscape != quarter_turn
+}
+
+fn set_page_orientation(ps: &mut document::objects::PlotSettings, landscape: bool) {
+    use document::objects::PlotRotation;
+    let natural_landscape = ps.paper_width > ps.paper_height;
+    let upside_down = matches!(
+        ps.rotation,
+        PlotRotation::Degrees180 | PlotRotation::Degrees270
+    );
+    ps.rotation = match ((landscape != natural_landscape), upside_down) {
+        (false, false) => PlotRotation::None,
+        (true, false) => PlotRotation::Degrees90,
+        (false, true) => PlotRotation::Degrees180,
+        (true, true) => PlotRotation::Degrees270,
+    };
+}
+
+pub(crate) fn layout_listing(scene: &crate::scene::Scene) -> Value {
+    let names = scene.layout_names();
+    let layouts = names
+        .iter()
+        .map(|name| {
+            let layout = scene
+                .document
+                .objects
+                .values()
+                .find_map(|object| match object {
+                    document::objects::ObjectType::Layout(layout) if layout.name == *name => {
+                        Some(layout)
+                    }
+                    _ => None,
+                });
+            json!({
+                "name": name,
+                "handle": layout.map(|layout| format!("{:X}", layout.handle.value())),
+                "current": scene.current_layout == *name,
+                "model": name == "Model",
+                "tab_order": layout.map_or(0, |layout| layout.tab_order),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "ok": true,
+        "current": scene.current_layout,
+        "count": layouts.len(),
+        "layouts": layouts,
+    })
+}
+
+pub(crate) fn page_setup_read(
+    scene: &crate::scene::Scene,
+    requested: &str,
+) -> Result<Value, Value> {
+    let name = canonical_layout_name(scene, requested)?;
+    let layout = scene
+        .document
+        .objects
+        .values()
+        .find_map(|object| match object {
+            document::objects::ObjectType::Layout(layout) if layout.name == name => Some(layout),
+            _ => None,
+        });
+    let initialized = layout.is_some_and(|layout| !crate::scene::page_setup_uninitialized(layout));
+    let ps = scene.plot_settings_for(&name).ok_or_else(|| {
+        failure(
+            "layout_missing",
+            format!("Layout '{name}' has no readable page setup"),
+        )
+    })?;
+    use document::objects::{PlotRotation, PlotType};
+    let rotation = match ps.rotation {
+        PlotRotation::None => 0,
+        PlotRotation::Degrees90 => 90,
+        PlotRotation::Degrees180 => 180,
+        PlotRotation::Degrees270 => 270,
+    };
+    let area = match ps.plot_type {
+        PlotType::Window => "window",
+        PlotType::Layout => "layout",
+        PlotType::LastScreenDisplay => "display",
+        PlotType::Limits => "limits",
+        PlotType::View => "view",
+        _ => "extents",
+    };
+    let window = (ps.plot_type == PlotType::Window && !ps.plot_window.is_empty()).then(|| {
+        json!([
+            ps.plot_window.lower_left_x,
+            ps.plot_window.lower_left_y,
+            ps.plot_window.upper_right_x,
+            ps.plot_window.upper_right_y,
+        ])
+    });
+    Ok(json!({
+        "ok": true,
+        "layout": name,
+        "page_setup": {
+            "initialized": initialized,
+            "paper": ps.paper_size,
+            "paper_width_mm": ps.paper_width,
+            "paper_height_mm": ps.paper_height,
+            "rotation": rotation,
+            "orientation": if page_is_landscape(&ps) { "landscape" } else { "portrait" },
+            "scale": {
+                "numerator": ps.scale_numerator,
+                "denominator": ps.scale_denominator,
+                "fit": ps.is_scale_to_fit(),
+            },
+            "center": ps.flags.plot_centered,
+            "plot_style": ps.current_style_sheet,
+            "area": area,
+            "view": ps.plot_view_name,
+            "window": window,
+            "offset_x": ps.origin_x,
+            "offset_y": ps.origin_y,
+        }
+    }))
+}
+
 impl OpenCADStudio {
     /// `close` — close a document tab. A dirty
     /// document is refused unless `"discard":true`; discarding clears the
@@ -120,10 +281,7 @@ impl OpenCADStudio {
 
     /// `layout_create` — add a layout with the default A4 page setup.
     pub(super) fn control_layout_create(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        let name = string(req, "name")?.to_owned();
-        if name.is_empty() {
-            return Err(failure("name_required", "Supply a layout name"));
-        }
+        let name = validated_layout_name(string(req, "name")?)?;
         let i = self.active_tab;
         if self.tabs[i]
             .scene
@@ -164,10 +322,105 @@ impl OpenCADStudio {
             }
         }
         self.tabs[i].scene.ensure_sheet_viewport(&name);
+        self.tabs[i].scene.initialize_layout_default_viewport(&name);
         self.tabs[i].dirty = true;
         let layouts = self.tabs[i].scene.layout_names();
         self.set_control_result(json!({ "layout": name, "layouts": layouts }));
         Ok(Task::none())
+    }
+
+    /// `layout_rename` — rename a paper layout and its dictionary entry.
+    pub(super) fn control_layout_rename(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        if self.tabs[i].active_block_edit.is_some() {
+            return Err(failure(
+                "block_editor_active",
+                "Close the block editor before renaming layouts",
+            ));
+        }
+        let name = canonical_layout_name(&self.tabs[i].scene, string(req, "name")?)?;
+        if name == "Model" {
+            return Err(failure(
+                "layout_protected",
+                "The Model layout cannot be renamed",
+            ));
+        }
+        let new_name = validated_layout_name(string(req, "new_name")?)?;
+        if name == new_name {
+            return Err(failure(
+                "layout_name_unchanged",
+                "The new layout name matches the current one",
+            ));
+        }
+        if self.tabs[i]
+            .scene
+            .layout_names()
+            .iter()
+            .any(|existing| existing != &name && existing.eq_ignore_ascii_case(&new_name))
+        {
+            return Err(failure(
+                "layout_exists",
+                format!("Layout '{new_name}' already exists"),
+            ));
+        }
+        self.push_undo_snapshot(i, "LAYOUT RENAME");
+        self.tabs[i].scene.rename_layout(&name, &new_name);
+        if self.tabs[i].scene.current_layout == name {
+            self.tabs[i].scene.set_current_layout(new_name.clone());
+        }
+        self.tabs[i].dirty = true;
+        let current = self.tabs[i].scene.current_layout.clone();
+        let layouts = self.tabs[i].scene.layout_names();
+        self.set_control_result(json!({
+            "name": name,
+            "new_name": new_name,
+            "current": current,
+            "layouts": layouts,
+        }));
+        Ok(Task::none())
+    }
+
+    /// `layout_activate` — make an existing model or paper layout current.
+    pub(super) fn control_layout_activate(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        if self.tabs[i].active_block_edit.is_some() {
+            return Err(failure(
+                "block_editor_active",
+                "Close the block editor before switching layouts",
+            ));
+        }
+        let name = canonical_layout_name(&self.tabs[i].scene, string(req, "name")?)?;
+        let task = self.on_layout_switch_view_only(name.clone());
+        let current = self.tabs[i].scene.current_layout.clone();
+        self.set_control_result(json!({ "layout": name, "current": current }));
+        Ok(task)
+    }
+
+    /// `layout_delete` — delete a paper layout, falling back to Model when active.
+    pub(super) fn control_layout_delete(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let i = self.active_tab;
+        if self.tabs[i].active_block_edit.is_some() {
+            return Err(failure(
+                "block_editor_active",
+                "Close the block editor before deleting layouts",
+            ));
+        }
+        let name = canonical_layout_name(&self.tabs[i].scene, string(req, "name")?)?;
+        if name == "Model" {
+            return Err(failure(
+                "layout_protected",
+                "The Model layout cannot be deleted",
+            ));
+        }
+        let task = self.update(Message::LayoutDelete(name.clone()));
+        let current = self.tabs[i].scene.current_layout.clone();
+        let layouts = self.tabs[i].scene.layout_names();
+        self.set_control_result(json!({
+            "deleted": name,
+            "current": current,
+            "layouts": layouts,
+        }));
+        Ok(task)
     }
 
     /// `page_setup_set` — write a layout's plot configuration
@@ -175,19 +428,8 @@ impl OpenCADStudio {
     /// keeps the layout's stored setup. Paper names resolve through the
     /// catalog; scales are `"fit"` or `"paper:drawing"` like `"1:100"`.
     pub(super) fn control_page_setup_set(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        let layout = string(req, "layout")?.to_owned();
         let i = self.active_tab;
-        if !self.tabs[i]
-            .scene
-            .layout_names()
-            .iter()
-            .any(|n| n.eq_ignore_ascii_case(&layout))
-        {
-            return Err(failure(
-                "layout_missing",
-                format!("Layout '{layout}' does not exist"),
-            ));
-        }
+        let layout = canonical_layout_name(&self.tabs[i].scene, string(req, "layout")?)?;
         let mut ps = self.tabs[i]
             .scene
             .plot_settings_for(&layout)
@@ -199,20 +441,25 @@ impl OpenCADStudio {
             let (width, height) = resolved.portrait_mm();
             ps.paper_width = width;
             ps.paper_height = height;
-            ps.rotation = if req["orientation"]
-                .as_str()
-                .is_some_and(|o| o.eq_ignore_ascii_case("portrait"))
-            {
-                document::objects::PlotRotation::None
+        }
+        if let Some(orientation) = req["orientation"].as_str() {
+            if orientation.eq_ignore_ascii_case("portrait") {
+                set_page_orientation(&mut ps, false);
+            } else if orientation.eq_ignore_ascii_case("landscape") {
+                set_page_orientation(&mut ps, true);
             } else {
-                document::objects::PlotRotation::Degrees90
-            };
+                return Err(failure(
+                    "invalid_orientation",
+                    "orientation must be portrait or landscape",
+                ));
+            }
         }
         if let Some(fit) = req["fit"].as_bool() {
             if fit {
                 ps.set_scale_to_fit();
                 ps.flags.use_standard_scale = true;
             } else {
+                ps.scale_type = document::objects::ScaledType::CustomScale;
                 ps.flags.use_standard_scale = false;
             }
         }
@@ -230,6 +477,7 @@ impl OpenCADStudio {
             };
             ps.scale_numerator = numerator;
             ps.scale_denominator = denominator;
+            ps.scale_type = document::objects::ScaledType::CustomScale;
             ps.standard_scale_factor = numerator / denominator;
             ps.flags.use_standard_scale = false;
         }
@@ -240,9 +488,77 @@ impl OpenCADStudio {
             ps.current_style_sheet = style.to_owned();
             ps.flags.plot_plot_styles = !style.is_empty();
         }
-        if let Some(window) = req["window"].as_array().filter(|v| v.len() == 4) {
-            let coord = |k: usize| window[k].as_f64().unwrap_or(0.0);
-            ps.set_plot_window(coord(0), coord(1), coord(2), coord(3));
+        for (key, origin) in [
+            ("offset_x", &mut ps.origin_x),
+            ("offset_y", &mut ps.origin_y),
+        ] {
+            if req.get(key).is_some() {
+                let Some(value) = req[key].as_f64().filter(|value| value.is_finite()) else {
+                    return Err(failure(
+                        "invalid_offset",
+                        format!("{key} must be a finite number in mm"),
+                    ));
+                };
+                *origin = value;
+            }
+        }
+        if let Some(area) = req["area"].as_str() {
+            use document::objects::PlotType;
+            ps.plot_type = if area.eq_ignore_ascii_case("extents") {
+                PlotType::Extents
+            } else if area.eq_ignore_ascii_case("display") {
+                PlotType::LastScreenDisplay
+            } else if area.eq_ignore_ascii_case("limits") {
+                PlotType::Limits
+            } else if area.eq_ignore_ascii_case("layout") {
+                PlotType::Layout
+            } else if area.eq_ignore_ascii_case("window") {
+                PlotType::Window
+            } else {
+                return Err(failure(
+                    "invalid_area",
+                    "area must be extents, display, limits, layout or window",
+                ));
+            };
+        }
+        if ps.plot_type == document::objects::PlotType::Window
+            && req["area"].as_str().is_some_and(|area| area.eq_ignore_ascii_case("window"))
+            && req.get("window").is_none()
+        {
+            return Err(failure(
+                "window_required",
+                "Supply window:[x0,y0,x1,y1] when area is window",
+            ));
+        }
+        if let Some(value) = req.get("window") {
+            let Some(window) = value.as_array().filter(|window| window.len() == 4) else {
+                return Err(failure(
+                    "invalid_window",
+                    "window must be four finite numbers [x0,y0,x1,y1]",
+                ));
+            };
+            let mut coordinates = [0.0; 4];
+            for (index, value) in window.iter().enumerate() {
+                let Some(value) = value.as_f64().filter(|value| value.is_finite()) else {
+                    return Err(failure(
+                        "invalid_window",
+                        "window must be four finite numbers [x0,y0,x1,y1]",
+                    ));
+                };
+                coordinates[index] = value;
+            }
+            if coordinates[2] <= coordinates[0] || coordinates[3] <= coordinates[1] {
+                return Err(failure(
+                    "invalid_window",
+                    "window must have positive width and height",
+                ));
+            }
+            ps.set_plot_window(
+                coordinates[0],
+                coordinates[1],
+                coordinates[2],
+                coordinates[3],
+            );
             ps.plot_type = document::objects::PlotType::Window;
         }
         self.push_undo_snapshot(i, "PAGESETUP");
@@ -252,6 +568,11 @@ impl OpenCADStudio {
                 format!("Layout '{layout}' vanished"),
             ));
         }
+        // Only a layout that was never opened gets its first viewport; one
+        // whose viewports the user erased stays as it is.
+        if layout != "Model" && self.tabs[i].scene.unopened_layouts.remove(&layout) {
+            self.tabs[i].scene.initialize_layout_default_viewport(&layout);
+        }
         self.tabs[i].dirty = true;
         self.set_control_result(json!({
             "layout": layout,
@@ -259,7 +580,7 @@ impl OpenCADStudio {
             "scale": json!({
                 "numerator": ps.scale_numerator,
                 "denominator": ps.scale_denominator,
-                "fit": ps.flags.use_standard_scale,
+                "fit": ps.is_scale_to_fit(),
             }),
             "plot_style": ps.current_style_sheet,
         }));

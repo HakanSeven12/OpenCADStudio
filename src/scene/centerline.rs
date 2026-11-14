@@ -1,5 +1,5 @@
 use super::*;
-use crate::command::WorkingPlane;
+use crate::entities::transform::WorkingPlane;
 use document::entities::{CenterLineAssociation, CenterLineSource, CenterLineSourceKind};
 use document::objects::XRecordValue;
 use document::types::Vector3;

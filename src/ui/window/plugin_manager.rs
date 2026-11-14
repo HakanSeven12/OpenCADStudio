@@ -46,7 +46,7 @@ pub const DESKTOP_DOWNLOAD_URL: &str =
 // Register the command names for autocomplete. On the web they open a desktop
 // download notice instead of the native marketplace.
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PLUGINS", "PLUGINMANAGER"]
+    names: &["PLUGINS", "PLUGINMANAGER", "APPLOAD"]
 });
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {

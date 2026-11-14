@@ -75,11 +75,19 @@ pub trait SnapshotData: Clone + std::fmt::Debug + Send + Sync + 'static {
 }
 
 /// Host-side, file-backed double buffer for the document view.
+///
+/// The buffer's own control state is HOST-PRIVATE: the host tracks which
+/// segment is active in `shadow_active` and never derives it from the shared
+/// control page, so a plugin that scribbles into the control region cannot
+/// steer the host's next publication into arbitrary memory (it can only
+/// corrupt what the PLUGIN reads, which is the plugin's own problem).
 pub struct DocumentSnapshotStore<T: SnapshotData> {
     path: PathBuf,
     mmap: MmapMut,
     segment_size: usize,
     current_version: u64,
+    /// Host-private index of the currently published segment (0 or 1).
+    shadow_active: usize,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -114,19 +122,42 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         }
         static STORE_ID: AtomicUsize = AtomicUsize::new(0);
         let id = STORE_ID.fetch_add(1, Ordering::Relaxed);
-        let path = Self::temp_path(tab_id, id);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)?;
-        #[cfg(unix)]
-        {
-            use std::fs::Permissions;
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(Permissions::from_mode(0o600))?;
+        // Exclusive creation under a CSPRNG-suffixed name: nobody can
+        // pre-create the path (an attacker's symlink is never followed —
+        // O_NOFOLLOW on Unix, atomic create-new semantics everywhere), and on
+        // Unix the file is owner-only outright instead of opened wide and
+        // chmodded afterwards. The snapshot path IS disclosed to the plugin,
+        // so a same-user plugin writing into a snapshot it was handed is
+        // expected; another user's process can no longer forge or hijack it.
+        let mut file = None;
+        let mut path = None;
+        for _ in 0..5 {
+            let candidate = Self::temp_path(tab_id, id);
+            let mut options = OpenOptions::new();
+            options.read(true).write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+                options.custom_flags(libc::O_NOFOLLOW);
+            }
+            match options.open(&candidate) {
+                Ok(f) => {
+                    file = Some(f);
+                    path = Some(candidate);
+                    break;
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
         }
+        let Some(file) = file else {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "cannot create a unique snapshot path",
+            ));
+        };
+        let path = path.expect("an opened file implies its path");
         file.set_len(total as u64)?;
 
         let mut mmap = unsafe { MmapOptions::new().len(total).map_mut(&file)? };
@@ -142,14 +173,19 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
             mmap,
             segment_size,
             current_version: 0,
+            shadow_active: 0,
             _phantom: std::marker::PhantomData,
         })
     }
 
     fn temp_path(tab_id: u64, id: usize) -> PathBuf {
         let mut path = std::env::temp_dir();
+        let mut suffix = [0u8; 8];
+        if getrandom::getrandom(&mut suffix).is_err() {
+            suffix = [0u8; 8];
+        }
         path.push(format!(
-            "ocs_plugin_doc_v4_{}_{}_{}_{}.bin",
+            "ocs_plugin_doc_v4_{}_{}_{}_{}_{:016x}.bin",
             std::process::id(),
             tab_id,
             std::time::SystemTime::now()
@@ -157,6 +193,7 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
                 .unwrap_or_default()
                 .as_millis(),
             id,
+            u64::from_le_bytes(suffix),
         ));
         path
     }
@@ -189,11 +226,9 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
             ));
         }
 
-        let inactive = {
-            let control = ControlPage::from_bytes_mut(&mut self.mmap);
-            let active = control.active_segment.load(Ordering::Acquire) as usize;
-            1 - active
-        };
+        // The inactive segment comes from HOST-PRIVATE state, never from the
+        // shared control page (see the struct docs).
+        let inactive = 1 - self.shadow_active;
         let offset = CONTROL_SIZE + inactive * self.segment_size;
 
         self.mmap[offset..offset + bytes.len()].copy_from_slice(bytes);
@@ -205,6 +240,7 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         control
             .active_segment
             .store(inactive as u8, Ordering::Release);
+        self.shadow_active = inactive;
         self.current_version = self.current_version.wrapping_add(1);
         control
             .version
@@ -212,11 +248,10 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
         Ok(())
     }
 
-    /// Current published version.
+    /// Current published version (host-private; the shared control page is
+    /// written for readers but never trusted back by the host).
     pub fn version(&self) -> u64 {
-        ControlPage::from_bytes(&self.mmap)
-            .version
-            .load(Ordering::Acquire)
+        self.current_version
     }
 }
 
@@ -305,6 +340,17 @@ impl<T: SnapshotData> SharedDocumentReader<T> {
         let Ok(len) = usize::try_from(control.active_len.load(Ordering::Acquire)) else {
             return &[];
         };
+        // Re-latch the segment index: the host may have flipped segments
+        // between the two loads, which would splice one snapshot's length
+        // onto another segment's bytes.
+        let recheck = control.active_segment.load(Ordering::Acquire) as usize;
+        if recheck != active {
+            return &[];
+        }
+        // A torn or malicious length can never name more than one segment.
+        if len > self.segment_size {
+            return &[];
+        }
         let Some(offset) = active
             .checked_mul(self.segment_size)
             .and_then(|offset| CONTROL_SIZE.checked_add(offset))

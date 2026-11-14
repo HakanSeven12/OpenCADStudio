@@ -82,7 +82,7 @@ pub struct V4HostShared {
 pub fn run_host_reader_thread(
     mut reader: Stream,
     shared: Arc<V4HostShared>,
-    incoming: mpsc::Sender<HostIncoming>,
+    incoming: mpsc::SyncSender<HostIncoming>,
     handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync>,
     mut rate_limiter: RateLimiter,
 ) {

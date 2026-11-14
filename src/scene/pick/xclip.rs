@@ -435,6 +435,14 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
     if poly.len() < 3 {
         return;
     }
+    // A repeated block copy arrives as a stub over the shared prototype with no
+    // points of its own; it has to become real geometry before it can be cut,
+    // or the clipped copy shows nothing at all.
+    if let std::borrow::Cow::Owned(expanded) =
+        crate::scene::model::instance_model::expand_stubs(wires)
+    {
+        *wires = expanded;
+    }
     // Clip in a frame relative to the boundary's first vertex: the wire points
     // arrive as absolute coordinates (double-single high+low), which at UTM
     // scale are ~5.7e6 and lose ~0.5 m in f32. Subtracting the f64 reference
@@ -671,20 +679,27 @@ pub fn frame_wire(
 ///
 /// `boundary` is a hatch's NaN-separated loops in f32 offsets from
 /// `world_origin` (the [`HatchModel`](crate::scene::model::hatch_model::HatchModel)
-/// representation); `poly` is the clip ring in the same world space the hatch
-/// occupies. Each loop is intersected with the clip polygon independently —
-/// the even-odd island structure is preserved because intersecting every loop
-/// with the same region distributes over the even-odd fill. Returns the
-/// clipped loops in offsets from `world_origin`; empty if nothing survives.
+/// representation); `poly` is the clip ring in absolute world coordinates.
+/// The ring is lowered into the loops' `world_origin`-relative space in f64
+/// first, so the clip keeps its precision far from the origin (at UTM
+/// northings an absolute f32 is only good to half a unit). Each loop is
+/// intersected with the clip polygon independently — the even-odd island
+/// structure is preserved because intersecting every loop with the same
+/// region distributes over the even-odd fill. Returns the clipped loops in
+/// offsets from `world_origin`; empty if nothing survives.
 pub fn clip_hatch_boundary(
     boundary: &[[f32; 2]],
     world_origin: [f64; 2],
-    poly: &[[f32; 2]],
+    poly: &[[f64; 2]],
 ) -> Vec<[f32; 2]> {
     if poly.len() < 3 {
         return boundary.to_vec();
     }
-    let (ox, oy) = (world_origin[0] as f32, world_origin[1] as f32);
+    let local: Vec<[f32; 2]> = poly
+        .iter()
+        .map(|p| [(p[0] - world_origin[0]) as f32, (p[1] - world_origin[1]) as f32])
+        .collect();
+    let pieces = convex_pieces(&local);
     let mut out: Vec<[f32; 2]> = Vec::new();
     let mut i = 0;
     while i < boundary.len() {
@@ -696,28 +711,80 @@ pub fn clip_hatch_boundary(
         while i < boundary.len() && boundary[i][0].is_finite() && boundary[i][1].is_finite() {
             i += 1;
         }
-        // Lift the loop into the clip polygon's world space.
-        let loop_abs: Vec<[f32; 2]> = boundary[start..i]
-            .iter()
-            .map(|p| [p[0] + ox, p[1] + oy])
-            .collect();
-        let clipped = clip_polygon_2d(&loop_abs, poly);
-        if clipped.len() >= 3 {
-            if !out.is_empty() {
-                out.push([f32::NAN, f32::NAN]);
-            }
-            // Lower back into the loop's `world_origin`-relative space so the
-            // result keeps the same f32-precision anchor the renderer adds back.
-            for p in clipped {
-                out.push([p[0] - ox, p[1] - oy]);
+        // A concave clip is cut into convex pieces with disjoint interiors, so
+        // the even-odd count of every point still comes from one piece.
+        for piece in &pieces {
+            let clipped = clip_polygon_2d(&boundary[start..i], piece);
+            if clipped.len() >= 3 {
+                if !out.is_empty() {
+                    out.push([f32::NAN, f32::NAN]);
+                }
+                out.extend(clipped);
             }
         }
     }
     out
 }
 
+/// Split a closed ring into convex pieces with disjoint interiors: the ring
+/// itself when it is convex, otherwise its ear-clipped triangles. The
+/// Sutherland–Hodgman clips below are exact only against a convex clip.
+fn convex_pieces(poly: &[[f32; 2]]) -> Vec<Vec<[f32; 2]>> {
+    let n = poly.len();
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let area2: f32 = (0..n)
+        .map(|i| {
+            let (a, b) = (poly[i], poly[(i + 1) % n]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    let sign = if area2 >= 0.0 { 1.0 } else { -1.0 };
+    let turn = |i: usize| sign * cross(poly[(i + n - 1) % n], poly[i], poly[(i + 1) % n]);
+    if (0..n).all(|i| turn(i) >= 0.0) {
+        return vec![poly.to_vec()];
+    }
+    // Ear clipping on a counter-clockwise index ring.
+    let mut ring: Vec<usize> = (0..n).collect();
+    if sign < 0.0 {
+        ring.reverse();
+    }
+    let mut pieces = Vec::with_capacity(n.saturating_sub(2));
+    while ring.len() > 3 {
+        let m = ring.len();
+        let ear = (0..m).find(|&k| {
+            let a = poly[ring[(k + m - 1) % m]];
+            let (b, c) = (poly[ring[k]], poly[ring[(k + 1) % m]]);
+            let inside = |p: [f32; 2]| {
+                cross(a, b, p) >= 0.0 && cross(b, c, p) >= 0.0 && cross(c, a, p) >= 0.0
+            };
+            cross(a, b, c) > 0.0
+                && ring.iter().all(|&v| {
+                    let p = poly[v];
+                    p == a || p == b || p == c || !inside(p)
+                })
+        });
+        // A degenerate ring (self-touching, all collinear) has no clean ear:
+        // drop a vertex and keep going rather than loop forever.
+        let k = ear.unwrap_or(0);
+        if ear.is_some() {
+            pieces.push(vec![
+                poly[ring[(k + m - 1) % m]],
+                poly[ring[k]],
+                poly[ring[(k + 1) % m]],
+            ]);
+        }
+        ring.remove(k);
+    }
+    if ring.len() == 3 {
+        pieces.push(ring.iter().map(|&v| poly[v]).collect());
+    }
+    pieces
+}
+
 /// Sutherland–Hodgman clip of a closed 2D polygon `subject` against the convex
-/// polygon `clip`.
+/// polygon `clip` (see [`convex_pieces`] for a concave one).
 fn clip_polygon_2d(subject: &[[f32; 2]], clip: &[[f32; 2]]) -> Vec<[f32; 2]> {
     let n = clip.len();
     let mut area2 = 0.0f32;
@@ -940,17 +1007,19 @@ fn seg_cross_t(p0: [f32; 3], p1: [f32; 3], a: [f32; 2], b: [f32; 2]) -> Option<f
     }
 }
 
-/// Clip a flat triangle list against `poly` (Sutherland–Hodgman per triangle,
-/// fan-triangulating the clipped convex result). Exact for convex boundaries;
-/// approximate for concave ones.
+/// Clip a flat triangle list against `poly` (Sutherland–Hodgman per triangle
+/// and convex piece of the boundary, fan-triangulating each convex result).
 fn clip_triangles(tris: &[[f32; 3]], poly: &[[f32; 2]]) -> Vec<[f32; 3]> {
+    let pieces = convex_pieces(poly);
     let mut out = Vec::new();
     for tri in tris.chunks_exact(3) {
-        let clipped = sutherland_hodgman(tri, poly);
-        for k in 1..clipped.len().saturating_sub(1) {
-            out.push(clipped[0]);
-            out.push(clipped[k]);
-            out.push(clipped[k + 1]);
+        for piece in &pieces {
+            let clipped = sutherland_hodgman(tri, piece);
+            for k in 1..clipped.len().saturating_sub(1) {
+                out.push(clipped[0]);
+                out.push(clipped[k]);
+                out.push(clipped[k + 1]);
+            }
         }
     }
     out
@@ -1144,7 +1213,7 @@ mod tests {
 
     #[test]
     fn hatch_boundary_clipped_kept_and_dropped() {
-        let clip = square(); // 0..10
+        let clip: Vec<[f64; 2]> = square().iter().map(|p| p.map(f64::from)).collect(); // 0..10
                              // Hatch loop straddling the right edge → clipped to x<=10.
         let straddle = [[5.0, 5.0], [15.0, 5.0], [15.0, 8.0], [5.0, 8.0]];
         let out = clip_hatch_boundary(&straddle, [0.0, 0.0], &clip);
@@ -1178,6 +1247,25 @@ mod tests {
         assert!(!out.is_empty());
         // Offsets must stay <= 10 (i.e. world x <= 1010).
         assert!(out.iter().all(|p| p[0].is_nan() || p[0] <= 10.0 + 1e-3));
+    }
+
+    #[test]
+    fn hatch_boundary_clip_keeps_its_precision_at_utm() {
+        // A 0.2-unit clip at a UTM northing, where an absolute f32 steps by 0.5.
+        let origin = [292884.0, 4718791.0];
+        let clip = vec![
+            [292884.1, 4718791.1],
+            [292884.3, 4718791.1],
+            [292884.3, 4718791.3],
+            [292884.1, 4718791.3],
+        ];
+        let hatch = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let out = clip_hatch_boundary(&hatch, origin, &clip);
+        assert_eq!(out.len(), 4);
+        for p in out {
+            assert!((0.1 - 1e-4..=0.3 + 1e-4).contains(&p[0]), "{p:?}");
+            assert!((0.1 - 1e-4..=0.3 + 1e-4).contains(&p[1]), "{p:?}");
+        }
     }
 
     #[test]

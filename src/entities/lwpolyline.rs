@@ -3,12 +3,12 @@ use kernel::geom2d::{Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance,
 
 use crate::t;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_prop as edit, format_area, format_length, parse_f64, rectangle_grip, ro_prop as ro,
     square_grip, stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::RenderConvertible;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
@@ -1378,7 +1378,7 @@ impl crate::entities::traits::PropertyEditable for LwPolyline {
 }
 
 impl crate::entities::traits::Transformable for LwPolyline {
-    fn apply_transform(&mut self, t: &crate::command::EntityTransform) {
+    fn apply_transform(&mut self, t: &crate::entities::transform::EntityTransform) {
         apply_transform(self, t);
     }
 }

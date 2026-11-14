@@ -87,7 +87,7 @@ const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 const MITER_LIMIT: f32 = 8.0;
 
 struct VertexOut {
-    @builtin(position)              clip_pos:       vec4<f32>,
+    @invariant @builtin(position)              clip_pos:       vec4<f32>,
     @location(0)                    color:          vec4<f32>,
     @location(1)                    distance:       f32,
     @location(2)                    pattern_length: f32,

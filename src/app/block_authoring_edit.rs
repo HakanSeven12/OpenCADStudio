@@ -111,8 +111,7 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Alignment type"),
                     );
-                    self.apply_action_document(i, staged);
-                    self.tabs[i].scene.bump_geometry();
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }
@@ -160,8 +159,7 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Base location"),
                     );
-                    self.apply_action_document(i, staged);
-                    self.tabs[i].scene.bump_geometry();
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }
@@ -225,9 +223,8 @@ impl OpenCADStudio {
                     i,
                     super::tab_document::HistoryLabel::Message("Edit block action override"),
                 );
-                self.apply_action_document(i, staged);
+                self.apply_action_document_and_bump(i, staged);
                 self.tabs[i].dirty = true;
-                self.tabs[i].scene.bump_geometry();
                 self.finish_pending_history(i);
                 self.tabs[i].properties.edit_buf.remove(&key);
                 self.refresh_properties();
@@ -268,9 +265,8 @@ impl OpenCADStudio {
                     i,
                     super::tab_document::HistoryLabel::Message("Edit block action chain"),
                 );
-                self.apply_action_document(i, staged);
+                self.apply_action_document_and_bump(i, staged);
                 self.tabs[i].dirty = true;
-                self.tabs[i].scene.bump_geometry();
                 self.finish_pending_history(i);
                 self.tabs[i].properties.edit_buf.remove(&key);
                 self.refresh_properties();
@@ -355,9 +351,8 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Edit block action base point"),
                     );
-                    self.apply_action_document(i, staged);
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.finish_pending_history(i);
                     self.tabs[i].properties.edit_buf.remove(&key);
                     self.refresh_properties();
@@ -551,8 +546,7 @@ impl OpenCADStudio {
             i,
             super::tab_document::HistoryLabel::Message("BEDIT Chain parameter actions"),
         );
-        self.apply_action_document(i, document);
-        self.tabs[i].scene.bump_geometry();
+        self.apply_action_document_and_bump(i, document);
         self.tabs[i].dirty = true;
         self.refresh_properties();
         Task::none()
@@ -570,8 +564,7 @@ impl OpenCADStudio {
                     i,
                     super::tab_document::HistoryLabel::Message("BEDIT Parameter value set"),
                 );
-                self.tabs[i].scene.document = document;
-                self.tabs[i].scene.bump_geometry();
+                self.apply_action_document_and_bump(i, document);
                 self.tabs[i].dirty = true;
                 self.refresh_properties();
             }
@@ -597,8 +590,7 @@ impl OpenCADStudio {
                     i,
                     super::tab_document::HistoryLabel::Message("BEDIT Parameter value set"),
                 );
-                self.tabs[i].scene.document = document;
-                self.tabs[i].scene.bump_geometry();
+                self.apply_action_document_and_bump(i, document);
                 self.tabs[i].dirty = true;
                 self.tabs[i].properties.edit_buf.remove(&key);
                 self.refresh_properties();
@@ -623,9 +615,8 @@ impl OpenCADStudio {
             i,
             super::tab_document::HistoryLabel::Message("Parameters Manager edit"),
         );
-        self.apply_action_document(i, staged);
+        self.apply_action_document_and_bump(i, staged);
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.bump_geometry();
         self.finish_pending_history(i);
         self.refresh_properties();
     }
@@ -813,9 +804,8 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Edit block parameter metadata"),
                     );
-                    self.tabs[i].scene.document = staged;
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
                     self.finish_pending_history(i);
                 }
                 self.tabs[i]
@@ -1223,8 +1213,10 @@ impl OpenCADStudio {
                         .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
                         .cloned()
                         .collect::<Vec<_>>();
+                    let mut delta = Vec::with_capacity(changed_entities.len());
                     for entity in changed_entities {
                         let handle = entity.common().handle;
+                        delta.push((handle, crate::scene::ChangeKind::Modified));
                         *doc.get_entity_mut(handle)
                             .expect("authoring edits retain entity identities") = entity;
                     }
@@ -1234,7 +1226,12 @@ impl OpenCADStudio {
                         }
                     }
                     doc.block_visibility_params = staged.block_visibility_params.clone();
-                    self.tabs[i].scene.bump_geometry();
+                    for &(h, _) in &delta {
+                        self.tabs[i].scene.reseed_derived_caches(h);
+                    }
+                    self.tabs[i]
+                        .scene
+                        .bump_entities_with_block_deps(&delta, &[definition], &[], false);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }

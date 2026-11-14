@@ -434,7 +434,7 @@ impl CadCommand for DashViewCommand {
         let t = text.trim();
         // The window corners take typed coordinates as points.
         if matches!(self.step, Step::WindowFirst(_) | Step::WindowSecond(..))
-            && crate::app::helpers::parse_coord(t).is_some()
+            && crate::entities::coord_parse::parse_coord(t).is_some()
         {
             return None;
         }

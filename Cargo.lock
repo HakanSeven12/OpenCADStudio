@@ -106,7 +106,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=29412dd#29412dd7993c80e7ed83ecbb21443d14e5a39eb6"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=82e2904#82e29044d26716dcc174e52d15b217a1c2a4eab5"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -4401,6 +4401,7 @@ dependencies = [
  "cargo-lock",
  "getrandom 0.2.17",
  "interprocess",
+ "libc",
  "libloading",
  "memmap2",
  "opencaddocument",
@@ -4410,6 +4411,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "thiserror 1.0.69",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4471,7 +4473,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=253879ba88e31762c6a02b4833667b4fc7816cad#253879ba88e31762c6a02b4833667b4fc7816cad"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=f9a3850#f9a3850abc766b58a604a7b88c4fd97dac29dd15"
 dependencies = [
  "acadrust",
  "ifccad",

@@ -394,7 +394,7 @@ pub(crate) fn apply(
     else {
         crate::scene::view::dispatch::apply_transform(
             e,
-            &crate::command::EntityTransform::Translate(delta),
+            &crate::entities::transform::EntityTransform::Translate(delta),
         );
         return Ok(());
     };
@@ -416,7 +416,7 @@ pub(crate) fn apply(
         | EntityType::MText(_) => {
             crate::scene::view::dispatch::apply_transform(
                 e,
-                &crate::command::EntityTransform::Translate(delta),
+                &crate::entities::transform::EntityTransform::Translate(delta),
             );
         }
         EntityType::Line(l) => {
@@ -538,7 +538,7 @@ pub(crate) fn apply_polar_frame(
     )?;
     super::super::view::dispatch::apply_transform(
         entity,
-        &crate::command::EntityTransform::Translate(new_pivot - pivot),
+        &crate::entities::transform::EntityTransform::Translate(new_pivot - pivot),
     );
     Ok(())
 }
@@ -568,7 +568,7 @@ pub(crate) fn apply_polar(
     if angle != 0. {
         crate::scene::view::dispatch::apply_transform(
             e,
-            &crate::command::EntityTransform::Rotate {
+            &crate::entities::transform::EntityTransform::Rotate {
                 center: base,
                 axis: DVec3::Z,
                 angle_rad: angle,

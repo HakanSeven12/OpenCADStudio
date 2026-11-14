@@ -335,6 +335,8 @@ fn layout_create_and_page_setup_configure_sheets() {
     ));
     assert_eq!(r["ok"], false);
     assert_eq!(r["code"], "layout_exists");
+    let initial = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(initial["page_setup"]["scale"]["fit"], false);
 
     // Page setup on the new layout: A4 landscape, fit, centered.
     let r = app.automation_op(&format!(
@@ -349,6 +351,81 @@ fn layout_create_and_page_setup_configure_sheets() {
     assert!(ps.flags.plot_centered);
     assert!(ps.flags.use_standard_scale);
 
+    let read = app.automation_op(r#"{"protocol":1,"op":"page_setup_get","layout":"pLaN"}"#);
+    assert_eq!(read["ok"], true, "{}", read["error"]);
+    assert_eq!(read["layout"], "PLAN");
+    assert_eq!(read["page_setup"]["orientation"], "landscape");
+    assert_eq!(read["page_setup"]["rotation"], 90);
+    assert_eq!(read["page_setup"]["center"], true);
+    assert!(read["page_setup"]["paper"]
+        .as_str()
+        .unwrap()
+        .contains("ISO_A4"));
+
+    // Every advertised field is applied, and an orientation-only write keeps
+    // the rest of the stored setup intact.
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps1b","document_id":{doc},"layout":"plan","orientation":"portrait","scale":"1:50","center":false,"offset_x":12.5,"offset_y":-4.0,"area":"window","window":[1,2,30,40]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let read = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(read["page_setup"]["orientation"], "portrait");
+    assert_eq!(read["page_setup"]["scale"]["numerator"], 1.0);
+    assert_eq!(read["page_setup"]["scale"]["denominator"], 50.0);
+    assert_eq!(read["page_setup"]["scale"]["fit"], false);
+    assert_eq!(read["page_setup"]["center"], false);
+    assert_eq!(read["page_setup"]["offset_x"], 12.5);
+    assert_eq!(read["page_setup"]["offset_y"], -4.0);
+    assert_eq!(read["page_setup"]["area"], "window");
+    assert_eq!(read["page_setup"]["window"], json!([1.0, 2.0, 30.0, 40.0]));
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps1c","document_id":{doc},"layout":"PLAN","orientation":"landscape"}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let read = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(read["page_setup"]["orientation"], "landscape");
+    assert_eq!(read["page_setup"]["offset_x"], 12.5);
+    assert_eq!(read["page_setup"]["area"], "window");
+
+    // Orientation is effective orientation, not just the rotation code: a
+    // natively landscape medium needs no quarter turn for landscape output.
+    let i = app.active_tab;
+    let mut native_landscape = app.tabs[i].scene.plot_settings_for("PLAN").unwrap();
+    native_landscape.paper_width = 297.0;
+    native_landscape.paper_height = 210.0;
+    native_landscape.rotation = document::objects::PlotRotation::None;
+    assert!(app.tabs[i]
+        .scene
+        .set_layout_plot_settings("PLAN", &native_landscape));
+    let read = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(read["page_setup"]["orientation"], "landscape");
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps-natural-portrait","document_id":{doc},"layout":"PLAN","orientation":"portrait"}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let read = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(read["page_setup"]["orientation"], "portrait");
+    assert_eq!(read["page_setup"]["rotation"], 90);
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps-natural-landscape","document_id":{doc},"layout":"PLAN","orientation":"landscape"}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let read = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    assert_eq!(read["page_setup"]["orientation"], "landscape");
+    assert_eq!(read["page_setup"]["rotation"], 0);
+
+    // Window validation is identical without MCP's pre-dispatch schema.
+    let history_before = app.tabs[i].history.undo_stack.len();
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps-window-required","document_id":{doc},"layout":"PLAN","area":"window"}}"#
+    ));
+    assert_eq!(r["code"], "window_required");
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps-window-invalid","document_id":{doc},"layout":"PLAN","window":[0,0,0,10]}}"#
+    ));
+    assert_eq!(r["code"], "invalid_window");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), history_before);
+
     // Bad scale string refused; unknown layout refused.
     let r = app.automation_op(&format!(
         r#"{{"protocol":1,"op":"page_setup_set","request_id":"ps2","document_id":{doc},"layout":"PLAN","scale":"nonsense"}}"#
@@ -360,6 +437,229 @@ fn layout_create_and_page_setup_configure_sheets() {
     ));
     assert_eq!(r["ok"], false);
     assert_eq!(r["code"], "layout_missing");
+}
+
+#[test]
+fn layout_lifecycle_is_case_insensitive_undoable_and_passive() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    let created = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_create","request_id":"life-create","document_id":{doc},"name":"PLAN"}"#,
+    );
+    assert_eq!(created["ok"], true, "{}", created["error"]);
+    assert_eq!(app.tabs[i].scene.current_layout, "Model");
+
+    app.tabs[i].dirty = false;
+    let before_doc = app.tabs[i].scene.document.clone();
+    let before_undo = app.tabs[i].history.undo_stack.len();
+    let before_revision = app.tabs[i].edit_revision;
+    let listing = app.automation_op(r#"{"protocol":1,"op":"layouts"}"#);
+    assert_eq!(listing["ok"], true);
+    assert_eq!(listing["current"], "Model");
+    assert!(listing["layouts"].as_array().unwrap().iter().any(|layout| {
+        layout["name"] == "PLAN" && layout["current"] == false && layout["model"] == false
+    }));
+    assert!(listing["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|layout| layout["name"] == "Model" && layout["model"] == true));
+    assert_eq!(app.tabs[i].scene.document, before_doc);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_undo);
+    assert_eq!(app.tabs[i].edit_revision, before_revision);
+    let setup_before_activation =
+        app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    let entities_before_activation = app.tabs[i].scene.document.entities().count();
+    assert!(!app.tabs[i].dirty);
+
+    let activated = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_activate","request_id":"life-activate","document_id":{doc},"name":"pLaN"}"#,
+    );
+    assert_eq!(activated["ok"], true, "{}", activated["error"]);
+    assert_eq!(activated["result"]["current"], "PLAN");
+    assert_eq!(app.tabs[i].scene.current_layout, "PLAN");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_undo);
+    assert!(!app.tabs[i].dirty);
+    assert_eq!(
+        app.tabs[i].scene.document.entities().count(),
+        entities_before_activation
+    );
+    assert_eq!(
+        app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#),
+        setup_before_activation
+    );
+
+    let rename = r#"{"protocol":1,"op":"layout_rename","request_id":"life-rename","document_id":{doc},"name":"plan","new_name":"Floor Plan"}"#;
+    let renamed = mutate(&mut app, rename);
+    assert_eq!(renamed["ok"], true, "{}", renamed["error"]);
+    assert_eq!(renamed["result"]["new_name"], "Floor Plan");
+    assert_eq!(app.tabs[i].scene.current_layout, "Floor Plan");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_undo + 1);
+    let dictionary = app.tabs[i].scene.document.header.acad_layout_dict_handle;
+    let dictionary = match &app.tabs[i].scene.document.objects[&dictionary] {
+        document::objects::ObjectType::Dictionary(dictionary) => dictionary,
+        other => panic!("expected ACAD_LAYOUT dictionary, got {other:?}"),
+    };
+    assert!(dictionary
+        .entries
+        .iter()
+        .any(|(key, _)| key == "Floor Plan"));
+    assert!(!dictionary.entries.iter().any(|(key, _)| key == "PLAN"));
+
+    // Replaying the same request id returns the cached result without another
+    // history entry or document write.
+    let replayed = mutate(&mut app, rename);
+    assert_eq!(replayed, renamed);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_undo + 1);
+
+    let undone = app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(undone["ok"], true, "{}", undone["error"]);
+    assert_eq!(app.tabs[i].scene.current_layout, "PLAN");
+    assert!(app.tabs[i]
+        .scene
+        .layout_names()
+        .contains(&"PLAN".to_string()));
+    assert!(!app.tabs[i]
+        .scene
+        .layout_names()
+        .contains(&"Floor Plan".to_string()));
+
+    let case_renamed = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_rename","request_id":"life-case-rename","document_id":{doc},"name":"PLAN","new_name":"plan"}"#,
+    );
+    assert_eq!(case_renamed["ok"], true, "{}", case_renamed["error"]);
+    assert_eq!(case_renamed["result"]["current"], "plan");
+    assert!(app.automation_op(r#"{"op":"undo"}"#)["ok"] == true);
+    assert_eq!(app.tabs[i].scene.current_layout, "PLAN");
+
+    let renamed = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_rename","request_id":"life-rename-again","document_id":{doc},"name":"PLAN","new_name":"Floor Plan"}"#,
+    );
+    assert_eq!(renamed["ok"], true, "{}", renamed["error"]);
+    let before_delete = app.tabs[i].history.undo_stack.len();
+    let deleted = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_delete","request_id":"life-delete","document_id":{doc},"name":"fLOOR pLAN"}"#,
+    );
+    assert_eq!(deleted["ok"], true, "{}", deleted["error"]);
+    assert_eq!(deleted["result"]["deleted"], "Floor Plan");
+    assert_eq!(deleted["result"]["current"], "Model");
+    assert_eq!(app.tabs[i].scene.current_layout, "Model");
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_delete + 1);
+    assert!(app.automation_op(r#"{"op":"undo"}"#)["ok"] == true);
+    assert_eq!(app.tabs[i].scene.current_layout, "Floor Plan");
+
+    for (op, request_id, extra) in [
+        (
+            "layout_rename",
+            "life-model-rename",
+            r#","new_name":"Other""#,
+        ),
+        ("layout_delete", "life-model-delete", ""),
+    ] {
+        let response = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"{op}","request_id":"{request_id}","document_id":{{doc}},"name":"model"{extra}}}"#
+            ),
+        );
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["code"], "layout_protected");
+    }
+    let missing = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_activate","request_id":"life-missing","document_id":{doc},"name":"GHOST"}"#,
+    );
+    assert_eq!(missing["code"], "layout_missing");
+    let invalid = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_rename","request_id":"life-invalid","document_id":{doc},"name":"Floor Plan","new_name":"BAD/NAME"}"#,
+    );
+    assert_eq!(invalid["code"], "invalid_layout_name");
+    let duplicate = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_rename","request_id":"life-duplicate","document_id":{doc},"name":"Floor Plan","new_name":"model"}"#,
+    );
+    assert_eq!(duplicate["code"], "layout_exists");
+    let empty = mutate(
+        &mut app,
+        r#"{"protocol":1,"op":"layout_create","request_id":"life-empty","document_id":{doc},"name":"  "}"#,
+    );
+    assert_eq!(empty["code"], "name_required");
+}
+
+#[test]
+fn renamed_layout_and_page_setup_survive_a_save_open_round_trip() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    assert_eq!(
+        mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"layout_create","request_id":"persist-create","document_id":{doc},"name":"PLAN"}"#,
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"layout_rename","request_id":"persist-rename","document_id":{doc},"name":"PLAN","new_name":"Floor Plan"}"#,
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"page_setup_set","request_id":"persist-setup","document_id":{doc},"layout":"Floor Plan","orientation":"landscape","offset_x":7.5,"area":"layout"}"#,
+        )["ok"],
+        true
+    );
+    // Opening the sheet marks it as initialized, just as an interactive
+    // page-setup workflow does before the drawing is saved.
+    assert_eq!(
+        mutate(
+            &mut app,
+            r#"{"protocol":1,"op":"layout_activate","request_id":"persist-activate","document_id":{doc},"name":"Floor Plan"}"#,
+        )["ok"],
+        true
+    );
+    let path =
+        std::env::temp_dir().join(format!("ocs_layout_roundtrip_{}.dxf", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{path_text}"}}"#));
+    assert_eq!(saved["ok"], true, "{}", saved["error"]);
+    let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{path_text}"}}"#));
+    assert_eq!(opened["ok"], true, "{}", opened["error"]);
+    let listing = app.automation_op(r#"{"op":"layouts"}"#);
+    assert!(listing["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|layout| layout["name"] == "Floor Plan"));
+    assert!(!listing["layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|layout| layout["name"] == "PLAN"));
+    let setup = app.automation_op(r#"{"op":"page_setup_get","layout":"floor plan"}"#);
+    assert_eq!(setup["ok"], true, "{}", setup["error"]);
+    assert_eq!(setup["layout"], "Floor Plan");
+    assert_eq!(setup["page_setup"]["orientation"], "landscape", "{setup}");
+    assert_eq!(setup["page_setup"]["offset_x"], 7.5, "{setup}");
+    assert_eq!(setup["page_setup"]["area"], "layout", "{setup}");
+
+    drop(app);
+    let sidecar = path.with_file_name(format!(
+        ".{}.ocs.lock",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_file(sidecar);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]

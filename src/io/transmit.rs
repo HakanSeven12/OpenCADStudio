@@ -2145,26 +2145,20 @@ mod tests {
             crate::io::xref::resolve_path("xrefs/nested.dwg", &isolated),
             Some(isolated.join("xrefs/nested.dwg"))
         );
+        // Compared as paths: joined onto its folder, a name with a `/` holds
+        // both separators on Windows.
         assert_eq!(
-            crate::io::resolve_image_file("textures/symbol.png", Some(&isolated.join("xrefs"))),
-            Some(
-                isolated
-                    .join("xrefs/textures/symbol.png")
-                    .to_string_lossy()
-                    .into_owned()
-            )
+            crate::io::resolve_image_file("textures/symbol.png", Some(&isolated.join("xrefs")))
+                .map(std::path::PathBuf::from),
+            Some(isolated.join("xrefs/textures/symbol.png"))
         );
         assert_eq!(
             crate::io::font_repo::font_file_path(
                 "assets/nested.shx",
                 Some(&isolated.join("xrefs"))
-            ),
-            Some(
-                isolated
-                    .join("xrefs/assets/nested.shx")
-                    .to_string_lossy()
-                    .into_owned()
             )
+            .map(std::path::PathBuf::from),
+            Some(isolated.join("xrefs/assets/nested.shx"))
         );
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -20,6 +20,7 @@ use document::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
     Spline as SplineEnt, XLine as XLineEnt,
 };
+use document::types::Vector3;
 use document::{EntityType, Handle};
 // Polyline offsetting, and the angle normalisation that goes with it, come
 // from the kernel; only the entity conversion stays here.
@@ -77,31 +78,38 @@ fn offset_line(l: &LineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
     Some(EntityType::Line(new_l))
 }
 
-// ── XLine (infinite construction line) offset ────────────────────────────────
-// A parallel infinite line: same direction, base point shifted perpendicular by
-// `dist` toward the side the cursor is on. (#296)
+// ── XLine / Ray offset ───────────────────────────────────────────────────────
+// A parallel line of the same kind: same direction, base point shifted
+// perpendicular by `dist` toward the side the cursor is on. (#296, #2969)
 
-fn offset_xline(x: &XLineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
-    let dx = x.direction.x;
-    let dy = x.direction.y;
+fn shifted_base(base: Vector3, direction: Vector3, dist: f64, side_pt: Vec3) -> Option<Vector3> {
+    let (dx, dy) = (direction.x, direction.y);
     let len = (dx * dx + dy * dy).sqrt();
     if len < 1e-12 {
         return None;
     }
-
-    let nx = -dy / len; // left-perpendicular
-    let ny = dx / len;
-
-    let vx = side_pt.x as f64 - x.base_point.x;
-    let vy = side_pt.y as f64 - x.base_point.y;
-    let cross = dx * vy - dy * vx;
+    let (nx, ny) = (-dy / len, dx / len); // left-perpendicular
+    let cross = dx * (side_pt.y as f64 - base.y) - dy * (side_pt.x as f64 - base.x);
     let sign = if cross >= 0.0 { 1.0 } else { -1.0 };
+    Some(Vector3::new(
+        base.x + sign * nx * dist,
+        base.y + sign * ny * dist,
+        base.z,
+    ))
+}
 
+fn offset_xline(x: &XLineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
     let mut new_x = x.clone();
     new_x.common.handle = Handle::NULL;
-    new_x.base_point.x += sign * nx * dist;
-    new_x.base_point.y += sign * ny * dist;
+    new_x.base_point = shifted_base(x.base_point, x.direction, dist, side_pt)?;
     Some(EntityType::XLine(new_x))
+}
+
+fn offset_ray(r: &document::entities::Ray, dist: f64, side_pt: Vec3) -> Option<EntityType> {
+    let mut new_r = r.clone();
+    new_r.common.handle = Handle::NULL;
+    new_r.base_point = shifted_base(r.base_point, r.direction, dist, side_pt)?;
+    Some(EntityType::Ray(new_r))
 }
 
 // ── Circle offset ──────────────────────────────────────────────────────────
@@ -301,6 +309,7 @@ pub(crate) fn compute_offsets(entity: &EntityType, dist: f64, side_pt: Vec3) -> 
         EntityType::Ellipse(e) => offset_ellipse(e, dist, side_pt).into_iter().collect(),
         EntityType::Spline(s) => offset_spline(s, dist, side_pt).into_iter().collect(),
         EntityType::XLine(x) => offset_xline(x, dist, side_pt).into_iter().collect(),
+        EntityType::Ray(r) => offset_ray(r, dist, side_pt).into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -531,6 +540,7 @@ pub fn is_offsettable(e: &EntityType) -> bool {
             | EntityType::Ellipse(_)
             | EntityType::Spline(_)
             | EntityType::XLine(_)
+            | EntityType::Ray(_)
     )
 }
 

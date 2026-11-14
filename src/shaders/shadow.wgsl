@@ -68,7 +68,7 @@ struct InstanceIn {
 fn vs_main(
     vertex: VertexIn,
     instance: InstanceIn,
-) -> @builtin(position) vec4<f32> {
+) -> @invariant @builtin(position) vec4<f32> {
     let world_high = vec3<f32>(
         dot(instance.model_row_0.xyz, vertex.position) + instance.model_row_0.w,
         dot(instance.model_row_1.xyz, vertex.position) + instance.model_row_1.w,

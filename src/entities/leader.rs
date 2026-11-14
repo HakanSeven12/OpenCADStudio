@@ -2,11 +2,11 @@ use document::entities::{HooklineDirection, Leader, LeaderCreationType, LeaderPa
 use document::Entity;
 use glam::Vec3;
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_prop as edit, ro_prop as ro, square_grip, stepper_prop as stepper,
 };
 use crate::entities::traits::RenderConvertible;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
@@ -494,17 +494,19 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
         for v in &mut entity.vertices {
             crate::scene::view::transform::reflect_xy_point(&mut v.x, &mut v.y, p1, p2);
         }
+        // Offsets from the last vertex reflect as directions.
+        let axis = p2 - p1;
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.block_offset.x,
             &mut entity.block_offset.y,
-            p1,
-            p2,
+            glam::DVec3::ZERO,
+            axis,
         );
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.annotation_offset.x,
             &mut entity.annotation_offset.y,
-            p1,
-            p2,
+            glam::DVec3::ZERO,
+            axis,
         );
     });
 }

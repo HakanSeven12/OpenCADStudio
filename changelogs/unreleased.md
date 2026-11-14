@@ -9,6 +9,7 @@
 
 ### 🚀 New Features
 
+* **Assistant Pallet:** `ASSISTANT` (alias `AI`, also on View ▸ Palettes) docks a chat pallet for an AI agent that drives the drawing through the `--mcp` endpoint. Requests and Markdown replies read as a conversation, each tool step shows as a card with its state, duration, input, result and viewport captures, and Stop cancels after the current step. The agent is an external service on the loopback interface (one JSON object per line, described in `docs/assistant-panel.md`), started on demand from `OCS_ASSISTANT_COMMAND`; no model, key or vendor is built in.
 * **Big Font Picker:** The Text Style manager replaces the plain numeric input for big-font files with a dedicated font picker listing big fonts in the drawing, SHX files adjacent to the drawing, and SHX files in configured font folders.
 * **Parameter Order:** The Parameters Manager's Order cell takes a whole-number rank for the parameter its row names; both rows of an XY or polar parameter print the same rank; an emptied cell clears it; the listed rows stay alphabetical.
 * **`EATTEDIT`:** The command reaches the editor `ATTEDIT` opens, on a selected block reference or after the pick, and completes from the command line.

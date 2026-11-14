@@ -1091,7 +1091,10 @@ impl OpenCADStudio {
             let before = typed.then(|| crate::command::step_signature(cmd.as_ref()));
             let res = match input {
                 StepInput::Point(p) => Some(cmd.on_point(p)),
-                StepInput::Text(s) => cmd.on_text_input(&s),
+                StepInput::Text(s) => {
+                    let s = crate::i18n::source_option(&cmd.prompt(), &s).unwrap_or(s);
+                    cmd.on_text_input(&s)
+                }
                 StepInput::EntityPick(h, p) => Some(cmd.on_entity_pick(h, p)),
                 StepInput::StructurePick(h, p) => Some(cmd.on_structure_pick(h, p)),
                 StepInput::SelectionComplete(hs) => Some(cmd.on_selection_complete(hs)),

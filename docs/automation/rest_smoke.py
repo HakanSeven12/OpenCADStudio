@@ -5,9 +5,10 @@ Drives the whole entity lifecycle over plain HTTP — the same API surface any
 language can call — against a real drawing session: create → verify by query
 → transform → mark with xdata → define a block → save → reopen → verify
 everything persisted → erase → undo. Then exercises the P1 surface the same
-way, always through real files: where filters, sysvars, layouts + page setups
-+ per-page plotting to real PDFs, a .dwt template → new-from-template round
-trip, a cross-document copy between two open documents, groups and selection
+way, always through real files: where filters, sysvars, the structured layout
+lifecycle + page setup reads/writes + percent-encoded names + per-page plotting
+to real PDFs, a .dwt template → new-from-template round trip, a cross-document
+copy between two open documents, groups and selection
 sets, and a close-with-discard. Uses only the Python standard library.
 
     python3 docs/automation/rest_smoke.py target/debug/OpenCADStudio
@@ -84,6 +85,20 @@ def main() -> None:
         expect(status == 200 and ready["session_id"], f"ready: {ready}")
         status, capabilities = call(port, "GET", "/capabilities")
         expect(capabilities["operations"]["entities_create"] is True, "capabilities")
+        for operation in (
+            "layouts", "page_setup_get", "layout_create", "layout_rename",
+            "layout_activate", "layout_delete", "page_setup_set", "xrefs",
+            "xref_reload", "xref_unload", "xref_detach", "xref_bind",
+            "xref_set_path", "xref_set_type",
+        ):
+            expect(capabilities["operations"].get(operation) is True,
+                   f"structured capability {operation}: {capabilities}")
+        status, references = call(port, "GET", "/xrefs")
+        expect(status == 200 and references["count"] == 0
+               and references["xrefs"] == [], f"empty xref read: {references}")
+        status, missing = call(port, "POST", "/xref_reload", {"id": "FFFFFFFF"})
+        expect(status == 404 and missing["code"] == "xref_missing",
+               f"structured xref missing refusal: {missing}")
 
         # 1. Create a batch of typed entities; the missing layer is created.
         status, created = call(port, "POST", "/entities", {
@@ -158,13 +173,51 @@ def main() -> None:
         status, circles = call(port, "POST", "/entities", {
             "entities": [
                 {"type": "Circle", "center": [0, -40], "radius": 2},
-                {"type": "Circle", "center": [30, -40], "radius": 8},
+                {"type": "Circle", "center": [30, -40], "radius": 8, "color": 1},
             ]
         })
         expect(status == 201, f"filter circles: {circles}")
         where = urllib.parse.quote(json.dumps([{"path": "/radius", "op": "gt", "value": 6}]))
         status, query = call(port, "GET", f"/entities?type=Circle&detail=geometry&where={where}")
         expect(query["count"] == 1 and query["entities"][0]["radius"] == 8.0, f"where filter: {query}")
+        where = urllib.parse.quote(json.dumps([{"path": "/layer", "op": "eq", "value": "FRAME"}]))
+        status, query = call(port, "GET", f"/entities?type=Line&where={where}")
+        expect(query["count"] == 2
+               and all(entity["layer"] == "FRAME" for entity in query["entities"]),
+               f"summary layer where: {query}")
+        where = urllib.parse.quote(json.dumps([
+            {"path": "/properties/common/color/Index", "op": "eq", "value": 1},
+        ]))
+        status, query = call(port, "GET", f"/entities?type=Circle&detail=full&where={where}")
+        expect(query["count"] == 1 and query["entities"][0]["radius"] == 8.0,
+               f"full common-color where: {query}")
+        circle_handles = circles["result"]["handles"]
+        status, reset = call(port, "POST", "/entities_set", {
+            "handles": [circle_handles[1]], "color": "ByLayer",
+            "label": "REST smoke color reset",
+        })
+        expect(status == 200 and reset["result"] == {
+            "requested": 1, "written": 1, "unchanged": 0,
+        }, f"entities_set reset: {reset}")
+        status, repeated = call(port, "POST", "/entities_set", {
+            "handles": [circle_handles[1]], "color": "ByLayer",
+        })
+        expect(repeated["result"]["written"] == 0
+               and repeated["result"]["unchanged"] == 1,
+               f"entities_set no-op: {repeated}")
+        status, refused = call(port, "POST", "/entities_set", {
+            "handles": [circle_handles[1], "FFFFFFFF"], "color": 1,
+        })
+        expect(status == 404 and refused["code"] == "entity_absent",
+               f"entities_set atomic refusal: {refused}")
+        status, query = call(port, "GET", f"/entities/{circle_handles[1]}")
+        expect(query["entities"][0]["properties"]["common"]["color"] == "ByLayer",
+               f"bad handle caused no partial color write: {query}")
+        status, undone = call(port, "POST", "/undo")
+        expect(undone["ok"], f"entities_set undo: {undone}")
+        status, query = call(port, "GET", f"/entities/{circle_handles[1]}")
+        expect(query["entities"][0]["properties"]["common"]["color"] == {"Index": 1},
+               f"entities_set one-step undo: {query}")
         status, query = call(port, "GET", f"/entities?where={urllib.parse.quote('not-json')}")
         expect(status == 400 and query["code"] == "invalid_where", f"bad where: {query}")
 
@@ -177,14 +230,63 @@ def main() -> None:
         status, refused = call(port, "POST", "/sysvars", {"set": {"not_a_sysvar": 1}})
         expect(status == 400 and refused["code"] == "unknown_sysvar", f"unknown sysvar: {refused}")
 
-        # 10. Sheets: a layout, its page setup, then one PDF per layout.
+        # 10. Sheets: structured list/create/get/rename/activate/delete,
+        # page setup field preservation, encoded names, then per-layout PDFs.
+        status, listing = call(port, "GET", "/layouts")
+        expect(status == 200 and listing["current"] == "Model", f"layout list: {listing}")
+        model = next(item for item in listing["layouts"] if item["name"] == "Model")
+        expect(set(model) == {"name", "handle", "current", "model", "tab_order"},
+               f"structured Model entry: {model}")
+        expect(model["current"] is True and model["model"] is True, "Model is current")
+
         status, layout = call(port, "POST", "/layouts", {"name": "PLAN"})
         expect(status == 201 and "PLAN" in layout["result"]["layouts"], f"layout: {layout}")
+        status, listing = call(port, "GET", "/layouts")
+        plan = next(item for item in listing["layouts"] if item["name"] == "PLAN")
+        expect(listing["current"] == "Model" and plan["current"] is False,
+               "layout_create does not activate")
+
         status, setup = call(port, "PUT", "/layouts/PLAN/page-setup", {
-            "paper": "ISO_A4_(210.00_x_297.00_MM)", "orientation": "landscape",
-            "fit": True, "center": True,
+            "paper": "ISO_A4_(210.00_x_297.00_MM)", "orientation": "portrait",
+            "scale": "1:50", "center": False, "offset_x": 12.5, "offset_y": -4.0,
+            "area": "window", "window": [0, 0, 100, 60],
         })
         expect(status == 200 and "ISO_A4" in setup["result"]["paper"], f"page setup: {setup}")
+        status, setup = call(port, "GET", "/layouts/plan/page-setup")
+        expect(status == 200 and setup["layout"] == "PLAN", f"canonical page setup: {setup}")
+        expect(setup["page_setup"]["offset_x"] == 12.5
+               and setup["page_setup"]["offset_y"] == -4.0
+               and setup["page_setup"]["area"] == "window"
+               and setup["page_setup"]["window"] == [0.0, 0.0, 100.0, 60.0],
+               f"offset/area/window applied: {setup}")
+        status, updated = call(port, "PUT", "/layouts/PLAN/page-setup", {
+            "orientation": "landscape",
+        })
+        expect(status == 200, f"orientation-only setup: {updated}")
+        status, setup = call(port, "GET", "/layouts/PLAN/page-setup")
+        page_setup = setup["page_setup"]
+        expect(page_setup["orientation"] == "landscape" and page_setup["rotation"] == 90,
+               f"orientation applied: {setup}")
+        expect(page_setup["scale"] == {"numerator": 1.0, "denominator": 50.0, "fit": False}
+               and page_setup["center"] is False and page_setup["offset_x"] == 12.5
+               and page_setup["offset_y"] == -4.0 and page_setup["area"] == "window"
+               and "ISO_A4" in page_setup["paper"],
+               f"orientation-only update preserves setup: {setup}")
+
+        status, renamed = call(port, "PATCH", "/layouts/plan", {"new_name": "Floor Plan"})
+        expect(status == 200 and renamed["result"]["name"] == "PLAN"
+               and renamed["result"]["new_name"] == "Floor Plan", f"layout rename: {renamed}")
+        encoded_name = urllib.parse.quote("Floor Plan", safe="")
+        status, activated = call(port, "POST", "/layouts/floor%20plan/activate", {})
+        expect(status == 200 and activated["result"]["layout"] == "Floor Plan"
+               and activated["result"]["current"] == "Floor Plan", f"layout activate: {activated}")
+        status, setup = call(port, "GET", f"/layouts/{encoded_name}/page-setup")
+        expect(status == 200 and setup["layout"] == "Floor Plan", f"encoded page setup: {setup}")
+        status, listing = call(port, "GET", "/layouts")
+        current = next(item for item in listing["layouts"] if item["current"])
+        expect(listing["current"] == "Floor Plan" and current["name"] == "Floor Plan",
+               f"canonical current layout: {listing}")
+
         plot_base = out_dir / "smoke_plot.pdf"
         status, plotted = call(port, "POST", "/plot", {
             "path": str(plot_base), "layout": "all", "per_page": True,
@@ -194,6 +296,12 @@ def main() -> None:
             pdf = Path(entry["path"])
             expect(pdf.read_bytes().startswith(b"%PDF"), f"not a PDF: {pdf}")
             pdf.unlink()
+
+        status, deleted = call(port, "DELETE", f"/layouts/{encoded_name}")
+        expect(status == 200 and deleted["result"]["deleted"] == "Floor Plan"
+               and deleted["result"]["current"] == "Model", f"layout delete: {deleted}")
+        status, missing = call(port, "GET", f"/layouts/{encoded_name}/page-setup")
+        expect(status == 404 and missing["code"] == "layout_missing", f"deleted layout: {missing}")
 
         # 11. Template round trip: save as .dwt, then start the drawing from
         # the template — the entities and their xdata survive.
@@ -271,7 +379,7 @@ def main() -> None:
             "handles": fresh["result"]["handles"], "replace": True,
         })
         expect(status == 201, f"block replace: {replaced}")
-        status, deleted = call(port, "DELETE", "/blocks/MARK")
+        status, deleted = call(port, "DELETE", "/blocks/MARK?force=true")
         expect(status == 200 and deleted["result"]["erased"] >= 1, f"block delete: {deleted}")
 
         # 14. Close the dirty second document with discard.

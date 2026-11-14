@@ -276,7 +276,7 @@ impl OpenCADStudio {
                 ));
             }
 
-            "PLUGINS" | "PLUGINMANAGER" => {
+            "PLUGINS" | "PLUGINMANAGER" | "APPLOAD" => {
                 return Some(Task::done(Message::PluginManagerOpen));
             }
 

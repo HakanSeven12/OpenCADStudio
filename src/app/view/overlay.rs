@@ -398,11 +398,10 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         if state.width_drag.is_some() || point.is_some_and(|p| self.on_handle(p)) {
             return iced::mouse::Interaction::ResizingHorizontally;
         }
-        if self.inplace && point.is_some_and(|p| self.cell.is_some_and(|cell| cell.contains(p))) {
-            return iced::mouse::Interaction::Text;
-        }
-        // Leave table-cell pointer handling unchanged so wheel zoom still reaches
-        // the drawing; the fallback preview has its own scroll container.
+        // No pointer of its own over the text being edited, in place or in a
+        // table cell: any would hide the drawing under it from the wheel, so
+        // zoom would stop there. The fallback preview has its own scroll
+        // container.
         iced::mouse::Interaction::default()
     }
 
@@ -715,7 +714,9 @@ pub(super) fn mtext_inplace_overlay<'a>(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     );
-    let toolbar_width = size.0.min(760.0).max(1.0);
+    // Keep the commonly edited fields visible together on a normal viewport.
+    // The first row still scrolls horizontally when the viewport is narrow.
+    let toolbar_width = size.0.min(1000.0).max(1.0);
     let drag_handle = mouse_area(
         container(text("⋮⋮").size(15)).height(58).center_y(58).padding([2, 3])
     ).on_press(Message::MTextToolbarGrab).interaction(iced::mouse::Interaction::Grab);
@@ -849,12 +850,6 @@ fn mtext_editor_content<'a>(
                     control: Element<'a, Message>|
      -> Element<'a, Message> {
         use super::super::mtext_editor::ValueOrigin;
-        if toolbar_only {
-            return row![text(name).size(10), control]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into();
-        }
         let mark: Element<'a, Message> = match origin {
             Some(origin) => {
                 let (label, accent): (_, fn(&Theme) -> iced::Color) = match origin {
@@ -890,6 +885,15 @@ fn mtext_editor_content<'a>(
             }
             None => iced::widget::Space::new().into(),
         };
+        if toolbar_only {
+            return row![
+                column![text(name).size(10), container(mark).height(13)].spacing(0),
+                control
+            ]
+            .spacing(3)
+            .align_y(iced::Alignment::Center)
+            .into();
+        }
         // The mark keeps its line when there is none, and every control sits
         // in a band of one height: the labels, the marks and the controls
         // each share one line whatever the control's own height.
@@ -2958,6 +2962,15 @@ mod cell_editor_wheel_tests {
     use super::*;
     #[test]
     fn wheel_over_the_typed_in_cell_still_zooms_the_drawing() {
+        wheel_zooms_over_editor(false);
+    }
+
+    #[test]
+    fn wheel_over_the_inplace_text_editor_still_zooms_the_drawing() {
+        wheel_zooms_over_editor(true);
+    }
+
+    fn wheel_zooms_over_editor(inplace: bool) {
         let p = |x, y| iced::Point::new(x, y);
         let cell = crate::app::table_cell_edit::CellCanvas {
             origin: p(100.0, 100.0),
@@ -2984,7 +2997,7 @@ mod cell_editor_wheel_tests {
             ruler: None,
             rotation: (1.0, 0.0),
             cell: Some(cell),
-            inplace: false,
+            inplace,
             translucent: false,
         };
         let drawing =

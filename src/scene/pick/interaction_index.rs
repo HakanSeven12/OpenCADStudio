@@ -1698,6 +1698,19 @@ impl InteractionIndex {
         self.query_xy_selection(wires, aabb, false)
     }
 
+    /// Variant of [`Self::query_xy_area`] / [`Self::query_xy_selection`] for
+    /// callers that immediately call `materialize_stubs`: if any queried wire
+    /// is a stub, `materialize_stubs` discards all primitive reference lists,
+    /// so we skip building them.
+    pub(crate) fn query_xy_selection_for_materialize(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        include_point_markers: bool,
+    ) -> InteractionCandidates {
+        self.query_xy_selection_inner(wires, aabb, include_point_markers, true)
+    }
+
     /// A box tests whole entity wires, so it does not need a materialized list
     /// of every segment inside the box.
     pub(crate) fn query_xy_box_wires(
@@ -1743,41 +1756,63 @@ impl InteractionIndex {
         aabb: [f64; 4],
         include_point_markers: bool,
     ) -> InteractionCandidates {
-        let ((wire_indices, segments), ((fill_triangles, pick_triangles), glyphs)) =
-            crate::par::join(
-                || {
-                    crate::par::join(
-                        || {
-                            let mut indices = self.wires.query_xy_unordered(aabb);
-                            indices.extend_from_slice(&self.unbounded_wires);
-                            if include_point_markers {
-                                indices.extend_from_slice(&self.screen_unbounded_wires);
-                            }
-                            indices.sort_unstable();
-                            indices.dedup();
-                            indices
-                        },
-                        || self.segments.query_xy_selection(aabb, include_point_markers),
-                    )
-                },
-                || {
-                    crate::par::join(
-                        || {
-                            crate::par::join(
-                                || {
-                                    self.fill_triangles
-                                        .query_xy_selection(aabb, include_point_markers)
-                                },
-                                || {
-                                    self.pick_triangles
-                                        .query_xy_selection(aabb, include_point_markers)
-                                },
-                            )
-                        },
-                        || self.glyphs.query_xy_selection(aabb, include_point_markers),
-                    )
-                },
-            );
+        self.query_xy_selection_inner(wires, aabb, include_point_markers, false)
+    }
+
+    fn query_xy_selection_inner(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        include_point_markers: bool,
+        skip_refs_if_stubbed: bool,
+    ) -> InteractionCandidates {
+        let mut wire_indices = self.wires.query_xy_unordered(aabb);
+        wire_indices.extend_from_slice(&self.unbounded_wires);
+        if include_point_markers {
+            wire_indices.extend_from_slice(&self.screen_unbounded_wires);
+        }
+        wire_indices.sort_unstable();
+        wire_indices.dedup();
+        if skip_refs_if_stubbed
+            && wire_indices
+                .iter()
+                .any(|&idx| wires.get(idx as usize).is_some_and(|w| w.stub.is_some()))
+        {
+            return InteractionCandidates {
+                wires: CandidateWires::Snapshot(wires),
+                wire_indices: Some(wire_indices),
+                segments: None,
+                snap_points: None,
+                key_vertices: None,
+                key_segments: None,
+                fill_triangles: None,
+                pick_triangles: None,
+                glyphs: None,
+                query_aabb: Some(aabb),
+                screen_rect: None,
+                screen_view: None,
+            };
+        }
+        let (segments, ((fill_triangles, pick_triangles), glyphs)) = crate::par::join(
+            || self.segments.query_xy_selection(aabb, include_point_markers),
+            || {
+                crate::par::join(
+                    || {
+                        crate::par::join(
+                            || {
+                                self.fill_triangles
+                                    .query_xy_selection(aabb, include_point_markers)
+                            },
+                            || {
+                                self.pick_triangles
+                                    .query_xy_selection(aabb, include_point_markers)
+                            },
+                        )
+                    },
+                    || self.glyphs.query_xy_selection(aabb, include_point_markers),
+                )
+            },
+        );
         InteractionCandidates {
             wires: CandidateWires::Snapshot(wires),
             wire_indices: Some(wire_indices),
@@ -1795,10 +1830,50 @@ impl InteractionIndex {
     }
 
     pub fn query_xy(&self, wires: Arc<Vec<WireModel>>, aabb: [f64; 4]) -> InteractionCandidates {
+        self.query_xy_inner(wires, aabb, false)
+    }
+
+    /// Variant of [`Self::query_xy`] for callers that immediately call
+    /// `materialize_stubs`: skips building primitive reference lists whenever
+    /// any queried wire slot carries a stub, since stub expansion drops them.
+    pub(crate) fn query_xy_for_materialize(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+    ) -> InteractionCandidates {
+        self.query_xy_inner(wires, aabb, true)
+    }
+
+    fn query_xy_inner(
+        &self,
+        wires: Arc<Vec<WireModel>>,
+        aabb: [f64; 4],
+        skip_refs_if_stubbed: bool,
+    ) -> InteractionCandidates {
         let mut wire_indices = self.wires.query_xy(aabb);
         wire_indices.extend_from_slice(&self.unbounded_wires);
         wire_indices.sort_unstable();
         wire_indices.dedup();
+        if skip_refs_if_stubbed
+            && wire_indices
+                .iter()
+                .any(|&idx| wires.get(idx as usize).is_some_and(|w| w.stub.is_some()))
+        {
+            return InteractionCandidates {
+                wires: CandidateWires::Snapshot(wires),
+                wire_indices: Some(wire_indices),
+                segments: None,
+                snap_points: None,
+                key_vertices: None,
+                key_segments: None,
+                fill_triangles: None,
+                pick_triangles: None,
+                glyphs: None,
+                query_aabb: Some(aabb),
+                screen_rect: None,
+                screen_view: None,
+            };
+        }
         InteractionCandidates {
             wires: CandidateWires::Snapshot(wires),
             wire_indices: Some(wire_indices),
@@ -1937,24 +2012,90 @@ impl<'a> SlotRemapCache<'a> {
 }
 
 #[derive(Default)]
-pub struct SharedWireRuns(Vec<(Arc<Vec<WireModel>>, u32)>);
+pub struct SharedWireRuns {
+    runs: Vec<Arc<Vec<WireModel>>>,
+    slots: Vec<(u32, u32)>,
+    run_lookup: rustc_hash::FxHashMap<usize, u32>,
+}
 
 impl SharedWireRuns {
+    const LINEAR_LIMIT: usize = 8;
+
     pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
+        Self {
+            runs: Vec::new(),
+            slots: Vec::with_capacity(capacity),
+            run_lookup: Default::default(),
+        }
+    }
+
+    pub(crate) fn from_parts(runs: Vec<Arc<Vec<WireModel>>>, slots: Vec<(u32, u32)>) -> Self {
+        Self {
+            runs,
+            slots,
+            run_lookup: Default::default(),
+        }
+    }
+
+    fn intern_run(&mut self, run: &Arc<Vec<WireModel>>) -> u32 {
+        if let Some(last) = self.runs.last() {
+            if Arc::ptr_eq(last, run) {
+                return (self.runs.len() - 1) as u32;
+            }
+        }
+        if self.run_lookup.is_empty() && self.runs.len() < Self::LINEAR_LIMIT {
+            if let Some(pos) = self.runs.iter().position(|existing| Arc::ptr_eq(existing, run)) {
+                return pos as u32;
+            }
+            let id = self.runs.len() as u32;
+            self.runs.push(Arc::clone(run));
+            return id;
+        }
+        if self.run_lookup.is_empty() {
+            self.run_lookup.reserve(self.runs.len() * 2);
+            for (idx, existing) in self.runs.iter().enumerate() {
+                self.run_lookup.insert(Arc::as_ptr(existing) as usize, idx as u32);
+            }
+        }
+        let ptr = Arc::as_ptr(run) as usize;
+        if let Some(&id) = self.run_lookup.get(&ptr) {
+            return id;
+        }
+        let id = self.runs.len() as u32;
+        self.runs.push(Arc::clone(run));
+        self.run_lookup.insert(ptr, id);
+        id
     }
 
     pub(crate) fn push(&mut self, run: &Arc<Vec<WireModel>>, index: u32) {
-        self.0.push((Arc::clone(run), index));
+        let run_id = self.intern_run(run);
+        self.slots.push((run_id, index));
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.0.len()
+        self.slots.len()
+    }
+
+    pub(crate) fn slot_ref(&self, slot: u32) -> Option<(u32, u32)> {
+        self.slots.get(slot as usize).copied()
+    }
+
+    pub(crate) fn runs(&self) -> &[Arc<Vec<WireModel>>] {
+        &self.runs
+    }
+
+    pub(crate) fn has_any_stub(&self) -> bool {
+        self.slots.iter().any(|&(run_id, idx)| {
+            self.runs
+                .get(run_id as usize)
+                .and_then(|run| run.get(idx as usize))
+                .is_some_and(|wire| wire.stub.is_some())
+        })
     }
 
     pub(crate) fn get(&self, slot: u32) -> Option<&WireModel> {
-        let (run, index) = self.0.get(slot as usize)?;
-        run.get(*index as usize)
+        let &(run_id, index) = self.slots.get(slot as usize)?;
+        self.runs.get(run_id as usize)?.get(index as usize)
     }
 }
 
@@ -2043,6 +2184,51 @@ pub trait WireSource {
 }
 
 impl InteractionCandidates {
+    /// Restrict a whole-wire box query to affected entities. Preserve whether
+    /// the source was indexed, since that controls the box pick's AABB
+    /// fallback; materialized block stubs are shared without geometry clones.
+    pub(crate) fn retain_box_handles(
+        &mut self,
+        handles: &rustc_hash::FxHashSet<document::Handle>,
+    ) -> bool {
+        if self.segments.is_some() {
+            return false;
+        }
+        let wires = &self.wires;
+        if let Some(indices) = &mut self.wire_indices {
+            indices.retain(|&index| {
+                wires.slot(index)
+                    .and_then(|wire| crate::scene::Scene::handle_from_wire_name(&wire.name))
+                    .is_some_and(|handle| handles.contains(&handle))
+            });
+        } else {
+            let keep = |wire: &WireModel| {
+                crate::scene::Scene::handle_from_wire_name(&wire.name)
+                    .is_some_and(|handle| handles.contains(&handle))
+            };
+            let filtered = match wires {
+                CandidateWires::Snapshot(snapshot) => {
+                    let mut filtered = SharedWireRuns::with_capacity(snapshot.len());
+                    for (index, wire) in snapshot.iter().enumerate() {
+                        if keep(wire) {
+                            filtered.push(snapshot, index as u32);
+                        }
+                    }
+                    filtered
+                }
+                CandidateWires::Shared(runs) => {
+                    let slots = (0..runs.len() as u32)
+                        .filter(|&slot| runs.get(slot).is_some_and(keep))
+                        .filter_map(|slot| runs.slot_ref(slot))
+                        .collect();
+                    SharedWireRuns::from_parts(runs.runs().to_vec(), slots)
+                }
+            };
+            self.wires = CandidateWires::Shared(Arc::new(filtered));
+        }
+        true
+    }
+
     pub fn all(wires: Arc<Vec<WireModel>>) -> Self {
         Self {
             wires: CandidateWires::Snapshot(wires),
@@ -2055,6 +2241,30 @@ impl InteractionCandidates {
             pick_triangles: None,
             glyphs: None,
             query_aabb: None,
+            screen_rect: None,
+            screen_view: None,
+        }
+    }
+
+    /// Wrap an already-queried overlay [`SharedWireRuns`] so every slot is
+    /// passed to `materialize_stubs` without building or remapping primitive
+    /// reference vectors that stub expansion discards.
+    pub(crate) fn shared_indexed_all(
+        wires: Arc<SharedWireRuns>,
+        query_aabb: Option<[f64; 4]>,
+    ) -> Self {
+        let indices = (0..wires.len() as u32).collect();
+        Self {
+            wires: CandidateWires::Shared(wires),
+            wire_indices: Some(indices),
+            segments: None,
+            snap_points: None,
+            key_vertices: None,
+            key_segments: None,
+            fill_triangles: None,
+            pick_triangles: None,
+            glyphs: None,
+            query_aabb,
             screen_rect: None,
             screen_view: None,
         }
@@ -2214,40 +2424,68 @@ impl InteractionCandidates {
     /// an XY query, only the wires near it are kept, the copies' and the
     /// plain ones alike, and no blank slot.
     pub(crate) fn materialize_stubs(self) -> Self {
-        if !self.iter().any(|wire| wire.stub.is_some()) {
+        const STUB_PAR_THRESHOLD: usize = 512;
+        const STUB_CHUNK_SIZE: usize = 512;
+
+        if !self.has_stubs() {
             return self;
         }
         let started = crate::perf::enabled().then(iced::time::Instant::now);
         let source_candidates = self.len();
         if let Some(indices) = &self.wire_indices {
-            // A single stub can share the aperture with thousands of plain
-            // wires. Expand the stub and keep the existing wire slots shared.
-            let mut runs = SharedWireRuns(Vec::with_capacity(indices.len()));
-            for &slot in indices {
-                let Some(wire) = self.wires.slot(slot) else {
-                    continue;
-                };
-                if wire.stub.is_some() {
-                    let mut expanded = Vec::new();
-                    crate::scene::model::instance_model::expand_stub_near_into(
-                        wire,
-                        self.query_aabb,
-                        &mut expanded,
-                    );
-                    let expanded = Arc::new(expanded);
-                    for index in 0..expanded.len() as u32 {
-                        runs.push(&expanded, index);
-                    }
-                } else {
-                    match &self.wires {
-                        CandidateWires::Snapshot(wires) => runs.push(wires, slot),
-                        CandidateWires::Shared(wires) => {
-                            let (run, index) = &wires.0[slot as usize];
-                            runs.push(run, *index);
-                        }
-                    }
+            // Keep plain wire slots zero-copy via a shared run table so
+            // materialized candidates pay at most one run `Arc` per parallel
+            // chunk instead of cloning/dropping an `Arc` and `Vec` per wire.
+            let mut base_runs = match &self.wires {
+                CandidateWires::Snapshot(wires) => vec![Arc::clone(wires)],
+                CandidateWires::Shared(src_runs) => src_runs.runs().to_vec(),
+            };
+            let base_expanded_run = base_runs.len() as u32;
+
+            let runs = if indices.len() < STUB_PAR_THRESHOLD {
+                let (expanded, slots) = materialize_index_chunk(
+                    indices,
+                    self.query_aabb,
+                    &self.wires,
+                    base_expanded_run,
+                );
+                if !expanded.is_empty() {
+                    base_runs.push(Arc::new(expanded));
                 }
-            }
+                SharedWireRuns::from_parts(base_runs, slots)
+            } else {
+                use crate::par::prelude::*;
+
+                let chunk_count = indices.len().div_ceil(STUB_CHUNK_SIZE);
+                let chunks: Vec<(Vec<WireModel>, Vec<(u32, u32)>)> = (0..chunk_count)
+                    .into_par_iter()
+                    .map(|chunk_idx| {
+                        let start = chunk_idx * STUB_CHUNK_SIZE;
+                        let end = (start + STUB_CHUNK_SIZE).min(indices.len());
+                        materialize_index_chunk(
+                            &indices[start..end],
+                            self.query_aabb,
+                            &self.wires,
+                            base_expanded_run + chunk_idx as u32,
+                        )
+                    })
+                    .collect();
+
+                let total_slots: usize = chunks.iter().map(|(_, slots)| slots.len()).sum();
+                let mut all_slots = Vec::with_capacity(total_slots);
+                let empty_run = Arc::new(Vec::new());
+                base_runs.reserve(chunks.len());
+                for (expanded, slots) in chunks {
+                    base_runs.push(if expanded.is_empty() {
+                        Arc::clone(&empty_run)
+                    } else {
+                        Arc::new(expanded)
+                    });
+                    all_slots.extend_from_slice(&slots);
+                }
+                SharedWireRuns::from_parts(base_runs, all_slots)
+            };
+
             let elapsed_ms = crate::perf::elapsed_ms(started);
             if elapsed_ms >= 3.0 {
                 crate::perf_record!(
@@ -2265,24 +2503,30 @@ impl InteractionCandidates {
                 ..Self::all(Arc::new(Vec::new()))
             };
         }
-        let mut wires = Vec::new();
-        for wire in self.iter() {
-            // A blank slot holds nothing, and a plain wire whose box misses
-            // the query could not be hit there: neither is copied, like a
-            // block copy's leaf away from the query.
-            if wire.stub.is_none()
-                && self
-                    .query_aabb
-                    .is_some_and(|query| holds_nothing(wire) || misses_query(wire, query))
-            {
-                continue;
+
+        let slot_count = self.wires.slot_count();
+        let wires = if slot_count < STUB_PAR_THRESHOLD {
+            materialize_unindexed_range(&self.wires, 0..slot_count, self.query_aabb)
+        } else {
+            use crate::par::prelude::*;
+
+            let chunk_count = slot_count.div_ceil(STUB_CHUNK_SIZE);
+            let chunks: Vec<Vec<WireModel>> = (0..chunk_count)
+                .into_par_iter()
+                .map(|chunk_idx| {
+                    let start = chunk_idx * STUB_CHUNK_SIZE;
+                    let end = (start + STUB_CHUNK_SIZE).min(slot_count);
+                    materialize_unindexed_range(&self.wires, start..end, self.query_aabb)
+                })
+                .collect();
+            let total: usize = chunks.iter().map(Vec::len).sum();
+            let mut merged = Vec::with_capacity(total);
+            for chunk in chunks {
+                merged.extend(chunk);
             }
-            crate::scene::model::instance_model::expand_stub_near_into(
-                wire,
-                self.query_aabb,
-                &mut wires,
-            );
-        }
+            merged
+        };
+
         let elapsed_ms = crate::perf::elapsed_ms(started);
         if elapsed_ms >= 3.0 {
             crate::perf_record!(
@@ -2576,6 +2820,69 @@ impl<'a> Iterator for WireIter<'a> {
             },
         }
     }
+}
+
+/// Expand stubs within one chunk of indexed candidate slots while keeping plain
+/// slots referencing their source run directly.
+fn materialize_index_chunk(
+    chunk_indices: &[u32],
+    query_aabb: Option<[f64; 4]>,
+    wires: &CandidateWires,
+    expanded_run_id: u32,
+) -> (Vec<WireModel>, Vec<(u32, u32)>) {
+    let mut expanded = Vec::new();
+    let mut slots = Vec::with_capacity(chunk_indices.len());
+    for &slot in chunk_indices {
+        let resolved = match wires {
+            CandidateWires::Snapshot(src) => src.get(slot as usize).map(|wire| (wire, (0, slot))),
+            CandidateWires::Shared(src_runs) => src_runs.slot_ref(slot).and_then(|(run_id, idx)| {
+                src_runs
+                    .runs()
+                    .get(run_id as usize)
+                    .and_then(|run| run.get(idx as usize))
+                    .map(|wire| (wire, (run_id, idx)))
+            }),
+        };
+        let Some((wire, plain_slot)) = resolved else {
+            continue;
+        };
+        if wire.stub.is_some() {
+            let start = expanded.len() as u32;
+            crate::scene::model::instance_model::expand_stub_near_into(
+                wire,
+                query_aabb,
+                &mut expanded,
+            );
+            for idx in start..expanded.len() as u32 {
+                slots.push((expanded_run_id, idx));
+            }
+        } else {
+            slots.push(plain_slot);
+        }
+    }
+    (expanded, slots)
+}
+
+/// Expand stubs across an unindexed slot range, dropping blank or off-query
+/// plain wires that the caller's XY aperture cannot hit.
+fn materialize_unindexed_range(
+    wires: &CandidateWires,
+    range: std::ops::Range<usize>,
+    query_aabb: Option<[f64; 4]>,
+) -> Vec<WireModel> {
+    let mut out = Vec::with_capacity(range.len());
+    for slot in range {
+        let Some(wire) = wires.slot(slot as u32) else {
+            continue;
+        };
+        if wire.stub.is_none()
+            && query_aabb.is_some_and(|query| holds_nothing(wire) || misses_query(wire, query))
+        {
+            continue;
+        }
+        crate::scene::model::instance_model::expand_stub_near_into(wire, query_aabb, &mut out);
+    }
+    out
 }
 
 /// Whether a wire holds nothing to pick or snap: a blank slot of the

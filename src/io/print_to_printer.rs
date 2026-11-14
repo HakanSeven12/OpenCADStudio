@@ -926,6 +926,36 @@ pub(crate) fn windows_printer_media(
     })
 }
 
+/// Whether `printer`'s default sheet and orientation already are a
+/// `w_mm` x `h_mm` page (within a millimetre).
+#[cfg(target_os = "windows")]
+fn default_sheet_fits(printer: &str, w_mm: f64, h_mm: f64) -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{DEVMODEW, DMORIENT_LANDSCAPE, DM_ORIENTATION};
+    let Some(media) = windows_printer_media(printer) else {
+        return false;
+    };
+    let listed = media.default_id.and_then(|id| {
+        let k = media.ids.iter().position(|&known| known == id)?;
+        media.sizes_tenths_mm.get(k).copied()
+    });
+    let Some((dw, dh)) = listed.or(media.default_tenths_mm) else {
+        return false;
+    };
+    let device_wide: Vec<u16> = printer.trim().encode_utf16().chain(Some(0)).collect();
+    let landscape = with_printer_devmode(&device_wide, |_, _| true).is_some_and(|buf| {
+        // SAFETY: the buffer holds at least a public DEVMODEW.
+        let dm = unsafe { &*(buf.as_ptr() as *const DEVMODEW) };
+        let orientation = unsafe { dm.Anonymous1.Anonymous1.dmOrientation };
+        dm.dmFields & DM_ORIENTATION != 0 && orientation == DMORIENT_LANDSCAPE as i16
+    });
+    let (short, long) = (
+        f64::from(dw.min(dh)) / 10.0,
+        f64::from(dw.max(dh)) / 10.0,
+    );
+    let (sheet_w, sheet_h) = if landscape { (long, short) } else { (short, long) };
+    (sheet_w - w_mm).abs() <= 1.0 && (sheet_h - h_mm).abs() <= 1.0
+}
+
 #[cfg(target_os = "windows")]
 fn gdi_raster_print(
     path: &std::path::Path,
@@ -1309,6 +1339,21 @@ fn dispatch_to_printer_opts(path: &std::path::Path, opts: &PrintOptions) -> Resu
             default_printer.as_deref(),
             pdf_printto_command().is_some(),
         )?;
+        // A PDF application prints on the printer's default sheet and
+        // orientation; any other page goes the direct route, which sets
+        // them (#2971).
+        let route = match route {
+            PrintRoute::PdfApplication { printer }
+                if !crate::scene::model::pdf_raster::page_size_inches(
+                    &path.to_string_lossy(),
+                    "1",
+                )
+                .is_some_and(|(w, h)| default_sheet_fits(&printer, w * 25.4, h * 25.4)) =>
+            {
+                PrintRoute::Direct { printer }
+            }
+            route => route,
+        };
         let printer = route.printer().to_string();
         let via_application = match &route {
             PrintRoute::PdfApplication { .. } => {

@@ -88,6 +88,25 @@ impl PlotQuality {
     }
 }
 
+/// Parses a DPI field of the plot dialog. Blank (or zero / non-numeric) means
+/// "not set": native raster pixels, full-precision vectors. Decimals such as
+/// `600.0` or `600,5` count as typed values instead of silently reading as blank;
+/// a comma before exactly three digits is a thousands separator (`1,200`).
+pub fn parse_dpi(text: &str) -> Option<u32> {
+    let text = text.trim();
+    let text = match text.split_once(',') {
+        Some((_, tail)) if tail.len() == 3 && tail.bytes().all(|b| b.is_ascii_digit()) => {
+            text.replace(',', "")
+        }
+        _ => text.replace(',', "."),
+    };
+    let value: f64 = text.parse().ok()?;
+    if !value.is_finite() || value < 0.5 {
+        return None;
+    }
+    Some(value.round().min(u32::MAX as f64) as u32)
+}
+
 /// The shaded-viewport plot modes, in dialog, listing and validation order.
 pub const SHADE_PLOT_MODES: &[&str] = &[
     "As displayed",
@@ -271,6 +290,19 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parse_dpi_blank_is_unset_and_typed_values_are_kept() {
+        assert_eq!(super::parse_dpi(""), None);
+        assert_eq!(super::parse_dpi("  "), None);
+        assert_eq!(super::parse_dpi("0"), None);
+        assert_eq!(super::parse_dpi("abc"), None);
+        assert_eq!(super::parse_dpi(" 600 "), Some(600));
+        assert_eq!(super::parse_dpi("2400"), Some(2400));
+        assert_eq!(super::parse_dpi("600.0"), Some(600));
+        assert_eq!(super::parse_dpi("1200,4"), Some(1200));
+        assert_eq!(super::parse_dpi("1,200"), Some(1200));
+    }
+
     use crate::scene::model::wire_model::TangentGeom;
     use crate::scene::WireModel;
 

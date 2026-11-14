@@ -14,13 +14,33 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::host::{PluginRequestError, PluginRequestSender};
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
 const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The proxy per-direction read/write deadline (review finding 13):
+/// `OCS_PLUGIN_PROXY_TIMEOUT_SECS` overrides the default; `0` keeps the
+/// default (per-read timeouts cannot meaningfully be "off" on a proxy).
+fn proxy_timeout() -> Duration {
+    match std::env::var("OCS_PLUGIN_PROXY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        Some(secs) if secs > 0 => Duration::from_secs(secs),
+        _ => REQUEST_TIMEOUT,
+    }
+}
+
+/// Constant-time equality for the pre-framing auth token (review finding 11):
+/// no branch depends on where a mismatch appears, so a local process probing
+/// the port cannot learn the token byte-at-a-time from response timing.
+fn tokens_equal(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 /// Length of the pre-framing auth token exchanged when a child connects to
 /// the request proxy. Any local process can see the port, so the token (shared
 /// only with the spawned child via an environment variable) prevents arbitrary
@@ -80,6 +100,8 @@ pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(
     }
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
+    // Wire the per-frame dialog decode budget (see `crate::dialog`).
+    crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf)?;
     Ok(msg)
 }
@@ -114,10 +136,19 @@ fn read_with_poll<R: Read>(
     reader: &mut R,
     buf: &mut [u8],
     poll: &mut dyn FnMut() -> Result<(), PluginRequestError>,
+    deadline: Option<Instant>,
 ) -> Result<(), PollError> {
     use std::io::ErrorKind;
     let mut off = 0;
     while off < buf.len() {
+        if deadline.is_some_and(|end| Instant::now() >= end) {
+            // P1-9: a polled request is bounded in total wall time; the peer
+            // might answer forever-slowly and the poll tick gave no signal.
+            return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "proxy request exceeded its total deadline",
+            ))));
+        }
         match reader.read(&mut buf[off..]) {
             Ok(0) => {
                 return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
@@ -142,9 +173,10 @@ fn read_with_poll<R: Read>(
 fn recv_framed_with_poll<R: Read>(
     reader: &mut R,
     poll: &mut dyn FnMut() -> Result<(), PluginRequestError>,
+    deadline: Option<Instant>,
 ) -> Result<PluginResponse, PollError> {
     let mut len_buf = [0u8; 8];
-    read_with_poll(reader, &mut len_buf, poll)?;
+    read_with_poll(reader, &mut len_buf, poll, deadline)?;
     let len = u64::from_le_bytes(len_buf) as usize;
     if len == 0 {
         return Err(ProxyError::Empty.into());
@@ -153,7 +185,9 @@ fn recv_framed_with_poll<R: Read>(
         return Err(ProxyError::TooLarge(len).into());
     }
     let mut buf = vec![0u8; len];
-    read_with_poll(reader, &mut buf, poll)?;
+    read_with_poll(reader, &mut buf, poll, deadline)?;
+    // Wire the per-frame dialog decode budget (see `crate::dialog`).
+    crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf).map_err(ProxyError::Encode)?;
     Ok(msg)
 }
@@ -175,7 +209,7 @@ impl ProxyPluginRequestSender {
         let mut stream = TcpStream::connect((host, port))?;
         stream.write_all(token)?;
         stream.flush()?;
-        stream.set_read_timeout(Some(REQUEST_TIMEOUT))?;
+        stream.set_read_timeout(Some(proxy_timeout()))?;
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
         })
@@ -210,7 +244,10 @@ impl ProxyPluginRequestSender {
             .set_read_timeout(Some(POLL_INTERVAL))
             .map_err(|e| PluginRequestError(e.to_string()))?;
 
-        let result = match recv_framed_with_poll(&mut *stream, poll) {
+        // P1-9: the polled request totals FOUR read-timeout budgets of wall
+        // time instead of waiting forever between poll ticks.
+        let deadline = Instant::now() + proxy_timeout() * 4;
+        let result = match recv_framed_with_poll(&mut *stream, poll, Some(deadline)) {
             Ok(resp) => Ok(resp),
             Err(PollError::Interrupted(e)) => {
                 // A partial response cannot be reused after interruption.
@@ -237,10 +274,34 @@ impl PluginRequestSender for ProxyPluginRequestSender {
     }
 }
 
+/// Deadline for reading the auth token on an accepted proxy connection:
+/// authentication must not be a place where a silent peer parks a thread.
+const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Live request-proxy connection-handler threads. Each slow client parks one
+/// thread (and its stack); the cap turns an unbounded backlog into a refused
+/// connection instead of unbounded thread growth.
+const MAX_PROXY_HANDLER_THREADS: usize = 512;
+
+static PROXY_HANDLER_THREADS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// RAII slot so a handler thread's cap count always leaves with its thread.
+struct HandlerSlot;
+
+impl Drop for HandlerSlot {
+    fn drop(&mut self) {
+        PROXY_HANDLER_THREADS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Read the first [`PROXY_TOKEN_LEN`] bytes from `stream` and verify they
 /// match `expected`. Returns `false` if the peer sent the wrong token or
-/// disconnected.
+/// disconnected. The read runs under [`AUTH_TIMEOUT`].
 fn verify_token(stream: &mut TcpStream, expected: &[u8; PROXY_TOKEN_LEN]) -> bool {
+    if let Err(e) = stream.set_read_timeout(Some(AUTH_TIMEOUT)) {
+        eprintln!("[plugin] proxy cannot set the auth deadline: {e}");
+    }
     let mut buf = [0u8; PROXY_TOKEN_LEN];
     match stream.read_exact(&mut buf) {
         Ok(()) => {}
@@ -249,7 +310,7 @@ fn verify_token(stream: &mut TcpStream, expected: &[u8; PROXY_TOKEN_LEN]) -> boo
             return false;
         }
     }
-    if buf != *expected {
+    if !tokens_equal(&buf, expected) {
         eprintln!("[plugin] proxy auth token mismatch; closing connection");
         return false;
     }
@@ -272,8 +333,23 @@ pub fn run_request_proxy(
         if !verify_token(&mut stream, &token) {
             continue;
         }
+        // P1-9: the thread cap, plus read/write deadlines on the connection —
+        // every slow client parks at most one bounded thread.
+        if PROXY_HANDLER_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            >= MAX_PROXY_HANDLER_THREADS
+        {
+            PROXY_HANDLER_THREADS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            eprintln!(
+                "[plugin] proxy handler thread cap {MAX_PROXY_HANDLER_THREADS} reached; \
+                 refusing the connection"
+            );
+            continue;
+        }
+        let _ = stream.set_read_timeout(Some(proxy_timeout()));
+        let _ = stream.set_write_timeout(Some(proxy_timeout()));
         let sender = Arc::clone(&sender);
         std::thread::spawn(move || {
+            let _slot = HandlerSlot;
             while let Ok(req) = recv_framed(&mut stream) {
                 let resp = match sender.request(req) {
                     Ok(r) => r,
@@ -308,8 +384,23 @@ pub fn run_request_proxy_with_shutdown(
                 if !verify_token(&mut stream, &token) {
                     continue;
                 }
+                // P1-9: the thread cap and per-direction deadlines apply here
+                // exactly like the plain variant above.
+                if PROXY_HANDLER_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    >= MAX_PROXY_HANDLER_THREADS
+                {
+                    PROXY_HANDLER_THREADS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    eprintln!(
+                        "[plugin] proxy handler thread cap {MAX_PROXY_HANDLER_THREADS} reached; \
+                         refusing the connection"
+                    );
+                    continue;
+                }
+                let _ = stream.set_read_timeout(Some(proxy_timeout()));
+                let _ = stream.set_write_timeout(Some(proxy_timeout()));
                 let sender = Arc::clone(&sender);
                 std::thread::spawn(move || {
+                    let _slot = HandlerSlot;
                     let mut stream = stream;
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         loop {
@@ -442,13 +533,44 @@ mod tests {
             block_next: false,
         };
         let mut polls = 0;
-        let resp = recv_framed_with_poll(&mut reader, &mut || {
-            polls += 1;
-            Ok(())
-        })
+        let resp = recv_framed_with_poll(
+            &mut reader,
+            &mut || {
+                polls += 1;
+                Ok(())
+            },
+            None,
+        )
         .unwrap();
         assert!(matches!(resp, PluginResponse::Bool(true)));
         // One byte, one block for every byte except the last (no poll after EOF).
         assert_eq!(polls, framed.len() - 1);
+    }
+
+    /// A polled request is bounded in total wall time even when the peer
+    /// stalls forever between poll ticks (P1-9).
+    #[test]
+    fn polled_request_respects_total_deadline() {
+        use std::io::Read as _;
+
+        struct Stalled;
+        impl Read for Stalled {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "would block",
+                ))
+            }
+        }
+
+        let mut reader = Stalled;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+        let result = recv_framed_with_poll(&mut reader, &mut || Ok(()), Some(deadline));
+        match result {
+            Err(PollError::Io(ProxyError::Io(e))) => {
+                assert_eq!(e.kind(), std::io::ErrorKind::TimedOut)
+            }
+            other => panic!("expected the total-deadline timeout, got {other:?}"),
+        }
     }
 }

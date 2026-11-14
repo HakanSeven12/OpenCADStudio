@@ -8,8 +8,8 @@ use document::objects::{
 use document::EntityType;
 use kernel::brep::{Body, Surface};
 
-use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
+use crate::entities::transform::EntityTransform;
 use crate::scene::model::object::{
     GripApply, GripDef, GripShape, PropSection, PropValue, Property,
 };

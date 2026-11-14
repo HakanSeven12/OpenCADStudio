@@ -54,7 +54,137 @@ pub enum TextStyle {
     Danger,
 }
 
+/// Maximum nesting depth accepted when decoding dialog/panel UI data. Real
+/// dialogs nest a handful of rows/fields deep; a hostile frame that nests
+/// `Row`/`Fields` controls tens of thousands deep previously overflowed the
+/// decoding thread's stack (which aborts the host/runner process). The cap is
+/// well above every legitimate layout and far below any stack limit.
+pub(crate) const MAX_DIALOG_NESTING: usize = 64;
+
+/// Maximum total control/value nodes accepted per top-level decoded dialog
+/// value, bounding allocation and CPU magnification from shared sub-blocks.
+pub(crate) const MAX_DIALOG_NODES: usize = 10_000;
+
+/// Per-thread `DialogControl`/`DialogValue` decode budget. `depth` is the
+/// current recursion depth (0 outside a decode); `nodes` counts total dialog
+/// nodes decoded within the current frame (re-zeroed by
+/// [`dialog_decode_frame_begin`] at each frame boundary).
+#[derive(Clone, Copy)]
+struct DialogDecodeBudget {
+    depth: usize,
+    nodes: usize,
+}
+
+thread_local! {
+    static DIALOG_DECODE_BUDGET: std::cell::Cell<DialogDecodeBudget> =
+        const { std::cell::Cell::new(DialogDecodeBudget { depth: 0, nodes: 0 }) };
+}
+
+/// Reset the per-thread decode budget at a frame boundary: call this right
+/// before decoding one whole wire frame so the node budget applies per frame
+/// rather than accumulating across frames.
+///
+/// The production callers (the wire transports) only exist in the `host`
+/// feature build; the feature-less data-contract build keeps the helper behind
+/// the same gate (review finding 15) while tests still reference it.
+#[cfg(any(feature = "host", test))]
+pub(crate) fn dialog_decode_frame_begin() {
+    DIALOG_DECODE_BUDGET.with(|budget| {
+        budget.set(DialogDecodeBudget { depth: 0, nodes: 0 });
+    });
+}
+
+/// Enter one dialog node during a decode. Returns `Err` when the payload
+/// exceeds the nesting or node budget; the error aborts the decode before the
+/// next level of recursion can consume stack.
+fn dialog_decode_enter() -> Result<(), String> {
+    DIALOG_DECODE_BUDGET.with(|budget| {
+        let mut budget = budget.get();
+        budget.depth += 1;
+        budget.nodes += 1;
+        DIALOG_DECODE_BUDGET.set(budget);
+        if budget.depth > MAX_DIALOG_NESTING {
+            return Err(format!(
+                "dialog control nesting exceeds the decoder depth budget ({MAX_DIALOG_NESTING})"
+            ));
+        }
+        if budget.nodes > MAX_DIALOG_NODES {
+            return Err(format!(
+                "dialog value exceeds the decoder node budget ({MAX_DIALOG_NODES})"
+            ));
+        }
+        Ok(())
+    })
+}
+
+/// Leave one dialog node (restores the depth budget even on decode failure).
+fn dialog_decode_exit() {
+    DIALOG_DECODE_BUDGET.with(|budget| {
+        let mut budget = budget.get();
+        budget.depth = budget.depth.saturating_sub(1);
+        DIALOG_DECODE_BUDGET.set(budget);
+    });
+}
+
+struct DialogDecodeGuard;
+
+impl Drop for DialogDecodeGuard {
+    fn drop(&mut self) {
+        dialog_decode_exit();
+    }
+}
+
+/// Charge `count` decoded dialog nodes against the frame node budget.
+fn dialog_decode_add_nodes(count: usize) -> Result<(), String> {
+    DIALOG_DECODE_BUDGET.with(|budget| {
+        let mut budget = budget.get();
+        budget.nodes = budget.nodes.saturating_add(count);
+        DIALOG_DECODE_BUDGET.set(budget);
+        if budget.nodes > MAX_DIALOG_NODES {
+            Err(format!(
+                "dialog value exceeds the decoder node budget ({MAX_DIALOG_NODES})"
+            ))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+/// Bounded deserialize helper for the recursive `Vec<DialogControl>` carriers
+/// (`Row`, `Column`, `Fields` and `DialogRow`). Charges one nesting level and
+/// the decoded element total against the frame budget: a payload past the
+/// budget refuses before the next level recurses, so the decoding stack stays
+/// bounded. The wire layout is unchanged.
+fn budgeted_controls<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<DialogControl>, D::Error> {
+    dialog_decode_enter()
+        .map_err(<D::Error as serde::de::Error>::custom)?;
+    let _guard = DialogDecodeGuard;
+    let controls = Vec::<DialogControl>::deserialize(deserializer)?;
+    dialog_decode_add_nodes(controls.len())
+        .map_err(<D::Error as serde::de::Error>::custom)?;
+    Ok(controls)
+}
+
+/// Bounded deserialize helper for the recursive `DialogValue::Fields` map.
+fn budgeted_dialog_value_map<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<HashMap<String, DialogValue>, D::Error> {
+    dialog_decode_enter()
+        .map_err(<D::Error as serde::de::Error>::custom)?;
+    let _guard = DialogDecodeGuard;
+    let map = HashMap::<String, DialogValue>::deserialize(deserializer)?;
+    dialog_decode_add_nodes(map.len())
+        .map_err(<D::Error as serde::de::Error>::custom)?;
+    Ok(map)
+}
+
 /// A single interactive control inside a dialog row.
+///
+/// Deserialization is bounded (see [`MAX_DIALOG_NESTING`]): the wire layout is
+/// unchanged, but a payload whose `Row`/`Column`/`Fields` nesting passes the
+/// decoder budget is rejected instead of overflowing the stack.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogControl {
     /// Informational / descriptive static text.
@@ -110,6 +240,7 @@ pub enum DialogControl {
     Fields {
         id: String,
         title: Option<String>,
+        #[serde(deserialize_with = "budgeted_controls")]
         controls: Vec<DialogControl>,
         #[serde(default)]
         collapsed: bool,
@@ -138,6 +269,7 @@ pub enum DialogControl {
     },
     /// A horizontal row grouping of controls.
     Row {
+        #[serde(deserialize_with = "budgeted_controls")]
         controls: Vec<DialogControl>,
         #[serde(default)]
         align_h: Option<HorizontalAlign>,
@@ -146,6 +278,7 @@ pub enum DialogControl {
     },
     /// A vertical column grouping of controls.
     Column {
+        #[serde(deserialize_with = "budgeted_controls")]
         controls: Vec<DialogControl>,
         #[serde(default)]
         align_h: Option<HorizontalAlign>,
@@ -229,6 +362,7 @@ impl DialogControl {
 /// A horizontal row of controls inside a dialog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DialogRow {
+    #[serde(deserialize_with = "budgeted_controls")]
     pub controls: Vec<DialogControl>,
     #[serde(default)]
     pub align_h: Option<HorizontalAlign>,
@@ -449,7 +583,10 @@ impl QuadPanelDef {
 /// Value returned by an interactive control.
 ///
 /// Compatibility rule: new variants MUST be appended at the end so existing
-/// plugins keep their bincode discriminant indices (`0..=7`).
+/// plugins keep their bincode discriminant indices (`0..=7`). Deserialization
+/// is bounded (see [`MAX_DIALOG_NESTING`]): the wire layout is unchanged, but
+/// a payload whose nested `Fields` maps pass the decoder budget is rejected
+/// instead of overflowing the stack.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogValue {
     Text(String),
@@ -458,7 +595,7 @@ pub enum DialogValue {
     Choice { index: usize, text: String },
     Color([u8; 3]),
     FilePath(String),
-    Fields(HashMap<String, DialogValue>),
+    Fields(#[serde(deserialize_with = "budgeted_dialog_value_map")] HashMap<String, DialogValue>),
     Table(Vec<Vec<String>>),
     /// Dynamically replaces the options list and selected index of a Choice control.
     ChoiceOptions {
@@ -916,6 +1053,66 @@ mod tests {
                 align_h: Some(HorizontalAlign::Center),
             }
         );
+    }
+
+    /// A deeply nested `Row` chain still decodes under the budget unchanged.
+    #[test]
+    fn dialog_decode_accepts_nesting_within_budget() {
+        let mut control = DialogControl::Text {
+            id: "leaf".to_string(),
+            label: String::new(),
+            default: String::new(),
+        };
+        for _ in 0..MAX_DIALOG_NESTING - 1 {
+            control = DialogControl::row(vec![control]);
+        }
+        dialog_decode_frame_begin();
+        let bytes = bincode::serialize(&control).expect("serialize dialog control");
+        let restored: DialogControl = bincode::deserialize(&bytes).expect("decode dialog control");
+        assert_eq!(restored, control);
+    }
+
+    /// A payload nesting past the budget is REFUSED instead of overflowing the
+    /// decoding thread's stack (which aborts the whole host/runner process).
+    #[test]
+    fn dialog_decode_rejects_nesting_past_budget() {
+        let mut control = DialogControl::Text {
+            id: "leaf".to_string(),
+            label: String::new(),
+            default: String::new(),
+        };
+        for _ in 0..MAX_DIALOG_NESTING + 8 {
+            control = DialogControl::row(vec![control]);
+        }
+        dialog_decode_frame_begin();
+        let bytes = bincode::serialize(&control).expect("serialize dialog control");
+        match bincode::deserialize::<DialogControl>(&bytes) {
+            Ok(_) => panic!("over-budget dialog decoded"),
+            Err(error) => assert!(
+                error.to_string().contains("depth budget"),
+                "expected the depth-budget rejection, got: {error}"
+            ),
+        }
+    }
+
+    /// A flat frame with more dialog nodes than the node budget (a wide
+    /// dialogs/panels batch) is refused before decoding allocates for it.
+    #[test]
+    fn dialog_decode_rejects_node_budget_overflow() {
+        let flat = DialogValue::Fields(
+            (0..MAX_DIALOG_NODES + 1)
+                .map(|i| (format!("field{i}"), DialogValue::Bool(true)))
+                .collect(),
+        );
+        dialog_decode_frame_begin();
+        let bytes = bincode::serialize(&flat).expect("serialize dialog value");
+        match bincode::deserialize::<DialogValue>(&bytes) {
+            Ok(_) => panic!("over-budget dialog value decoded"),
+            Err(error) => assert!(
+                error.to_string().contains("node budget"),
+                "expected the node-budget rejection, got: {error}"
+            ),
+        }
     }
 }
 

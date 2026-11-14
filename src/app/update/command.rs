@@ -369,6 +369,9 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_command_append_char(&mut self, s: String) -> Task<Message> {
+        if let Some(task) = self.shift_glyph(&s) {
+            return task;
+        }
         // While the MText preview is up, typed glyphs edit it directly.
         if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
             if s.chars().all(|c| !c.is_control()) {
@@ -1513,6 +1516,7 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn on_command_escape(&mut self) -> Task<Message> {
         self.table_edit_command_line = false;
+        self.tabs[self.active_tab].multiple_cmd = None;
         self.tabs[self.active_tab].measurement.clear();
         // Escape also closes the overlapping-objects list.
         if self.cycle_candidates.take().is_some() {
@@ -3415,9 +3419,10 @@ impl OpenCADStudio {
     }
 
     /// Read the system clipboard for PASTESPEC — its text, then its picture
-    /// — and report both at once, so the prompt lists every format on hand.
-    /// The web gets the picture's encoded file from the Clipboard API; native
-    /// gets pixels, kept as a PNG.
+    /// and the link a copied range of cells comes with — and report them at
+    /// once, so the prompt lists every format on hand. The web gets the
+    /// picture's encoded file from the Clipboard API; native gets pixels,
+    /// kept as a PNG.
     pub(in crate::app) fn read_system_clipboard_formats(&self) -> Task<Message> {
         use crate::io::ole_embed::EmbeddedImage;
         #[cfg(target_arch = "wasm32")]
@@ -3430,7 +3435,7 @@ impl OpenCADStudio {
                         .and_then(|(name, bytes)| EmbeddedImage::from_bytes(name, bytes).ok());
                     (text, picture)
                 },
-                |(text, picture)| Message::PasteSpecial(text, picture),
+                |(text, picture)| Message::PasteSpecial(text, picture, None),
             )
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -3447,7 +3452,7 @@ impl OpenCADStudio {
                             name: format!("{}.png", pasted_image_stem()),
                         })
                     });
-                    Message::PasteSpecial(text.clone(), picture)
+                    Message::PasteSpecial(text.clone(), picture, crate::sys::clipboard_link::read())
                 })
             })
         }
@@ -4799,8 +4804,7 @@ impl OpenCADStudio {
                     };
                     match result {
                         Ok(Some(staged)) => {
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             changed = true;
                         }

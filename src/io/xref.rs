@@ -1415,6 +1415,32 @@ pub fn collect_entries_with_prev(
     unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
     prev: &std::collections::HashMap<u64, std::time::SystemTime>,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
+    collect_entries_impl(doc, base_dir, unloaded, prev, true)
+}
+
+/// Resolve one host-owned row without applying the manager's nested-row
+/// deduplication filter. A direct, uninserted record can intentionally be
+/// hidden by that filter immediately after a path edit; lifecycle responses
+/// still need to serialize the row they just changed.
+pub(crate) fn collect_direct_entry_with_prev(
+    doc: &document::Document,
+    base_dir: &Path,
+    unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
+    prev: &std::collections::HashMap<u64, std::time::SystemTime>,
+    key: u64,
+) -> Option<crate::io::xref_model::ReferenceEntry> {
+    collect_entries_impl(doc, base_dir, unloaded, prev, false)
+        .into_iter()
+        .find(|entry| entry.key == key && entry.parent_key.is_none())
+}
+
+fn collect_entries_impl(
+    doc: &document::Document,
+    base_dir: &Path,
+    unloaded: &std::collections::HashSet<crate::io::xref_model::UnloadKey>,
+    prev: &std::collections::HashMap<u64, std::time::SystemTime>,
+    deduplicate_nested: bool,
+) -> Vec<crate::io::xref_model::ReferenceEntry> {
     use crate::io::xref_model::{
         child_key, decide_status, normalize_lexical, RefKind, RefStatus, RefType, ReferenceEntry,
         UnloadKey,
@@ -1699,7 +1725,7 @@ pub fn collect_entries_with_prev(
     // so a nested reference showed up twice: once at the top, once under its
     // parent (#2838). A top-level row the host never inserts itself, whose
     // file the walk found under a parent, is that nested row.
-    {
+    if deduplicate_nested {
         let nested_files: HashSet<String> = entries
             .iter()
             .filter(|e| e.parent_key.is_some())
@@ -3092,14 +3118,21 @@ pub fn set_ref_path(doc: &mut Document, key: u64, new_raw: &str) -> Result<Strin
     }
 }
 
-/// Convert one reference's stored path to `pathtype` against `host_path`.
-/// Verbatim store on success; neutral errors otherwise.
-pub fn apply_pathtype(
+#[derive(Debug)]
+pub(crate) enum ApplyPathtypeError {
+    MissingReference,
+    Conversion(crate::io::xref_model::PathtypeError),
+    Store(String),
+}
+
+/// Typed implementation shared by the UI wrapper and automation. Keeping the
+/// conversion variant intact prevents stable API errors depending on locale.
+pub(crate) fn apply_pathtype_typed(
     doc: &mut Document,
     key: u64,
     pathtype: crate::io::xref_model::Pathtype,
     host_path: &Path,
-) -> Result<String, String> {
+) -> Result<String, ApplyPathtypeError> {
     let saved = match find_target(doc, key) {
         Some(RefTarget::DwgXref { name, .. }) => doc
             .block_records
@@ -3121,7 +3154,7 @@ pub fn apply_pathtype(
             }
         }
         Some(RefTarget::PointCloud { name, .. }) => name,
-        None => return Err(crate::t!("XREF: no loaded reference with that key.").to_string()),
+        None => return Err(ApplyPathtypeError::MissingReference),
     };
     // A stored relative path first has to be resolved against its current host
     // folder.  Passing it straight to `to_pathtype_result` made `Full` a
@@ -3142,17 +3175,33 @@ pub fn apply_pathtype(
     };
     match crate::io::xref_model::to_pathtype_result(&effective, host_path, pathtype) {
         Ok(next) => {
-            set_ref_path(doc, key, &next)?;
+            set_ref_path(doc, key, &next).map_err(ApplyPathtypeError::Store)?;
             Ok(next)
         }
-        Err(crate::io::xref_model::PathtypeError::AcrossDrives) => {
-            Err(crate::t!("XREF: cannot make path relative across drives.").to_string())
-        }
-        Err(crate::io::xref_model::PathtypeError::UnsavedHost) => Err(crate::t!(
-            "XREF  Save the drawing first to resolve relative XREF paths."
-        )
-        .to_string()),
+        Err(error) => Err(ApplyPathtypeError::Conversion(error)),
     }
+}
+
+/// Convert one reference's stored path to `pathtype` against `host_path`.
+/// Verbatim store on success; localized UI errors otherwise.
+pub fn apply_pathtype(
+    doc: &mut Document,
+    key: u64,
+    pathtype: crate::io::xref_model::Pathtype,
+    host_path: &Path,
+) -> Result<String, String> {
+    apply_pathtype_typed(doc, key, pathtype, host_path).map_err(|error| match error {
+        ApplyPathtypeError::MissingReference => {
+            crate::t!("XREF: no loaded reference with that key.").to_string()
+        }
+        ApplyPathtypeError::Conversion(crate::io::xref_model::PathtypeError::AcrossDrives) => {
+            crate::t!("XREF: cannot make path relative across drives.").to_string()
+        }
+        ApplyPathtypeError::Conversion(crate::io::xref_model::PathtypeError::UnsavedHost) => {
+            crate::t!("XREF  Save the drawing first to resolve relative XREF paths.").to_string()
+        }
+        ApplyPathtypeError::Store(error) => error,
+    })
 }
 
 /// Find & Replace: rewrite `old` → `new` as a component-wise prefix replace

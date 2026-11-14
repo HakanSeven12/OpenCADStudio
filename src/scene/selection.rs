@@ -218,7 +218,8 @@ impl Scene {
             .find(|record| record.handle == block)
             .map(|record| record.entity_handles.clone())
             .unwrap_or_default();
-        let selected = handles
+        let selected = self
+            .without_sheet_viewports(&handles)
             .into_iter()
             .filter(|handle| self.passes_selection_filter(*handle))
             .filter(|handle| !self.is_reference_only(*handle))
@@ -465,7 +466,7 @@ impl Scene {
         let matches: Vec<Handle> = self
             .current_layout_entity_handles()
             .into_iter()
-            .filter(|h| !self.selected.contains(h))
+            .filter(|h| !self.selected.contains(h) && self.entity_pickable(*h))
             .filter(|h| {
                 self.document.get_entity(*h).is_some_and(|e| {
                     keys.get(entity_type_name(e))
@@ -1214,12 +1215,14 @@ impl Scene {
     // ── Erase ─────────────────────────────────────────────────────────────
 
     pub fn erase_entities(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, true, true, true);
+        let handles = self.without_sheet_viewports(handles);
+        self.remove_entities(&handles, true, true, true);
     }
 
     /// Replace only planned sources, preserving annotations or leaders not exploded.
     pub fn erase_entities_exact(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, true, true, false);
+        let handles = self.without_sheet_viewports(handles);
+        self.remove_entities(&handles, true, true, false);
     }
 
     /// Like [`erase_entities`](Self::erase_entities) but without the
@@ -1227,7 +1230,8 @@ impl Scene {
     /// removes them through the plugin host API; locked-layer policy stays
     /// enforced either way.
     pub fn erase_entities_plugin(&mut self, handles: &[Handle]) {
-        self.remove_entities(handles, true, false, true);
+        let handles = self.without_sheet_viewports(handles);
+        self.remove_entities(&handles, true, false, true);
     }
 
     /// Erase entities a constraint owns, such as the dimension it draws.

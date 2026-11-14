@@ -329,6 +329,7 @@ impl OpenCADStudio {
             structure,
             parametric_constraints,
             reference_designations: Vec::new(),
+            reference_session: None,
             graph: None,
             named_parameters,
             label: super::tab_document::HistoryLabel::formatted(

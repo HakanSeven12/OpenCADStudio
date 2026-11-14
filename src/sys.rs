@@ -1,6 +1,7 @@
 // Small platform shims for things the desktop build does natively but the web
 // (wasm) build must handle differently or skip.
 
+pub mod clipboard_link;
 pub mod startup_times;
 pub mod ui_font;
 

@@ -194,6 +194,24 @@ impl OpenCADStudio {
                 }
             }
             "UNDO" => return Some(Task::done(Message::Undo)),
+            // MULTIPLE — repeat the next command until it is cancelled.
+            "MULTIPLE" => {
+                let c = crate::command::ValuePromptCommand::new(
+                    "MULTIPLE",
+                    "Enter command name to repeat:",
+                );
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+                return Some(Task::none());
+            }
+            cmd if cmd.starts_with("MULTIPLE ") => {
+                let name = cmd["MULTIPLE ".len()..].trim().to_string();
+                if name.is_empty() || name.eq_ignore_ascii_case("MULTIPLE") {
+                    return Some(Task::none());
+                }
+                self.tabs[i].multiple_cmd = Some(name.clone());
+                return Some(self.dispatch_command(&name));
+            }
             "REDO" => return Some(Task::done(Message::Redo)),
             // OOPS — restore the objects removed by the most recent ERASE,
             // without undoing any work done since.

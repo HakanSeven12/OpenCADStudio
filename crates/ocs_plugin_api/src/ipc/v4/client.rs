@@ -811,7 +811,14 @@ impl HostApi for V4PluginHostApi {
     fn selection(&self) -> Vec<Handle> {
         match self.request(PluginRequest::GetSelection) {
             Ok(PluginResponse::Selection(handles)) => handles,
-            _ => Vec::new(),
+            _ => {
+                // P2-7 honesty: the frozen legacy answer shape keeps the
+                // empty selection, but the failure is never silent.
+                eprintln!(
+                    "[plugin] GetSelection failed or was unexpected; serving an empty selection"
+                );
+                Vec::new()
+            }
         }
     }
 

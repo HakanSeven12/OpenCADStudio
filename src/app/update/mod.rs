@@ -153,7 +153,7 @@ mod style;
 pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
-mod viewport_snap;
+pub(in crate::app) mod viewport_snap;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -500,7 +500,14 @@ impl OpenCADStudio {
         }
         self.last_plugin_document = Some(key);
         crate::plugin::v4_support::publish_drawing_changed(tab.id, tab.scene.geometry_epoch);
-        crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document);
+        if let Err(e) =
+            crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document)
+        {
+            // P1-18: a failed publication is logged, not ignored — the epoch
+            // still reaches native plugins, but the snapshot side named its
+            // failure on stderr instead of silently going stale.
+            eprintln!("[host] V4 document view failed to publish: {e}");
+        }
         // Same guarded boundary, second surface (API v9): the plain
         // `DocumentChanged` carries the settled geometry epoch to every
         // loaded native plugin through `BuiltinPlugin::on_notification`.
@@ -580,7 +587,8 @@ impl OpenCADStudio {
         {
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 if crate::io::linetypes::ensure_catalog_linetype(&mut tab.scene.document, name) {
-                    tab.scene.bump_geometry();
+                    tab.scene
+                        .invalidate_linetype_dependencies(std::slice::from_ref(name));
                 }
             }
         }
@@ -3103,6 +3111,7 @@ impl OpenCADStudio {
             Message::Count(message) => self.on_count(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
+            Message::Assistant(message) => self.on_assistant(message),
             Message::SheetSet(message) => self.on_sheet_set(message),
             Message::KeyTip(input) => self.on_keytip(input),
             Message::RibbonSelectTab(idx) => {
@@ -4163,6 +4172,10 @@ impl OpenCADStudio {
             }
 
             Message::CommandAppendChar(s) => self.on_command_append_char(s),
+            Message::HeldOverrideRelease => {
+                self.release_held_override();
+                Task::none()
+            }
 
             Message::CommandBackspace => self.on_command_backspace(),
 
@@ -6520,6 +6533,7 @@ impl OpenCADStudio {
 
             Message::HoverDwellTick => self.on_hover_dwell_tick(),
             Message::MoveCoalesceTick => self.on_move_coalesce_tick(),
+            Message::BoxPreviewTick => self.on_box_preview_tick(),
 
             Message::SnapDwellTick => self.on_snap_dwell_tick(),
 
@@ -6635,8 +6649,7 @@ impl OpenCADStudio {
                 match result {
                     Ok(Some(staged)) => {
                         self.push_undo_snapshot(i, "Lookup value");
-                        self.apply_action_document(i, staged);
-                        self.tabs[i].scene.bump_geometry();
+                        self.apply_action_document_and_bump(i, staged);
                         self.tabs[i].dirty = true;
                         self.finish_pending_history(i);
                         self.refresh_properties();
@@ -8936,6 +8949,7 @@ impl OpenCADStudio {
                 // — without this a lock could linger until the next move.
                 if !shift {
                     self.axis_lock_dir = None;
+                    self.release_held_override();
                 }
                 // A live command may key its preview off Ctrl (arc-direction
                 // flip). Rebuild it at the current cursor so the flip shows
@@ -9441,7 +9455,7 @@ impl OpenCADStudio {
 
             Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
 
-            Message::PasteSpecial(text, picture) => {
+            Message::PasteSpecial(text, picture, link) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]
                     .active_cmd
@@ -9451,7 +9465,8 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let text = text.filter(|text| !text.trim().is_empty());
-                if text.is_none() && picture.is_none() && self.clipboard.is_empty() {
+                let nothing = text.is_none() && picture.is_none() && link.is_none();
+                if nothing && self.clipboard.is_empty() {
                     // Nothing to paste in any format.
                     self.tabs[i].active_cmd = None;
                     self.command_line
@@ -9459,7 +9474,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 // Every format is known now: ask for one of them.
-                let command = self.paste_special_command(i, text.as_deref(), picture);
+                let command = self.paste_special_command(i, text.as_deref(), link, picture);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(command);
                 self.push_ucs_to_cmd(i);
@@ -14618,6 +14633,17 @@ impl OpenCADStudio {
                 // In the open Linetype Manager a load is staged like its
                 // other changes: Apply keeps it, Close drops it.
                 let staged = self.linetypes_are_staged();
+                let before_names: rustc_hash::FxHashSet<String> = if staged {
+                    rustc_hash::FxHashSet::default()
+                } else {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .map(|lt| lt.name.to_ascii_uppercase())
+                        .collect()
+                };
                 if !staged {
                     self.push_undo_snapshot(i, "LINETYPE");
                 }
@@ -14629,8 +14655,18 @@ impl OpenCADStudio {
                 if staged {
                     self.load_linetype_bufs(i);
                 } else if added > 0 {
+                    let added_names: Vec<String> = self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .filter(|lt| !before_names.contains(&lt.name.to_ascii_uppercase()))
+                        .map(|lt| lt.name.clone())
+                        .collect();
                     self.tabs[i].dirty = true;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i]
+                        .scene
+                        .invalidate_linetype_dependencies(&added_names);
                 }
                 self.command_line
                     .push_output(crate::tf!("{added} linetype(s) loaded.").as_ref());

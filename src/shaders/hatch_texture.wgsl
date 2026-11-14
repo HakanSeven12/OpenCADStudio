@@ -95,7 +95,7 @@ struct VIn  {
     @location(3) draw_depth: f32,
 }
 struct VOut {
-    @builtin(position) clip: vec4<f32>,
+    @invariant @builtin(position) clip: vec4<f32>,
     @location(0)       xz:   vec2<f32>,
 }
 

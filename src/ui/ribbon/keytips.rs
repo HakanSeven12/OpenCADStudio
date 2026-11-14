@@ -1232,7 +1232,7 @@ fn bold(renderer: &Renderer) -> iced::Font {
     }
 }
 
-fn text_width(content: &str, size: f32, font: iced::Font) -> f32 {
+pub(crate) fn text_width(content: &str, size: f32, font: iced::Font) -> f32 {
     <Renderer as advanced_text::Renderer>::Paragraph::with_text(advanced_text::Text {
         content,
         bounds: Size::INFINITE,

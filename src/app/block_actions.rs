@@ -112,8 +112,7 @@ impl OpenCADStudio {
                 i,
                 super::tab_document::HistoryLabel::Message("Reset block references"),
             );
-            self.apply_action_document(i, staged);
-            self.tabs[i].scene.bump_geometry();
+            self.apply_action_document_and_bump(i, staged);
             self.tabs[i].dirty = true;
             self.finish_pending_history(i);
             self.refresh_properties();
@@ -180,7 +179,15 @@ impl OpenCADStudio {
         self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
         Task::none()
     }
-    pub(super) fn apply_action_document(&mut self, i: usize, mut staged: document::Document) {
+    fn apply_action_document_diff(
+        &mut self,
+        i: usize,
+        mut staged: document::Document,
+    ) -> (
+        Vec<(document::Handle, crate::scene::ChangeKind)>,
+        Vec<String>,
+    ) {
+        use crate::scene::ChangeKind;
         let doc = &mut self.tabs[i].scene.document;
         // Drawable entity iteration omits BLOCK and ENDBLK. Their records
         // still carry evaluated origins and delimit the published body.
@@ -191,6 +198,8 @@ impl OpenCADStudio {
             .flat_map(|record| [record.block_entity_handle, record.block_end_handle])
             .filter(|handle| !handle.is_null())
             .collect::<rustc_hash::FxHashSet<_>>();
+        let mut seen_handles = rustc_hash::FxHashSet::default();
+        let mut delta_changes = Vec::new();
         let changes = staged
             .entities()
             .chain(
@@ -198,15 +207,40 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|&handle| staged.get_entity(handle)),
             )
+            .filter(|e| seen_handles.insert(e.common().handle))
             .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
-            .cloned()
+            .map(|e| {
+                let handle = e.common().handle;
+                let kind = if doc.get_entity(handle).is_some() {
+                    ChangeKind::Modified
+                } else {
+                    ChangeKind::Added
+                };
+                delta_changes.push((handle, kind));
+                e.clone()
+            })
             .collect::<Vec<_>>();
+        seen_handles.clear();
         let removed = doc
             .entities()
             .chain(markers.iter().filter_map(|&handle| doc.get_entity(handle)))
             .map(|e| e.common().handle)
-            .filter(|h| staged.get_entity(*h).is_none())
+            .filter(|h| seen_handles.insert(*h) && staged.get_entity(*h).is_none())
             .collect::<Vec<_>>();
+        for &handle in &removed {
+            delta_changes.push((handle, ChangeKind::Removed));
+        }
+        let mut touched_blocks = Vec::new();
+        for next in staged.block_records.iter() {
+            if doc.block_records.get(&next.name) != Some(next) {
+                touched_blocks.push(next.name.clone());
+            }
+        }
+        for prev in doc.block_records.iter() {
+            if staged.block_records.get(&prev.name).is_none() {
+                touched_blocks.push(prev.name.clone());
+            }
+        }
         doc.swap_structure(staged.snapshot_structure());
         for handle in removed {
             doc.remove_entity_arc(handle);
@@ -219,6 +253,30 @@ impl OpenCADStudio {
                 doc.restore_entity_arc(std::sync::Arc::new(entity));
             }
         }
+        (delta_changes, touched_blocks)
+    }
+
+    pub(super) fn apply_action_document(&mut self, i: usize, staged: document::Document) {
+        let _ = self.apply_action_document_diff(i, staged);
+    }
+
+    pub(super) fn apply_action_document_and_bump(
+        &mut self,
+        i: usize,
+        staged: document::Document,
+    ) {
+        let (delta_changes, touched_blocks) = self.apply_action_document_diff(i, staged);
+        let scene = &mut self.tabs[i].scene;
+        for &(handle, _) in &delta_changes {
+            scene.reseed_derived_caches(handle);
+        }
+        if delta_changes.is_empty() && touched_blocks.is_empty() {
+            if let Some(edited) = scene.block_edit_block {
+                scene.bump_block_definition(edited);
+            }
+            return;
+        }
+        scene.bump_entities_with_block_deps(&delta_changes, &[], &touched_blocks, false);
     }
     /// Lookup has no geometry action of its own: choose the parameter whose
     /// property table the new action edits.
@@ -432,8 +490,7 @@ impl OpenCADStudio {
                                     "Associate block action",
                                 ),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -515,8 +572,7 @@ impl OpenCADStudio {
                                 i,
                                 super::tab_document::HistoryLabel::Message("Action selection set"),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -620,8 +676,7 @@ impl OpenCADStudio {
                                 super::tab_document::HistoryLabel::Message(kind.name()),
                             ),
                         );
-                        self.apply_action_document(i, staged);
-                        self.tabs[i].scene.bump_geometry();
+                        self.apply_action_document_and_bump(i, staged);
                         self.tabs[i].dirty = true;
                         self.tabs[i].active_cmd = None;
                         self.tabs[i].scene.clear_preview_wire();
@@ -749,8 +804,7 @@ impl OpenCADStudio {
                                 i,
                                 super::tab_document::HistoryLabel::Message("Test block parameter"),
                             );
-                            self.apply_action_document(i, staged);
-                            self.tabs[i].scene.bump_geometry();
+                            self.apply_action_document_and_bump(i, staged);
                             self.tabs[i].dirty = true;
                             self.finish_pending_history(i);
                         }
@@ -869,11 +923,7 @@ impl OpenCADStudio {
                     world: actions::v(transform.apply(actions::native(grip.point)))
                         - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: if p.flip {
-                        crate::scene::model::object::GripShape::Arrow
-                    } else {
-                        crate::scene::model::object::GripShape::Triangle
-                    },
+                    shape: parameter_grip_shape(&p),
                     dir: grip.direction.and_then(|direction| {
                         actions::v(transform.apply_rotation(actions::native(direction)))
                             .try_normalize()
@@ -987,15 +1037,26 @@ impl OpenCADStudio {
 }
 
 impl OpenCADStudio {
+    /// Parameter grips of every selected dynamic block reference; the
+    /// alignment markers only for a single selected reference.
     fn refresh_reference_action_grips(&mut self, wo: [f64; 3]) {
         let i = self.active_tab;
-        let tab = &self.tabs[i];
-        if tab.active_block_edit_session().is_some() || tab.scene.selected.len() != 1 {
+        if self.tabs[i].active_block_edit_session().is_some() {
             return;
         }
-        let Some(handle) = tab.selected_handle else {
+        let handles = self.tabs[i].scene.selected_handles_in_order();
+        let limit = self.grip_object_limit;
+        if limit > 0 && handles.len() > limit as usize {
             return;
-        };
+        }
+        let single = handles.len() == 1;
+        for handle in handles {
+            self.push_reference_action_grips(handle, single, wo);
+        }
+    }
+    fn push_reference_action_grips(&mut self, handle: Handle, alignment: bool, wo: [f64; 3]) {
+        let i = self.active_tab;
+        let tab = &self.tabs[i];
         let Some(def) = actions::instance::definition(&tab.scene.document, handle) else {
             return;
         };
@@ -1031,11 +1092,7 @@ impl OpenCADStudio {
                     world: actions::v(transform.apply(actions::native(grip.point)))
                         - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: if p.flip {
-                        crate::scene::model::object::GripShape::Arrow
-                    } else {
-                        crate::scene::model::object::GripShape::Triangle
-                    },
+                    shape: parameter_grip_shape(&p),
                     dir: grip.direction.and_then(|direction| {
                         actions::v(transform.apply_rotation(actions::native(direction)))
                             .try_normalize()
@@ -1044,7 +1101,9 @@ impl OpenCADStudio {
                 });
             }
         }
-        grips.extend(self.alignment_grip_markers(handle, wo));
+        if alignment {
+            grips.extend(self.alignment_grip_markers(handle, wo));
+        }
         for grip in grips {
             self.tabs[i].selected_grips.push(grip);
             self.tabs[i].selected_grip_handles.push(handle);
@@ -1053,7 +1112,7 @@ impl OpenCADStudio {
     fn start_reference_action_grip(&mut self, handle: Handle, id: usize) -> bool {
         let i = self.active_tab;
         let tab = &self.tabs[i];
-        if tab.active_block_edit_session().is_some() || tab.selected_handle != Some(handle) {
+        if tab.active_block_edit_session().is_some() || !tab.scene.selected.contains(&handle) {
             return false;
         }
         let Some(def) = actions::instance::definition(&tab.scene.document, handle) else {
@@ -1172,8 +1231,7 @@ impl OpenCADStudio {
                         i,
                         super::tab_document::HistoryLabel::Message("Block reference parameter"),
                     );
-                    self.apply_action_document(i, staged);
-                    self.tabs[i].scene.bump_geometry();
+                    self.apply_action_document_and_bump(i, staged);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }
@@ -1215,5 +1273,198 @@ impl OpenCADStudio {
         self.grip_hover = None;
         self.grip_popup = None;
         true
+    }
+}
+
+#[doc(hidden)]
+pub struct BlockBenchHarness(OpenCADStudio);
+
+impl BlockBenchHarness {
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new();
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
+    }
+
+    pub fn setup_block_edit_undo(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        for k in 0..bg_lines {
+            let y = (k as f64) * 2.0;
+            app.tabs[i]
+                .scene
+                .add_entity(EntityType::Line(Line::from_points(
+                    Vector3::new(100.0, y, 0.0),
+                    Vector3::new(200.0, y, 0.0),
+                )));
+        }
+        for b in 0..other_blocks {
+            let name = format!("OtherBlock_{b}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(5.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            app.tabs[i].scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        }
+        let edit_ents = (0..entities_per_block)
+            .map(|j| {
+                EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                    Vector3::new(8.0, (j as f64) * 0.5, 0.0),
+                ))
+            })
+            .collect();
+        app.tabs[i]
+            .scene
+            .define_block_raw("EditBenchBlock", Vector3::ZERO, edit_ents);
+        let edit_line = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EditBenchBlock")
+            .unwrap()
+            .entity_handles[0];
+        let mut ins_edit = Insert::new("EditBenchBlock", Vector3::new(10.0, 20.0, 0.0));
+        ins_edit.common.handle = Handle::NULL;
+        app.tabs[i].scene.add_entity(EntityType::Insert(ins_edit));
+        let _ = app.tabs[i].scene.entity_wires();
+
+        app.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Edit block geometry"),
+        );
+        if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(edit_line)
+        {
+            line.end.x = 16.0;
+        }
+        app.tabs[i].scene.bump_geometry();
+        app.finish_pending_history(i);
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn undo_redo_cycle(&mut self) -> usize {
+        let i = self.0.active_tab;
+        self.0.undo_active_tab();
+        let a = self.0.tabs[i].scene.entity_wires().len();
+        self.0.redo_active_tab();
+        let b = self.0.tabs[i].scene.entity_wires().len();
+        a.wrapping_add(b)
+    }
+
+    pub fn setup_visibility(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle, Handle) {
+        let (scene, _insert, def, param) = crate::scene::Scene::bench_setup_visibility_scene(
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+        );
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        app.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Visibility state"),
+        );
+        app.show_visibility_state(i, def, param, 1);
+        app.finish_pending_history(i);
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), def, param)
+    }
+
+    pub fn show_visibility_state(
+        &mut self,
+        def_block: Handle,
+        param: Handle,
+        state_idx: usize,
+    ) -> usize {
+        let i = self.0.active_tab;
+        self.0.show_visibility_state(i, def_block, param, state_idx);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_dynamic_action(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle, Handle, Handle) {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let (mut scene, insert, stretch_param, _flip_param) =
+            crate::scene::Scene::bench_setup_dynamic_block_scene(bg_lines, 0, entities_per_block);
+        for b in 0..other_blocks {
+            let name = format!("ActionOtherBlock_{b}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(5.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            scene.add_entity(EntityType::Insert(ins));
+        }
+        let def = actions::instance::definition(&scene.document, insert).expect("dynamic def");
+        let _ = scene.entity_wires();
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), insert, def, stretch_param)
+    }
+
+    pub fn evaluate_dynamic_action(
+        &mut self,
+        insert: Handle,
+        definition: Handle,
+        parameter: Handle,
+        stretch_x: f64,
+    ) -> usize {
+        let _ = self.0.evaluate_reference_parameter(
+            insert,
+            definition,
+            parameter,
+            actions::Value::Point(glam::DVec3::new(stretch_x, 0.0, 0.0)),
+        );
+        let i = self.0.active_tab;
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+}
+
+/// Grip shape by parameter kind: flip = arrow, rotation = circle,
+/// linear = triangle, point / XY / polar = square.
+fn parameter_grip_shape(p: &actions::Parameter) -> crate::scene::model::object::GripShape {
+    use crate::scene::model::object::GripShape;
+    if p.flip {
+        GripShape::Arrow
+    } else if p.rotation {
+        GripShape::Circle
+    } else if p.linear {
+        GripShape::Triangle
+    } else {
+        GripShape::Square
     }
 }

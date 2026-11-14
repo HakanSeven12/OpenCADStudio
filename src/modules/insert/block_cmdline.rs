@@ -241,7 +241,7 @@ enum BlockStep {
 pub struct DashBlockCommand {
     step: BlockStep,
     table: BlockTable,
-    ucs: crate::app::helpers::UcsXform,
+    ucs: crate::entities::ucs_xform::UcsXform,
     name: String,
     redefine: bool,
     mode: BlockObjectMode,
@@ -257,7 +257,7 @@ pub struct DashBlockCommand {
 impl DashBlockCommand {
     pub fn new(
         table: BlockTable,
-        ucs: crate::app::helpers::UcsXform,
+        ucs: crate::entities::ucs_xform::UcsXform,
         preselected: Vec<Handle>,
         units: i16,
     ) -> Self {
@@ -1156,7 +1156,7 @@ impl CadCommand for BlockReplaceCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::helpers::UcsXform;
+    use crate::entities::ucs_xform::UcsXform;
 
     fn plan_table() -> BlockTable {
         let mut document = Document::new();

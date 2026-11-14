@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::command::EntityTransform;
+use crate::entities::transform::EntityTransform;
 use crate::scene::viewport_ref::ViewportFrame;
 use document::types::{Matrix4, Transform};
 #[cfg(test)]

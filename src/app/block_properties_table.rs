@@ -144,8 +144,7 @@ impl OpenCADStudio {
             i,
             super::tab_document::HistoryLabel::Message("Block Properties Table"),
         );
-        self.tabs[i].scene.document = working;
-        self.tabs[i].scene.bump_geometry();
+        self.apply_action_document_and_bump(i, working);
         self.tabs[i].dirty = true;
         self.finish_pending_history(i);
         self.refresh_properties();

@@ -15,7 +15,7 @@ serde_json = { version = "1", optional = true }
 # Pulled in only by the `host` feature, which adds the `document`-typed
 # `HostApi` runtime surface. The default crate stays dependency-free so engine
 # crates and external tooling can depend on the manifest/ribbon contract cheaply.
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "253879ba88e31762c6a02b4833667b4fc7816cad", optional = true, features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "f9a3850", optional = true, features = ["serde"] }
 
 # Runtime IPC and serialization (host feature only).
 interprocess = { version = "2", optional = true }
@@ -27,11 +27,24 @@ memmap2 = { version = "0.9", optional = true }
 rkyv = { version = "0.7", features = ["validation", "std"], optional = true }
 getrandom = { version = "0.2", optional = true }
 
+# Process-tree lifecycle (host feature only): Unix plugin runners run in their
+# own session so reaping can signal the whole tree; Windows runners are bound
+# to a kill-on-close Job Object so grandchildren cannot outlive the host.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [features]
 # Enables the runtime host surface (`HostApi` trait) and the out-of-process
 # plugin runtime. The OpenCADStudio binary turns this on; pure-data consumers
 # leave it off.
-host = ["dep:document", "dep:serde_json", "dep:interprocess", "dep:bincode", "dep:serde_bytes", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom"]
+host = ["dep:document", "dep:serde_json", "dep:interprocess", "dep:bincode", "dep:serde_bytes", "dep:thiserror", "dep:libloading", "dep:memmap2", "dep:rkyv", "dep:getrandom", "dep:libc", "dep:windows-sys"]
 
 [build-dependencies]
 serde-reflection = "0.6"
@@ -39,7 +52,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 cargo-lock = "11"
 # document is scanned at build time to generate the embedded type registry.
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "253879ba88e31762c6a02b4833667b4fc7816cad", features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "f9a3850", features = ["serde"] }
 
 [dev-dependencies]
 serde_json = "1"

@@ -1154,11 +1154,13 @@ impl OpenCADStudio {
             }
             Detached::Panel(panel) => {
                 let tab = self.tabs.get(self.active_tab)?;
-                column![
-                    header,
-                    self.panel_body(panel, window.placement.w, true, tab)
-                ]
-                .into()
+                // The pallet lays out to the width the window really gives
+                // it: the remembered placement can be wider than the window
+                // (#3019), which hid the table's last columns with no scroll.
+                let body = iced::widget::responsive(move |size| {
+                    self.panel_body(panel, size.width, true, tab)
+                });
+                column![header, body].into()
             }
         };
         Some(

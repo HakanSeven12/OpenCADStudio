@@ -10,7 +10,7 @@ use kernel::space::Plane;
 use rustc_hash::FxHashMap;
 
 use super::{sweep_model, wire_model::WireModel};
-use crate::command::WorkingPlane;
+use crate::entities::transform::WorkingPlane;
 use crate::scene::{boundary_faces, exact_hatch_paths, ring_source_handles, BoundarySource, Scene};
 
 const BOUNDARY_TOLERANCE: f64 = 1e-6;

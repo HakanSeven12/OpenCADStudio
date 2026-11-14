@@ -1443,15 +1443,29 @@ impl OpenCADStudio {
                 "block_define":true,
                 "block_delete":true,
                 "embed_image":true,
+                "dgn_import":true,
                 "close":true,
                 "entities_copy_to":true,
                 "entities_create":true,
+                "entities_set":true,
+                "xrefs":true,
+                "xref_reload":true,
+                "xref_unload":true,
+                "xref_detach":true,
+                "xref_bind":true,
+                "xref_set_path":true,
+                "xref_set_type":true,
                 "entities_delete":true,
                 "entities_transform":true,
                 "file_identity":true,
                 "group_create":true,
                 "node_graph":true,
                 "layout_create":true,
+                "layout_rename":true,
+                "layout_activate":true,
+                "layout_delete":true,
+                "layouts":true,
+                "page_setup_get":true,
                 "page_setup_set":true,
                 "selection_set_load":true,
                 "selection_set_save":true,
@@ -1805,7 +1819,7 @@ impl OpenCADStudio {
                 if changed {
                     self.push_undo_snapshot(i, "MCP SET_PROPERTIES");
                     self.tabs[i].scene.document.summary_info = edited;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].scene.update_summary_field_hosts();
                     self.tabs[i].dirty = true;
                 }
                 result_name = Some("summary_info".to_string());

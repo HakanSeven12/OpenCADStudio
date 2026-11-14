@@ -166,8 +166,7 @@ impl OpenCADStudio {
         match result {
             Ok(Some(staged)) => {
                 self.push_undo_snapshot(i, "Block Properties Table row");
-                self.apply_action_document(i, staged);
-                self.tabs[i].scene.bump_geometry();
+                self.apply_action_document_and_bump(i, staged);
                 self.tabs[i].dirty = true;
                 self.finish_pending_history(i);
                 self.refresh_properties();
@@ -733,6 +732,20 @@ impl OpenCADStudio {
         // flag the definition gave anything outside the set.
         {
             let doc = &mut self.tabs[i].scene.document;
+            let state = doc
+                .dynamic_visibility_for_insert(insert_handle)
+                .and_then(|(_, param)| {
+                    let name = param.states.get(state_idx)?.name.clone();
+                    Some((param.eval_node_id, name))
+                });
+            if let Some((id, name)) = state {
+                crate::scene::block_actions::instance::save_visibility_name(
+                    doc,
+                    insert_handle,
+                    id,
+                    &name,
+                );
+            }
             for (idx, h) in mapping.anon_handles.iter().enumerate() {
                 if !mapping.governed_idx.contains(&idx) {
                     continue;
@@ -750,8 +763,6 @@ impl OpenCADStudio {
             self.tabs[i]
                 .scene
                 .bump_block_visibility(insert_handle, &anon_name);
-        } else {
-            self.tabs[i].scene.bump_geometry();
         }
         self.tabs[i].dirty = true;
         self.refresh_selected_grips();

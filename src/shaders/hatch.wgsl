@@ -86,7 +86,7 @@ struct VIn {
 }
 
 struct VOut {
-    @builtin(position) clip:           vec4<f32>,
+    @invariant @builtin(position) clip:           vec4<f32>,
     @location(0)       xz:             vec2<f32>,
     @location(1) @interpolate(flat) instance_index: u32,
 }

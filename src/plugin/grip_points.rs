@@ -391,7 +391,7 @@ pub(crate) fn visibility(
         !disabled.contains(plugin)
             && (sink_installed(plugin)
                 || crate::plugin::external::with_manager(|m| {
-                    m.grip_endpoint(plugin).is_some_and(|(_, _, alive)| alive)
+                    m.declaration_endpoint_alive(plugin)
                 }))
     }
 }

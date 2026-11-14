@@ -453,16 +453,16 @@ hard-constrained drag direction), and `shape`. The declaration lifecycle:
   and a cancel discards the phase untouched. The payload is capped at 256
   entities per response (a larger set is refused with an error line); a
   response carrying only `preview` behaves exactly as before.
-- **A plugin can never freeze the host (v11.1).** Every delivery — begin,
-  move, settle, cancel — is issued WITHOUT waiting and collected at pump
-  ticks (coalescing unchanged: at most one move in flight, newest point
-  delivered next). Nested COMMAND frames (`run_command` /
-  `execute_command`) are REFUSED inside grip deliveries with an honest
-  `Err`: their execution would need the host's message loop, which a
-  delivery on the UI thread cannot pump — the freeze the consumer's
-  settle-replay wedge exhibited. Every other nested request (reads,
-  `push_undo`, direct writes, `entities_batch`) keeps its full inline
-  serving, so the settle callback stays the plugin's complete write
+- **Grip deliveries cannot freeze the host silently (v11.1).** Every
+  delivery — begin, move, settle, cancel — is issued WITHOUT waiting and
+  collected at pump ticks (coalescing unchanged: at most one move in
+  flight, newest point delivered next). Nested COMMAND frames
+  (`run_command` / `execute_command`) are REFUSED inside grip deliveries
+  with an honest `Err`: their execution would need the host's message
+  loop, which a delivery on the UI thread cannot pump — the freeze the
+  consumer's settle-replay wedge exhibited. Every other nested request
+  (reads, `push_undo`, direct writes, `entities_batch`) keeps its full
+  inline serving, so the settle callback stays the plugin's complete write
   window. A delivery that outlives its settle deadline is abandoned: the
   plugin's connection is torn down, any partially-open scope is closed
   (no dangling history), the drag ends as a cancel, and an error line
@@ -899,14 +899,28 @@ corruption cannot affect the host or other plugins. Plugin processes stay
 
 Two timeouts protect the host from a stuck runner:
 
-| Timeout | Env var | Default | Floor |
-|---|---|---|---|
-| Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 30 s | — |
-| Per-call | `OCS_PLUGIN_CALL_TIMEOUT_SECS` | 30 s | `GetManifest`/`GetRibbon` ≥ 5 s, `Dispatch` ≥ 10 s, interactive events/prompt/pick ≥ 2 s |
+| Timeout | Env var | Default | Floor | Cap |
+|---|---|---|---|---|
+| Spawn (connection) | `OCS_PLUGIN_SPAWN_TIMEOUT_SECS` | 90 s (a cold-start AV scan on Windows can legitimately take that long) | — | — |
+| Per-call | `OCS_PLUGIN_CALL_TIMEOUT_SECS` | 30 s | `GetManifest`/`GetRibbon` ≥ 5 s, `Dispatch` ≥ 10 s, interactive events/prompt/pick ≥ 2 s | UI-blocking preview ticks (`CursorMove`/`CustomGripMove`) ≤ 2 s, one-step interactive probes ≤ 10 s |
+| Proxy read/write (per direction) | `OCS_PLUGIN_PROXY_TIMEOUT_SECS` | 30 s | — | — |
+
+A request routed through the TCP request proxy (the external Python REPL is
+the documented consumer) is additionally bounded in TOTAL wall time: four
+times the proxy timeout (2 minutes at the default), after which it answers
+`TimedOut` ("proxy request exceeded its total deadline") instead of retrying
+forever.
 
 A call timeout covers the full round-trip, including any nested plugin→host
-requests handled inline. When it fires the host kills the runner, marks the
-plugin dead, and reports a `CallTimeout` error via the normal plugin error path.
+requests handled inline. When it fires the host kills the runner's whole
+process tree, marks the plugin dead, and reports a `CallTimeout` error via the
+normal plugin error path. Nested traffic renews the per-call deadline (a
+debugger-paused plugin answers keep-alives), so an ABSOLUTE call budget also
+applies to one request: 10× the per-call timeout by default, overridable with
+`OCS_PLUGIN_CALL_MAX_SECONDS` (`0` disables the cap). Preview ticks are
+capped at 2 s and per-step interactive probes at 10 s regardless of the
+global setting, so a slow plugin degrades a command with an honest timeout
+instead of freezing the UI for the global budget.
 
 `<config>` is `%APPDATA%` (Windows), `~/Library/Application Support` (macOS), or
 `$XDG_CONFIG_HOME` / `~/.config` (Linux).

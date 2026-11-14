@@ -3,7 +3,8 @@ use super::{
     block_actions as actions, block_grips, block_orientation_parameter as orientation,
     render_graph, Scene,
 };
-use crate::command::{EntityTransform, PointPickContext, WorkingPlane};
+use crate::command::PointPickContext;
+use crate::entities::transform::{EntityTransform, WorkingPlane};
 use document::{
     entities::Insert,
     objects::{DynamicBlockData, ObjectType},

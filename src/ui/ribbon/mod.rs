@@ -39,6 +39,7 @@ mod app_menu;
 mod collapse;
 mod floating;
 mod keytips;
+pub(crate) use keytips::text_width;
 mod layout;
 mod locate;
 mod minimize;

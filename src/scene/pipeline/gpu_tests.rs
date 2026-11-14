@@ -1040,3 +1040,160 @@ fn test_pline_arc_switch_preview_and_render() {
         }
     }
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn highlight_chunks_reuse_unchanged_buckets_and_invalidate_on_geometry_change() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    })).expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    pipeline.prepare_highlight_wire_cache(7, 1);
+    let wires: Vec<_> = (1..=1024).map(|n| {
+        WireModel::solid(
+            n.to_string(),
+            vec![[n as f32, 0.0, 0.0], [n as f32, 1.0, 0.0]],
+            [1.0, 1.0, 1.0, 1.0],
+            false,
+        )
+    }).collect();
+    let color = [0.1, 0.4, 1.0, 1.0];
+    let key = color.map(f32::to_bits);
+    let depth = rustc_hash::FxHashMap::default();
+    let transient = rustc_hash::FxHashSet::default();
+    let refs: Vec<_> = wires.iter().collect();
+    let _ = pipeline.highlight_small_wire_chunks(&device, &queue, &refs, color, &depth, &transient);
+    let unchanged = pipeline.highlight_wire_chunks[&(1, key)].gpu[0].instance_buffer.clone();
+    let changed = pipeline.highlight_wire_chunks[&(0, key)].gpu[0].instance_buffer.clone();
+    let refs: Vec<_> = wires.iter().skip(1).collect();
+    let _ = pipeline.highlight_small_wire_chunks(&device, &queue, &refs, color, &depth, &transient);
+    assert_eq!(pipeline.highlight_wire_chunks[&(1, key)].gpu[0].instance_buffer, unchanged);
+    assert_ne!(pipeline.highlight_wire_chunks[&(0, key)].gpu[0].instance_buffer, changed);
+    pipeline.prepare_highlight_wire_cache(8, 1);
+    assert!(pipeline.highlight_wire_chunks.is_empty());
+    assert_eq!(pipeline.highlight_wire_chunk_bytes, 0);
+}
+
+// Regression coverage for retaining committed highlights while a new box moves.
+fn split_highlight_test_setup() -> (wgpu::Device, wgpu::Queue, Pipeline, Vec<WireModel>) {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+    let wires: Vec<_> = (1..=3)
+        .map(|n| {
+            WireModel::solid(
+                n.to_string(),
+                vec![[n as f32, 0.0, 0.0], [n as f32, 1.0, 0.0]],
+                [1.0; 4],
+                false,
+            )
+        })
+        .collect();
+    pipeline.wire_handle_index = std::sync::Arc::new(
+        [(1, vec![0]), (2, vec![1]), (3, vec![2])]
+            .into_iter()
+            .collect(),
+    );
+    pipeline.prepare_highlight_wire_cache(1, 1);
+    (device, queue, pipeline, wires)
+}
+
+fn handles(values: &[u64]) -> rustc_hash::FxHashSet<Handle> {
+    values.iter().copied().map(Handle::new).collect()
+}
+
+const SPLIT_TINT: Option<[f32; 4]> = Some([0.1, 0.4, 1.0, 1.0]);
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn split_highlight_reuses_selection_when_hover_changes() {
+    let (device, queue, mut p, wires) = split_highlight_test_setup();
+    let selected = handles(&[1]);
+    let annotation = std::sync::Arc::new(Vec::new());
+    let depth = rustc_hash::FxHashMap::default();
+    let upload = |p: &mut Pipeline, hovered: u64| {
+        p.upload_split_highlights(
+            &device,
+            &queue,
+            &wires,
+            &selected,
+            &handles(&[hovered]),
+            &annotation,
+            &[],
+            &depth,
+            SPLIT_TINT,
+            1,
+            1,
+        )
+    };
+    upload(&mut p, 2);
+    let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();
+    let old = cache.wires[0].instance_buffer.clone();
+    upload(&mut p, 3);
+    let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();
+    assert_eq!(old, cache.wires[0].instance_buffer);
+    assert_eq!(p.gpu_selected_wires.len(), 2);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn split_highlight_rebuilds_when_selection_changes() {
+    let (device, queue, mut p, wires) = split_highlight_test_setup();
+    let annotation = std::sync::Arc::new(Vec::new());
+    let depth = rustc_hash::FxHashMap::default();
+    let empty = rustc_hash::FxHashSet::default();
+    for selected in [1, 2] {
+        p.upload_split_highlights(
+            &device,
+            &queue,
+            &wires,
+            &handles(&[selected]),
+            &empty,
+            &annotation,
+            &[],
+            &depth,
+            SPLIT_TINT,
+            1,
+            1,
+        );
+    }
+    let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();
+    assert_eq!(cache.selected, handles(&[2]));
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn split_highlight_rebuilds_when_depth_changes() {
+    let (device, queue, mut p, wires) = split_highlight_test_setup();
+    let annotation = std::sync::Arc::new(Vec::new());
+    let depth = rustc_hash::FxHashMap::default();
+    let selected = handles(&[1]);
+    let empty = rustc_hash::FxHashSet::default();
+    for generation in [1, 2] {
+        p.upload_split_highlights(
+            &device,
+            &queue,
+            &wires,
+            &selected,
+            &empty,
+            &annotation,
+            &[],
+            &depth,
+            SPLIT_TINT,
+            1,
+            generation,
+        );
+    }
+    let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();
+    assert_eq!(cache.depth_generation, 2);
+}

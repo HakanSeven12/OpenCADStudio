@@ -407,7 +407,13 @@ mod tests {
 
     #[test]
     fn ifccad_extension_aliases_roundtrip_through_the_production_reader() {
-        let source = sample_document();
+        // Only a line: the sample's named plot-style handle is a reported
+        // IFCCAD loss, and this test is about the extension aliases.
+        let mut source = Document::new();
+        let mut line = Line::new();
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.handle = source.allocate_handle();
+        let _ = source.add_entity(EntityType::Line(line));
         for extension in ["ifccad", "IFCCAD", "ifcx", "IFCX"] {
             let format = external_format(extension).expect("native drawing extension");
             let bytes = serialize_document(&source, extension).unwrap();

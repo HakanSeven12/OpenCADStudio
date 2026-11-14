@@ -6,7 +6,7 @@ use kernel::geom2d::{
     Tolerance, Transform as CurveTransform,
 };
 
-use crate::command::WorkingPlane;
+use crate::entities::transform::WorkingPlane;
 use crate::par::prelude::*;
 
 #[derive(Clone)]
@@ -2232,8 +2232,8 @@ mod boundary_xline_tests {
             document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
-        let sources =
-            scene.boundary_sources_on_plane(crate::command::WorkingPlane::default(), 1.0e-6);
+        let sources = scene
+            .boundary_sources_on_plane(crate::entities::transform::WorkingPlane::default(), 1.0e-6);
         let faces = boundary_faces(&sources, 1.0e-6);
         assert_eq!(
             faces.len(),
@@ -2255,8 +2255,8 @@ mod boundary_xline_tests {
             document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
-        let sources =
-            scene.boundary_sources_on_plane(crate::command::WorkingPlane::default(), 1.0e-6);
+        let sources = scene
+            .boundary_sources_on_plane(crate::entities::transform::WorkingPlane::default(), 1.0e-6);
         let faces = boundary_faces(&sources, 1.0e-6);
         assert_eq!(
             faces.len(),
@@ -2273,7 +2273,7 @@ mod boundary_xline_tests {
         ));
         let source = entity_boundary_source_on_plane(
             &xline,
-            crate::command::WorkingPlane::default(),
+            crate::entities::transform::WorkingPlane::default(),
             1.0e-6,
             Some(([0.0, 0.0], [10.0, 10.0])),
         )
@@ -2300,7 +2300,7 @@ mod boundary_xline_tests {
 
     #[test]
     fn finite_boundary_curves_skip_scene_scan_but_xlines_require_it() {
-        let plane = crate::command::WorkingPlane::default();
+        let plane = crate::entities::transform::WorkingPlane::default();
         let line = EntityType::Line(document::entities::Line::from_points(
             document::types::Vector3::new(0.0, 0.0, 0.0),
             document::types::Vector3::new(10.0, 0.0, 0.0),
@@ -2327,8 +2327,8 @@ mod boundary_xline_tests {
             document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
-        let sources =
-            scene.boundary_sources_on_plane(crate::command::WorkingPlane::default(), 1.0e-6);
+        let sources = scene
+            .boundary_sources_on_plane(crate::entities::transform::WorkingPlane::default(), 1.0e-6);
         let faces = boundary_faces(&sources, 1.0e-6);
         assert_eq!(
             faces.len(),

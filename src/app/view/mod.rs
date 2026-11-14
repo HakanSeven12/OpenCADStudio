@@ -465,7 +465,9 @@ pub(crate) fn main_window_event(
         }
         iced::Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
         iced::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
-            crate::ui::ribbon::keytip_key_released(&key)
+            crate::ui::ribbon::keytip_key_released(&key).or_else(|| {
+                matches!(key, keyboard::Key::Character(_)).then_some(Message::HeldOverrideRelease)
+            })
         }
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
             // `command()` is Cmd on macOS, Ctrl elsewhere — the
@@ -3948,6 +3950,11 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        let box_preview = if self.box_preview_pending.is_some() {
+            crate::app::tool_windows::main_window_frames().map(|_| Message::BoxPreviewTick)
+        } else {
+            Subscription::none()
+        };
         let snap_dwell = if self
             .snap_dwell
             .as_ref()
@@ -4023,6 +4030,13 @@ impl OpenCADStudio {
                 })
         } else {
             Subscription::none()
+        };
+        // Drain the Assistant's connection while it is open or working.
+        let assistant_poll = match self.assistant.poll_interval() {
+            Some(every) => iced::time::every(every).map(|_| {
+                Message::Assistant(crate::ui::window::assistant::AssistantMsg::Poll)
+            }),
+            None => Subscription::none(),
         };
         // Blink the MText preview caret while the editor is open.
         let caret_blink = if self.mtext_editor.is_some() {
@@ -4140,12 +4154,14 @@ impl OpenCADStudio {
             hover_dwell,
             snap_dwell,
             move_coalesce,
+            box_preview,
             nav_settle,
             gpu_probe,
             thumbnail_capture,
             capture_frame,
             caret_blink,
             quick_calc_flash,
+            assistant_poll,
             ribbon_minimize,
             web_fonts,
             autosave,

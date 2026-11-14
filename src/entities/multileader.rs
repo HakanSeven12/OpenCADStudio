@@ -101,12 +101,12 @@ pub(crate) fn active_vertical_attachment(ml: &MultiLeader) -> TextAttachmentType
     }
 }
 
-use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro,
     square_grip, triangle_grip,
 };
 use crate::entities::traits::RenderConvertible;
+use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::{SnapHint, TangentGeom};

@@ -243,6 +243,8 @@ impl OpenCADStudio {
                 | CmdResult::SliceSurfaceEntities { .. }
                 // An array arrow keeps the array selected for the next arrow.
                 | CmdResult::EditAssocArray { .. }
+                // A parameter grip keeps its references selected, as other grips do.
+                | CmdResult::EvaluateBlockParameter { insert: Some(_), .. }
         );
         self.result_depth += 1;
         let task = self.apply_cmd_result_inner(result);
@@ -1194,6 +1196,13 @@ impl OpenCADStudio {
             CmdResult::PasteClipboard { base_pt } => {
                 self.handle_paste_clipboard(base_pt);
             }
+            CmdResult::PlaceLinkedTable(link) => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.place_linked_table(link);
+            }
             CmdResult::PlacePastedImage { image, embedded } => {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -1473,7 +1482,13 @@ impl OpenCADStudio {
             self.focus_cmd_input()
         };
         crate::ui::ribbon::keytip_note_command_finished();
-        Task::batch([dispatched, focus])
+        // MULTIPLE: the command ended without Escape, so it starts again.
+        let tab = &self.tabs[self.active_tab];
+        let again = match (&tab.active_cmd, &tab.multiple_cmd) {
+            (None, Some(cmd)) => Task::done(Message::Command(cmd.clone())),
+            _ => Task::none(),
+        };
+        Task::batch([dispatched, focus, again])
     }
 
     // --- C2a handlers: flow / lifecycle (thin-router targets, bodies moved verbatim) ---
@@ -1597,6 +1612,7 @@ impl OpenCADStudio {
     fn handle_cancel(&mut self, cancel: CmdResult) {
         crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
+        self.tabs[i].multiple_cmd = None;
         if self.tabs[i].pending_parameter_set_follow_up.is_some()
             || self.tabs[i].pending_xy_box_set.is_some()
             || self.tabs[i].pending_action_pair.is_some()
@@ -2068,6 +2084,8 @@ impl OpenCADStudio {
         let count = self.tabs[i].scene.delete_groups_containing(&handles);
         self.tabs[i].dirty = true;
         self.commit_group_undo(i, undo);
+        // Grips picked before UNGROUP still show the dissolved group's box.
+        self.refresh_selected_grips();
         if count > 0 {
             self.command_line
                 .push_info(crate::tf!("{} group(s) dissolved.", count).as_ref());

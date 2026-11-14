@@ -2668,6 +2668,22 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
             Some((base.common.handle, needs_sync, block_missing))
         })
         .collect();
+    // A `*D` picture is one dimension's own geometry. Files that point several
+    // dimensions at one block would save the same picture for all of them, so
+    // every sharer is rebaked into a block of its own.
+    let shared = shared_dimension_blocks(doc);
+    let dimensions: Vec<(Handle, Option<Vector3>, bool)> = dimensions
+        .into_iter()
+        .map(|(handle, point, missing)| {
+            let shares = match doc.get_entity(handle) {
+                Some(EntityType::Dimension(d)) => {
+                    shared.contains(&d.base().block_name.to_ascii_uppercase())
+                }
+                _ => false,
+            };
+            (handle, point, missing || shares)
+        })
+        .collect();
 
     let mut pending = Vec::new();
     for (handle, definition_point, block_missing) in dimensions {
@@ -2689,6 +2705,28 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
         }
     }
     pending
+}
+
+/// Upper-cased `*D` block names more than one dimension refers to, counting
+/// dimensions inside block definitions too.
+fn shared_dimension_blocks(doc: &Document) -> rustc_hash::FxHashSet<String> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut shared = rustc_hash::FxHashSet::default();
+    let nested = doc
+        .block_records
+        .iter()
+        .flat_map(|record| record.entity_handles.iter())
+        .filter_map(|handle| doc.get_entity(*handle));
+    for entity in doc.entities().chain(nested) {
+        let EntityType::Dimension(d) = entity else {
+            continue;
+        };
+        let name = d.base().block_name.to_ascii_uppercase();
+        if name.starts_with("*D") && !seen.insert(name.clone()) {
+            shared.insert(name);
+        }
+    }
+    shared
 }
 
 /// Remove `*D` pictures no dimension, insert or scale representation refers to
@@ -2829,6 +2867,8 @@ pub fn bake_dimension_blocks(doc: &mut Document) {
             d.base_mut().insertion_point = Vector3::new(0.0, 0.0, 0.0);
         }
     }
+    // A shared picture whose sharers were all rebaked is now unreferenced.
+    drop_detached_dimension_blocks(doc);
 }
 
 /// Drop baked dimension geometry so the next save regenerates it.
@@ -2840,10 +2880,13 @@ pub fn invalidate_dim_block(doc: &mut Document, handle: Handle) {
     if bn.trim().is_empty() {
         return;
     }
-    // Dimension graphics live in an anonymous "*D…" block, unique to the one
-    // dimension, so it is safe to delete along with its sub-entities. Guard on
-    // the anonymous prefix so a hand-referenced named block is never removed.
-    if bn.starts_with("*D") || bn.starts_with("*d") {
+    // Dimension graphics live in an anonymous "*D…" block, normally unique to
+    // the one dimension, so it is deleted along with its sub-entities. Guard on
+    // the anonymous prefix so a hand-referenced named block is never removed,
+    // and keep a block other dimensions still point at.
+    if (bn.starts_with("*D") || bn.starts_with("*d"))
+        && !shared_dimension_blocks(doc).contains(&bn.to_ascii_uppercase())
+    {
         if let Some(rec) = doc.block_records.remove(&bn) {
             let mut owned = rec.entity_handles.clone();
             owned.push(rec.block_entity_handle);

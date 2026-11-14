@@ -1,5 +1,5 @@
 src/ui/properties.rs 7 22
-src/ui/command_line.rs 47 47
+src/ui/command_line.rs 6 1
 src/ui/node_graph.rs 0 25
 src/ui/window/graphic_attributes.rs 1 0
 src/ui/window/browser.rs 0 0

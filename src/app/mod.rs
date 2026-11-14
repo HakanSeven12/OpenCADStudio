@@ -55,7 +55,6 @@ mod dimension_preview_tests;
 mod dock;
 mod drafting_settings;
 mod drawing_properties;
-pub(crate) mod expr_eval;
 pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
@@ -134,6 +133,11 @@ mod viewport_dimension_tests;
 mod visibility;
 
 pub use style_ops::StyleKind;
+
+// The expression evaluator lives in `entities::expr_eval`. This private
+// import keeps `crate::app::expr_eval` working for the code in `app`, and
+// only for it: code outside `app` uses the `entities` path.
+use crate::entities::expr_eval;
 
 /// The Quad display-option message. Defined in `update/context_menu.rs` next
 /// to the quad glue and re-exported so the whole crate reaches it as

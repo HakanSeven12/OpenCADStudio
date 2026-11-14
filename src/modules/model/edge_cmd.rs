@@ -564,7 +564,7 @@ impl CadCommand for SolidEdgeCommand {
                     }
                 }
                 EdgeStep::Expression => {
-                    let value = crate::app::expr_eval::eval_number(text)?;
+                    let value = crate::entities::expr_eval::eval_number(text)?;
                     self.step = self.expression_return;
                     self.accept_distance(value)
                 }
@@ -625,7 +625,7 @@ impl CadCommand for SolidEdgeCommand {
                 self.accept_radius(value)
             }
             EdgeStep::Expression => {
-                let value = crate::app::expr_eval::eval_number(text)?;
+                let value = crate::entities::expr_eval::eval_number(text)?;
                 self.accept_radius(value)
             }
             EdgeStep::ChamferDistance1 | EdgeStep::ChamferDistance2 => None,

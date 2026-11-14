@@ -441,11 +441,11 @@ impl CadCommand for ExtrudeCommand {
                 self.step = self.taper_return;
                 Some(CmdResult::NeedPoint)
             }
-            ExtrudeStep::Expression => crate::app::expr_eval::eval_number(value)
+            ExtrudeStep::Expression => crate::entities::expr_eval::eval_number(value)
                 .filter(|height| height.is_finite() && height.abs() > 1e-6)
                 .map(|height| self.finish(ExtrudeExtent::Height(height))),
             ExtrudeStep::TaperExpression => {
-                let angle = crate::app::expr_eval::eval_number(value)
+                let angle = crate::entities::expr_eval::eval_number(value)
                     .and_then(|value| crate::entities::common::parse_angle(&value.to_string()))?;
                 if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 {
                     return Some(CmdResult::NeedPoint);
@@ -1637,7 +1637,7 @@ impl CadCommand for RevolveCommand {
                 Some(CmdResult::NeedPoint)
             }
             RevolveStep::Expression => {
-                let angle = crate::app::expr_eval::eval_number(value)
+                let angle = crate::entities::expr_eval::eval_number(value)
                     .and_then(|value| crate::entities::common::parse_angle(&value.to_string()))?;
                 if !angle.is_finite()
                     || angle.abs() <= 1e-9

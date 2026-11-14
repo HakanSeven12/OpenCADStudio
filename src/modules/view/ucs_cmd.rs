@@ -286,15 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn spanish_and_international_options_work() {
-        for option in ["Universal", "U", "_World"] {
+    fn localized_and_international_options_work() {
+        // Tests run in en-US: the prompt's labels are the English ones.
+        for option in ["World", "W", "_World"] {
             let mut cmd = UcsCommand::new();
             let result = cmd.on_text_input(option);
             assert!(matches!(result, Some(CmdResult::Dispatch(s)) if s == "UCS WORLD"));
         }
         let mut cmd = UcsCommand::new();
         assert!(matches!(
-            cmd.on_text_input("Guardar"),
+            cmd.on_text_input("Save"),
             Some(CmdResult::NeedPoint)
         ));
         let result = cmd.on_text_input("MiPlano");

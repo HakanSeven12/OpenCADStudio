@@ -1258,7 +1258,7 @@ pub(crate) fn sample_list<'a>(
                 1.0,
                 0.0,
             ))
-            .style(crate::ui::color_select::popup_panel_style)
+            .style(crate::ui::palette_menu::frame_style)
             .padding(2);
             crate::ui::drop_down_fit::drop_down_fit(
                 iced_aw::DropDown::new(head, popup, true)

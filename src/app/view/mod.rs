@@ -4822,7 +4822,7 @@ fn start_page_content<'a>(
                     );
                     let height = ((templates.len() + 1) as f32 * 26.0).min(360.0);
                     let popup = container(scrollable(list).height(height))
-                        .style(crate::ui::color_select::popup_panel_style)
+                        .style(crate::ui::palette_menu::frame_style)
                         .padding(2);
                     crate::ui::drop_down_fit::drop_down_fit(
                         iced_aw::DropDown::new(head, popup, true)

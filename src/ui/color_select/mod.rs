@@ -18,6 +18,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
 use crate::ui::style::form::ROW_H;
+use crate::ui::style::{chrome, text as ui_text};
 use document::types::Color as AcadColor;
 use iced::widget::{button, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Theme};
@@ -99,8 +100,8 @@ pub fn swatch<'a>(bg: Color) -> Element<'a, Message> {
         .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(bg)),
             border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
+                color: chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
                 radius: 2.0.into(),
             },
             ..Default::default()
@@ -162,19 +163,16 @@ pub fn color_selector_varies<'a>(
     on_toggle: Message,
     on_more: Message,
 ) -> Element<'a, Message> {
-    let indicator = container(text(crate::t!("?")).size(10))
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.strong.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                text_color: Some(palette.background.strong.text),
-                ..Default::default()
-            }
+    let indicator = container(text(crate::t!("?")).size(ui_text::UI_SMALL))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::hover(theme))),
+            border: Border {
+                color: chrome::border(theme),
+                width: crate::ui::style::palette_metrics::line(),
+                radius: 2.0.into(),
+            },
+            text_color: Some(chrome::strong(theme)),
+            ..Default::default()
         })
         .width(13)
         .height(13)
@@ -208,7 +206,7 @@ fn color_selector_with_indicator<'a>(
     // Closed button: current swatch + name + caret.
     let mut head_row = row![
         indicator,
-        text(name).size(11),
+        crate::ui::kit::one_line(text(name)).size(ui_text::UI),
         iced::widget::Space::new().width(Length::Fill),
     ]
     .spacing(5)
@@ -222,18 +220,11 @@ fn color_selector_with_indicator<'a>(
         .height(ROW_H)
         .width(Length::Fill);
     if extras.flat {
-        head = head.style(|theme: &Theme, status| {
-            let palette = theme.palette();
-            button::Style {
-                background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                    .then(|| Background::Color(palette.background.strong.color)),
-                text_color: palette.background.base.text,
-                border: Border {
-                    radius: 2.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
+        head = head.style(|theme: &Theme, status| button::Style {
+            background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                .then(|| Background::Color(chrome::hover(theme))),
+            text_color: chrome::text(theme),
+            ..Default::default()
         });
     }
 
@@ -242,8 +233,8 @@ fn color_selector_with_indicator<'a>(
     }
 
     let popup = container(color_list_with_current(current, extras, on_select, on_more))
-        .style(popup_panel_style)
-        .padding(2);
+        .style(crate::ui::palette_menu::frame_style)
+        .padding(crate::ui::kit::DROPDOWN_PAD);
 
     // `DropDown` keeps the popup outside the surrounding form layout and
     // handles viewport placement, Escape, and outside-click dismissal.
@@ -259,32 +250,10 @@ fn color_selector_with_indicator<'a>(
     )
 }
 
-pub(crate) fn popup_panel_style(theme: &Theme) -> container::Style {
-    let palette = theme.palette();
-    container::Style {
-        background: Some(Background::Color(palette.background.weak.color)),
-        border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
+/// A row of a dropdown list: the kit's dropdown option, lit under the
+/// pointer.
 pub(crate) fn list_row_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
-    let hovered = matches!(status, button::Status::Hovered);
-    let text_color = if hovered {
-        palette.background.strong.text
-    } else {
-        palette.background.base.text
-    };
-    button::Style {
-        background: hovered.then_some(Background::Color(palette.background.strong.color)),
-        text_color,
-        ..Default::default()
-    }
+    crate::ui::kit::dropdown_option_style(false)(theme, status)
 }
 
 /// The colour list shown inside a picker popup: named ACI colours (with
@@ -315,14 +284,18 @@ pub fn color_list_with_current<'a>(
         if initial_selected.is_none() && current == Some(color) {
             initial_selected = Some(rows.len());
         }
+        let is_current = current == Some(color);
         let el: Element<'a, Message> = button(
-            row![swatch(bg), text(label_str.clone()).size(11)]
-                .spacing(5)
-                .align_y(iced::Center),
+            row![
+                swatch(bg),
+                crate::ui::kit::one_line(text(label_str.clone())).size(ui_text::UI)
+            ]
+            .spacing(5)
+            .align_y(iced::Center),
         )
         .on_press(msg.clone())
-        .style(list_row_style)
-        .padding([2, 4])
+        .style(crate::ui::kit::dropdown_option_style(is_current))
+        .padding([2.0, crate::ui::kit::DROPDOWN_ITEM_PAD_X])
         .width(Length::Fill)
         .into();
         rows.push(DropdownRow::item(el, label_str, msg));
@@ -363,10 +336,10 @@ pub fn color_list_with_current<'a>(
     }
     let more_label = t!("Select Color...").into_owned();
     rows.push(DropdownRow::item(
-        button(text(more_label.clone()).size(11))
+        button(text(more_label.clone()).size(ui_text::UI))
             .on_press(on_more.clone())
             .style(list_row_style)
-            .padding([2, 4])
+            .padding([2.0, crate::ui::kit::DROPDOWN_ITEM_PAD_X])
             .width(Length::Fill),
         more_label,
         on_more,

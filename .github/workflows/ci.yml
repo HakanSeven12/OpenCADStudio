@@ -2,7 +2,8 @@ name: Tests
 
 # Runs the workspace tests on every push to main and on every pull request,
 # on Linux, Windows and macOS. A separate lint job reports rustfmt and clippy
-# results without blocking merges until the existing tree has been cleaned up.
+# results without blocking merges until the existing tree has been cleaned up,
+# and an architecture job reports module dependencies the same way.
 
 on:
   push:
@@ -81,3 +82,36 @@ jobs:
       - name: cargo clippy
         continue-on-error: true
         run: cargo clippy --workspace --all-targets --locked
+
+  architecture:
+    name: architecture (informational)
+    runs-on: ubuntu-22.04
+    # Reports module dependencies that point up the layers described in
+    # docs/architecture/RULES.md. On a pull request it lists only what the
+    # pull request adds or removes, compared with the commit it merges into,
+    # in the job summary and as warnings on the changed lines. Like the lint
+    # job it never fails: the steps carry continue-on-error, and the report
+    # step ignores the tool's exit code so the run shows warnings, not errors.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # A pull request checks out its merge commit; its first parent is
+          # the base the report compares against.
+          fetch-depth: 2
+
+      - name: Tool tests
+        continue-on-error: true
+        run: python3 scripts/test_arch_check.py
+
+      - name: Upward dependencies added or removed
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+          python3 scripts/arch_check.py diff "$RUNNER_TEMP/base" --markdown >> "$GITHUB_STEP_SUMMARY" || true
+          python3 scripts/arch_check.py diff "$RUNNER_TEMP/base" || true
+
+      - name: Upward dependencies
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        run: python3 scripts/arch_check.py report --markdown >> "$GITHUB_STEP_SUMMARY"

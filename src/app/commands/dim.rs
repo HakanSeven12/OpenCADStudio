@@ -2249,65 +2249,108 @@ impl OpenCADStudio {
             .filter(|value| value.is_finite() && *value >= 0.0)
     }
 
-    /// Screen-space bounds of one entity in the same coordinate space the
-    /// WIPEOUT command uses.
-    fn textmask_bounds(&self, i: usize, handle: document::Handle) -> Option<([f32; 3], [f32; 3])> {
-        let wires = self.tabs[i].scene.wire_models_for(&[handle]);
-        let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for wire in &wires {
-            for point in &wire.points {
-                for k in 0..3 {
-                    min[k] = min[k].min(point[k]);
-                    max[k] = max[k].max(point[k]);
-                }
-            }
-        }
-        if min[0] <= max[0] {
-            return Some((min, max));
-        }
-        // Glyph wires need the font atlas, which a headless document may not
-        // have built yet. Fall back to the text's own placement so a mask can
-        // still be created and reported.
+    /// A wipeout that hugs the text at `handle`, in the same coordinate space
+    /// the WIPEOUT command uses. The glyph wires give the text's own box; when
+    /// the font atlas has not been built the text's placement stands in. The
+    /// box is measured in the text's own frame and turned back, so a rotated
+    /// text gets a polygon that follows its rotation instead of an
+    /// axis-aligned rectangle that also masks its neighbours.
+    fn textmask_mask(
+        &self,
+        i: usize,
+        handle: document::Handle,
+    ) -> Option<(document::entities::Wipeout, f64)> {
+        use document::types::{Vector2, Vector3};
         let entity = self.tabs[i].scene.document.get_entity(handle)?;
-        let (origin, width, height, rotation) = match entity {
-            document::EntityType::Text(text) => {
-                let width = text.value.chars().count() as f64
-                    * text.height
-                    * 0.6
-                    * text.width_factor.abs().max(1e-6);
-                (text.insertion_point, width, text.height, text.rotation)
-            }
-            document::EntityType::MText(text) => {
-                let width = if text.rectangle_width > 0.0 {
-                    text.rectangle_width
-                } else if text.extents_width > 0.0 {
-                    text.extents_width
-                } else {
-                    text.value.chars().count() as f64 * text.height * 0.6
-                };
-                let rows = text.value.split('\n').count().max(1) as f64;
-                let height = text
-                    .rectangle_height
-                    .filter(|height| *height > 0.0)
-                    .or((text.extents_height > 0.0).then_some(text.extents_height))
-                    .unwrap_or(rows * text.height * 1.6);
-                (text.insertion_point, width, height, text.rotation)
-            }
+        let (origin, rotation) = match entity {
+            document::EntityType::Text(text) => (text.insertion_point, text.rotation),
+            document::EntityType::MText(text) => (text.insertion_point, text.rotation),
             _ => return None,
         };
         let (sin, cos) = rotation.sin_cos();
-        for (x, y) in [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)] {
-            let wx = (origin.x + x * cos - y * sin) as f32;
-            let wy = (origin.y + x * sin + y * cos) as f32;
-            let wz = origin.z as f32;
-            min[0] = min[0].min(wx);
-            min[1] = min[1].min(wy);
-            min[2] = min[2].min(wz);
-            max[0] = max[0].max(wx);
-            max[1] = max[1].max(wy);
-            max[2] = max[2].max(wz);
+        let to_local = |x: f64, y: f64| {
+            let (dx, dy) = (x - origin.x, y - origin.y);
+            (dx * cos + dy * sin, -dx * sin + dy * cos)
+        };
+        let wires = self.tabs[i].scene.wire_models_for(&[handle]);
+        let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
+        let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
+        let mut z = origin.z;
+        for wire in &wires {
+            for point in &wire.points {
+                let (x, y) = to_local(point[0] as f64, point[1] as f64);
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+                z = z.min(point[2] as f64);
+            }
         }
-        Some((min, max))
+        if min_x > max_x {
+            // Glyph wires need the font atlas, which a headless document may
+            // not have built yet. Fall back to the text's own placement so a
+            // mask can still be created and reported.
+            let (width, height) = match entity {
+                document::EntityType::Text(text) => (
+                    text.value.chars().count() as f64
+                        * text.height
+                        * 0.6
+                        * text.width_factor.abs().max(1e-6),
+                    text.height,
+                ),
+                document::EntityType::MText(text) => {
+                    let width = if text.rectangle_width > 0.0 {
+                        text.rectangle_width
+                    } else if text.extents_width > 0.0 {
+                        text.extents_width
+                    } else {
+                        text.value.chars().count() as f64 * text.height * 0.6
+                    };
+                    let rows = text.value.split('\n').count().max(1) as f64;
+                    let height = text
+                        .rectangle_height
+                        .filter(|height| *height > 0.0)
+                        .or((text.extents_height > 0.0).then_some(text.extents_height))
+                        .unwrap_or(rows * text.height * 1.6);
+                    (width, height)
+                }
+                _ => return None,
+            };
+            min_x = 0.0;
+            min_y = 0.0;
+            max_x = width;
+            max_y = height;
+        }
+        let height = (max_y - min_y).max(0.0);
+        let pad = self
+            .textmask_offset(i)
+            .unwrap_or((height * 0.15).max(0.0));
+        let corners: Vec<Vector2> = [
+            (min_x - pad, min_y - pad),
+            (max_x + pad, min_y - pad),
+            (max_x + pad, max_y + pad),
+            (min_x - pad, max_y + pad),
+        ]
+        .into_iter()
+        .map(|(x, y)| {
+            Vector2::new(
+                origin.x + x * cos - y * sin,
+                origin.y + x * sin + y * cos,
+            )
+        })
+        .collect();
+        if cos > 0.0 && sin.abs() < 1e-9 {
+            // Unrotated text keeps the plain rectangular wipeout it always had.
+            Some((
+                document::entities::Wipeout::from_corners(
+                    Vector3::new(corners[0].x, corners[0].y, z),
+                    Vector3::new(corners[2].x, corners[2].y, z),
+                ),
+                pad,
+            ))
+        } else {
+            Some((document::entities::Wipeout::polygonal(&corners, z), pad))
+        }
     }
 
     /// The masks that belong to `text`, tracked through the TEXTMASK xdata
@@ -2340,41 +2383,27 @@ impl OpenCADStudio {
     /// without stacking wipeouts. Returns how many texts were masked.
     fn apply_textmasks(&mut self, i: usize, handles: &[document::Handle]) -> usize {
         use document::xdata::{ExtendedDataRecord, XDataValue};
-        let offset = self.textmask_offset(i);
         let mut masked = 0usize;
         for handle in handles {
             let previous = self.textmask_masks_for(i, *handle);
             if !previous.is_empty() {
                 self.tabs[i].scene.erase_entities(&previous);
             }
-            let Some((min, max)) = self.textmask_bounds(i, *handle) else {
+            let Some((mut mask, pad)) = self.textmask_mask(i, *handle) else {
                 continue;
             };
-            let height = (max[1] - min[1]) as f64;
-            let pad = offset.unwrap_or((height * 0.15).max(0.0));
-            let c1 = document::types::Vector3::new(
-                min[0] as f64 - pad,
-                min[1] as f64 - pad,
-                min[2] as f64,
-            );
-            let c2 = document::types::Vector3::new(
-                max[0] as f64 + pad,
-                max[1] as f64 + pad,
-                min[2] as f64,
-            );
-            let mask = self.tabs[i]
-                .scene
-                .add_entity_clone(document::EntityType::Wipeout(
-                    document::entities::Wipeout::from_corners(c1, c2),
-                ));
-            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(mask) {
-                let mut record = ExtendedDataRecord::new(TEXTMASK_APP);
-                record.add_value(XDataValue::Handle(*handle));
-                entity.common_mut().extended_data.upsert_record(record);
-            }
             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
                 let mut record = ExtendedDataRecord::new(TEXTMASK_APP);
                 record.add_value(XDataValue::Real(pad));
+                entity.common_mut().extended_data.upsert_record(record);
+            }
+            mask.common.handle = document::Handle::NULL;
+            let mask = self.tabs[i]
+                .scene
+                .add_entity_clone(document::EntityType::Wipeout(mask));
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(mask) {
+                let mut record = ExtendedDataRecord::new(TEXTMASK_APP);
+                record.add_value(XDataValue::Handle(*handle));
                 entity.common_mut().extended_data.upsert_record(record);
             }
             masked += 1;

@@ -8829,3 +8829,61 @@ mod batch8_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod text_mask_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// A mask is a wipeout around the text, so it must turn with the text.
+    /// The old bounds were the axis-aligned box of the rotated glyph wires,
+    /// and the rectangle built from it covered far more than the text did —
+    /// on a 45-degree label it hid a large square of the drawing around it.
+    #[test]
+    fn a_rotated_text_gets_a_mask_that_turns_with_it() {
+        use document::entities::Text;
+        use document::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut text = Text::with_value("MASK", Vector3::new(20.0, 20.0, 0.0));
+        text.height = 2.0;
+        text.rotation = std::f64::consts::FRAC_PI_4;
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Text(text));
+        app.tabs[i].scene.select_entities(&[handle]);
+
+        let _ = app.run_command_line("TEXTMASK");
+        let _ = app.feed_active_cmd("");
+
+        let wipeout = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Wipeout(wipeout) => Some(wipeout.clone()),
+                _ => None,
+            })
+            .expect("the text is masked");
+        assert_ne!(
+            wipeout.clip_type,
+            document::entities::WipeoutClipType::Rectangular,
+            "a rotated text needs a turned polygon, not an axis-aligned box"
+        );
+        let corners = wipeout.world_boundary_vertices();
+        assert_eq!(corners.len(), 4);
+        // The first edge follows the text's 45-degree rotation.
+        let (dx, dy) = (corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+        assert!(
+            dx.abs() > 0.2 && dy.abs() > 0.2,
+            "the mask edge must not stay on an axis: {dx}, {dy}"
+        );
+        assert!(
+            (dx.abs() - dy.abs()).abs() < 1e-6,
+            "the mask edge turns 45 degrees: {dx}, {dy}"
+        );
+    }
+}
+

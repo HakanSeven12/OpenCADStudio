@@ -118,7 +118,7 @@ impl CadCommand for UcsCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let t = text.trim();
         if matches!(self.option.as_deref(), None | Some("3POINT") | Some("3P"))
-            && crate::app::helpers::parse_coord(t).is_some()
+            && crate::entities::coord_parse::parse_coord(t).is_some()
         {
             return None;
         }

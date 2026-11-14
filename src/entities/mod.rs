@@ -5,6 +5,7 @@ pub mod attribute;
 pub mod circle;
 pub(crate) mod civil;
 pub mod common;
+pub(crate) mod coord_parse;
 pub mod curve;
 pub mod dim_inspect;
 pub mod dim_override;

@@ -393,12 +393,12 @@ pub static PANEL_ACTION: OpDef = OpDef {
         opt(
             "action",
             Ty::EnumCi(&["click", "change"]),
-            "Defaults to click. Buttons support click; Checkbox/Choice/Text/Number/Color support change.",
+            "Defaults to click. Buttons support click; Checkbox/Choice/Text/Number support change (Color is picker-only).",
         ),
         opt(
             "value",
-            Ty::Raw(r#"{"oneOf":[{"type":"boolean"},{"type":"number"},{"type":"string"},{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index"]},{"type":"array","items":{"type":"integer","minimum":0,"maximum":255},"minItems":3,"maxItems":3}]}"#),
-            "Typed draft for change: booleans, numbers, strings, {index, text} choices or [r,g,b] colours.",
+            Ty::Raw(r#"{"oneOf":[{"type":"boolean"},{"type":"number"},{"type":"string"},{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index"]}]}"#),
+            "Typed draft for change: booleans, numbers, strings, or {index, text} choices. Choice text defaults to options[index] when omitted.",
         ),
     ],
     rules: &[],

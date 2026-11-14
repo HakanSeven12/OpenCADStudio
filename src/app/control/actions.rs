@@ -1359,12 +1359,14 @@ impl OpenCADStudio {
             )),
             (DialogControl::Button { .. }, _) => Err(bad_kind("click")),
             (DialogControl::Checkbox { .. }, "change") => {
-                let value: ocs_plugin_api::dialog::DialogValue = serde_json::from_value(
-                    req["value"].clone(),
-                )
-                .map_err(|_| failure("invalid_request", "value must be {\"Bool\": <bool>}"))?;
-                let ocs_plugin_api::dialog::DialogValue::Bool(checked) = value else {
-                    return Err(bad_kind("change (Bool)"));
+                // The schema contract is the RAW shape (a plain boolean);
+                // the tagged `{"Bool": …}` DialogValue JSON is tolerated.
+                let pick = req["value"].get("Bool").unwrap_or(&req["value"]);
+                let Some(checked) = pick.as_bool() else {
+                    return Err(failure(
+                        "invalid_request",
+                        "checkbox change needs boolean `value`",
+                    ));
                 };
                 Ok(self.update(Message::PluginPanelBoolToggle(
                     panel_id.to_string(),
@@ -1372,18 +1374,23 @@ impl OpenCADStudio {
                     checked,
                 )))
             }
-            (DialogControl::Choice { .. }, "change") => {
-                let value: ocs_plugin_api::dialog::DialogValue = serde_json::from_value(
-                    req["value"].clone(),
-                )
-                .map_err(|_| {
-                    failure(
+            (DialogControl::Choice { options, .. }, "change") => {
+                // RAW: `{index, text?}`; text defaults to options[index],
+                // exactly like the rendered widget's selection. Tagged
+                // `{"Choice": …}` DialogValue JSON is tolerated.
+                let pick = req["value"].get("Choice").unwrap_or(&req["value"]);
+                let Some(index) = pick["index"].as_u64() else {
+                    return Err(failure(
                         "invalid_request",
-                        "value must be {\"Choice\": {\"index\": <n>, \"text\": \"...\"}}",
-                    )
-                })?;
-                let ocs_plugin_api::dialog::DialogValue::Choice { index, text } = value else {
-                    return Err(bad_kind("change (Choice)"));
+                        "choice change needs {\"index\": <n> (optional \"text\")",
+                    ));
+                };
+                let Ok(index) = usize::try_from(index) else {
+                    return Err(failure("invalid_request", "index out of range"));
+                };
+                let text = match pick["text"].as_str() {
+                    Some(text) => text.to_string(),
+                    None => options.get(index).cloned().unwrap_or_default(),
                 };
                 Ok(self.update(Message::PluginPanelChoiceSelect(
                     panel_id.to_string(),
@@ -1393,25 +1400,22 @@ impl OpenCADStudio {
                 )))
             }
             (DialogControl::Text { .. } | DialogControl::Number { .. }, "change") => {
-                let value: ocs_plugin_api::dialog::DialogValue = serde_json::from_value(
-                    req["value"].clone(),
-                )
-                .map_err(|_| failure(
-                    "invalid_request",
-                    "value must be {\"Text\": \"...\"} or {\"Number\": <f64>}",
-                ))?;
-                let text = match value {
-                    ocs_plugin_api::dialog::DialogValue::Text(text) => text,
-                    ocs_plugin_api::dialog::DialogValue::Number(number) => {
-                        if !number.is_finite() {
-                            return Err(failure(
-                                "invalid_request",
-                                "Number must be finite",
-                            ));
-                        }
-                        format!("{number}")
-                    }
-                    _ => return Err(bad_kind("change (Text/Number)")),
+                // RAW: a plain string or finite number (the widget sends
+                // the draft text); tagged `{"Text": …}` / `{"Number": …}`
+                // DialogValue JSON is tolerated.
+                let pick = req["value"]
+                    .get("Text")
+                    .or_else(|| req["value"].get("Number"))
+                    .unwrap_or(&req["value"]);
+                let text = if let Some(text) = pick.as_str() {
+                    text.to_string()
+                } else if let Some(number) = pick.as_f64().filter(|n| n.is_finite()) {
+                    format!("{number}")
+                } else {
+                    return Err(failure(
+                        "invalid_request",
+                        "text/number change needs string or finite number `value`",
+                    ));
                 };
                 Ok(self.update(Message::PluginPanelTextChange(
                     panel_id.to_string(),

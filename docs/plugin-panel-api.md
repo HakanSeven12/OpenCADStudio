@@ -116,9 +116,11 @@ Evidence: the `firetest-ocsgui` skill (native MCP bridge firetest,
 - **`panel_action` MCP op** (`PANEL_ACTION` in `src/mcp_ops.rs`, armed on
   the plugin_panel control deed; `panel_control` is a recursive
   control-type finder, `panel_action` dispatches): fires ONE control's
-  real GUI interaction without a window — `click` on an action-less button
-  (the plugin's click event) or a typed `change` value on
-  Checkbox/Choice/Text/Number/Color drafts:
+  real GUI interaction without a window — `click` on an action-less
+  button, or a typed `change` on Checkbox (boolean), Choice
+  (`{index, text?}` — text defaults to `options[index]`), Text/Number
+  (plain string/number) drafts; Color is picker-only (color drafts reach
+  the plugin through `update_panel` or the picker itself):
 
   ```json
   {"op":"panel_action","panel_id":"epl_panel","control_id":"epl_button_ping","action":"click"}

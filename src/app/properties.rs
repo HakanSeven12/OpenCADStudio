@@ -3003,6 +3003,43 @@ impl OpenCADStudio {
                             })
                             .unwrap_or_default();
                     }
+                    // Mixed annotative objects lose the row the per-type
+                    // builders place in different sections; keep it so the
+                    // scale list can be edited on all of them at once.
+                    let doc = &self.tabs[i].scene.document;
+                    if filtered.len() > 1
+                        && !sections
+                            .iter()
+                            .any(|s| s.props.iter().any(|p| p.field == "annotative_scale"))
+                        && filtered.iter().all(|(_, entity)| {
+                            crate::scene::annotative::supports_annotation_context(entity)
+                                && crate::scene::annotative::is_annotative(doc, entity)
+                        })
+                    {
+                        let shown = |handle: Handle| {
+                            let scale = crate::scene::annotative::active_object_context_for_scale(
+                                doc, handle, None,
+                            )?
+                            .scale;
+                            crate::scene::annotative::object_scale_memberships(doc, handle)
+                                .into_iter()
+                                .find(|(_, h)| *h == scale)
+                                .map(|(name, _)| name)
+                        };
+                        let first = shown(filtered[0].0);
+                        let value = if filtered.iter().all(|(handle, _)| shown(*handle) == first) {
+                            first.unwrap_or_else(|| doc.header.current_annotation_scale.clone())
+                        } else {
+                            VARIES_LABEL.to_string()
+                        };
+                        if let Some(section) = sections.first_mut() {
+                            section.props.push(crate::entities::common::ro_prop(
+                                t!("Annotative scale").as_ref(),
+                                "annotative_scale",
+                                value,
+                            ));
+                        }
+                    }
                     if let (Some(t), Some(groups_ms), Some(filter_ms), Some(local_ms)) =
                         (t_arm, t_groups, t_filter, t_local)
                     {

@@ -123,6 +123,7 @@ const EXECUTE_OPS: &[&str] = &[
     "set_properties",
     "panel_input",
     "panel_button",
+    "panel_action",
     "action",
     "embed_image",
     "dgn_import",

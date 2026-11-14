@@ -8938,4 +8938,57 @@ mod change_properties_tests {
     }
 }
 
+#[cfg(test)]
+mod table_style_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::objects::ObjectType;
+
+    fn style(app: &OpenCADStudio, name: &str) -> document::objects::TableStyle {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
+                    Some(style.clone())
+                }
+                _ => None,
+            })
+            .expect("the style exists")
+    }
+
+    /// TABLESTYLE could create a style and make it current but every style it
+    /// created kept the standard margins and text height: SET took the name and
+    /// ignored the rest, so a style could not be authored from the command
+    /// line at all.
+    #[test]
+    fn tablestyle_set_authors_the_style_properties() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("TABLESTYLE NEW LEDGER");
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER HMARGIN 0.25");
+        assert_eq!(style(&app, "LEDGER").horizontal_margin, 0.25);
+
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER TEXTHEIGHT 3.5");
+        let ledger = style(&app, "LEDGER");
+        assert_eq!(ledger.data_row_style.text_height, 3.5);
+        assert_eq!(ledger.header_row_style.text_height, 3.5);
+        assert_eq!(ledger.title_row_style.text_height, 3.5);
+
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER ANNOTATIVE YES");
+        assert!(style(&app, "LEDGER").annotative);
+
+        // Without a property, SET still picks the style new tables take.
+        let _ = app.run_command_line("TABLESTYLE SET LEDGER");
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_table_style_name,
+            "LEDGER"
+        );
+    }
+}
+
 

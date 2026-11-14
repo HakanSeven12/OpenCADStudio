@@ -1036,38 +1036,162 @@ impl OpenCADStudio {
                     "SET" | "S" => {
                         let name = parts.get(1).copied().unwrap_or("").to_string();
                         if name.is_empty() {
-                            self.command_line
-                                .push_error(crate::t!("Usage: TABLESTYLE SET <name>").as_ref());
+                            self.command_line.push_error(
+                                crate::t!(
+                                    "Usage: TABLESTYLE SET <name> [<property> <value>]"
+                                )
+                                .as_ref(),
+                            );
                         } else {
                             let doc = &self.tabs[i].scene.document;
-                            let style = doc.objects.values().find_map(|o| {
-                                if let ObjectType::TableStyle(s) = o {
-                                    if s.name.eq_ignore_ascii_case(&name) {
-                                        Some(s.name.clone())
-                                    } else {
-                                        None
+                            let handle = doc.objects.iter().find_map(|(handle, object)| {
+                                match object {
+                                    ObjectType::TableStyle(s)
+                                        if s.name.eq_ignore_ascii_case(&name) =>
+                                    {
+                                        Some(*handle)
                                     }
-                                } else {
-                                    None
+                                    _ => None,
                                 }
                             });
-                            match style {
-                                Some(name) => {
-                                    let doc = &mut self.tabs[i].scene.document;
-                                    doc.header.current_table_style_name = name.clone();
-                                    self.push_undo_snapshot(i, "TABLESTYLE SET");
-                                    self.tabs[i].dirty = true;
-                                    self.command_line.push_output(
-                                        crate::tf!("Table style set to '{name}'.").as_ref(),
-                                    );
-                                }
-                                None => {
-                                    self.command_line.push_error(
-                                        crate::tf!("TABLESTYLE: no table style named '{name}'.")
-                                            .as_ref(),
-                                    );
-                                }
+                            let Some(handle) = handle else {
+                                self.command_line.push_error(
+                                    crate::tf!("TABLESTYLE: no table style named '{name}'.")
+                                        .as_ref(),
+                                );
+                                return Some(Task::none());
+                            };
+                            if parts.len() < 4 {
+                                self.push_undo_snapshot(i, "TABLESTYLE SET");
+                                let doc = &mut self.tabs[i].scene.document;
+                                let style_name = match doc.objects.get(&handle) {
+                                    Some(ObjectType::TableStyle(s)) => s.name.clone(),
+                                    _ => name.clone(),
+                                };
+                                doc.header.current_table_style_name = style_name.clone();
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(
+                                    crate::tf!("Table style set to '{style_name}'.").as_ref(),
+                                );
+                                return Some(Task::none());
                             }
+                            // `SET <name> <property> <value>` authors the
+                            // style itself: margins, text, row visibility and
+                            // the annotative flag, the properties the style
+                            // manager edits.
+                            enum Change {
+                                HorizontalMargin(f64),
+                                VerticalMargin(f64),
+                                BothMargins(f64),
+                                TextHeight(f64),
+                                TextStyle(String, Option<document::Handle>),
+                                Title(bool),
+                                Header(bool),
+                                Annotative(bool),
+                            }
+                            let property = parts[2].to_ascii_lowercase().replace(['_', '-'], "");
+                            let value = parts[3];
+                            let number = |minimum: f64| {
+                                value
+                                    .parse::<f64>()
+                                    .ok()
+                                    .filter(|v| v.is_finite() && *v >= minimum)
+                            };
+                            let flag = |value: &str| {
+                                match value.to_ascii_uppercase().as_str() {
+                                    "1" | "YES" | "TRUE" | "ON" => Some(true),
+                                    "0" | "NO" | "FALSE" | "OFF" => Some(false),
+                                    _ => None,
+                                }
+                            };
+                            let change = match property.as_str() {
+                                "hmargin" | "horizontalmargin" => {
+                                    number(0.0).map(Change::HorizontalMargin)
+                                }
+                                "vmargin" | "verticalmargin" => {
+                                    number(0.0).map(Change::VerticalMargin)
+                                }
+                                "margin" | "cellmargin" => number(0.0).map(Change::BothMargins),
+                                "textheight" | "height" => number(0.0).map(Change::TextHeight),
+                                "textstyle" | "style" => {
+                                    self.tabs[i].scene.document.text_styles.get(value).map(
+                                        |text_style| {
+                                            Change::TextStyle(
+                                                text_style.name.clone(),
+                                                Some(text_style.handle),
+                                            )
+                                        },
+                                    )
+                                }
+                                "title" | "titlerow" => flag(value).map(Change::Title),
+                                "header" | "headerrow" => flag(value).map(Change::Header),
+                                "annotative" => flag(value).map(Change::Annotative),
+                                _ => {
+                                    self.command_line.push_error(
+                                        crate::tf!(
+                                            "TABLESTYLE: unknown property '{property}'. Try: hmargin vmargin margin textheight textstyle title header annotative"
+                                        )
+                                        .as_ref(),
+                                    );
+                                    return Some(Task::none());
+                                }
+                            };
+                            let Some(change) = change else {
+                                self.command_line.push_error(
+                                    crate::tf!(
+                                        "TABLESTYLE: '{value}' is not a valid value for {property}."
+                                    )
+                                    .as_ref(),
+                                );
+                                return Some(Task::none());
+                            };
+                            self.push_undo_snapshot(i, "TABLESTYLE SET");
+                            let doc = &mut self.tabs[i].scene.document;
+                            let Some(ObjectType::TableStyle(style)) = doc.objects.get_mut(&handle)
+                            else {
+                                return Some(Task::none());
+                            };
+                            let summary = match change {
+                                Change::HorizontalMargin(margin) => {
+                                    style.horizontal_margin = margin;
+                                    crate::tf!("horizontal margin = {margin:.3}")
+                                }
+                                Change::VerticalMargin(margin) => {
+                                    style.vertical_margin = margin;
+                                    crate::tf!("vertical margin = {margin:.3}")
+                                }
+                                Change::BothMargins(margin) => {
+                                    style.set_margins(margin);
+                                    crate::tf!("cell margin = {margin:.3}")
+                                }
+                                Change::TextHeight(height) => {
+                                    style.set_all_text_heights(height);
+                                    crate::tf!("text height = {height:.3}")
+                                }
+                                Change::TextStyle(text_style, text_handle) => {
+                                    style.set_all_text_styles(&text_style, text_handle);
+                                    crate::tf!("text style = {text_style}")
+                                }
+                                Change::Title(visible) => {
+                                    style.set_title_visible(visible);
+                                    crate::tf!("title row = {}", if visible { "shown" } else { "hidden" })
+                                }
+                                Change::Header(visible) => {
+                                    style.set_header_visible(visible);
+                                    crate::tf!("header row = {}", if visible { "shown" } else { "hidden" })
+                                }
+                                Change::Annotative(annotative) => {
+                                    style.annotative = annotative;
+                                    crate::tf!("annotative = {}", u8::from(annotative))
+                                }
+                            };
+                            self.tabs[i]
+                                .scene
+                                .invalidate_object_style_dependencies(&[handle]);
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(
+                                crate::tf!("TABLESTYLE: '{name}': {summary}.").as_ref(),
+                            );
                         }
                     }
                     _ => {

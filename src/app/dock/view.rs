@@ -330,7 +330,7 @@ impl OpenCADStudio {
         for (n, &gi) in groups.iter().enumerate() {
             let is_open = shown == Some(gi);
             let lit =
-                target_group == Some(gi) || (!dragging && self.dock_grip_hover == Some((side, gi)));
+                target_group == Some(gi) || (!dragging && self.dock_grip_lit == Some((side, gi)));
             let group_dragged =
                 dragging && movement.is_some_and(|(_, group, _)| group == Some((side, gi)));
             let panels = self.dock_group_visible(side, gi);

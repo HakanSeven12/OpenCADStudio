@@ -70,10 +70,22 @@ impl OpenCADStudio {
                     self.dock_title_hover = None;
                 }
             }
-            DockMsg::GripHover(side, gi) => self.dock_grip_hover = Some((side, gi)),
+            DockMsg::GripHover(side, gi) => {
+                self.dock_grip_hover = Some((side, gi));
+                return iced::Task::perform(
+                    crate::app::update::rest(crate::ui::dock::GRIP_LIT_DELAY),
+                    move |()| Message::Dock(crate::ui::dock::DockMsg::GripLit(side, gi)),
+                );
+            }
             DockMsg::GripHoverEnd(side, gi) => {
                 if self.dock_grip_hover == Some((side, gi)) {
                     self.dock_grip_hover = None;
+                    self.dock_grip_lit = None;
+                }
+            }
+            DockMsg::GripLit(side, gi) => {
+                if self.dock_grip_hover == Some((side, gi)) {
+                    self.dock_grip_lit = Some((side, gi));
                 }
             }
             DockMsg::FloatRaise(id) => self.dock.raise_float(id),
@@ -253,6 +265,7 @@ impl OpenCADStudio {
     fn dock_clear_hover(&mut self) {
         self.dock_icon_hover = None;
         self.dock_grip_hover = None;
+        self.dock_grip_lit = None;
     }
 
     /// Pointer released: land what was dragged and save a changed layout.

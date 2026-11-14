@@ -68,6 +68,8 @@ pub enum DockMsg {
     GripHover(DockSide, usize),
     /// The pointer left that edge band.
     GripHoverEnd(DockSide, usize),
+    /// The pointer has rested on that band for [`GRIP_LIT_DELAY`].
+    GripLit(DockSide, usize),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar (or its menu's Dock left /
@@ -1203,8 +1205,12 @@ pub const STRIP_DIVIDER_H: f32 = crate::ui::style::palette_metrics::LINE;
 /// Space between the last group and the + button.
 pub const STRIP_PLUS_GAP: f32 = crate::ui::style::palette_metrics::STRIP_GROUP_PAD;
 /// Width of the band along a group's window-side edge that drags the whole
-/// group (the icons drag single pallets).
-pub const STRIP_GRIP_W: f32 = 8.0;
+/// group (the icons drag single pallets). Narrow, so a press meant for a
+/// tab does not catch it.
+pub const STRIP_GRIP_W: f32 = 4.0;
+/// How long the pointer rests on a group grip before it lights: passing
+/// over it on the way to a tab leaves it dark.
+pub const GRIP_LIT_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 /// How far the "new group" zone around a divider reaches into the icons on
 /// either side.
 const STRIP_NEW_GROUP_SLOP: f32 = 4.0;

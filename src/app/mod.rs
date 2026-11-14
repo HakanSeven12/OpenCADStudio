@@ -1967,6 +1967,9 @@ pub(super) struct OpenCADStudio {
     /// Cursor-anchored one-shot snap override menu (Shift+RMB): the canvas
     /// point it opened at, or `None` when closed (#337).
     snap_override_popup: Option<iced::Point>,
+    /// The Shift+letter temporary override held during a point prompt
+    /// (#3016): the typed key and what it changed, undone on release.
+    held_override: Option<(char, crate::app::update::viewport_snap::HeldOverride)>,
     /// Hard axis lock (#312): the WCS direction captured when Shift went down
     /// during a rubber-band point pick. While `Some`, every candidate point —
     /// osnap hits included — projects onto this ray from `last_point` (or the
@@ -4219,6 +4222,8 @@ pub enum Message {
     /// itself isn't focused (focus parked on viewport / button / etc.)
     /// so typing still routes to the command line.
     CommandAppendChar(String),
+    /// A character key went up: ends a held Shift+letter override.
+    HeldOverrideRelease,
     /// Pop the trailing character off the command-line input — backspace
     /// counterpart to `CommandAppendChar`.
     CommandBackspace,
@@ -6632,6 +6637,7 @@ impl OpenCADStudio {
             pending_command_editor_text: None,
             text_inline: None,
             snap_override_popup: None,
+            held_override: None,
             axis_lock_dir: None,
             angle_override: None,
             drag_move: None,

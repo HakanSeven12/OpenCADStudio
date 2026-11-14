@@ -153,7 +153,7 @@ mod style;
 pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
-mod viewport_snap;
+pub(in crate::app) mod viewport_snap;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -4171,6 +4171,10 @@ impl OpenCADStudio {
             }
 
             Message::CommandAppendChar(s) => self.on_command_append_char(s),
+            Message::HeldOverrideRelease => {
+                self.release_held_override();
+                Task::none()
+            }
 
             Message::CommandBackspace => self.on_command_backspace(),
 
@@ -8944,6 +8948,7 @@ impl OpenCADStudio {
                 // — without this a lock could linger until the next move.
                 if !shift {
                     self.axis_lock_dir = None;
+                    self.release_held_override();
                 }
                 // A live command may key its preview off Ctrl (arc-direction
                 // flip). Rebuild it at the current cursor so the flip shows

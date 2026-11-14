@@ -369,6 +369,9 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_command_append_char(&mut self, s: String) -> Task<Message> {
+        if let Some(task) = self.shift_glyph(&s) {
+            return task;
+        }
         // While the MText preview is up, typed glyphs edit it directly.
         if self.mtext_editor.as_ref().is_some_and(|e| e.show_preview) {
             if s.chars().all(|c| !c.is_control()) {

@@ -465,7 +465,9 @@ pub(crate) fn main_window_event(
         }
         iced::Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
         iced::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
-            crate::ui::ribbon::keytip_key_released(&key)
+            crate::ui::ribbon::keytip_key_released(&key).or_else(|| {
+                matches!(key, keyboard::Key::Character(_)).then_some(Message::HeldOverrideRelease)
+            })
         }
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
             // `command()` is Cmd on macOS, Ctrl elsewhere — the

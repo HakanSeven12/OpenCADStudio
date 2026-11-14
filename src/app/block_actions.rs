@@ -923,11 +923,7 @@ impl OpenCADStudio {
                     world: actions::v(transform.apply(actions::native(grip.point)))
                         - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: if p.flip {
-                        crate::scene::model::object::GripShape::Arrow
-                    } else {
-                        crate::scene::model::object::GripShape::Triangle
-                    },
+                    shape: parameter_grip_shape(&p),
                     dir: grip.direction.and_then(|direction| {
                         actions::v(transform.apply_rotation(actions::native(direction)))
                             .try_normalize()
@@ -1085,11 +1081,7 @@ impl OpenCADStudio {
                     world: actions::v(transform.apply(actions::native(grip.point)))
                         - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: if p.flip {
-                        crate::scene::model::object::GripShape::Arrow
-                    } else {
-                        crate::scene::model::object::GripShape::Triangle
-                    },
+                    shape: parameter_grip_shape(&p),
                     dir: grip.direction.and_then(|direction| {
                         actions::v(transform.apply_rotation(actions::native(direction)))
                             .try_normalize()
@@ -1446,5 +1438,20 @@ impl BlockBenchHarness {
         );
         let i = self.0.active_tab;
         self.0.tabs[i].scene.entity_wires().len()
+    }
+}
+
+/// Grip shape by parameter kind: flip = arrow, rotation = circle,
+/// linear = triangle, point / XY / polar = square.
+fn parameter_grip_shape(p: &actions::Parameter) -> crate::scene::model::object::GripShape {
+    use crate::scene::model::object::GripShape;
+    if p.flip {
+        GripShape::Arrow
+    } else if p.rotation {
+        GripShape::Circle
+    } else if p.linear {
+        GripShape::Triangle
+    } else {
+        GripShape::Square
     }
 }

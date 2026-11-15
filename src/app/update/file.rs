@@ -4806,6 +4806,30 @@ impl OpenCADStudio {
                     ("DWG Files", "dwg")
                 };
             let close = self.close_save_dialog_window();
+            // macOS: a parentless panel opened while the Save As dialog
+            // closes loses the key window and dismisses itself (#3055);
+            // attach it to the main window as a sheet instead.
+            #[cfg(target_os = "macos")]
+            if let Some(window_id) = self.main_window {
+                let title = crate::t!("Save Drawing As").to_string();
+                let filter_label = filter_label.to_string();
+                let filter_ext = filter_ext.to_string();
+                let pick = iced::window::run(window_id, move |parent| {
+                    let mut dlg = crate::sys::blocking_file_dialog()
+                        .set_parent(parent)
+                        .set_title(&title)
+                        .set_file_name(&default_name)
+                        .add_filter(&filter_label, &[filter_ext.as_str()]);
+                    if let Some(dir) = seed_dir {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    let path = dlg.save_file()?;
+                    crate::config::remember_dialog_dir(&path);
+                    Some(path)
+                })
+                .map(Message::SaveDialogPathPicked);
+                return Task::batch([close, pick]);
+            }
             let pick = Task::perform(
                 async move {
                     let mut dlg = crate::sys::file_dialog()

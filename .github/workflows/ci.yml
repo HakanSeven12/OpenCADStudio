@@ -129,10 +129,20 @@ jobs:
           fetch-depth: 2
 
       - name: Tool tests
+        id: tool_tests
         continue-on-error: true
         run: |
           python3 scripts/test_arch_check.py
           python3 scripts/test_health.py
+
+      # The job stays green (it never fails a pull request), but a failure of
+      # the report's own tests is shown, since the report may then be wrong.
+      - name: Report a tool test failure
+        if: steps.tool_tests.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "::warning::The tests of scripts/arch_check.py or scripts/health.py failed (see the Tool tests step); the report below may be wrong."
+          echo "**The report's own tests failed** (see the Tool tests step), so the report below may be wrong." >> "$GITHUB_STEP_SUMMARY"
 
       - name: What this pull request changes
         if: github.event_name == 'pull_request'

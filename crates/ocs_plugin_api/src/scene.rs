@@ -68,13 +68,17 @@ pub const MAX_PATCH_OPS: usize = 10_000;
 /// Maximum serialized byte length of one [`SceneElement::Text`] `content`
 /// run. Text in a panel is a label, not a document; the cap keeps a single
 /// padded field from dominating frame space the way an unbounded string
-/// would, while remaining far above any rendered legend.
-pub(crate) const MAX_TEXT_BYTES: usize = 4_096;
+/// would, while remaining far above any rendered legend. Shared with the
+/// widget vocabulary ([`crate::widgets`]), which budgets every widget text
+/// field against the same cap.
+pub const MAX_TEXT_BYTES: usize = 4_096;
 
 /// Maximum serialized byte length of one [`SceneElement::Asset`] `uri`.
 /// Asset URIs are opaque references the host loads and caches; the cap keeps
 /// a padded reference from smuggling payload bytes into the scene frame.
-pub(crate) const MAX_ASSET_URI_BYTES: usize = 512;
+/// Shared with the widget vocabulary ([`crate::widgets::IconRef`]), which
+/// budgets its icon references against the same cap.
+pub const MAX_ASSET_URI_BYTES: usize = 512;
 
 /// Plugin-assigned, stable identity of one scene element.
 ///

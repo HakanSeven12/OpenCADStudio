@@ -67,6 +67,12 @@ pub fn revolve(
     a0: f64,
     a1: f64,
 ) -> Option<NurbsSurface3> {
+    // A revolution never needs more than one turn; a larger (or not finite)
+    // sweep would grow the spline without limit.
+    let sweep = a1 - a0;
+    if !sweep.is_finite() || sweep.abs() > std::f64::consts::TAU + 1e-9 {
+        return None;
+    }
     let o = Vec3::from(origin);
     let k = Vec3::from(axis).normalize()?;
     let mut rows = Vec::new();

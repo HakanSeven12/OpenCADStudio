@@ -494,6 +494,28 @@ impl Doc {
                 Surface::Plane(self.frame(v(1), Some(v(2)), form1(3))?),
                 None,
             )),
+            // The plane A·x + B·y + C·z = D; a trimmed surface brings its
+            // own boundary, so the bounding curve of forms ±1 is not needed.
+            108 => {
+                let n = [v(1), v(2), v(3)];
+                let len2 = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+                if !(len2 > 1e-24) || !v(4).is_finite() {
+                    return None;
+                }
+                let at = n.map(|c| c * v(4) / len2);
+                let normal = match (entity.transform != 0)
+                    .then(|| self.matrix(entity.transform))
+                    .flatten()
+                {
+                    Some(m) => [0, 1, 2].map(|r| m[r][0] * n[0] + m[r][1] * n[1] + m[r][2] * n[2]),
+                    None => n,
+                };
+                let x = build::any_perpendicular(kernel::space::Vec3::from(normal)).to_array();
+                Some((
+                    Surface::Plane(Plane::orthonormal(self.place(entity)(at), x, normal)?),
+                    None,
+                ))
+            }
             192 => Some((
                 Surface::Cylinder(kernel::brep::Cylinder {
                     base: self.frame(v(1), Some(v(2)), form1(4))?,
@@ -1591,6 +1613,9 @@ mod tests {
     const ATTRIBUTES: &[u8] = include_bytes!("../../tests/fixtures/iges/attributes.igs");
     const RATIONAL_ARC: &[u8] = include_bytes!("../../tests/fixtures/iges/rational_arc.igs");
     const TWO_SOLIDS: &[u8] = include_bytes!("../../tests/fixtures/iges/two_solids.igs");
+    const PLANE_108: &[u8] = include_bytes!("../../tests/fixtures/iges/plane108.igs");
+    const LARGE_REVOLUTION: &[u8] =
+        include_bytes!("../../tests/fixtures/iges/revolution_large_angle.igs");
 
     fn bounds(body: &Body) -> ([f64; 3], [f64; 3]) {
         let b = kernel::brep::body_bounds(body).expect("a body with geometry");
@@ -1894,4 +1919,23 @@ mod tests {
         }
         assert!(cases > 1000, "{cases} damaged files");
     }
+
+    /// A trimmed face on a Plane entity (108) comes in as one sheet (#3048).
+    #[test]
+    fn a_face_on_a_plane_entity_is_read() {
+        let model = read(PLANE_108, Some(1.0)).expect("a model");
+        assert_eq!(model.sheets.len(), 1);
+        let (min, max) = bounds(&model.sheets[0].0);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-6, "min");
+        assert_close(max, [10.0, 10.0, 0.0], 1e-6, "max");
+    }
+
+    /// A revolution of more than one turn is refused instead of growing
+    /// without limit (#3047).
+    #[test]
+    fn a_revolution_of_more_than_one_turn_is_refused() {
+        let sheets = read(LARGE_REVOLUTION, Some(1.0)).map_or(0, |m| m.sheets.len());
+        assert_eq!(sheets, 0);
+    }
+
 }

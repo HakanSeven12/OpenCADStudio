@@ -35,3 +35,7 @@ weights 1, √2/2, 1. FreeCAD reads it as an arc of radius 10 and length 5π.
 
 Faces exported in Open CASCADE's faces mode (trimmed surfaces on Plane
 entities, 108) are not read yet; see #3048.
+
+`plane108.igs` (issue #3048) and `revolution_large_angle.igs` (issue #3047)
+were written by hand: a 10 × 10 square trimmed face on a Plane entity (108),
+and a surface of revolution (120) whose end angle is 1,000,000 radians.

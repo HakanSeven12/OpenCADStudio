@@ -13307,8 +13307,8 @@ mod tests {
             r#"
 L.create('Walls', color=1, lineweight=50, description='load bearing', transparency=30)
 L.create('Grid', color=(10, 200, 30), linetype='Continuous', off=True, plottable=False)
-L.modify('Walls', color=5, locked=True)
 doc.create_entity('Line', start=P(0, 0, 0), end=P(1, 0, 0), layer='Walls')
+L.modify('Walls', color=5, locked=True)
 L.rename('Walls', 'Structure')
 check('dup', lambda: L.create('structure'))
 check('badname', lambda: L.create('a<b'))

@@ -3107,8 +3107,10 @@ mod tests {
     // The precise GPTS/bounds rewrite lengthens objects after lopdf has
     // written the file, so it rebuilds the classic xref table by hand. Readers
     // such as hayro repair a broken table silently, so check the table itself:
-    // startxref finds it, every entry is well formed, every in-use offset lands
-    // on its own `N G obj`, and the entry count matches the trailer's /Size.
+    // startxref finds it, every entry has the 20-byte form the PDF specification
+    // requires (`nnnnnnnnnn ggggg n \n`, as lopdf writes it), every in-use
+    // offset lands on its own `N G obj`, and the entry count matches the
+    // trailer's /Size.
     #[test]
     fn geopdf_precision_rewrite_keeps_a_valid_classic_xref_table() {
         fn number(bytes: &[u8]) -> usize {
@@ -3140,7 +3142,7 @@ mod tests {
                 .position(|window| window == b"trailer")
                 .expect("trailer");
         let table = std::str::from_utf8(&bytes[xref + b"xref\n".len()..trailer]).unwrap();
-        let mut lines = table.lines();
+        let mut lines = table.split_terminator('\n');
         let mut entries = 0;
         let mut in_use = 0;
         while let Some(header) = lines.next() {
@@ -3148,7 +3150,9 @@ mod tests {
             let (start, count): (usize, usize) = (start.parse().unwrap(), count.parse().unwrap());
             for number_in_section in start..start + count {
                 let entry = lines.next().expect("entry line");
-                let fields: Vec<&str> = entry.split(' ').collect();
+                // 19 bytes plus the '\n' split off: the last field is followed by a space.
+                assert!(entry.len() == 19 && entry.ends_with(' '), "entry {entry:?}");
+                let fields: Vec<&str> = entry.trim_end().split(' ').collect();
                 assert_eq!(fields.len(), 3, "entry {entry:?}");
                 assert!(fields[0].len() == 10 && fields[0].bytes().all(|b| b.is_ascii_digit()));
                 assert!(fields[1].len() == 5 && fields[1].bytes().all(|b| b.is_ascii_digit()));

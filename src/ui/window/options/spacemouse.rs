@@ -5,13 +5,17 @@ use iced::{Element, Fill};
 
 pub(crate) const ICON: &[u8] = include_bytes!("../../../../assets/icons/ui/spacemouse.svg");
 
+const LINUX_NOTE: &str = "Push to pan, lift or press to zoom; in 3D navigation tilt to pitch and twist to turn about the pivot. Button 1 fits the view, button 2 returns to the top view. Axis sensitivity and inversion are set in spacenavd (spnavcfg or /etc/spnavrc).";
+
 pub(crate) fn view(
     preferences: Preferences,
     status: Status,
     paused: bool,
     details: bool,
 ) -> Element<'static, Message> {
-    let supported = cfg!(windows);
+    let supported = cfg!(any(windows, target_os = "linux"));
+    // Linux has no driver UI: the app maps every axis and the buttons itself.
+    let linux = cfg!(target_os = "linux");
     let mut enabled = checkbox(preferences.enabled).size(15);
     if supported {
         enabled = enabled.on_toggle(Message::SpaceMouseEnabled);
@@ -55,7 +59,7 @@ pub(crate) fn view(
             .width(Fill),
     ]
     .spacing(12);
-    if preferences.mode != NavigationMode::Full3D && supported {
+    if (preferences.mode != NavigationMode::Full3D || linux) && supported {
         content = content.push(
             row![
                 checkbox(preferences.pan_reversed)
@@ -91,7 +95,7 @@ pub(crate) fn view(
     }
     content = content.push(
         button(
-            text(crate::t!(if supported {
+            text(crate::t!(if supported && !linux {
                 "Open 3Dconnexion settings…"
             } else {
                 "SpaceMouse information…"
@@ -103,9 +107,13 @@ pub(crate) fn view(
         .padding([5, 10]),
     );
     content = content.push(
-        text(crate::t!(
-            "Configure 3D navigation, buttons, and radial menus in 3Dconnexion settings. Pan only and Pan and zoom share the push/tilt mapping and pan settings shown here."
-        ))
+        text(if linux {
+            crate::t!(LINUX_NOTE)
+        } else {
+            crate::t!(
+                "Configure 3D navigation, buttons, and radial menus in 3Dconnexion settings. Pan only and Pan and zoom share the push/tilt mapping and pan settings shown here."
+            )
+        })
         .size(11)
         .width(Fill),
     );
@@ -123,7 +131,9 @@ pub(crate) fn view(
     if details {
         let detail = match status {
             Status::Unavailable(reason) => reason,
-            Status::Unsupported => "This version supports SpaceMouse through 3DxWare on Windows. Other platforms do not yet have a device adapter.".into(),
+            Status::Unsupported => "This version supports SpaceMouse through 3DxWare on Windows and spacenavd on Linux. Other platforms do not yet have a device adapter.".into(),
+            Status::Disconnected if linux => "spacenavd closed the connection. Open CAD Studio reconnects automatically.".into(),
+            _ if linux => "Uses the spacenavd daemon. Navigation pauses while a dialog is open. Your selected navigation mode is saved across drawings and sessions.".into(),
             Status::Disconnected => "3DxWare is running. Connect a SpaceMouse; Open CAD Studio reconnects automatically.".into(),
             _ => "Uses the installed 3DxWare driver. Navigation pauses while a dialog is open. Your selected navigation mode is saved across drawings and sessions.".into(),
         };

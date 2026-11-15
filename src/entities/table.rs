@@ -4488,8 +4488,11 @@ impl PropertyEditable for Table {
     }
 }
 
+pub(crate) mod scaling;
+
 impl Transformable for Table {
     fn apply_transform(&mut self, t: &EntityTransform) {
+        scaling::prepare_unstyled(self, t);
         transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
@@ -4504,6 +4507,7 @@ impl Transformable for Table {
             entity.horizontal_direction.x = tip_x - entity.insertion_point.x;
             entity.horizontal_direction.y = tip_y - entity.insertion_point.y;
         });
+        scaling::finish(self, t);
     }
 }
 
@@ -4685,7 +4689,27 @@ pub fn table_indicator(
         .and_then(|handle| document.text_styles.iter().find(|s| s.handle == handle))
         .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
     let style = crate::entities::text_support::resolve_text_style(&style_name, document);
-    let text_h = text_height as f32;
+    // The grid's typical row / column (the median), not its smallest: one
+    // row or column dragged down to almost nothing must not shrink every
+    // band and label with it.
+    let typical = |sizes: &mut dyn Iterator<Item = f32>| {
+        let mut sizes: Vec<f32> = sizes.filter(|size| *size > 0.0).collect();
+        if sizes.is_empty() {
+            return f32::INFINITY;
+        }
+        sizes.sort_by(f32::total_cmp);
+        sizes[sizes.len() / 2]
+    };
+    let min_row = typical(&mut tab.rows.iter().map(|row| row.height as f32));
+    let min_column = typical(&mut tab.columns.iter().map(|column| column.width as f32));
+    let label_chars = column_label(tab.columns.len() - 1).len().max(3) as f32;
+    // Labels and padding must fit the current grid, including multi-letter
+    // columns and tables whose inherited text style is much larger than a cell.
+    let text_h = (text_height as f32)
+        .min(min_row * 0.3)
+        .min(min_column / (label_chars * 2.0));
+    let hm = (hm as f32).min(min_column * 0.1);
+    let vm = (vm as f32).min(min_row * 0.1);
     // The row numbers' column: the ink width of three of the font's widest
     // digits, plus the cell margins (measured at height 4.5: txt 12, romans
     // 11.57, Arial 9.95 — twice that at height 9).
@@ -4722,8 +4746,8 @@ pub fn table_indicator(
         .copied()
         .unwrap_or(text_h * 3.0)
     });
-    let band_h = text_h + 2.0 * vm as f32;
-    let band_w = digits + 2.0 * hm as f32;
+    let band_h = (text_h + 2.0 * vm).min(min_row);
+    let band_w = (digits + 2.0 * hm).min(min_column);
     let range = range.map(|r| widen_to_merged(tab, r));
     let in_range = |index: usize, row: bool| {
         range.is_some_and(|(r0, c0, r1, c1)| {
@@ -4948,8 +4972,11 @@ mod tests {
                 .insert(handle, document::objects::ObjectType::TableStyle(style));
             let mut table = Table::new(Vector3::ZERO, rows, 1);
             table.table_style_handle = Some(handle);
+            // Cells large enough for the text, so the band is not shrunk to fit them.
+            table.columns[0].width = 100.0;
             for row in &mut table.rows {
                 row.style_id = 3;
+                row.height = 30.0;
             }
             table_indicator(&table, &document, None)
                 .expect("the table has cells")
@@ -6681,3 +6708,7 @@ pub(crate) fn store_cell_geometry(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "table/scaling_tests.rs"]
+mod scaling_tests;

@@ -1188,24 +1188,24 @@ pub const DOCK_DIVIDER_W: f32 = 5.0;
 /// Width of a floating panel's vertical title bar: 22 px and the 1 px dark
 /// line parting it from the panel.
 pub const DOCK_FLOAT_BAR_W: f32 =
-    crate::ui::style::palette_metrics::FLOAT_BAR_W + crate::ui::style::palette_metrics::LINE;
+    crate::ui::style::kit_metrics::FLOAT_BAR_W + crate::ui::style::kit_metrics::LINE;
 /// Width of an edge's vertical icon strip: its light part and the 1 px
 /// edge line on the palette side.
-pub const DOCK_STRIP_W: f32 = crate::ui::style::palette_metrics::STRIP_W;
+pub const DOCK_STRIP_W: f32 = crate::ui::style::kit_metrics::STRIP_W;
 /// Height of one pallet icon in the strip.
-pub const STRIP_CELL_H: f32 = crate::ui::style::palette_metrics::STRIP_CELL_H;
+pub const STRIP_CELL_H: f32 = crate::ui::style::kit_metrics::STRIP_CELL_H;
 /// Size of a pallet icon in the strip.
-pub const RAIL_ICON: f32 = crate::ui::style::palette_metrics::STRIP_ICON;
+pub const RAIL_ICON: f32 = crate::ui::style::kit_metrics::STRIP_ICON;
 /// Text size of a strip tab's name (shown in capitals).
 pub const STRIP_LABEL_SIZE: f32 = crate::ui::style::text::UI;
 /// Height of the + button below a strip's groups.
-pub const STRIP_PLUS_H: f32 = crate::ui::style::palette_metrics::STRIP_PLUS_H;
+pub const STRIP_PLUS_H: f32 = crate::ui::style::kit_metrics::STRIP_PLUS_H;
 /// Room above a group's first icon and below its last, inside those cells.
-pub const STRIP_PAD: f32 = crate::ui::style::palette_metrics::STRIP_GROUP_PAD;
+pub const STRIP_PAD: f32 = crate::ui::style::kit_metrics::STRIP_GROUP_PAD;
 /// Line between groups.
-pub const STRIP_DIVIDER_H: f32 = crate::ui::style::palette_metrics::LINE;
+pub const STRIP_DIVIDER_H: f32 = crate::ui::style::kit_metrics::LINE;
 /// Space between the last group and the + button.
-pub const STRIP_PLUS_GAP: f32 = crate::ui::style::palette_metrics::STRIP_GROUP_PAD;
+pub const STRIP_PLUS_GAP: f32 = crate::ui::style::kit_metrics::STRIP_GROUP_PAD;
 /// Width of the band along a group's window-side edge that drags the whole
 /// group (the icons drag single pallets). Narrow, so a press meant for a
 /// tab does not catch it.
@@ -1290,7 +1290,7 @@ pub fn strip_menu_top(y: f32, menu_h: f32, strip_h: f32) -> f32 {
 /// names, the name (in capitals, read upward) above the icon, or the name
 /// alone, with equal room above and below.
 pub fn strip_tab_h(title: &str, names: StripNames) -> f32 {
-    use crate::ui::style::palette_metrics as pm;
+    use crate::ui::style::kit_metrics as km;
     if !names.names() {
         return STRIP_CELL_H;
     }
@@ -1298,11 +1298,11 @@ pub fn strip_tab_h(title: &str, names: StripNames) -> f32 {
         crate::ui::style::text_metrics::width(&title.to_uppercase(), STRIP_LABEL_SIZE, false)
             .ceil();
     let icon = if names.icons() {
-        pm::STRIP_ICON + pm::STRIP_NAME_GAP
+        km::STRIP_ICON + km::STRIP_NAME_GAP
     } else {
         0.0
     };
-    2.0 * pm::STRIP_NAME_PAD + icon + name
+    2.0 * km::STRIP_NAME_PAD + icon + name
 }
 
 /// What a dragged pallet released at height `y` over the icon strip joins.
@@ -1367,7 +1367,7 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
 }
 
 /// [`title_bar`] with a pallet's own control (its ☰ menu button) before the
-/// close. Every palette uses this one bar: 23 px on the palette body, the
+/// close. Every palette uses this one bar: 23 px on the surface, the
 /// title in 13 px capitals, the ☰ menu and close always shown, pin
 /// (auto-hide) and detach only while the bar is hovered. The pin stands
 /// upright while docked and lies turned 90° while the palette auto-hides. A
@@ -1379,11 +1379,11 @@ pub fn title_bar_with<'a>(
     chrome: Chrome,
     extra: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    use crate::ui::style::{chrome as tokens, palette_metrics as pm, text as ui_text};
+    use crate::ui::style::{chrome as tokens, kit_metrics as km, text as ui_text};
     if chrome.floating {
         return match extra {
             Some(extra) => row![Space::new().width(Length::Fill), extra]
-                .padding([pm::TOOL_GAP, pm::TOOL_GAP])
+                .padding([km::TOOL_GAP, km::TOOL_GAP])
                 .into(),
             None => Space::new().width(0).height(0).into(),
         };
@@ -1400,11 +1400,11 @@ pub fn title_bar_with<'a>(
                 color: Some(tokens::title_text(theme)),
             }),
     )
-    .height(Length::Fixed(pm::TITLE_H))
-    .padding(iced::Padding::ZERO.top(pm::TITLE_TEXT_TOP));
+    .height(Length::Fixed(km::TITLE_H))
+    .padding(iced::Padding::ZERO.top(km::TITLE_TEXT_TOP));
     let mut bar = row![title, Space::new().width(Length::Fill)]
-        .height(Length::Fixed(pm::TITLE_H))
-        .padding(iced::Padding::ZERO.left(pm::TITLE_PAD_X).right(TITLE_PAD_R))
+        .height(Length::Fixed(km::TITLE_H))
+        .padding(iced::Padding::ZERO.left(km::TITLE_PAD_X).right(TITLE_PAD_R))
         .align_y(iced::Center);
     if chrome.title_hovered {
         #[cfg(not(target_arch = "wasm32"))]
@@ -1424,7 +1424,7 @@ pub fn title_bar_with<'a>(
     mouse_area(
         container(bar)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(tokens::palette_body(theme))),
+                background: Some(Background::Color(tokens::surface(theme))),
                 ..Default::default()
             })
             .width(Length::Fill),
@@ -1446,11 +1446,11 @@ pub fn title_button<'a>(
     icon: Element<'a, Message>,
     message: Message,
 ) -> button::Button<'a, Message> {
-    use crate::ui::style::{chrome as tokens, palette_metrics as pm};
+    use crate::ui::style::{chrome as tokens, kit_metrics as km};
     button(container(icon).center(Length::Fill))
         .on_press(message)
-        .width(Length::Fixed(pm::TITLE_BUTTON))
-        .height(Length::Fixed(pm::TITLE_BUTTON))
+        .width(Length::Fixed(km::TITLE_BUTTON))
+        .height(Length::Fixed(km::TITLE_BUTTON))
         .padding(0)
         .style(|theme: &Theme, status| button::Style {
             background: matches!(status, button::Status::Hovered | button::Status::Pressed)
@@ -1462,7 +1462,7 @@ pub fn title_button<'a>(
 
 /// A title-bar icon in the title-bar tint.
 fn title_icon<'a>(art: &'static [u8]) -> Element<'a, Message> {
-    title_icon_sized(art, crate::ui::style::palette_metrics::TITLE_ICON)
+    title_icon_sized(art, crate::ui::style::kit_metrics::TITLE_ICON)
 }
 
 /// [`title_icon`] at `size`.
@@ -1476,7 +1476,7 @@ fn title_tip<'a>(
     tip: String,
     position: tooltip::Position,
 ) -> Element<'a, Message> {
-    use crate::ui::style::{palette_metrics as pm, text as ui_text};
+    use crate::ui::style::{kit_metrics as km, text as ui_text};
     tooltip(
         content,
         text(tip)
@@ -1484,7 +1484,7 @@ fn title_tip<'a>(
             .line_height(ui_text::line()),
         position,
     )
-    .gap(pm::TOOL_GAP)
+    .gap(km::TOOL_GAP)
     .into()
 }
 
@@ -1499,7 +1499,7 @@ pub fn pin_button<'a>(
         id,
         auto_collapse,
         tip,
-        crate::ui::style::palette_metrics::TITLE_ICON,
+        crate::ui::style::kit_metrics::TITLE_ICON,
     )
 }
 
@@ -1542,7 +1542,7 @@ pub fn detach_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Mes
 
 /// The close button of a panel's title bar.
 pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
-    close_button_sized(id, tip, crate::ui::style::palette_metrics::TITLE_ICON)
+    close_button_sized(id, tip, crate::ui::style::kit_metrics::TITLE_ICON)
 }
 
 /// [`close_button`] with an `icon`-sized cross (a floating palette's bar).
@@ -1572,7 +1572,7 @@ pub fn menu_button<'a>(message: Message, tip: String) -> Element<'a, Message> {
 }
 
 /// The splitter between stacked palettes: a `SPLITTER_H` bar in
-/// `palette_bar` with five grip dots centred, lit in the accent while
+/// `surface_raised` with five grip dots centred, lit in the accent while
 /// hovered or dragged (`active`). One widget for every palette.
 pub struct SplitterGrip {
     /// The splitter is being dragged.
@@ -1605,12 +1605,12 @@ impl iced::widget::canvas::Program<Message> for SplitterGrip {
         bounds: iced::Rectangle,
         cursor: iced::advanced::mouse::Cursor,
     ) -> Vec<iced::widget::canvas::Geometry> {
-        use crate::ui::style::{chrome as tokens, palette_metrics as pm, text::snap_px};
+        use crate::ui::style::{chrome as tokens, kit_metrics as km, text::snap_px};
         let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             bounds.size(),
-            tokens::palette_bar(theme),
+            tokens::surface_raised(theme),
         );
         let lit = self.active || *hovered || cursor.is_over(bounds);
         let color = if lit {
@@ -1618,15 +1618,15 @@ impl iced::widget::canvas::Program<Message> for SplitterGrip {
         } else {
             tokens::muted(theme)
         };
-        let n = pm::SPLITTER_DOTS as f32;
-        let span = n * pm::SPLITTER_DOT + (n - 1.0) * pm::SPLITTER_DOT_GAP;
+        let n = km::SPLITTER_DOTS as f32;
+        let span = n * km::SPLITTER_DOT + (n - 1.0) * km::SPLITTER_DOT_GAP;
         let x0 = snap_px((bounds.width - span) / 2.0);
-        let y = snap_px((bounds.height - pm::SPLITTER_DOT) / 2.0);
-        for i in 0..pm::SPLITTER_DOTS {
-            let x = x0 + i as f32 * (pm::SPLITTER_DOT + pm::SPLITTER_DOT_GAP);
+        let y = snap_px((bounds.height - km::SPLITTER_DOT) / 2.0);
+        for i in 0..km::SPLITTER_DOTS {
+            let x = x0 + i as f32 * (km::SPLITTER_DOT + km::SPLITTER_DOT_GAP);
             frame.fill_rectangle(
                 iced::Point::new(x, y),
-                iced::Size::new(pm::SPLITTER_DOT, pm::SPLITTER_DOT),
+                iced::Size::new(km::SPLITTER_DOT, km::SPLITTER_DOT),
                 color,
             );
         }

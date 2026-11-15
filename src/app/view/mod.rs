@@ -4229,7 +4229,7 @@ fn doc_tab_context_menu(
     has_current_path: bool,
     has_other_drawings: bool,
 ) -> Element<'static, Message> {
-    use crate::ui::palette_menu::Item;
+    use crate::ui::kit::menu::Item;
     let mut items = vec![
         Item::new(t!("Save All"), Message::DocTabSaveAll),
         Item::new(t!("Close All"), Message::DocTabCloseAll),
@@ -4256,7 +4256,7 @@ fn doc_tab_context_menu(
             .enabled(has_current_path),
         );
     }
-    crate::ui::palette_menu::menu(items)
+    crate::ui::kit::menu::view(items)
 }
 
 impl OpenCADStudio {
@@ -4288,8 +4288,8 @@ fn doc_tab_menu_items(
     tabs: &[DocumentTab],
     active_tab: usize,
     above_docks: bool,
-) -> Vec<crate::ui::palette_menu::Item> {
-    use crate::ui::palette_menu::{Item, Mark};
+) -> Vec<crate::ui::kit::menu::Item> {
+    use crate::ui::kit::menu::{Item, Mark};
     let mut items = Vec::new();
     if let Some(start) = tabs.iter().position(|tab| tab.is_start) {
         items.push(
@@ -4339,16 +4339,16 @@ impl OpenCADStudio {
     /// its right edge on the ☰ button's, kept inside the window. A press
     /// anywhere else closes it and still reaches what is under it.
     fn doc_tab_menu_layer(&self) -> Element<'_, Message> {
-        use crate::ui::style::palette_metrics as pm;
+        use crate::ui::style::kit_metrics as km;
         let layer = self.doc_tab_menu.then_some(()).and_then(|()| {
             let bounds = crate::ui::wrap_bar::dropdown_bounds(DOC_TAB_MENU_ID)?;
             let items = doc_tab_menu_items(&self.tabs, self.active_tab, self.file_tabs_above_docks);
-            let width = crate::ui::palette_menu::width(&items);
+            let width = crate::ui::kit::menu::width(&items);
             let x = (bounds.x + bounds.width - width)
                 .min(self.win_size.0 - width)
                 .max(0.0);
-            let y = bounds.y + pm::TAB_H + pm::TAB_LINE;
-            let menu = container(crate::ui::palette_menu::menu(items))
+            let y = bounds.y + km::TAB_H + km::TAB_LINE;
+            let menu = container(crate::ui::kit::menu::view(items))
                 .padding(iced::Padding::ZERO.top(y).left(x))
                 .width(Fill)
                 .height(Fill);
@@ -4367,15 +4367,15 @@ impl OpenCADStudio {
     /// anywhere else closes it and still reaches what is under it, so a
     /// press on another tab switches to it at once.
     fn doc_tab_layouts_layer(&self) -> Element<'_, Message> {
-        use crate::ui::style::palette_metrics as pm;
+        use crate::ui::style::kit_metrics as km;
         let layer = self.doc_tab_layouts.and_then(|idx| {
             let tab = self.tabs.get(idx)?;
             let bounds = crate::ui::wrap_bar::dropdown_bounds(&format!("DOC_TAB:{idx}"))?;
             let items = doc_tab_layout_items(tab, idx, idx == self.active_tab);
-            let width = crate::ui::palette_menu::width(&items);
+            let width = crate::ui::kit::menu::width(&items);
             let x = bounds.x.min(self.win_size.0 - width).max(0.0);
-            let y = bounds.y + pm::TAB_H + pm::TAB_LINE;
-            let menu = container(crate::ui::palette_menu::menu(items))
+            let y = bounds.y + km::TAB_H + km::TAB_LINE;
+            let menu = container(crate::ui::kit::menu::view(items))
                 .padding(iced::Padding::ZERO.top(y).left(x))
                 .width(Fill)
                 .height(Fill);
@@ -4398,8 +4398,8 @@ fn doc_tab_layout_items(
     tab: &DocumentTab,
     idx: usize,
     active: bool,
-) -> Vec<crate::ui::palette_menu::Item> {
-    use crate::ui::palette_menu::{Item, Mark};
+) -> Vec<crate::ui::kit::menu::Item> {
+    use crate::ui::kit::menu::{Item, Mark};
     tab.scene
         .cached_layout_names()
         .iter()
@@ -4430,7 +4430,7 @@ fn tab_bar_button_style(theme: &Theme, status: button::Status) -> button::Style 
 
 /// The drawing-tab bar (variant C of the prototype): 24 px on `strip`,
 /// tabs filling it — the inactive ones `tab_inactive`, the active one
-/// `palette_body` joined to the 2 px `palette_body` line under the bar —
+/// `surface` joined to the 2 px `surface` line under the bar —
 /// 1 px apart, a + after the last tab and a ☰ menu at the far right. A tab
 /// shows its whole file name, a dot before it while unsaved, and always
 /// the palette's close button. The Start
@@ -4446,8 +4446,8 @@ pub(super) fn doc_tab_bar<'a>(
     menu_open: bool,
     above_docks: bool,
 ) -> Element<'a, Message> {
-    use crate::ui::palette_menu;
-    use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+    use crate::ui::kit::menu;
+    use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
     let mut items: Vec<Element<'_, Message>> = Vec::new();
     let drag_targets: std::sync::Arc<[usize]> = tabs
         .iter()
@@ -4469,9 +4469,9 @@ pub(super) fn doc_tab_bar<'a>(
         };
         // The whole file name, always: no shortening, so no tooltip either.
         let name = tab.tab_display_name();
-        let mut title = row![].spacing(pm::TAB_INNER_GAP).align_y(iced::Center);
+        let mut title = row![].spacing(km::TAB_INNER_GAP).align_y(iced::Center);
         if tab.dirty {
-            title = title.push(palette_menu::dot(pm::DIRTY_DOT, tab_text));
+            title = title.push(menu::dot(km::DIRTY_DOT, tab_text));
         }
         title = title.push(
             text(name)
@@ -4483,7 +4483,7 @@ pub(super) fn doc_tab_bar<'a>(
         let title_btn = button(title.height(Fill))
             .on_press(Message::TabSwitch(idx))
             .height(Fill)
-            .padding(iced::Padding::ZERO.left(pm::TAB_PAD_X))
+            .padding(iced::Padding::ZERO.left(km::TAB_PAD_X))
             .style(move |theme: &Theme, _status| button::Style {
                 text_color: tab_text(theme),
                 ..Default::default()
@@ -4497,23 +4497,23 @@ pub(super) fn doc_tab_bar<'a>(
         };
         // The same close button as a palette's title bar.
         let close_btn = crate::ui::dock::title_button(
-            crate::ui::icons::tinted(crate::ui::icons::CLOSE, pm::TITLE_ICON, close),
+            crate::ui::icons::tinted(crate::ui::icons::CLOSE, km::TITLE_ICON, close),
             Message::TabClose(tab.id),
         );
         let tab_container = container(
             row![
                 title_btn,
-                Space::new().width(pm::TAB_INNER_GAP),
+                Space::new().width(km::TAB_INNER_GAP),
                 close_btn,
-                Space::new().width(pm::TOOL_GAP)
+                Space::new().width(km::TOOL_GAP)
             ]
             .height(Fill)
             .align_y(iced::Center),
         )
-        .height(iced::Length::Fixed(pm::TAB_H))
+        .height(iced::Length::Fixed(km::TAB_H))
         .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(if is_active {
-                chrome::palette_body(theme)
+                chrome::surface(theme)
             } else if is_hovered {
                 chrome::open_panel(theme)
             } else {
@@ -4545,14 +4545,14 @@ pub(super) fn doc_tab_bar<'a>(
     let new_btn = button(
         container(crate::ui::icons::tinted(
             crate::ui::icons::PLUS,
-            pm::STRIP_PLUS_ICON,
+            km::STRIP_PLUS_ICON,
             chrome::tab_text,
         ))
         .center(Fill),
     )
     .on_press(Message::TabNew)
-    .width(iced::Length::Fixed(pm::TAB_BUTTON_W))
-    .height(iced::Length::Fixed(pm::TAB_H))
+    .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+    .height(iced::Length::Fixed(km::TAB_H))
     .padding(0)
     .style(tab_bar_button_style);
     items.push(new_btn.into());
@@ -4560,14 +4560,14 @@ pub(super) fn doc_tab_bar<'a>(
     let menu_btn = button(
         container(crate::ui::icons::tinted(
             crate::ui::icons::MENU,
-            pm::TITLE_ICON,
+            km::TITLE_ICON,
             chrome::tab_text,
         ))
         .center(Fill),
     )
     .on_press(Message::DocTabMenu(!menu_open, None))
-    .width(iced::Length::Fixed(pm::TAB_BUTTON_W))
-    .height(iced::Length::Fixed(pm::TAB_H))
+    .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+    .height(iced::Length::Fixed(km::TAB_H))
     .padding(0)
     .style(tab_bar_button_style);
     // Its menu is a layer of its own under the bar (`doc_tab_menu_layer`),
@@ -4575,7 +4575,7 @@ pub(super) fn doc_tab_bar<'a>(
     let menu_btn = crate::ui::wrap_bar::PosReport::new(DOC_TAB_MENU_ID, menu_btn);
 
     let tabs_row = Row::with_children(items)
-        .spacing(pm::TAB_GAP)
+        .spacing(km::TAB_GAP)
         .align_y(iced::Center);
     let bar = if above_docks {
         // Across the window: the tabs wrap onto more lines when they
@@ -4585,11 +4585,11 @@ pub(super) fn doc_tab_bar<'a>(
         let empty = ContextMenu::new(
             container(Space::new())
                 .width(Fill)
-                .height(iced::Length::Fixed(pm::TAB_H)),
-            move || palette_menu::menu(doc_tab_menu_items(tabs, active_tab, above_docks)),
+                .height(iced::Length::Fixed(km::TAB_H)),
+            move || menu::view(doc_tab_menu_items(tabs, active_tab, above_docks)),
         );
         row![
-            tabs_row.wrap().vertical_spacing(pm::TAB_GAP),
+            tabs_row.wrap().vertical_spacing(km::TAB_GAP),
             empty,
             menu_btn
         ]
@@ -4607,8 +4607,8 @@ pub(super) fn doc_tab_bar<'a>(
                         .scroller_width(0.0),
                 ))
                 .width(Fill)
-                .height(iced::Length::Fixed(pm::TAB_H)),
-            move || palette_menu::menu(doc_tab_menu_items(tabs, active_tab, above_docks)),
+                .height(iced::Length::Fixed(km::TAB_H)),
+            move || menu::view(doc_tab_menu_items(tabs, active_tab, above_docks)),
         );
         row![strip, menu_btn].align_y(iced::alignment::Vertical::Top)
     };
@@ -4619,9 +4619,9 @@ pub(super) fn doc_tab_bar<'a>(
                 background: Some(Background::Color(chrome::strip(theme))),
                 ..Default::default()
             }),
-        container(Space::new().width(Fill).height(pm::TAB_LINE)).style(|theme: &Theme| {
+        container(Space::new().width(Fill).height(km::TAB_LINE)).style(|theme: &Theme| {
             container::Style {
-                background: Some(Background::Color(chrome::palette_body(theme))),
+                background: Some(Background::Color(chrome::surface(theme))),
                 ..Default::default()
             }
         }),
@@ -4766,7 +4766,7 @@ fn start_page_content<'a>(
                     text_color: pair.text,
                     border: Border {
                         color: crate::ui::style::chrome::border(theme),
-                        width: crate::ui::style::palette_metrics::line(),
+                        width: crate::ui::style::kit_metrics::line(),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -4832,7 +4832,7 @@ fn start_page_content<'a>(
                         * crate::ui::style::start_metrics::TEMPLATE_ROW_H)
                         .min(360.0);
                     let popup = container(scrollable(list).height(height))
-                        .style(crate::ui::palette_menu::frame_style)
+                        .style(crate::ui::kit::menu::frame_style)
                         .padding(2);
                     crate::ui::drop_down_fit::drop_down_fit(
                         iced_aw::DropDown::new(head, popup, true)
@@ -4931,7 +4931,7 @@ fn start_page_content<'a>(
             text_color: pair.text,
             border: Border {
                 color: Color::from_rgb8(255, 69, 0),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 ..Default::default()
             },
             ..Default::default()
@@ -5070,7 +5070,7 @@ fn start_page_content<'a>(
                     .style(|theme: &Theme| container::Style {
                         border: Border {
                             color: crate::ui::style::chrome::border(theme),
-                            width: crate::ui::style::palette_metrics::line(),
+                            width: crate::ui::style::kit_metrics::line(),
                             radius: 6.0.into(),
                         },
                         ..Default::default()
@@ -5144,7 +5144,7 @@ fn start_page_content<'a>(
             background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 8.0.into(),
             },
             ..Default::default()
@@ -5195,7 +5195,7 @@ fn start_page_content<'a>(
                 )),
                 border: Border {
                     color: crate::ui::style::chrome::border(theme),
-                    width: crate::ui::style::palette_metrics::line(),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 6.0.into(),
                 },
                 ..Default::default()
@@ -5266,7 +5266,7 @@ fn start_page_content<'a>(
             background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 8.0.into(),
             },
             ..Default::default()
@@ -5358,7 +5358,7 @@ fn start_page_content<'a>(
             background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 8.0.into(),
             },
             ..Default::default()
@@ -5549,7 +5549,7 @@ fn recent_tiles<'a>(
                 background: Some(Background::Color(crate::ui::style::chrome::page(theme))),
                 border: Border {
                     color: crate::ui::style::chrome::border(theme),
-                    width: crate::ui::style::palette_metrics::line(),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 4.0.into(),
                 },
                 ..Default::default()
@@ -5795,7 +5795,7 @@ pub(super) fn recent_files_panel<'a>(
         text_color: crate::ui::style::chrome::text(theme),
         border: Border {
             color: crate::ui::style::chrome::border(theme),
-            width: crate::ui::style::palette_metrics::line(),
+            width: crate::ui::style::kit_metrics::line(),
             radius: 4.0.into(),
         },
         ..Default::default()
@@ -5852,7 +5852,7 @@ pub(super) fn recent_files_panel<'a>(
         background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
         border: Border {
             color: crate::ui::style::chrome::border(theme),
-            width: crate::ui::style::palette_metrics::line(),
+            width: crate::ui::style::kit_metrics::line(),
             radius: 8.0.into(),
         },
         ..Default::default()

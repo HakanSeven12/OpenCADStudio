@@ -180,7 +180,10 @@ fn panel_measure_key(
     // Panel titles and labels are measured translated, so a language switch
     // has to measure them again.
     panel_measure_key_at(
-        (crate::sys::ui_font::generation(), crate::i18n::language_generation()),
+        (
+            crate::sys::ui_font::generation(),
+            crate::i18n::language_generation(),
+        ),
         groups,
         last_cmd,
         style_ctx,
@@ -265,7 +268,7 @@ const DD_HEADER_MIN_W: f32 = 190.0;
 /// Width of the accent outline of a contextual tab: a hairline, one
 /// physical pixel like every other line.
 fn tab_outline_w() -> f32 {
-    crate::ui::style::palette_metrics::line()
+    crate::ui::style::kit_metrics::line()
 }
 
 /// The contextual tab, which the tool area's accent line leaves a gap
@@ -1724,7 +1727,7 @@ impl Ribbon {
                 .selected(Some(0))
                 .on_escape(Message::CloseRibbonDropdown);
             let panel = container(list)
-                .style(crate::ui::palette_menu::frame_style)
+                .style(crate::ui::kit::menu::frame_style)
                 .width(Length::Fixed(170.0));
 
             let (align_right, h_pad, top) = self.dd_anchor(open_id, 170.0, win.0);
@@ -1942,7 +1945,7 @@ impl Ribbon {
                 .selected(initial_selected)
                 .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(2)
             .width(Length::Fixed(W));
         let (align_right, h_pad, top) = self.dd_anchor(id, W, win.0);
@@ -2111,7 +2114,7 @@ impl Ribbon {
             ]
             .spacing(2),
         )
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .width(Length::Fixed(300.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(id, 300.0, win.0);
@@ -2233,7 +2236,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, LARGE_W * 2.3, win.0);
@@ -2320,7 +2323,7 @@ impl Ribbon {
                 .selected(initial_selected)
                 .on_escape(Message::CloseRibbonDropdown);
         let list = container(dd_list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .width(Length::Fixed(220.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, 220.0, win.0);
@@ -2364,7 +2367,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .width(Length::Fixed(140.0));
 
         let (align_right, h_pad, top) = self.dd_anchor(anchor, 140.0, win.0);
@@ -2476,7 +2479,7 @@ fn dropdown_list<'a>(
         .selected(initial_selected)
         .on_escape(Message::CloseRibbonDropdown);
     let panel = container(list)
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .width(Length::Fixed(panel_w));
     (panel.into(), panel_w)
 }
@@ -2880,7 +2883,10 @@ mod tests {
                 .layout(
                     &mut tree,
                     &renderer,
-                    &Limits::new(iced::Size::ZERO, iced::Size::new(f32::INFINITY, f32::INFINITY)),
+                    &Limits::new(
+                        iced::Size::ZERO,
+                        iced::Size::new(f32::INFINITY, f32::INFINITY),
+                    ),
                 )
                 .size()
                 .width

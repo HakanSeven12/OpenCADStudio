@@ -640,7 +640,7 @@ impl Ribbon {
             container(popup.width(Length::Shrink))
                 .width(Length::Shrink)
                 .style(move |theme: &Theme| {
-                    let mut style = crate::ui::palette_menu::frame_style(theme);
+                    let mut style = crate::ui::kit::menu::frame_style(theme);
                     if more {
                         style.background = Some(Background::Color(chrome::open_panel(theme)));
                     }

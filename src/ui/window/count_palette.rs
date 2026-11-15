@@ -8,7 +8,7 @@ use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::button_style;
-use crate::ui::style::palette_metrics as pm;
+use crate::ui::style::kit_metrics as km;
 use document::count::{BlockInstance, CountKey};
 use document::{Document, Handle};
 use iced::widget::{button, checkbox, column, container, row, text, tooltip, Space};
@@ -308,7 +308,7 @@ fn small_icon<'a>(bytes: &'static [u8], size: f32) -> Element<'a, Message> {
 }
 
 fn row_menu(name: String, key: CountKey, expandable: bool) -> Element<'static, Message> {
-    use crate::ui::palette_menu::Item;
+    use crate::ui::kit::menu::Item;
     let entry = |label: String, action: RowAction| {
         Item::new(
             label,
@@ -335,7 +335,7 @@ fn row_menu(name: String, key: CountKey, expandable: bool) -> Element<'static, M
             RowAction::Expand(2),
         ));
     }
-    crate::ui::palette_menu::menu(items)
+    crate::ui::kit::menu::view(items)
 }
 
 /// One row of the list: a block (with its table check box, or the mark of
@@ -351,37 +351,37 @@ fn list_row<'a>(
     depth: u16,
     expanded: Option<bool>,
 ) -> Element<'a, Message> {
-    let mut lead = row![].spacing(pm::TOOL_GAP).align_y(iced::Center);
+    let mut lead = row![].spacing(km::TOOL_GAP).align_y(iced::Center);
     if let Some(checked) = palette.table.as_ref().filter(|_| depth == 0) {
         let on = checked.contains(&name.to_ascii_uppercase());
         let n = name.to_string();
         lead = lead.push(
             checkbox(on)
-                .size(pm::CHECK)
+                .size(km::CHECK)
                 .on_toggle(move |v| msg(CountMsg::TableCheck(n.clone(), v))),
         );
     } else if expanded == Some(true) {
         lead = lead.push(
             container(crate::ui::icons::themed(
                 crate::ui::icons::MINUS,
-                pm::BAR_ICON,
+                km::BAR_ICON,
             ))
-            .center_x(Length::Fixed(pm::CHECK)),
+            .center_x(Length::Fixed(km::CHECK)),
         );
     } else {
-        lead = lead.push(Space::new().width(pm::CHECK));
+        lead = lead.push(Space::new().width(km::CHECK));
     }
     if depth == 0 {
-        lead = lead.push(small_icon(BLOCK_ICON, pm::ROW_ICON));
+        lead = lead.push(small_icon(BLOCK_ICON, km::ROW_ICON));
     }
-    let mut end = row![].spacing(pm::TOOL_GAP).align_y(iced::Center);
+    let mut end = row![].spacing(km::TOOL_GAP).align_y(iced::Center);
     if errors {
-        end = end.push(crate::ui::icons::themed_warning(WARNING_ICON, pm::BAR_ICON));
+        end = end.push(crate::ui::icons::themed_warning(WARNING_ICON, km::BAR_ICON));
     }
     // An expanded row shows its counts on the rows below it.
     end = end.push(match count {
         Some(n) => kit::number_cell(n.to_string()),
-        None => crate::ui::icons::themed(crate::ui::icons::MORE, pm::BAR_ICON),
+        None => crate::ui::icons::themed(crate::ui::icons::MORE, km::BAR_ICON),
     });
     let row = kit::tree_row(label)
         .depth(depth)
@@ -402,13 +402,13 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
                 msg(CountMsg::Search(v))
             }),
             kit::tool_button(
-                small_icon(AREA_ICON, pm::ROW_ICON),
+                small_icon(AREA_ICON, km::ROW_ICON),
                 crate::t!("Count in a specified area").into_owned(),
                 Some(msg(CountMsg::Area)),
                 false,
             ),
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center),
     );
     let sort = |by_count: bool, title: String| {
@@ -481,7 +481,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
                     .all(|r| checked.contains(&r.name.to_ascii_uppercase()));
             row![
                 checkbox(every)
-                    .size(pm::CHECK)
+                    .size(km::CHECK)
                     .on_toggle(|v| msg(CountMsg::TableAll(v))),
                 Space::new().width(Fill),
                 kit::text_button(
@@ -495,7 +495,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
                     true,
                 ),
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center)
             .into()
         }
@@ -504,7 +504,7 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
         top,
         kit::band(header),
         container(kit::scroll_area(list)).height(Fill),
-        container(kit::band(footer)).padding(Padding::ZERO.bottom(pm::TOOL_GAP)),
+        container(kit::band(footer)).padding(Padding::ZERO.bottom(km::TOOL_GAP)),
     ]
     .into()
 }
@@ -546,10 +546,10 @@ fn mode_view<'a>(
                     kit::name_text(crate::t!(*label).into_owned()),
                     container(
                         checkbox(matching[k])
-                            .size(pm::CHECK)
+                            .size(km::CHECK)
                             .on_toggle(move |v| msg(CountMsg::Match(k, v))),
                     )
-                    .padding(Padding::ZERO.left(pm::CELL_PAD_X))
+                    .padding(Padding::ZERO.left(km::CELL_PAD_X))
                     .into(),
                     false,
                     None,
@@ -567,7 +567,7 @@ fn mode_view<'a>(
             for h in &result.errors {
                 body = body.push(
                     kit::tree_row(crate::t!("Overlapping object").into_owned())
-                        .icon(crate::ui::icons::themed_warning(WARNING_ICON, pm::BAR_ICON))
+                        .icon(crate::ui::icons::themed_warning(WARNING_ICON, km::BAR_ICON))
                         .on_press(msg(CountMsg::ShowError(*h)))
                         .view(),
                 );
@@ -690,7 +690,7 @@ pub fn toolbar<'a>(mode: &CountMode, doc: &Document) -> Element<'a, Message> {
             background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 4.0.into(),
             },
             ..Default::default()

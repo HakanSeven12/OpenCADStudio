@@ -16,7 +16,7 @@ use crate::app::Message;
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 use crate::ui::dock::{Chrome, PanelId};
 use crate::ui::icons::SWAP;
-use crate::ui::style::palette_metrics as pm;
+use crate::ui::style::kit_metrics as km;
 
 pub const ICON: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/quickcalc.svg");
 pub(super) const POINT: &[u8] = include_bytes!("../../../../assets/icons/point.svg");
@@ -114,9 +114,9 @@ pub(super) fn tokens(theme: &Theme) -> Tokens {
     use crate::ui::style::chrome;
     let p = theme.palette();
     let dark = p.is_dark;
-    // QuickCalc stands on the palette body like every palette; its keys
+    // QuickCalc stands on the surface like every palette; its keys
     // step away from it.
-    let bg = chrome::palette_body(theme);
+    let bg = chrome::surface(theme);
     let text = chrome::text(theme);
     // Keys step away from the pallet's background: lighter on dark chrome,
     // darker on light chrome with white digits.
@@ -128,7 +128,7 @@ pub(super) fn tokens(theme: &Theme) -> Tokens {
         }
     };
     Tokens {
-        weak: chrome::palette_bar(theme),
+        weak: chrome::surface_raised(theme),
         strong: chrome::hover(theme),
         line: chrome::border(theme),
         text,
@@ -198,8 +198,8 @@ pub(super) fn muted<'a>(s: impl text::IntoFragment<'a>, size: f32) -> text::Text
 /// A toolbar button (the kit's); `on` lights the running pick tool.
 fn tool<'a>(bytes: &'static [u8], msg: QuickCalcMsg, on: bool) -> Element<'a, Message> {
     button(container(crate::ui::kit::tool_icon(bytes)).center(Fill))
-        .width(pm::TOOL_H)
-        .height(pm::TOOL_H)
+        .width(km::TOOL_H)
+        .height(km::TOOL_H)
         .padding(0)
         .on_press(m(msg))
         .style(crate::ui::kit::flat_button_style(on))
@@ -545,10 +545,10 @@ pub fn view<'a>(
     crate::ui::kit::palette(
         title_bar,
         container(body).padding(iced::Padding {
-            top: pm::TOOL_GAP,
-            bottom: pm::TOOL_GAP,
-            left: pm::GRID_INSET_L,
-            right: pm::GRID_INSET_R,
+            top: km::TOOL_GAP,
+            bottom: km::TOOL_GAP,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
         }),
         width,
     )
@@ -562,7 +562,7 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
 
     // Toolbar.
     let divider =
-        container(Space::new().width(pm::line()).height(pm::ROW_ICON)).style(|theme: &Theme| {
+        container(Space::new().width(km::line()).height(km::ROW_ICON)).style(|theme: &Theme| {
             container::Style {
                 background: Some(Background::Color(tokens(theme).line)),
                 ..Default::default()
@@ -584,18 +584,18 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
             QuickCalcMsg::Pick(PickKind::Angle),
             active(PickKind::Angle)
         ),
-        container(divider).padding([0.0, pm::TOOL_GAP]),
+        container(divider).padding([0.0, km::TOOL_GAP]),
         tool(crate::ui::icons::TRASH, QuickCalcMsg::ClearHistory, false),
         tool(COPY, QuickCalcMsg::Copy, false),
         tool(SEND, QuickCalcMsg::PasteToCommandLine, false),
         Space::new().width(Fill),
         keypad_mode_switch(p),
         container(angle_mode_button(p.mode)).padding(iced::Padding {
-            left: pm::TOOL_GAP,
+            left: km::TOOL_GAP,
             ..iced::Padding::ZERO
         }),
     ]
-    .spacing(pm::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     // History, newest at the bottom next to the input. Empty, it is just
@@ -813,7 +813,7 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
         + 6.0
         + if show_error { 38.0 } else { 20.0 }
         + if picking.is_some() { 52.0 } else { 0.0 };
-    let below_toolbar = height - pm::TOOL_H - GAP;
+    let below_toolbar = height - km::TOOL_H - GAP;
     let history_h = history_rows.len() as f32 * HISTORY_ROW_H;
     let rest = input_h + super::keypad_view::height(p) + sections_height(p) + 3.0 * GAP;
     let overflows = history_h + rest > below_toolbar;
@@ -849,11 +849,11 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
 /// The height a newly floated pallet opens at: the toolbar, a few history
 /// rows, the input, the Standard keypad and both section headers closed.
 pub fn float_height() -> f32 {
-    const FRAME_PADDING: f32 = 2.0 * pm::TOOL_GAP;
+    const FRAME_PADDING: f32 = 2.0 * km::TOOL_GAP;
     const HISTORY_ROWS: f32 = 3.0;
     let p = QuickCalcPalette::default();
     FRAME_PADDING
-        + pm::TOOL_H
+        + km::TOOL_H
         + HISTORY_ROWS * HISTORY_ROW_H
         + (30.0 + 6.0 + 20.0)
         + super::keypad_view::height(&p)
@@ -864,7 +864,7 @@ pub fn float_height() -> f32 {
 /// The sections' height when laid out in full: every header plus the open
 /// bodies, from the fixed row sizes they are built with.
 fn sections_height(p: &QuickCalcPalette) -> f32 {
-    const HEADER: f32 = pm::CATEGORY_GAP + pm::CATEGORY_H;
+    const HEADER: f32 = km::CATEGORY_GAP + km::CATEGORY_H;
     Section::ALL
         .iter()
         .map(|section| {

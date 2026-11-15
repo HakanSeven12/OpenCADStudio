@@ -3,13 +3,13 @@
 
 use super::tooltip::{tooltip, TipPosition};
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use iced::widget::{button, container, row};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
 /// A row of toolbar buttons, 4 px apart, in a palette [`super::band`].
 pub fn toolbar<'a>(buttons: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    super::band(row(buttons).spacing(pm::TOOL_GAP).align_y(iced::Center))
+    super::band(row(buttons).spacing(km::TOOL_GAP).align_y(iced::Center))
 }
 
 /// The look of a flat square button: nothing until hovered, then
@@ -35,7 +35,7 @@ pub fn flat_button_style(active: bool) -> impl Fn(&Theme, button::Status) -> but
             border: Border {
                 color: border,
                 width: if background.is_some() {
-                    pm::line()
+                    km::line()
                 } else {
                     0.0
                 },
@@ -69,8 +69,8 @@ pub fn tool_button<'a>(
 ) -> Element<'a, Message> {
     let b = button(container(icon).center(Length::Fill))
         .on_press_maybe(message)
-        .width(Length::Fixed(pm::TOOL_H))
-        .height(Length::Fixed(pm::TOOL_H))
+        .width(Length::Fixed(km::TOOL_H))
+        .height(Length::Fixed(km::TOOL_H))
         .padding(0)
         .style(flat_button_style(active));
     tooltip(b, tip, TipPosition::Bottom)
@@ -79,7 +79,7 @@ pub fn tool_button<'a>(
 /// A toolbar icon: `art` at the row icon size in the text colour (the
 /// button's lit state brightens it to `strong`).
 pub fn tool_icon<'a>(art: &'static [u8]) -> Element<'a, Message> {
-    crate::ui::icons::tinted(art, pm::ROW_ICON, chrome::text)
+    crate::ui::icons::tinted(art, km::ROW_ICON, chrome::text)
 }
 
 /// A small square button for a category bar (collapse all, expand all, add).
@@ -89,18 +89,18 @@ pub fn bar_button<'a>(
     message: Message,
 ) -> Element<'a, Message> {
     let b = button(
-        container(crate::ui::icons::tinted(art, pm::BAR_ICON, chrome::text)).center(Length::Fill),
+        container(crate::ui::icons::tinted(art, km::BAR_ICON, chrome::text)).center(Length::Fill),
     )
     .on_press(message)
-    .width(Length::Fixed(pm::BAR_BUTTON))
-    .height(Length::Fixed(pm::BAR_BUTTON))
+    .width(Length::Fixed(km::BAR_BUTTON))
+    .height(Length::Fixed(km::BAR_BUTTON))
     .padding(0)
     .style(flat_button_style(false));
     tooltip(b, tip, TipPosition::Bottom)
 }
 
 /// A text button of a palette (Create Table, Insert, Cancel): 22 px high on
-/// `palette_bar`, lit by `hover`; `primary` fills it with the accent.
+/// `surface_raised`, lit by `hover`; `primary` fills it with the accent.
 pub fn text_button<'a>(
     caption: impl Into<String>,
     message: Option<Message>,
@@ -115,8 +115,8 @@ pub fn text_button<'a>(
         .center_y(Length::Fill),
     )
     .on_press_maybe(message)
-    .height(Length::Fixed(pm::TOOL_H))
-    .padding([0.0, pm::MENU_PAD_X])
+    .height(Length::Fixed(km::TOOL_H))
+    .padding([0.0, km::MENU_PAD_X])
     .style(text_button_style(primary))
     .into()
 }
@@ -130,7 +130,7 @@ pub fn text_button_style(primary: bool) -> impl Fn(&Theme, button::Status) -> bu
         let background = match (primary, hovered) {
             (true, false) => chrome::accent(theme),
             (true, true) => chrome::mix(chrome::accent(theme), chrome::strong(theme), 0.15),
-            (false, false) => chrome::palette_bar(theme),
+            (false, false) => chrome::surface_raised(theme),
             (false, true) => chrome::hover(theme),
         };
         button::Style {

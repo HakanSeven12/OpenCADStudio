@@ -87,7 +87,7 @@ pub fn quad_expanded_card(
         .width(Length::Shrink)
         .height(Length::Shrink)
         .id(iced::widget::Id::new("quad-expanded-card"))
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .into()
 }
 

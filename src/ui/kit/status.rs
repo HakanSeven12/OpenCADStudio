@@ -2,7 +2,7 @@
 //! list, and a status line at the bottom.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{container, text as label};
 use iced::{Background, Element, Length, Padding, Theme};
 
@@ -18,10 +18,10 @@ pub fn empty_state<'a>(message: impl Into<String>) -> Element<'a, Message> {
             }),
     )
     .padding(Padding {
-        top: pm::TOOL_GAP,
-        bottom: pm::TOOL_GAP,
-        left: pm::GRID_INSET_L,
-        right: pm::GRID_INSET_R,
+        top: km::TOOL_GAP,
+        bottom: km::TOOL_GAP,
+        left: km::GRID_INSET_L,
+        right: km::GRID_INSET_R,
     })
     .width(Length::Fill)
     .into()
@@ -36,12 +36,12 @@ pub fn footer<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Messa
         .padding(Padding {
             top: FOOTER_PAD_Y,
             bottom: FOOTER_PAD_Y,
-            left: pm::GRID_INSET_L,
-            right: pm::GRID_INSET_R,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
         })
         .align_y(iced::Center)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::palette_bar(theme))),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             text_color: Some(chrome::muted(theme)),
             ..Default::default()
         })
@@ -58,4 +58,4 @@ pub fn footer_text<'a>(value: impl Into<String>) -> Element<'a, Message> {
 }
 
 /// Room above and below a footer's line, so one line is a grid row high.
-const FOOTER_PAD_Y: f32 = (pm::ROW_H - text::UI_LINE) / 2.0;
+const FOOTER_PAD_Y: f32 = (km::ROW_H - text::UI_LINE) / 2.0;

@@ -1,8 +1,8 @@
 //! A dropdown: a field-style head with a caret, and under it a list that
 //! starts at the field's left edge, at least the field's width and as wide
 //! as its longest option. The list is the shared [`DropdownList`] (arrows,
-//! Enter, type-ahead, Escape) in the palette menu's frame; its options light
-//! like palette menu items.
+//! Enter, type-ahead, Escape) in the kit menu's frame; its options light
+//! like kit menu items.
 //!
 //! The open state lives in the caller's own state, so opening and closing
 //! needs no widget-tree handle and the keys the list takes always match the
@@ -13,7 +13,7 @@ use iced::{Background, Element, Length, Theme};
 
 use crate::app::Message;
 use crate::ui::dropdown_list::{DropdownList, DropdownRow};
-use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 
 /// An option: lit under the pointer, and lit when it is the `current` value.
 pub fn dropdown_option_style(current: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
@@ -51,7 +51,7 @@ pub fn dropdown_head<'a>(
     )
     .on_press(toggle.clone())
     .style(super::cell_button_style)
-    .padding([0.0, pm::CELL_PAD_X]);
+    .padding([0.0, km::CELL_PAD_X]);
     let caret = super::on_selected_row(caret);
     let label = super::one_line(text(shown.into()))
         .size(ui_text::UI)
@@ -66,7 +66,7 @@ pub fn dropdown_head<'a>(
     };
     let head = container(row![label, caret].align_y(iced::Center))
         .style(super::combo_container_style)
-        .padding([0.0, pm::CELL_PAD_X])
+        .padding([0.0, km::CELL_PAD_X])
         .width(Length::Fill);
     mouse_area(head).on_press(toggle).into()
 }
@@ -87,7 +87,7 @@ pub fn dropdown_option<'a>(
     )
     .on_press(message.clone())
     .style(dropdown_option_style(current))
-    .padding([2.0, pm::DROPDOWN_ITEM_PAD_X])
+    .padding([2.0, km::DROPDOWN_ITEM_PAD_X])
     .width(Length::Fill);
     DropdownRow::item(item, key.into(), message)
 }
@@ -98,7 +98,7 @@ pub fn dropdown_width<'s>(labels: impl Iterator<Item = &'s str>, field: f32) -> 
     let widest = labels
         .map(|label| crate::ui::style::text_metrics::width(label, ui_text::UI, false))
         .fold(0.0_f32, f32::max);
-    (widest + 2.0 * pm::DROPDOWN_ITEM_PAD_X + 2.0 * pm::DROPDOWN_PAD + pm::SCROLLBAR_W)
+    (widest + 2.0 * km::DROPDOWN_ITEM_PAD_X + 2.0 * km::DROPDOWN_PAD + km::SCROLLBAR_W)
         .max(field)
         .ceil()
 }
@@ -113,8 +113,8 @@ pub fn dropdown<'a>(
     open: bool,
 ) -> Element<'a, Message> {
     let popup = container(list)
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(pm::DROPDOWN_PAD);
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(km::DROPDOWN_PAD);
     crate::ui::color_select::editable_drop_down_below(
         head,
         popup.into(),

@@ -13,7 +13,7 @@ use crate::scene::model::wire_model::WireModel;
 use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::{chrome, palette_metrics as pm_};
+use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::pdf_dialogs::accent_text;
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
 use iced::widget::{
@@ -802,7 +802,7 @@ fn thumb<'a>(palette: &'a BlockPalette, item: &Item, size: f32) -> Element<'a, M
 
 /// The context menu for an item.
 fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<'static, Message> {
-    use crate::ui::palette_menu::Item as MenuItem;
+    use crate::ui::kit::menu::Item as MenuItem;
     let entry = |label: String, action: MenuAction, enabled: bool| {
         MenuItem::new(label, pm(BlockPaletteMsg::Menu(item.clone(), action))).enabled(enabled)
     };
@@ -828,7 +828,7 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
         Tab::Recent | Tab::Favorites => true,
         Tab::Libraries => false,
     };
-    crate::ui::palette_menu::menu(vec![
+    crate::ui::kit::menu::view(vec![
         entry(
             crate::t!("Insert").into_owned(),
             MenuAction::Insert,
@@ -900,7 +900,7 @@ fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> 
                 let yes_no =
                     |v: bool| if v { crate::t!("Yes") } else { crate::t!("No") }.into_owned();
                 row![
-                    container(thumb(palette, &item, pm_::ROW_ICON))
+                    container(thumb(palette, &item, km::ROW_ICON))
                         .width(Length::Fixed(DETAILS_ICON_W)),
                     one_line(text(name.clone()).size(crate::ui::style::text::UI)),
                     text(format!("{} / {}", yes_no(ann), yes_no(dynamic)))
@@ -932,7 +932,7 @@ fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> 
                 text_color: Some(fg),
                 border: Border {
                     color: block_card_border(theme, placing),
-                    width: pm_::LINE,
+                    width: km::LINE,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
@@ -951,8 +951,8 @@ fn item_view<'a>(palette: &'a BlockPalette, item: Item) -> Element<'a, Message> 
 
 fn icon_button<'a>(icon: IconKind, tip: &str, msg: BlockPaletteMsg) -> Element<'a, Message> {
     let icon_el: Element<'_, Message> = match icon {
-        IconKind::Glyph(s) => text(s).size(pm_::ROW_ICON).into(),
-        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, pm_::ROW_ICON),
+        IconKind::Glyph(s) => text(s).size(km::ROW_ICON).into(),
+        IconKind::Svg(bytes) => crate::ui::icons::semantic(bytes, km::ROW_ICON),
     };
     kit::tool_button(icon_el, crate::t!(tip).into_owned(), Some(pm(msg)), false)
 }
@@ -963,10 +963,10 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
     let check_cell = |on: bool, f: fn(bool) -> OptionMsg| -> Element<'a, Message> {
         container(
             checkbox(on)
-                .size(pm_::CHECK)
+                .size(km::CHECK)
                 .on_toggle(move |v| pm(BlockPaletteMsg::Option(f(v)))),
         )
-        .padding(iced::Padding::ZERO.left(pm_::CELL_PAD_X))
+        .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
         .into()
     };
     let grid_row = |name: String, value: Element<'a, Message>| {
@@ -1016,7 +1016,7 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
             ))
             .push(kit::row_view(
                 container(kind)
-                    .padding(iced::Padding::ZERO.right(pm_::CELL_PAD_X))
+                    .padding(iced::Padding::ZERO.right(km::CELL_PAD_X))
                     .into(),
                 row![check_cell(o.scale, OptionMsg::Scale), on_screen()]
                     .align_y(iced::Center)
@@ -1071,9 +1071,9 @@ fn options_card<'a>(palette: &'a BlockPalette) -> Element<'a, Message> {
     }
     container(content)
         .padding(iced::Padding {
-            bottom: pm_::TOOL_GAP,
-            left: pm_::GRID_INSET_L,
-            right: pm_::GRID_INSET_R,
+            bottom: km::TOOL_GAP,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
             ..iced::Padding::ZERO
         })
         .width(Fill)
@@ -1120,7 +1120,7 @@ pub fn view(
         ))
     })
     .text_size(crate::ui::style::text::UI)
-    .width(Length::Fixed(pm_::NAME_COL_W))
+    .width(Length::Fixed(km::NAME_COL_W))
     .padding(kit::BOX_PAD)
     .style(kit::pick_list_style)
     .menu_style(kit::pick_menu_style);
@@ -1133,7 +1133,7 @@ pub fn view(
         ),
         view_pick,
     ]
-    .spacing(pm_::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     let mut top = column![tabs, kit::band(header)];
@@ -1156,7 +1156,7 @@ pub fn view(
                 false,
             ),
         ]
-        .spacing(pm_::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
         let in_sub = palette.library_dir.as_ref().is_some_and(|d| {
             palette
@@ -1166,7 +1166,7 @@ pub fn view(
         });
         if in_sub {
             lib_row = lib_row.push(kit::tool_button(
-                crate::ui::icons::themed_arrow_up(pm_::BAR_ICON),
+                crate::ui::icons::themed_arrow_up(km::BAR_ICON),
                 crate::t!("Up").into_owned(),
                 Some(pm(BlockPaletteMsg::LibraryUp)),
                 false,
@@ -1187,8 +1187,8 @@ pub fn view(
     }
     let heading =
         container(kit::section_bar(palette.tab.heading(), Vec::new())).padding(iced::Padding {
-            left: pm_::GRID_INSET_L,
-            right: pm_::GRID_INSET_R,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
             ..iced::Padding::ZERO
         });
     top = top.push(heading);
@@ -1248,15 +1248,15 @@ pub fn view(
         // The kit's scroll area, with the scroll position reported so only
         // the rows in view are built.
         scrollable(container(col).padding(iced::Padding {
-            top: pm_::TOOL_GAP,
-            right: pm_::GRID_INSET_R,
-            bottom: pm_::TOOL_GAP,
-            left: pm_::GRID_INSET_L,
+            top: km::TOOL_GAP,
+            right: km::GRID_INSET_R,
+            bottom: km::TOOL_GAP,
+            left: km::GRID_INSET_L,
         }))
         .direction(iced::widget::scrollable::Direction::Vertical(
             iced::widget::scrollable::Scrollbar::new()
-                .width(pm_::SCROLLBAR_W)
-                .scroller_width(pm_::SCROLL_THUMB_W)
+                .width(km::SCROLLBAR_W)
+                .scroller_width(km::SCROLL_THUMB_W)
                 .margin(0),
         ))
         .style(kit::scroll_style)
@@ -1416,11 +1416,11 @@ pub fn gallery(palette: &BlockPalette) -> Element<'_, Message> {
     )
     .padding(8)
     .width(Length::Fixed(GALLERY_W))
-    .style(crate::ui::palette_menu::frame_style)
+    .style(crate::ui::kit::menu::frame_style)
     .into()
 }
 
-/// Background and label colour of a block card: the palette bar at rest,
+/// Background and label colour of a block card: the raised surface at rest,
 /// the hover surface while hovered, the selected row while placing.
 pub(crate) fn block_card_colors(
     theme: &Theme,
@@ -1434,7 +1434,7 @@ pub(crate) fn block_card_colors(
             button::Status::Hovered | button::Status::Pressed => {
                 (chrome::hover(theme), chrome::strong(theme))
             }
-            _ => (chrome::palette_bar(theme), chrome::text(theme)),
+            _ => (chrome::surface_raised(theme), chrome::text(theme)),
         }
     }
 }

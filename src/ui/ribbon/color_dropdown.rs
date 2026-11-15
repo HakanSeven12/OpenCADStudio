@@ -314,7 +314,7 @@ fn color_panel<'a>(
             right: 12.0,
         })
         .width(Length::Fixed(PANEL_W))
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .into()
 }
 

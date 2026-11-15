@@ -58,7 +58,7 @@ fn dock_app() -> OpenCADStudio {
     let i = app.active_tab;
     // A 900 px workspace: the docks run its full height, the drawing-tab
     // bar between them sits over the viewport.
-    let vp_h = 900.0 - crate::ui::style::palette_metrics::TAB_BAR_H;
+    let vp_h = 900.0 - crate::ui::style::kit_metrics::TAB_BAR_H;
     app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, vp_h);
     app.win_size = (1600.0, 900.0).into();
     app
@@ -2824,20 +2824,20 @@ fn strip_names_reads_the_old_strip_labels_flag() {
 #[test]
 fn the_strip_has_the_board_sizes() {
     use crate::ui::dock::{strip_hit, strip_layout, StripHit, DOCK_STRIP_W, STRIP_CELL_H};
-    use crate::ui::style::palette_metrics as pm;
+    use crate::ui::style::kit_metrics as km;
     assert_eq!(DOCK_STRIP_W, 31.0);
     assert_eq!(STRIP_CELL_H, 28.0);
     let (layout, plus_top) = strip_layout(&[(0, vec![STRIP_CELL_H; 2]), (1, vec![STRIP_CELL_H])]);
     // The 2 px group padding sits inside the first and last cells.
-    assert_eq!(layout[0].icons_top, pm::STRIP_GROUP_PAD);
+    assert_eq!(layout[0].icons_top, km::STRIP_GROUP_PAD);
     assert_eq!(
         layout[0].bottom(),
-        2.0 * pm::STRIP_GROUP_PAD + 2.0 * STRIP_CELL_H
+        2.0 * km::STRIP_GROUP_PAD + 2.0 * STRIP_CELL_H
     );
-    assert_eq!(layout[1].top, layout[0].bottom() + pm::LINE);
+    assert_eq!(layout[1].top, layout[0].bottom() + km::LINE);
     assert_eq!(
         plus_top,
-        layout[1].bottom() + pm::LINE + pm::STRIP_GROUP_PAD
+        layout[1].bottom() + km::LINE + km::STRIP_GROUP_PAD
     );
     // Centre of each cell joins its group, before or after the cell's own
     // pallet depending on the half; the line between groups starts one.
@@ -2859,12 +2859,12 @@ fn the_strip_has_the_board_sizes() {
 #[test]
 fn strip_tabs_follow_the_names_mode() {
     use crate::ui::dock::{strip_tab_h, StripNames, STRIP_CELL_H};
-    use crate::ui::style::palette_metrics as pm;
+    use crate::ui::style::kit_metrics as km;
     assert_eq!(strip_tab_h("Properties", StripNames::Icons), STRIP_CELL_H);
     let both = strip_tab_h("Properties", StripNames::IconsAndNames);
     let names = strip_tab_h("Properties", StripNames::NamesOnly);
-    assert_eq!(both - names, pm::STRIP_ICON + pm::STRIP_NAME_GAP);
-    assert!(names > 2.0 * pm::STRIP_NAME_PAD + 40.0, "{names}");
+    assert_eq!(both - names, km::STRIP_ICON + km::STRIP_NAME_GAP);
+    assert!(names > 2.0 * km::STRIP_NAME_PAD + 40.0, "{names}");
     for h in [both, names] {
         assert_eq!(h.fract(), 0.0, "whole pixels: {h}");
     }
@@ -2924,7 +2924,7 @@ fn strip_drops_hit_the_same_cells_on_both_sides() {
 #[test]
 fn the_docks_run_up_to_the_ribbon_beside_the_drawing_tabs() {
     with_stack(|| {
-        use crate::ui::style::palette_metrics as pm;
+        use crate::ui::style::kit_metrics as km;
         let mut app = dock_app();
         let _ = app.update(Message::TabNew);
         let i = app.active_tab;
@@ -2945,11 +2945,11 @@ fn the_docks_run_up_to_the_ribbon_beside_the_drawing_tabs() {
                 .vp_size
                 .1
         };
-        assert_eq!(app.dock_workspace_size().1, vp_h(&app) + pm::TAB_BAR_H);
+        assert_eq!(app.dock_workspace_size().1, vp_h(&app) + km::TAB_BAR_H);
         let tab = find_in_view(&app, &name);
         assert!(tab.x > left && tab.x < VIEW_SIZE.width - right, "{tab:?}");
         let title = find_in_view(&app, "PROPERTIES");
-        assert!(title.y < tab.y + pm::TAB_BAR_H, "{title:?} beside {tab:?}");
+        assert!(title.y < tab.y + km::TAB_BAR_H, "{title:?} beside {tab:?}");
         // Above the palettes: the bar runs across the window, over the docks.
         let _ = app.update(Message::DocTabsAboveDocks(true));
         assert!(app.file_tabs_above_docks);
@@ -2958,7 +2958,7 @@ fn the_docks_run_up_to_the_ribbon_beside_the_drawing_tabs() {
         let title = find_in_view(&app, "PROPERTIES");
         assert!(tab_above.x < tab.x, "{tab_above:?}");
         assert!(
-            title.y > tab_above.y + pm::TAB_H / 2.0,
+            title.y > tab_above.y + km::TAB_H / 2.0,
             "{title:?} under {tab_above:?}"
         );
     });

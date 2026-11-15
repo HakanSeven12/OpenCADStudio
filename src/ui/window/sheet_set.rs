@@ -8,10 +8,10 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::dock::PanelId;
 use crate::ui::kit;
-use crate::ui::palette_menu::{self, Item};
+use crate::ui::kit::menu::{self, Item};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
-use crate::ui::style::{chrome, palette_metrics as pm, text as text_size};
+use crate::ui::style::{chrome, kit_metrics as km, text as text_size};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style};
 use document::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
 use iced::widget::{
@@ -650,7 +650,7 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
     }
     items.push(Item::Separator);
     items.push(entry("Properties...", MenuAction::Properties, true));
-    palette_menu::menu(items)
+    menu::view(items)
 }
 
 /// A small status badge after a sheet name.
@@ -660,7 +660,7 @@ fn badge<'a>(prefix: &str, label: &str, warn: bool) -> Element<'a, Message> {
             .size(text_size::UI_SMALL)
             .line_height(text_size::line()),
     )
-    .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+    .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
     .style(move |theme: &Theme| container::Style {
         text_color: Some(if warn {
             chrome::danger(theme)
@@ -669,8 +669,8 @@ fn badge<'a>(prefix: &str, label: &str, warn: bool) -> Element<'a, Message> {
         }),
         border: Border {
             color: chrome::border(theme),
-            width: pm::line(),
-            radius: (pm::CHECK / 2.0).into(),
+            width: km::line(),
+            radius: (km::CHECK / 2.0).into(),
         },
         ..Default::default()
     })
@@ -689,7 +689,7 @@ fn plain_row<'a>(
 ) -> Element<'a, Message> {
     let mut item = kit::tree_row(label)
         .depth(depth)
-        .icon(crate::ui::icons::semantic(icon, pm::ROW_ICON));
+        .icon(crate::ui::icons::semantic(icon, km::ROW_ICON));
     item = match fold {
         Some((open, m)) => item.fold(open, m),
         None => item.caret_room(),
@@ -722,7 +722,7 @@ fn menu_panel(menu: &[Mi], open: Option<&str>) -> Element<'static, Message> {
             .open(open == Some(key.as_str())),
         })
         .collect();
-    palette_menu::menu_with_submenus(items, msg(SheetSetMsg::Submenu(None)))
+    menu::with_submenus(items, msg(SheetSetMsg::Submenu(None)))
 }
 
 /// A menu item: translated label and message (an empty label is a separator).
@@ -748,7 +748,7 @@ fn tree_row<'a>(
     let status = state.status.get(&id).copied();
     let mut item = kit::tree_row(label)
         .depth(depth)
-        .icon(crate::ui::icons::semantic(icon, pm::ROW_ICON))
+        .icon(crate::ui::icons::semantic(icon, km::ROW_ICON))
         .selected(selected)
         .on_press(msg(SheetSetMsg::Select(id.clone())))
         .on_double_click(msg(SheetSetMsg::Activate(id.clone())));
@@ -1226,7 +1226,7 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
             .width(Fill)
             .style(|theme: &Theme| container::Style {
                 background: Some(Background::Color(crate::ui::style::chrome::mix(
-                    crate::ui::style::chrome::palette_body(theme),
+                    crate::ui::style::chrome::surface(theme),
                     crate::ui::style::chrome::danger(theme),
                     0.2,
                 ))),

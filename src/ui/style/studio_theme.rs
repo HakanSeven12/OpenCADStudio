@@ -86,8 +86,8 @@ mod tests {
             ("border", chrome::border(&theme), 0x56606f),
             ("hover_border", chrome::hover_border(&theme), 0x5b6779),
             // The palette area of the prototype.
-            ("palette_body", chrome::palette_body(&theme), 0x3b4453),
-            ("palette_bar", chrome::palette_bar(&theme), 0x2e3440),
+            ("surface", chrome::surface(&theme), 0x3b4453),
+            ("surface_raised", chrome::surface_raised(&theme), 0x2e3440),
             ("strip", chrome::strip(&theme), 0x2b313b),
             ("edge", chrome::edge(&theme), 0x202731),
             ("strip_divider", chrome::strip_divider(&theme), 0x4a5463),

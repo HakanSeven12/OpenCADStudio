@@ -21,16 +21,16 @@ use crate::ui::icons;
 use crate::ui::popup::context_menu::{MENU_ROW_H, MENU_SEP_H};
 use crate::ui::style::{chrome, text_metrics};
 
-// The palette menu's look: a check in the mark column before the label, UI
+// The kit menu's look: a check in the mark column before the label, UI
 // text, the hover colour, its row and separator heights and its frame.
-use crate::ui::style::{palette_metrics as pm, text as ui_text};
+use crate::ui::style::{kit_metrics as km, text as ui_text};
 /// Size of the check mark before a checked row's label.
-const CHECK_SIZE: f32 = pm::BAR_ICON;
-const CARET_SIZE: f32 = pm::CARET;
+const CHECK_SIZE: f32 = km::BAR_ICON;
+const CARET_SIZE: f32 = km::CARET;
 /// Size of a row's label.
 const LABEL_SIZE: f32 = ui_text::UI;
 /// Least gap between a label and the caret at the row's end.
-const MARK_GAP: f32 = pm::MENU_PAD_X;
+const MARK_GAP: f32 = km::MENU_PAD_X;
 
 /// The lists the menu opens beside itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -532,7 +532,7 @@ pub(super) fn fit_width<'a>(labels: impl Iterator<Item = &'a str>) -> f32 {
     let longest = labels
         .map(|label| text_metrics::width(label, LABEL_SIZE, false))
         .fold(0.0, f32::max);
-    longest + pm::MENU_CHECK_W + ROW_PADDING.right + MARK_GAP + CARET_SIZE + 2.0 * frame()
+    longest + km::MENU_CHECK_W + ROW_PADDING.right + MARK_GAP + CARET_SIZE + 2.0 * frame()
 }
 
 fn placed<'a>(panel: Element<'a, Message>, left: f32, top: f32) -> Element<'a, Message> {
@@ -557,7 +557,7 @@ fn frame() -> f32 {
 /// one-pixel border, as the menu bar's do.
 pub(super) fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> Element<'_, Message> {
     container(column(items).width(Fill))
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .padding(frame())
         .width(Length::Fixed(width))
         .into()
@@ -566,13 +566,13 @@ pub(super) fn panel_of_width(items: Vec<Element<'_, Message>>, width: f32) -> El
 /// A line one physical pixel high across the menu, inset at the sides: a
 /// logical pixel would draw one or two pixels high at a fractional scale.
 fn separator<'a>() -> Element<'a, Message> {
-    crate::ui::palette_menu::entry(crate::ui::palette_menu::Item::Separator)
+    crate::ui::kit::menu::entry(crate::ui::kit::menu::Item::Separator)
 }
 
-/// A row's padding: the palette menu's mark column before the label.
+/// A row's padding: the kit menu's mark column before the label.
 const ROW_PADDING: Padding = Padding {
     top: 0.0,
-    right: pm::MENU_PAD_X,
+    right: km::MENU_PAD_X,
     bottom: 0.0,
     left: 0.0,
 };
@@ -605,7 +605,7 @@ pub(super) fn check_row<'a>(
         icons::themed_disabled(icons::CHECK, CHECK_SIZE)
     };
     let content = row![
-        container(check).center_x(Length::Fixed(pm::MENU_CHECK_W)),
+        container(check).center_x(Length::Fixed(km::MENU_CHECK_W)),
         text(label)
             .size(LABEL_SIZE)
             .line_height(ui_text::line())
@@ -624,7 +624,7 @@ pub(super) fn check_row<'a>(
 /// A row that opens `list` beside the menu when hovered or clicked.
 fn submenu_row<'a>(label: String, open: bool, list: Submenu) -> Element<'a, Message> {
     let content = row![
-        Space::new().width(pm::MENU_CHECK_W),
+        Space::new().width(km::MENU_CHECK_W),
         text(label)
             .size(LABEL_SIZE)
             .line_height(ui_text::line())

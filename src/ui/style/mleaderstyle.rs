@@ -20,7 +20,9 @@ use iced::widget::{
     button, canvas, checkbox, column, container, mouse_area, radio, row, scrollable, stack, text,
     text_input, Space,
 };
-use iced::{mouse, Background, Border, Color, Element, Fill, Length, Point, Rectangle, Size, Theme};
+use iced::{
+    mouse, Background, Border, Color, Element, Fill, Length, Point, Rectangle, Size, Theme,
+};
 use std::fmt;
 
 /// The window's natural size, the same on every face so it does not jump.
@@ -458,26 +460,25 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
             })
             .into(),
     ];
-    let overlay: Option<(Element<'a, Message>, Message)> =
-        if let Some(notice) = &v.dialog.notice {
-            Some((notice_card(notice), msg(MlsMsg::NoticeClose)))
-        } else if let Some(name) = &v.dialog.delete_ask {
-            Some((delete_card(name), msg(MlsMsg::DeleteAnswer(false))))
-        } else if let Some(draft) = &v.dialog.create {
-            Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
-        } else if let Some(ask) = &v.dialog.reload_ask {
-            Some((
-                reload_card(ask, |answer| msg(MlsMsg::ReloadAnswer(answer))),
-                msg(MlsMsg::ReloadAnswer(Reload::Cancel)),
-            ))
-        } else if let Some(load) = &v.dialog.load {
-            Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
-        } else {
-            v.dialog
-                .pick
-                .as_ref()
-                .map(|pick| (pick_card(pick, &v), msg(MlsMsg::PickCancel)))
-        };
+    let overlay: Option<(Element<'a, Message>, Message)> = if let Some(notice) = &v.dialog.notice {
+        Some((notice_card(notice), msg(MlsMsg::NoticeClose)))
+    } else if let Some(name) = &v.dialog.delete_ask {
+        Some((delete_card(name), msg(MlsMsg::DeleteAnswer(false))))
+    } else if let Some(draft) = &v.dialog.create {
+        Some((create_card(draft, &v), msg(MlsMsg::CreateCancel)))
+    } else if let Some(ask) = &v.dialog.reload_ask {
+        Some((
+            reload_card(ask, |answer| msg(MlsMsg::ReloadAnswer(answer))),
+            msg(MlsMsg::ReloadAnswer(Reload::Cancel)),
+        ))
+    } else if let Some(load) = &v.dialog.load {
+        Some((load_card(load, &v), msg(MlsMsg::LoadCancel)))
+    } else {
+        v.dialog
+            .pick
+            .as_ref()
+            .map(|pick| (pick_card(pick, &v), msg(MlsMsg::PickCancel)))
+    };
     if let Some((panel, dismiss)) = overlay {
         layers.push(
             mouse_area(
@@ -627,16 +628,19 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
         choice("used", tr!("mleader-style", "styles-in-use")),
     ];
     let filter_selected = filters[usize::from(v.dialog.in_use_only)].clone();
-    let filter = crate::ui::dropdown_list::pick_list(Some(filter_selected), filters, |c| {
-        c.to_string()
-    })
-    .on_select(|c: Choice| msg(MlsMsg::ListFilter(c.code == "used")))
-    .text_size(11)
-    .width(Fill);
+    let filter =
+        crate::ui::dropdown_list::pick_list(Some(filter_selected), filters, |c| c.to_string())
+            .on_select(|c: Choice| msg(MlsMsg::ListFilter(c.code == "used")))
+            .text_size(11)
+            .width(Fill);
     let left = column![
-        text(tr!("mleader-style", "styles")).size(11).style(muted_style),
+        text(tr!("mleader-style", "styles"))
+            .size(11)
+            .style(muted_style),
         list,
-        text(tr!("mleader-style", "list")).size(11).style(muted_style),
+        text(tr!("mleader-style", "list"))
+            .size(11)
+            .style(muted_style),
         filter,
     ]
     .spacing(6)
@@ -743,14 +747,13 @@ fn create_card<'a>(draft: &'a CreateDraft, v: &View<'a>) -> Element<'a, Message>
         .padding([5, 8])
         .style(input_style)
         .width(Fill);
-    let start = crate::ui::dropdown_list::pick_list(
-        Some(draft.start_with.clone()),
-        starts,
-        |value| value.to_string(),
-    )
-    .on_select(|value| msg(MlsMsg::CreateStart(value)))
-    .text_size(12)
-    .width(Fill);
+    let start =
+        crate::ui::dropdown_list::pick_list(Some(draft.start_with.clone()), starts, |value| {
+            value.to_string()
+        })
+        .on_select(|value| msg(MlsMsg::CreateStart(value)))
+        .text_size(12)
+        .width(Fill);
     let annotative = row![
         checkbox(draft.annotative)
             .on_toggle(|on| msg(MlsMsg::CreateAnnotative(on)))
@@ -767,12 +770,16 @@ fn create_card<'a>(draft: &'a CreateDraft, v: &View<'a>) -> Element<'a, Message>
             .size(13)
             .style(crate::ui::window::pdf_dialogs::accent_text),
         column![
-            text(tr!("mleader-style", "new-name")).size(11).style(muted_style),
+            text(tr!("mleader-style", "new-name"))
+                .size(11)
+                .style(muted_style),
             name
         ]
         .spacing(4),
         column![
-            text(tr!("mleader-style", "start-with")).size(11).style(muted_style),
+            text(tr!("mleader-style", "start-with"))
+                .size(11)
+                .style(muted_style),
             start
         ]
         .spacing(4),
@@ -781,7 +788,11 @@ fn create_card<'a>(draft: &'a CreateDraft, v: &View<'a>) -> Element<'a, Message>
         row![
             help_button(),
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::CreateCancel), false),
+            dialog_button(
+                tr!("mleader-style", "cancel"),
+                msg(MlsMsg::CreateCancel),
+                false
+            ),
             dialog_button(
                 tr!("mleader-style", "continue"),
                 msg(MlsMsg::CreateContinue),
@@ -823,7 +834,11 @@ fn notice_card<'a>(notice: &'a Notice) -> Element<'a, Message> {
             .align_y(iced::Alignment::Start),
         row![
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "close"), msg(MlsMsg::NoticeClose), true),
+            dialog_button(
+                tr!("mleader-style", "close"),
+                msg(MlsMsg::NoticeClose),
+                true
+            ),
         ],
     ]
     .spacing(14);
@@ -843,8 +858,16 @@ fn delete_card<'a>(name: &'a str) -> Element<'a, Message> {
         .align_y(iced::Center),
         row![
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "yes"), msg(MlsMsg::DeleteAnswer(true)), false),
-            dialog_button(tr!("mleader-style", "no"), msg(MlsMsg::DeleteAnswer(false)), true),
+            dialog_button(
+                tr!("mleader-style", "yes"),
+                msg(MlsMsg::DeleteAnswer(true)),
+                false
+            ),
+            dialog_button(
+                tr!("mleader-style", "no"),
+                msg(MlsMsg::DeleteAnswer(false)),
+                true
+            ),
         ]
         .spacing(6),
     ]
@@ -856,7 +879,11 @@ fn pick_card<'a>(pick: &'a Pick, v: &View<'a>) -> Element<'a, Message> {
     let footer = || {
         row![
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::PickCancel), false),
+            dialog_button(
+                tr!("mleader-style", "cancel"),
+                msg(MlsMsg::PickCancel),
+                false
+            ),
             dialog_button(tr!("mleader-style", "ok"), msg(MlsMsg::PickOk), true),
         ]
         .spacing(6)
@@ -965,9 +992,7 @@ pub(crate) fn linetype_card<'a>(
                     ..Default::default()
                 }
             });
-            mouse_area(cell)
-                .on_press(on_pick(lt.name.clone()))
-                .into()
+            mouse_area(cell).on_press(on_pick(lt.name.clone())).into()
         })
         .collect();
     let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(220.0)))
@@ -994,7 +1019,7 @@ pub(crate) fn linetype_card<'a>(
     ]
     .spacing(8);
     panel(body.into(), 560.0)
-        }
+}
 
 fn load_card<'a>(load: &'a LoadDraft, v: &View<'a>) -> Element<'a, Message> {
     load_linetypes_card(
@@ -1063,7 +1088,9 @@ pub(crate) fn load_linetypes_card<'a>(
             .size(13)
             .style(crate::ui::window::pdf_dialogs::accent_text),
         row![
-            text(tr!("mleader-style", "file")).size(11).style(muted_style),
+            text(tr!("mleader-style", "file"))
+                .size(11)
+                .style(muted_style),
             text(file).size(11).width(Fill),
             dialog_button(tr!("mleader-style", "choose-file"), on_file, false),
         ]
@@ -1113,13 +1140,20 @@ pub(crate) fn reload_card<'a>(
                 Reload::This
             ),
             choice(tr!("mleader-style", "reload-all"), Reload::All),
-            choice(tr!("mleader-style", "reload-skip", name = name), Reload::Skip),
+            choice(
+                tr!("mleader-style", "reload-skip", name = name),
+                Reload::Skip
+            ),
             choice(tr!("mleader-style", "reload-skip-rest"), Reload::SkipRest),
         ]
         .spacing(6),
         row![
             Space::new().width(Fill),
-            dialog_button(tr!("mleader-style", "cancel"), on_answer(Reload::Cancel), false),
+            dialog_button(
+                tr!("mleader-style", "cancel"),
+                on_answer(Reload::Cancel),
+                false
+            ),
         ],
     ]
     .spacing(14);
@@ -1184,11 +1218,20 @@ fn sample_selector<'a>(
     open: bool,
     enabled: bool,
 ) -> Element<'a, Message> {
-    let control = sample_list(current, entries, Message::MLeaderColorMore(field), open, enabled);
-    row![label(caption), container(control).width(Length::Fixed(FIELD))]
-        .spacing(8)
-        .align_y(iced::Center)
-        .into()
+    let control = sample_list(
+        current,
+        entries,
+        Message::MLeaderColorMore(field),
+        open,
+        enabled,
+    );
+    row![
+        label(caption),
+        container(control).width(Length::Fixed(FIELD))
+    ]
+    .spacing(8)
+    .align_y(iced::Center)
+    .into()
 }
 
 /// The list control of [`sample_selector`]: `toggle` opens and closes it.
@@ -1258,7 +1301,7 @@ pub(crate) fn sample_list<'a>(
                 1.0,
                 0.0,
             ))
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(2);
             crate::ui::drop_down_fit::drop_down_fit(
                 iced_aw::DropDown::new(head, popup, true)
@@ -1400,10 +1443,13 @@ fn color_row<'a>(
             Length::Fill,
         )
     };
-    row![label(caption), container(control).width(Length::Fixed(FIELD))]
-        .spacing(8)
-        .align_y(iced::Center)
-        .into()
+    row![
+        label(caption),
+        container(control).width(Length::Fixed(FIELD))
+    ]
+    .spacing(8)
+    .align_y(iced::Center)
+    .into()
 }
 
 fn toggle<'a>(
@@ -1417,19 +1463,21 @@ fn toggle<'a>(
     if let Some(on_toggle) = on_toggle {
         check = check.on_toggle(on_toggle);
     }
-    let caption = text(caption).size(11).style(move |theme: &Theme| {
-        iced::widget::text::Style {
+    let caption = text(caption)
+        .size(11)
+        .style(move |theme: &Theme| iced::widget::text::Style {
             color: (!enabled)
                 .then(|| crate::ui::style::readable::muted_text(theme).scale_alpha(0.7)),
-        }
-    });
-    row![check, caption]
-        .spacing(6)
-        .align_y(iced::Center)
-        .into()
+        });
+    row![check, caption].spacing(6).align_y(iced::Center).into()
 }
 
-fn style_toggle<'a>(caption: String, value: bool, field: &'static str, enabled: bool) -> Element<'a, Message> {
+fn style_toggle<'a>(
+    caption: String,
+    value: bool,
+    field: &'static str,
+    enabled: bool,
+) -> Element<'a, Message> {
     toggle(
         caption,
         value,
@@ -1646,8 +1694,10 @@ fn structure_tab<'a>(
             container(toggle(
                 caption,
                 on,
-                Some(Box::new(move |checked| msg(MlsMsg::Constraint(key, checked)))
-                    as Box<dyn Fn(bool) -> Message>)
+                Some(
+                    Box::new(move |checked| msg(MlsMsg::Constraint(key, checked)))
+                        as Box<dyn Fn(bool) -> Message>
+                )
             ))
             .width(Length::Fixed(LABEL + 80.0)),
             list,
@@ -1673,8 +1723,10 @@ fn structure_tab<'a>(
             container(toggle(
                 tr!("mleader-style", "max-points"),
                 m.max_points_on,
-                Some(Box::new(|checked| msg(MlsMsg::Constraint("max_points", checked)))
-                    as Box<dyn Fn(bool) -> Message>)
+                Some(
+                    Box::new(|checked| msg(MlsMsg::Constraint("max_points", checked)))
+                        as Box<dyn Fn(bool) -> Message>
+                )
             ))
             .width(Length::Fixed(LABEL + 80.0)),
             max_input,
@@ -1727,7 +1779,11 @@ fn structure_tab<'a>(
     ]
     .spacing(8);
     let annotative = style.is_annotative;
-    let shown_scale: &str = if m.scale_to_layout { "0" } else { v.scale_factor };
+    let shown_scale: &str = if m.scale_to_layout {
+        "0"
+    } else {
+        v.scale_factor
+    };
     let mut scale_input = text_input("", shown_scale)
         .id(field_id("scale_factor"))
         .size(11)
@@ -1866,7 +1922,10 @@ fn text_options<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Me
     .align_y(iced::Center);
     let angles = vec![
         choice("Optimized", tr!("mleader-style", "angle-right-reading")),
-        choice("ParallelToLastLeaderLine", tr!("mleader-style", "angle-as-inserted")),
+        choice(
+            "ParallelToLastLeaderLine",
+            tr!("mleader-style", "angle-as-inserted"),
+        ),
         choice("Horizontal", tr!("mleader-style", "angle-horizontal")),
     ];
     let angle_code = format!("{:?}", style.text_angle_type);
@@ -1972,7 +2031,8 @@ fn leader_connection<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'
                 true,
             )));
     } else {
-        let side = |value: TextAttachmentType| choice(attachment_code(value), attachment_label(value));
+        let side =
+            |value: TextAttachmentType| choice(attachment_code(value), attachment_label(value));
         // Framed text always meets the leader: Extend is off with it.
         body = body
             .push(indented(choice_row(
@@ -2222,7 +2282,10 @@ impl LeaderPreview {
             content: style.content_type,
             line_color: v.line_color.to_string(),
             line_weight: style.line_weight.value(),
-            dashed: !(lt.is_empty() || lt == "bylayer" || lt == "byblock" || lt.contains("continuous")),
+            dashed: !(lt.is_empty()
+                || lt == "bylayer"
+                || lt == "byblock"
+                || lt.contains("continuous")),
             arrow: v.arrowhead_name.to_ascii_uppercase(),
             landing: style.enable_landing,
             dogleg: style.enable_dogleg,
@@ -2237,7 +2300,9 @@ impl LeaderPreview {
             block: v.block_name.clone(),
             block_color: v.block_color.to_string(),
             px_per_unit: {
-                let scale = if style.is_annotative || v.dialog.modify.as_ref().is_some_and(|m| m.scale_to_layout) {
+                let scale = if style.is_annotative
+                    || v.dialog.modify.as_ref().is_some_and(|m| m.scale_to_layout)
+                {
                     1.0
                 } else {
                     typed(v.scale_factor, style.scale_factor)
@@ -2387,14 +2452,20 @@ impl canvas::Program<Message> for LeaderPreview {
                         b.line_to(along(size, -size * half));
                     });
                     frame.stroke(&open, thin);
-                } else if code.contains("BLANK") || code == "CLOSED" || code.contains("DATUM TRIANGLE") && !code.contains("FILLED") {
+                } else if code.contains("BLANK")
+                    || code == "CLOSED"
+                    || code.contains("DATUM TRIANGLE") && !code.contains("FILLED")
+                {
                     frame.stroke(&tri, thin);
                 } else {
                     frame.fill(&tri, line_color);
                 }
             }
         }
-        let origin = Point::new(tail.x + px(self.landing_gap).clamp(0.0, bounds.width * 0.5), tail.y);
+        let origin = Point::new(
+            tail.x + px(self.landing_gap).clamp(0.0, bounds.width * 0.5),
+            tail.y,
+        );
         match self.content {
             LeaderContentType::Block => {
                 let color = aci_color(&self.block_color, ink);
@@ -2402,7 +2473,11 @@ impl canvas::Program<Message> for LeaderPreview {
                 // The predefined blocks at their drawing size: a 0.25
                 // radius callout, quarter-unit tags, 0.09375 high tags.
                 let u = |value: f32| px(value * self.block_scale);
-                let half = if self.block == "Detail Callout" { 0.25 } else { 0.125 };
+                let half = if self.block == "Detail Callout" {
+                    0.25
+                } else {
+                    0.125
+                };
                 let r = u(half).max(1.0);
                 let c = Point::new(origin.x + r, origin.y);
                 let at = |x: f32, y: f32| Point::new(c.x + u(x), c.y - u(y));
@@ -2420,7 +2495,12 @@ impl canvas::Program<Message> for LeaderPreview {
                 };
                 let (hx, tx) = (0.25 / 3f32.sqrt(), 0.25 * 3f32.sqrt() / 2.0);
                 let shape = match self.block.as_str() {
-                    "Box" => polygon(&[(-0.125, 0.125), (0.125, 0.125), (0.125, -0.125), (-0.125, -0.125)]),
+                    "Box" => polygon(&[
+                        (-0.125, 0.125),
+                        (0.125, 0.125),
+                        (0.125, -0.125),
+                        (-0.125, -0.125),
+                    ]),
                     "Hexagon" => polygon(&[
                         (-hx, 0.0),
                         (-hx / 2.0, 0.125),
@@ -2441,7 +2521,9 @@ impl canvas::Program<Message> for LeaderPreview {
                 // The attribute tags, centred on their baselines.
                 let tags: &[(&str, f32)] = match self.block.as_str() {
                     "Detail Callout" => &[("VIEWNUMBER", 1.0 / 48.0), ("SHEETNUMBER", -0.15625)],
-                    "Slot" | "Circle" | "Box" | "Hexagon" | "Triangle" => &[("TAGNUMBER", -0.046875)],
+                    "Slot" | "Circle" | "Box" | "Hexagon" | "Triangle" => {
+                        &[("TAGNUMBER", -0.046875)]
+                    }
                     _ => &[],
                 };
                 if self.block == "Detail Callout" {

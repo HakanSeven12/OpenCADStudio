@@ -7,7 +7,7 @@ use crate::app::Message;
 use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
 use crate::ui::kit;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use document::entities::ExtendedEntityData;
 use document::{Document, EntityType, Handle};
 use iced::widget::{button, checkbox, column, container};
@@ -202,7 +202,7 @@ fn tree_row<'a>(
         Some((Switch::Mixed, message)) => button(
             container(crate::ui::icons::tinted(
                 crate::ui::icons::MINUS,
-                pm::BAR_ICON,
+                km::BAR_ICON,
                 chrome::accent,
             ))
             .center(Fill),
@@ -210,14 +210,14 @@ fn tree_row<'a>(
         .on_press(message)
         .style(kit::flat_button_style(true))
         .padding(0)
-        .width(Length::Fixed(pm::CHECK))
-        .height(Length::Fixed(pm::CHECK))
+        .width(Length::Fixed(km::CHECK))
+        .height(Length::Fixed(km::CHECK))
         .into(),
         Some((on, message)) => checkbox(on == Switch::On)
             .on_toggle(move |_| message.clone())
-            .size(pm::CHECK)
+            .size(km::CHECK)
             .into(),
-        None => checkbox(false).size(pm::CHECK).into(),
+        None => checkbox(false).size(km::CHECK).into(),
     };
     let selected = state.selected.as_deref() == Some(key.as_str());
     let mut row = kit::tree_row(label)
@@ -271,7 +271,7 @@ pub fn view<'a>(
             let on = switch_state(&cloud.hidden, &cloud.scans, &row);
             Some((on, msg(PcManagerMsg::Toggle(cloud.handle, row))))
         };
-        let cloud_icon = || crate::ui::icons::semantic(CLOUD_ICON, pm::ROW_ICON);
+        let cloud_icon = || crate::ui::icons::semantic(CLOUD_ICON, km::ROW_ICON);
         tree = tree.push(tree_row(
             state,
             root.clone(),
@@ -291,7 +291,7 @@ pub fn view<'a>(
                 format!("{root}/regions"),
                 1,
                 None,
-                crate::ui::icons::semantic_disabled(REGION_ICON, pm::ROW_ICON),
+                crate::ui::icons::semantic_disabled(REGION_ICON, km::ROW_ICON),
                 regions.clone(),
                 None,
             ));
@@ -302,7 +302,7 @@ pub fn view<'a>(
                 format!("{root}/unassigned"),
                 1,
                 None,
-                crate::ui::icons::semantic(UNASSIGNED_ICON, pm::ROW_ICON),
+                crate::ui::icons::semantic(UNASSIGNED_ICON, km::ROW_ICON),
                 unassigned.clone(),
                 switch(Row::Unassigned),
             ));

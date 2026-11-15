@@ -27,22 +27,22 @@ pub fn layout_entries<'a>(layouts: &[String], current: &str) -> Vec<Entry<'a>> {
         .collect()
 }
 
-/// A layout, the current one marked: a palette menu item.
+/// A layout, the current one marked: a kit menu item.
 fn layout_row<'a>(name: String, is_current: bool) -> Element<'a, Message> {
-    crate::ui::palette_menu::entry(
-        crate::ui::palette_menu::Item::new(name.clone(), Message::LayoutSwitch(name))
-            .mark(crate::ui::palette_menu::Mark::Radio(is_current)),
+    crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(name.clone(), Message::LayoutSwitch(name))
+            .mark(crate::ui::kit::menu::Mark::Radio(is_current)),
     )
 }
 
-/// A status pill shown or hidden: a palette menu item with its check.
+/// A status pill shown or hidden: a kit menu item with its check.
 fn menu_row(
     label: std::borrow::Cow<'static, str>,
     checked: bool,
     msg: Message,
 ) -> Element<'static, Message> {
-    crate::ui::palette_menu::entry(
-        crate::ui::palette_menu::Item::new(label, msg)
-            .mark(crate::ui::palette_menu::Mark::Check(checked)),
+    crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(label, msg)
+            .mark(crate::ui::kit::menu::Mark::Check(checked)),
     )
 }

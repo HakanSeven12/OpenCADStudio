@@ -150,7 +150,7 @@ impl Widget<Message, Theme, iced::Renderer> for PressFirst<'_> {
 #[cfg(test)]
 mod tests {
     use crate::app::Message;
-    use crate::ui::style::palette_metrics as pm;
+    use crate::ui::style::kit_metrics as km;
 
     /// A press in a grid row's value field selects the row, although the
     /// field captures the press (a `mouse_area` would never hear it).
@@ -166,7 +166,7 @@ mod tests {
         let name = ui.find("Hyperlink").expect("name cell present");
         let bounds = name.visible_bounds().expect("name visible");
         ui.point_at(iced::Point::new(
-            bounds.x + pm::NAME_COL_W + 2.0 * pm::INDENT,
+            bounds.x + km::NAME_COL_W + 2.0 * km::INDENT,
             bounds.center_y(),
         ));
         ui.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonPressed(

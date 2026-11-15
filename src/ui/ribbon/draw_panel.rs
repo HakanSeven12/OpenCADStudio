@@ -920,7 +920,7 @@ fn options_list<'a>(
         .collect();
     let dd_list = DropdownList::new(rows).on_escape(Message::CloseRibbonDropdown);
     let list = container(dd_list)
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .width(OPTIONS_W);
     let list = opaque(
         mouse_area(list)

@@ -111,9 +111,9 @@ impl OpenCADStudio {
                     .collect();
                 let (_, plus_top) = self.dock_strip_layout(side);
                 let items = dock_edge_menu_items(side, &checked, self.dock.strip_names);
-                let menu_w = crate::ui::palette_menu::width(&items);
+                let menu_w = crate::ui::kit::menu::width(&items);
                 let strip = crate::ui::dock::DOCK_STRIP_W;
-                let gap = crate::ui::style::palette_metrics::TOOL_GAP;
+                let gap = crate::ui::style::kit_metrics::TOOL_GAP;
                 let x = match side {
                     crate::app::config::DockSide::Left => strip + gap,
                     crate::app::config::DockSide::Right => {
@@ -126,17 +126,13 @@ impl OpenCADStudio {
                         .on_right_press(Message::Dock(crate::ui::dock::DockMsg::EdgeMenu(None)))
                         .into(),
                 );
-                let menu_h = crate::ui::palette_menu::height(&items);
+                let menu_h = crate::ui::kit::menu::height(&items);
                 let y = crate::ui::dock::strip_menu_top(
                     self.dock_edge_menu_y.unwrap_or(plus_top),
                     menu_h,
                     self.dock_workspace_size().1,
                 );
-                layers.push(place_at(
-                    crate::ui::palette_menu::menu(items),
-                    x.max(0.0),
-                    y,
-                ));
+                layers.push(place_at(crate::ui::kit::menu::view(items), x.max(0.0), y));
             }
         }
         // An open floating title-bar menu, over its own click catcher.
@@ -296,7 +292,7 @@ impl OpenCADStudio {
             DockMsg, DropTarget, DOCK_STRIP_W, STRIP_GRIP_W, STRIP_PAD, STRIP_PLUS_GAP,
             STRIP_PLUS_H,
         };
-        use crate::ui::style::{chrome, palette_metrics as pm};
+        use crate::ui::style::{chrome, kit_metrics as km};
         let (layout, plus_top) = self.dock_strip_layout(side);
         let names = self.dock.strip_names;
         // Only a group actually on screen is marked as open: on an
@@ -375,17 +371,17 @@ impl OpenCADStudio {
                 let content: Element<'_, Message> = match (names.icons(), names.names()) {
                     (true, false) => container(icon()).center(Fill).into(),
                     (true, true) => column![
-                        Space::new().height(pm::STRIP_NAME_PAD),
+                        Space::new().height(km::STRIP_NAME_PAD),
                         name(),
-                        Space::new().height(pm::STRIP_NAME_GAP),
+                        Space::new().height(km::STRIP_NAME_GAP),
                         container(icon()).center_x(Fill).height(RAIL_ICON),
-                        Space::new().height(pm::STRIP_NAME_PAD),
+                        Space::new().height(km::STRIP_NAME_PAD),
                     ]
                     .into(),
                     _ => column![
-                        Space::new().height(pm::STRIP_NAME_PAD),
+                        Space::new().height(km::STRIP_NAME_PAD),
                         name(),
-                        Space::new().height(pm::STRIP_NAME_PAD),
+                        Space::new().height(km::STRIP_NAME_PAD),
                     ]
                     .into(),
                 };
@@ -400,7 +396,7 @@ impl OpenCADStudio {
                         bottom: pad_bottom,
                         ..iced::Padding::ZERO
                     })
-                    .width(Length::Fixed(pm::STRIP_BODY_W))
+                    .width(Length::Fixed(km::STRIP_BODY_W))
                     .height(Length::Fixed(cell_h + pad_top + pad_bottom))
                     .style(move |theme: &Theme| container::Style {
                         background: hovered.then(|| Background::Color(chrome::hover(theme))),
@@ -446,18 +442,18 @@ impl OpenCADStudio {
                 band
             };
             let band = container(band)
-                .width(Length::Fixed(pm::STRIP_BODY_W))
+                .width(Length::Fixed(km::STRIP_BODY_W))
                 .height(Length::Fixed(row_h))
                 .align_x(window_side);
             let body: Element<'_, Message> = stack![
                 column(cells)
-                    .width(Length::Fixed(DOCK_STRIP_W - pm::line()))
+                    .width(Length::Fixed(DOCK_STRIP_W - km::line()))
                     .height(Length::Fixed(row_h)),
                 band
             ]
             .into();
             // The open group runs over the edge line into the palette.
-            let edge = Space::new().width(pm::line()).height(Length::Fixed(row_h));
+            let edge = Space::new().width(km::line()).height(Length::Fixed(row_h));
             let group: Element<'_, Message> = match side {
                 DockSide::Left => row![body, edge].into(),
                 DockSide::Right => row![edge, body].into(),
@@ -467,7 +463,7 @@ impl OpenCADStudio {
                     .width(Length::Fixed(DOCK_STRIP_W))
                     .height(Length::Fixed(row_h))
                     .style(move |theme: &Theme| container::Style {
-                        background: is_open.then(|| Background::Color(chrome::palette_body(theme))),
+                        background: is_open.then(|| Background::Color(chrome::surface(theme))),
                         ..Default::default()
                     })
                     .into(),
@@ -479,8 +475,8 @@ impl OpenCADStudio {
             items.push(body_and_edge(
                 container(
                     Space::new()
-                        .width(DOCK_STRIP_W - pm::line())
-                        .height(pm::line()),
+                        .width(DOCK_STRIP_W - km::line())
+                        .height(km::line()),
                 )
                 .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(if around_open {
@@ -491,13 +487,13 @@ impl OpenCADStudio {
                     ..Default::default()
                 })
                 .into(),
-                Space::new().width(pm::line()).height(pm::line()).into(),
+                Space::new().width(km::line()).height(km::line()).into(),
             ));
         }
         let plus = button(
             container(crate::ui::icons::tinted(
                 crate::ui::icons::PLUS,
-                pm::STRIP_PLUS_ICON,
+                km::STRIP_PLUS_ICON,
                 chrome::tab_text,
             ))
             .center(Fill),
@@ -508,7 +504,7 @@ impl OpenCADStudio {
                 .then(|| Background::Color(chrome::hover(theme))),
             ..Default::default()
         })
-        .width(Length::Fixed(DOCK_STRIP_W - pm::line()))
+        .width(Length::Fixed(DOCK_STRIP_W - km::line()))
         .height(Length::Fixed(STRIP_PLUS_H))
         .padding(0);
         // The tabs clip above the +, so overflowing ones never push it away.
@@ -518,14 +514,14 @@ impl OpenCADStudio {
         let strip = column![
             tabs,
             Space::new().height(STRIP_PLUS_GAP),
-            body_and_edge(plus.into(), Space::new().width(pm::line()).into()),
+            body_and_edge(plus.into(), Space::new().width(km::line()).into()),
         ];
         let strip = mouse_area(strip).on_move(|p| Message::Dock(DockMsg::StripPointer(p)));
         // Underneath: the strip colour and the edge line along the palette
         // side, full height (the open group covers it).
         let base = body_and_edge(
             container(Space::new())
-                .width(Length::Fixed(DOCK_STRIP_W - pm::line()))
+                .width(Length::Fixed(DOCK_STRIP_W - km::line()))
                 .height(Fill)
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(chrome::strip(theme))),
@@ -533,7 +529,7 @@ impl OpenCADStudio {
                 })
                 .into(),
             container(Space::new())
-                .width(Length::Fixed(pm::line()))
+                .width(Length::Fixed(km::line()))
                 .height(Fill)
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(chrome::edge(theme))),
@@ -757,13 +753,13 @@ impl OpenCADStudio {
         // under the content, which would otherwise cover it.
         let framed = container(content)
             .height(Length::Fixed(f.h))
-            .padding(crate::ui::style::palette_metrics::line())
+            .padding(crate::ui::style::kit_metrics::line())
             .clip(true)
             .style(|theme: &Theme| container::Style {
                 // The ribbon's dark 1 px contour, all the way round.
                 border: Border {
                     color: crate::ui::style::chrome::page(theme),
-                    width: crate::ui::style::palette_metrics::line(),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 0.0.into(),
                 },
                 shadow: iced::Shadow {
@@ -830,7 +826,7 @@ impl OpenCADStudio {
             frame.bar_x(f) + self.dock_float_menu_at.x,
             frame.y + self.dock_float_menu_at.y,
         );
-        use crate::ui::palette_menu::{self, Item, Mark};
+        use crate::ui::kit::menu::{self, Item, Mark};
         #[allow(unused_mut)]
         let mut items = vec![
             Item::new(
@@ -858,7 +854,7 @@ impl OpenCADStudio {
             .icon(crate::ui::icons::DETACH),
         );
         // At the pointer, kept inside the workspace.
-        let (menu_w, menu_h) = (palette_menu::width(&items), palette_menu::height(&items));
+        let (menu_w, menu_h) = (menu::width(&items), menu::height(&items));
         let menu_x = if at.x + menu_w <= ww {
             at.x
         } else {
@@ -866,7 +862,7 @@ impl OpenCADStudio {
         };
         let menu_x = menu_x.clamp(0.0, (ww - menu_w).max(0.0));
         let menu_y = at.y.min(wh - menu_h).max(0.0);
-        Some(place_at(palette_menu::menu(items), menu_x, menu_y))
+        Some(place_at(menu::view(items), menu_x, menu_y))
     }
 
     /// The live drop preview for dragged panel `id`: a tint over the target
@@ -1159,7 +1155,7 @@ fn floating_title_bar(
     hovered: bool,
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
-    use crate::ui::style::{chrome, palette_metrics as pm};
+    use crate::ui::style::{chrome, kit_metrics as km};
     let tip = if on_left {
         iced::widget::tooltip::Position::Left
     } else {
@@ -1174,15 +1170,15 @@ fn floating_title_bar(
     .height(Fill);
     // Close and pin only show while the pointer is over the bar, as on a
     // docked title bar.
-    let mut bar = column![].spacing(pm::line());
+    let mut bar = column![].spacing(km::line());
     if hovered {
         bar = bar
-            .push(crate::ui::dock::close_button_sized(id, tip, pm::FLOAT_ICON))
+            .push(crate::ui::dock::close_button_sized(id, tip, km::FLOAT_ICON))
             .push(crate::ui::dock::pin_button_sized(
                 id,
                 auto_collapse,
                 tip,
-                pm::FLOAT_ICON,
+                km::FLOAT_ICON,
             ));
     }
     let bar = bar
@@ -1190,19 +1186,19 @@ fn floating_title_bar(
             container(title)
                 .width(Fill)
                 .height(Fill)
-                .padding([pm::STRIP_NAME_PAD, 0.0]),
+                .padding([km::STRIP_NAME_PAD, 0.0]),
         )
         .push(
             container(crate::ui::icons::tinted(
                 id.icon(),
-                pm::FLOAT_ICON,
+                km::FLOAT_ICON,
                 chrome::title_text,
             ))
             .center_x(Fill),
         )
-        .padding([pm::TOOL_GAP, 0.0])
+        .padding([km::TOOL_GAP, 0.0])
         .align_x(iced::Center)
-        .width(Length::Fixed(pm::FLOAT_BAR_W))
+        .width(Length::Fixed(km::FLOAT_BAR_W))
         .height(Fill);
     // In the ribbon's title-strip colour, with a 1 px dark line against
     // the panel.
@@ -1210,7 +1206,7 @@ fn floating_title_bar(
         background: Some(Background::Color(chrome::title_bar(theme))),
         ..Default::default()
     });
-    let line = container(Space::new().width(pm::line()).height(Fill)).style(|theme: &Theme| {
+    let line = container(Space::new().width(km::line()).height(Fill)).style(|theme: &Theme| {
         container::Style {
             background: Some(Background::Color(chrome::page(theme))),
             ..Default::default()
@@ -1306,21 +1302,21 @@ fn dock_divider(
     id: crate::ui::dock::PanelId,
     side: crate::app::config::DockSide,
 ) -> Element<'static, Message> {
-    use crate::ui::style::{chrome, palette_metrics as pm};
+    use crate::ui::style::{chrome, kit_metrics as km};
     // The grab band lies over the drawing's edge, beside the palette, and
     // shows nothing: the palette runs up to the drawing as a floating one
     // does. Under the pointer its line shows in the accent, against the
     // palette.
     let band = |lit: bool| -> Element<'static, Message> {
         let line = container(Space::new())
-            .width(Length::Fixed(pm::DIVIDER_LINE))
+            .width(Length::Fixed(km::DIVIDER_LINE))
             .height(Fill)
             .style(move |theme: &Theme| container::Style {
                 background: lit.then(|| Background::Color(chrome::accent(theme))),
                 ..Default::default()
             });
         let rest = Space::new()
-            .width(Length::Fixed(DOCK_DIVIDER_W - pm::DIVIDER_LINE))
+            .width(Length::Fixed(DOCK_DIVIDER_W - km::DIVIDER_LINE))
             .height(Fill);
         match side {
             crate::app::config::DockSide::Left => row![line, rest].into(),
@@ -1348,9 +1344,9 @@ fn dock_edge_menu_items(
     side: crate::app::config::DockSide,
     checked: &[(crate::ui::dock::PanelId, bool)],
     names: crate::ui::dock::StripNames,
-) -> Vec<crate::ui::palette_menu::Item> {
+) -> Vec<crate::ui::kit::menu::Item> {
     use crate::ui::dock::{DockMsg, StripNames};
-    use crate::ui::palette_menu::{Item, Mark};
+    use crate::ui::kit::menu::{Item, Mark};
     let mut items: Vec<Item> = checked
         .iter()
         .map(|(id, checked)| {
@@ -1393,7 +1389,7 @@ fn dock_splitter(
 ) -> Element<'static, Message> {
     let line = canvas(crate::ui::dock::SplitterGrip { active })
         .width(Length::Fixed(col_w))
-        .height(Length::Fixed(crate::ui::style::palette_metrics::SPLITTER_H));
+        .height(Length::Fixed(crate::ui::style::kit_metrics::SPLITTER_H));
     mouse_area(line)
         .on_press(Message::Dock(crate::ui::dock::DockMsg::SplitGrab(
             side, gi, upper, lower,
@@ -1428,7 +1424,7 @@ fn dock_ghost(id: crate::ui::dock::PanelId, w: f32, h: f32) -> Element<'static, 
         .clip(true)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(
-                crate::ui::style::chrome::palette_body(theme).scale_alpha(0.85),
+                crate::ui::style::chrome::surface(theme).scale_alpha(0.85),
             )),
             border: Border {
                 color: crate::ui::style::chrome::accent(theme),

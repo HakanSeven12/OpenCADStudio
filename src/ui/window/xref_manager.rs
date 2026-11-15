@@ -11,10 +11,10 @@ use crate::io::xref_model::{
     normalize_lexical, Pathtype, RefKind, RefStatus, RefType, ReferenceEntry,
 };
 use crate::ui::kit;
-use crate::ui::palette_menu::{self, Item};
+use crate::ui::kit::menu::{self, Item};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::text as ui_text;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use document::Document;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::Padding;
@@ -35,13 +35,13 @@ const TABLE_MIN_H: f32 = 120.0;
 /// Minimum table content width so columns stay readable in narrow docks.
 const TABLE_MIN_W: f32 = 480.0;
 /// Inter-column gutter shared by header, rows, and grab zones so columns align.
-const COL_GUTTER: f32 = pm::CELL_PAD_X;
+const COL_GUTTER: f32 = km::CELL_PAD_X;
 /// Tree-mode text size: a step above the table cells, like the
 /// industry tree.
 /// Indent per tree depth level.
-const INDENT_W: f32 = pm::INDENT;
+const INDENT_W: f32 = km::INDENT;
 /// Height of a reference row, the grid's row.
-const ROW_H: f32 = pm::ROW_H;
+const ROW_H: f32 = km::ROW_H;
 
 /// Dashed vertical tree guide (one per ancestor level), stretched to the row.
 const TREE_GUIDE_SVG: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 100\" preserveAspectRatio=\"none\"><line x1=\"8\" y1=\"0\" x2=\"8\" y2=\"100\" stroke=\"#808080\" stroke-width=\"1.5\" stroke-dasharray=\"4,4\"/></svg>";
@@ -75,15 +75,15 @@ const TREE_FONT_SZ: f32 = ui_text::UI;
 const ROW_PAD: Padding = Padding {
     top: 0.0,
     bottom: 0.0,
-    left: pm::CELL_PAD_X,
-    right: pm::CELL_PAD_X,
+    left: km::CELL_PAD_X,
+    right: km::CELL_PAD_X,
 };
 /// A band of its own under the table (the missing-files notice).
 const BAND_PAD: Padding = Padding {
-    top: pm::TOOL_GAP,
-    bottom: pm::TOOL_GAP,
-    left: pm::GRID_INSET_L,
-    right: pm::GRID_INSET_R,
+    top: km::TOOL_GAP,
+    bottom: km::TOOL_GAP,
+    left: km::GRID_INSET_L,
+    right: km::GRID_INSET_R,
 };
 /// The preview image's width and the preview field's height.
 const PREVIEW_W: f32 = 220.0;
@@ -634,7 +634,7 @@ impl XrefManagerPanel {
         );
         // Table content width: column widths plus gutters, stretched to the
         // dock when wider so rows fill the panel; narrower docks sidescroll.
-        let table_w = (width - pm::GRID_INSET_L - pm::GRID_INSET_R - 2.0 * pm::CELL_PAD_X)
+        let table_w = (width - km::GRID_INSET_L - km::GRID_INSET_R - 2.0 * km::CELL_PAD_X)
             .max(self.table_content_width());
         // ── Toolbar: split-button groups per spec ───────────────────────
         // Attach ▾ (default DWG), Refresh ▾ (default Refresh), Change Path ▾.
@@ -808,7 +808,7 @@ impl XrefManagerPanel {
                 list_btn,
                 tree_btn,
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         );
         // Each divider between header cells grabs for a width drag
@@ -834,9 +834,9 @@ impl XrefManagerPanel {
             if i + 1 < self.col_widths.len() {
                 let grab = mouse_area(
                     container(
-                        container(iced::widget::Space::new().width(pm::line()).height(Fill)).style(
+                        container(iced::widget::Space::new().width(km::line()).height(Fill)).style(
                             |theme: &Theme| container::Style {
-                                background: Some(Background::Color(chrome::palette_body(theme))),
+                                background: Some(Background::Color(chrome::surface(theme))),
                                 ..Default::default()
                             },
                         ),
@@ -852,7 +852,7 @@ impl XrefManagerPanel {
         let col_header: Element<'_, Message> = mouse_area(
             container(header_row.width(Length::Fixed(table_w)))
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(chrome::palette_bar(theme))),
+                    background: Some(Background::Color(chrome::surface_raised(theme))),
                     ..Default::default()
                 })
                 .height(Length::Fixed(ROW_H))
@@ -947,8 +947,8 @@ impl XrefManagerPanel {
             )
             .direction(iced::widget::scrollable::Direction::Horizontal(
                 iced::widget::scrollable::Scrollbar::new()
-                    .width(pm::SCROLL_THUMB_W)
-                    .scroller_width(pm::SCROLL_THUMB_W),
+                    .width(km::SCROLL_THUMB_W)
+                    .scroller_width(km::SCROLL_THUMB_W),
             ))
             .style(kit::scroll_style)
             .height(Length::Fixed(self.table_h))
@@ -958,10 +958,10 @@ impl XrefManagerPanel {
         // properties panel content.
         let table_rows: Element<'_, Message> = container(table_rows)
             .padding(Padding {
-                top: pm::TOOL_GAP,
+                top: km::TOOL_GAP,
                 bottom: 0.0,
-                left: pm::GRID_INSET_L,
-                right: pm::GRID_INSET_R,
+                left: km::GRID_INSET_L,
+                right: km::GRID_INSET_R,
             })
             .width(Fill)
             .into();
@@ -1030,7 +1030,7 @@ impl XrefManagerPanel {
                                     .size(crate::ui::style::text::UI)
                                     .style(muted_style),
                             ]
-                            .spacing(pm::TOOL_GAP)
+                            .spacing(km::TOOL_GAP)
                             .align_x(iced::Center),
                         )
                         .center_x(Fill)
@@ -1050,7 +1050,7 @@ impl XrefManagerPanel {
                 .width(Fill)
                 .height(Length::Fixed(PREVIEW_H))
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(chrome::palette_bar(theme))),
+                    background: Some(Background::Color(chrome::surface_raised(theme))),
                     ..Default::default()
                 })
                 .into(),
@@ -1066,14 +1066,14 @@ impl XrefManagerPanel {
         let split = mouse_area(
             iced::widget::canvas(crate::ui::dock::SplitterGrip { active: false })
                 .width(Fill)
-                .height(Length::Fixed(pm::SPLITTER_H)),
+                .height(Length::Fixed(km::SPLITTER_H)),
         )
         .on_press(Message::XrefSplitGrab)
         .interaction(iced::mouse::Interaction::ResizingVertically);
         // The toolbar band keeps a tool gap above it; the rest of the top
         // inset puts it as far from the title bar as from the left.
         let top_inset =
-            iced::widget::Space::new().height(Length::Fixed(pm::TOP_INSET - pm::TOOL_GAP));
+            iced::widget::Space::new().height(Length::Fixed(km::TOP_INSET - km::TOOL_GAP));
         let mut content = column![
             title_bar,
             top_inset,
@@ -1097,7 +1097,7 @@ impl XrefManagerPanel {
         // setting — and resize — actually takes effect.
         container(content)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::palette_body(theme))),
+                background: Some(Background::Color(chrome::surface(theme))),
                 ..Default::default()
             })
             .width(Length::Fixed(width))
@@ -1303,7 +1303,7 @@ fn toolbar_tip(label: String, tip: String) -> Element<'static, Message> {
 }
 
 /// Split button: a default action plus a caret that opens the rest in the
-/// palette menu (spec toolbar: Attach ▾, Refresh ▾, Change Path ▾).
+/// kit menu (spec toolbar: Attach ▾, Refresh ▾, Change Path ▾).
 ///
 /// `main_msg` runs the default action; `toggle` flips this menu (closing the
 /// others is handled at the message site); `items` are the menu's items.
@@ -1320,15 +1320,15 @@ fn split_button(
     let caret = button(container(crate::ui::icons::dropdown_arrow()).center(Length::Fill))
         .on_press(toggle)
         .style(kit::flat_button_style(menu_open))
-        .width(Length::Fixed(pm::BAR_BUTTON))
-        .height(Length::Fixed(pm::TOOL_H))
+        .width(Length::Fixed(km::BAR_BUTTON))
+        .height(Length::Fixed(km::TOOL_H))
         .padding(0);
-    let head = row![main, caret].spacing(pm::LINE).align_y(iced::Center);
-    let width = palette_menu::width(&items);
-    iced_aw::DropDown::new(head, palette_menu::menu(items), menu_open)
+    let head = row![main, caret].spacing(km::LINE).align_y(iced::Center);
+    let width = menu::width(&items);
+    iced_aw::DropDown::new(head, menu::view(items), menu_open)
         .width(Length::Fixed(width))
         .alignment(iced_aw::drop_down::Alignment::Bottom)
-        .offset(pm::LINE * 2.0)
+        .offset(km::LINE * 2.0)
         .on_dismiss(Message::XrefManagerDismissMenus)
         .into()
 }
@@ -1342,7 +1342,7 @@ fn menu_item(label: String, msg: Option<Message>, gate: Option<String>) -> Item 
     }
 }
 
-/// Per-row right-click menu, the palette menu: universal tools, then path
+/// Per-row right-click menu, the kit menu: universal tools, then path
 /// tools. No Bind, no Attach/Overlay — those are DWG-only and hidden
 /// entirely. Change Path Type opens its list beside the menu on hover.
 /// `nested` greys everything but Open: a nested reference is changed in its
@@ -1395,7 +1395,7 @@ fn row_menu_for(
         )
         .enabled(!nested),
     ];
-    palette_menu::menu_with_submenus(items, Message::XrefRowChangePathLeave)
+    menu::with_submenus(items, Message::XrefRowChangePathLeave)
 }
 
 fn xref_row<'a>(
@@ -1423,15 +1423,15 @@ fn xref_row<'a>(
         let key = entry.key;
         let arrow = button(
             container(if is_expanded {
-                crate::ui::icons::themed_arrow_down(pm::CARET)
+                crate::ui::icons::themed_arrow_down(km::CARET)
             } else {
-                crate::ui::icons::themed_arrow_right(pm::CARET)
+                crate::ui::icons::themed_arrow_right(km::CARET)
             })
             .center(Length::Fill),
         )
         .on_press(Message::XrefManagerToggleExpand(key))
         .style(kit::cell_button_style)
-        .width(Length::Fixed(pm::INDENT))
+        .width(Length::Fixed(km::INDENT))
         .height(Length::Fixed(ROW_H))
         .padding(0);
         name_cell = name_cell.push(arrow);
@@ -1450,7 +1450,7 @@ fn xref_row<'a>(
             .line_height(crate::ui::style::text::line())
             .width(Fill),
     ]
-    .spacing(pm::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center)
     .width(Length::Fixed(cw[1]))
     .into();
@@ -1524,15 +1524,15 @@ fn tree_row(
         let key = entry.key;
         let arrow = button(
             container(if is_expanded {
-                crate::ui::icons::themed_arrow_down(pm::CARET)
+                crate::ui::icons::themed_arrow_down(km::CARET)
             } else {
-                crate::ui::icons::themed_arrow_right(pm::CARET)
+                crate::ui::icons::themed_arrow_right(km::CARET)
             })
             .center(Length::Fill),
         )
         .on_press(Message::XrefManagerToggleExpand(key))
         .style(kit::cell_button_style)
-        .width(Length::Fixed(pm::INDENT))
+        .width(Length::Fixed(km::INDENT))
         .height(Length::Fixed(ROW_H))
         .padding(0);
         cells = cells.push(arrow);
@@ -1540,7 +1540,7 @@ fn tree_row(
     cells = cells.push(
         container(crate::ui::icons::themed_secondary(
             crate::ui::icons::DOC,
-            pm::ROW_ICON,
+            km::ROW_ICON,
         ))
         .align_y(iced::Center),
     );
@@ -1553,7 +1553,7 @@ fn tree_row(
     // #49: messages carry stable identity.
     let row_id = XrefRowId::of(entry.key, &entry.saved_path);
     let row = mouse_area(
-        container(cells.spacing(pm::TOOL_GAP).width(Fill))
+        container(cells.spacing(km::TOOL_GAP).width(Fill))
             .style(row_style(is_selected))
             .padding(ROW_PAD)
             .height(Length::Fixed(ROW_H))
@@ -1587,14 +1587,14 @@ fn tree_host_row(display: DisplayRow, host_name: &str) -> Element<'_, Message> {
     let mut cells = row![].align_y(iced::Center);
     cells = cells.push(tree_indent(display.depth));
     cells =
-        cells.push(container(crate::ui::icons::themed_home(pm::ROW_ICON)).align_y(iced::Center));
+        cells.push(container(crate::ui::icons::themed_home(km::ROW_ICON)).align_y(iced::Center));
     cells = cells.push(
         kit::one_line(text(name))
             .size(TREE_FONT_SZ)
             .line_height(crate::ui::style::text::line())
             .width(Fill),
     );
-    container(cells.spacing(pm::TOOL_GAP).width(Fill))
+    container(cells.spacing(km::TOOL_GAP).width(Fill))
         .style(row_style(false))
         .padding(ROW_PAD)
         .height(Length::Fixed(ROW_H))
@@ -2316,8 +2316,9 @@ mod tests {
         // buttons again.
         use iced_core::Widget;
 
-        let mut menu =
-            iced_aw::ContextMenu::new(text("anchor"), || row_menu_for(XrefRowId::of(0, ""), false, false, Pathtype::Relative));
+        let mut menu = iced_aw::ContextMenu::new(text("anchor"), || {
+            row_menu_for(XrefRowId::of(0, ""), false, false, Pathtype::Relative)
+        });
         let mut tree = iced_core::widget::Tree::new(
             &menu as &dyn Widget<Message, iced::Theme, iced::Renderer>,
         );

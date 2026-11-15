@@ -101,7 +101,7 @@ pub fn swatch<'a>(bg: Color) -> Element<'a, Message> {
             background: Some(Background::Color(bg)),
             border: Border {
                 color: chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 2.0.into(),
             },
             ..Default::default()
@@ -168,7 +168,7 @@ pub fn color_selector_varies<'a>(
             background: Some(Background::Color(chrome::hover(theme))),
             border: Border {
                 color: chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 2.0.into(),
             },
             text_color: Some(chrome::strong(theme)),
@@ -233,8 +233,8 @@ fn color_selector_with_indicator<'a>(
     }
 
     let popup = container(color_list_with_current(current, extras, on_select, on_more))
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::style::palette_metrics::DROPDOWN_PAD);
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::style::kit_metrics::DROPDOWN_PAD);
 
     // `DropDown` keeps the popup outside the surrounding form layout and
     // handles viewport placement, Escape, and outside-click dismissal.
@@ -289,7 +289,7 @@ pub fn color_list_with_current<'a>(
         )
         .on_press(msg.clone())
         .style(crate::ui::kit::dropdown_option_style(is_current))
-        .padding([2.0, crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X])
+        .padding([2.0, crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X])
         .width(Length::Fill)
         .into();
         rows.push(DropdownRow::item(el, label_str, msg));
@@ -333,7 +333,7 @@ pub fn color_list_with_current<'a>(
         button(text(more_label.clone()).size(ui_text::UI))
             .on_press(on_more.clone())
             .style(crate::ui::kit::dropdown_row_style)
-            .padding([2.0, crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X])
+            .padding([2.0, crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X])
             .width(Length::Fill),
         more_label,
         on_more,

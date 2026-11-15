@@ -5,7 +5,7 @@
 
 use super::tree::row_style;
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{button, container, mouse_area, row, text as label, Space};
 use iced::{Background, Element, Length, Padding, Theme};
 
@@ -62,15 +62,15 @@ impl Column {
 /// Width of a column's resize handle.
 const RESIZE_W: f32 = 4.0;
 
-/// The line at a column header's right end: 1 px of `palette_body`, and
+/// The line at a column header's right end: 1 px of `surface`, and
 /// with `on_resize` a 4 px grip over it that sends it when
 /// pressed, to size the column by dragging. For headers laid out by hand
 /// (the Layer Manager's, Layer Walk's) as well as [`column_header`].
 pub fn column_divider<'a>(on_resize: Option<Message>) -> Element<'a, Message> {
     let line =
-        container(Space::new().width(pm::line()).height(Length::Fill)).style(|theme: &Theme| {
+        container(Space::new().width(km::line()).height(Length::Fill)).style(|theme: &Theme| {
             container::Style {
-                background: Some(Background::Color(chrome::palette_body(theme))),
+                background: Some(Background::Color(chrome::surface(theme))),
                 ..Default::default()
             }
         });
@@ -88,7 +88,7 @@ pub fn column_divider<'a>(on_resize: Option<Message>) -> Element<'a, Message> {
     }
 }
 
-/// The header row: column titles on `palette_bar`, 11 px semibold, a sort
+/// The header row: column titles on `surface_raised`, 11 px semibold, a sort
 /// arrow on the sorted column, 1 px palette-body lines between columns.
 pub fn column_header<'a>(columns: Vec<Column>) -> Element<'a, Message> {
     let count = columns.len();
@@ -97,18 +97,18 @@ pub fn column_header<'a>(columns: Vec<Column>) -> Element<'a, Message> {
             .size(text::UI)
             .line_height(text::line())
             .font(super::SEMIBOLD)]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
         if let Some(descending) = c.sort {
             title = title.push(crate::ui::icons::themed_arrow_toggle(
                 !descending,
-                pm::CARET,
+                km::CARET,
             ));
         }
         let title = container(title)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+            .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
             .align_x(if c.end {
                 iced::alignment::Horizontal::Right
             } else {
@@ -139,9 +139,9 @@ pub fn column_header<'a>(columns: Vec<Column>) -> Element<'a, Message> {
     });
     container(row(cells).height(Length::Fill))
         .width(Length::Fill)
-        .height(Length::Fixed(pm::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::palette_bar(theme))),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         })
@@ -207,11 +207,11 @@ impl<'a> ListRow<'a> {
         let selected = self.selected;
         let content = container(row(cells).height(Length::Fill))
             .width(Length::Fill)
-            .height(Length::Fixed(pm::ROW_H));
+            .height(Length::Fixed(km::ROW_H));
         let lit = |hovered: bool| {
             container(Space::new())
                 .width(Length::Fill)
-                .height(Length::Fixed(pm::ROW_H))
+                .height(Length::Fixed(km::ROW_H))
                 .style(row_style(selected, hovered && interactive))
         };
         let stacked = iced::widget::stack![iced::widget::hover(lit(false), lit(true)), content];
@@ -234,7 +234,7 @@ impl<'a> ListRow<'a> {
 /// A text cell: 11 px, padded, muted when it only states something.
 pub fn text_cell<'a>(value: impl Into<String>, muted: bool) -> Element<'a, Message> {
     container(super::value_text(value, muted))
-        .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+        .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .into()
 }
 
@@ -242,7 +242,7 @@ pub fn text_cell<'a>(value: impl Into<String>, muted: bool) -> Element<'a, Messa
 pub fn number_cell<'a>(value: impl Into<String>) -> Element<'a, Message> {
     container(super::value_text(value, false))
         .width(Length::Fill)
-        .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+        .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .align_x(iced::alignment::Horizontal::Right)
         .into()
 }
@@ -255,8 +255,8 @@ pub fn toggle_cell<'a>(
 ) -> Element<'a, Message> {
     button(container(icon).center(Length::Fill))
         .on_press_maybe(message)
-        .width(Length::Fixed(pm::ROW_H))
-        .height(Length::Fixed(pm::ROW_H))
+        .width(Length::Fixed(km::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
         .padding(0)
         .style(super::flat_button_style(false))
         .into()

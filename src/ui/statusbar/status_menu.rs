@@ -55,7 +55,7 @@ pub fn menu_bar<'a>(
     let menu = Menu::new(items)
         .width(Length::Fixed(width))
         // The rows stay inside the border, so it draws over a lit row.
-        .padding(crate::ui::style::palette_metrics::line())
+        .padding(crate::ui::style::kit_metrics::line())
         .spacing(0)
         .offset(1.0)
         .close_on_background_click(true);
@@ -70,16 +70,16 @@ pub fn menu_bar<'a>(
         .safe_bounds_margin(super::ROW_HEIGHT)
         .close_on_background_click_global(true)
         .draw_path(DrawPath::Backdrop)
-        // The palette menu's frame, shadow and hover.
+        // The kit menu's frame, shadow and hover.
         .style(|theme: &Theme, _| {
-            let frame = crate::ui::palette_menu::frame_style(theme);
+            let frame = crate::ui::kit::menu::frame_style(theme);
             iced_aw::style::menu_bar::Style {
                 bar_background: Background::Color(Color::TRANSPARENT),
                 bar_border: Border::default(),
                 bar_shadow: Shadow::default(),
-                menu_background: frame.background.unwrap_or(Background::Color(
-                    crate::ui::style::chrome::palette_body(theme),
-                )),
+                menu_background: frame
+                    .background
+                    .unwrap_or(Background::Color(crate::ui::style::chrome::surface(theme))),
                 menu_border: frame.border,
                 menu_shadow: frame.shadow,
                 path: Background::Color(crate::ui::style::chrome::hover(theme)),

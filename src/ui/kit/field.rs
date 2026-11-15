@@ -2,24 +2,24 @@
 //! Properties object list box).
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{container, text_input};
 use iced::{Background, Element, Length, Padding, Theme};
 
 /// Vertical padding of a 22 px box around a 14 px text line and its 1 px
 /// border.
-const BOX_PAD_Y: f32 = (pm::TOOL_H - text::UI_LINE - 2.0 * pm::LINE) / 2.0;
+const BOX_PAD_Y: f32 = (km::TOOL_H - text::UI_LINE - 2.0 * km::LINE) / 2.0;
 
 /// Padding of a text input or combo filling a 22 px box (a toolbar-height
 /// field, as opposed to a [`super::FIELD_PAD`] grid cell).
 pub const BOX_PAD: Padding = Padding {
     top: BOX_PAD_Y,
     bottom: BOX_PAD_Y,
-    left: pm::CELL_PAD_X,
-    right: pm::CELL_PAD_X,
+    left: km::CELL_PAD_X,
+    right: km::CELL_PAD_X,
 };
 
-/// A search field: the `palette_bar` box, 22 px, 11 px text. Returned as a
+/// A search field: the `surface_raised` box, 22 px, 11 px text. Returned as a
 /// text input so callers can add `on_submit`, an `id`, ...
 pub fn search_field<'a>(
     placeholder: &str,
@@ -36,15 +36,15 @@ pub fn search_field<'a>(
 }
 
 /// A selector box (the object list at the top of Properties): `content`
-/// in the 22 px `palette_bar` box, filling the width.
+/// in the 22 px `surface_raised` box, filling the width.
 pub fn select_box<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
         .width(Length::Fill)
-        .height(Length::Fixed(pm::TOOL_H))
-        .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+        .height(Length::Fixed(km::TOOL_H))
+        .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .align_y(iced::Center)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::palette_bar(theme))),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         })
@@ -52,7 +52,7 @@ pub fn select_box<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, M
 }
 
 /// A button that opens a list (a picker head, an L / B / C mode button):
-/// the `palette_bar` box, `hover` while hovered, the accent edge while its
+/// the `surface_raised` box, `hover` while hovered, the accent edge while its
 /// list is `open`.
 pub fn box_button_style(
     open: bool,
@@ -64,16 +64,16 @@ pub fn box_button_style(
             background: Some(Background::Color(if hovered {
                 chrome::hover(theme)
             } else {
-                chrome::palette_bar(theme)
+                chrome::surface_raised(theme)
             })),
             text_color: chrome::text(theme),
             border: iced::Border {
                 color: if open {
                     chrome::accent(theme)
                 } else {
-                    chrome::palette_bar(theme)
+                    chrome::surface_raised(theme)
                 },
-                width: pm::line(),
+                width: km::line(),
                 radius: 0.0.into(),
             },
             ..Default::default()
@@ -81,7 +81,7 @@ pub fn box_button_style(
     }
 }
 
-/// A pick list in a palette: the `palette_bar` box, accent edge while
+/// A pick list in a palette: the `surface_raised` box, accent edge while
 /// open, 11 px text (use with `.text_size(text::UI)` and [`BOX_PAD`]).
 pub fn pick_list_style(
     theme: &Theme,
@@ -89,10 +89,10 @@ pub fn pick_list_style(
 ) -> iced::widget::pick_list::Style {
     use iced::widget::pick_list::Status;
     let (background, edge) = match status {
-        Status::Opened { .. } => (chrome::palette_bar(theme), chrome::accent(theme)),
+        Status::Opened { .. } => (chrome::surface_raised(theme), chrome::accent(theme)),
         Status::Hovered => (chrome::hover(theme), chrome::hover(theme)),
         Status::Active | Status::Disabled => {
-            (chrome::palette_bar(theme), chrome::palette_bar(theme))
+            (chrome::surface_raised(theme), chrome::surface_raised(theme))
         }
     };
     iced::widget::pick_list::Style {
@@ -102,20 +102,20 @@ pub fn pick_list_style(
         background: Background::Color(background),
         border: iced::Border {
             color: edge,
-            width: pm::line(),
+            width: km::line(),
             radius: 0.0.into(),
         },
     }
 }
 
-/// The list a palette pick list opens: the palette menu's look.
+/// The list a palette pick list opens: the kit menu's look.
 pub fn pick_menu_style(theme: &Theme) -> iced::overlay::menu::Style {
-    // The list of a dropdown in the colours of the palette menus (the
+    // The list of a dropdown in the colours of the kit menus (the
     // right-click menus): their frame and shadow, the item under the
     // pointer or the keys lit as theirs.
-    let frame = crate::ui::palette_menu::frame_style(theme);
+    let frame = crate::ui::kit::menu::frame_style(theme);
     iced::overlay::menu::Style {
-        background: Background::Color(chrome::palette_body(theme)),
+        background: Background::Color(chrome::surface(theme)),
         border: frame.border,
         text_color: chrome::text(theme),
         selected_text_color: chrome::text(theme),
@@ -131,6 +131,6 @@ mod tests {
     #[test]
     fn a_box_is_22_px_on_whole_pixels() {
         assert_eq!(BOX_PAD_Y.fract(), 0.0);
-        assert_eq!(2.0 * BOX_PAD_Y + text::UI_LINE + 2.0 * pm::LINE, pm::TOOL_H);
+        assert_eq!(2.0 * BOX_PAD_Y + text::UI_LINE + 2.0 * km::LINE, km::TOOL_H);
     }
 }

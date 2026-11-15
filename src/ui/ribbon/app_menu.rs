@@ -87,7 +87,7 @@ impl Ribbon {
     /// The application menu under the logo: the file commands and Options,
     /// then the recent drawings.
     pub(super) fn app_menu(&self, recent: &[PathBuf], win: (f32, f32)) -> Element<'_, Message> {
-        use crate::ui::palette_menu::{self, Item};
+        use crate::ui::kit::menu::{self, Item};
         let mut items: Vec<Item> = commands()
             .into_iter()
             .map(|(icon, label, shortcut, command)| {
@@ -114,9 +114,9 @@ impl Ribbon {
                     .tip(path.display().to_string())
             }));
         }
-        // The palette menu, at least as wide as it always was.
-        let width = palette_menu::width(&items).max(MENU_W);
-        let panel = palette_menu::menu_at_least(items, MENU_W);
+        // The kit menu, at least as wide as it always was.
+        let width = menu::width(&items).max(MENU_W);
+        let panel = menu::view_at_least(items, MENU_W);
         self.place_dropdown(APP_MENU_ID, panel, width, win.0)
     }
 }

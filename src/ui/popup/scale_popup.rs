@@ -46,17 +46,16 @@ pub fn menu_entries(
     entries
 }
 
-/// A scale, the current one checked: a palette menu item.
+/// A scale, the current one checked: a kit menu item.
 fn scale_row(label: String, active: bool, msg: Message) -> Element<'static, Message> {
-    crate::ui::palette_menu::entry(
-        crate::ui::palette_menu::Item::new(label, msg)
-            .mark(crate::ui::palette_menu::Mark::Check(active)),
+    crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(label, msg).mark(crate::ui::kit::menu::Mark::Check(active)),
     )
 }
 
 /// Manage..., after a separator.
 fn manage_row() -> Element<'static, Message> {
-    use crate::ui::palette_menu::{entry, Item};
+    use crate::ui::kit::menu::{entry, Item};
     iced::widget::column![
         entry(Item::Separator),
         entry(Item::new(t!("Manage..."), Message::ScaleManagerOpen)),

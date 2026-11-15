@@ -4,7 +4,7 @@
 //!
 //! Properties uses it first; the other palettes (Layers, Xref Manager,
 //! Layer Walk, ...) move onto it in the uniformity pass. Colours come from
-//! [`chrome`], sizes from [`palette_metrics`], text from [`text`].
+//! [`chrome`], sizes from [`kit_metrics`], text from [`text`].
 //!
 //! A row is laid out as
 //!
@@ -13,10 +13,10 @@
 //!               └───────── line under the row ─────┘
 //! ```
 //!
-//! with the grid lines in `palette_bar` and nothing drawn in the indent.
+//! with the grid lines in `surface_raised` and nothing drawn in the indent.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text as label, Space};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 
@@ -35,20 +35,20 @@ pub fn one_line(text: iced::widget::Text<'_>) -> iced::widget::Text<'_> {
 
 /// Vertical padding of a text input or combo filling a grid cell: a whole
 /// pixel, so the `UI_LINE` text box plus a 1 px border fills the row.
-pub const FIELD_PAD_Y: f32 = ((pm::ROW_H - text::UI_LINE - 2.0 * pm::LINE) / 2.0).floor();
+pub const FIELD_PAD_Y: f32 = ((km::ROW_H - text::UI_LINE - 2.0 * km::LINE) / 2.0).floor();
 /// Padding of a field in a grid cell.
 pub const FIELD_PAD: Padding = Padding {
     top: FIELD_PAD_Y,
     bottom: FIELD_PAD_Y,
-    left: pm::CELL_PAD_X,
-    right: pm::CELL_PAD_X,
+    left: km::CELL_PAD_X,
+    right: km::CELL_PAD_X,
 };
 
 /// A 1 px grid line, `w` × `h`.
 fn line<'a>(w: Length, h: Length) -> Element<'a, Message> {
     container(Space::new().width(w).height(h))
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::palette_bar(theme))),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             ..Default::default()
         })
         .into()
@@ -56,7 +56,7 @@ fn line<'a>(w: Length, h: Length) -> Element<'a, Message> {
 
 /// A vertical grid line one row tall.
 fn vline<'a>() -> Element<'a, Message> {
-    line(Length::Fixed(pm::line()), Length::Fixed(pm::ROW_H))
+    line(Length::Fixed(km::line()), Length::Fixed(km::ROW_H))
 }
 
 /// Name text: muted when the value is read-only.
@@ -97,26 +97,26 @@ pub fn row_view<'a>(
     on_select: Option<Message>,
 ) -> Element<'a, Message> {
     let name_cell = container(name)
-        .width(Length::Fixed(pm::NAME_COL_W))
-        .height(Length::Fixed(pm::ROW_H))
-        .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+        .width(Length::Fixed(km::NAME_COL_W))
+        .height(Length::Fixed(km::ROW_H))
+        .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .align_y(iced::Center)
         .clip(true)
         .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(if selected {
                 chrome::row_selected(theme)
             } else {
-                chrome::palette_body(theme)
+                chrome::surface(theme)
             })),
             ..Default::default()
         });
     let value_cell = container(value)
         .width(Length::Fill)
-        .height(Length::Fixed(pm::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
         .align_y(iced::Center)
         .clip(true)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(chrome::palette_body(theme))),
+            background: Some(Background::Color(chrome::surface(theme))),
             ..Default::default()
         });
     let (name_cell, value_cell): (Element<'a, Message>, Element<'a, Message>) = match on_select {
@@ -128,17 +128,17 @@ pub fn row_view<'a>(
     };
     column![
         row![
-            Space::new().width(pm::INDENT),
+            Space::new().width(km::INDENT),
             vline(),
             name_cell,
             vline(),
             value_cell,
             vline(),
         ]
-        .height(Length::Fixed(pm::ROW_H)),
+        .height(Length::Fixed(km::ROW_H)),
         row![
-            Space::new().width(pm::INDENT),
-            line(Length::Fill, Length::Fixed(pm::line())),
+            Space::new().width(km::INDENT),
+            line(Length::Fill, Length::Fixed(km::line())),
         ],
     ]
     .into()
@@ -147,23 +147,23 @@ pub fn row_view<'a>(
 /// A value cell holding plain text with the cell padding.
 pub fn value_cell<'a>(value: impl Into<String>, muted: bool) -> Element<'a, Message> {
     container(value_text(value, muted))
-        .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+        .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
         .width(Length::Fill)
         .into()
 }
 
-/// A category bar: `title` in 11 px semibold on `palette_bar`, the caret
+/// A category bar: `title` in 11 px semibold on `surface_raised`, the caret
 /// at the right, the whole bar toggling `collapsed` on press, with a
-/// `CATEGORY_GAP` of palette body above it.
+/// `CATEGORY_GAP` of surface above it.
 pub fn category_bar<'a>(
     title: impl Into<String>,
     collapsed: bool,
     on_toggle: Message,
 ) -> Element<'a, Message> {
     let caret = if collapsed {
-        crate::ui::icons::themed_arrow_right(pm::CARET)
+        crate::ui::icons::themed_arrow_right(km::CARET)
     } else {
-        crate::ui::icons::themed_arrow_down(pm::CARET)
+        crate::ui::icons::themed_arrow_down(km::CARET)
     };
     let bar = mouse_area(bar_box(title.into(), caret))
         .on_press(on_toggle)
@@ -179,11 +179,11 @@ pub fn section_bar<'a>(
 ) -> Element<'a, Message> {
     with_gap(bar_box(
         title.into(),
-        row(trailing).spacing(pm::LINE).align_y(iced::Center),
+        row(trailing).spacing(km::LINE).align_y(iced::Center),
     ))
 }
 
-/// The bar of a category or section: title and `end` on `palette_bar`.
+/// The bar of a category or section: title and `end` on `surface_raised`.
 fn bar_box<'a>(title: String, end: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(
         row![
@@ -198,21 +198,21 @@ fn bar_box<'a>(title: String, end: impl Into<Element<'a, Message>>) -> Element<'
         .align_y(iced::Center),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(pm::CATEGORY_H))
-    .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+    .height(Length::Fixed(km::CATEGORY_H))
+    .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
     .align_y(iced::Center)
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(chrome::palette_bar(theme))),
+        background: Some(Background::Color(chrome::surface_raised(theme))),
         text_color: Some(chrome::text(theme)),
         ..Default::default()
     })
     .into()
 }
 
-/// `bar` with a gap of palette body above it, parting it from the rows
+/// `bar` with a gap of surface above it, parting it from the rows
 /// before.
 fn with_gap<'a>(bar: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    column![Space::new().height(pm::CATEGORY_GAP), bar.into()].into()
+    column![Space::new().height(km::CATEGORY_GAP), bar.into()].into()
 }
 
 /// The scroll area of a grid: insets `GRID_INSET_L` on the left and
@@ -223,15 +223,15 @@ fn with_gap<'a>(bar: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
 /// `SCROLLBAR_W` rail with a `SCROLL_THUMB_W` thumb centred.
 pub fn scroll_area<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     let content = container(content).padding(Padding {
-        left: pm::GRID_INSET_L,
-        right: pm::GRID_INSET_R,
+        left: km::GRID_INSET_L,
+        right: km::GRID_INSET_R,
         ..Padding::ZERO
     });
     scrollable(content)
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::new()
-                .width(pm::SCROLLBAR_W)
-                .scroller_width(pm::SCROLL_THUMB_W)
+                .width(km::SCROLLBAR_W)
+                .scroller_width(km::SCROLL_THUMB_W)
                 .margin(0),
         ))
         .width(Length::Fill)
@@ -257,7 +257,7 @@ pub fn scroll_style(theme: &Theme, status: scrollable::Status) -> scrollable::St
         scroller: scrollable::Scroller {
             background: Background::Color(thumb),
             border: Border {
-                radius: (pm::SCROLL_THUMB_W / 2.0).into(),
+                radius: (km::SCROLL_THUMB_W / 2.0).into(),
                 ..Default::default()
             },
         },
@@ -266,8 +266,8 @@ pub fn scroll_style(theme: &Theme, status: scrollable::Status) -> scrollable::St
     style
 }
 
-/// A text input or combo in a grid cell: flat on the palette body until
-/// focused or hovered, then the `palette_bar` field with the accent
+/// A text input or combo in a grid cell: flat on the surface until
+/// focused or hovered, then the `surface_raised` field with the accent
 /// border while focused.
 pub fn field_style(
     theme: &Theme,
@@ -275,15 +275,15 @@ pub fn field_style(
 ) -> iced::widget::text_input::Style {
     use iced::widget::text_input::Status;
     let (background, border) = match status {
-        Status::Focused { .. } => (chrome::palette_bar(theme), chrome::accent(theme)),
-        Status::Hovered => (chrome::palette_bar(theme), chrome::palette_bar(theme)),
-        _ => (chrome::palette_body(theme), chrome::palette_body(theme)),
+        Status::Focused { .. } => (chrome::surface_raised(theme), chrome::accent(theme)),
+        Status::Hovered => (chrome::surface_raised(theme), chrome::surface_raised(theme)),
+        _ => (chrome::surface(theme), chrome::surface(theme)),
     };
     iced::widget::text_input::Style {
         background: Background::Color(background),
         border: Border {
             color: border,
-            width: pm::line(),
+            width: km::line(),
             radius: 0.0.into(),
         },
         icon: Color::TRANSPARENT,
@@ -293,7 +293,7 @@ pub fn field_style(
     }
 }
 
-/// The combo field (a choice shown as a box): always the `palette_bar`
+/// The combo field (a choice shown as a box): always the `surface_raised`
 /// field.
 pub fn combo_style(
     theme: &Theme,
@@ -301,18 +301,18 @@ pub fn combo_style(
 ) -> iced::widget::text_input::Style {
     use iced::widget::text_input::Status;
     let mut style = field_style(theme, status);
-    style.background = Background::Color(chrome::palette_bar(theme));
+    style.background = Background::Color(chrome::surface_raised(theme));
     if !matches!(status, Status::Focused { .. }) {
-        style.border.color = chrome::palette_bar(theme);
+        style.border.color = chrome::surface_raised(theme);
     }
     style
 }
 
 /// A choice shown as a box (a combo head that is not a text input): the
-/// `palette_bar` field.
+/// `surface_raised` field.
 pub fn combo_container_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(chrome::palette_bar(theme))),
+        background: Some(Background::Color(chrome::surface_raised(theme))),
         text_color: Some(chrome::text(theme)),
         ..Default::default()
     }
@@ -358,10 +358,10 @@ pub fn read_only_style(
     _status: iced::widget::text_input::Status,
 ) -> iced::widget::text_input::Style {
     iced::widget::text_input::Style {
-        background: Background::Color(chrome::palette_body(theme)),
+        background: Background::Color(chrome::surface(theme)),
         border: Border {
-            color: chrome::palette_body(theme),
-            width: pm::line(),
+            color: chrome::surface(theme),
+            width: km::line(),
             radius: 0.0.into(),
         },
         icon: Color::TRANSPARENT,
@@ -389,9 +389,9 @@ pub fn read_only_field<'a>(value: &str) -> Element<'a, Message> {
 /// bar's under the pointer.
 pub fn cell_field_pair(theme: &Theme, status: button::Status) -> iced::theme::palette::Pair {
     let fill = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        chrome::palette_bar(theme)
+        chrome::surface_raised(theme)
     } else {
-        chrome::palette_body(theme)
+        chrome::surface(theme)
     };
     iced::theme::palette::Pair::new(fill, chrome::text(theme))
 }
@@ -416,6 +416,6 @@ mod tests {
     #[test]
     fn a_field_fills_the_row_on_whole_pixels() {
         assert_eq!(FIELD_PAD_Y.fract(), 0.0);
-        const { assert!(2.0 * FIELD_PAD_Y + text::UI_LINE + 2.0 * pm::LINE <= pm::ROW_H) };
+        const { assert!(2.0 * FIELD_PAD_Y + text::UI_LINE + 2.0 * km::LINE <= km::ROW_H) };
     }
 }

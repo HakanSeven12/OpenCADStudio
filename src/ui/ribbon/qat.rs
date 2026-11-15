@@ -530,7 +530,7 @@ impl Ribbon {
         }
         let list = DropdownList::new(items).on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(icons::hairline())
             .width(Length::Fixed(width));
         self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), width, win.0)
@@ -615,7 +615,7 @@ impl Ribbon {
             ]
             .spacing(metrics::GAP),
         )
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .width(Length::Fixed(metrics::QAT_PICKER_W));
         self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), metrics::QAT_PICKER_W, win.0)
     }
@@ -992,7 +992,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(crate::ui::palette_menu::frame_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(icons::hairline())
             .width(Length::Fixed(width));
         self.place_dropdown(id, panel.into(), width, win.0)

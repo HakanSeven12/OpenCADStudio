@@ -1049,7 +1049,7 @@ fn osnap_btn<'a>(
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn layout_tab_context_menu(name: String) -> Element<'static, Message> {
-    use crate::ui::palette_menu::{menu, Item};
+    use crate::ui::kit::menu::{view as menu, Item};
     menu(vec![
         Item::new(t!("New Layout"), Message::LayoutCreate),
         Item::new(t!("Copy"), Message::LayoutCopy(name.clone())),

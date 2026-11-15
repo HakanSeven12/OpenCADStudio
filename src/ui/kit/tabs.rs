@@ -1,9 +1,9 @@
 //! Segmented tabs at the top of a palette (Block Palette, Tool Palettes,
-//! Authoring Palettes, Sheet Set): equal parts on a `palette_bar` track,
-//! the active one on the palette body.
+//! Authoring Palettes, Sheet Set): equal parts on a `surface_raised` track,
+//! the active one on the surface.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{button, container, row, text as label};
 use iced::{Background, Element, Length, Padding, Theme};
 
@@ -14,7 +14,7 @@ pub fn tabs<'a>(items: Vec<(String, Message)>, active: usize) -> Element<'a, Mes
         // Tabs share the width in proportion to their labels, so a long one
         // ("Current Drawing") is not cut while a short one has room to spare.
         let portion = (crate::ui::style::text_metrics::width(&name, text::UI, false)
-            + 2.0 * pm::CELL_PAD_X)
+            + 2.0 * km::CELL_PAD_X)
             .ceil()
             .max(1.0) as u16;
         button(
@@ -30,13 +30,13 @@ pub fn tabs<'a>(items: Vec<(String, Message)>, active: usize) -> Element<'a, Mes
         .on_press(message)
         .clip(true)
         .width(Length::FillPortion(portion))
-        .height(Length::Fixed(pm::TOOL_H - 2.0 * pm::line()))
+        .height(Length::Fixed(km::TOOL_H - 2.0 * km::line()))
         .padding(0)
         .style(move |theme: &Theme, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
                 background: if is_active {
-                    Some(Background::Color(chrome::palette_body(theme)))
+                    Some(Background::Color(chrome::surface(theme)))
                 } else if hovered {
                     Some(Background::Color(chrome::hover(theme)))
                 } else {
@@ -53,11 +53,11 @@ pub fn tabs<'a>(items: Vec<(String, Message)>, active: usize) -> Element<'a, Mes
         .into()
     });
     super::band(
-        container(row(parts).spacing(pm::line()))
-            .padding(Padding::new(pm::line()))
+        container(row(parts).spacing(km::line()))
+            .padding(Padding::new(km::line()))
             .width(Length::Fill)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::palette_bar(theme))),
+                background: Some(Background::Color(chrome::surface_raised(theme))),
                 ..Default::default()
             }),
     )
@@ -65,7 +65,7 @@ pub fn tabs<'a>(items: Vec<(String, Message)>, active: usize) -> Element<'a, Mes
 
 /// One vertical tab along a palette's side (Tool Palettes, Authoring
 /// Palettes): its name in capitals reading upward, the open one on the
-/// palette body and the others on the strip, as the palette strip shows
+/// surface and the others on the strip, as the palette strip shows
 /// them.
 pub fn side_tab<'a>(name: &str, selected: bool, message: Message) -> Element<'a, Message> {
     let height = crate::ui::dock::strip_tab_h(name, crate::ui::dock::StripNames::NamesOnly);
@@ -78,11 +78,11 @@ pub fn side_tab<'a>(name: &str, selected: bool, message: Message) -> Element<'a,
         .height(height),
     )
     .on_press(message)
-    .width(pm::STRIP_BODY_W)
+    .width(km::STRIP_BODY_W)
     .padding(0)
     .style(move |theme: &Theme, status| button::Style {
         background: Some(Background::Color(if selected {
-            chrome::palette_body(theme)
+            chrome::surface(theme)
         } else if status == button::Status::Hovered {
             chrome::hover(theme)
         } else {

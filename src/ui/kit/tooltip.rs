@@ -2,7 +2,7 @@
 //! 11 px text), used by every palette.
 
 use crate::app::Message;
-use crate::ui::style::{palette_metrics as pm, text};
+use crate::ui::style::{kit_metrics as km, text};
 use iced::widget::{container, text as label, tooltip as iced_tooltip};
 use iced::Element;
 
@@ -18,7 +18,7 @@ pub fn tooltip<'a>(
     tip: impl Into<String>,
     position: TipPosition,
 ) -> Element<'a, Message> {
-    tooltip_gap(content, tip, position, pm::TOOL_GAP)
+    tooltip_gap(content, tip, position, km::TOOL_GAP)
 }
 
 /// [`tooltip`] `gap` away from its content (the ribbon's tips sit
@@ -31,7 +31,7 @@ pub fn tooltip_gap<'a>(
 ) -> Element<'a, Message> {
     iced_tooltip(
         content,
-        container(label(tip.into()).size(text::UI).line_height(text::line())).padding(pm::TIP_PAD),
+        container(label(tip.into()).size(text::UI).line_height(text::line())).padding(km::TIP_PAD),
         position,
     )
     .gap(gap)
@@ -47,7 +47,7 @@ pub fn tooltip_style(theme: &iced::Theme) -> container::Style {
         background: Some(iced::Background::Color(chrome::panel(theme))),
         border: iced::Border {
             color: chrome::border(theme),
-            width: pm::line(),
+            width: km::line(),
             radius: super::toolbar::BUTTON_RADIUS.into(),
         },
         text_color: Some(chrome::text(theme)),

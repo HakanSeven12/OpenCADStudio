@@ -26,7 +26,7 @@ padding, check position and frame:
 
 | Menu | File | Row |
 |---|---|---|
-| palette menu (the kit's) | `ui/palette_menu.rs` | 22 |
+| kit menu | `ui/kit/menu.rs` | 22 |
 | ribbon right-click menu | `ui/ribbon/ribbon_menu.rs` | own, check on the right, 12 px text, buttons |
 | application menu | `ui/ribbon/app_menu.rs` | 28 |
 | viewport context menu | `ui/popup/context_menu.rs` | 22, own code |
@@ -59,9 +59,9 @@ palette audit.
 
 | # | Prompt | Files | Size |
 |---|---|---|---|
-| 1a | **One menu, palettes first.** `palette_menu` gains shortcuts (muted, right-aligned), submenus (a flyout beside the row, opened on hover, the menu keeping one width) and an `on_enter` for closing a flyout. The floating title bar menu, Layers' tree and row menus, the Xref row menu and Sheet Set's menus move onto it. | `palette_menu.rs`, `app/dock/view.rs`, `layers.rs`, `xref_manager.rs`, `sheet_set.rs` | M |
-| 1b | **Drawing menus.** The viewport context menu, status bar menu, viewport control menus and MText menu move onto `palette_menu`. | `popup/context_menu.rs`, `statusbar/statusbar_menu.rs`, `app/view/controls.rs`, `mtext_menu.rs` | L |
-| 1c | **Ribbon menus.** The ribbon right-click menu, application menu and menu bar move onto `palette_menu` (rows become `mouse_area`s, as every context menu needs). | `ribbon/ribbon_menu.rs`, `ribbon/app_menu.rs`, `menu_bar.rs` | M |
+| 1a | **One menu, palettes first.** `kit::menu` gains shortcuts (muted, right-aligned), submenus (a flyout beside the row, opened on hover, the menu keeping one width) and an `on_enter` for closing a flyout. The floating title bar menu, Layers' tree and row menus, the Xref row menu and Sheet Set's menus move onto it. | `kit/menu.rs`, `app/dock/view.rs`, `layers.rs`, `xref_manager.rs`, `sheet_set.rs` | M |
+| 1b | **Drawing menus.** The viewport context menu, status bar menu, viewport control menus and MText menu move onto `kit::menu`. | `popup/context_menu.rs`, `statusbar/statusbar_menu.rs`, `app/view/controls.rs`, `mtext_menu.rs` | L |
+| 1c | **Ribbon menus.** The ribbon right-click menu, application menu and menu bar move onto `kit::menu` (rows become `mouse_area`s, as every context menu needs). | `ribbon/ribbon_menu.rs`, `ribbon/app_menu.rs`, `menu_bar.rs` | M |
 | 2a | **`kit::dropdown`.** A field-style head and a list under it from its left edge, at least the field's width and as wide as its longest option, ellipsis, keys, an optional icon or swatch per row, in `pick_menu_style`. Properties' choice rows, block picker, editable choices and lineweight move onto it. | `kit/dropdown.rs`, `properties.rs` | L |
 | 2b | **Layers and the colour picker** on `kit::dropdown`; `popup_panel_style` goes. | `layers.rs`, `color_select/*` | M |
 | 2c | **Ribbon lists** (layer, annotation layer, linetype, lineweight, style, colour) on `kit::dropdown`. | `ribbon/mod.rs`, `ribbon/widgets.rs`, `ribbon/color_dropdown.rs` | L |
@@ -76,9 +76,17 @@ linetype rows stay searchable combo boxes in the kit's list style;
 QuickCalc keeps its own derived key colours. The dialogs are out of this
 plan's scope.
 
+**Names.** The kit serves the whole UI, not only the palettes, so its
+shared parts carry no "palette" in their names: the menu is `ui::kit::menu`
+(`view`, `with_submenus`, `entry`, `frame_style`, `inset`, `Item`), the
+sizes are `style::kit_metrics` (imported as `km`), and the two palette
+surfaces are `chrome::surface` and `chrome::surface_raised`. `kit::palette`
+(a docked palette's frame) keeps its name. `PALETTE_FAMILY_PLAN.md` is left
+as written, with the old names.
+
 ## 3. Rules
 
 As in `PALETTE_FAMILY_PLAN.md`: behaviour unchanged (messages, keys,
 persisted state); colours from `chrome::`, text from `text::`, sizes from
-`palette_metrics` / `ribbon_metrics`; drawn lines `palette_metrics::line()`;
+`kit_metrics` / `ribbon_metrics`; drawn lines `kit_metrics::line()`;
 format only touched hunks; no new clippy warnings in touched code.

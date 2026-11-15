@@ -3,7 +3,7 @@
 # (`theme.palette()`, `background.*` / `primary.*` pairs, `Color::from_rgb*`)
 # and literal sizes (`.size/.padding/.spacing/.width/.height` or
 # `Length::Fixed` with a number) it still has. Colours belong in
-# `chrome::`, text sizes in `text::` and measurements in `palette_metrics`
+# `chrome::`, text sizes in `text::` and measurements in `kit_metrics`
 # (docs/ui/PALETTE_FAMILY_PLAN.md).
 #
 #   sh docs/ui/audit_counts.sh           print the counts
@@ -42,7 +42,7 @@ count() {
     grep -v '^[[:space:]]*//' "$2" | grep -cE "$1" || true
 }
 COLOURS='theme\.palette\(\)|\b(palette|p|pal)\.(background|primary)\.|Color::from_rgb'
-# A zero is not a size: `.padding(0)`, `[0.0, pm::CELL_PAD_X]`, `width(0)`.
+# A zero is not a size: `.padding(0)`, `[0.0, km::CELL_PAD_X]`, `width(0)`.
 NUM='-?([1-9]|0\.[0-9]*[1-9])'
 LITERALS="\.(size|padding|spacing|width|height)\([[:space:]]*\[?$NUM|Length::Fixed\([[:space:]]*$NUM"
 report() {
@@ -71,14 +71,14 @@ case "${1:-}" in
             exit 1
         fi
         if [ "$literals" -gt "$bl" ]; then
-            echo "$f: $literals literal sizes (baseline $bl): use text:: / palette_metrics"
+            echo "$f: $literals literal sizes (baseline $bl): use text:: / kit_metrics"
             exit 1
         fi
     done || fail=1
     if [ "$fail" -ne 0 ]; then
         exit 1
     fi
-    echo "palette audit: no file above its baseline"
+    echo "kit audit: no file above its baseline"
     ;;
 *)
     printf '%-42s %8s %8s\n' file colours literals

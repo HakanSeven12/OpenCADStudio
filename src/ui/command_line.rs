@@ -13,7 +13,7 @@ use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 use std::ops::Range;
 
 use crate::ui::style::common::accessible_accent_threshold;
-use crate::ui::style::{palette_metrics as pm, text as ui_text};
+use crate::ui::style::{kit_metrics as km, text as ui_text};
 
 /// Maximum entries kept for the context menu's "Recent Input" list.
 pub const RECENT_INPUT_CAP: usize = 10;
@@ -50,26 +50,23 @@ const AUTOCOMPLETE_LIMIT: usize = 8;
 
 // ── The bar's sizes ────────────────────────────────────────────────────────
 /// A history line's padding, and a suggestion row's.
-const LINE_PAD: [f32; 2] = [pm::LINE, pm::GRID_INSET_L];
-const ROW_PAD: [f32; 2] = [2.0 * pm::LINE, pm::GRID_INSET_L];
+const LINE_PAD: [f32; 2] = [km::LINE, km::GRID_INSET_L];
+const ROW_PAD: [f32; 2] = [2.0 * km::LINE, km::GRID_INSET_L];
 /// An option pill's padding, and a small button's.
-const PILL_PAD: [f32; 2] = [
-    pm::LINE,
-    crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X,
-];
+const PILL_PAD: [f32; 2] = [km::LINE, crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X];
 const BUTTON_PAD: [f32; 2] = [
-    2.0 * pm::LINE,
-    crate::ui::style::palette_metrics::DROPDOWN_ITEM_PAD_X,
+    2.0 * km::LINE,
+    crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X,
 ];
 /// Around the "Command:" prompt, and around the autocomplete list.
-const PROMPT_PAD: [f32; 2] = [5.0, pm::GRID_INSET_L];
-const LIST_PAD: [f32; 2] = [pm::TOOL_GAP, pm::GRID_INSET_L];
+const PROMPT_PAD: [f32; 2] = [5.0, km::GRID_INSET_L];
+const LIST_PAD: [f32; 2] = [km::TOOL_GAP, km::GRID_INSET_L];
 /// Between a row's parts, and between the bar's buttons.
-const ITEM_GAP: f32 = pm::TAB_INNER_GAP;
-const BUTTON_GAP: f32 = 2.0 * pm::LINE;
+const ITEM_GAP: f32 = km::TAB_INNER_GAP;
+const BUTTON_GAP: f32 = 2.0 * km::LINE;
 /// A colour swatch in a suggestion row, and the slot its icon takes.
 const SWATCH: f32 = 12.0;
-const ICON_SLOT: f32 = pm::CHECK;
+const ICON_SLOT: f32 = km::CHECK;
 /// The input row: the drawing tab bar's and status bar's height.
 const BAR_H: f32 = 30.0;
 
@@ -912,7 +909,7 @@ impl CommandLine {
             chrome,
         );
         use crate::ui::kit;
-        use crate::ui::style::{chrome, palette_metrics as pm};
+        use crate::ui::style::{chrome, kit_metrics as km};
         let log = text_editor(history_content)
             .on_action(Message::CommandHistoryEdit)
             .size(crate::ui::style::text::UI)
@@ -924,7 +921,7 @@ impl CommandLine {
                 history_highlight_format,
             )
             .style(|theme: &Theme, _status| text_editor::Style {
-                background: Background::Color(chrome::palette_body(theme)),
+                background: Background::Color(chrome::surface(theme)),
                 border: Border::default(),
                 placeholder: chrome::muted(theme),
                 value: chrome::text(theme),
@@ -932,15 +929,15 @@ impl CommandLine {
             });
         // The log scrolls like a palette's grid, kept at its newest line.
         let log = scrollable(container(log).padding(iced::Padding {
-            left: pm::GRID_INSET_L,
-            right: pm::GRID_INSET_R,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
             ..iced::Padding::ZERO
         }))
         .height(Length::Fill)
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::new()
-                .width(pm::SCROLLBAR_W)
-                .scroller_width(pm::SCROLL_THUMB_W)
+                .width(km::SCROLLBAR_W)
+                .scroller_width(km::SCROLL_THUMB_W)
                 .margin(0),
         ))
         .style(kit::scroll_style)
@@ -961,7 +958,7 @@ impl CommandLine {
         ]);
         kit::palette(
             title_bar,
-            column![tools, Space::new().height(pm::TOOL_GAP), log],
+            column![tools, Space::new().height(km::TOOL_GAP), log],
             width,
         )
     }
@@ -1074,7 +1071,7 @@ impl CommandLine {
                                     )
                                 } else {
                                     iced::theme::palette::Pair::new(
-                                        crate::ui::style::chrome::palette_bar(theme),
+                                        crate::ui::style::chrome::surface_raised(theme),
                                         crate::ui::style::chrome::text(theme),
                                     )
                                 };
@@ -1083,7 +1080,7 @@ impl CommandLine {
                                     text_color: pair.text,
                                     border: Border {
                                         color: crate::ui::style::chrome::border(theme),
-                                        width: pm::line(),
+                                        width: km::line(),
                                         radius: 3.0.into(),
                                     },
                                     ..Default::default()
@@ -1108,7 +1105,7 @@ impl CommandLine {
                     let p = theme.palette();
                     let color = accessible_accent_threshold(
                         p.success.base.color,
-                        crate::ui::style::chrome::palette_body(theme),
+                        crate::ui::style::chrome::surface(theme),
                         crate::ui::style::chrome::text(theme),
                         4.5,
                     );
@@ -1138,7 +1135,7 @@ impl CommandLine {
                     )
                 } else {
                     iced::theme::palette::Pair::new(
-                        crate::ui::style::chrome::palette_bar(theme),
+                        crate::ui::style::chrome::surface_raised(theme),
                         crate::ui::style::chrome::text(theme),
                     )
                 };
@@ -1147,7 +1144,7 @@ impl CommandLine {
                     text_color: pair.text,
                     border: Border {
                         color: crate::ui::style::chrome::border(theme),
-                        width: pm::line(),
+                        width: km::line(),
                         radius: 3.0.into(),
                     },
                     ..Default::default()
@@ -1236,7 +1233,7 @@ impl CommandLine {
                                     background: Some(Background::Color(swatch_color)),
                                     border: Border {
                                         color: crate::ui::style::chrome::border(theme),
-                                        width: pm::line(),
+                                        width: km::line(),
                                         radius: 1.0.into(),
                                     },
                                     ..Default::default()
@@ -1307,7 +1304,7 @@ impl CommandLine {
                                 )
                             } else {
                                 iced::theme::palette::Pair::new(
-                                    crate::ui::style::chrome::palette_body(theme),
+                                    crate::ui::style::chrome::surface(theme),
                                     crate::ui::style::chrome::text(theme),
                                 )
                             };
@@ -1360,7 +1357,7 @@ impl CommandLine {
                 style.background = Some(Background::Color(mcp_color));
                 style.text_color = Color::from_rgb(0.08, 0.08, 0.10);
                 style.border.color = mcp_color;
-                style.border.width = pm::line();
+                style.border.width = km::line();
                 style
             })
             .padding(BUTTON_PAD);
@@ -1368,11 +1365,11 @@ impl CommandLine {
             crate::ui::kit::tooltip(mcp_btn, t!(mcp_tooltip), crate::ui::kit::TipPosition::Top);
         let mcp_copy_btn = button(crate::ui::icons::themed(
             crate::ui::icons::COPY,
-            pm::BAR_ICON,
+            km::BAR_ICON,
         ))
         .on_press(Message::ControlCopySetup)
         .style(crate::ui::kit::flat_button_style(false))
-        .padding([pm::LINE * 2.0, pm::TOOL_GAP]);
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
         let mcp_copy_btn = crate::ui::kit::tooltip(
             mcp_copy_btn,
             t!("Copy MCP client setup"),
@@ -1391,11 +1388,11 @@ impl CommandLine {
         });
         let graph_btn = button(crate::ui::icons::themed(
             crate::ui::icons::NODE_GRAPH,
-            pm::BAR_ICON,
+            km::BAR_ICON,
         ))
         .on_press(Message::Graph(crate::ui::node_graph::GraphMsg::Toggle))
         .style(crate::ui::kit::flat_button_style(graph_open))
-        .padding([pm::LINE * 2.0, pm::TOOL_GAP]);
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
         let graph_btn = crate::ui::kit::tooltip(
             graph_btn,
             t!("Node graph"),
@@ -1405,11 +1402,11 @@ impl CommandLine {
         // menu's Enter.
         let enter_btn = button(crate::ui::icons::themed(
             crate::ui::icons::CHECK,
-            pm::BAR_ICON,
+            km::BAR_ICON,
         ))
         .on_press(Message::CommandFinalize)
         .style(crate::ui::kit::flat_button_style(false))
-        .padding([pm::LINE * 2.0, pm::TOOL_GAP]);
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
         let enter_btn =
             crate::ui::kit::tooltip(enter_btn, t!("Enter"), crate::ui::kit::TipPosition::Top);
         let input_row = row![
@@ -1420,7 +1417,7 @@ impl CommandLine {
             graph_btn,
             mcp_btn
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
 
         // Full backlog dropdown — appears ABOVE the input pill when open. The
@@ -1444,7 +1441,7 @@ impl CommandLine {
                     history_highlight_format,
                 )
                 .style(|theme: &Theme, _status| text_editor::Style {
-                    background: Background::Color(crate::ui::style::chrome::palette_body(theme)),
+                    background: Background::Color(crate::ui::style::chrome::surface(theme)),
                     border: Border::default(),
                     placeholder: crate::ui::style::readable::hint_text(theme),
                     value: crate::ui::style::chrome::text(theme),
@@ -1455,8 +1452,8 @@ impl CommandLine {
                 .height(Length::Fixed(history_height))
                 .direction(scrollable::Direction::Vertical(
                     scrollable::Scrollbar::new()
-                        .width(pm::SCROLL_THUMB_W + 2.0 * pm::LINE)
-                        .scroller_width(pm::SCROLL_THUMB_W),
+                        .width(km::SCROLL_THUMB_W + 2.0 * km::LINE)
+                        .scroller_width(km::SCROLL_THUMB_W),
                 ))
                 .anchor_bottom();
             // Header strip: a Copy-all and a Clear button pinned above the log.
@@ -1465,7 +1462,7 @@ impl CommandLine {
                     crate::ui::icons::themed_success(crate::ui::icons::COPY, 11.0),
                     text(t!("Copy")).size(ui_text::UI),
                 ]
-                .spacing(pm::TOOL_GAP)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center),
             )
             .on_press(Message::CommandHistoryCopy)
@@ -1476,7 +1473,7 @@ impl CommandLine {
                     crate::ui::icons::themed_warning(crate::ui::icons::TRASH, 11.0),
                     text(t!("Clear")).size(ui_text::UI),
                 ]
-                .spacing(pm::TOOL_GAP)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center),
             )
             .on_press(Message::CommandHistoryClear)
@@ -1541,12 +1538,12 @@ impl CommandLine {
                 container(history_rows)
                     .style(move |theme: &Theme| container::Style {
                         background: Some(Background::Color(
-                            crate::ui::style::chrome::palette_body(theme).scale_alpha(opacity),
+                            crate::ui::style::chrome::surface(theme).scale_alpha(opacity),
                         )),
                         ..Default::default()
                     })
                     .width(Length::Fill)
-                    .padding([2.0 * pm::LINE, 0.0]),
+                    .padding([2.0 * km::LINE, 0.0]),
             )
             .on_enter(Message::CommandHistoryHover(true))
             .on_exit(Message::CommandHistoryHover(false))
@@ -1568,7 +1565,7 @@ impl CommandLine {
                 container(input_row)
                     .style(move |theme: &Theme| {
                         let color =
-                            crate::ui::style::chrome::palette_bar(theme).scale_alpha(opacity);
+                            crate::ui::style::chrome::surface_raised(theme).scale_alpha(opacity);
                         container::Style {
                             background: Some(Background::Color(color)),
                             ..Default::default()
@@ -1583,11 +1580,11 @@ impl CommandLine {
         )
         .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(
-                crate::ui::style::chrome::palette_body(theme).scale_alpha(opacity),
+                crate::ui::style::chrome::surface(theme).scale_alpha(opacity),
             )),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: if history_open { pm::line() } else { 0.0 },
+                width: if history_open { km::line() } else { 0.0 },
                 radius: 4.0.into(),
             },
             ..Default::default()
@@ -1662,7 +1659,7 @@ fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
         )
     } else {
         iced::theme::palette::Pair::new(
-            crate::ui::style::chrome::palette_bar(theme),
+            crate::ui::style::chrome::surface_raised(theme),
             crate::ui::style::chrome::text(theme),
         )
     };
@@ -1671,7 +1668,7 @@ fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
         text_color: pair.text,
         border: Border {
             color: crate::ui::style::chrome::border(theme),
-            width: pm::line(),
+            width: km::line(),
             radius: 3.0.into(),
         },
         ..Default::default()
@@ -1711,7 +1708,7 @@ fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
         EntryKind::Info => user_text_color().unwrap_or_else(|| {
             accessible_accent_threshold(
                 crate::ui::style::chrome::accent(theme),
-                crate::ui::style::chrome::palette_body(theme),
+                crate::ui::style::chrome::surface(theme),
                 crate::ui::style::chrome::text(theme),
                 4.5,
             )

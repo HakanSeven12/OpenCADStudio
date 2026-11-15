@@ -4,7 +4,6 @@
 //! widget trees with title bar, collapse pins, inputs, buttons, collapsible sections,
 //! and data tables, integrated with OpenCADStudio's docking system.
 
-use std::collections::{HashMap, HashSet};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
@@ -12,11 +11,12 @@ use iced::{Element, Fill, Length, Padding, Theme};
 use ocs_plugin_api::dialog::{
     DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, VerticalAlign,
 };
+use std::collections::{HashMap, HashSet};
 
 use crate::app::Message;
 use crate::ui::dock::{title_bar, Chrome, PanelId};
 use crate::ui::kit;
-use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::plugin_dialog::{
     apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
     svg_image, ChoiceOption,
@@ -426,9 +426,12 @@ impl PluginPanelState {
                             errors.push(format!("missing table value for control id '{id}'"));
                         }
                     }
-                    DialogControl::Row { controls, .. } | DialogControl::Column { controls, .. } => {
+                    DialogControl::Row { controls, .. }
+                    | DialogControl::Column { controls, .. } => {
                         if budget.depth >= MAX_SNAPSHOT_FIELDS_DEPTH {
-                            errors.push("controls exceed the snapshot depth budget; skipped".to_string());
+                            errors.push(
+                                "controls exceed the snapshot depth budget; skipped".to_string(),
+                            );
                         } else {
                             budget.depth += 1;
                             snapshot_controls(
@@ -562,9 +565,12 @@ impl PluginPanelState {
     pub fn view<'a>(&'a self, num_id: u32, width: f32, chrome: Chrome) -> Element<'a, Message> {
         let tbar = title_bar(PanelId::Plugin(num_id), self.def.title.clone(), chrome);
 
-        let mut body_col = column![].spacing(pm::TOOL_GAP).width(Fill);
+        let mut body_col = column![].spacing(km::TOOL_GAP).width(Fill);
         for control in &self.def.controls {
-            if control.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+            if control
+                .id()
+                .is_some_and(|id| self.hidden_controls.contains(id))
+            {
                 continue;
             }
             body_col = body_col.push(self.view_control_inner(control, false));
@@ -572,7 +578,7 @@ impl PluginPanelState {
 
         kit::palette(
             tbar,
-            kit::scroll_area(container(body_col).padding(Padding::ZERO.top(pm::TOOL_GAP))),
+            kit::scroll_area(container(body_col).padding(Padding::ZERO.top(km::TOOL_GAP))),
             width,
         )
     }
@@ -590,8 +596,10 @@ impl PluginPanelState {
                 return Space::new().width(0).height(0).into();
             }
         }
-        let is_disabled =
-            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let is_disabled = parent_disabled
+            || control
+                .id()
+                .is_some_and(|id| self.disabled_controls.contains(id));
         let panel_id = self.def.id.clone();
         match control {
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
@@ -609,7 +617,7 @@ impl PluginPanelState {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let pid = panel_id.clone();
                 let cid = id.clone();
-                let mut cb = checkbox(current).size(pm::CHECK);
+                let mut cb = checkbox(current).size(km::CHECK);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
                         Message::PluginPanelBoolToggle(pid.clone(), cid.clone(), checked)
@@ -654,14 +662,14 @@ impl PluginPanelState {
             }
             DialogControl::Color { id, label, .. } => {
                 let rgb = self.color_values.get(id).copied().unwrap_or([255, 0, 0]);
-                let color_preview = container(Space::new().width(pm::ROW_ICON).height(pm::CHECK))
+                let color_preview = container(Space::new().width(km::ROW_ICON).height(km::CHECK))
                     .style(move |theme: &Theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgb8(
                             rgb[0], rgb[1], rgb[2],
                         ))),
                         border: iced::Border {
                             color: chrome::border(theme),
-                            width: pm::line(),
+                            width: km::line(),
                             radius: 0.0.into(),
                         },
                         ..Default::default()
@@ -676,7 +684,7 @@ impl PluginPanelState {
                                 false
                             )
                         ]
-                        .spacing(pm::TOOL_GAP)
+                        .spacing(km::TOOL_GAP)
                         .align_y(iced::Alignment::Center),
                     ),
                 )
@@ -702,8 +710,8 @@ impl PluginPanelState {
                         .then(|| Message::PluginPanelFilePick(panel_id.clone(), cid_for_pick)),
                 )
                 .style(kit::cell_button_style)
-                .height(Length::Fixed(pm::ROW_H))
-                .padding([0.0, pm::CELL_PAD_X]);
+                .height(Length::Fixed(km::ROW_H))
+                .padding([0.0, km::CELL_PAD_X]);
                 grid_row(
                     label,
                     row![input, browse_btn].align_y(iced::Alignment::Center),
@@ -723,8 +731,10 @@ impl PluginPanelState {
                 return Space::new().width(0).height(0).into();
             }
         }
-        let is_disabled =
-            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let is_disabled = parent_disabled
+            || control
+                .id()
+                .is_some_and(|id| self.disabled_controls.contains(id));
         let panel_id = self.def.id.clone();
         match control {
             DialogControl::InfoText { text: msg, align_h }
@@ -769,7 +779,7 @@ impl PluginPanelState {
                 align_h,
                 align_v,
             } => {
-                let mut row_el = row![].spacing(pm::TOOL_GAP);
+                let mut row_el = row![].spacing(km::TOOL_GAP);
                 match align_v {
                     Some(VerticalAlign::Top) => {
                         row_el = row_el.align_y(iced::alignment::Vertical::Top);
@@ -791,15 +801,18 @@ impl PluginPanelState {
                     row_el = row_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_h {
-                    Some(HorizontalAlign::Left) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Left).into()
-                    }
-                    Some(HorizontalAlign::Center) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Center).into()
-                    }
-                    Some(HorizontalAlign::Right) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Right).into()
-                    }
+                    Some(HorizontalAlign::Left) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Left)
+                        .into(),
+                    Some(HorizontalAlign::Center) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .into(),
+                    Some(HorizontalAlign::Right) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Right)
+                        .into(),
                     None => row_el.width(Fill).into(),
                 }
             }
@@ -808,7 +821,7 @@ impl PluginPanelState {
                 align_h,
                 align_v,
             } => {
-                let mut col_el = column![].spacing(pm::TOOL_GAP);
+                let mut col_el = column![].spacing(km::TOOL_GAP);
                 match align_h {
                     Some(HorizontalAlign::Left) => {
                         col_el = col_el.align_x(iced::alignment::Horizontal::Left);
@@ -828,15 +841,18 @@ impl PluginPanelState {
                     col_el = col_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_v {
-                    Some(VerticalAlign::Top) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Top).into()
-                    }
-                    Some(VerticalAlign::Middle) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Center).into()
-                    }
-                    Some(VerticalAlign::Bottom) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Bottom).into()
-                    }
+                    Some(VerticalAlign::Top) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Top)
+                        .into(),
+                    Some(VerticalAlign::Middle) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .into(),
+                    Some(VerticalAlign::Bottom) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Bottom)
+                        .into(),
                     None => col_el.into(),
                 }
             }
@@ -868,8 +884,8 @@ impl PluginPanelState {
                 }
                 let mut btn = button(container(label_txt.width(Fill)).center_y(Fill))
                     .style(kit::text_button_style(false))
-                    .height(Length::Fixed(pm::TOOL_H))
-                    .padding([0.0, pm::MENU_PAD_X]);
+                    .height(Length::Fixed(km::TOOL_H))
+                    .padding([0.0, km::MENU_PAD_X]);
                 if !is_disabled {
                     btn = btn.on_press(Message::PluginPanelButtonClick(pid, cid, act));
                 }
@@ -919,7 +935,7 @@ impl PluginPanelState {
                 allow_delete,
                 ..
             } => {
-                let mut table_col = column![].spacing(pm::TOOL_GAP).width(Fill);
+                let mut table_col = column![].spacing(km::TOOL_GAP).width(Fill);
 
                 if let Some(lbl) = label {
                     table_col = table_col.push(
@@ -930,10 +946,10 @@ impl PluginPanelState {
                     );
                 }
 
-                // Table headers, as the kit's column header: palette_bar,
+                // Table headers, as the kit's column header: surface_raised,
                 // semibold titles, 1 px palette-body lines between them.
                 let mut header_row = row![]
-                    .spacing(pm::line())
+                    .spacing(km::line())
                     .align_y(iced::Alignment::Center)
                     .width(Fill);
                 for h in headers {
@@ -945,22 +961,24 @@ impl PluginPanelState {
                                 .font(kit::SEMIBOLD)
                                 .wrapping(iced::widget::text::Wrapping::None),
                         )
-                        .padding([0.0, pm::CELL_PAD_X])
-                        .height(Length::Fixed(pm::ROW_H))
+                        .padding([0.0, km::CELL_PAD_X])
+                        .height(Length::Fixed(km::ROW_H))
                         .align_y(iced::Alignment::Center)
                         .width(Fill)
                         .clip(true)
                         .style(|theme: &Theme| container::Style {
-                            background: Some(iced::Background::Color(chrome::palette_bar(theme))),
+                            background: Some(iced::Background::Color(chrome::surface_raised(
+                                theme,
+                            ))),
                             ..Default::default()
                         }),
                     );
                 }
                 if *allow_delete {
                     header_row = header_row.push(
-                        container(Space::new().width(pm::BAR_BUTTON).height(pm::ROW_H)).style(
+                        container(Space::new().width(km::BAR_BUTTON).height(km::ROW_H)).style(
                             |theme: &Theme| container::Style {
-                                background: Some(iced::Background::Color(chrome::palette_bar(
+                                background: Some(iced::Background::Color(chrome::surface_raised(
                                     theme,
                                 ))),
                                 ..Default::default()
@@ -972,12 +990,12 @@ impl PluginPanelState {
                 // Table data rows: plain text until hovered or typed in,
                 // 1 px lines between rows and cells.
                 let current_rows = self.table_values.get(id);
-                let mut rows_list = column![header_row].spacing(pm::line()).width(Fill);
+                let mut rows_list = column![header_row].spacing(km::line()).width(Fill);
 
                 if let Some(rows) = current_rows {
                     for (r_idx, row_cells) in rows.iter().enumerate() {
                         let mut r_widget = row![]
-                            .spacing(pm::line())
+                            .spacing(km::line())
                             .align_y(iced::Alignment::Center)
                             .width(Fill);
                         for (c_idx, cell_text) in row_cells.iter().enumerate() {
@@ -1008,7 +1026,7 @@ impl PluginPanelState {
                             let del_btn = button(
                                 container(crate::ui::icons::tinted(
                                     crate::ui::icons::CLOSE,
-                                    pm::BAR_ICON,
+                                    km::BAR_ICON,
                                     chrome::text,
                                 ))
                                 .center(Fill),
@@ -1017,8 +1035,8 @@ impl PluginPanelState {
                                 (!is_disabled)
                                     .then(|| Message::PluginPanelTableRemoveRow(pid, tid, r_idx)),
                             )
-                            .width(Length::Fixed(pm::BAR_BUTTON))
-                            .height(Length::Fixed(pm::ROW_H))
+                            .width(Length::Fixed(km::BAR_BUTTON))
+                            .height(Length::Fixed(km::ROW_H))
                             .padding(0)
                             .style(kit::flat_button_style(false));
                             r_widget = r_widget.push(body_cell(del_btn, Length::Shrink));
@@ -1031,16 +1049,16 @@ impl PluginPanelState {
                     scrollable(rows_list)
                         .direction(scrollable::Direction::Vertical(
                             scrollable::Scrollbar::new()
-                                .width(pm::SCROLLBAR_W)
-                                .scroller_width(pm::SCROLL_THUMB_W),
+                                .width(km::SCROLLBAR_W)
+                                .scroller_width(km::SCROLL_THUMB_W),
                         ))
                         .style(kit::scroll_style)
                         .height(Length::Shrink)
                         .width(Fill),
                 )
-                .padding(pm::line())
+                .padding(km::line())
                 .style(|theme: &Theme| container::Style {
-                    background: Some(iced::Background::Color(chrome::palette_bar(theme))),
+                    background: Some(iced::Background::Color(chrome::surface_raised(theme))),
                     ..Default::default()
                 })
                 .width(Fill);
@@ -1098,20 +1116,20 @@ fn grid_field<'a>(
 /// A value cell's content inset like the grid's text.
 fn value_box<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)
-        .padding([0.0, pm::CELL_PAD_X])
-        .height(Length::Fixed(pm::ROW_H))
+        .padding([0.0, km::CELL_PAD_X])
+        .height(Length::Fixed(km::ROW_H))
         .align_y(iced::Alignment::Center)
         .width(Fill)
         .into()
 }
 
-/// A table cell on the palette body, one row high.
+/// A table cell on the surface, one row high.
 fn body_cell<'a>(content: impl Into<Element<'a, Message>>, width: Length) -> Element<'a, Message> {
     container(content)
-        .height(Length::Fixed(pm::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
         .width(width)
         .style(|theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(chrome::palette_body(theme))),
+            background: Some(iced::Background::Color(chrome::surface(theme))),
             ..Default::default()
         })
         .into()
@@ -1388,14 +1406,14 @@ mod tests {
                 "title".to_string(),
                 DialogValue::Text("IFC properties - Alignment-Axis-h-seg-001".to_string()),
             ),
-            (
-                "length".to_string(),
-                DialogValue::Text("2.5".to_string()),
-            ),
+            ("length".to_string(), DialogValue::Text("2.5".to_string())),
         ]));
         assert_eq!(state.def.title, "IFC properties - Alignment-Axis-h-seg-001");
         assert_eq!(state.def.controls, original_controls);
-        assert_eq!(state.text_values.get("length").map(String::as_str), Some("2.5"));
+        assert_eq!(
+            state.text_values.get("length").map(String::as_str),
+            Some("2.5")
+        );
         assert!(!state.text_values.contains_key("title"));
     }
 
@@ -1424,7 +1442,9 @@ mod tests {
         ]);
         assert_eq!(
             state.svg_handles.get("chart"),
-            Some(&iced::widget::svg::Handle::from_memory(svg.as_bytes().to_vec()))
+            Some(&iced::widget::svg::Handle::from_memory(
+                svg.as_bytes().to_vec()
+            ))
         );
         let snapshot = state.snapshot(0);
         assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
@@ -1439,7 +1459,10 @@ mod tests {
             };
         }
         let updated = PluginPanelState::from_def(def);
-        assert_ne!(updated.svg_handles.get("chart"), state.svg_handles.get("chart"));
+        assert_ne!(
+            updated.svg_handles.get("chart"),
+            state.svg_handles.get("chart")
+        );
     }
 
     #[test]

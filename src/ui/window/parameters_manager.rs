@@ -3,7 +3,7 @@ use crate::app::Message;
 use crate::scene::block_parameters_manager::{self as manager, Group, Row};
 use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::kit;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use iced::widget::{button, canvas, column, container, mouse_area, row, text, text_input, Space};
 use iced::{Element, Fill, Length, Point, Rectangle, Size};
 
@@ -208,10 +208,10 @@ fn glyph_cell(kind: GlyphKind, id: String) -> Element<'static, Message> {
     container(
         canvas(Glyph(kind))
             .width(Length::Fixed(GLYPH_WIDTH))
-            .height(Length::Fixed(pm::CHECK)),
+            .height(Length::Fixed(km::CHECK)),
     )
     .width(Length::Fixed(GLYPH_WIDTH))
-    .height(Length::Fixed(pm::ROW_H))
+    .height(Length::Fixed(km::ROW_H))
     .align_y(iced::Center)
     .id(iced::widget::Id::from(id))
     .into()
@@ -236,8 +236,8 @@ fn cell_button(value: &str, message: Message) -> button::Button<'static, Message
         if value.is_empty() { " " } else { value }.to_owned(),
     ))
     .clip(true)
-    .padding([0.0, pm::CELL_PAD_X])
-    .height(Length::Fixed(pm::ROW_H))
+    .padding([0.0, km::CELL_PAD_X])
+    .height(Length::Fixed(km::ROW_H))
     .style(kit::flat_button_style(false))
     .on_press(message)
 }
@@ -460,10 +460,10 @@ fn header_line(panel: &Panel) -> Element<'static, Message> {
     // The kit's column header look: titles on the bar colour, semibold.
     container(row(cells).spacing(SPACING).align_y(iced::Center))
         .width(Fill)
-        .height(Length::Fixed(pm::ROW_H))
-        .padding(iced::Padding::ZERO.left(pm::CELL_PAD_X))
+        .height(Length::Fixed(km::ROW_H))
+        .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
         .style(|theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(chrome::palette_bar(theme))),
+            background: Some(iced::Background::Color(chrome::surface_raised(theme))),
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         })
@@ -486,7 +486,7 @@ fn group_line(group: Group) -> Element<'static, Message> {
     };
     // A section bar: the gap above, the group on the bar colour.
     column![
-        Space::new().height(pm::CATEGORY_GAP),
+        Space::new().height(km::CATEGORY_GAP),
         container(
             row(vec![
                 glyph_cell(
@@ -499,10 +499,10 @@ fn group_line(group: Group) -> Element<'static, Message> {
             .align_y(iced::Center),
         )
         .width(Fill)
-        .height(Length::Fixed(pm::CATEGORY_H))
-        .padding(iced::Padding::ZERO.left(pm::CELL_PAD_X))
+        .height(Length::Fixed(km::CATEGORY_H))
+        .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
         .style(|theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(chrome::palette_bar(theme))),
+            background: Some(iced::Background::Color(chrome::surface_raised(theme))),
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         }),
@@ -519,18 +519,18 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
             button(
                 container(
                     canvas(Glyph(GlyphKind::Funnel))
-                        .width(Length::Fixed(pm::BAR_ICON))
-                        .height(Length::Fixed(pm::BAR_ICON)),
+                        .width(Length::Fixed(km::BAR_ICON))
+                        .height(Length::Fixed(km::BAR_ICON)),
                 )
                 .center(Fill),
             )
             .on_press(Message::ParametersManagerFilterMenu)
-            .width(Length::Fixed(pm::TOOL_H))
-            .height(Length::Fixed(pm::TOOL_H))
+            .width(Length::Fixed(km::TOOL_H))
+            .height(Length::Fixed(km::TOOL_H))
             .padding(0)
             .style(kit::flat_button_style(panel.filter_menu)),
         )
-        .width(Length::Fixed(pm::TOOL_H))
+        .width(Length::Fixed(km::TOOL_H))
         .id(iced::widget::Id::from("parameters-manager-funnel"))
         .into(),
         container(kit::search_field(
@@ -548,7 +548,7 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
         .width(Fill)
         .into(),
     ])
-    .spacing(pm::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center)
     .into()
 }
@@ -571,19 +571,19 @@ fn filter_menu(panel: &Panel) -> Element<'static, Message> {
         list = list.push(
             button(
                 row![tick, ui_text(mode.menu_label())]
-                    .spacing(pm::TOOL_GAP)
+                    .spacing(km::TOOL_GAP)
                     .align_y(iced::Center),
             )
             .on_press(Message::ParametersManagerFilterMode(mode))
             .style(kit::flat_button_style(false))
-            .padding([0.0, pm::CELL_PAD_X])
-            .height(Length::Fixed(pm::MENU_ITEM_H))
+            .padding([0.0, km::CELL_PAD_X])
+            .height(Length::Fixed(km::MENU_ITEM_H))
             .width(Fill),
         );
     }
     container(list)
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
         .width(Fill)
         .into()
 }
@@ -599,8 +599,8 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
                 color: Some(chrome::muted(theme)),
             }),
         )
-        .padding([0.0, pm::CELL_PAD_X])
-        .height(Length::Fixed(pm::MENU_ITEM_H))
+        .padding([0.0, km::CELL_PAD_X])
+        .height(Length::Fixed(km::MENU_ITEM_H))
         .align_y(iced::Center)
         .id(iced::widget::Id::new("parameters-manager-column-Name")),
     );
@@ -619,13 +619,13 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
             container(
                 button(
                     row![tick, ui_text(column.label())]
-                        .spacing(pm::TOOL_GAP)
+                        .spacing(km::TOOL_GAP)
                         .align_y(iced::Center),
                 )
                 .on_press(Message::ParametersManagerColumn(column))
                 .style(kit::flat_button_style(false))
-                .padding([0.0, pm::CELL_PAD_X])
-                .height(Length::Fixed(pm::MENU_ITEM_H))
+                .padding([0.0, km::CELL_PAD_X])
+                .height(Length::Fixed(km::MENU_ITEM_H))
                 .width(Fill),
             )
             .width(Fill)
@@ -636,8 +636,8 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
         );
     }
     container(list)
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
         .width(Fill)
         .into()
 }
@@ -718,7 +718,7 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
     }
     row(cells)
         .spacing(SPACING)
-        .height(Length::Fixed(pm::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
         .align_y(iced::Center)
         .into()
 }
@@ -760,8 +760,8 @@ pub fn view(
             crate::t!("Parameters Manager").into_owned(),
             chrome,
         ),
-        body.push(Space::new().height(pm::TOOL_GAP))
-            .push(container(kit::scroll_area(column(lines).spacing(pm::line()))).height(Fill))
+        body.push(Space::new().height(km::TOOL_GAP))
+            .push(container(kit::scroll_area(column(lines).spacing(km::line()))).height(Fill))
             .push(kit::footer(kit::footer_text(footer)))
             .height(Fill),
         width,

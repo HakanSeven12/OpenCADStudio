@@ -16,7 +16,7 @@ use crate::io::xref_model::wildcard_match;
 use crate::t;
 use crate::ui::kit;
 use crate::ui::style::text as ui_text;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use document::tables::layer::Layer as DocLayer;
 use document::tables::Table;
 use iced::widget::{
@@ -30,7 +30,7 @@ use std::rc::Rc;
 
 /// Icon size inside a walk row (mirrors the Layer Manager table).
 /// Height of a walk row: the palette grid's.
-const ROW_H: f32 = pm::ROW_H;
+const ROW_H: f32 = km::ROW_H;
 
 // ── Messages ─────────────────────────────────────────────────────────────
 
@@ -679,8 +679,8 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     // The name column keeps its width while the palette has room for it and
     // the fixed columns, and gives way when it does not.
-    let fixed = COL_SWATCH + col_w[1] + COL_PIN + COL_STATE + 4.0 * pm::TOOL_GAP;
-    let room = width - pm::GRID_INSET_L - pm::GRID_INSET_R - 2.0 * pm::CELL_PAD_X - fixed;
+    let fixed = COL_SWATCH + col_w[1] + COL_PIN + COL_STATE + 4.0 * km::TOOL_GAP;
+    let room = width - km::GRID_INSET_L - km::GRID_INSET_R - 2.0 * km::CELL_PAD_X - fixed;
     let col_w = [col_w[0].min(room).max(COL_MIN_W), col_w[1]];
     let body = container(view_content(
         rows,
@@ -728,7 +728,7 @@ fn view_content<'a>(
             crate::tr!("layer-walk", "saved-filters"),
             true,
         )))
-        .width(Length::Fixed(pm::NAME_COL_W))
+        .width(Length::Fixed(km::NAME_COL_W))
         .into()
     } else {
         combo_box(
@@ -740,7 +740,7 @@ fn view_content<'a>(
         .size(ui_text::UI)
         .line_height(ui_text::line())
         .padding(kit::BOX_PAD)
-        .width(Length::Fixed(pm::NAME_COL_W))
+        .width(Length::Fixed(km::NAME_COL_W))
         .input_style(kit::combo_style)
         .menu_style(kit::pick_menu_style)
         .into()
@@ -761,7 +761,7 @@ fn view_content<'a>(
     let filter_check: Element<'_, Message> = checkbox(session.show_only_matching)
         .label(t!("Filter"))
         .on_toggle_maybe(filter_toggle)
-        .size(pm::CHECK)
+        .size(km::CHECK)
         .text_size(ui_text::UI)
         .into();
     // An applied filter is the only thing worth clearing: an empty box is
@@ -796,7 +796,7 @@ fn view_content<'a>(
     let header = column![
         kit::band(
             row![select_btn, filter_combo_box, filter_box, clear_filter]
-                .spacing(pm::TOOL_GAP)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center),
         ),
         kit::band(
@@ -811,7 +811,7 @@ fn view_content<'a>(
                 iced::widget::Space::new().width(Fill),
                 status,
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         ),
     ];
@@ -830,12 +830,12 @@ fn view_content<'a>(
         } else {
             row![title]
         }
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
         if session.sort == col {
             content = content.push(crate::ui::icons::themed_arrow_toggle(
                 session.sort_asc,
-                pm::CARET,
+                km::CARET,
             ));
         }
         let head: Element<'_, Message> = button(container(content).clip(true).center_y(Fill))
@@ -846,7 +846,7 @@ fn view_content<'a>(
                 text_color: chrome::text(theme),
                 ..Default::default()
             })
-            .padding(Padding::ZERO.right(pm::CELL_PAD_X))
+            .padding(Padding::ZERO.right(km::CELL_PAD_X))
             .width(Fill)
             .height(Fill)
             .into();
@@ -862,7 +862,7 @@ fn view_content<'a>(
             .height(Fill),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fixed(pm::ROW_H))
+        .height(Length::Fixed(km::ROW_H))
     };
     let header_grid = container(
         row![
@@ -878,15 +878,15 @@ fn view_content<'a>(
                 1
             ),
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center),
     )
     .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(chrome::palette_bar(theme))),
+        background: Some(Background::Color(chrome::surface_raised(theme))),
         ..Default::default()
     })
-    .height(Length::Fixed(pm::ROW_H))
-    .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+    .height(Length::Fixed(km::ROW_H))
+    .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
     .width(Fill);
 
     // ── Rows ──────────────────────────────────────────────────────────────
@@ -963,7 +963,7 @@ fn view_content<'a>(
             true
         ),
     ]
-    .spacing(pm::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     // The inline dialogs sit between the column header and the list: the
@@ -991,17 +991,17 @@ fn view_content<'a>(
     if let Some(dialog) = dialog {
         grid = grid.push(
             container(dialog)
-                .padding([pm::TOOL_GAP, 0.0])
+                .padding([km::TOOL_GAP, 0.0])
                 .width(Fill)
                 .align_x(iced::Center),
         );
     }
     let grid = container(grid.push(list).height(Fill))
         .padding(Padding {
-            top: pm::TOOL_GAP,
+            top: km::TOOL_GAP,
             bottom: 0.0,
-            left: pm::GRID_INSET_L,
-            right: pm::GRID_INSET_R,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
         })
         .width(Fill)
         .height(Fill);
@@ -1010,13 +1010,13 @@ fn view_content<'a>(
         grid,
         container(footer)
             .padding(Padding {
-                top: pm::TOOL_GAP,
-                bottom: pm::TOOL_GAP,
-                left: pm::GRID_INSET_L,
-                right: pm::GRID_INSET_R,
+                top: km::TOOL_GAP,
+                bottom: km::TOOL_GAP,
+                left: km::GRID_INSET_L,
+                right: km::GRID_INSET_R,
             })
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(chrome::palette_bar(theme))),
+                background: Some(Background::Color(chrome::surface_raised(theme))),
                 ..Default::default()
             })
             .width(Fill),
@@ -1083,7 +1083,7 @@ fn walk_row(
                 kit::TipPosition::FollowCursor,
             ),
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .width(Fill),
     )
@@ -1105,10 +1105,10 @@ fn walk_row(
     let glyph: Element<'_, Message> = if is_held {
         container(crate::ui::icons::themed_primary(
             crate::ui::icons::PIN_ACTIVE,
-            pm::BAR_ICON,
+            km::BAR_ICON,
         ))
         .width(Length::Fixed(COL_PIN))
-        .height(Length::Fixed(pm::ROW_ICON))
+        .height(Length::Fixed(km::ROW_ICON))
         .align_x(iced::Center)
         .align_y(iced::Center)
         .style(|theme: &Theme| container::Style {
@@ -1120,7 +1120,7 @@ fn walk_row(
     } else if is_hovered {
         container(crate::ui::icons::themed_secondary(
             crate::ui::icons::PIN,
-            pm::BAR_ICON,
+            km::BAR_ICON,
         ))
         .width(Length::Fixed(COL_PIN))
         .align_x(iced::Center)
@@ -1146,7 +1146,7 @@ fn walk_row(
     .on_press(msg(LayerWalkMsg::ToggleHold { name }))
     .interaction(iced::mouse::Interaction::Pointer);
     let cells = row![left, pin, state_cells(row, is_visible)]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
     let body = container(
         mouse_area(cells)
@@ -1162,10 +1162,10 @@ fn walk_row(
     .width(Fill)
     .height(Length::Fixed(ROW_H))
     .align_y(iced::Center)
-    .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+    .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
     .style(move |theme: &Theme| {
         // Hover outranks selection outranks the filter tint, as in every
-        // palette list; other rows lie on the palette body.
+        // palette list; other rows lie on the surface.
         let band = if is_hovered {
             Some(chrome::hover(theme))
         } else if is_selected {
@@ -1207,23 +1207,23 @@ fn state_cells<'a>(row: &LayerWalkRow, is_visible: bool) -> Element<'a, Message>
         crate::tr!("layer-walk", "eye-hidden")
     };
     let eye: Element<'a, Message> = if on_screen {
-        crate::ui::icons::themed(crate::ui::icons::layer_visible(true), pm::BAR_ICON)
+        crate::ui::icons::themed(crate::ui::icons::layer_visible(true), km::BAR_ICON)
     } else {
-        crate::ui::icons::themed_disabled(crate::ui::icons::layer_visible(false), pm::BAR_ICON)
+        crate::ui::icons::themed_disabled(crate::ui::icons::layer_visible(false), km::BAR_ICON)
     };
     let mut state = row![kit::tooltip(eye, tip, kit::TipPosition::FollowCursor)]
-        .spacing(pm::LINE * 2.0)
+        .spacing(km::LINE * 2.0)
         .align_y(iced::Center);
     if row.frozen {
         state = state.push(kit::tooltip(
-            crate::ui::icons::themed_disabled(crate::ui::icons::layer_freeze(true), pm::CARET),
+            crate::ui::icons::themed_disabled(crate::ui::icons::layer_freeze(true), km::CARET),
             crate::tr!("layer-walk", "frozen-tip"),
             kit::TipPosition::FollowCursor,
         ));
     }
     if row.locked {
         state = state.push(kit::tooltip(
-            crate::ui::icons::themed_disabled(crate::ui::icons::layer_lock(true), pm::CARET),
+            crate::ui::icons::themed_disabled(crate::ui::icons::layer_lock(true), km::CARET),
             crate::tr!("layer-walk", "locked-tip"),
             kit::TipPosition::FollowCursor,
         ));
@@ -1237,7 +1237,7 @@ fn state_cells<'a>(row: &LayerWalkRow, is_visible: bool) -> Element<'a, Message>
 /// through an `Rc`, so the list stays cheap on a drawing with thousands of
 /// layers; the entries only clone when a menu actually opens.
 fn row_menu(entries: Vec<MenuEntry>) -> Element<'static, Message> {
-    use crate::ui::palette_menu::Item;
+    use crate::ui::kit::menu::Item;
     let items = entries
         .into_iter()
         .map(|entry| match entry {
@@ -1246,7 +1246,7 @@ fn row_menu(entries: Vec<MenuEntry>) -> Element<'static, Message> {
             MenuEntry::Disabled(label, reason) => Item::disabled(label, reason),
         })
         .collect();
-    crate::ui::palette_menu::menu(items)
+    crate::ui::kit::menu::view(items)
 }
 
 // ── Inline dialogs ────────────────────────────────────────────────────────
@@ -1262,7 +1262,7 @@ pub fn purge_confirm_card(count: usize) -> Element<'static, Message> {
             dialog_btn(t!("Yes"), LayerWalkMsg::PurgeConfirm(true), true),
             dialog_btn(t!("No"), LayerWalkMsg::PurgeConfirm(false), false),
         ]
-        .spacing(pm::TOOL_GAP),
+        .spacing(km::TOOL_GAP),
     ])
 }
 
@@ -1288,12 +1288,12 @@ pub fn inspect_card(total: usize, selected: usize, objects: usize) -> Element<'s
 /// Width of an inline dialog.
 const CARD_W: f32 = 300.0;
 
-/// An inline dialog: the palette menu's frame around its lines.
+/// An inline dialog: the kit menu's frame around its lines.
 fn card(body: iced::widget::Column<'static, Message>) -> Element<'static, Message> {
-    container(body.spacing(pm::TOOL_GAP))
-        .padding(pm::GRID_INSET_L)
+    container(body.spacing(km::TOOL_GAP))
+        .padding(km::GRID_INSET_L)
         .width(Length::Fixed(CARD_W))
-        .style(crate::ui::palette_menu::frame_style)
+        .style(crate::ui::kit::menu::frame_style)
         .into()
 }
 
@@ -1316,7 +1316,7 @@ fn footer_check<'a>(
     checkbox(checked)
         .label(label)
         .on_toggle(move |on| msg(m(on)))
-        .size(pm::CHECK)
+        .size(km::CHECK)
         .text_size(ui_text::UI)
         .into()
 }
@@ -1332,19 +1332,19 @@ fn footer_btn<'a>(
     button(
         row![
             if enabled {
-                crate::ui::icons::themed(icon, pm::ROW_ICON)
+                crate::ui::icons::themed(icon, km::ROW_ICON)
             } else {
-                crate::ui::icons::themed_disabled(icon, pm::ROW_ICON)
+                crate::ui::icons::themed_disabled(icon, km::ROW_ICON)
             },
             text(label).size(ui_text::UI).line_height(ui_text::line()),
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center),
     )
     .on_press_maybe(enabled.then(|| msg(message)))
     .style(kit::flat_button_style(false))
-    .height(Length::Fixed(pm::TOOL_H))
-    .padding([0.0, pm::CELL_PAD_X])
+    .height(Length::Fixed(km::TOOL_H))
+    .padding([0.0, km::CELL_PAD_X])
     .into()
 }
 

@@ -904,7 +904,7 @@ impl OpenCADStudio {
     /// between the docks (the docks then run from the ribbon down).
     pub(crate) fn dock_workspace_size(&self) -> (f32, f32) {
         let tabs = if self.doc_tabs_in_center() {
-            crate::ui::style::palette_metrics::TAB_BAR_H
+            crate::ui::style::kit_metrics::TAB_BAR_H
         } else {
             0.0
         };

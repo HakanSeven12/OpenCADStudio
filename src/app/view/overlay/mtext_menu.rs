@@ -17,9 +17,9 @@ macro_rules! label {
     };
 }
 
-// The palette menu's measurements: its rows, separators and frame.
-const ROW_H: f32 = pm::MENU_ITEM_H;
-const HEADER_H: f32 = pm::MENU_ITEM_H;
+// The kit menu's measurements: its rows, separators and frame.
+const ROW_H: f32 = km::MENU_ITEM_H;
+const HEADER_H: f32 = km::MENU_ITEM_H;
 
 /// A press outside the open popup closes it; the editor routes the rest.
 fn close() -> Message {
@@ -31,7 +31,7 @@ fn dim(theme: &Theme) -> Color {
     crate::ui::style::readable::muted_text(theme)
 }
 
-/// A row in the palette menu's colours: lit with `hover`, square.
+/// A row in the kit menu's colours: lit with `hover`, square.
 fn item_style(theme: &Theme, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
         button::Status::Hovered | button::Status::Pressed => {
@@ -78,14 +78,14 @@ const REFRESH: &[u8] = include_bytes!("../../../../assets/icons/ui/refresh.svg")
 fn mark_cell(mark: Mark) -> Element<'static, Message> {
     let cell: Element<'static, Message> = match mark {
         Mark::Check => crate::ui::icons::themed_check_cell(true),
-        Mark::Svg(bytes) => crate::ui::icons::themed(bytes, pm::BAR_ICON),
+        Mark::Svg(bytes) => crate::ui::icons::themed(bytes, km::BAR_ICON),
         Mark::Text(text_mark) => text(text_mark)
             .size(ui_text::UI)
             .line_height(ui_text::line())
             .into(),
     };
     iced::widget::container(cell)
-        .center_x(Length::Fixed(pm::MENU_CHECK_W))
+        .center_x(Length::Fixed(km::MENU_CHECK_W))
         .into()
 }
 
@@ -104,7 +104,7 @@ fn row_button(mark: impl Into<Mark>, name: String, on_press: Message) -> Element
         .height(Fill),
     )
     .on_press(on_press)
-    .padding(iced::Padding::ZERO.right(pm::MENU_PAD_X))
+    .padding(iced::Padding::ZERO.right(km::MENU_PAD_X))
     .width(Fill)
     .height(ROW_H)
     .style(item_style)
@@ -143,8 +143,12 @@ fn field(
             .style(crate::ui::kit::field_style)
             .width(MENU_FIELD_W),
     ]
-    .spacing(pm::TOOL_GAP)
-    .padding(iced::Padding::ZERO.left(pm::MENU_CHECK_W).right(pm::MENU_PAD_X))
+    .spacing(km::TOOL_GAP)
+    .padding(
+        iced::Padding::ZERO
+            .left(km::MENU_CHECK_W)
+            .right(km::MENU_PAD_X),
+    )
     .align_y(iced::Alignment::Center)
     .height(ROW_H)
     .into()
@@ -172,13 +176,13 @@ impl Panel {
     }
 
     fn separator(mut self) -> Self {
-        self.rows.push(crate::ui::palette_menu::entry(
-            crate::ui::palette_menu::Item::Separator,
+        self.rows.push(crate::ui::kit::menu::entry(
+            crate::ui::kit::menu::Item::Separator,
         ));
         self
     }
 
-    /// The palette menu: its frame, the title as a heading over the rows.
+    /// The kit menu: its frame, the title as a heading over the rows.
     fn build(self) -> Element<'static, Message> {
         let header = container(
             text(self.title)
@@ -187,12 +191,16 @@ impl Panel {
                 .font(crate::ui::kit::SEMIBOLD),
         )
         .height(HEADER_H)
-        .padding(iced::Padding::ZERO.left(pm::MENU_CHECK_W).right(pm::MENU_PAD_X))
+        .padding(
+            iced::Padding::ZERO
+                .left(km::MENU_CHECK_W)
+                .right(km::MENU_PAD_X),
+        )
         .center_y(HEADER_H);
         container(column![header, column(self.rows).spacing(0).width(Fill)])
             .width(self.width)
-            .padding(crate::ui::palette_menu::inset(pm::MENU_PAD_Y))
-            .style(crate::ui::palette_menu::frame_style)
+            .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
+            .style(crate::ui::kit::menu::frame_style)
             .into()
     }
 }
@@ -734,10 +742,13 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 fn inert(mark: impl Into<Mark>, name: String, reason: String) -> Element<'static, Message> {
     iced::widget::tooltip(
         button(
-            row![mark_cell(mark.into()), text(name).size(ui_text::UI).width(Fill),]
-                .spacing(2)
-                .align_y(iced::Alignment::Center)
-                .height(Fill),
+            row![
+                mark_cell(mark.into()),
+                text(name).size(ui_text::UI).width(Fill),
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center)
+            .height(Fill),
         )
         .padding([0, 6])
         .width(Fill)

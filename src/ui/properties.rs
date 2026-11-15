@@ -24,7 +24,7 @@ use iced::{
 
 // ── Row-height-derived constants ─────────────────────────────────────────
 /// Height of a property row: the palette grid's.
-const ROW_H: f32 = crate::ui::style::palette_metrics::ROW_H;
+const ROW_H: f32 = crate::ui::style::kit_metrics::ROW_H;
 /// Width of the Quick Properties panel.
 const QUICK_W: f32 = 260.0;
 const PATTERN_CARD_W: f32 = 158.0;
@@ -125,7 +125,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
                 (bounds.height - pad * 2.0).max(0.0),
             ),
         );
-        frame.fill(&sample, crate::ui::style::chrome::palette_body(theme));
+        frame.fill(&sample, crate::ui::style::chrome::surface(theme));
 
         match &self.pattern {
             HatchPattern::Solid => {
@@ -328,7 +328,7 @@ pub(crate) fn hatch_pattern_picker_content<'a>(
                     )
                 } else {
                     iced::theme::palette::Pair::new(
-                        crate::ui::style::chrome::palette_bar(theme),
+                        crate::ui::style::chrome::surface_raised(theme),
                         crate::ui::style::chrome::text(theme),
                     )
                 };
@@ -869,16 +869,16 @@ impl PropertiesPanel {
             container(title_content)
                 .style(crate::ui::kit::combo_container_style)
                 .width(Length::Fill)
-                .height(Length::Fixed(crate::ui::style::palette_metrics::TOOL_H))
-                .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X])
+                .height(Length::Fixed(crate::ui::style::kit_metrics::TOOL_H))
+                .padding([0.0, crate::ui::style::kit_metrics::CELL_PAD_X])
                 .align_y(iced::Center),
         )
         .width(Length::Fill)
         .padding(Padding {
-            top: crate::ui::style::palette_metrics::TOP_INSET,
-            bottom: crate::ui::style::palette_metrics::TOOL_GAP,
-            left: crate::ui::style::palette_metrics::GRID_INSET_L,
-            right: crate::ui::style::palette_metrics::GRID_INSET_R,
+            top: crate::ui::style::kit_metrics::TOP_INSET,
+            bottom: crate::ui::style::kit_metrics::TOOL_GAP,
+            left: crate::ui::style::kit_metrics::GRID_INSET_L,
+            right: crate::ui::style::kit_metrics::GRID_INSET_R,
         });
 
         // ── Content ─────────────────────────────────────────────────────────
@@ -895,9 +895,7 @@ impl PropertiesPanel {
 
         container(column![header, title_bar, content])
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(crate::ui::style::chrome::palette_body(
-                    theme,
-                ))),
+                background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                 text_color: Some(crate::ui::style::chrome::text(theme)),
                 ..Default::default()
             })
@@ -922,8 +920,8 @@ impl PropertiesPanel {
         .style(crate::ui::kit::combo_container_style)
         .width(Length::Fill)
         .padding([
-            crate::ui::style::palette_metrics::TOOL_GAP,
-            crate::ui::style::palette_metrics::GRID_INSET_L,
+            crate::ui::style::kit_metrics::TOOL_GAP,
+            crate::ui::style::kit_metrics::GRID_INSET_L,
         ]);
         // The title bar moves the panel.
         let title = iced::widget::mouse_area(title)
@@ -940,13 +938,13 @@ impl PropertiesPanel {
 
         let content = Element::from(
             scrollable(container(sections.width(Length::Fill)).padding(Padding {
-                right: crate::ui::style::palette_metrics::GRID_INSET_R,
+                right: crate::ui::style::kit_metrics::GRID_INSET_R,
                 ..Padding::ZERO
             }))
             .direction(iced::widget::scrollable::Direction::Vertical(
                 iced::widget::scrollable::Scrollbar::new()
-                    .width(crate::ui::style::palette_metrics::SCROLLBAR_W)
-                    .scroller_width(crate::ui::style::palette_metrics::SCROLL_THUMB_W)
+                    .width(crate::ui::style::kit_metrics::SCROLLBAR_W)
+                    .scroller_width(crate::ui::style::kit_metrics::SCROLL_THUMB_W)
                     .margin(0),
             ))
             .style(crate::ui::kit::scroll_style)
@@ -958,13 +956,11 @@ impl PropertiesPanel {
         Some(
             container(column![title, content].spacing(0))
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(crate::ui::style::chrome::palette_body(
-                        theme,
-                    ))),
+                    background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                     text_color: Some(crate::ui::style::chrome::text(theme)),
                     border: Border {
                         color: crate::ui::style::chrome::edge(theme),
-                        width: crate::ui::style::palette_metrics::line(),
+                        width: crate::ui::style::kit_metrics::line(),
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -1520,13 +1516,13 @@ impl PropertiesPanel {
     /// never narrower than the row's value field. Wider than the palette it
     /// runs out over the drawing, starting at the field's left edge.
     fn list_width<'s>(&self, labels: impl Iterator<Item = &'s str>) -> f32 {
-        use crate::ui::style::palette_metrics as pm;
+        use crate::ui::style::kit_metrics as km;
         let field = self.rendering_width.get()
-            - pm::GRID_INSET_L
-            - pm::GRID_INSET_R
-            - pm::INDENT
-            - pm::NAME_COL_W
-            - 3.0 * pm::LINE;
+            - km::GRID_INSET_L
+            - km::GRID_INSET_R
+            - km::INDENT
+            - km::NAME_COL_W
+            - 3.0 * km::LINE;
         crate::ui::kit::dropdown_width(labels, field)
     }
 
@@ -1679,7 +1675,7 @@ impl PropertiesPanel {
         .style(|theme: &Theme, status| {
             let bg = match status {
                 button::Status::Hovered | button::Status::Pressed => Some(Background::Color(
-                    crate::ui::style::chrome::palette_bar(theme),
+                    crate::ui::style::chrome::surface_raised(theme),
                 )),
                 _ => None,
             };
@@ -1717,12 +1713,10 @@ impl PropertiesPanel {
                     crate::ui::style::chrome::border(theme)
                 };
                 container::Style {
-                    background: Some(Background::Color(crate::ui::style::chrome::palette_body(
-                        theme,
-                    ))),
+                    background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                     border: Border {
                         color: border_color,
-                        width: crate::ui::style::palette_metrics::line(),
+                        width: crate::ui::style::kit_metrics::line(),
                         radius: 2.0.into(),
                     },
                     ..Default::default()
@@ -1927,7 +1921,7 @@ impl PropertiesPanel {
             if active {
                 Background::Color(crate::ui::style::chrome::lit(theme))
             } else {
-                Background::Color(crate::ui::style::chrome::palette_body(theme))
+                Background::Color(crate::ui::style::chrome::surface(theme))
             }
         };
         let content = container(
@@ -1959,7 +1953,7 @@ impl PropertiesPanel {
                     text_color: Some(palette.danger.weak.text),
                     border: Border {
                         color: palette.danger.base.color,
-                        width: crate::ui::style::palette_metrics::line(),
+                        width: crate::ui::style::kit_metrics::line(),
                         radius: 4.0.into(),
                     },
                     ..Default::default()
@@ -1995,9 +1989,9 @@ impl PropertiesPanel {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
                 background: Some(Background::Color(if hovered {
-                    crate::ui::style::chrome::palette_bar(theme)
+                    crate::ui::style::chrome::surface_raised(theme)
                 } else {
-                    crate::ui::style::chrome::palette_body(theme)
+                    crate::ui::style::chrome::surface(theme)
                 })),
                 text_color: crate::ui::style::chrome::text(theme),
                 border: Border {
@@ -2006,7 +2000,7 @@ impl PropertiesPanel {
                     } else {
                         crate::ui::style::chrome::border(theme)
                     },
-                    width: crate::ui::style::palette_metrics::line(),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 2.0.into(),
                 },
                 ..Default::default()
@@ -2063,7 +2057,7 @@ fn render_stepper_row<'a>(label: &'a str, display: &'a str) -> Element<'a, Messa
                 background: Some(Background::Color(pair.color)),
                 border: Border {
                     color: crate::ui::style::chrome::border(theme),
-                    width: crate::ui::style::palette_metrics::line(),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 2.0.into(),
                 },
                 text_color: pair.text,
@@ -2107,7 +2101,7 @@ fn render_bool_row<'a>(label: &'a str, field: &'static str, value: bool) -> Elem
             background: Some(Background::Color(pair.color)),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 2.0.into(),
             },
             text_color: if value {
@@ -2215,13 +2209,13 @@ fn render_group_row(
     let name = button(
         row![
             if expanded {
-                crate::ui::icons::themed_arrow_down(crate::ui::style::palette_metrics::CARET)
+                crate::ui::icons::themed_arrow_down(crate::ui::style::kit_metrics::CARET)
             } else {
-                crate::ui::icons::themed_arrow_right(crate::ui::style::palette_metrics::CARET)
+                crate::ui::icons::themed_arrow_right(crate::ui::style::kit_metrics::CARET)
             },
             crate::ui::kit::name_text(crate::ui::text_util::elide(base, NAME_CHARS)),
         ]
-        .spacing(crate::ui::style::palette_metrics::TOOL_GAP)
+        .spacing(crate::ui::style::kit_metrics::TOOL_GAP)
         .align_y(iced::Center),
     )
     .on_press(toggle)
@@ -2248,7 +2242,7 @@ fn render_annotative_scale_row<'a>(label: &'a str, value: &'a str) -> Element<'a
     )
     .on_press(Message::AnnoObjectScaleOpen)
     .style(crate::ui::kit::cell_button_style)
-    .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X]);
+    .padding([0.0, crate::ui::style::kit_metrics::CELL_PAD_X]);
     let manage = crate::ui::kit::on_selected_row(manage);
 
     let controls = row![field, manage]
@@ -2266,7 +2260,7 @@ fn render_hyperlink_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Messa
     )
     .on_press(Message::PropHyperlinkOpen)
     .style(crate::ui::kit::cell_button_style)
-    .padding([0.0, crate::ui::style::palette_metrics::CELL_PAD_X]);
+    .padding([0.0, crate::ui::style::kit_metrics::CELL_PAD_X]);
     let manage = crate::ui::kit::on_selected_row(manage);
     let controls = row![field, manage]
         .align_y(iced::Center)
@@ -2324,7 +2318,7 @@ fn render_entity_link_row<'a>(
             background: Some(Background::Color(pair.color)),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 2.0.into(),
             },
             text_color: pair.text,
@@ -2397,7 +2391,7 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
             background: Some(Background::Color(pair.color)),
             border: Border {
                 color: crate::ui::style::chrome::border(theme),
-                width: crate::ui::style::palette_metrics::line(),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 2.0.into(),
             },
             text_color: pair.text,
@@ -2591,7 +2585,7 @@ mod tests {
         }
 
         for theme in crate::app::config::all_themes() {
-            let popup = crate::ui::palette_menu::frame_style(&theme);
+            let popup = crate::ui::kit::menu::frame_style(&theme);
             assert!(
                 popup.background.is_some_and(is_opaque),
                 "{theme}: list surface must be opaque"

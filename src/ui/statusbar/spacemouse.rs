@@ -22,7 +22,7 @@ pub(crate) fn view(
     )
     .padding([3, 6])
     .style(button::subtle);
-    use crate::ui::palette_menu::{entry, Item, Mark};
+    use crate::ui::kit::menu::{entry, Item, Mark};
     let mut entries = vec![Entry::stay(entry(Item::Heading(format!(
         "SpaceMouse · {}",
         crate::t!(status.label())

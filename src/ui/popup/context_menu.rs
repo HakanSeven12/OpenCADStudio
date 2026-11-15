@@ -21,16 +21,16 @@ use crate::t;
 
 /// Fixed row height used by the renderer, so `ContextMenu::default_row_y`
 /// (which anchors the default row under the cursor) agrees with the layout.
-pub const MENU_ROW_H: f32 = crate::ui::style::palette_metrics::MENU_ITEM_H;
+pub const MENU_ROW_H: f32 = crate::ui::style::kit_metrics::MENU_ITEM_H;
 /// Height of a separator row (1 px line plus its vertical padding).
-pub const MENU_SEP_H: f32 = crate::ui::style::palette_metrics::MENU_SEPARATOR_H;
+pub const MENU_SEP_H: f32 = crate::ui::style::kit_metrics::MENU_SEPARATOR_H;
 /// Vertical padding inside the menu panel above the first row.
-pub const MENU_PAD_TOP: f32 = crate::ui::style::palette_metrics::MENU_PAD_Y;
+pub const MENU_PAD_TOP: f32 = crate::ui::style::kit_metrics::MENU_PAD_Y;
 /// The row layout the renderer uses, for sizing the menu to its widest row:
 /// side padding, icon gutter, gap after it, indent of a submenu's items,
 /// least gap before a hint or check, and the check and caret.
-const ROW_PAD_LEFT: f32 = crate::ui::style::palette_metrics::TOOL_GAP;
-const ROW_PAD_RIGHT: f32 = crate::ui::style::palette_metrics::MENU_PAD_X;
+const ROW_PAD_LEFT: f32 = crate::ui::style::kit_metrics::TOOL_GAP;
+const ROW_PAD_RIGHT: f32 = crate::ui::style::kit_metrics::MENU_PAD_X;
 const GUTTER_W: f32 = 18.0;
 const GUTTER_GAP: f32 = 4.0;
 const CHILD_INDENT: f32 = 14.0;
@@ -323,7 +323,7 @@ impl ContextMenu {
     /// row, using the renderer's fixed row metrics.
     pub fn default_row_y(&self) -> f32 {
         // The rows start inside the panel's border.
-        let first = MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE;
+        let first = MENU_PAD_TOP + crate::ui::style::kit_metrics::LINE;
         let mut y = first;
         for row in &self.rows {
             match row {
@@ -353,7 +353,7 @@ impl ContextMenu {
     /// Total panel height (rows plus the panel's vertical padding and its
     /// border, which the rows stay inside).
     pub fn height(&self) -> f32 {
-        let mut h = MENU_PAD_TOP * 2.0 + 2.0 * crate::ui::style::palette_metrics::LINE;
+        let mut h = MENU_PAD_TOP * 2.0 + 2.0 * crate::ui::style::kit_metrics::LINE;
         for row in &self.rows {
             match row {
                 MenuRow::Item(_) => h += MENU_ROW_H,
@@ -1288,17 +1288,17 @@ mod tests {
         let menu = build_context_menu(&line_ctx(), None);
         assert_eq!(
             menu.default_row_y(),
-            MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE
+            MENU_PAD_TOP + crate::ui::style::kit_metrics::LINE
         );
         let menu = build_context_menu(&idle_ctx(false), None);
         assert_eq!(
             menu.default_row_y(),
-            MENU_PAD_TOP + crate::ui::style::palette_metrics::LINE
+            MENU_PAD_TOP + crate::ui::style::kit_metrics::LINE
         );
         // 12 items (Filter... among them) + 3 submenu headers + 6
         // separators, plus panel padding. No saved filters: no submenu.
         let expected = MENU_PAD_TOP * 2.0
-            + 2.0 * crate::ui::style::palette_metrics::LINE
+            + 2.0 * crate::ui::style::kit_metrics::LINE
             + 15.0 * MENU_ROW_H
             + 6.0 * MENU_SEP_H;
         assert_eq!(menu.height(), expected);

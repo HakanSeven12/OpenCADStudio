@@ -2,7 +2,7 @@
 //! trailing control (a switch, a count), 18 px high like the grid's rows.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text};
+use crate::ui::style::{chrome, kit_metrics as km, text};
 use iced::widget::{button, container, mouse_area, row, text as label, Space};
 use iced::{Background, Element, Length, Padding, Theme};
 
@@ -103,29 +103,29 @@ impl<'a> TreeRow<'a> {
 
     /// The row.
     pub fn view(self) -> Element<'a, Message> {
-        let mut cells = row![Space::new().width(f32::from(self.depth) * pm::INDENT)]
+        let mut cells = row![Space::new().width(f32::from(self.depth) * km::INDENT)]
             .spacing(0)
             .align_y(iced::Center)
             .height(Length::Fill);
         if let Some((open, toggle)) = self.fold {
             let caret = if open {
-                crate::ui::icons::themed_arrow_down(pm::CARET)
+                crate::ui::icons::themed_arrow_down(km::CARET)
             } else {
-                crate::ui::icons::themed_arrow_right(pm::CARET)
+                crate::ui::icons::themed_arrow_right(km::CARET)
             };
             cells = cells.push(
                 button(container(caret).center(Length::Fill))
                     .on_press(toggle)
-                    .width(Length::Fixed(pm::INDENT))
-                    .height(Length::Fixed(pm::ROW_H))
+                    .width(Length::Fixed(km::INDENT))
+                    .height(Length::Fixed(km::ROW_H))
                     .padding(0)
                     .style(|_: &Theme, _| button::Style::default()),
             );
         } else if self.caret_room {
-            cells = cells.push(Space::new().width(pm::INDENT));
+            cells = cells.push(Space::new().width(km::INDENT));
         }
         if let Some(icon) = self.icon {
-            cells = cells.push(container(icon).padding(Padding::ZERO.right(pm::TOOL_GAP)));
+            cells = cells.push(container(icon).padding(Padding::ZERO.right(km::TOOL_GAP)));
         }
         let muted = self.muted;
         cells = cells.push(
@@ -149,8 +149,8 @@ impl<'a> TreeRow<'a> {
         let body = |hovered: bool| row_style(selected, hovered && interactive);
         let row_box = container(cells)
             .width(Length::Fill)
-            .height(Length::Fixed(pm::ROW_H))
-            .padding(Padding::ZERO.left(pm::CELL_PAD_X).right(pm::CELL_PAD_X))
+            .height(Length::Fixed(km::ROW_H))
+            .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
             .style(body(false));
         // Hover lights the whole row: the same row drawn lit under the
         // pointer would need the cells twice, so the hover is a layer of
@@ -158,10 +158,10 @@ impl<'a> TreeRow<'a> {
         let hover_layer = iced::widget::hover(
             container(Space::new())
                 .width(Length::Fill)
-                .height(Length::Fixed(pm::ROW_H)),
+                .height(Length::Fixed(km::ROW_H)),
             container(Space::new())
                 .width(Length::Fill)
-                .height(Length::Fixed(pm::ROW_H))
+                .height(Length::Fixed(km::ROW_H))
                 .style(body(true)),
         );
         let stacked = iced::widget::stack![hover_layer, row_box];

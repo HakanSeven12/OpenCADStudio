@@ -6,7 +6,7 @@
 //! Properties panel's own rows for that entity (built and written back in
 //! `app::node_graph`); operation rows come from the node's spec.
 
-use crate::ui::style::palette_metrics as pm;
+use crate::ui::style::kit_metrics as km;
 use document::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::advanced::layout::{self, Layout};
@@ -1220,10 +1220,10 @@ impl Graph {
         let icon: Element<'_, Message> = match item {
             PaletteItem::Object(kind) => crate::modules::registry::command_icon(kind.command())
                 .map_or_else(
-                    || Space::new().width(pm::ROW_ICON).into(),
-                    |bytes| crate::ui::icons::semantic(bytes, pm::ROW_ICON),
+                    || Space::new().width(km::ROW_ICON).into(),
+                    |bytes| crate::ui::icons::semantic(bytes, km::ROW_ICON),
                 ),
-            PaletteItem::Op(_) => Space::new().width(pm::ROW_ICON).into(),
+            PaletteItem::Op(_) => Space::new().width(km::ROW_ICON).into(),
         };
         let held = match self.drag {
             Some(Drag::Palette(held)) => Some(held),
@@ -1235,11 +1235,11 @@ impl Graph {
                 icon,
                 crate::ui::kit::value_text(t!(item.label()).into_owned(), false)
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         )
-        .padding([0.0, pm::CELL_PAD_X + pm::INDENT])
-        .height(Length::Fixed(pm::ROW_H))
+        .padding([0.0, km::CELL_PAD_X + km::INDENT])
+        .height(Length::Fixed(km::ROW_H))
         .align_y(iced::Center)
         .width(Length::Fill)
         .style(move |theme: &Theme| {
@@ -1270,7 +1270,7 @@ impl Graph {
         let lit = hover(
             container(Space::new())
                 .width(Length::Fill)
-                .height(Length::Fixed(pm::ROW_H)),
+                .height(Length::Fixed(km::ROW_H)),
             hovered,
         );
         with_tip(
@@ -1305,7 +1305,7 @@ impl Graph {
                 tool(crate::ui::icons::FOLDER_OPEN, "Open graph", GraphMsg::Open),
                 tool(crate::ui::icons::SAVE, "Save graph", GraphMsg::Save),
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         );
 
@@ -1354,7 +1354,7 @@ impl Graph {
             dock::title_bar(PanelId::NodeGraph, t!("Node Graph").into_owned(), chrome),
             column![
                 toolbar,
-                Space::new().height(pm::TOOL_GAP),
+                Space::new().height(km::TOOL_GAP),
                 kit::scroll_area(tree)
             ],
             width,
@@ -1462,9 +1462,7 @@ impl Graph {
             container(col)
                 .width(NODE_W)
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(crate::ui::style::chrome::palette_body(
-                        theme,
-                    ))),
+                    background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                     border: Border {
                         color: crate::ui::style::chrome::border(theme),
                         width: 1.0,
@@ -1720,7 +1718,7 @@ impl canvas::Program<Message> for Wires {
         frame.fill_rectangle(
             Point::ORIGIN,
             bounds.size(),
-            crate::ui::style::chrome::palette_body(theme).scale_alpha(0.6),
+            crate::ui::style::chrome::surface(theme).scale_alpha(0.6),
         );
         let stroke = canvas::Stroke::default()
             .with_color(crate::ui::style::chrome::accent(theme))

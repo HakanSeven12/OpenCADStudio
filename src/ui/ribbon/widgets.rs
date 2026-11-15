@@ -1237,7 +1237,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
                     .padding(SMALL_PAD),
                 tip.to_string(),
                 TipPos::Right,
-                crate::ui::style::palette_metrics::TOOL_GAP,
+                crate::ui::style::kit_metrics::TOOL_GAP,
             );
             super::ribbon_menu::tool_target(
                 super::ribbon_menu::tool_qat(t),

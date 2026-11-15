@@ -9,7 +9,7 @@ use crate::app::settings::BlockInsertOptions;
 use crate::app::{ClipboardDeps, Message};
 use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::kit;
-use crate::ui::style::{chrome, palette_metrics as pm};
+use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::block_palette::{preview_canvas, BlockPreview};
 use iced::widget::{button, checkbox, column, container, pick_list, row, text, Space};
 use iced::{Background, Element, Fill, Length, Theme};
@@ -295,7 +295,7 @@ pub fn view<'a>(
             picker,
             container(add_btn).id("tool-palettes-add-drawing-block")
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .into()
     };
@@ -322,7 +322,7 @@ pub fn view<'a>(
             false,
         ),
     ]
-    .spacing(pm::TOOL_GAP)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     // Tool list for the active palette
@@ -373,11 +373,11 @@ pub fn view<'a>(
                 ]
                 .width(Fill),
             ]
-            .spacing(pm::TOOL_GAP)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         )
         .on_press(tm(ToolPalettesMsg::InsertTool(idx)))
-        .padding(pm::TOOL_GAP)
+        .padding(km::TOOL_GAP)
         .width(Fill)
         .style(move |theme: &Theme, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
@@ -397,8 +397,8 @@ pub fn view<'a>(
         let small = |label: &'static str, message: Option<Message>| {
             button(container(text(label).size(crate::ui::style::text::UI)).center(Fill))
                 .on_press_maybe(message)
-                .width(pm::BAR_BUTTON)
-                .height(pm::BAR_BUTTON)
+                .width(km::BAR_BUTTON)
+                .height(km::BAR_BUTTON)
                 .padding(0)
                 .style(kit::flat_button_style(false))
         };
@@ -414,7 +414,7 @@ pub fn view<'a>(
 
         let row_el = container(
             row![main_btn, up_btn, down_btn, del_btn]
-                .spacing(pm::line())
+                .spacing(km::line())
                 .align_y(iced::Center),
         )
         .id(format!("tool-palette-item-{idx}"))
@@ -426,7 +426,7 @@ pub fn view<'a>(
     let tools_list: Element<'a, Message> = if tool_rows.is_empty() {
         kit::empty_state(crate::tr!("tool-palettes", "no-tools"))
     } else {
-        kit::scroll_area(column(tool_rows).spacing(pm::line()))
+        kit::scroll_area(column(tool_rows).spacing(km::line()))
     };
 
     // Vertical palette tabs along the right side, like the palette strip.
@@ -439,7 +439,7 @@ pub fn view<'a>(
         .id(format!("tool-palette-tab-{idx}"))
         .into()
     }))
-    .spacing(pm::line())
+    .spacing(km::line())
     .push(Space::new().height(Fill));
 
     // Placement options footer
@@ -449,9 +449,9 @@ pub fn view<'a>(
             container(
                 checkbox(on)
                     .on_toggle(move |v| tm(message(v)))
-                    .size(pm::CHECK),
+                    .size(km::CHECK),
             )
-            .padding(iced::Padding::ZERO.left(pm::CELL_PAD_X))
+            .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
             .into(),
             false,
             None,
@@ -471,9 +471,9 @@ pub fn view<'a>(
         ),
     ])
     .padding(iced::Padding {
-        bottom: pm::TOOL_GAP,
-        left: pm::GRID_INSET_L,
-        right: pm::GRID_INSET_R,
+        bottom: km::TOOL_GAP,
+        left: km::GRID_INSET_L,
+        right: km::GRID_INSET_R,
         ..iced::Padding::ZERO
     });
 
@@ -482,7 +482,7 @@ pub fn view<'a>(
         kit::band(add_selected_btn),
         kit::band(add_drawing_row),
         kit::band(new_tab_row),
-        Space::new().height(pm::TOOL_GAP),
+        Space::new().height(km::TOOL_GAP),
         row![container(tools_list).width(Fill), side_tabs].height(Fill),
         options_footer,
     ]

@@ -893,7 +893,7 @@ pub fn view_tds_material<'a>(
         iced_aw::DropDown::new(
             head,
             container(list)
-                .style(crate::ui::palette_menu::frame_style)
+                .style(crate::ui::kit::menu::frame_style)
                 .padding(2),
             true,
         )

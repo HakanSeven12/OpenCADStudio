@@ -3,7 +3,7 @@
 //! implementation of it.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{mouse, overlay, renderer, Shell};
@@ -667,7 +667,7 @@ const MENUS: &[(&str, &[Entry])] = &[
     ),
 ];
 
-const ENTRY_H: f32 = pm::MENU_ITEM_H;
+const ENTRY_H: f32 = km::MENU_ITEM_H;
 const ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
 /// A row's label and the shortcut and aliases at its end.
 const LABEL_SIZE: f32 = ui_text::UI;
@@ -675,9 +675,9 @@ const TAIL_SIZE: f32 = ui_text::UI;
 /// Gap between a row's parts, its side padding, the least gap before the
 /// shortcut, and the submenu arrow.
 const ROW_SPACING: f32 = 8.0;
-const ROW_PAD: f32 = pm::MENU_PAD_X;
+const ROW_PAD: f32 = km::MENU_PAD_X;
 const TAIL_GAP: f32 = 8.0;
-const ARROW: f32 = pm::CARET;
+const ARROW: f32 = km::CARET;
 /// The menus the Start tab keeps: it has no drawing for the others.
 const START_MENUS: [&str; 3] = ["File", "Window", "Help"];
 
@@ -1131,9 +1131,9 @@ fn entry_style(theme: &Theme, status: button::Status, submenu: bool) -> button::
     }
 }
 
-/// The palette menu's separator line.
+/// The kit menu's separator line.
 fn separator<'a>() -> Element<'a, Message> {
-    crate::ui::palette_menu::entry(crate::ui::palette_menu::Item::Separator)
+    crate::ui::kit::menu::entry(crate::ui::kit::menu::Item::Separator)
 }
 
 /// A menu title on the bar: `tab_text`, and `strong` on a `hover` fill

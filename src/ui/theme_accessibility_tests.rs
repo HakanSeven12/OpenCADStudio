@@ -478,12 +478,12 @@ fn test_block_palette_contrast() {
         // a hardcoded foreground, these equality checks fail on every theme
         // whose surface text is not pure white.
         let (normal_bg, normal_fg) = block_card_colors(theme, false, BtnStatus::Active);
-        // Cards sit on the palette body, so they take the palette bar to
+        // Cards sit on the surface, so they take the raised surface to
         // read as cards, with the palette's text.
         assert_eq!(
             normal_bg,
-            chrome::palette_bar(theme),
-            "Theme {:?} block card normal background drifted from the palette bar",
+            chrome::surface_raised(theme),
+            "Theme {:?} block card normal background drifted from the raised surface",
             theme
         );
         assert_eq!(
@@ -602,11 +602,11 @@ fn test_block_palette_contrast() {
 
         // ── 5. Toolbar icon buttons (kit flat buttons; glyphs inherit the
         // button's text colour) ──
-        // Resting buttons are transparent over the palette body.
+        // Resting buttons are transparent over the surface.
         let flat = crate::ui::kit::flat_button_style(false);
         let rest = flat(theme, BtnStatus::Active);
         assert_eq!(rest.background, None);
-        let icon_rest_contrast = wcag_contrast(rest.text_color, chrome::palette_body(theme));
+        let icon_rest_contrast = wcag_contrast(rest.text_color, chrome::surface(theme));
         assert!(
             icon_rest_contrast >= 4.5,
             "Theme {:?} block palette icon button ({:.2}:1) fails WCAG AA on dock background",
@@ -632,11 +632,11 @@ fn test_block_palette_contrast() {
         }
 
         // ── 6. Empty-state muted text ("No blocks in this drawing") ──
-        // kit::empty_state draws it in the muted token over the palette body
+        // kit::empty_state draws it in the muted token over the surface
         // → secondary text threshold >= 3.0:1. (The old hardcoded 0.55-gray
         // failed this on light themes.)
         let empty_text = chrome::muted(theme);
-        let empty_contrast = wcag_contrast(empty_text, chrome::palette_body(theme));
+        let empty_contrast = wcag_contrast(empty_text, chrome::surface(theme));
         assert!(
             empty_contrast >= 3.0,
             "Theme {:?} block palette empty-state text ({:.2}:1) fails secondary text threshold (>=3.0:1)",

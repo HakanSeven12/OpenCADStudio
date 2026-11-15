@@ -86,7 +86,7 @@ jobs:
       # Reports a palette file that gains generic iced colours or literal
       # sizes (docs/ui/PALETTE_FAMILY_PLAN.md); the counts in
       # docs/ui/audit_counts.txt only go down.
-      - name: palette audit
+      - name: kit audit
         continue-on-error: true
         run: sh docs/ui/audit_counts.sh --check
 

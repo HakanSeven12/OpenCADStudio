@@ -4001,7 +4001,7 @@ impl OpenCADStudio {
                     Some(idx) if !self.doc_tab_menu => {
                         let gen = self.doc_tab_hover_gen;
                         let delay = std::time::Duration::from_millis(
-                            crate::ui::style::palette_metrics::TAB_HOVER_MS,
+                            crate::ui::style::kit_metrics::TAB_HOVER_MS,
                         );
                         Task::perform(rest(delay), move |_| {
                             Message::DocTabLayoutsSettled(idx, gen)

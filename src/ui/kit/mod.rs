@@ -17,17 +17,18 @@
 //! | Empty state | [`empty_state`] |
 //! | Footer | [`footer`] |
 //! | Frame | [`palette`], [`band`], [`crate::ui::dock::SplitterGrip`] |
-//! | Menus, tooltips | [`crate::ui::palette_menu`], [`tooltip`] |
+//! | Menus, tooltips | [`crate::ui::kit::menu`], [`tooltip`] |
 //!
 //! Colours come from [`crate::ui::style::chrome`], text sizes from
 //! [`crate::ui::style::text`], sizes from
-//! [`crate::ui::style::palette_metrics`].
+//! [`crate::ui::style::kit_metrics`].
 
 mod dropdown;
 mod field;
 mod frame;
 mod grid;
 mod list;
+pub mod menu;
 mod press;
 mod status;
 mod tabs;

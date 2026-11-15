@@ -8,7 +8,7 @@ use crate::ui::popup::context_menu::{
     ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
 };
 use crate::ui::popup::quad_menu::{QuadMsg, QuadPanel, QuadUi};
-use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::overlay;
@@ -191,7 +191,11 @@ impl MTextPreview {
     fn on_handle(&self, p: iced::Point) -> bool {
         if self.inplace {
             if let (Some(cell), Some(ruler)) = (self.cell, self.ruler) {
-                let handle = if ruler.growth < 0.0 { cell.corners[0] } else { cell.corners[1] };
+                let handle = if ruler.growth < 0.0 {
+                    cell.corners[0]
+                } else {
+                    cell.corners[1]
+                };
                 let d = p - handle;
                 return d.x.hypot(d.y) <= 10.0;
             }
@@ -280,9 +284,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         bounds: iced::Rectangle,
         cursor: iced::mouse::Cursor,
     ) -> Option<iced::widget::canvas::Action<Message>> {
-        use iced::Event;
         use iced::mouse::{Button, Event as Me};
         use iced::widget::canvas::Action;
+        use iced::Event;
         match event {
             Event::Mouse(Me::ButtonPressed(Button::Left)) => {
                 if let Some(p) = cursor.position_in(bounds) {
@@ -340,7 +344,12 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                     let point = cursor.position_from(bounds.position())?;
                     let (x, y) = self.cell?.unproject(point);
                     let (_, y) = turn((self.rotation.0, -self.rotation.1), x, y);
-                    return Some(Action::publish(Message::MTextHeightDrag(Some(f64::from((height + start - y).max(0.001))))).and_capture());
+                    return Some(
+                        Action::publish(Message::MTextHeightDrag(Some(f64::from(
+                            (height + start - y).max(0.001),
+                        ))))
+                        .and_capture(),
+                    );
                 }
                 if let Some((start, width)) = state.width_drag {
                     let point = cursor.position_from(bounds.position())?;
@@ -348,7 +357,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                         let (x, y) = self.cell?.unproject(point);
                         let (x, _) = turn((self.rotation.0, -self.rotation.1), x, y);
                         f64::from((width + self.ruler?.growth * (x - start)).max(0.001))
-                    } else { self.dragged_width(width, point.x - start)? };
+                    } else {
+                        self.dragged_width(width, point.x - start)?
+                    };
                     return Some(Action::publish(Message::MTextBoxDrag(Some(width))).and_capture());
                 }
                 if state.dragging {
@@ -385,15 +396,17 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             return iced::mouse::Interaction::ResizingVertically;
         }
         let point = cursor.position_in(bounds);
-        if self.inplace && point.is_some_and(|p| {
-            self.cell.is_some_and(|cell| {
-                let a = cell.corners[2];
-                let b = cell.corners[3];
-                let handle = iced::Point::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                let d = p - handle;
-                d.x.hypot(d.y) <= 10.0
+        if self.inplace
+            && point.is_some_and(|p| {
+                self.cell.is_some_and(|cell| {
+                    let a = cell.corners[2];
+                    let b = cell.corners[3];
+                    let handle = iced::Point::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                    let d = p - handle;
+                    d.x.hypot(d.y) <= 10.0
+                })
             })
-        }) {
+        {
             return iced::mouse::Interaction::ResizingVertically;
         }
         if state.width_drag.is_some() || point.is_some_and(|p| self.on_handle(p)) {
@@ -452,7 +465,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 if length > 1.0 {
                     let along = edge / length;
                     let mut normal = iced::Vector::new(along.y, -along.x);
-                    if normal.x * (cell.corners[3].x - a.x) + normal.y * (cell.corners[3].y - a.y) > 0.0 {
+                    if normal.x * (cell.corners[3].x - a.x) + normal.y * (cell.corners[3].y - a.y)
+                        > 0.0
+                    {
                         normal = -normal;
                     }
                     let ruler_line = Path::new(|p| {
@@ -465,7 +480,12 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                             p.line_to(point + normal * if i % 5 == 0 { 7.0 } else { 3.5 });
                         }
                     });
-                    frame.stroke(&ruler_line, Stroke::default().with_color(theme.palette().primary.base.color).with_width(1.0));
+                    frame.stroke(
+                        &ruler_line,
+                        Stroke::default()
+                            .with_color(theme.palette().primary.base.color)
+                            .with_width(1.0),
+                    );
                     let labels = (length / 70.0).floor().clamp(1.0, 12.0) as usize;
                     for i in 0..=labels {
                         let fraction = i as f32 / labels as f32;
@@ -478,11 +498,19 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                         });
                     }
                     let handle = if ruler.growth < 0.0 { a } else { b };
-                    frame.fill_rectangle(handle - iced::Vector::new(4.0, 4.0), iced::Size::new(8.0, 8.0), Color::WHITE);
+                    frame.fill_rectangle(
+                        handle - iced::Vector::new(4.0, 4.0),
+                        iced::Size::new(8.0, 8.0),
+                        Color::WHITE,
+                    );
                     let a = cell.corners[2];
                     let b = cell.corners[3];
-                    let bottom = iced::Point::new((a.x+b.x)*0.5, (a.y+b.y)*0.5);
-                    frame.fill_rectangle(bottom - iced::Vector::new(4.0, 4.0), iced::Size::new(8.0, 8.0), Color::WHITE);
+                    let bottom = iced::Point::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                    frame.fill_rectangle(
+                        bottom - iced::Vector::new(4.0, 4.0),
+                        iced::Size::new(8.0, 8.0),
+                        Color::WHITE,
+                    );
                 }
             }
         }
@@ -702,8 +730,18 @@ pub(super) fn mtext_inplace_overlay<'a>(
         ruler: Some({
             let width = ed.rect_width as f32;
             let growth = ed.box_growth();
-            let left = if growth == 2.0 { -width * 0.5 } else if growth < 0.0 { -width } else { 0.0 };
-            BoxRuler { left, right: left + width, growth }
+            let left = if growth == 2.0 {
+                -width * 0.5
+            } else if growth < 0.0 {
+                -width
+            } else {
+                0.0
+            };
+            BoxRuler {
+                left,
+                right: left + width,
+                growth,
+            }
         }),
         rotation: (angle.cos(), angle.sin()),
         cell: Some(cell),
@@ -719,11 +757,23 @@ pub(super) fn mtext_inplace_overlay<'a>(
     // The first row still scrolls horizontally when the viewport is narrow.
     let toolbar_width = size.0.min(1000.0).max(1.0);
     let drag_handle = mouse_area(
-        container(text("⋮⋮").size(15)).height(58).center_y(58).padding([2, 3])
-    ).on_press(Message::MTextToolbarGrab).interaction(iced::mouse::Interaction::Grab);
-    let toolbar = container(row![drag_handle, mtext_editor_content(
-        ed, &styles, crate::ui::modal::ModalSizing::FILL, 0.0, true,
-    )].spacing(2)).style(container::bordered_box).padding(3).width(toolbar_width);
+        container(text("⋮⋮").size(15))
+            .height(58)
+            .center_y(58)
+            .padding([2, 3]),
+    )
+    .on_press(Message::MTextToolbarGrab)
+    .interaction(iced::mouse::Interaction::Grab);
+    let toolbar = container(
+        row![
+            drag_handle,
+            mtext_editor_content(ed, &styles, crate::ui::modal::ModalSizing::FILL, 0.0, true,)
+        ]
+        .spacing(2),
+    )
+    .style(container::bordered_box)
+    .padding(3)
+    .width(toolbar_width);
     let x = cell
         .corners
         .iter()
@@ -748,10 +798,13 @@ pub(super) fn mtext_inplace_overlay<'a>(
         (x + ed.toolbar_offset.x).clamp(0.0, (size.0 - toolbar_width).max(0.0)),
         (toolbar_y + ed.toolbar_offset.y).clamp(0.0, (size.1 - 100.0).max(0.0)),
     );
-    mouse_area(stack![surface, position_canvas_overlay(anchor, toolbar.into())])
-        .on_move(Message::MTextToolbarMove)
-        .on_release(Message::MTextToolbarRelease)
-        .into()
+    mouse_area(stack![
+        surface,
+        position_canvas_overlay(anchor, toolbar.into())
+    ])
+    .on_move(Message::MTextToolbarMove)
+    .on_release(Message::MTextToolbarRelease)
+    .into()
 }
 
 pub(super) fn mtext_editor_overlay<'a>(
@@ -955,7 +1008,11 @@ fn mtext_editor_content<'a>(
         Message::MTextColorPickerToggle,
         Message::OpenColorWindow(crate::app::ColorPickTarget::MText, ed.whole_text_color()),
     ))
-    .width(iced::Length::Fixed(if toolbar_only { 110.0 } else { 150.0 }));
+    .width(iced::Length::Fixed(if toolbar_only {
+        110.0
+    } else {
+        150.0
+    }));
 
     // A value of the text's own takes "Reset to style" on a right click.
     let resettable = |field: &'static str,
@@ -1057,7 +1114,11 @@ fn mtext_editor_content<'a>(
     ]
     .spacing(if toolbar_only { 4 } else { 10 })
     .align_y(iced::Alignment::Start)
-    .width(if toolbar_only { iced::Length::Shrink } else { width });
+    .width(if toolbar_only {
+        iced::Length::Shrink
+    } else {
+        width
+    });
 
     // ── Row 2: character formatting, undo, alignment and the menus ─────────
     // Below its full width the row scrolls sideways; the thin bar sits
@@ -1073,9 +1134,13 @@ fn mtext_editor_content<'a>(
         .width(width);
 
     if toolbar_only {
-        let fields = scrollable(row1).direction(iced::widget::scrollable::Direction::Horizontal(
-            iced::widget::scrollable::Scrollbar::new().width(3).scroller_width(3)
-        )).width(width);
+        let fields = scrollable(row1)
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new()
+                    .width(3)
+                    .scroller_width(3),
+            ))
+            .width(width);
         return column![
             fields,
             row![row2, mtext_toolbar::compact_status_bar(ed)]
@@ -1556,9 +1621,9 @@ const MENU_EDITOR_W: f32 = 300.0;
 /// Width of the icon gutter every row reserves so labels line up whether or
 /// not the row carries a glyph (object snaps, command icons).
 const MENU_GUTTER_W: f32 = 18.0;
-const MENU_ICON_SIZE: f32 = pm::ROW_ICON;
+const MENU_ICON_SIZE: f32 = km::ROW_ICON;
 /// Trailing check mark of checked rows; sits in the submenu caret column.
-const MENU_CHECK_SIZE: f32 = pm::BAR_ICON;
+const MENU_CHECK_SIZE: f32 = km::BAR_ICON;
 
 /// The gutter cell: the row's glyph, faded with a disabled row, or empty
 /// space of the same width.
@@ -1600,9 +1665,9 @@ pub(super) fn viewport_context_menu_overlay(
     menu: &ContextMenu,
     highlighted: Option<usize>,
 ) -> Element<'static, Message> {
-    // The palette menu's separator: a hairline centred in the separator
+    // The kit menu's separator: a hairline centred in the separator
     // height the model counts (`MENU_SEP_H`).
-    let sep = || crate::ui::palette_menu::entry(crate::ui::palette_menu::Item::Separator);
+    let sep = || crate::ui::kit::menu::entry(crate::ui::kit::menu::Item::Separator);
 
     // Index into `menu.selectable()` of the row being rendered, so the
     // keyboard highlight lands on the same row the model counts.
@@ -1627,11 +1692,11 @@ pub(super) fn viewport_context_menu_overlay(
                 let is_hl = highlighted == Some(sel_idx);
                 let enabled = !children.is_empty();
                 let caret = if !enabled {
-                    crate::ui::icons::themed_disabled_arrow_right(pm::CARET)
+                    crate::ui::icons::themed_disabled_arrow_right(km::CARET)
                 } else if *open {
-                    crate::ui::icons::themed_arrow_down(pm::CARET)
+                    crate::ui::icons::themed_arrow_down(km::CARET)
                 } else {
-                    crate::ui::icons::themed_arrow_right(pm::CARET)
+                    crate::ui::icons::themed_arrow_right(km::CARET)
                 };
                 let content = row![
                     context_menu_gutter(*icon, enabled),
@@ -1642,14 +1707,14 @@ pub(super) fn viewport_context_menu_overlay(
                     iced::widget::Space::new().width(Fill),
                     caret,
                 ]
-                .spacing(pm::TOOL_GAP)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center);
                 let mut btn = button(content)
                     .padding(iced::Padding {
                         top: 0.0,
-                        right: pm::MENU_PAD_X,
+                        right: km::MENU_PAD_X,
                         bottom: 0.0,
-                        left: pm::TOOL_GAP,
+                        left: km::TOOL_GAP,
                     })
                     .width(Fill)
                     .height(Length::Fixed(MENU_ROW_H))
@@ -1664,7 +1729,7 @@ pub(super) fn viewport_context_menu_overlay(
                 if *open {
                     for child in children {
                         let is_hl = highlighted == Some(sel_idx);
-                        items.push(context_menu_row(child, pm::INDENT, is_hl));
+                        items.push(context_menu_row(child, km::INDENT, is_hl));
                         sel_idx += 1;
                     }
                 }
@@ -1673,20 +1738,19 @@ pub(super) fn viewport_context_menu_overlay(
     }
 
     let menu_col = column(items).spacing(0).width(Length::Fill);
-    let menu_col =
-        scrollable(menu_col)
-            .height(Length::Shrink)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(pm::SCROLL_THUMB_W)
-                    .scroller_width(pm::SCROLL_THUMB_W),
-            ))
-            .style(crate::ui::kit::scroll_style);
+    let menu_col = scrollable(menu_col)
+        .height(Length::Shrink)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(km::SCROLL_THUMB_W)
+                .scroller_width(km::SCROLL_THUMB_W),
+        ))
+        .style(crate::ui::kit::scroll_style);
 
-    // The palette menu's frame.
+    // The kit menu's frame.
     let panel = container(menu_col)
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::palette_menu::inset(MENU_PAD_TOP))
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(MENU_PAD_TOP))
         .width(Length::Fixed(menu.width));
 
     // Shift the panel so the default row's centre line is under the pointer.
@@ -1719,13 +1783,15 @@ pub(super) fn context_menu_editor_overlay(
             iced::widget::checkbox(on)
                 .label(label)
                 .text_size(ui_text::UI)
-                .size(pm::CHECK)
+                .size(km::CHECK)
                 .on_toggle(move |_| Message::ContextMenuEdit(E::Toggle(key.clone()))),
         ]
         .into()
     };
-    let mut items: Vec<Element<'static, Message>> =
-        vec![crate::ui::kit::value_text(crate::tr!("context-menu", "editor-title"), true)];
+    let mut items: Vec<Element<'static, Message>> = vec![crate::ui::kit::value_text(
+        crate::tr!("context-menu", "editor-title"),
+        true,
+    )];
     for row in rows {
         match row {
             // Repeat stays: it is the menu's default row.
@@ -1748,7 +1814,7 @@ pub(super) fn context_menu_editor_overlay(
                 let fixed = *id != crate::ui::popup::context_menu::SubmenuId::RecentInput;
                 for child in children.iter().filter(|_| fixed) {
                     let key = row_key(&MenuRow::Item(child.clone())).unwrap_or_default();
-                    items.push(tick(key, child.label.clone(), pm::INDENT));
+                    items.push(tick(key, child.label.clone(), km::INDENT));
                 }
             }
             MenuRow::Separator => {}
@@ -1759,15 +1825,12 @@ pub(super) fn context_menu_editor_overlay(
         true,
     ));
     let small = |glyph: &'static str, msg: Message| {
-        button(
-            container(text(glyph).size(ui_text::UI).line_height(ui_text::line()))
-                .center(Fill),
-        )
-        .on_press(msg)
-        .width(Length::Fixed(pm::BAR_BUTTON))
-        .height(Length::Fixed(pm::BAR_BUTTON))
-        .padding(0)
-        .style(crate::ui::kit::flat_button_style(false))
+        button(container(text(glyph).size(ui_text::UI).line_height(ui_text::line())).center(Fill))
+            .on_press(msg)
+            .width(Length::Fixed(km::BAR_BUTTON))
+            .height(Length::Fixed(km::BAR_BUTTON))
+            .padding(0)
+            .style(crate::ui::kit::flat_button_style(false))
     };
     for (index, (label, command)) in custom.custom.iter().enumerate() {
         items.push(
@@ -1800,7 +1863,7 @@ pub(super) fn context_menu_editor_overlay(
                 false
             ),
         ]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .into(),
     );
@@ -1817,15 +1880,15 @@ pub(super) fn context_menu_editor_overlay(
     );
     let body = scrollable(
         column(items)
-            .spacing(pm::TOOL_GAP)
-            .padding([pm::TOOL_GAP, pm::GRID_INSET_L])
+            .spacing(km::TOOL_GAP)
+            .padding([km::TOOL_GAP, km::GRID_INSET_L])
             .width(Length::Fixed(MENU_EDITOR_W)),
     )
     .style(crate::ui::kit::scroll_style)
     .height(Length::Shrink);
     let panel = container(body)
-        .style(crate::ui::palette_menu::frame_style)
-        .padding(crate::ui::palette_menu::inset(MENU_PAD_TOP))
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(MENU_PAD_TOP))
         .width(Length::Fixed(MENU_EDITOR_W));
     position_canvas_overlay_clamped(
         pos,
@@ -1855,10 +1918,10 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     }
     let enabled = item.enabled;
     let mut content = row![context_menu_gutter(item.icon, enabled), label_text]
-        .spacing(pm::TOOL_GAP)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
     if let Some(hint) = item.hint.as_ref() {
-        // Muted, as a palette menu item's shortcut.
+        // Muted, as a kit menu item's shortcut.
         content = content.push(iced::widget::Space::new().width(Fill)).push(
             text(hint.clone())
                 .size(ui_text::UI)
@@ -1885,9 +1948,9 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     let mut btn = button(content)
         .padding(iced::Padding {
             top: 0.0,
-            right: pm::MENU_PAD_X,
+            right: km::MENU_PAD_X,
             bottom: 0.0,
-            left: pm::TOOL_GAP + indent,
+            left: km::TOOL_GAP + indent,
         })
         .width(Fill)
         .height(Length::Fixed(MENU_ROW_H))
@@ -1898,7 +1961,7 @@ fn context_menu_row(item: &MenuItem, indent: f32, highlighted: bool) -> Element<
     btn.into()
 }
 
-/// Row colours, the palette menu's: the keyboard highlight and the hovered
+/// Row colours, the kit menu's: the keyboard highlight and the hovered
 /// row lit with `hover`, disabled rows muted.
 fn context_menu_row_style(
     theme: &Theme,
@@ -1908,7 +1971,10 @@ fn context_menu_row_style(
     let lit = highlighted || matches!(status, button::Status::Hovered | button::Status::Pressed);
     let (background, text_color) = match status {
         button::Status::Disabled => (None, chrome::muted(theme)),
-        _ if lit => (Some(Background::Color(chrome::hover(theme))), chrome::text(theme)),
+        _ if lit => (
+            Some(Background::Color(chrome::hover(theme))),
+            chrome::text(theme),
+        ),
         _ => (None, chrome::text(theme)),
     };
     button::Style {

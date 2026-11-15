@@ -71,7 +71,7 @@ where
 /// Width of the label column in a `label : control` row.
 pub const LABEL_WIDTH: f32 = 92.0;
 /// Height of a row in a dialog form (colour picker, gradient editor). The
-/// palettes use `palette_metrics::ROW_H`.
+/// palettes use `kit_metrics::ROW_H`.
 pub const ROW_H: f32 = 26.0;
 
 /// [`button_style`] as a plain function, for the main action.

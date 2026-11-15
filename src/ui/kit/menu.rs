@@ -3,7 +3,7 @@
 //! Same item height, check marks, separators and colours everywhere.
 
 use crate::app::Message;
-use crate::ui::style::{chrome, palette_metrics as pm, text as ui_text};
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use iced::widget::{column, container, mouse_area, row, text, Space};
 use iced::{Background, Border, Element, Length, Theme};
 
@@ -175,8 +175,8 @@ fn mark_cell<'a>(mark: Mark) -> Element<'a, Message> {
         _ => Space::new().into(),
     };
     container(inner)
-        .center_x(Length::Fixed(pm::MENU_CHECK_W))
-        .center_y(Length::Fixed(pm::MENU_ITEM_H))
+        .center_x(Length::Fixed(km::MENU_CHECK_W))
+        .center_y(Length::Fixed(km::MENU_ITEM_H))
         .into()
 }
 
@@ -223,13 +223,13 @@ fn row_area<'a>(
     let body = |hovered: bool| {
         container(Space::new())
             .width(Length::Fill)
-            .height(Length::Fixed(pm::MENU_ITEM_H))
+            .height(Length::Fixed(km::MENU_ITEM_H))
             .style(style(hovered))
     };
     let face = container(
         content
-            .height(Length::Fixed(pm::MENU_ITEM_H))
-            .padding(iced::Padding::ZERO.right(pm::MENU_PAD_X)),
+            .height(Length::Fixed(km::MENU_ITEM_H))
+            .padding(iced::Padding::ZERO.right(km::MENU_PAD_X)),
     )
     .width(Length::Fill)
     .style(style(false));
@@ -255,14 +255,14 @@ fn row_area<'a>(
 fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
     match it {
         Item::Separator => container(
-            container(Space::new().width(Length::Fill).height(pm::line())).style(
+            container(Space::new().width(Length::Fill).height(km::line())).style(
                 |theme: &Theme| container::Style {
                     background: Some(Background::Color(chrome::border(theme))),
                     ..Default::default()
                 },
             ),
         )
-        .center_y(Length::Fixed(pm::MENU_SEPARATOR_H))
+        .center_y(Length::Fixed(km::MENU_SEPARATOR_H))
         .width(Length::Fill)
         .into(),
         Item::Heading(caption) => container(
@@ -273,8 +273,8 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
                     color: Some(chrome::muted(theme)),
                 }),
         )
-        .padding(iced::Padding::ZERO.left(pm::MENU_CHECK_W))
-        .center_y(Length::Fixed(pm::MENU_ITEM_H))
+        .padding(iced::Padding::ZERO.left(km::MENU_CHECK_W))
+        .center_y(Length::Fixed(km::MENU_ITEM_H))
         .width(Length::Fill)
         .into(),
         Item::Action {
@@ -290,7 +290,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
             if let Some(art) = icon {
                 content = content.push(
                     container(crate::ui::icons::tinted(art, ITEM_ICON, chrome::text))
-                        .padding(iced::Padding::ZERO.right(pm::TOOL_GAP)),
+                        .padding(iced::Padding::ZERO.right(km::TOOL_GAP)),
                 );
             }
             content = content.push(
@@ -301,7 +301,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
                     .width(Length::Fill),
             );
             if dirty {
-                content = content.push(dot(pm::DIRTY_DOT, chrome::text));
+                content = content.push(dot(km::DIRTY_DOT, chrome::text));
             }
             if let Some(key) = shortcut {
                 content = content.push(
@@ -314,7 +314,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
                                 color: Some(chrome::muted(theme)),
                             }),
                     )
-                    .padding(iced::Padding::ZERO.left(pm::MENU_PAD_X)),
+                    .padding(iced::Padding::ZERO.left(km::MENU_PAD_X)),
                 );
             }
             row_area(content, on_press.map(|m| *m), on_enter, false, tip)
@@ -330,7 +330,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
             if let Some(art) = icon {
                 content = content.push(
                     container(crate::ui::icons::tinted(art, ITEM_ICON, chrome::text))
-                        .padding(iced::Padding::ZERO.right(pm::TOOL_GAP)),
+                        .padding(iced::Padding::ZERO.right(km::TOOL_GAP)),
                 );
             }
             content = content
@@ -341,7 +341,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
                         .wrapping(iced::widget::text::Wrapping::None)
                         .width(Length::Fill),
                 )
-                .push(crate::ui::icons::themed_arrow_right(pm::CARET));
+                .push(crate::ui::icons::themed_arrow_right(km::CARET));
             let open_msg = on_open.map(|m| *m);
             row_area(content, open_msg.clone(), open_msg, open, None)
         }
@@ -354,7 +354,7 @@ fn entry_with<'a>(it: Item, on_enter: Option<Message>) -> Element<'a, Message> {
 /// border's width all round, so a lit row stops inside the border and the
 /// border stays on top of it.
 pub fn inset(pad_y: f32) -> iced::Padding {
-    let line = pm::line();
+    let line = km::line();
     iced::Padding {
         top: pad_y + line,
         bottom: pad_y + line,
@@ -363,16 +363,16 @@ pub fn inset(pad_y: f32) -> iced::Padding {
     }
 }
 
-pub fn menu<'a>(items: Vec<Item>) -> Element<'a, Message> {
-    menu_at_least(items, 0.0)
+pub fn view<'a>(items: Vec<Item>) -> Element<'a, Message> {
+    view_at_least(items, 0.0)
 }
 
-/// [`menu`], at least `min_width` wide.
-pub fn menu_at_least<'a>(items: Vec<Item>, min_width: f32) -> Element<'a, Message> {
+/// [`view`], at least `min_width` wide.
+pub fn view_at_least<'a>(items: Vec<Item>, min_width: f32) -> Element<'a, Message> {
     let width = width(&items).max(min_width);
     container(column(items.into_iter().map(entry)).width(Length::Fill))
         .width(Length::Fixed(width))
-        .padding(inset(pm::MENU_PAD_Y))
+        .padding(inset(km::MENU_PAD_Y))
         .style(frame_style)
         .into()
 }
@@ -382,7 +382,7 @@ pub fn menu_at_least<'a>(items: Vec<Item>, min_width: f32) -> Element<'a, Messag
 /// submenu either way (near the window edge the overlay is moved in to fit,
 /// and a width that changed with the submenu moved it out from under the
 /// pointer, #2258). Coming onto any other row sends `close`.
-pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, Message> {
+pub fn with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, Message> {
     let main_w = width(&items);
     let flyout_w = items
         .iter()
@@ -392,7 +392,7 @@ pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, M
         })
         .fold(0.0_f32, f32::max);
     // Where the open submenu's row starts, and its items.
-    let mut top = pm::MENU_PAD_Y + pm::LINE;
+    let mut top = km::MENU_PAD_Y + km::LINE;
     let mut flyout: Option<(f32, Vec<Item>)> = None;
     let mut rows: Vec<Element<'a, Message>> = Vec::new();
     for it in items {
@@ -426,13 +426,13 @@ pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, M
     }
     let main = container(column(rows).width(Length::Fill))
         .width(Length::Fixed(main_w))
-        .padding(inset(pm::MENU_PAD_Y))
+        .padding(inset(km::MENU_PAD_Y))
         .style(frame_style);
     let side: Element<'a, Message> = match flyout {
         // The submenu's first item level with its row.
         Some((at, items)) => column![
-            Space::new().height(Length::Fixed(at - pm::MENU_PAD_Y - pm::LINE)),
-            menu(items)
+            Space::new().height(Length::Fixed(at - km::MENU_PAD_Y - km::LINE)),
+            view(items)
         ]
         .into(),
         None => Space::new().width(Length::Fixed(flyout_w)).into(),
@@ -445,8 +445,8 @@ pub fn menu_with_submenus<'a>(items: Vec<Item>, close: Message) -> Element<'a, M
 /// Height of one item's row.
 fn item_height(it: &Item) -> f32 {
     match it {
-        Item::Separator => pm::MENU_SEPARATOR_H,
-        _ => pm::MENU_ITEM_H,
+        Item::Separator => km::MENU_SEPARATOR_H,
+        _ => km::MENU_ITEM_H,
     }
 }
 
@@ -459,7 +459,7 @@ pub fn width(items: &[Item]) -> f32 {
         .filter_map(|it| match it {
             Item::Separator => None,
             Item::Heading(caption) => Some(
-                pm::MENU_CHECK_W
+                km::MENU_CHECK_W
                     + crate::ui::style::text_metrics::width(caption, ui_text::UI_SMALL, false)
                         .ceil(),
             ),
@@ -471,49 +471,49 @@ pub fn width(items: &[Item]) -> f32 {
                 ..
             } => {
                 let icon = if icon.is_some() {
-                    ITEM_ICON + pm::TOOL_GAP
+                    ITEM_ICON + km::TOOL_GAP
                 } else {
                     0.0
                 };
                 let dot = if *dirty {
-                    pm::TAB_INNER_GAP + pm::DIRTY_DOT
+                    km::TAB_INNER_GAP + km::DIRTY_DOT
                 } else {
                     0.0
                 };
                 let key = shortcut.as_deref().map_or(0.0, |key| {
-                    pm::MENU_PAD_X
+                    km::MENU_PAD_X
                         + crate::ui::style::text_metrics::width(key, ui_text::UI, false).ceil()
                 });
                 let text = crate::ui::style::text_metrics::width(label, ui_text::UI, false).ceil();
-                Some(pm::MENU_CHECK_W + icon + text + dot + key)
+                Some(km::MENU_CHECK_W + icon + text + dot + key)
             }
             Item::Submenu { icon, label, .. } => {
                 let icon = if icon.is_some() {
-                    ITEM_ICON + pm::TOOL_GAP
+                    ITEM_ICON + km::TOOL_GAP
                 } else {
                     0.0
                 };
                 let text = crate::ui::style::text_metrics::width(label, ui_text::UI, false).ceil();
-                Some(pm::MENU_CHECK_W + icon + text + pm::TOOL_GAP + pm::CARET)
+                Some(km::MENU_CHECK_W + icon + text + km::TOOL_GAP + km::CARET)
             }
         })
         .fold(0.0_f32, f32::max);
-    (widest + pm::MENU_PAD_X + 2.0 * pm::LINE).ceil()
+    (widest + km::MENU_PAD_X + 2.0 * km::LINE).ceil()
 }
 
 /// Height of a menu holding `items`, for keeping it on screen.
 pub fn height(items: &[Item]) -> f32 {
-    2.0 * pm::MENU_PAD_Y + 2.0 * pm::LINE + items.iter().map(item_height).sum::<f32>()
+    2.0 * km::MENU_PAD_Y + 2.0 * km::LINE + items.iter().map(item_height).sum::<f32>()
 }
 
-/// The menu frame: the palette body with a 1 px edge, no rounding.
+/// The menu frame: the surface with a 1 px edge, no rounding.
 pub fn frame_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(chrome::palette_body(theme))),
+        background: Some(Background::Color(chrome::surface(theme))),
         text_color: Some(chrome::text(theme)),
         border: Border {
             color: chrome::edge(theme),
-            width: pm::line(),
+            width: km::line(),
             radius: 0.0.into(),
         },
         shadow: iced::Shadow {
@@ -543,7 +543,7 @@ mod tests {
         ];
         assert_eq!(
             height(&items),
-            2.0 * pm::MENU_PAD_Y + 2.0 * pm::LINE + 2.0 * pm::MENU_ITEM_H + pm::MENU_SEPARATOR_H
+            2.0 * km::MENU_PAD_Y + 2.0 * km::LINE + 2.0 * km::MENU_ITEM_H + km::MENU_SEPARATOR_H
         );
     }
 
@@ -561,7 +561,7 @@ mod tests {
         assert!(width(&long) > width(&short));
         assert_eq!(
             width(&long),
-            (pm::MENU_CHECK_W + label + pm::MENU_PAD_X + 2.0 * pm::LINE).ceil()
+            (km::MENU_CHECK_W + label + km::MENU_PAD_X + 2.0 * km::LINE).ceil()
         );
         // An icon and a dirty dot add their room.
         let more = vec![Item::new("Tabs above the palettes", Message::Noop)

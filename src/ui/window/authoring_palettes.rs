@@ -5,7 +5,7 @@ use crate::modules::{parametric, IconKind, ToolDef};
 use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::icons;
 use crate::ui::kit;
-use crate::ui::style::palette_metrics as pm;
+use crate::ui::style::kit_metrics as km;
 use iced::widget::{button, column, container, row, stack, text, Space};
 use iced::{Element, Fill};
 
@@ -248,9 +248,9 @@ fn catalog(
             stack![
                 base,
                 container(if enabled {
-                    icons::semantic(include_bytes!("../../../assets/icons/ui/bolt.svg"), pm::BAR_ICON)
+                    icons::semantic(include_bytes!("../../../assets/icons/ui/bolt.svg"), km::BAR_ICON)
                 } else {
-                    icons::semantic_disabled(include_bytes!("../../../assets/icons/ui/bolt.svg"), pm::BAR_ICON)
+                    icons::semantic_disabled(include_bytes!("../../../assets/icons/ui/bolt.svg"), km::BAR_ICON)
                 })
                 .width(TOOL_ICON)
                 .height(TOOL_ICON)
@@ -314,7 +314,7 @@ fn catalog(
             entry
         }
     }))
-    .spacing(pm::line())
+    .spacing(km::line())
     .into()
 }
 
@@ -326,11 +326,11 @@ fn tool_row(
 ) -> Element<'static, Message> {
     let entry = button(
         row![icon, kit::value_text(crate::t!(label).into_owned(), false)]
-            .spacing(pm::TOOL_GAP * 2.0)
+            .spacing(km::TOOL_GAP * 2.0)
             .align_y(iced::Center),
     )
     .on_press_maybe(message)
-    .padding([0.0, pm::CELL_PAD_X])
+    .padding([0.0, km::CELL_PAD_X])
     .height(TOOL_ROW_H)
     .width(Fill)
     .style(kit::flat_button_style(false));
@@ -394,9 +394,9 @@ fn constraints() -> Element<'static, Message> {
     ];
     column![
         kit::section_bar(crate::t!("Geometric Constraints").into_owned(), Vec::new()),
-        column(geometric.into_iter().map(constraint_row)).spacing(pm::line()),
+        column(geometric.into_iter().map(constraint_row)).spacing(km::line()),
         kit::section_bar(crate::t!("Constraint Parameters").into_owned(), Vec::new()),
-        column(dimensional.into_iter().map(constraint_row)).spacing(pm::line()),
+        column(dimensional.into_iter().map(constraint_row)).spacing(km::line()),
     ]
     .into()
 }
@@ -429,7 +429,7 @@ pub fn view(
         .id(category.widget_id())
         .into()
     }))
-    .spacing(pm::line())
+    .spacing(km::line())
     .push(Space::new().height(Fill));
     kit::palette(
         dock::title_bar(

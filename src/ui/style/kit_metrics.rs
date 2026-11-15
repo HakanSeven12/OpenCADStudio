@@ -3,7 +3,7 @@
 //! the Properties grid and the drawing-tab bar. Logical pixels, whole
 //! numbers. Code in those areas refers to these names, not to numbers.
 //!
-//! Colours live in [`super::chrome`] (`palette_body`, `palette_bar`,
+//! Colours live in [`super::chrome`] (`surface`, `surface_raised`,
 //! `strip`, `edge`, ...), text sizes in [`super::text`].
 
 /// A 1 px line: edges, grid lines, dividers. For sizes that count a line
@@ -115,7 +115,7 @@ pub const CHECK: f32 = 14.0;
 
 /// Height of a tab (it fills the bar above the line).
 pub const TAB_H: f32 = 23.0;
-/// The `palette_body` line under the tabs, joined to the active tab.
+/// The `surface` line under the tabs, joined to the active tab.
 pub const TAB_LINE: f32 = 2.0;
 /// The tab bar: 23 px of tabs and the 2 px line under them.
 pub const TAB_BAR_H: f32 = TAB_H + TAB_LINE;

@@ -1600,4 +1600,20 @@ mod tests {
         }
         assert!(cases > 1000, "{cases} damaged files");
     }
+
+    /// A whole sphere bounded by a vertex loop gets its seam and meshes
+    /// (#3051), whether written analytic or as a spline.
+    #[test]
+    fn a_sphere_on_a_vertex_loop_gets_a_seam_and_meshes() {
+        let curved = read(CURVED).expect("a STEP model");
+        let analytic = &curved.products[curved.products[curved.roots[0]].children[0].0];
+        let spline = read(NURBS_SPHERE).expect("a STEP model");
+        for body in [&analytic.bodies[0].body, &only_product(&spline).bodies[0].body] {
+            assert_eq!((body.edges.len(), body.vertices.len()), (1, 2));
+            assert!(body.validate().is_empty(), "{:?}", body.validate());
+            let mesh = kernel::brep::mesh_body(body, 0.1, 0.01);
+            assert!(!mesh.triangles.is_empty(), "the sphere meshes");
+        }
+    }
+
 }

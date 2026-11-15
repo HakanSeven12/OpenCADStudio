@@ -963,7 +963,7 @@ impl OpenCADStudio {
     // window without Apply discards by restoring the snapshot.
 
     /// Snapshot the style-related document state into a transferable record.
-    fn capture_style_state(&self, linetypes: bool) -> StyleStateSnapshot {
+    pub(super) fn capture_style_state(&self, linetypes: bool) -> StyleStateSnapshot {
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
         let style_objects = doc

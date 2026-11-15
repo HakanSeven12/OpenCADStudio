@@ -1701,12 +1701,14 @@ impl OpenCADStudio {
 
     fn dash_style(&mut self, i: usize, args: &[String]) {
         let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
-        match arg(0).as_str() {
-            "?" => {
+        // A style is set with ten arguments; the list and the missing font
+        // take fewer, so no style name is mistaken for them.
+        match (arg(0).as_str(), args.len()) {
+            ("?", 2 | 3) => {
                 self.list_text_styles(i, &arg(1), arg(2).parse().unwrap_or(0));
                 return;
             }
-            "FONT_MISSING" => {
+            ("FONT_MISSING", 1) => {
                 self.command_line
                     .push_output(&trp!("text-style", "font-missing"));
                 return;
@@ -1715,7 +1717,10 @@ impl OpenCADStudio {
         }
         let [name, font, height, width, oblique, backwards, upside_down, vertical, annotative, orientation] =
             std::array::from_fn(|n| arg(n));
-        let undo = self.begin_text_style_undo(i, "STYLE", std::slice::from_ref(&name));
+        // The style, its orientation flag and the current style are one undo
+        // step.
+        let before = self.capture_style_state(false);
+        let dirty_before = self.tabs[i].dirty;
         let doc = &mut self.tabs[i].scene.document;
         if doc.text_styles.get(&name).is_none() {
             let mut style = document::tables::TextStyle::new(&name);
@@ -1767,7 +1772,8 @@ impl OpenCADStudio {
         doc.header.current_text_style_name = name.clone();
         self.tabs[i].dirty = true;
         self.tabs[i].scene.invalidate_text_style_dependencies(&name);
-        self.commit_text_style_undo(i, undo);
+        let after = self.capture_style_state(false);
+        self.commit_style_undo(i, before, after, Vec::new(), dirty_before, None);
         let _ = self.on_ribbon_style_changed(crate::modules::StyleKey::TextStyle, name.clone());
         self.command_line
             .push_output(&trp!("text-style", "now-current", name = name));

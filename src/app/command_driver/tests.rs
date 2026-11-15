@@ -9381,3 +9381,68 @@ mod attsync_order_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod battman_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::EntityType;
+    use document::types::Vector3;
+
+    /// BATTMAN asks the picked reference's block for its definitions and
+    /// writes the edited list back to the block, tag-for-tag, values kept.
+    /// The reference an editing session renames keeps the value it held.
+    #[test]
+    fn battman_applies_the_edited_definition_to_its_references() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new("TAGGED".into(), "Tag".into(), String::new())
+            })],
+        );
+        let mut insert = Insert::new("PANEL", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAGGED".into(), "kept".into()));
+        let reference = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(insert));
+
+        app.tabs[i].scene.select_entities(&[reference]);
+        let _ = app.dispatch_command("BATTMAN");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::AttMan),
+            "BATTMAN opens on the picked reference's block"
+        );
+
+        let _ = app.update(crate::app::Message::AttMan(
+            crate::ui::window::attman_dialog::AttManMsg::Tag("RENAMED".to_string()),
+        ));
+        let _ = app.update(crate::app::Message::AttMan(
+            crate::ui::window::attman_dialog::AttManMsg::Apply,
+        ));
+
+        let document = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = document.get_entity(reference).expect("reference")
+        else {
+            panic!("not an insert");
+        };
+        let tags: Vec<String> = insert.attributes.iter().map(|a| a.tag.clone()).collect();
+        assert_eq!(tags, vec!["RENAMED".to_string()]);
+        let values: Vec<String> = insert
+            .attributes
+            .iter()
+            .map(|a| a.get_value().to_string())
+            .collect();
+        assert_eq!(values, vec!["kept".to_string()]);
+    }
+}
+

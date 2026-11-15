@@ -475,14 +475,25 @@ impl OpenCADStudio {
             return;
         }
         self.last_plugin_selection = Some(key);
+        let revision = self.bump_selection_revision(tab_id);
         let handles = self.tabs[i].scene.selected_handles_in_order();
-        crate::plugin::v4_support::publish_selection_changed_v4(tab_id, handles.clone());
-        // Same guarded boundary, second surface (API v9): the plain
-        // `SelectionChanged` reaches every loaded native plugin through
-        // `BuiltinPlugin::on_notification`, without a shared-view
-        // subscription.
-        crate::plugin::v4_support::publish_selection_changed(handles.clone());
+        // Per-endpoint API routing (v22): digest to v22+ runners, the exact
+        // legacy streams (v4..v21 handle list; plain below v4) to older ones.
+        crate::plugin::v4_support::publish_selection_changed_versioned(
+            tab_id,
+            handles.clone(),
+            revision,
+        );
         self.control_record_selection_event(&handles);
+    }
+
+    /// Next monotonic selection revision for `tab_id`, used by the v22
+    /// `SelectionChangedDigest` so workers can order/dedup results.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn bump_selection_revision(&mut self, tab_id: u64) -> u64 {
+        let entry = self.selection_revision_by_tab.entry(tab_id).or_insert(0);
+        *entry += 1;
+        *entry
     }
 
     /// Refresh the shared V4 document after built-in geometry edits. Plugin

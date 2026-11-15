@@ -774,9 +774,11 @@ impl<'a> HostSession<'a> {
                     self.app.tabs[self.tab].scene.selection_fingerprint(),
                 ));
             }
-            crate::plugin::v4_support::publish_selection_changed_v4(
+            let revision = self.app.bump_selection_revision(self.tab_id());
+            crate::plugin::v4_support::publish_selection_changed_versioned(
                 self.tab_id(),
                 self.selection(),
+                revision,
             );
         }
         Ok(())

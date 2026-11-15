@@ -383,6 +383,28 @@ pub static PANEL_BUTTON: OpDef = OpDef {
     example: r#"{"op":"panel_button","panel_id":"cvifc.ifc_h_properties","control_id":"apply"}"#,
 };
 
+pub static PANEL_ACTION: OpDef = OpDef {
+    name: "panel_action",
+    doc: "Fire ONE panel control's real GUI interaction without a window: `click` on an action-less button (the plugin's click event) or a typed `change` value on Checkbox/Choice/Text/Number drafts. The same Message the rendered widget would send; records, geometry and undo stay untouched.",
+    batchable: false,
+    params: &[
+        req("panel_id", Ty::Str, "Registered native panel id."),
+        req("control_id", Ty::Str, "Control id declared by that panel."),
+        opt(
+            "action",
+            Ty::EnumCi(&["click", "change"]),
+            "Defaults to click. Buttons support click; Checkbox/Choice/Text/Number support change (Color is picker-only).",
+        ),
+        opt(
+            "value",
+            Ty::Raw(r#"{"oneOf":[{"type":"boolean"},{"type":"number"},{"type":"string"},{"type":"object","properties":{"index":{"type":"integer","minimum":0},"text":{"type":"string"}},"required":["index"]}]}"#),
+            "Typed draft for change: booleans, numbers, strings, or {index, text} choices. Choice text defaults to options[index] when omitted.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"panel_action","panel_id":"epl_panel","control_id":"epl_button_ping","action":"click"}"#,
+};
+
 pub static ACTION: OpDef = OpDef {
     name: "action",
     doc: "Trigger a named GUI action or dialog command.",
@@ -1285,6 +1307,7 @@ pub static OPS: &[&OpDef] = &[
     &SET_PROPERTIES,
     &PANEL_INPUT,
     &PANEL_BUTTON,
+    &PANEL_ACTION,
     &ACTION,
     &EMBED_IMAGE,
     &DGN_IMPORT,

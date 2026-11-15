@@ -63,6 +63,21 @@ pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<document::Handle>)
     broadcast(HostNotification::SelectionChangedV4 { tab_id, handles });
 }
 
+/// Broadcast a selection change with per-endpoint API routing (v22): v22+
+/// runners receive the O(1) `SelectionChangedDigest` ({tab_id, revision,
+/// count}); older endpoints keep their exact legacy notification streams
+/// (`SelectionChangedV4` for v4..v21, plain `SelectionChanged` below — which
+/// the broadcast's non-V4 skip already gated in today's behavior).
+pub fn publish_selection_changed_versioned(
+    tab_id: u64,
+    handles: Vec<document::Handle>,
+    revision: u64,
+) {
+    crate::plugin::external::with_manager(|mgr| {
+        mgr.broadcast_selection_changed(tab_id, &handles, revision);
+    });
+}
+
 /// Broadcast the tab-independent `HostNotification::SelectionChanged` to every
 /// loaded native plugin (API v9): the plain-handle variant of the selection
 /// event, dispatched at the same fingerprint-guarded message boundary as the

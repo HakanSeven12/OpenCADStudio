@@ -351,6 +351,7 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
+        N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
         N::CommandStateChanged { .. } | N::DrawingChanged { .. } => 7,

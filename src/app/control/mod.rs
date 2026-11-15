@@ -645,6 +645,18 @@ impl OpenCADStudio {
                     ocs_plugin_api::dialog::DialogControl::Number { id, label, .. } => json!({"id":id,"kind":"Number","label":label,"value":panel.text_values.get(id)}),
                     ocs_plugin_api::dialog::DialogControl::InfoText { text, .. } => json!({"kind":"InfoText","text":text}),
                     ocs_plugin_api::dialog::DialogControl::Button { id, label, .. } => json!({"id":id,"kind":"Button","label":label}),
+                    // Structured drafts (additive): every kind also carries a
+                    // `value` next to the legacy debug `kind` string so
+                    // automation reads typed state without parsing Rust
+                    // debug output.
+                    ocs_plugin_api::dialog::DialogControl::Checkbox { id, .. } => json!({"id":id,"kind":"Checkbox","value":panel.bool_values.get(id)}),
+                    ocs_plugin_api::dialog::DialogControl::Choice { id, options, .. } => {
+                        let index = panel.choice_values.get(id).copied();
+                        let text = index.map(|index| options.get(index).cloned().unwrap_or_default());
+                        json!({"id":id,"kind":"Choice","value":{"index":index,"text":text},"options":options.iter().map(|o|o.as_str()).collect::<Vec<_>>()})
+                    }
+                    ocs_plugin_api::dialog::DialogControl::Color { id, .. } => json!({"id":id,"kind":"Color","value":panel.color_values.get(id)}),
+                    ocs_plugin_api::dialog::DialogControl::Label { id, .. } => json!({"id":id,"kind":"Label","value":panel.text_values.get(id)}),
                     other => json!({"kind":format!("{:?}",other)}),
                 }).collect::<Vec<_>>()})
             }).collect::<Vec<_>>(),
@@ -1435,6 +1447,7 @@ impl OpenCADStudio {
             "action" => self.control_ui_action(req)?,
             "panel_input" => self.control_panel_input(req)?,
             "panel_button" => self.control_panel_button(req)?,
+            "panel_action" => self.control_panel_action(req)?,
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             "dgn_import" => self.control_dgn_import(req)?,

@@ -1106,6 +1106,51 @@ fn content_display_value(
     evaluate_table_formula(table, &value).unwrap_or(value)
 }
 
+/// A formula typed into a cell ("=A1+C1") is plain text, which other
+/// programs keep showing as typed. Turns the cell into a formula field
+/// (`\AcExpr (A1+C1)`), the form a formula cell is stored in, holding the
+/// value the screen shows. A formula that does not evaluate stays as text.
+/// Returns whether the cell changed.
+pub(crate) fn typed_formula_to_field(
+    document: &mut document::Document,
+    table: document::Handle,
+    row: usize,
+    column: usize,
+) -> bool {
+    let Some(document::EntityType::Table(source)) = document.get_entity(table) else {
+        return false;
+    };
+    let Some([content]) = source
+        .cell(row, column)
+        .map(|cell| cell.contents.as_slice())
+    else {
+        return false;
+    };
+    if content.field_handle.is_some() {
+        return false;
+    }
+    let raw = format_cell_value(&content.value);
+    let Some(body) = raw.trim().strip_prefix('=').map(str::trim) else {
+        return false;
+    };
+    if body.is_empty() {
+        return false;
+    }
+    let Some(shown) = evaluate_table_formula(source, &raw) else {
+        return false;
+    };
+    let code = format!("\\AcExpr ({body})");
+    document
+        .set_table_cell_field(
+            table,
+            row,
+            column,
+            "%<\\_FldIdx 0>%",
+            vec![document::fields::NewField::new(code, shown)],
+        )
+        .is_some()
+}
+
 /// Rewrite a formula cell's picture text to its computed value: the picture
 /// block is what a file stores and other programs draw, and it must show the
 /// same result the screen shows, not the raw "=A1+C1". Returns the picture
@@ -1126,6 +1171,7 @@ pub(crate) fn refresh_picture_formulas(
         }
     }
     let mut updates: Vec<(document::Handle, String)> = Vec::new();
+    let mut cells: Vec<(usize, usize, String)> = Vec::new();
     for row in 0..source.rows.len() {
         for column in 0..source.columns.len() {
             let Some(cell) = source.cell(row, column) else {
@@ -1135,17 +1181,36 @@ pub(crate) fn refresh_picture_formulas(
                 continue;
             };
             let raw = format_cell_value(&content.value);
-            if !raw.trim_start().starts_with('=') {
+            // A formula field keeps the value it had when last evaluated;
+            // the cell and its picture follow the cells it reads.
+            let formula_field = content
+                .field_handle
+                .is_some_and(|handle| is_formula_field(document, handle));
+            if !formula_field && !raw.trim_start().starts_with('=') {
                 continue;
             }
             let shown = content_display_value(document, &source, content);
             if shown == raw {
                 continue;
             }
+            if formula_field {
+                cells.push((row, column, shown.clone()));
+            }
             if let Some(picture) = cell_picture(document, &source, row, column) {
                 for &member in &picture.members {
                     updates.push((member, shown.clone()));
                 }
+            }
+        }
+    }
+    if let Some(document::EntityType::Table(target)) = document.get_entity_mut(table) {
+        for (row, column, shown) in cells {
+            if let Some(content) = target
+                .cell_mut(row, column)
+                .and_then(|cell| cell.contents.first_mut())
+            {
+                content.value.text = shown.clone();
+                content.value.formatted_value = shown;
             }
         }
     }
@@ -1159,6 +1224,22 @@ pub(crate) fn refresh_picture_formulas(
         }
     }
     changed
+}
+
+/// Whether a cell's field is one formula: a `_text` container whose only
+/// child is an `AcExpr` field.
+fn is_formula_field(document: &document::Document, container: document::Handle) -> bool {
+    use document::objects::ObjectType;
+    let Some(ObjectType::Field(container)) = document.objects.get(&container) else {
+        return false;
+    };
+    let [child] = container.child_fields.as_slice() else {
+        return false;
+    };
+    matches!(
+        document.objects.get(child),
+        Some(ObjectType::Field(child)) if child.evaluator_id == "AcExpr"
+    )
 }
 
 fn resolved_content_geometry(

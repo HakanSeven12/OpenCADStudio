@@ -3100,6 +3100,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: __ocs_fmt_0__ 個の属性 [__ocs_fmt_1__] = __ocs_fmt_2__ を更新しました。
     .arc-length-symbol-dimarcsym = 円弧長記号 (DIMARCSYM)
     .axis = 軸
+    .axis-x = aXis
     .axis-end = 軸、終点
     .boundary-pick-internal-point-miss = BOUNDARY  内部点を選択:__ocs_arg_miss__
     .boundary = 境界
@@ -3321,7 +3322,7 @@ draw =
     .tan-tan-radius = 接線、接線、半径
     .tan-tan-tan = 接線、接線、接線
     .trace = トレース
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = 使用法: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = 使用法: POLYSOLID <width> <height>   （先にポリラインを選択）
     .usage-pyramid-radius-height-sides-default-4-si = 使用法: PYRAMID <radius> <height> [sides]   （既定は 4 側面）

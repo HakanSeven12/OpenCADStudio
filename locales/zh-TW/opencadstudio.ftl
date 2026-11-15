@@ -3109,6 +3109,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT：已更新 __ocs_fmt_0__ 個屬性 [__ocs_fmt_1__=__ocs_fmt_2__]。
     .arc-length-symbol-dimarcsym = 弧長符號 (DIMARCSYM)
     .axis = 軸
+    .axis-x = aXis
     .axis-end = 軸、端點
     .boundary-pick-internal-point-miss = BOUNDARY 拾取內部點：__ocs_arg_miss__
     .boundary = 邊界
@@ -3330,7 +3331,7 @@ draw =
     .tan-tan-radius = 相切、相切、半徑
     .tan-tan-tan = 相切、相切、相切
     .trace = 追蹤
-    .ttt = 點
+    .ttt = TTt
     .usage-attdisp-on-off-normal = 用法： ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = 用法： POLYSOLID <width> <height>   (select a polyline first)
     .usage-pyramid-radius-height-sides-default-4-si = 用法： PYRAMID <radius> <height> [sides]   (default 4 sides)

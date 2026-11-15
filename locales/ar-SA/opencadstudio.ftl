@@ -3122,6 +3122,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: تم تحديث __ocs_fmt_0__ سمة [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = رمز طول القوس (DIMARCSYM)
     .axis = المحور
+    .axis-x = aXis
     .axis-end = المحور، النهاية
     .boundary-pick-internal-point-miss = BOUNDARY  اختر نقطة داخلية:__ocs_arg_miss__
     .boundary = الحد

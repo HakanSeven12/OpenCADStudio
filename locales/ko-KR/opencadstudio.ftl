@@ -3109,6 +3109,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: __ocs_fmt_0__ 속성 [__ocs_fmt_1__] = __ocs_fmt_2__를 업데이트했습니다.
     .arc-length-symbol-dimarcsym = 호 길이 기호(DIMARCSYM)
     .axis = 축
+    .axis-x = aXis
     .axis-end = 축, 끝
     .boundary-pick-internal-point-miss =BOUNDARY 내부 점 선택:__ocs_arg_miss__
     .boundary = 경계
@@ -3330,7 +3331,7 @@ draw =
     .tan-tan-radius = 황갈색, 황갈색, 반경
     .tan-tan-tan = 탄, 탄, 탄
     .trace = 추적
-    .ttt = ㅜㅜ
+    .ttt = TTt
     .usage-attdisp-on-off-normal = 사용법: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = 사용법: POLYSOLID <width> <height>(폴리라인을 먼저 선택하세요)
     .usage-pyramid-radius-height-sides-default-4-si = 사용법: PYRAMID <radius> <height> [sides] (기본 4면)

@@ -1020,10 +1020,13 @@ impl CommandLine {
                         // typed shows the keyword itself instead.
                         let keyword = opt.keyword.to_uppercase();
                         let short_upper = short.to_uppercase();
-                        let label = if keyword.is_empty()
-                            || (!short.is_empty()
-                                && (keyword.starts_with(&short_upper)
-                                    || short_upper.starts_with(&keyword)))
+                        // A finishing button (Enter) has nothing to type,
+                        // so no letters are marked.
+                        let label = if keyword.is_empty() {
+                            row![part(&opt.label)]
+                        } else if !short.is_empty()
+                            && (keyword.starts_with(&short_upper)
+                                || short_upper.starts_with(&keyword))
                         {
                             row![part(before), part(short).style(accent), part(after)]
                         } else {

@@ -3110,6 +3110,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: bijgewerkt __ocs_fmt_0__ attribuut(s) [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Symbool lengte van de boog (DIMARCSYM)
     .axis = As
+    .axis-x = aXis
     .axis-end = As, einde
     .boundary-pick-internal-point-miss = BOUNDARY Kies intern punt:__ocs_arg_miss__
     .boundary = Begrenzing
@@ -3331,7 +3332,7 @@ draw =
     .tan-tan-radius = Raaklijn, raaklijn, straal
     .tan-tan-tan = Raaklijn, raaklijn, raaklijn
     .trace = Spoor
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Gebruik: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Gebruik: POLYSOLID <width> <height>   (select a polyline first)
     .usage-pyramid-radius-height-sides-default-4-si = Gebruik: PYRAMID <radius> <height> [sides]   (default 4 sides)

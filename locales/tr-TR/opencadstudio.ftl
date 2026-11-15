@@ -3089,6 +3089,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: __ocs_fmt_0__ öznitelik güncellendi [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Yay uzunluğu simgesi (DIMARCSYM)
     .axis = Eksen
+    .axis-x = aXis
     .axis-end = Eksen, Bitiş
     .boundary-pick-internal-point-miss = BOUNDARY  İç nokta seçin:__ocs_arg_miss__
     .boundary = Sınır
@@ -3313,7 +3314,7 @@ draw =
     .tan-tan-radius = Teğet, Teğet, Yarıçap
     .tan-tan-tan = Teğet, Teğet, Teğet
     .trace = İz
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Kullanım: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Kullanım: POLYSOLID <width> <height> (önce bir çoklu çizgi seçin)
     .usage-pyramid-radius-height-sides-default-4-si = Kullanım: PYRAMID <radius> <height> [sides] (varsayılan 4 kenar)

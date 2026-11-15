@@ -3113,6 +3113,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: đã cập nhật __ocs_fmt_0__ thuộc tính [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Ký hiệu độ dài cung (DIMARCSYM)
     .axis = Trục
+    .axis-x = aXis
     .axis-end = Trục, Cuối
     .boundary-pick-internal-point-miss = BOUNDARY  Chọn điểm bên trong:__ocs_arg_miss__
     .boundary = Đường biên
@@ -3337,7 +3338,7 @@ draw =
     .tan-tan-radius = Tiếp tuyến, Tiếp tuyến, Bán kính
     .tan-tan-tan = Tiếp tuyến, Tiếp tuyến, Tiếp tuyến
     .trace = Nét đôi (Trace)
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Cách dùng: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Cách dùng: POLYSOLID <width> <height> (chọn polyline trước)
     .usage-pyramid-radius-height-sides-default-4-si = Cách dùng: PYRAMID <bán kính> <chiều cao> [cạnh] (mặc định 4 cạnh)

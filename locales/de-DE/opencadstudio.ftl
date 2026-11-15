@@ -3110,6 +3110,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: aktualisiertes __ocs_fmt_0__ Attribut(s) [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Bogenlängensymbol (DIMARCSYM)
     .axis = Achse
+    .axis-x = aXis
     .axis-end = Achse, Ende
     .boundary-pick-internal-point-miss = BOUNDARY Interner Punkt auswählen:__ocs_arg_miss__
     .boundary = Begrenzung
@@ -3331,7 +3332,7 @@ draw =
     .tan-tan-radius = Tangente, Tangente, Radius
     .tan-tan-tan = Tangente, Tangente, Tangente
     .trace = Band
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Anwendung: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Anwendung: POLYSOLID <width> <height>   (select a polyline first)
     .usage-pyramid-radius-height-sides-default-4-si = Anwendung: PYRAMID <radius> <height> [sides]   (default 4 sides)

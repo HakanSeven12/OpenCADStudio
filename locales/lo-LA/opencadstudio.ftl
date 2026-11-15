@@ -3108,6 +3108,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: ອັບເດດ __ocs_fmt_0__ ຄຸນລັກສະນະແລ້ວ [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = ສັນຍະລັກຄວາມຍາວສ່ວນໂຄ້ງ (DIMARCSYM)
     .axis = ແກນ
+    .axis-x = aXis
     .axis-end = ແກນ, ຈຸດສິ້ນສຸດ
     .boundary-pick-internal-point-miss = BOUNDARY  ເລືອກຈຸດພາຍໃນ:__ocs_arg_miss__
     .boundary = ຂອບເຂດ
@@ -3332,7 +3333,7 @@ draw =
     .tan-tan-radius = ສຳຜັດ, ສຳຜັດ, ລັດສະໝີ
     .tan-tan-tan = ສຳຜັດ, ສຳຜັດ, ສຳຜັດ
     .trace = ເສັ້ນໜາ (Trace)
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = ວິທີໃຊ້: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = ວິທີໃຊ້: POLYSOLID <width> <height>   (ເລືອກໂພລີລາຍກ່ອນ)
     .usage-pyramid-radius-height-sides-default-4-si = ວິທີໃຊ້: PYRAMID <radius> <height> [sides]   (ເລີ່ມຕົ້ນ 4 ດ້ານ)

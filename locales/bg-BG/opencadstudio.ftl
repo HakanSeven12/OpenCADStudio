@@ -3109,6 +3109,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: обновени __ocs_fmt_0__ атрибут(а) [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Символ за дължина на дъга (DIMARCSYM)
     .axis = Ос
+    .axis-x = aXis
     .axis-end = Ос, край
     .boundary-pick-internal-point-miss = BOUNDARY  Избери вътрешна точка:__ocs_arg_miss__
     .boundary = Граница
@@ -3330,7 +3331,7 @@ draw =
     .tan-tan-radius = Допир, допир, радиус
     .tan-tan-tan = Допир, допир, допир
     .trace = Следа
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Употреба: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Употреба: POLYSOLID <ширина> <височина>   (първо избери полилиния)
     .usage-pyramid-radius-height-sides-default-4-si = Употреба: PYRAMID <радиус> <височина> [страни]   (4 страни по подразбиране)

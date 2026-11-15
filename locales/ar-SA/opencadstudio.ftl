@@ -7232,6 +7232,7 @@ count-feature =
 dock =
     .icons-only = الأيقونات فقط
     .icons-and-names = الأيقونات والأسماء
+    .names-only = الأسماء فقط
     .allow-docking = السماح بالإرساء
     .auto-hide = إخفاء تلقائي
     .dock-left = إرساء إلى اليسار
@@ -9796,3 +9797,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = علامات التبويب فوق اللوحات

@@ -1027,7 +1027,10 @@ pub mod menu {
                         ellipsis: self.ellipsis,
                         hint_factor: renderer.hint_factor(),
                     },
-                    Point::new(bounds.x + self.padding.left, bounds.center_y()),
+                    crate::ui::style::text::snap_point(Point::new(
+                        bounds.x + self.padding.left,
+                        bounds.center_y(),
+                    )),
                     if is_selected {
                         style.selected_text_color
                     } else {
@@ -1592,12 +1595,14 @@ where
                     shaping,
                     wrapping: text::Wrapping::None,
                     ellipsis: text::Ellipsis::None,
+                    // Hinting is off in the pinned iced: `iced_graphics::text::hint_factor`
+                    // returns `None`; follow `renderer.hint_factor()` once it is enabled.
                     hint_factor: None,
                 },
-                Point::new(
+                crate::ui::style::text::snap_point(Point::new(
                     bounds.x + bounds.width - self.padding.right,
                     bounds.center_y(),
-                ),
+                )),
                 style.handle_color,
                 *viewport,
             );
@@ -1625,7 +1630,10 @@ where
                     ellipsis: self.ellipsis,
                     hint_factor: renderer.hint_factor(),
                 },
-                Point::new(bounds.x + self.padding.left, bounds.center_y()),
+                crate::ui::style::text::snap_point(Point::new(
+                    bounds.x + self.padding.left,
+                    bounds.center_y(),
+                )),
                 if selected.is_some() {
                     style.text_color
                 } else {

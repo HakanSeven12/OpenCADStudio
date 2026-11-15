@@ -3,21 +3,20 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 use rustc_hash::FxHashMap as HashMap;
 
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, container, row, text, tooltip, Space};
+use iced::widget::{button, container, row, text, Space};
 use iced::{Background, Element, Fill, Length, Theme};
 
 use super::layout::{QatBuiltin, QatItem};
 use super::ribbon_menu::{check_row, fit_width, MenuTarget, RightPress};
 use super::widgets::{
-    combo_btn_style, layer_combo_face, make_tip, qat_split_part_style, quick_access_btn,
-    render_history_control, split_outline, tip_style, top_hist_btn_style, CENTER_LAYER_COMBO,
-    DIM_LAYER_COMBO, LAYER_COMBO_ID, MLEADER_LAYER_COMBO, PROP_COLOR_ID, PROP_LINETYPE_ID,
-    PROP_LW_ID, SMALL_ICON, TOP_HIST_GAP,
+    combo_btn_style, layer_combo_face, qat_split_part_style, quick_access_btn,
+    render_history_control, split_outline, top_hist_btn_style, CENTER_LAYER_COMBO, DIM_LAYER_COMBO,
+    LAYER_COMBO_ID, MLEADER_LAYER_COMBO, PROP_COLOR_ID, PROP_LINETYPE_ID, PROP_LW_ID, SMALL_ICON,
+    TOP_HIST_GAP,
 };
 use super::{Ribbon, REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use crate::app::Message;
@@ -40,7 +39,6 @@ pub const QAT_PICKER_INPUT: &str = "qat_more_commands_input";
 const CUSTOMIZE_ICON: &str = "M6 7h12 M8.5 11.5L12 15l3.5-3.5";
 /// Starts the dropdown id of a split item's list.
 const SPLIT_PREFIX: &str = "qat:";
-const TIP_DELAY: Duration = Duration::from_millis(400);
 /// Two overlapping windows.
 const SWITCH_WINDOWS_ICON: &str = "M3 5h12v10H3z M9 9h12v10H9z";
 /// A window with a bar along its top and a side bar.
@@ -532,7 +530,7 @@ impl Ribbon {
         }
         let list = DropdownList::new(items).on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(super::widgets::popup_panel_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(icons::hairline())
             .width(Length::Fixed(width));
         self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), width, win.0)
@@ -595,7 +593,7 @@ impl Ribbon {
                             .then(|| Message::RibbonQat(QatMsg::Add(candidate.item.clone())));
                         let btn = button(content)
                             .on_press_maybe(msg.clone())
-                            .style(super::widgets::popup_row_style)
+                            .style(crate::ui::kit::dropdown_row_style)
                             .width(Fill)
                             .padding(metrics::QAT_PICKER_ROW_PAD);
                         if let Some(msg) = msg {
@@ -617,7 +615,7 @@ impl Ribbon {
             ]
             .spacing(metrics::GAP),
         )
-        .style(super::widgets::popup_panel_style)
+        .style(crate::ui::kit::menu::frame_style)
         .width(Length::Fixed(metrics::QAT_PICKER_W));
         self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), metrics::QAT_PICKER_W, win.0)
     }
@@ -725,14 +723,12 @@ impl Ribbon {
         .width(Length::Fixed(metrics::QAT_BUTTON))
         .height(metrics::QAT_BUTTON)
         .padding(0);
-        let face_btn = tooltip(
+        let face_btn = crate::ui::kit::tooltip_gap(
             face_btn,
-            make_tip(command_tip(&face.label, face_cmd)),
+            command_tip(&face.label, face_cmd),
             TipPos::Bottom,
-        )
-        .gap(6.0)
-        .delay(TIP_DELAY)
-        .style(tip_style);
+            crate::ui::style::ribbon_metrics::TIP_GAP,
+        );
         let arrow = button(
             container(icons::dropdown_arrow())
                 .center_x(Fill)
@@ -743,14 +739,12 @@ impl Ribbon {
         .width(Length::Fixed(metrics::QAT_SPLIT_ARROW_W))
         .height(metrics::QAT_BUTTON)
         .padding(0);
-        let arrow = tooltip(
+        let arrow = crate::ui::kit::tooltip_gap(
             arrow,
-            make_tip(crate::t!(label).replace('\n', " ")),
+            crate::t!(label).replace('\n', " "),
             TipPos::Bottom,
-        )
-        .gap(6.0)
-        .delay(TIP_DELAY)
-        .style(tip_style);
+            crate::ui::style::ribbon_metrics::TIP_GAP,
+        );
         let parts: Element<'_, Message> = row![face_btn, arrow].into();
         let parts = split_outline(parts);
         let anchor = super::keytips::quick_access_anchor(id);
@@ -998,7 +992,7 @@ impl Ribbon {
             .selected(initial_selected)
             .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
-            .style(super::widgets::popup_panel_style)
+            .style(crate::ui::kit::menu::frame_style)
             .padding(icons::hairline())
             .width(Length::Fixed(width));
         self.place_dropdown(id, panel.into(), width, win.0)
@@ -1206,14 +1200,11 @@ fn place_row<'a>(label: String, below: bool, ribbon_closed: bool) -> Element<'a,
         (!ribbon_closed).then_some(Message::RibbonQat(QatMsg::SetBelow(!below))),
     );
     if ribbon_closed {
-        tooltip(
+        crate::ui::kit::tooltip(
             row,
-            make_tip(crate::tr!("ribbon-menu", "qat-place-unavailable")),
+            crate::tr!("ribbon-menu", "qat-place-unavailable"),
             TipPos::Right,
         )
-        .delay(TIP_DELAY)
-        .style(tip_style)
-        .into()
     } else {
         row.into()
     }
@@ -1239,11 +1230,12 @@ fn tipped<'a>(
     if open {
         return btn.into();
     }
-    tooltip(btn, make_tip(tip), TipPos::Bottom)
-        .gap(6.0)
-        .delay(TIP_DELAY)
-        .style(tip_style)
-        .into()
+    crate::ui::kit::tooltip_gap(
+        btn,
+        tip,
+        TipPos::Bottom,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
+    )
 }
 
 /// A 1 px line between two items.

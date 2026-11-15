@@ -7227,6 +7227,7 @@ count-feature =
 dock =
     .icons-only = Chỉ biểu tượng
     .icons-and-names = Biểu tượng và tên
+    .names-only = Chỉ tên
     .allow-docking = Cho phép neo
     .auto-hide = Tự động ẩn
     .dock-left = Neo bên trái
@@ -9790,3 +9791,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Thẻ phía trên bảng

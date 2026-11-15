@@ -7143,6 +7143,7 @@ count-feature =
 dock =
     .icons-only = Yalnızca simgeler
     .icons-and-names = Simgeler ve adlar
+    .names-only = Yalnızca adlar
     .allow-docking = Yerleştirmeye izin ver
     .auto-hide = Otomatik gizle
     .dock-left = Sola yerleştir
@@ -9712,3 +9713,6 @@ anno-scale-prompt =
     .scale = Açıklama ölçeği
     .dont-ask = Bir daha sorma
     .ok = Tamam
+
+doc-tabs =
+    .above-palettes = Sekmeler paletlerin üstünde

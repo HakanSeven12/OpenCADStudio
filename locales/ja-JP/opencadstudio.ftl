@@ -7208,6 +7208,7 @@ count-feature =
 dock =
     .icons-only = アイコンのみ
     .icons-and-names = アイコンと名前
+    .names-only = 名前のみ
     .allow-docking = ドッキングを許可
     .auto-hide = 自動的に隠す
     .dock-left = 左にドッキング
@@ -9771,3 +9772,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = パレットの上にタブ

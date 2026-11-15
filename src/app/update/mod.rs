@@ -112,6 +112,27 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Resolves once `delay` has passed, for hover delays (the dock's, a drawing
+/// tab's layouts list): a sleeping helper thread; the web build has none and
+/// resolves at once.
+pub(in crate::app) fn rest(
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] delay: std::time::Duration,
+) -> impl std::future::Future<Output = ()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let rx = {
+        let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            let _ = tx.send(());
+        });
+        rx
+    };
+    async move {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = rx.await;
+    }
+}
+
 fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> Option<usize> {
     if from >= len || to >= len || from == to {
         return None;
@@ -130,10 +151,10 @@ mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
-pub(in crate::app) mod linetype_manager;
 mod file;
 mod graphic_attributes;
 mod keytips;
+pub(in crate::app) mod linetype_manager;
 pub(in crate::app) mod mleader_style;
 mod dimstyle_dialog;
 pub(super) mod tool_palettes;
@@ -3427,9 +3448,7 @@ impl OpenCADStudio {
                 if let Some(p) = path {
                     let path_str = p.to_string_lossy().to_string();
                     if let Some(state) = &mut self.plugin_dialog_state {
-                        state
-                            .file_values
-                            .insert(id.clone(), path_str.clone());
+                        state.file_values.insert(id.clone(), path_str.clone());
                     }
                     return self.dispatch_plugin_dialog_action(
                         id,
@@ -3475,13 +3494,23 @@ impl OpenCADStudio {
                             (
                                 Some(resp),
                                 updates,
-                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                                Some((
+                                    dialog_title,
+                                    owner_plugin_id,
+                                    owner_command_id,
+                                    current_values,
+                                )),
                             )
                         } else {
                             (
                                 None,
                                 Vec::new(),
-                                Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                                Some((
+                                    dialog_title,
+                                    owner_plugin_id,
+                                    owner_command_id,
+                                    current_values,
+                                )),
                             )
                         }
                     } else {
@@ -3533,14 +3562,18 @@ impl OpenCADStudio {
                             rows.clear();
                         }
                     }
-                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) =
+                        &dialog_meta
+                    {
                         crate::plugin::v4_support::publish_panel_action_to_plugin(
                             owner_plugin_id.as_deref(),
                             *owner_command_id,
                             dialog_title.clone(),
                             id,
                             "clear".to_string(),
-                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(
+                                current_values.clone(),
+                            )),
                         );
                     }
                     return Task::none();
@@ -3548,14 +3581,18 @@ impl OpenCADStudio {
                     if let Some(state) = &mut self.plugin_dialog_state {
                         state.reset_values();
                     }
-                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) = &dialog_meta {
+                    if let Some((dialog_title, owner_plugin_id, owner_command_id, current_values)) =
+                        &dialog_meta
+                    {
                         crate::plugin::v4_support::publish_panel_action_to_plugin(
                             owner_plugin_id.as_deref(),
                             *owner_command_id,
                             dialog_title.clone(),
                             id,
                             "reset".to_string(),
-                            Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                            Some(ocs_plugin_api::dialog::DialogValue::Fields(
+                                current_values.clone(),
+                            )),
                         );
                     }
                     return Task::none();
@@ -3575,7 +3612,9 @@ impl OpenCADStudio {
                         dialog_title.clone(),
                         id,
                         "click".to_string(),
-                        Some(ocs_plugin_api::dialog::DialogValue::Fields(current_values.clone())),
+                        Some(ocs_plugin_api::dialog::DialogValue::Fields(
+                            current_values.clone(),
+                        )),
                     );
                 }
                 Task::none()
@@ -3819,7 +3858,6 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
                 if self.mtext_editor.is_some() {
@@ -3868,6 +3906,7 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
+                self.doc_tab_layouts = None;
                 if idx != self.active_tab {
                     self.close_table_cell_editor();
                 }
@@ -3958,11 +3997,86 @@ impl OpenCADStudio {
             }
 
             Message::DocTabHover(index) => {
-                self.hovered_doc_tab = index.filter(|&idx| idx < self.tabs.len());
+                let index = index.filter(|&idx| idx < self.tabs.len());
+                if index == self.hovered_doc_tab {
+                    return Task::none();
+                }
+                self.hovered_doc_tab = index;
+                self.doc_tab_hover_gen = self.doc_tab_hover_gen.wrapping_add(1);
+                // Another tab's rest closes the open list; leaving for the
+                // list itself keeps it.
+                if index.is_some() && index != self.doc_tab_layouts {
+                    self.doc_tab_layouts = None;
+                }
+                match index {
+                    // Not while a menu is open.
+                    Some(idx) if !self.doc_tab_menu => {
+                        let gen = self.doc_tab_hover_gen;
+                        let delay = std::time::Duration::from_millis(
+                            crate::ui::style::kit_metrics::TAB_HOVER_MS,
+                        );
+                        Task::perform(rest(delay), move |_| {
+                            Message::DocTabLayoutsSettled(idx, gen)
+                        })
+                    }
+                    _ => Task::none(),
+                }
+            }
+
+            Message::DocTabLayoutsSettled(idx, gen) => {
+                if gen == self.doc_tab_hover_gen
+                    && self.hovered_doc_tab == Some(idx)
+                    && !self.doc_tab_menu
+                {
+                    self.doc_tab_layouts = Some(idx);
+                }
                 Task::none()
             }
 
+            Message::DocTabLayoutsClose => {
+                self.doc_tab_layouts = None;
+                Task::none()
+            }
+
+            Message::DocTabLayout(idx, layout) => {
+                self.doc_tab_layouts = None;
+                if idx >= self.tabs.len() {
+                    return Task::none();
+                }
+                let switch = if idx == self.active_tab {
+                    Task::none()
+                } else {
+                    self.update(Message::TabSwitch(idx))
+                };
+                let layout = if self.tabs[self.active_tab].scene.current_layout == layout {
+                    Task::none()
+                } else {
+                    self.update(Message::LayoutSwitch(layout))
+                };
+                Task::batch([switch, layout])
+            }
+
+            Message::DocTabsAboveDocks(on) => {
+                self.doc_tab_menu = false;
+                self.file_tabs_above_docks = on;
+                self.save_config();
+                Task::none()
+            }
+
+            Message::DocTabMenu(open, pick) => {
+                self.doc_tab_menu = open;
+                self.doc_tab_layouts = None;
+                match pick {
+                    Some(idx) if idx < self.tabs.len() && idx != self.active_tab => {
+                        self.update(Message::TabSwitch(idx))
+                    }
+                    _ => Task::none(),
+                }
+            }
+
             Message::TabReorder { from, to, after } => {
+                // The layouts list belongs to a tab index the move shifts.
+                self.doc_tab_layouts = None;
                 let Some(insertion) = reorder_insertion_index(from, to, after, self.tabs.len())
                 else {
                     return Task::none();
@@ -3998,6 +4112,7 @@ impl OpenCADStudio {
                     self.close_table_cell_editor();
                 }
                 self.hovered_doc_tab = None;
+                self.doc_tab_layouts = None;
                 // Resolve the stable id when the message is handled, not when
                 // it was built: an earlier close in the same batch may have
                 // shifted or removed the tab a captured index referred to.
@@ -7084,8 +7199,12 @@ impl OpenCADStudio {
                 // The shared list opens on its first scale when none of the
                 // selected ones is in it.
                 if common && self.anno_object_scale.selected_listed().is_empty() {
-                    self.anno_object_scale.selected =
-                        self.anno_object_scale.listed().into_iter().take(1).collect();
+                    self.anno_object_scale.selected = self
+                        .anno_object_scale
+                        .listed()
+                        .into_iter()
+                        .take(1)
+                        .collect();
                 }
                 Task::none()
             }
@@ -7560,7 +7679,10 @@ impl OpenCADStudio {
                 // ones the window asks before dropping the rest.
                 let i = self.active_tab;
                 let picked = self.scale_manager_multi.clone();
-                let used = picked.iter().filter(|name| self.anno_scale_referenced(i, name)).count();
+                let used = picked
+                    .iter()
+                    .filter(|name| self.anno_scale_referenced(i, name))
+                    .count();
                 if picked.is_empty() || used == picked.len() {
                     return Task::none();
                 }
@@ -10521,6 +10643,12 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PropRowSelect(key) => {
+                let i = self.active_tab;
+                self.tabs[i].properties.selected_row = Some(key);
+                Task::none()
+            }
+
             Message::PropSectionToggle(title) => {
                 let sections = &mut self.collapsed_property_sections;
                 if !sections.remove(&title) {
@@ -13365,7 +13493,13 @@ impl OpenCADStudio {
             Message::LayerNameColGrab => {
                 // Start a Name-column divider drag; the dock's pointer capture
                 // feeds it (see `on_dock`).
-                self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn);
+                self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn(None));
+                self.dock_drag_last = None;
+                Task::none()
+            }
+            Message::LayerColGrab(col) => {
+                // Another column's divider: the same capture sizes it.
+                self.dock_drag = Some(crate::ui::dock::DockDrag::LayerColumn(Some(col)));
                 self.dock_drag_last = None;
                 Task::none()
             }
@@ -16439,4 +16573,41 @@ fn mcp_client_setup() -> (String, String) {
         .collect();
     let add_line = format!("claude mcp add opencadstudio -- {}", quoted.join(" "));
     (config, add_line)
+}
+
+#[cfg(test)]
+mod doc_tab_layouts_tests {
+    use super::Message;
+    use crate::app::OpenCADStudio;
+
+    fn app_with_three_tabs() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        for _ in 0..3 {
+            let _ = app.update(Message::TabNew);
+        }
+        app
+    }
+
+    #[test]
+    fn closing_a_tab_closes_its_layouts_list() {
+        let mut app = app_with_three_tabs();
+        let last = app.tabs.len() - 1;
+        app.doc_tab_layouts = Some(last);
+        let id = app.tabs[last - 1].id;
+        let _ = app.update(Message::TabClose(id));
+        assert_eq!(app.doc_tab_layouts, None);
+    }
+
+    #[test]
+    fn moving_a_tab_closes_the_layouts_list() {
+        let mut app = app_with_three_tabs();
+        let last = app.tabs.len() - 1;
+        app.doc_tab_layouts = Some(last);
+        let _ = app.update(Message::TabReorder {
+            from: last,
+            to: last - 1,
+            after: false,
+        });
+        assert_eq!(app.doc_tab_layouts, None);
+    }
 }

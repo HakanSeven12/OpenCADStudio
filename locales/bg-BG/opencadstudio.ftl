@@ -7220,6 +7220,7 @@ count-feature =
 dock =
     .icons-only = Само икони
     .icons-and-names = Икони и имена
+    .names-only = Само имена
     .allow-docking = Разреши закачане
     .auto-hide = Автоматично скриване
     .dock-left = Закачи вляво
@@ -9793,3 +9794,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Раздели над палитрите

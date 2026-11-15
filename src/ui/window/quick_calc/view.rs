@@ -15,7 +15,8 @@ use crate::app::calc::{AngleMode, Value};
 use crate::app::Message;
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 use crate::ui::dock::{Chrome, PanelId};
-use crate::ui::icons::{SWAP, TRI_DOWN, TRI_UP};
+use crate::ui::icons::SWAP;
+use crate::ui::style::kit_metrics as km;
 
 pub const ICON: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/quickcalc.svg");
 pub(super) const POINT: &[u8] = include_bytes!("../../../../assets/icons/point.svg");
@@ -110,13 +111,15 @@ pub(super) fn disabled(t: &Tokens) -> Color {
 }
 
 pub(super) fn tokens(theme: &Theme) -> Tokens {
+    use crate::ui::style::chrome;
     let p = theme.palette();
     let dark = p.is_dark;
-    let bg = p.background.base.color;
-    let text = p.background.base.text;
-    // Keys step away from the pallet's background: lighter on dark chrome
-    // (#2A2A2A function, #383838 digit on Fusion Black), darker on light
-    // chrome with white digits (#F3F3F3 / #FFFFFF on Fusion White).
+    // QuickCalc stands on the surface like every palette; its keys
+    // step away from it.
+    let bg = chrome::surface(theme);
+    let text = chrome::text(theme);
+    // Keys step away from the pallet's background: lighter on dark chrome,
+    // darker on light chrome with white digits.
     let step = |t: f32| {
         if dark {
             mix(bg, Color::WHITE, t)
@@ -125,19 +128,19 @@ pub(super) fn tokens(theme: &Theme) -> Tokens {
         }
     };
     Tokens {
-        weak: p.background.weak.color,
-        strong: p.background.strong.color,
-        line: p.background.neutral.color,
+        weak: chrome::surface_raised(theme),
+        strong: chrome::hover(theme),
+        line: chrome::border(theme),
         text,
-        muted: mix(bg, text, 0.68),
+        muted: chrome::muted(theme),
         faint: mix(bg, text, 0.52),
-        accent: p.primary.base.color,
-        on_accent: on_accent(p.primary.base.color),
-        danger: p.danger.base.color,
+        accent: chrome::accent(theme),
+        on_accent: on_accent(chrome::accent(theme)),
+        danger: chrome::danger(theme),
         danger_text: if dark {
             Color::from_rgb8(0xFF, 0x6B, 0x66)
         } else {
-            p.danger.base.color
+            chrome::danger(theme)
         },
         field: if dark {
             mix(bg, Color::BLACK, 0.3)
@@ -171,14 +174,7 @@ pub(super) fn tip<'a>(
     content: impl Into<Element<'a, Message>>,
     label: String,
 ) -> Element<'a, Message> {
-    tooltip(
-        content,
-        crate::ui::ribbon::tooltip_content(label),
-        tooltip::Position::Bottom,
-    )
-    .delay(std::time::Duration::from_millis(400))
-    .style(crate::ui::ribbon::tooltip_style)
-    .into()
+    crate::ui::kit::tooltip(content, label, tooltip::Position::Bottom)
 }
 
 /// Full-strength text in the theme's text colour.
@@ -199,40 +195,15 @@ pub(super) fn muted<'a>(s: impl text::IntoFragment<'a>, size: f32) -> text::Text
 
 // ── Buttons ─────────────────────────────────────────────────────────────
 
-/// A 28 px toolbar button; `on` highlights the running pick tool.
+/// A toolbar button (the kit's); `on` lights the running pick tool.
 fn tool<'a>(bytes: &'static [u8], msg: QuickCalcMsg, on: bool) -> Element<'a, Message> {
-    button(
-        container(icon(
-            bytes,
-            18.0,
-            if on { |t| t.accent } else { |t| t.muted },
-        ))
-        .center(Fill),
-    )
-    .width(28)
-    .height(28)
-    .padding(0)
-    .on_press(m(msg))
-    .style(move |theme: &Theme, status| {
-        let t = tokens(theme);
-        let background = if on {
-            Some(Background::Color(t.accent.scale_alpha(0.16)))
-        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-            Some(Background::Color(t.strong))
-        } else {
-            None
-        };
-        button::Style {
-            background,
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            text_color: t.text,
-            ..Default::default()
-        }
-    })
-    .into()
+    button(container(crate::ui::kit::tool_icon(bytes)).center(Fill))
+        .width(km::TOOL_H)
+        .height(km::TOOL_H)
+        .padding(0)
+        .on_press(m(msg))
+        .style(crate::ui::kit::flat_button_style(on))
+        .into()
 }
 
 pub(super) fn plain_button_style(theme: &Theme, status: button::Status) -> button::Style {
@@ -274,7 +245,7 @@ pub(super) fn text_button<'a>(
 
 /// One option of a segmented control; the options share the width.
 pub(super) fn segment<'a>(label: String, on: bool, msg: QuickCalcMsg) -> Element<'a, Message> {
-    button(container(text(label).size(10.5)).center(Fill))
+    button(container(text(label).size(crate::ui::style::text::UI_SMALL)).center(Fill))
         .width(Fill)
         .height(20)
         .padding([0, 8])
@@ -314,46 +285,9 @@ pub(super) fn segmented<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Mes
 
 // ── Sections ────────────────────────────────────────────────────────────
 
-/// A section's 28 px header, one button that toggles the section: the
-/// title on the left, a chevron on the right that points down while the
-/// section is closed and up while it is open.
+/// A section's header: the palettes' category bar, toggling the section.
 fn section_header<'a>(section: Section, label: String, open: bool) -> Element<'a, Message> {
-    let chevron = icon(if open { TRI_UP } else { TRI_DOWN }, 11.0, |t| t.muted);
-    let content = row![strong(label, 11.5).width(Fill), chevron]
-        .spacing(7)
-        .align_y(iced::Center);
-    // A button puts its content at the top; centre it in the 28 px bar.
-    let toggle = button(container(content).center_y(Fill))
-        .width(Fill)
-        .height(28)
-        .padding(iced::Padding {
-            left: 8.0,
-            right: 14.0,
-            ..iced::Padding::ZERO
-        })
-        .on_press(m(QuickCalcMsg::Toggle(section)))
-        .style(|theme: &Theme, status| {
-            let t = tokens(theme);
-            button::Style {
-                background: Some(Background::Color(
-                    if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                        t.strong
-                    } else {
-                        t.weak
-                    },
-                )),
-                text_color: t.text,
-                ..Default::default()
-            }
-        });
-    column![
-        container(Space::new().width(Fill).height(1)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(tokens(theme).line)),
-            ..Default::default()
-        }),
-        toggle,
-    ]
-    .into()
+    crate::ui::kit::category_bar(label, !open, m(QuickCalcMsg::Toggle(section)))
 }
 
 // ── Toolbar controls ────────────────────────────────────────────────────
@@ -608,7 +542,16 @@ pub fn view<'a>(
         chrome,
     );
     let body = iced::widget::responsive(move |size| body(p, &inputs, size.height));
-    crate::ui::dock::frame(title_bar, body, width)
+    crate::ui::kit::palette(
+        title_bar,
+        container(body).padding(iced::Padding {
+            top: km::TOOL_GAP,
+            bottom: km::TOOL_GAP,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
+        }),
+        width,
+    )
 }
 
 fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a, Message> {
@@ -619,9 +562,11 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
 
     // Toolbar.
     let divider =
-        container(Space::new().width(1).height(16)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(tokens(theme).line)),
-            ..Default::default()
+        container(Space::new().width(km::line()).height(km::ROW_ICON)).style(|theme: &Theme| {
+            container::Style {
+                background: Some(Background::Color(tokens(theme).line)),
+                ..Default::default()
+            }
         });
     let toolbar = row![
         tool(
@@ -639,18 +584,18 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
             QuickCalcMsg::Pick(PickKind::Angle),
             active(PickKind::Angle)
         ),
-        container(divider).padding([0, 4]),
+        container(divider).padding([0.0, km::TOOL_GAP]),
         tool(crate::ui::icons::TRASH, QuickCalcMsg::ClearHistory, false),
         tool(COPY, QuickCalcMsg::Copy, false),
         tool(SEND, QuickCalcMsg::PasteToCommandLine, false),
         Space::new().width(Fill),
         keypad_mode_switch(p),
         container(angle_mode_button(p.mode)).padding(iced::Padding {
-            left: 4.0,
+            left: km::TOOL_GAP,
             ..iced::Padding::ZERO
         }),
     ]
-    .spacing(2)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     // History, newest at the bottom next to the input. Empty, it is just
@@ -667,20 +612,24 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
             .padding(0)
             .on_press(m(QuickCalcMsg::HistoryLoad(i)))
             .style(button::text);
-            let result = button(text(e.value.display()).size(12.5).font(STRONG))
-                .padding(0)
-                .on_press(m(QuickCalcMsg::HistoryCopy(i)))
-                .style(|theme: &Theme, status| {
-                    let t = tokens(theme);
-                    button::Style {
-                        text_color: if matches!(status, button::Status::Hovered) {
-                            t.accent
-                        } else {
-                            t.text
-                        },
-                        ..Default::default()
-                    }
-                });
+            let result = button(
+                text(e.value.display())
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .font(STRONG),
+            )
+            .padding(0)
+            .on_press(m(QuickCalcMsg::HistoryCopy(i)))
+            .style(|theme: &Theme, status| {
+                let t = tokens(theme);
+                button::Style {
+                    text_color: if matches!(status, button::Status::Hovered) {
+                        t.accent
+                    } else {
+                        t.text
+                    },
+                    ..Default::default()
+                }
+            });
             container(
                 row![expr, tip(result, crate::t!("Copy result").into_owned()),]
                     .spacing(10)
@@ -717,7 +666,8 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
                 crate::t!("Specify second point in the drawing"),
             ),
         };
-        let mut heading = row![text(title.into_owned()).size(11.5)].spacing(6);
+        let mut heading =
+            row![text(title.into_owned()).size(crate::ui::style::text::UI)].spacing(6);
         if kind.steps() > 1 {
             heading = heading.push(muted(
                 crate::tf!("step {} of {}", step, kind.steps()).into_owned(),
@@ -728,9 +678,12 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
             container(
                 row![
                     icon(POINT, 16.0, |t| t.accent),
-                    column![heading, text(prompt.into_owned()).size(11.5)]
-                        .spacing(1)
-                        .width(Fill),
+                    column![
+                        heading,
+                        text(prompt.into_owned()).size(crate::ui::style::text::UI)
+                    ]
+                    .spacing(1)
+                    .width(Fill),
                     text_button(text(crate::t!("Cancel")).size(11), QuickCalcMsg::CancelPick),
                 ]
                 .spacing(8)
@@ -790,7 +743,7 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
                     row![
                         icon(ERROR, 13.0, |t| t.danger_text),
                         text(e.message.clone())
-                            .size(11.5)
+                            .size(crate::ui::style::text::UI)
                             .style(|theme: &Theme| text::Style {
                                 color: Some(tokens(theme).danger_text),
                             }),
@@ -860,7 +813,7 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
         + 6.0
         + if show_error { 38.0 } else { 20.0 }
         + if picking.is_some() { 52.0 } else { 0.0 };
-    let below_toolbar = height - 28.0 - GAP;
+    let below_toolbar = height - km::TOOL_H - GAP;
     let history_h = history_rows.len() as f32 * HISTORY_ROW_H;
     let rest = input_h + super::keypad_view::height(p) + sections_height(p) + 3.0 * GAP;
     let overflows = history_h + rest > below_toolbar;
@@ -896,11 +849,11 @@ fn body<'a>(p: &'a QuickCalcPalette, inputs: &Inputs, height: f32) -> Element<'a
 /// The height a newly floated pallet opens at: the toolbar, a few history
 /// rows, the input, the Standard keypad and both section headers closed.
 pub fn float_height() -> f32 {
-    const FRAME_PADDING: f32 = 2.0 * 6.0;
+    const FRAME_PADDING: f32 = 2.0 * km::TOOL_GAP;
     const HISTORY_ROWS: f32 = 3.0;
     let p = QuickCalcPalette::default();
     FRAME_PADDING
-        + 28.0
+        + km::TOOL_H
         + HISTORY_ROWS * HISTORY_ROW_H
         + (30.0 + 6.0 + 20.0)
         + super::keypad_view::height(&p)
@@ -911,7 +864,7 @@ pub fn float_height() -> f32 {
 /// The sections' height when laid out in full: every header plus the open
 /// bodies, from the fixed row sizes they are built with.
 fn sections_height(p: &QuickCalcPalette) -> f32 {
-    const HEADER: f32 = 29.0;
+    const HEADER: f32 = km::CATEGORY_GAP + km::CATEGORY_H;
     Section::ALL
         .iter()
         .map(|section| {

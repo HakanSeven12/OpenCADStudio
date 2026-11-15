@@ -16,13 +16,14 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use iced::widget::{
-    button, column, container, image, markdown, mouse_area, row, scrollable, text, text_input,
-    Space,
+    column, container, image, markdown, mouse_area, row, scrollable, text, text_input, Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Font, Length, Task, Theme};
+use iced::{Background, Border, Element, Fill, Font, Length, Padding, Task, Theme};
 
 use crate::app::Message;
 use crate::ui::dock::{Chrome, PanelId};
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 
 pub const ICON: &[u8] = include_bytes!("../../../assets/icons/assistant.svg");
 pub const INPUT_ID: &str = "assistant-input";
@@ -36,7 +37,10 @@ const CONNECT_PATIENCE: Duration = Duration::from_secs(40);
 
 /// Quick requests offered as chips under the conversation.
 const CHIPS: [(&str, &str); 6] = [
-    ("What's open?", "What drawing is open, and what's in it? Keep it short."),
+    (
+        "What's open?",
+        "What drawing is open, and what's in it? Keep it short.",
+    ),
     ("Selection?", "What is selected right now?"),
     ("Zoom extents", "Zoom to the whole drawing."),
     ("Show view", "Show me the current view."),
@@ -79,7 +83,10 @@ struct Card {
 
 enum Item {
     User(String),
-    Bot { source: String, content: markdown::Content },
+    Bot {
+        source: String,
+        content: markdown::Content,
+    },
     Note(String),
     Card(Card),
     Error(String),
@@ -352,7 +359,12 @@ impl AssistantPalette {
                 let images: Vec<image::Handle> = ev
                     .get("images")
                     .and_then(|v| v.as_array())
-                    .map(|list| list.iter().filter_map(|v| v.as_str()).filter_map(decode_image).collect())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|v| v.as_str())
+                            .filter_map(decode_image)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 if let Some(card) = self.card_mut(&id) {
                     card.state = if ok { CardState::Ok } else { CardState::Failed };
@@ -495,9 +507,8 @@ fn run_link(tx_in: Sender<Incoming>, rx_out: Receiver<String>) {
                 launched = true;
                 match launch_service() {
                     Ok(()) => {
-                        let _ = tx_in.send(Incoming::Note(
-                            "Starting the assistant service…".into(),
-                        ));
+                        let _ =
+                            tx_in.send(Incoming::Note("Starting the assistant service…".into()));
                     }
                     Err(why) => {
                         let _ = tx_in.send(Incoming::Closed(why));
@@ -595,99 +606,94 @@ fn launch_service() -> Result<(), String> {
 }
 
 // ── View ────────────────────────────────────────────────────────────────
-
-const STRONG: Font = Font {
-    weight: iced::font::Weight::Semibold,
-    ..Font::DEFAULT
-};
+//
+// The palette family's kit throughout: bands inside the palette's insets,
+// UI text, kit text buttons and fields, chrome:: colours, hairlines.
 
 fn m(msg: AssistantMsg) -> Message {
     Message::Assistant(msg)
 }
 
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
-    }
-}
-
-fn muted(theme: &Theme) -> Color {
-    let p = theme.palette();
-    mix(p.background.base.color, p.background.base.text, 0.62)
-}
-
 fn muted_text(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(muted(theme)),
+        color: Some(chrome::muted(theme)),
     }
 }
 
+fn danger_text(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(chrome::danger(theme)),
+    }
+}
+
+/// A request the user sent: the accent-tinted surface of a lit button.
 fn bubble_style(theme: &Theme) -> container::Style {
-    let p = theme.palette();
     container::Style {
-        background: Some(Background::Color(p.primary.base.color.scale_alpha(0.18))),
+        background: Some(Background::Color(chrome::lit(theme))),
         border: Border {
-            radius: 8.0.into(),
-            ..Default::default()
+            color: chrome::lit_border(theme),
+            width: km::line(),
+            radius: 0.0.into(),
         },
-        text_color: Some(p.background.base.text),
+        text_color: Some(chrome::text(theme)),
         ..Default::default()
     }
 }
 
+/// A tool step: a palette-bar box edged in its outcome's colour.
 fn card_style(state: CardState) -> impl Fn(&Theme) -> container::Style {
     move |theme: &Theme| {
-        let p = theme.palette();
         let edge = match state {
-            CardState::Ok => p.success.base.color,
-            CardState::Failed => p.danger.base.color,
-            _ => p.primary.base.color,
+            CardState::Ok => chrome::success(theme),
+            CardState::Failed => chrome::danger(theme),
+            _ => chrome::accent(theme),
         };
         container::Style {
-            background: Some(Background::Color(p.background.weak.color)),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             border: Border {
-                color: edge.scale_alpha(0.55),
-                width: 1.0,
-                radius: 5.0.into(),
+                color: edge.scale_alpha(CARD_EDGE_ALPHA),
+                width: km::line(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         }
     }
 }
 
-fn chip_style(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.palette();
-    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-    button::Style {
-        background: Some(Background::Color(if hovered {
-            p.background.strong.color
-        } else {
-            p.background.weak.color
-        })),
-        border: Border {
-            color: p.background.neutral.color,
-            width: 1.0,
-            radius: 10.0.into(),
-        },
-        text_color: p.background.base.text,
-        ..Default::default()
-    }
-}
+/// How strongly a step's outcome colours its edge.
+const CARD_EDGE_ALPHA: f32 = 0.55;
 
-fn small_button<'a>(label: &'a str, msg: Message) -> Element<'a, Message> {
-    button(text(label).size(11))
-        .padding([2, 8])
-        .style(button::subtle)
-        .on_press(msg)
+/// A horizontal hairline between the palette's parts.
+fn rule<'a>() -> Element<'a, Message> {
+    container(Space::new().width(Fill).height(km::line()))
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::border(theme))),
+            ..Default::default()
+        })
         .into()
 }
 
-pub fn view<'a>(p: &'a AssistantPalette, theme: &'a Theme, width: f32, chrome: Chrome) -> Element<'a, Message> {
+/// A band of the palette: inside its insets, a tool gap above and below.
+fn band<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .width(Fill)
+        .padding(Padding {
+            top: km::TOOL_GAP,
+            bottom: km::TOOL_GAP,
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
+        })
+        .into()
+}
+
+pub fn view<'a>(
+    p: &'a AssistantPalette,
+    theme: &'a Theme,
+    width: f32,
+    chrome: Chrome,
+) -> Element<'a, Message> {
     let title_bar = crate::ui::dock::title_bar(PanelId::Assistant, "Assistant".to_string(), chrome);
-    crate::ui::dock::frame(title_bar, body(p, theme), width)
+    kit::palette(title_bar, body(p, theme), width)
 }
 
 fn body<'a>(p: &'a AssistantPalette, theme: &'a Theme) -> Element<'a, Message> {
@@ -701,133 +707,154 @@ fn body<'a>(p: &'a AssistantPalette, theme: &'a Theme) -> Element<'a, Message> {
                 p.status.drawing.clone()
             },
         ),
-        Link::Connected => (false, "Service running, OpenCAD Studio not reached".to_string()),
+        Link::Connected => (
+            false,
+            "Service running, OpenCAD Studio not reached".to_string(),
+        ),
         Link::Connecting(n) => (false, n.clone()),
         Link::Down(why) => (false, why.clone()),
         Link::Idle => (false, "Not started".to_string()),
     };
-    let dot = container(Space::new().width(8).height(8)).style(move |theme: &Theme| {
-        let pal = theme.palette();
-        container::Style {
-            background: Some(Background::Color(if dot_ok {
-                pal.success.base.color
-            } else {
-                pal.danger.base.color.scale_alpha(0.8)
-            })),
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
+    let dot = crate::ui::kit::menu::dot(
+        km::DIRTY_DOT,
+        if dot_ok {
+            chrome::success
+        } else {
+            chrome::danger
+        },
+    );
     let mut head = row![
         dot,
-        text(line).size(12).font(STRONG).width(Fill),
+        kit::one_line(text(line))
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .font(kit::SEMIBOLD)
+            .width(Fill),
     ]
-    .spacing(6)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
     if matches!(p.link, Link::Down(_)) {
-        head = head.push(small_button("Reconnect", m(AssistantMsg::Reconnect)));
+        head = head.push(kit::text_button(
+            "Reconnect",
+            Some(m(AssistantMsg::Reconnect)),
+            false,
+        ));
     }
-    head = head.push(small_button("New chat", m(AssistantMsg::NewChat)));
+    head = head.push(kit::text_button(
+        "New chat",
+        Some(m(AssistantMsg::NewChat)),
+        false,
+    ));
 
-    let mut meta = String::new();
-    if !p.status.model.is_empty() {
-        meta = format!(
-            "{} · {} · {} tools · this chat ≈ ${:.2}",
-            p.status.model, p.status.effort, p.status.tools, p.status.cost
-        );
-    }
-    let mut header = column![head].spacing(2);
+    let mut header = column![head].spacing(km::LINE * 2.0);
     if !p.status.path.is_empty() {
-        header = header.push(text(p.status.path.clone()).size(10).style(muted_text));
+        header = header.push(kit::value_text(p.status.path.clone(), true));
     }
-    if !meta.is_empty() {
-        header = header.push(text(meta).size(10).style(muted_text));
+    if !p.status.model.is_empty() {
+        header = header.push(kit::value_text(
+            format!(
+                "{} · {} · {} tools · this chat ≈ ${:.2}",
+                p.status.model, p.status.effort, p.status.tools, p.status.cost
+            ),
+            true,
+        ));
     }
     if p.link == Link::Connected && !p.status.api_key && !p.status.model.is_empty() {
         header = header.push(
-            text(crate::t!("The assistant service has no API key configured."))
-                .size(11)
-                .style(|t: &Theme| text::Style {
-                    color: Some(t.palette().danger.base.color),
-                }),
+            text(crate::t!(
+                "The assistant service has no API key configured."
+            ))
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .style(danger_text),
         );
     }
 
     // Conversation.
-    let mut log = column![].spacing(8).padding([4, 10]).width(Fill);
+    let mut log = column![].spacing(km::GRID_INSET_L).width(Fill);
     if p.items.is_empty() {
         log = log.push(
-            container(
-                column![
-                    text("Tell me what to do in this drawing.").size(13).font(STRONG),
-                    text("For example: “select all the doors”, “how many rooms are there?”, “move the selection 1 m right”, “zoom to the kitchen”.")
-                        .size(12)
-                        .style(muted_text),
-                    text("Every step I take appears here as a card and happens live in the drawing. Ctrl+Z undoes it like any edit.")
-                        .size(11)
-                        .style(muted_text),
-                ]
-                .spacing(6),
-            )
-            .padding([18, 4]),
+            column![
+                text("Tell me what to do in this drawing.")
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+                    .font(kit::SEMIBOLD),
+                text("For example: “select all the doors”, “how many rooms are there?”, “move the selection 1 m right”, “zoom to the kitchen”.")
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+                    .style(muted_text),
+                text("Every step I take appears here as a card and happens live in the drawing. Ctrl+Z undoes it like any edit.")
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+                    .style(muted_text),
+            ]
+            .spacing(km::TOOL_GAP),
         );
     }
     for (i, item) in p.items.iter().enumerate() {
         log = log.push(item_view(i, item, theme));
     }
     if p.running {
-        log = log.push(text("Working…").size(11).style(muted_text));
+        log = log.push(kit::value_text("Working…", true));
     }
-    let log = scrollable(log)
-        .id(iced::widget::Id::new(LOG_ID))
-        .height(Fill)
-        .width(Fill);
+    // The kit's scroll area, with the id the app scrolls to the end by.
+    let log = scrollable(container(log).padding(Padding {
+        top: km::TOOL_GAP,
+        bottom: km::TOOL_GAP,
+        left: km::GRID_INSET_L,
+        right: km::GRID_INSET_R,
+    }))
+    .id(iced::widget::Id::new(LOG_ID))
+    .direction(iced::widget::scrollable::Direction::Vertical(
+        iced::widget::scrollable::Scrollbar::new()
+            .width(km::SCROLLBAR_W)
+            .scroller_width(km::SCROLL_THUMB_W)
+            .margin(0),
+    ))
+    .style(kit::scroll_style)
+    .height(Fill)
+    .width(Fill);
 
     // Chips.
-    let mut chips = row![].spacing(4);
+    let mut chips = row![].spacing(km::TOOL_GAP);
     for (i, (label, _)) in CHIPS.iter().enumerate() {
-        let mut b = button(text(*label).size(11)).padding([2, 8]).style(chip_style);
-        if !p.running {
-            b = b.on_press(m(AssistantMsg::Chip(i)));
-        }
-        chips = chips.push(b);
+        chips = chips.push(kit::text_button(
+            *label,
+            (!p.running).then(|| m(AssistantMsg::Chip(i))),
+            false,
+        ));
     }
-    let chips = chips.wrap();
+    let chips = chips.wrap().vertical_spacing(km::TOOL_GAP);
 
     // Composer.
     let mut input = text_input("Ask or instruct… (Enter to send)", &p.input)
         .id(iced::widget::Id::new(INPUT_ID))
-        .size(13)
-        .padding([7, 9]);
+        .size(ui_text::UI)
+        .line_height(ui_text::line())
+        .padding(kit::BOX_PAD)
+        .style(kit::combo_style)
+        .width(Fill);
     if !p.running {
         input = input
             .on_input(|v| m(AssistantMsg::Input(v)))
             .on_submit(m(AssistantMsg::Send));
     }
     let action = if p.running {
-        button(text("Stop").size(12).font(STRONG))
-            .padding([6, 12])
-            .style(button::danger)
-            .on_press(m(AssistantMsg::Stop))
+        kit::text_button("Stop", Some(m(AssistantMsg::Stop)), false)
     } else {
-        button(text("Send").size(12).font(STRONG))
-            .padding([6, 12])
-            .style(button::primary)
-            .on_press(m(AssistantMsg::Send))
+        kit::text_button("Send", Some(m(AssistantMsg::Send)), true)
     };
-    let composer = row![input, action].spacing(6).align_y(iced::Center);
+    let composer = row![input, action]
+        .spacing(km::TOOL_GAP)
+        .align_y(iced::Center);
 
     column![
-        container(header).padding([4, 4]),
-        iced::widget::rule::horizontal(1),
+        band(header),
+        rule(),
         log,
-        iced::widget::rule::horizontal(1),
-        container(column![chips, composer].spacing(6)).padding([6, 4]),
+        rule(),
+        band(column![chips, composer].spacing(km::TOOL_GAP)),
     ]
-    .spacing(4)
     .height(Fill)
     .into()
 }
@@ -836,43 +863,51 @@ fn item_view<'a>(i: usize, item: &'a Item, theme: &'a Theme) -> Element<'a, Mess
     match item {
         Item::User(t) => row![
             Space::new().width(Length::FillPortion(1)),
-            container(text(t.as_str()).size(13))
-                .padding([6, 10])
-                .style(bubble_style),
+            container(
+                text(t.as_str())
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+            )
+            .padding([km::TOOL_GAP, km::GRID_INSET_L])
+            .style(bubble_style),
         ]
         .width(Fill)
         .into(),
         Item::Bot { content, .. } => markdown::view(
             content.items(),
-            markdown::Settings::with_text_size(13, theme),
+            markdown::Settings::with_text_size(ui_text::UI, theme),
         )
         .map(|uri| Message::OpenUrl(uri.to_string())),
         Item::Note(n) => {
             // Thinking summaries: keep the latest line short.
             let last = n.trim().lines().last().unwrap_or("").trim();
             let short: String = last.chars().take(160).collect();
-            text(format!("› {short}")).size(11).style(muted_text).into()
+            text(format!("› {short}"))
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
+                .style(muted_text)
+                .into()
         }
         Item::Card(card) => card_view(i, card),
         Item::Error(e) => text(e.as_str())
-            .size(12)
-            .style(|t: &Theme| text::Style {
-                color: Some(t.palette().danger.base.color),
-            })
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .style(danger_text)
             .into(),
-        Item::Stopped => text("Stopped.").size(12).style(muted_text).into(),
+        Item::Stopped => kit::value_text("Stopped.", true),
     }
 }
 
 fn card_view<'a>(i: usize, card: &'a Card) -> Element<'a, Message> {
     let mark: Element<'a, Message> = match card.state {
-        CardState::Pending | CardState::Running => text("◌").size(12).into(),
-        CardState::Ok => text("✓").size(12).style(|t: &Theme| text::Style {
-            color: Some(t.palette().success.base.color),
-        }).into(),
-        CardState::Failed => text("✗").size(12).style(|t: &Theme| text::Style {
-            color: Some(t.palette().danger.base.color),
-        }).into(),
+        CardState::Pending | CardState::Running => text("◌").size(ui_text::UI).into(),
+        CardState::Ok => text("✓")
+            .size(ui_text::UI)
+            .style(|t: &Theme| text::Style {
+                color: Some(chrome::success(t)),
+            })
+            .into(),
+        CardState::Failed => text("✗").size(ui_text::UI).style(danger_text).into(),
     };
     let time = match card.state {
         CardState::Pending => "preparing…".to_string(),
@@ -882,33 +917,38 @@ fn card_view<'a>(i: usize, card: &'a Card) -> Element<'a, Message> {
     };
     let summary = row![
         mark,
-        text(card.title.as_str()).size(12).font(STRONG).width(Fill),
-        text(time).size(10).style(muted_text),
+        kit::one_line(text(card.title.as_str()))
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .font(kit::SEMIBOLD)
+            .width(Fill),
+        kit::value_text(time, true),
     ]
-    .spacing(6)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
     let mut col = column![mouse_area(summary)
         .on_press(m(AssistantMsg::ToggleCard(i)))
         .interaction(iced::mouse::Interaction::Pointer)]
-    .spacing(4);
+    .spacing(km::TOOL_GAP);
     if card.open {
         let mono = |s: &'a str| {
-            container(text(s).size(10).font(Font::MONOSPACE))
-                .padding(4)
-                .width(Fill)
-                .style(|t: &Theme| container::Style {
-                    background: Some(Background::Color(t.palette().background.base.color)),
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
+            container(
+                text(s)
+                    .size(ui_text::UI_SMALL)
+                    .line_height(ui_text::line())
+                    .font(Font::MONOSPACE),
+            )
+            .padding(km::TOOL_GAP)
+            .width(Fill)
+            .style(|t: &Theme| container::Style {
+                background: Some(Background::Color(chrome::surface(t))),
+                ..Default::default()
+            })
         };
-        col = col.push(text(format!("{} · input", card.name)).size(10).style(muted_text));
+        col = col.push(kit::value_text(format!("{} · input", card.name), true));
         col = col.push(mono(card.args.as_str()));
         if !card.result.is_empty() {
-            col = col.push(text("result").size(10).style(muted_text));
+            col = col.push(kit::value_text("result", true));
             col = col.push(mono(card.result.as_str()));
         }
     }
@@ -916,7 +956,7 @@ fn card_view<'a>(i: usize, card: &'a Card) -> Element<'a, Message> {
         col = col.push(image(handle.clone()).width(Fill));
     }
     container(col)
-        .padding([5, 8])
+        .padding([km::TOOL_GAP, km::GRID_INSET_L])
         .width(Fill)
         .style(card_style(card.state))
         .into()
@@ -948,12 +988,16 @@ mod tests {
     fn a_tool_step_goes_pending_running_done_on_one_card() {
         let mut p = palette();
         p.apply(json!({"type": "tool_pending", "id": "t1", "name": "ocs_select"}));
-        p.apply(json!({"type": "tool_start", "id": "t1", "name": "ocs_select",
-                       "title": "Select doors", "args": "{}"}));
+        p.apply(
+            json!({"type": "tool_start", "id": "t1", "name": "ocs_select",
+                       "title": "Select doors", "args": "{}"}),
+        );
         p.apply(json!({"type": "tool_end", "id": "t1", "ok": true, "ms": 42,
                        "preview": "3 selected", "images": []}));
         assert_eq!(p.items.len(), 1);
-        let Item::Card(card) = &p.items[0] else { panic!("expected a card") };
+        let Item::Card(card) = &p.items[0] else {
+            panic!("expected a card")
+        };
         assert_eq!(card.title, "Select doors");
         assert_eq!(card.state, CardState::Ok);
         assert_eq!(card.ms, 42);
@@ -967,7 +1011,9 @@ mod tests {
                        "title": "Run", "args": "{}"}));
         p.apply(json!({"type": "tool_end", "id": "t2", "ok": false, "ms": 3,
                        "preview": "unknown command", "images": []}));
-        let Item::Card(card) = &p.items[0] else { panic!("expected a card") };
+        let Item::Card(card) = &p.items[0] else {
+            panic!("expected a card")
+        };
         assert_eq!(card.state, CardState::Failed);
         assert!(card.open);
         assert_eq!(card.result, "unknown command");
@@ -983,7 +1029,9 @@ mod tests {
         p.apply(json!({"type": "done", "cost_usd": 0.05}));
         assert!(!p.running);
         assert_eq!(p.items.len(), 1);
-        let Item::Bot { source, .. } = &p.items[0] else { panic!("expected a reply") };
+        let Item::Bot { source, .. } = &p.items[0] else {
+            panic!("expected a reply")
+        };
         assert_eq!(source, "Selected **3** doors.");
         assert!((p.status.cost - 0.05).abs() < 1e-9);
     }

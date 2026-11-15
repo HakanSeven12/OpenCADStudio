@@ -22,11 +22,24 @@ use crate::app::Message;
 pub fn drop_down_fit<'a>(drop_down: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     Element::new(DropDownFit {
         content: drop_down.into(),
+        start: false,
+    })
+}
+
+/// [`drop_down_fit`] with the list starting at its field's left edge
+/// (kept inside the window): a list wider than its field otherwise opens
+/// centred under it, reaching out left of it.
+pub fn drop_down_fit_start<'a>(drop_down: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    Element::new(DropDownFit {
+        content: drop_down.into(),
+        start: true,
     })
 }
 
 struct DropDownFit<'a> {
     content: Element<'a, Message>,
+    /// Start the list at the field's left edge.
+    start: bool,
 }
 
 impl Widget<Message, Theme, Renderer> for DropDownFit<'_> {
@@ -124,6 +137,7 @@ impl Widget<Message, Theme, Renderer> for DropDownFit<'_> {
             width: viewport.x + viewport.width,
             height: viewport.y + viewport.height,
         };
+        let start_x = self.start.then(|| layout.bounds().x + translation.x);
         let inner = self.content.as_widget_mut().overlay(
             tree,
             layout,
@@ -131,17 +145,30 @@ impl Widget<Message, Theme, Renderer> for DropDownFit<'_> {
             &from_corner,
             translation,
         )?;
-        Some(overlay::Element::new(Box::new(FitOverlay { inner })))
+        Some(overlay::Element::new(Box::new(FitOverlay {
+            inner,
+            start_x,
+        })))
     }
 }
 
 struct FitOverlay<'a> {
     inner: overlay::Element<'a, Message, Theme, Renderer>,
+    /// Where the list starts when it starts at its field's left edge.
+    start_x: Option<f32>,
 }
 
 impl overlay::Overlay<Message, Theme, Renderer> for FitOverlay<'_> {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        self.inner.as_overlay_mut().layout(renderer, bounds)
+        let node = self.inner.as_overlay_mut().layout(renderer, bounds);
+        match self.start_x {
+            Some(x) => {
+                let placed = node.bounds();
+                let x = x.min(bounds.width - placed.width).max(0.0);
+                node.move_to(iced::Point::new(x, placed.y))
+            }
+            None => node,
+        }
     }
 
     fn draw(

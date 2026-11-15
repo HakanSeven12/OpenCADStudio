@@ -93,6 +93,13 @@ jobs:
         continue-on-error: true
         run: cargo clippy --workspace --all-targets --locked
 
+      # Reports a file built on the UI kit that gains generic iced colours or literal
+      # sizes (see src/ui/kit/mod.rs); the counts in
+      # docs/ui/audit_counts.txt only go down.
+      - name: kit audit
+        continue-on-error: true
+        run: sh docs/ui/audit_counts.sh --check
+
       # The whole tree has too many warnings for a list to help, so the
       # summary shows only those in the files this pull request touches.
       - name: Warnings in the files this pull request touches

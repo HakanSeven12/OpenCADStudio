@@ -7217,6 +7217,7 @@ count-feature =
 dock =
     .icons-only = Vain kuvakkeet
     .icons-and-names = Kuvakkeet ja nimet
+    .names-only = Vain nimet
     .allow-docking = Salli telakointi
     .auto-hide = Piilota automaattisesti
     .dock-left = Telakoi vasemmalle
@@ -9790,3 +9791,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Välilehdet palettien yläpuolella

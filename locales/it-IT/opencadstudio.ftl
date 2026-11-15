@@ -7219,6 +7219,7 @@ count-feature =
 dock =
     .icons-only = Solo icone
     .icons-and-names = Icone e nomi
+    .names-only = Solo nomi
     .allow-docking = Consenti ancoraggio
     .auto-hide = Nascondi automaticamente
     .dock-left = Ancora a sinistra
@@ -9792,3 +9793,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Schede sopra le tavolozze

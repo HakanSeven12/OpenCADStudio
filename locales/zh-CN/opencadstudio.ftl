@@ -7203,6 +7203,7 @@ count-feature =
 dock =
     .icons-only = 仅图标
     .icons-and-names = 图标和名称
+    .names-only = 仅名称
     .allow-docking = 允许停靠
     .auto-hide = 自动隐藏
     .dock-left = 停靠到左侧
@@ -9766,3 +9767,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = 选项卡位于选项板上方

@@ -10,16 +10,13 @@ use iced::widget::{
 use iced::{Background, Element, Fill, Length, Padding, Theme};
 
 use super::extras::{self, Layout, MoreGroup, MoreTool, PanelExtras};
-use super::widgets::{
-    make_icon, make_tip, popup_panel_style, popup_row_style, tip_style, tool_btn_style,
-    PANEL_TITLE_H, PANEL_TITLE_SIZE,
-};
+use super::widgets::{make_icon, tool_btn_style, PANEL_TITLE_H, PANEL_TITLE_SIZE};
 use super::{dropdown_backdrop, keytips, position_ribbon_dropdown, Ribbon, RibbonMinimize};
 use crate::app::Message;
 use crate::modules::IconKind;
 use crate::t;
 use crate::ui::icons;
-use crate::ui::style::{chrome, ribbon_metrics as metrics};
+use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::{dropdown_bounds, recent_bounds, PosReport};
 
 /// The title strip at the bottom of a panel and the line over it, which an
@@ -416,7 +413,7 @@ pub(super) fn launcher<'a>(panel: &PanelExtras) -> Option<Element<'a, Message>> 
 fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a, Message>> {
     let dialog = panel.dialog?;
     // The corner arrow runs the panel's dialog command.
-    let launcher = tooltip(
+    let launcher = crate::ui::kit::tooltip(
         // A right arrow turned to point into the corner.
         button(
             container(
@@ -436,14 +433,9 @@ fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a
         .width(LAUNCHER_W)
         .height(height)
         .padding(0),
-        make_tip(super::widgets::tool_tip_text(
-            &t!(panel.dialog_label),
-            dialog,
-        )),
+        super::widgets::tool_tip_text(&t!(panel.dialog_label), dialog),
         tooltip::Position::Bottom,
-    )
-    .delay(Duration::from_millis(400))
-    .style(tip_style);
+    );
     Some(keytips::anchor(panel.launcher, launcher))
 }
 
@@ -609,7 +601,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
         };
         let msg = Message::RibbonTextLayer(value);
         let item: Element<'a, Message> = button(
-            row![swatch, text(label.clone()).size(11)]
+            row![swatch, text(label.clone()).size(ui_text::UI)]
                 .spacing(6)
                 .align_y(iced::Center),
         )
@@ -618,7 +610,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
             if on && !matches!(status, button::Status::Hovered) {
                 tool_btn_style(theme, true, status)
             } else {
-                popup_row_style(theme, status)
+                crate::ui::kit::dropdown_row_style(theme, status)
             }
         })
         .width(Fill)
@@ -648,7 +640,7 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
             metrics::SMALL_ICON
         ),
         text(t!("Text Layer"))
-            .size(11)
+            .size(ui_text::UI)
             .style(|theme: &Theme| text::Style {
                 color: Some(chrome::muted(theme)),
             }),
@@ -675,7 +667,7 @@ fn group_label<'a>(group: &MoreGroup) -> Element<'a, Message> {
     });
     row![
         text(t!(group.title).to_uppercase())
-            .size(9.5)
+            .size(crate::ui::style::text::UI_SMALL)
             .style(|theme: &Theme| text::Style {
                 color: Some(chrome::muted(theme)),
             }),
@@ -757,10 +749,8 @@ fn slide_out_button(
         .height(cell)
         .padding((cell - CELL_ICON) / 2.0);
     let tip = super::widgets::tool_tip_text(&t!(tool.tool.label), command);
-    let face: Element<'static, Message> = tooltip(face, make_tip(tip), tooltip::Position::Bottom)
-        .delay(Duration::from_millis(400))
-        .style(tip_style)
-        .into();
+    let face: Element<'static, Message> =
+        crate::ui::kit::tooltip(face, tip, tooltip::Position::Bottom);
     let face = keytips::anchor_with(|| keytips::item_anchor(panel_id, command), face);
     if tool.options.is_empty() {
         return face;
@@ -787,16 +777,11 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
     .style(move |theme: &Theme, status| tool_btn_style(theme, on, status))
     .padding(3);
     let amount = fade.unsigned_abs().min(90) as u8;
-    let switch = tooltip(
+    let switch = crate::ui::kit::tooltip(
         switch,
-        make_tip(super::widgets::tool_tip_text(
-            &t!("Xref fading"),
-            "XDWGFADECTL",
-        )),
+        super::widgets::tool_tip_text(&t!("Xref fading"), "XDWGFADECTL"),
         tooltip::Position::Bottom,
-    )
-    .delay(Duration::from_millis(400))
-    .style(tip_style);
+    );
     let switch = keytips::anchor_with(
         || keytips::item_anchor(panel_id, keytips::XREF_FADE),
         switch,
@@ -805,12 +790,12 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
         switch,
         keytips::label_anchor(
             || keytips::label_id(&keytips::item_anchor(panel_id, keytips::XREF_FADE)),
-            text(t!("Xref fading")).size(11),
+            text(t!("Xref fading")).size(ui_text::UI),
         ),
         iced::widget::slider(0..=90u8, amount, Message::XrefFadeSlide)
             .on_release(Message::XrefFadeCommit)
             .width(Fill),
-        text(amount.to_string()).size(11).width(22),
+        text(amount.to_string()).size(ui_text::UI).width(22),
     ]
     .spacing(6)
     .align_y(iced::Center)
@@ -857,9 +842,12 @@ fn footer_bar<'a>(
     };
     // The title and its chevron in the footer's text colour.
     let title = button(
-        row![text(t!(panel.title())).size(11.5), icons::dropup_arrow()]
-            .spacing(4)
-            .align_y(iced::Center),
+        row![
+            text(t!(panel.title())).size(crate::ui::style::text::UI),
+            icons::dropup_arrow()
+        ]
+        .spacing(4)
+        .align_y(iced::Center),
     )
     .on_press(if peek {
         Message::ToggleRibbonDropdown(panel.id.to_string())
@@ -920,9 +908,9 @@ fn options_list<'a>(
                 dropdown_id: command,
                 cmd,
             };
-            let item = button(text(translated.clone()).size(11))
+            let item = button(text(translated.clone()).size(ui_text::UI))
                 .on_press(msg.clone())
-                .style(popup_row_style)
+                .style(crate::ui::kit::dropdown_row_style)
                 .width(Fill)
                 .height(OPTION_HEIGHT)
                 .padding([3, 7]);
@@ -931,7 +919,9 @@ fn options_list<'a>(
         })
         .collect();
     let dd_list = DropdownList::new(rows).on_escape(Message::CloseRibbonDropdown);
-    let list = container(dd_list).style(popup_panel_style).width(OPTIONS_W);
+    let list = container(dd_list)
+        .style(crate::ui::kit::menu::frame_style)
+        .width(OPTIONS_W);
     let list = opaque(
         mouse_area(list)
             .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverSubmenu(true)))

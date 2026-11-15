@@ -7218,6 +7218,7 @@ count-feature =
 dock =
     .icons-only = Alleen pictogrammen
     .icons-and-names = Pictogrammen en namen
+    .names-only = Alleen namen
     .allow-docking = Koppelen toestaan
     .auto-hide = Automatisch verbergen
     .dock-left = Links koppelen
@@ -9791,3 +9792,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Tabbladen boven de paletten

@@ -7221,6 +7221,7 @@ count-feature =
 dock =
     .icons-only = Icons only
     .icons-and-names = Icons and names
+    .names-only = Names only
     .allow-docking = Allow docking
     .auto-hide = Auto-hide
     .dock-left = Dock left
@@ -9792,3 +9793,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Tabs above the palettes

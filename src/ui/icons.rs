@@ -82,6 +82,8 @@ pub static DOCK_BACK: &[u8] = include_bytes!("../../assets/icons/ui/window_dock_
 pub static PIN: &[u8] = include_bytes!("../../assets/icons/ui/pin.svg");
 /// `PIN` tilted 30°: the pin while auto-hide is on.
 pub static PIN_ACTIVE: &[u8] = include_bytes!("../../assets/icons/ui/pin_active.svg");
+/// `PIN` turned 90°: a docked palette's pin while it auto-hides.
+pub static PIN_SIDE: &[u8] = include_bytes!("../../assets/icons/ui/pin_side.svg");
 pub static SPLIT_V: &[u8] = include_bytes!("../../assets/icons/ui/split_v.svg");
 pub static SPLIT_H: &[u8] = include_bytes!("../../assets/icons/ui/split_h.svg");
 pub static GRID: &[u8] = include_bytes!("../../assets/icons/ui/grid.svg");

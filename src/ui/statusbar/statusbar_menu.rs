@@ -1,7 +1,6 @@
 //! Status-bar customization and layout-list menu entries.
 
-use iced::widget::{button, row, text};
-use iced::{Background, Element, Fill, Theme};
+use iced::Element;
 
 use crate::app::Message;
 use crate::t;
@@ -28,39 +27,22 @@ pub fn layout_entries<'a>(layouts: &[String], current: &str) -> Vec<Entry<'a>> {
         .collect()
 }
 
+/// A layout, the current one marked: a kit menu item.
 fn layout_row<'a>(name: String, is_current: bool) -> Element<'a, Message> {
-    let lbl = text(name.clone()).size(11);
-    button(row![lbl].align_y(iced::Center))
-        .on_press(Message::LayoutSwitch(name))
-        .style(move |theme: &Theme, status| {
-            let mut style = button::subtle(theme, status);
-            if is_current && status == button::Status::Active {
-                let palette = theme.palette();
-                style.background = Some(Background::Color(palette.primary.weak.color));
-                style.text_color = palette.primary.weak.text;
-            }
-            style
-        })
-        .width(Fill)
-        .padding([4, 12])
-        .into()
+    crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(name.clone(), Message::LayoutSwitch(name))
+            .mark(crate::ui::kit::menu::Mark::Radio(is_current)),
+    )
 }
 
+/// A status pill shown or hidden: a kit menu item with its check.
 fn menu_row(
     label: std::borrow::Cow<'static, str>,
     checked: bool,
     msg: Message,
 ) -> Element<'static, Message> {
-    let check = crate::ui::icons::themed_check_cell(checked);
-
-    let lbl = text(label).size(11);
-
-    let content = row![check, lbl].spacing(6).align_y(iced::Center);
-
-    button(content)
-        .on_press(msg)
-        .style(button::subtle)
-        .width(Fill)
-        .padding([4, 10])
-        .into()
+    crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(label, msg)
+            .mark(crate::ui::kit::menu::Mark::Check(checked)),
+    )
 }

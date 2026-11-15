@@ -414,14 +414,7 @@ fn row_of<'a>(
         lines.push(error.message.clone());
     }
     lines.push(crate::t!("Double-click to insert").into_owned());
-    tooltip(
-        area,
-        crate::ui::ribbon::tooltip_content(lines.join("\n")),
-        tooltip::Position::Bottom,
-    )
-    .delay(std::time::Duration::from_millis(400))
-    .style(crate::ui::ribbon::tooltip_style)
-    .into()
+    crate::ui::kit::tooltip(area, lines.join("\n"), tooltip::Position::Bottom)
 }
 
 pub(super) fn variables<'a>(

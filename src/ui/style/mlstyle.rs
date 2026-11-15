@@ -267,7 +267,7 @@ impl canvas::Program<Message> for MLinePreviewCanvas {
                 t!("Elements"),
                 self.elements.len()
             ),
-            position: Point::new(10.0, bounds.height - 9.0),
+            position: crate::ui::style::text::snap_point(Point::new(10.0, bounds.height - 9.0)),
             color: ink.scale_alpha(0.62),
             size: iced::Pixels(10.0),
             align_y: iced::alignment::Vertical::Center,

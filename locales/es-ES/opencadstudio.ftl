@@ -7220,6 +7220,7 @@ count-feature =
 dock =
     .icons-only = Solo iconos
     .icons-and-names = Iconos y nombres
+    .names-only = Solo nombres
     .allow-docking = Permitir acoplar
     .auto-hide = Ocultar automáticamente
     .dock-left = Acoplar a la izquierda
@@ -9793,3 +9794,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Pestañas sobre las paletas

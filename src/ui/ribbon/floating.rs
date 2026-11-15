@@ -1020,14 +1020,7 @@ fn hover_button<'a>(icon: &'static str, tip: String, msg: FloatMsg) -> Element<'
     .width(metrics::FLOAT_HOVER_HIT)
     .height(metrics::FLOAT_HOVER_HIT)
     .padding(0);
-    iced::widget::tooltip(
-        btn,
-        super::widgets::make_tip(tip),
-        iced::widget::tooltip::Position::Top,
-    )
-    .delay(std::time::Duration::from_millis(400))
-    .style(super::widgets::tip_style)
-    .into()
+    crate::ui::kit::tooltip(btn, tip, iced::widget::tooltip::Position::Top)
 }
 
 fn hover_button_style(
@@ -1334,13 +1327,7 @@ fn side_strip<'a>(
     })
     .width(Length::Fill)
     .height(Length::Fill);
-    let vertical = iced::widget::tooltip(
-        vertical,
-        super::widgets::make_tip(label),
-        iced::widget::tooltip::Position::Right,
-    )
-    .delay(std::time::Duration::from_millis(400))
-    .style(super::widgets::tip_style);
+    let vertical = crate::ui::kit::tooltip(vertical, label, iced::widget::tooltip::Position::Right);
     let mut strip = iced::widget::column![vertical].align_x(iced::Center);
     if let Some(launcher) = launcher {
         strip = strip.push(launcher);
@@ -1434,7 +1421,7 @@ impl iced::widget::canvas::Program<Message> for VerticalTitle {
             frame.rotate(std::f32::consts::FRAC_PI_2);
             frame.fill_text(Text {
                 content: label,
-                position: Point::ORIGIN,
+                position: crate::ui::style::text::snap_point(Point::ORIGIN),
                 color,
                 size: size.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),

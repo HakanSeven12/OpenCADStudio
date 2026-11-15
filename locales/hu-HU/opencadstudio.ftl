@@ -7198,6 +7198,7 @@ count-feature =
 dock =
     .icons-only = Csak ikonok
     .icons-and-names = Ikonok és nevek
+    .names-only = Csak nevek
     .allow-docking = Dokkolás engedélyezése
     .auto-hide = Automatikus elrejtés
     .dock-left = Dokkolás balra
@@ -9771,3 +9772,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Lapok a paletták felett

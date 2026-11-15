@@ -125,6 +125,7 @@ impl OpenCADStudio {
             tab.layer_walk_rows.len(),
             self.ctrl_down,
             self.shift_down,
+            self.layer_walk_col_w,
             width,
             chrome,
         )
@@ -406,6 +407,11 @@ impl OpenCADStudio {
                     session.pattern = Some(name.clone());
                     session.saved_active = Some(name);
                 }
+            }
+            LayerWalkMsg::ColumnGrab(col) => {
+                // The dock's pointer capture feeds the drag (see `on_dock`).
+                self.dock_drag = Some(crate::ui::dock::DockDrag::WalkColumn(col));
+                self.dock_drag_last = None;
             }
             LayerWalkMsg::Sort(col) => {
                 {

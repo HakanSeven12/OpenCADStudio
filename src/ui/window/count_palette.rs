@@ -5,22 +5,20 @@
 
 use crate::app::Message;
 use crate::ui::dock::PanelId;
+use crate::ui::kit;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::form::{button_style, field_style};
+use crate::ui::style::form::button_style;
+use crate::ui::style::kit_metrics as km;
 use document::count::{BlockInstance, CountKey};
 use document::{Document, Handle};
-use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
-    Space,
-};
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
+use iced::widget::{button, checkbox, column, container, row, text, tooltip, Space};
+use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 const BLOCK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/block.svg");
 const AREA_ICON: &[u8] = include_bytes!("../../../assets/icons/shapes/rect.svg");
 const SELECT_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
 const TABLE_ICON: &[u8] = include_bytes!("../../../assets/icons/table.svg");
 const WARNING_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
-const CHECK_ICON: &[u8] = include_bytes!("../../../assets/icons/ui/check.svg");
 
 /// The name of the layer count areas are drawn on.
 pub const AREA_LAYER: &str = "0-CountArea";
@@ -310,73 +308,41 @@ fn small_icon<'a>(bytes: &'static [u8], size: f32) -> Element<'a, Message> {
 }
 
 fn row_menu(name: String, key: CountKey, expandable: bool) -> Element<'static, Message> {
-    let entry = |label: String, action: RowAction| -> Element<'static, Message> {
-        button(text(label).size(12))
-            .width(Fill)
-            .padding([5, 12])
-            .on_press(msg(CountMsg::Menu(name.clone(), key.clone(), action)))
-            .style(|theme: &Theme, status| {
-                let mut s = button::text(theme, status);
-                if matches!(status, button::Status::Hovered) {
-                    s.background = Some(Background::Color(theme.palette().primary.base.color));
-                    s.text_color = theme.palette().primary.base.text;
-                }
-                s
-            })
-            .into()
+    use crate::ui::kit::menu::Item;
+    let entry = |label: String, action: RowAction| {
+        Item::new(
+            label,
+            msg(CountMsg::Menu(name.clone(), key.clone(), action)),
+        )
     };
-    let mut items = column![
+    let mut items = vec![
         entry(
             crate::t!("Review Count Details").into_owned(),
-            RowAction::Review
+            RowAction::Review,
         ),
         entry(
             crate::t!("Insert Count Field").into_owned(),
-            RowAction::Field
+            RowAction::Field,
         ),
-    ]
-    .spacing(1);
+    ];
     if expandable {
-        items = items
-            .push(
-                container(Space::new())
-                    .height(1)
-                    .width(Fill)
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(
-                            theme.palette().background.neutral.color,
-                        )),
-                        ..Default::default()
-                    }),
-            )
-            .push(
-                container(text(crate::t!("EXPAND BY")).size(10).style(muted_style))
-                    .padding([3, 12]),
-            )
-            .push(entry(crate::t!("Layer").into_owned(), RowAction::Expand(0)))
-            .push(entry(crate::t!("Scale").into_owned(), RowAction::Expand(1)))
-            .push(entry(
-                crate::t!("Mirror State").into_owned(),
-                RowAction::Expand(2),
-            ));
+        items.push(Item::Separator);
+        items.push(Item::Heading(crate::t!("EXPAND BY").into_owned()));
+        items.push(entry(crate::t!("Layer").into_owned(), RowAction::Expand(0)));
+        items.push(entry(crate::t!("Scale").into_owned(), RowAction::Expand(1)));
+        items.push(entry(
+            crate::t!("Mirror State").into_owned(),
+            RowAction::Expand(2),
+        ));
     }
-    container(items)
-        .padding(4)
-        .width(Length::Fixed(200.0))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    crate::ui::kit::menu::view(items)
 }
 
+/// One row of the list: a block (with its table check box, or the mark of
+/// an expanded row) or, one level in, one of its expanded counts.
+#[allow(clippy::too_many_arguments)]
 fn list_row<'a>(
-    palette: &CountPalette,
+    palette: &'a CountPalette,
     name: &str,
     key: CountKey,
     label: String,
@@ -385,98 +351,89 @@ fn list_row<'a>(
     depth: u16,
     expanded: Option<bool>,
 ) -> Element<'a, Message> {
-    let lead: Element<'a, Message> =
-        if let Some(checked) = palette.table.as_ref().filter(|_| depth == 0) {
-            let on = checked.contains(&name.to_ascii_uppercase());
-            let n = name.to_string();
+    let mut lead = row![].spacing(km::TOOL_GAP).align_y(iced::Center);
+    if let Some(checked) = palette.table.as_ref().filter(|_| depth == 0) {
+        let on = checked.contains(&name.to_ascii_uppercase());
+        let n = name.to_string();
+        lead = lead.push(
             checkbox(on)
-                .size(14)
-                .on_toggle(move |v| msg(CountMsg::TableCheck(n.clone(), v)))
-                .into()
-        } else if expanded == Some(true) {
-            container(crate::ui::icons::themed(crate::ui::icons::MINUS, 12.0))
-                .width(Length::Fixed(14.0))
-                .into()
-        } else {
-            Space::new().width(Length::Fixed(14.0)).into()
-        };
-    let mut cells = row![
-        Space::new().width(Length::Fixed(f32::from(depth) * 18.0)),
-        lead
-    ];
-    if depth == 0 {
-        cells = cells.push(small_icon(BLOCK_ICON, 14.0));
+                .size(km::CHECK)
+                .on_toggle(move |v| msg(CountMsg::TableCheck(n.clone(), v))),
+        );
+    } else if expanded == Some(true) {
+        lead = lead.push(
+            container(crate::ui::icons::themed(
+                crate::ui::icons::MINUS,
+                km::BAR_ICON,
+            ))
+            .center_x(Length::Fixed(km::CHECK)),
+        );
+    } else {
+        lead = lead.push(Space::new().width(km::CHECK));
     }
-    cells = cells.push(text(label).size(12).width(Fill));
+    if depth == 0 {
+        lead = lead.push(small_icon(BLOCK_ICON, km::ROW_ICON));
+    }
+    let mut end = row![].spacing(km::TOOL_GAP).align_y(iced::Center);
     if errors {
-        cells = cells.push(crate::ui::icons::themed_warning(WARNING_ICON, 12.0));
+        end = end.push(crate::ui::icons::themed_warning(WARNING_ICON, km::BAR_ICON));
     }
     // An expanded row shows its counts on the rows below it.
-    cells = cells.push(match count {
-        Some(n) => Element::from(text(n.to_string()).size(12)),
-        None => crate::ui::icons::themed(crate::ui::icons::MORE, 12.0),
+    end = end.push(match count {
+        Some(n) => kit::number_cell(n.to_string()),
+        None => crate::ui::icons::themed(crate::ui::icons::MORE, km::BAR_ICON),
     });
-    let body = container(cells.spacing(6).align_y(iced::Center))
-        .width(Fill)
-        .padding([4, 6]);
-    let area = mouse_area(body)
+    let row = kit::tree_row(label)
+        .depth(depth)
+        .icon(lead)
+        .trailing(end)
         .on_press(msg(CountMsg::Open(name.to_string(), key.clone())))
-        .interaction(iced::mouse::Interaction::Pointer);
+        .view();
     let (n, expandable) = (name.to_string(), depth == 0);
-    iced_aw::ContextMenu::new(area, move || row_menu(n.clone(), key.clone(), expandable)).into()
+    iced_aw::ContextMenu::new(row, move || row_menu(n.clone(), key.clone(), expandable)).into()
 }
 
-fn header_button<'a>(
-    label: String,
-    active: bool,
-    descending: bool,
-    m: CountMsg,
-) -> Element<'a, Message> {
-    let mut content = row![text(label).size(11)].spacing(3).align_y(iced::Center);
-    if active {
-        content = content.push(crate::ui::icons::themed_arrow_toggle(!descending, 8.0));
-    }
-    button(content)
-        .on_press(msg(m))
-        .style(button::text)
-        .padding([2, 4])
-        .into()
-}
-
-/// The list: search, area button, Name / Count columns, rows, Create Table.
+/// The list: search and area button, Name / Count columns, rows, and the
+/// Create Table (or Insert / Cancel) buttons.
 fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Element<'a, Message> {
-    let search = text_input(&crate::t!("Search"), &palette.search)
-        .on_input(|v| msg(CountMsg::Search(v)))
-        .padding([4, 8])
-        .size(12)
-        .style(field_style);
-    let top = row![
-        search.width(Fill),
-        crate::ui::dock::tool_button(
-            small_icon(AREA_ICON, crate::ui::dock::TOOL_H),
-            crate::t!("Count in a specified area").into_owned(),
-            msg(CountMsg::Area),
-        ),
-    ]
-    .spacing(4)
-    .align_y(iced::Center);
-    let header = row![
-        header_button(
-            crate::t!("Name").into_owned(),
-            !palette.by_count,
-            palette.descending,
-            CountMsg::Sort(false)
-        ),
-        Space::new().width(Fill),
-        header_button(
-            crate::t!("Count").into_owned(),
-            palette.by_count,
-            palette.descending,
-            CountMsg::Sort(true)
-        ),
-    ]
-    .align_y(iced::Center);
-    let mut list = column![].spacing(1);
+    let top = kit::band(
+        row![
+            kit::search_field(&crate::t!("Search"), &palette.search, |v| {
+                msg(CountMsg::Search(v))
+            }),
+            kit::tool_button(
+                small_icon(AREA_ICON, km::ROW_ICON),
+                crate::t!("Count in a specified area").into_owned(),
+                Some(msg(CountMsg::Area)),
+                false,
+            ),
+        ]
+        .spacing(km::TOOL_GAP)
+        .align_y(iced::Center),
+    );
+    let sort = |by_count: bool, title: String| {
+        let mut c = kit::column(
+            title,
+            if by_count {
+                Length::Shrink
+            } else {
+                Length::Fill
+            },
+        )
+        .on_press(msg(CountMsg::Sort(by_count)));
+        if palette.by_count == by_count {
+            c = c.sorted(palette.descending);
+        }
+        if by_count {
+            c = c.end();
+        }
+        c
+    };
+    let header = kit::column_header(vec![
+        sort(false, crate::t!("Name").into_owned()),
+        sort(true, crate::t!("Count").into_owned()),
+    ]);
+    let mut list = column![];
     for r in rows(instances, palette) {
         let expansion = palette.expansion(&r.name).filter(|e| e.iter().any(|v| *v));
         let count = expansion.is_none().then_some(r.count);
@@ -509,10 +466,11 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
     let footer: Element<'a, Message> = match &palette.table {
         None => row![
             Space::new().width(Fill),
-            button(text(crate::t!("Create Table")).size(12))
-                .on_press(msg(CountMsg::CreateTable))
-                .style(button_style(false))
-                .padding([5, 12]),
+            kit::text_button(
+                crate::t!("Create Table").into_owned(),
+                Some(msg(CountMsg::CreateTable)),
+                false,
+            ),
         ]
         .into(),
         Some(checked) => {
@@ -521,49 +479,34 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
                 && all
                     .iter()
                     .all(|r| checked.contains(&r.name.to_ascii_uppercase()));
-            let mut insert = button(text(crate::t!("Insert")).size(12))
-                .style(button_style(true))
-                .padding([5, 12]);
-            if !checked.is_empty() {
-                insert = insert.on_press(msg(CountMsg::TableInsert));
-            }
             row![
                 checkbox(every)
-                    .size(14)
+                    .size(km::CHECK)
                     .on_toggle(|v| msg(CountMsg::TableAll(v))),
                 Space::new().width(Fill),
-                button(text(crate::t!("Cancel")).size(12))
-                    .on_press(msg(CountMsg::TableCancel))
-                    .style(button_style(false))
-                    .padding([5, 12]),
-                insert,
+                kit::text_button(
+                    crate::t!("Cancel").into_owned(),
+                    Some(msg(CountMsg::TableCancel)),
+                    false,
+                ),
+                kit::text_button(
+                    crate::t!("Insert").into_owned(),
+                    (!checked.is_empty()).then(|| msg(CountMsg::TableInsert)),
+                    true,
+                ),
             ]
-            .spacing(6)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center)
             .into()
         }
     };
     column![
         top,
-        container(column![header, scrollable(list).height(Fill)].spacing(2))
-            .padding(4)
-            .height(Fill)
-            .style(card),
-        footer,
+        kit::band(header),
+        container(kit::scroll_area(list)).height(Fill),
+        container(kit::band(footer)).padding(Padding::ZERO.bottom(km::TOOL_GAP)),
     ]
-    .spacing(6)
     .into()
-}
-
-fn card(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(theme.palette().background.weak.color)),
-        border: Border {
-            radius: 4.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
 }
 
 /// Count mode in the palette: back to the list, the counted block with the
@@ -573,38 +516,25 @@ fn mode_view<'a>(
     mode: &'a CountMode,
     doc: &Document,
 ) -> Element<'a, Message> {
-    let back = button(
-        row![
-            crate::ui::icons::themed_arrow_left(10.0),
-            text(crate::t!("Back to List")).size(12)
-        ]
-        .spacing(4)
-        .align_y(iced::Center),
-    )
-    .on_press(msg(CountMsg::Back))
-    .style(button::text)
-    .padding([2, 2]);
+    let back = kit::band(kit::text_button(
+        crate::t!("Back to List").into_owned(),
+        Some(msg(CountMsg::Back)),
+        false,
+    ));
     let result = mode.result(doc);
-    let mut body = column![back].spacing(8);
+    let mut body = column![];
     if let Some(name) = mode.target_name() {
-        let mut details = column![button(
-            row![
-                crate::ui::icons::themed_success(CHECK_ICON, 12.0),
-                text(match mode.target {
-                    Some(CountTarget::Group(_)) =>
-                        crate::tf!("Geometries: {}", mode.count(doc)).into_owned(),
-                    _ => format!("{name}: {}", mode.count(doc)),
-                })
-                .size(12)
-                .width(Fill),
-            ]
-            .spacing(6)
-            .align_y(iced::Center),
-        )
-        .on_press(msg(CountMsg::ToggleDetails))
-        .style(button::text)
-        .padding(0)]
-        .spacing(6);
+        let title = match mode.target {
+            Some(CountTarget::Group(_)) => {
+                crate::tf!("Geometries: {}", mode.count(doc)).into_owned()
+            }
+            _ => format!("{name}: {}", mode.count(doc)),
+        };
+        body = body.push(kit::category_bar(
+            title,
+            palette.details_closed,
+            msg(CountMsg::ToggleDetails),
+        ));
         if let (false, Some(CountTarget::Block { matching, .. })) =
             (palette.details_closed, &mode.target)
         {
@@ -612,45 +542,39 @@ fn mode_view<'a>(
                 .iter()
                 .enumerate()
             {
-                details = details.push(
-                    checkbox(matching[k])
-                        .label(crate::t!(*label).into_owned())
-                        .text_size(12)
-                        .size(14)
-                        .on_toggle(move |v| msg(CountMsg::Match(k, v))),
-                );
+                body = body.push(kit::row_view(
+                    kit::name_text(crate::t!(*label).into_owned()),
+                    container(
+                        checkbox(matching[k])
+                            .size(km::CHECK)
+                            .on_toggle(move |v| msg(CountMsg::Match(k, v))),
+                    )
+                    .padding(Padding::ZERO.left(km::CELL_PAD_X))
+                    .into(),
+                    false,
+                    None,
+                ));
             }
         }
-        body = body.push(container(details).padding(8).width(Fill).style(card));
     }
     if !result.errors.is_empty() {
-        let mut report = column![button(
-            row![
-                crate::ui::icons::themed_warning(WARNING_ICON, 12.0),
-                text(crate::tf!("Count Error Report: {}", result.errors.len()))
-                    .size(12)
-                    .width(Fill),
-            ]
-            .spacing(6)
-            .align_y(iced::Center),
-        )
-        .on_press(msg(CountMsg::ToggleErrors))
-        .style(button::text)
-        .padding(0)]
-        .spacing(4);
+        body = body.push(kit::category_bar(
+            crate::tf!("Count Error Report: {}", result.errors.len()).into_owned(),
+            palette.errors_closed,
+            msg(CountMsg::ToggleErrors),
+        ));
         if !palette.errors_closed {
             for h in &result.errors {
-                report = report.push(
-                    button(text(crate::t!("Overlapping object")).size(12))
+                body = body.push(
+                    kit::tree_row(crate::t!("Overlapping object").into_owned())
+                        .icon(crate::ui::icons::themed_warning(WARNING_ICON, km::BAR_ICON))
                         .on_press(msg(CountMsg::ShowError(*h)))
-                        .style(button::text)
-                        .padding([2, 18]),
+                        .view(),
                 );
             }
         }
-        body = body.push(container(report).padding(8).width(Fill).style(card));
     }
-    body.into()
+    column![back, kit::scroll_area(body)].into()
 }
 
 pub fn view<'a>(
@@ -682,7 +606,7 @@ pub fn view<'a>(
             list_view(palette, &instances)
         }
     };
-    crate::ui::dock::frame(title_bar, column![body].spacing(6), width)
+    kit::palette(title_bar, body, width)
 }
 
 fn bar_button<'a>(
@@ -763,10 +687,10 @@ pub fn toolbar<'a>(mode: &CountMode, doc: &Document) -> Element<'a, Message> {
     let bar = container(bar)
         .padding([4, 10])
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
             border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::kit_metrics::line(),
                 radius: 4.0.into(),
             },
             ..Default::default()
@@ -783,9 +707,9 @@ pub fn border<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(Fill))
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| container::Style {
+        .style(|theme: &Theme| container::Style {
             border: Border {
-                color: Color::from_rgb(0.18, 0.52, 0.95),
+                color: crate::ui::style::chrome::accent(theme),
                 width: 2.0,
                 radius: 0.0.into(),
             },

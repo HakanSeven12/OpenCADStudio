@@ -7220,6 +7220,7 @@ count-feature =
 dock =
     .icons-only = Μόνο εικονίδια
     .icons-and-names = Εικονίδια και ονόματα
+    .names-only = Μόνο ονόματα
     .allow-docking = Να επιτρέπεται η πρόσδεση
     .auto-hide = Αυτόματη απόκρυψη
     .dock-left = Πρόσδεση αριστερά
@@ -9793,3 +9794,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Καρτέλες πάνω από τις παλέτες

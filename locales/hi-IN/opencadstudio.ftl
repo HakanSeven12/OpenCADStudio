@@ -7208,6 +7208,7 @@ count-feature =
 dock =
     .icons-only = केवल आइकन
     .icons-and-names = आइकन और नाम
+    .names-only = केवल नाम
     .allow-docking = डॉकिंग की अनुमति दें
     .auto-hide = स्वतः छिपाएँ
     .dock-left = बाएँ डॉक करें
@@ -9781,3 +9782,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = पैलेट के ऊपर टैब

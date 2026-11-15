@@ -7,24 +7,6 @@ use crate::app::{Message, OpenCADStudio};
 /// so a plain click never moves anything.
 const DOCK_DRAG_THRESHOLD: f32 = 5.0;
 
-/// Resolves once the dock hover delay has passed (a sleeping helper thread;
-/// the web build has none and resolves at once).
-fn hover_delay() -> impl std::future::Future<Output = ()> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let rx = {
-        let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
-        std::thread::spawn(move || {
-            std::thread::sleep(crate::ui::dock::DOCK_HOVER_DELAY);
-            let _ = tx.send(());
-        });
-        rx
-    };
-    async move {
-        #[cfg(not(target_arch = "wasm32"))]
-        let _ = rx.await;
-    }
-}
-
 impl OpenCADStudio {
     /// Dock chrome interaction (grab / pin / resize / hover / move) applied to
     /// whichever panel the message names.
@@ -43,6 +25,10 @@ impl OpenCADStudio {
                 self.dock_begin(DockDrag::moving(id, None), Some(id));
             }
             DockMsg::GroupGrab(side, gi) => {
+                // The strips are rebuilt under the drag's capture layer, so
+                // the grip never hears the pointer leave: unlight it now.
+                self.dock_grip_hover = None;
+                self.dock_grip_lit = None;
                 if let Some(&id) = self.dock_group_visible(side, gi).first() {
                     self.dock_begin(DockDrag::moving(id, Some((side, gi))), Some(id));
                 }
@@ -88,10 +74,24 @@ impl OpenCADStudio {
                     self.dock_title_hover = None;
                 }
             }
-            DockMsg::GripHover(side, gi) => self.dock_grip_hover = Some((side, gi)),
+            DockMsg::GripHover(side, gi) => {
+                self.dock_grip_hover = Some((side, gi));
+                self.dock_grip_gen = self.dock_grip_gen.wrapping_add(1);
+                let gen = self.dock_grip_gen;
+                return iced::Task::perform(
+                    crate::app::update::rest(crate::ui::dock::GRIP_LIT_DELAY),
+                    move |()| Message::Dock(crate::ui::dock::DockMsg::GripLit(side, gi, gen)),
+                );
+            }
             DockMsg::GripHoverEnd(side, gi) => {
                 if self.dock_grip_hover == Some((side, gi)) {
                     self.dock_grip_hover = None;
+                    self.dock_grip_lit = None;
+                }
+            }
+            DockMsg::GripLit(side, gi, gen) => {
+                if gen == self.dock_grip_gen && self.dock_grip_hover == Some((side, gi)) {
+                    self.dock_grip_lit = Some((side, gi));
                 }
             }
             DockMsg::FloatRaise(id) => self.dock.raise_float(id),
@@ -120,6 +120,7 @@ impl OpenCADStudio {
             DockMsg::DockTo(id, side) => {
                 self.dock_drag = None;
                 self.dock_float_menu = None;
+                self.dock_clear_hover();
                 if self.dock.dock(id, side, usize::MAX) {
                     self.save_config();
                 }
@@ -153,9 +154,9 @@ impl OpenCADStudio {
                 self.dock_edge_menu_y = Some(self.dock_strip_pointer_y);
             }
             DockMsg::StripPointer(p) => self.dock_strip_pointer_y = p.y,
-            DockMsg::StripLabels(on) => {
+            DockMsg::StripNames(names) => {
                 self.dock_edge_menu = None;
-                self.dock.strip_labels = on;
+                self.dock.strip_names = names;
                 self.save_config();
             }
             DockMsg::EdgeMenuToggle(side, id) => {
@@ -265,9 +266,27 @@ impl OpenCADStudio {
         iced::Task::none()
     }
 
+    /// Forget which strip cell and group grip are hovered, after the strips
+    /// were rebuilt without the pointer leaving them.
+    fn dock_clear_hover(&mut self) {
+        self.dock_icon_hover = None;
+        self.dock_grip_hover = None;
+        self.dock_grip_lit = None;
+    }
+
     /// Pointer released: land what was dragged and save a changed layout.
     fn dock_drag_release(&mut self) {
         use crate::ui::dock::{DockDrag, DropTarget, FloatPanel};
+        // A real drag rebuilds the strips under the drag's capture layer,
+        // so no cell ever hears the pointer leave: drop the hover marks,
+        // or a cell stays lit as if hovered. A plain click keeps them.
+        let dragged = self
+            .dock_drag
+            .and_then(|d| d.movement())
+            .is_some_and(|(_, _, target)| target.is_some());
+        if dragged {
+            self.dock_clear_hover();
+        }
         let mut changed = false;
         match self.dock_drag.take() {
             Some(DockDrag::Move {
@@ -298,7 +317,8 @@ impl OpenCADStudio {
                     }
                 };
             }
-            Some(DockDrag::Move { .. } | DockDrag::LayerColumn) | None => {}
+            Some(DockDrag::Move { .. } | DockDrag::LayerColumn(_) | DockDrag::WalkColumn(_))
+            | None => {}
             Some(
                 DockDrag::Width(_)
                 | DockDrag::Split { .. }
@@ -445,10 +465,28 @@ impl OpenCADStudio {
                 let pos = self.quick_properties_pos + (point - last);
                 self.quick_properties_pos = iced::Point::new(pos.x.max(0.0), pos.y.max(0.0));
             }
-            DockDrag::LayerColumn => {
+            DockDrag::LayerColumn(col) => {
                 let Some(last) = last else { return };
-                self.layer_name_col_w =
-                    (self.layer_name_col_w + point.x - last.x).clamp(60.0, 640.0);
+                let dx = point.x - last.x;
+                match col {
+                    None => {
+                        self.layer_name_col_w = (self.layer_name_col_w + dx).clamp(60.0, 640.0);
+                    }
+                    Some(col) => {
+                        let w = crate::ui::window::layers::column_width(&self.layer_col_w, col);
+                        self.layer_col_w.insert(
+                            col,
+                            (w + dx).clamp(crate::ui::window::layers::COL_MIN_W, 640.0),
+                        );
+                    }
+                }
+            }
+            DockDrag::WalkColumn(i) => {
+                let Some(last) = last else { return };
+                if let Some(w) = self.layer_walk_col_w.get_mut(i) {
+                    *w = (*w + point.x - last.x)
+                        .clamp(crate::ui::window::layer_walk::COL_MIN_W, 640.0);
+                }
             }
             DockDrag::Width(id) => {
                 let Some(last) = last else { return };
@@ -488,9 +526,10 @@ impl OpenCADStudio {
         self.dock_hover_gen = self.dock_hover_gen.wrapping_add(1);
         self.dock_hover_pending = Some(target);
         let gen = self.dock_hover_gen;
-        iced::Task::perform(hover_delay(), move |()| {
-            Message::Dock(crate::ui::dock::DockMsg::HoverSettled(gen))
-        })
+        iced::Task::perform(
+            crate::app::update::rest(crate::ui::dock::DOCK_HOVER_DELAY),
+            move |()| Message::Dock(crate::ui::dock::DockMsg::HoverSettled(gen)),
+        )
     }
 
     /// Whether a popup a pallet opened is showing: a colour dropdown in the
@@ -861,8 +900,14 @@ impl OpenCADStudio {
     }
 
     /// Size of the workspace the dock lays out in: window width by viewport
-    /// height.
+    /// height, plus the drawing-tab bar when it sits over the drawing
+    /// between the docks (the docks then run from the ribbon down).
     pub(crate) fn dock_workspace_size(&self) -> (f32, f32) {
+        let tabs = if self.doc_tabs_in_center() {
+            crate::ui::style::kit_metrics::TAB_BAR_H
+        } else {
+            0.0
+        };
         (
             self.win_size.0,
             self.tabs[self.active_tab]
@@ -871,8 +916,15 @@ impl OpenCADStudio {
                 .borrow()
                 .view
                 .vp_size
-                .1,
+                .1
+                + tabs,
         )
+    }
+
+    /// Whether the drawing-tab bar sits over the drawing, between the
+    /// docks, rather than across the window above them.
+    pub(crate) fn doc_tabs_in_center(&self) -> bool {
+        self.show_file_tabs && !self.file_tabs_above_docks
     }
 
     /// The open pallets of group `gi` on `side`, top → bottom. Closed
@@ -958,7 +1010,7 @@ impl OpenCADStudio {
         &self,
         side: crate::app::config::DockSide,
     ) -> (Vec<crate::ui::dock::StripGroup>, f32) {
-        let labelled = self.dock.strip_labels;
+        let names = self.dock.strip_names;
         let groups: Vec<(usize, Vec<f32>)> = self
             .dock_visible_groups(side)
             .into_iter()
@@ -966,7 +1018,7 @@ impl OpenCADStudio {
                 let cells = self
                     .dock_group_visible(side, gi)
                     .into_iter()
-                    .map(|id| crate::ui::dock::strip_tab_h(&crate::t!(id.title()), labelled))
+                    .map(|id| crate::ui::dock::strip_tab_h(&crate::t!(id.title()), names))
                     .collect();
                 (gi, cells)
             })
@@ -1022,11 +1074,8 @@ impl OpenCADStudio {
         let inset = |side: DockSide| match self.dock_shown_group(side) {
             None => 0.0,
             Some(_) if self.dock.edge_auto_hide(side) => crate::ui::dock::DOCK_STRIP_W,
-            Some(gi) => {
-                crate::ui::dock::DOCK_STRIP_W
-                    + self.dock_group_width(side, gi)
-                    + crate::ui::dock::DOCK_DIVIDER_W
-            }
+            // The grab band lies over the drawing: it takes no room.
+            Some(gi) => crate::ui::dock::DOCK_STRIP_W + self.dock_group_width(side, gi),
         };
         (inset(DockSide::Left), inset(DockSide::Right))
     }

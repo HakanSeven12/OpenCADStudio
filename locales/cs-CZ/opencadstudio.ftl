@@ -7222,6 +7222,7 @@ count-feature =
 dock =
     .icons-only = Pouze ikony
     .icons-and-names = Ikony a názvy
+    .names-only = Pouze názvy
     .allow-docking = Povolit ukotvení
     .auto-hide = Automaticky skrýt
     .dock-left = Ukotvit vlevo
@@ -9799,3 +9800,6 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Karty nad paletami

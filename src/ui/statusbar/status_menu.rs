@@ -54,7 +54,8 @@ pub fn menu_bar<'a>(
         .collect();
     let menu = Menu::new(items)
         .width(Length::Fixed(width))
-        .padding(0)
+        // The rows stay inside the border, so it draws over a lit row.
+        .padding(crate::ui::style::kit_metrics::line())
         .spacing(0)
         .offset(1.0)
         .close_on_background_click(true);
@@ -69,29 +70,20 @@ pub fn menu_bar<'a>(
         .safe_bounds_margin(super::ROW_HEIGHT)
         .close_on_background_click_global(true)
         .draw_path(DrawPath::Backdrop)
+        // The kit menu's frame, shadow and hover.
         .style(|theme: &Theme, _| {
-            let palette = theme.palette();
+            let frame = crate::ui::kit::menu::frame_style(theme);
             iced_aw::style::menu_bar::Style {
                 bar_background: Background::Color(Color::TRANSPARENT),
                 bar_border: Border::default(),
                 bar_shadow: Shadow::default(),
-                menu_background: Background::Color(palette.background.weakest.color),
-                menu_border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                menu_shadow: Shadow {
-                    color: palette.background.strongest.color.scale_alpha(0.35),
-                    offset: iced::Vector::new(0.0, -2.0),
-                    blur_radius: 6.0,
-                },
-                path: Background::Color(palette.primary.weak.color),
-                path_border: Border {
-                    color: palette.primary.base.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
+                menu_background: frame
+                    .background
+                    .unwrap_or(Background::Color(crate::ui::style::chrome::surface(theme))),
+                menu_border: frame.border,
+                menu_shadow: frame.shadow,
+                path: Background::Color(crate::ui::style::chrome::hover(theme)),
+                path_border: Border::default(),
             }
         })
         .into()

@@ -273,7 +273,7 @@ impl canvas::Program<Message> for PreviewCanvas {
                 }
                 PreviewMark::Label { at, text } => frame.fill_text(canvas::Text {
                     content: text,
-                    position: Point::new(at + MARGIN, y),
+                    position: crate::ui::style::text::snap_point(Point::new(at + MARGIN, y)),
                     color: ink,
                     size: iced::Pixels(12.0),
                     align_y: iced::alignment::Vertical::Center,

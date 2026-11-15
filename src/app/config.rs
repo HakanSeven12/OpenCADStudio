@@ -40,6 +40,9 @@ pub struct AppConfig {
     pub show_layers: bool,
     /// Whether the document file tabs are shown (FILETAB).
     pub show_file_tabs: bool,
+    /// The drawing tabs run across the window above the palettes, instead
+    /// of between them over the drawing (the default).
+    pub file_tabs_above_docks: bool,
     /// Whether the layout tabs are shown (LAYOUTTAB).
     pub show_layout_tabs: bool,
     /// Graphic Attributes creates fills on the current layer instead of the
@@ -74,6 +77,7 @@ impl Default for AppConfig {
             show_command_history: false,
             show_layers: false,
             show_file_tabs: true,
+            file_tabs_above_docks: false,
             show_layout_tabs: true,
             graphic_fills_on_current_layer: false,
             annotation_auto_scale: -4,

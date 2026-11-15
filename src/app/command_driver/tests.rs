@@ -9155,4 +9155,60 @@ mod attedit_one_at_a_time_tests {
     }
 }
 
+#[cfg(test)]
+mod viewport_annotation_sync_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Viewport;
+    use document::EntityType;
+
+    /// The status pill's sync action re-links the viewport it describes to
+    /// its annotation scale, from the headless dispatch path. A clean round
+    /// trip: the viewport has the scale stored, the stored link is cleared,
+    /// and the sync message re-establishes it.
+    #[test]
+    fn the_sync_action_relinks_a_viewport_to_its_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let handle = {
+            let i = app.active_tab;
+            let scene = &mut app.tabs[i].scene;
+            scene.add_layout("P1").unwrap();
+            scene.current_layout = "P1".to_string();
+            let mut viewport = Viewport::new();
+            viewport.width = 200.0;
+            viewport.height = 100.0;
+            let handle = scene
+                .document
+                .add_entity_to_layout(EntityType::Viewport(Box::new(viewport)), "P1")
+                .unwrap();
+            assert!(scene.add_scale("1:100", 1.0, 100.0));
+            assert!(scene.set_viewport_scale_named_for(handle, "1:100").is_some());
+            // Clear the link the render paths see, as a drawing from an
+            // older file or a bad reference would carry.
+            scene
+                .document
+                .set_viewport_annotation_scale(handle, document::Handle::NULL);
+            assert_eq!(
+                scene.document.viewport_annotation_scale(handle),
+                Some(document::Handle::NULL)
+            );
+            handle
+        };
+
+        let _ = app.update(crate::app::Message::SyncViewportAnnotationScale);
+
+        let scene = &mut app.tabs[app.active_tab].scene;
+        let stored = scene.document.viewport_annotation_scale(handle);
+        let named = scene
+            .scale_handle_ensuring("1:100")
+            .expect("the 1:100 scale exists");
+        assert_eq!(
+            stored,
+            Some(named),
+            "the sync action links the viewport the pill describes"
+        );
+    }
+}
+
 

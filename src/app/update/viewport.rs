@@ -2205,6 +2205,7 @@ impl OpenCADStudio {
             // every pointer event while drawing, and clear any idle hover once.
             self.tabs[i].scene.set_constraint_hover_highlights(&[]);
         }
+        self.refresh_ducs_face_highlight(i, p);
         self.queue_box_selection_preview(i, p);
         // Modifier-driven selection must be known before cursor_plane/axis and
         // drafting constraints are read, not merely before the final callback.

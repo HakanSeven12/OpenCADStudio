@@ -2751,6 +2751,10 @@ pub struct Scene {
     /// drawn separately so hovering one constraint does not light the whole chain.
     constraint_hover_refs: Vec<crate::scene::parametric_constraints::ParametricRef>,
     constraint_hover_wires: Vec<WireModel>,
+    /// Dynamic UCS: the outline of the planar solid face a first point
+    /// would align the UCS to, with the solid and face it outlines.
+    ducs_face: Option<(Handle, kernel::brep::FaceKey)>,
+    ducs_face_wires: Vec<WireModel>,
     /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
     pub selection_color: [f32; 4],
     /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
@@ -3636,6 +3640,8 @@ impl Scene {
             filter_preview_highlights: HashSet::default(),
             constraint_hover_refs: Vec::new(),
             constraint_hover_wires: Vec::new(),
+            ducs_face: None,
+            ducs_face_wires: Vec::new(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_widen: 0.0,
             edge_color: None,
@@ -15537,6 +15543,48 @@ impl Scene {
         let face = crate::scene::model::solid_model::nearest_planar_face(body, pick.to_array())?;
         crate::scene::model::solid_model::planar_face_ucs(body, face, pick.to_array())
             .map(|ucs| (ucs, pick))
+    }
+
+    /// Outline the planar solid face under `local` (relative to `bounds`), the
+    /// face a Dynamic UCS would align to; `None` clears the outline.
+    pub fn set_ducs_face_at(&mut self, at: Option<(iced::Rectangle, iced::Point)>) {
+        let face = at.and_then(|(bounds, local)| {
+            let camera = self.camera.borrow();
+            let view_rot = camera.view_proj_rte(bounds);
+            let eye = camera.eye();
+            drop(camera);
+            let (handle, pick) = self.solid_click_hit_point(local, view_rot, eye, bounds)?;
+            self.restore_solid_models(&[handle]);
+            let body = self.solid_models.get(&handle)?;
+            let face =
+                crate::scene::model::solid_model::nearest_planar_face(body, pick.to_array())?;
+            Some((handle, face))
+        });
+        if face == self.ducs_face {
+            return;
+        }
+        self.ducs_face = face;
+        self.ducs_face_wires = face
+            .and_then(|(handle, face)| {
+                let body = self.solid_models.get(&handle)?;
+                Some(
+                    crate::scene::model::solid_model::face_outline(body, face)
+                        .into_iter()
+                        .map(|points| {
+                            let mut wire = WireModel::solid_f64(
+                                format!("ducs-face:{}", handle.value()),
+                                points,
+                                WireModel::HOVER,
+                                false,
+                            );
+                            wire.set_fixed_screen_width(2.0);
+                            wire
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap_or_default();
+        self.bump_selection();
     }
 
     /// The nearest drawn surface under `local` (relative to `bounds`): a solid

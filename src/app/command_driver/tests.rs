@@ -9212,3 +9212,83 @@ mod viewport_annotation_sync_tests {
 }
 
 
+
+#[cfg(test)]
+mod data_extraction_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    /// `-DATAEXTRACTION <settings> <point>` runs a saved extraction end to
+    /// end: the external file the wizard offers is written with the rows,
+    /// and the extraction table lands at the point. This pins the whole
+    /// path an automated run needs — no point of it stops at a prompt
+    /// nobody can answer headlessly.
+    #[test]
+    fn a_saved_extraction_writes_the_file_and_places_the_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        let mut line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        line.common.layer = "WALLS".to_string();
+        app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+
+        let folder = std::env::temp_dir().join(format!(
+            "ocs-extraction-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&folder).expect("the folder");
+        let ext = folder.join("lines.csv");
+        let settings_path = folder.join("lines.dxex");
+        let settings = serde_json::json!({
+            "version": 1,
+            "source": "currentDrawing",
+            "includeCurrent": true,
+            "includeSubfolders": false,
+            "objectTypes": ["Line"],
+            "properties": ["Layer"],
+            "combineIdentical": false,
+            "showCount": true,
+            "showName": true,
+            "outputTable": true,
+            "outputFile": true,
+            "outputPath": ext.display().to_string(),
+            "tableTitle": "LINES",
+            "propertyHeaders": true,
+            "inUseOnly": false,
+            "blocksOnly": false,
+            "attributedBlocksOnly": false,
+            "displayAllTypes": true,
+            "hiddenCategories": [],
+        });
+        std::fs::write(&settings_path, settings.to_string()).expect("the settings file");
+
+        let settings_text = settings_path.display().to_string().replace('\\', "/");
+        let line = format!("-DATAEXTRACTION {settings_text} 0,0");
+        let _ = app.run_command_line(&line);
+
+        let written = std::fs::read_to_string(&ext).expect("the extraction file was written");
+        assert!(
+            written.to_uppercase().contains("WALLS"),
+            "the file names the layer: {written}"
+        );
+        let tables: Vec<document::entities::Table> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Table(table) => Some((**table).clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 1, "one extraction table was placed");
+        assert_eq!(
+            tables[0].cell_text(0, 0).map(|text| text.to_string()).as_deref(),
+            Some("LINES"),
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}

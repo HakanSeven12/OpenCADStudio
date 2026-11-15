@@ -169,6 +169,12 @@ impl OpenCADStudio {
                 .as_ref()
                 .map(|s| s.title())
                 .unwrap_or_else(|| "Plugin Dialog".to_string()),
+            // SCN-016: the armed widget-surface prompt. No locale key on
+            // purpose — plugin-command confirmations are plugin-specific
+            // content (the desc's prompt is the message body); this is the
+            // fixed frame title, the same plain-string form the plugin
+            // dialog's fallback uses.
+            Some(K::WidgetPrompt) => "Widget Confirmation".to_string(),
             None => String::new(),
         }
     }
@@ -1780,6 +1786,23 @@ impl OpenCADStudio {
             super::super::ModalKind::PluginDialog => {
                 let state = self.plugin_dialog_state.as_ref()?;
                 automatic_flow(ex, |flow| state.view_sized(flow))
+            }
+            // SCN-016: the armed widget-surface confirmation prompt — the
+            // mount's body builder over the app-owned registry's desc (the
+            // DISPLAY COPY; the dispatcher's PromptStage stays the
+            // exchange's authority). The decisions ride
+            // `Message::WidgetPromptMsg` (the mount's
+            // [`prompt_modal_element`] emits them, mapped through
+            // [`prompt_app_message`]); the descent into `None` (the desc
+            // was consumed) renders no modal — the close follows the
+            // decision/Escape routes. AUTO layout: the body is the
+            // message text + the decision pair (the natural size).
+            super::super::ModalKind::WidgetPrompt => {
+                let shown = self.widget_prompt_modal?;
+                let desc = self.mount_registry.borrow().prompt_dialog_owned(shown)?;
+                let (element, _) =
+                    crate::ui::window::plugin_widget_mount::prompt_modal_element(&desc);
+                element.map(crate::ui::window::plugin_widget_mount::prompt_app_message)
             }
         })
     }

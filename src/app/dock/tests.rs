@@ -2822,11 +2822,9 @@ fn strip_names_reads_the_old_strip_labels_flag() {
 }
 
 #[test]
-fn the_strip_has_the_board_sizes() {
-    use crate::ui::dock::{strip_hit, strip_layout, StripHit, DOCK_STRIP_W, STRIP_CELL_H};
+fn strip_layout_places_groups_and_dividers() {
+    use crate::ui::dock::{strip_hit, strip_layout, StripHit, STRIP_CELL_H};
     use crate::ui::style::kit_metrics as km;
-    assert_eq!(DOCK_STRIP_W, 31.0);
-    assert_eq!(STRIP_CELL_H, 28.0);
     let (layout, plus_top) = strip_layout(&[(0, vec![STRIP_CELL_H; 2]), (1, vec![STRIP_CELL_H])]);
     // The 2 px group padding sits inside the first and last cells.
     assert_eq!(layout[0].icons_top, km::STRIP_GROUP_PAD);

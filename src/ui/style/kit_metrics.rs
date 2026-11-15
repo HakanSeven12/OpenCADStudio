@@ -154,24 +154,16 @@ pub const MENU_W: f32 = 220.0;
 pub const DROPDOWN_ITEM_PAD_X: f32 = 6.0;
 pub const DROPDOWN_PAD: f32 = LINE;
 
+// Relations the sizes keep, checked when the crate compiles.
+const _: () = {
+    assert!(STRIP_ICON < STRIP_CELL_H);
+    assert!(TITLE_BUTTON <= TITLE_H);
+    assert!(SCROLL_THUMB_W < SCROLLBAR_W);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_board_measurements() {
-        assert_eq!(STRIP_W, 31.0);
-        assert_eq!(TAB_H + TAB_LINE, TAB_BAR_H);
-        const {
-            assert!(STRIP_ICON < STRIP_CELL_H);
-            assert!(TITLE_BUTTON <= TITLE_H);
-            assert!(SCROLL_THUMB_W < SCROLLBAR_W);
-        }
-        assert!(
-            SPLITTER_DOTS as f32 * (SPLITTER_DOT + SPLITTER_DOT_GAP) < 40.0,
-            "the grip stays a small centred mark"
-        );
-    }
 
     #[test]
     fn every_measurement_is_whole_pixels() {

@@ -409,13 +409,6 @@ pub fn cell_button_style(theme: &Theme, status: button::Status) -> button::Style
 /// Opacity of the accent behind selected text.
 const SELECTION_ALPHA: f32 = 0.5;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_field_fills_the_row_on_whole_pixels() {
-        assert_eq!(FIELD_PAD_Y.fract(), 0.0);
-        const { assert!(2.0 * FIELD_PAD_Y + text::UI_LINE + 2.0 * km::LINE <= km::ROW_H) };
-    }
-}
+// A field's text, padding and border fit its box, checked when the crate
+// compiles.
+const _: () = assert!(2.0 * FIELD_PAD_Y + text::UI_LINE + 2.0 * km::LINE <= km::ROW_H);

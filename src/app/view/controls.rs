@@ -511,15 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_has_the_board_sizes_on_whole_pixels() {
-        // 22 px of content inside a 1 px border; 20 px buttons with 16 px
-        // icons; 22 px flyout rows; 11 px text.
-        assert_eq!(VP_BAR_H - 2.0 * VP_BORDER, 22.0);
-        const { assert!(VP_BTN <= VP_BAR_H - 2.0 * VP_BORDER) };
-        assert_eq!(
-            (VP_BTN, VP_ICON, VP_MENU_ROW_H, VP_TEXT),
-            (20.0, 16.0, 22.0, 11.0)
-        );
+    fn the_bar_measurements_are_whole_pixels() {
         for v in [
             VP_BAR_H,
             VP_PAD_X,

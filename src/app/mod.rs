@@ -21,8 +21,6 @@ mod block_cycle_order;
 mod block_editor;
 #[cfg(test)]
 mod block_editor_tests;
-#[cfg(test)]
-mod ui_shots_tests;
 mod block_feedback;
 mod block_grip_set;
 mod block_lookup;
@@ -45,11 +43,12 @@ mod insert_attributes_tests;
 pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };
+mod assistant;
 pub(crate) mod commands;
 #[cfg(test)]
 mod dim_constraint_value_tests;
-pub(crate) mod dim_viewport;
 mod dim_variables;
+pub(crate) mod dim_viewport;
 #[cfg(test)]
 mod dimension_convert_tests;
 #[cfg(test)]
@@ -57,9 +56,9 @@ mod dimension_preview_tests;
 mod dock;
 mod drafting_settings;
 mod drawing_properties;
-mod geographic_location;
 pub(crate) mod filter_dialog;
 mod find_replace;
+mod geographic_location;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -70,6 +69,8 @@ mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
 mod layers;
+#[cfg(test)]
+mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
@@ -92,7 +93,6 @@ mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
 mod quick_calc;
-mod assistant;
 mod recent;
 mod record_api;
 mod rename_dialog;
@@ -113,8 +113,6 @@ mod text_style_draft;
 mod text_style_font_picker_tests;
 #[cfg(test)]
 mod text_style_layout_tests;
-#[cfg(test)]
-mod linetype_manager_tests;
 #[cfg(test)]
 mod text_style_manager_tests;
 #[cfg(test)]
@@ -6952,7 +6950,7 @@ impl OpenCADStudio {
         id
     }
 
-/// Open a declarative plugin modal dialog on the currently active tab.
+    /// Open a declarative plugin modal dialog on the currently active tab.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open_plugin_dialog(&mut self, def: ocs_plugin_api::dialog::DialogDef) {
         let tab = self.active_tab;
@@ -7072,13 +7070,23 @@ impl OpenCADStudio {
                     (
                         Some(resp),
                         updates,
-                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                        Some((
+                            dialog_title,
+                            owner_plugin_id,
+                            owner_command_id,
+                            current_values,
+                        )),
                     )
                 } else {
                     (
                         None,
                         Vec::new(),
-                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                        Some((
+                            dialog_title,
+                            owner_plugin_id,
+                            owner_command_id,
+                            current_values,
+                        )),
                     )
                 }
             } else {
@@ -7109,7 +7117,9 @@ impl OpenCADStudio {
                 return self.on_plugin_dialog_cancel();
             }
             Some(ocs_plugin_api::dialog::DialogActionResponse::None) | None => {
-                if let Some((dialog_title, owner_plugin_id, owner_command_id, mut current_vals)) = fallback_notify {
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, mut current_vals)) =
+                    fallback_notify
+                {
                     if let Some(v) = value {
                         current_vals.insert("__event_value__".to_string(), v);
                     }

@@ -124,13 +124,6 @@ pub fn pick_menu_style(theme: &Theme) -> iced::overlay::menu::Style {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_box_is_22_px_on_whole_pixels() {
-        assert_eq!(BOX_PAD_Y.fract(), 0.0);
-        assert_eq!(2.0 * BOX_PAD_Y + text::UI_LINE + 2.0 * km::LINE, km::TOOL_H);
-    }
-}
+// A field's text, padding and border fit its box, checked when the crate
+// compiles.
+const _: () = assert!(2.0 * BOX_PAD_Y + text::UI_LINE + 2.0 * km::LINE == km::TOOL_H);

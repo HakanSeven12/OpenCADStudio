@@ -5211,6 +5211,13 @@ impl Scene {
                         *handle,
                     )
                     .is_empty();
+                    // The fresh picture stores each cell's raw text; a formula
+                    // cell's picture must carry its computed value instead.
+                    rebuilt |= !crate::entities::table::refresh_picture_formulas(
+                        &mut self.document,
+                        *handle,
+                    )
+                    .is_empty();
                     // A reader may rebuild the table from its TABLECONTENT
                     // copy: keep the copy in step, with its old value on record.
                     if let Some((content, before)) =

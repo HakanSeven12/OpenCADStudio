@@ -981,3 +981,36 @@ fn a_table_in_an_associative_array_keeps_its_fields() {
         )
     );
 }
+
+/// A formula typed in the cell editor: the edit drops the picture handle, the
+/// picture is redrawn by name, and its MTEXT must carry the computed value.
+#[test]
+fn a_formula_typed_in_a_cell_is_saved_in_the_picture_as_its_value() {
+    let (mut app, handle) = fixture("=C1+D2");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    start(&mut app, handle);
+    let _ = app.update(Message::CommandBackspace);
+    let _ = app.update(Message::CommandAppendChar("1".into()));
+    let _ = app.update(Message::TableEditorClick(iced::Point::new(
+        -1000.0, -1000.0,
+    )));
+    assert_eq!(source(&app, handle), "=C1+D1");
+    let document = &app.tabs[app.active_tab].scene.document;
+    let texts = picture_texts(document, table_in(document, handle)).expect("picture");
+    assert!(
+        texts.iter().any(|t| t.starts_with("\"5\"")),
+        "the picture should hold the value 5: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains("=C1+D1")),
+        "the picture holds the formula text: {texts:?}"
+    );
+}

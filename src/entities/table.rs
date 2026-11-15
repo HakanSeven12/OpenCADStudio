@@ -1106,6 +1106,61 @@ fn content_display_value(
     evaluate_table_formula(table, &value).unwrap_or(value)
 }
 
+/// Rewrite a formula cell's picture text to its computed value: the picture
+/// block is what a file stores and other programs draw, and it must show the
+/// same result the screen shows, not the raw "=A1+C1". Returns the picture
+/// MTEXT handles whose text changed.
+pub(crate) fn refresh_picture_formulas(
+    document: &mut document::Document,
+    table: document::Handle,
+) -> Vec<document::Handle> {
+    let Some(document::EntityType::Table(source)) = document.get_entity(table) else {
+        return Vec::new();
+    };
+    let mut source = (**source).clone();
+    // An edited table lets go of its picture handle but keeps the name; the
+    // block is still there, and the picture lookup resolves through it.
+    if source.block_record_handle.is_none() {
+        if let Some(record) = document.block_records.get(&source.block_name) {
+            source.block_record_handle = Some(record.handle);
+        }
+    }
+    let mut updates: Vec<(document::Handle, String)> = Vec::new();
+    for row in 0..source.rows.len() {
+        for column in 0..source.columns.len() {
+            let Some(cell) = source.cell(row, column) else {
+                continue;
+            };
+            let Some(content) = cell.contents.first() else {
+                continue;
+            };
+            let raw = format_cell_value(&content.value);
+            if !raw.trim_start().starts_with('=') {
+                continue;
+            }
+            let shown = content_display_value(document, &source, content);
+            if shown == raw {
+                continue;
+            }
+            if let Some(picture) = cell_picture(document, &source, row, column) {
+                for &member in &picture.members {
+                    updates.push((member, shown.clone()));
+                }
+            }
+        }
+    }
+    let mut changed = Vec::new();
+    for (handle, text) in updates {
+        if let Some(document::EntityType::MText(entity)) = document.get_entity_mut(handle) {
+            if entity.value != text {
+                entity.value = text;
+                changed.push(handle);
+            }
+        }
+    }
+    changed
+}
+
 fn resolved_content_geometry(
     document: &document::Document,
     table: &Table,

@@ -316,6 +316,10 @@ pub enum TableOperation {
         rotation: Option<u16>,
         scale: Option<[f64; 2]>,
     },
+    /// Put the paper-space layout tabs in this order (API v23). `names` lists
+    /// every paper-space layout once, in the new order; `Model` stays first
+    /// and is not listed. One undo step.
+    LayoutSetTabOrder { names: Vec<String> },
 }
 
 /// The style tables `TableOperation` can rename, delete or make current.

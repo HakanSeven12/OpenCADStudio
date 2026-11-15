@@ -175,7 +175,10 @@
 /// notification (`tab_id`, monotonic per-tab `revision`, exact `count`) routed
 /// INSTEAD OF the legacy handle-list selection variants to plugins that report
 /// v22+; older plugins keep the exact legacy streams.
-pub const API_VERSION: u32 = 22;
+/// v23 appends `TableOperation::LayoutSetTabOrder`: a plugin sets the order of
+/// the paper-space layout tabs in one undo step. A v22 host cannot decode it,
+/// so a plugin that sends it declares v23.
+pub const API_VERSION: u32 = 23;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

@@ -54,6 +54,7 @@ pub mod pdf_shx_dialog;
 pub mod plot;
 pub mod plugin_dialog;
 pub mod plugin_manager;
+pub mod plugin_scene;
 pub mod plugin_panel;
 pub mod print_all;
 pub mod purge;

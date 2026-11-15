@@ -1779,7 +1779,7 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::PluginDialog => {
                 let state = self.plugin_dialog_state.as_ref()?;
-                automatic_flow(ex, |_flow| state.view())
+                automatic_flow(ex, |flow| state.view_sized(flow))
             }
         })
     }

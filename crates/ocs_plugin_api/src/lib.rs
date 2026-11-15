@@ -38,6 +38,7 @@ pub mod entity_coverage_types;
 pub mod manifest;
 pub mod ribbon;
 pub mod scene;
+pub mod scene_builder;
 pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
@@ -82,6 +83,10 @@ pub use scene::{
     AssetKind, CubicSegment, DragMeta, MarkerKind, PanelScene, PanelScenePatch, Rect2D, Rgba8,
     SceneColor, SceneElement, SceneError, SceneOp, SceneRevision, StableId, Stroke, ThemeColor,
     Vec2,
+};
+pub use scene_builder::{
+    fixture_graph_scene, fixture_graph_scene_plan, fixture_scene_with_files, try_fixture_graph_scene,
+    PatchBuilder, SceneBuilder,
 };
 pub use type_registry::{
     get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,

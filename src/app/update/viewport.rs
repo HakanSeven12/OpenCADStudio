@@ -2205,6 +2205,7 @@ impl OpenCADStudio {
             // every pointer event while drawing, and clear any idle hover once.
             self.tabs[i].scene.set_constraint_hover_highlights(&[]);
         }
+        self.refresh_ducs_face_highlight(i, p);
         self.queue_box_selection_preview(i, p);
         // Modifier-driven selection must be known before cursor_plane/axis and
         // drafting constraints are read, not merely before the final callback.
@@ -10837,6 +10838,15 @@ mod rapid_drawing_tests {
         app
     }
 
+    /// Sends one pointer move. A pass that took `MOVE_COALESCE_FROM_MS` or
+    /// more (common on a loaded CI runner) arms the coalescing gate, which
+    /// would withhold the next move; these tests are about what each move
+    /// does, not about the gate, whose own tests arm it explicitly.
+    fn move_to(app: &mut OpenCADStudio, at: Point) {
+        app.move_pass_due = None;
+        let _ = app.update(Message::ViewportMove(at));
+    }
+
     fn screen(app: &OpenCADStudio, point: glam::DVec3) -> Point {
         let p = app.tabs[app.active_tab]
             .scene
@@ -10873,7 +10883,7 @@ mod rapid_drawing_tests {
                     glam::DVec3::new(25.0, 30.0, 0.0),
                 ] {
                     let at = screen(&app, target);
-                    let _ = app.update(Message::ViewportMove(at));
+                    move_to(&mut app, at);
                     let cursor = app.tabs[i].last_cursor_world;
                     let expected = app.tabs[i]
                         .suspended_cmd
@@ -10921,8 +10931,8 @@ mod rapid_drawing_tests {
         let _ = app.run_command_line("LINE");
         let at = screen(&app, glam::DVec3::new(40.0, 30.0, 0.0));
         assert!((0.0..800.0).contains(&at.x) && (0.0..600.0).contains(&at.y));
-        let _ = app.update(Message::ViewportMove(at));
-        let _ = app.update(Message::ViewportMove(at));
+        move_to(&mut app, at);
+        move_to(&mut app, at);
         assert!(
             !app.snap_dwell.as_ref().unwrap().snap_resolved,
             "OTRACK must not bypass the movement throttle"
@@ -11021,7 +11031,7 @@ mod rapid_drawing_tests {
         app.ortho_mode = true;
         let click = |app: &mut OpenCADStudio, aim: glam::DVec3| {
             let at = screen(app, aim);
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(app, at);
             let _ = app.update(Message::ViewportLeftPressAt(at));
             let _ = app.update(Message::ViewportLeftRelease);
             app.last_point.unwrap()
@@ -11049,7 +11059,7 @@ mod rapid_drawing_tests {
                 for (x, y) in [(40.0, 30.0), (80.0, 60.0), (120.0, 30.0), (160.0, 60.0)] {
                     let target = glam::DVec3::new(x, y, 0.0);
                     let old = screen(&app, target + glam::DVec3::new(-15.0, 10.0, 0.0));
-                    let _ = app.update(Message::ViewportMove(old));
+                    move_to(&mut app, old);
                     let at = screen(&app, target);
                     let _ = app.update(if pane {
                         Message::PanePressAt(0, at)
@@ -11068,7 +11078,7 @@ mod rapid_drawing_tests {
                         "{command} pane={pane}: accepted click should leave the snap gate resolved"
                     );
                     let after_press = app.last_point;
-                    let _ = app.update(Message::ViewportMove(old));
+                    move_to(&mut app, old);
                     let _ = app.update(Message::ViewportLeftRelease);
                     assert_eq!(app.last_point, after_press);
                 }
@@ -11086,7 +11096,7 @@ mod rapid_drawing_tests {
             let at = screen(&app, glam::DVec3::new(40.0, 30.0, 0.0));
             let _ = app.update(Message::ViewportLeftPressAt(at));
             let at = screen(&app, glam::DVec3::new(50.0, 40.0, 0.0));
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(&mut app, at);
             let i = app.active_tab;
             app.snap_dwell.as_mut().unwrap().last_move_at = Instant::now();
             let _ = app.on_snap_dwell_tick();
@@ -11094,7 +11104,7 @@ mod rapid_drawing_tests {
             let before = app.tabs[i].scene.preview_wires[0].points.clone();
             for x in 60..90 {
                 let at = screen(&app, glam::DVec3::new(f64::from(x), 55.0, 0.0));
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
             }
             assert_eq!(
                 app.tabs[i].scene.preview_wires[0].points, before,
@@ -11150,7 +11160,7 @@ mod rapid_drawing_tests {
             let _ = app.update(Message::ViewportLeftPressAt(at));
             for (step, x) in [70.0, 75.0, 80.0, 85.0].into_iter().enumerate() {
                 let at = screen(&app, glam::DVec3::new(x, 50.0, 0.0));
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
                 // The pointer is still moving: the frame tick rebuilds only
                 // the command preview.
                 let dwell = app.snap_dwell.as_mut().unwrap();
@@ -11281,7 +11291,7 @@ mod rapid_drawing_tests {
         app.shift_down = true;
         app.snap_dwell = None;
         let at = screen(&app, glam::DVec3::new(40.0, 3.0, 0.0));
-        let _ = app.update(Message::ViewportMove(at));
+        move_to(&mut app, at);
         let first = app.axis_lock_dir.expect("locked to the first axis");
         assert!(first.x.abs() > 0.99, "{first:?}");
         let _ = app.update(Message::ViewportLeftPressAt(at));
@@ -11294,7 +11304,7 @@ mod rapid_drawing_tests {
         ] {
             app.snap_dwell = None;
             let at = screen(&app, to);
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(&mut app, at);
         }
         let second = app.axis_lock_dir.expect("locked to the second axis");
         assert!(second.y.abs() > 0.99, "{second:?}");
@@ -11314,13 +11324,13 @@ mod rapid_drawing_tests {
                 app.polar_mode = true;
                 app.polar_increment_deg = 90.0;
                 let first = screen(&app, glam::DVec3::new(20.0, 0.0, 0.0));
-                let _ = app.update(Message::ViewportMove(first));
+                move_to(&mut app, first);
                 assert!(app.snap_dwell.is_some());
                 if force_full {
                     app.snap_dwell = None;
                 }
                 let at = screen(&app, target);
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
                 assert_eq!(app.last_point, Some(glam::DVec3::ZERO));
                 assert!(app.tabs[i].active_cmd.is_some());
                 if !force_full {
@@ -11356,13 +11366,13 @@ mod rapid_drawing_tests {
                 app.polar_mode = polar;
                 app.polar_increment_deg = 90.0;
                 let first = screen(&app, glam::DVec3::new(0.0, 0.0, 10.0));
-                let _ = app.update(Message::ViewportMove(first));
+                move_to(&mut app, first);
                 assert!(app.snap_dwell.is_some());
                 if force_full {
                     app.snap_dwell = None;
                 }
                 let at = screen(&app, glam::DVec3::new(0.0, 0.0, 20.0));
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
                 assert_eq!(app.last_point, Some(anchor));
                 (app.tabs[i].last_cursor_world, app.otrack_kind)
             };
@@ -11394,13 +11404,13 @@ mod rapid_drawing_tests {
                 }
                 app.snap_dwell = None;
                 let at = screen(&app, glam::DVec3::new(40.0, 10.0, 0.0));
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
                 assert!(app.axis_lock_dir.is_some());
                 if force_full {
                     app.snap_dwell = None;
                 }
                 let at = screen(&app, glam::DVec3::new(10.0, 40.0, 0.0));
-                let _ = app.update(Message::ViewportMove(at));
+                move_to(&mut app, at);
                 (app.tabs[i].last_cursor_world, app.axis_lock_dir)
             };
             let full = exercise(true);
@@ -11439,12 +11449,12 @@ mod rapid_drawing_tests {
             let i = app.active_tab;
             app.tabs[i].active_cmd = Some(Box::new(AxisCommand));
             let at = screen(&app, glam::DVec3::new(40.0, 10.0, 0.0));
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(&mut app, at);
             if force_full {
                 app.snap_dwell = None;
             }
             let at = screen(&app, glam::DVec3::new(10.0, 40.0, 0.0));
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(&mut app, at);
             app.tabs[i].last_cursor_world
         };
         assert!(exercise(false).distance(exercise(true)) < 0.001);
@@ -11460,7 +11470,7 @@ mod rapid_drawing_tests {
         let second = screen(&app, glam::DVec3::new(40.0, 0.0, 0.0));
         let _ = app.update(Message::ViewportLeftPressAt(second));
         let start = screen(&app, glam::DVec3::new(40.0, 15.0, 0.0));
-        let _ = app.update(Message::ViewportMove(start));
+        move_to(&mut app, start);
         app.snap_dwell.as_mut().unwrap().last_move_at = Instant::now();
         let _ = app.on_snap_dwell_tick();
         assert!(!app.tabs[i].scene.preview_wires.is_empty());
@@ -11474,7 +11484,7 @@ mod rapid_drawing_tests {
         let initial = bits(&app.tabs[i].scene.preview_wires);
         for y in 20..35 {
             let at = screen(&app, glam::DVec3::new(40.0, f64::from(y), 0.0));
-            let _ = app.update(Message::ViewportMove(at));
+            move_to(&mut app, at);
         }
         assert!(
             app.snap_dwell.as_ref().unwrap().preview_dirty,
@@ -11513,7 +11523,7 @@ mod rapid_drawing_tests {
         let at_jitter = Point::new(at.x + 1.0, at.y + 1.0);
 
         // 1. Move to A and stationary dwell to acquire A.
-        let _ = app.update(Message::ViewportMove(at));
+        move_to(&mut app, at);
         for _ in 0..6 {
             app.snap_dwell.as_mut().unwrap().last_move_at =
                 Instant::now() - std::time::Duration::from_millis(100);
@@ -11530,7 +11540,7 @@ mod rapid_drawing_tests {
         );
 
         // Small jitter within aperture must not toggle or reset.
-        let _ = app.update(Message::ViewportMove(at_jitter));
+        move_to(&mut app, at_jitter);
         let _ = app.update(Message::SnapDwellTick);
         assert_eq!(
             app.snapper.tracking_points.len(),
@@ -11539,8 +11549,8 @@ mod rapid_drawing_tests {
         );
 
         // 2. Leave and return.
-        let _ = app.update(Message::ViewportMove(away));
-        let _ = app.update(Message::ViewportMove(at));
+        move_to(&mut app, away);
+        move_to(&mut app, at);
 
         // 3. Stationary dwell removes final point A.
         for _ in 0..6 {
@@ -11559,8 +11569,8 @@ mod rapid_drawing_tests {
         );
 
         // 4. Rapid departure and return.
-        let _ = app.update(Message::ViewportMove(away));
-        let _ = app.update(Message::ViewportMove(at));
+        move_to(&mut app, away);
+        move_to(&mut app, at);
 
         // 5. Stationary dwell must reacquire A.
         for _ in 0..6 {
@@ -11603,9 +11613,9 @@ mod rapid_drawing_tests {
         let interior = screen(&app, glam::DVec3::new(60.0, 30.0, 0.0));
         assert!((0.0..800.0).contains(&interior.x) && (0.0..600.0).contains(&interior.y));
 
-        let _ = app.update(Message::ViewportMove(interior));
+        move_to(&mut app, interior);
         std::thread::sleep(std::time::Duration::from_millis(160));
-        let _ = app.update(Message::ViewportMove(interior));
+        move_to(&mut app, interior);
 
         assert!(
             app.snapper.parallel_ref.is_some(),

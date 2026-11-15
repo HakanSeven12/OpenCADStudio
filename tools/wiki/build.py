@@ -295,10 +295,17 @@ def main(out):
             dst = os.path.join(out, "images", os.path.relpath(src, images))
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copyfile(src, dst)
-    for path in used_icons:
+    for path in sorted(used_icons):
+        src = os.path.join(ICONS, path)
+        if not os.path.exists(src):
+            # A page names an icon that has since been removed from
+            # assets/icons. Say so and carry on: any copy already in the
+            # wiki stays where it is.
+            print(f"warning: a wiki page names a missing icon: {path}", file=sys.stderr)
+            continue
         dst = os.path.join(out, "images", "icons", path)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copyfile(os.path.join(ICONS, path), dst)
+        shutil.copyfile(src, dst)
     shutil.copyfile(os.path.join(ROOT, "assets", "logo.svg"), os.path.join(out, "images", "logo.svg"))
 
     fix_links(out)

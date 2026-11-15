@@ -125,6 +125,15 @@ pub enum HostRequest {
     GetModalDialog {
         command_id: u64,
     },
+    /// V19 (additive): an event (choice change, button, toggle, table row)
+    /// inside the interactive command's open modal dialog. The runner answers
+    /// with [`HostResponse::DialogAction`] carrying the command's
+    /// `on_dialog_action` result, so out-of-process plugins can replace,
+    /// submit or close their dialog like in-process ones.
+    DialogAction {
+        command_id: u64,
+        event: crate::dialog::DialogEvent,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -142,6 +151,8 @@ pub enum HostResponse {
     /// preview wire set that replaces its previous live preview.
     CustomGrip(CustomGripResponse),
     ModalDialog(Option<crate::dialog::DialogDef>),
+    /// V19 (additive): answer to [`HostRequest::DialogAction`].
+    DialogAction(crate::dialog::DialogActionResponse),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -605,6 +616,18 @@ mod tests {
         assert_eq!(
             discriminant_of(&HostRequest::GetModalDialog { command_id: 1 }),
             14
+        );
+        assert_eq!(
+            discriminant_of(&HostRequest::DialogAction {
+                command_id: 1,
+                event: crate::dialog::DialogEvent {
+                    control_id: String::new(),
+                    action: String::new(),
+                    value: None,
+                    current_values: Default::default(),
+                },
+            }),
+            15
         );
     }
 

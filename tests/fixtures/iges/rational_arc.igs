@@ -1,0 +1,9 @@
+Test fixture for src/io/iges_import.rs: a rational spline.              S      1
+1H,,1H;,7Hfixture,16Hrational_arc.igs,9Hhand-made,3H1.0,32,38,6,308,15, G      1
+7Hfixture,1.,2,2HMM,1,1.,15H20261114.000000,1E-06,10.,4Htest,4Htest,11, G      2
+0;                                                                      G      3
+     126       1       0       0       0       0       0       000000000D      1
+     126       0       0       2       0                               0D      2
+126,2,2,1,0,0,0,0.,0.,0.,1.,1.,1.,1.,0.707106781186548,1.,10.,         1P      1
+0.,0.,10.,10.,0.,0.,10.,0.,0.,1.,0.,0.,1.;                             1P      2
+S      1G      3D      2P      2                                        T      1

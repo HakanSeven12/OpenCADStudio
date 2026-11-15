@@ -1272,3 +1272,348 @@ fn without_products(doc: &Doc, ids: &[u64], unit_mm: Option<f64>) -> StepModel {
         roots,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOX: &[u8] = include_bytes!("../../tests/fixtures/step/box.step");
+    const INCH_BOX: &[u8] = include_bytes!("../../tests/fixtures/step/inch_box.step");
+    const CURVED: &[u8] = include_bytes!("../../tests/fixtures/step/curved.step");
+    const NURBS_SPHERE: &[u8] = include_bytes!("../../tests/fixtures/step/nurbs_sphere.step");
+    const ASSEMBLY: &[u8] = include_bytes!("../../tests/fixtures/step/assembly.step");
+    const OPEN_BOX: &[u8] = include_bytes!("../../tests/fixtures/step/open_box.step");
+    const COLOURED_BOX: &[u8] = include_bytes!("../../tests/fixtures/step/coloured_box.step");
+    const NO_PRODUCTS: &[u8] = include_bytes!("../../tests/fixtures/step/no_products.step");
+
+    fn bounds(body: &kernel::brep::Body) -> ([f64; 3], [f64; 3]) {
+        let b = kernel::brep::body_bounds(body).expect("a body with geometry");
+        (b.min, b.max)
+    }
+
+    fn assert_close(actual: [f64; 3], expected: [f64; 3], tolerance: f64, what: &str) {
+        for k in 0..3 {
+            assert!(
+                (actual[k] - expected[k]).abs() <= tolerance,
+                "{what}: {actual:?} != {expected:?}"
+            );
+        }
+    }
+
+    fn volume(body: &kernel::brep::Body) -> f64 {
+        kernel::brep::mass_properties(body)
+            .expect("a closed body")
+            .volume
+    }
+
+    fn assert_volume(body: &kernel::brep::Body, expected: f64, what: &str) {
+        let v = volume(body);
+        assert!(
+            (v - expected).abs() <= expected * 1e-6,
+            "{what}: volume {v} != {expected}"
+        );
+    }
+
+    /// The one product of a file holding one solid.
+    fn only_product(model: &StepModel) -> &StepProduct {
+        assert!(model.direct.is_empty());
+        assert_eq!(model.roots.len(), 1);
+        let product = &model.products[model.roots[0]];
+        assert!(product.children.is_empty());
+        assert_eq!(product.bodies.len(), 1);
+        product
+    }
+
+    #[test]
+    fn a_box_is_one_named_product_with_one_solid() {
+        let model = read(BOX).expect("a STEP model");
+        assert_eq!(model.unit_mm, Some(1.0));
+        let product = only_product(&model);
+        assert_eq!(product.name, "Box");
+        assert_eq!((product.numbered, product.scale), (None, 1.0));
+        let body = &product.bodies[0];
+        assert_eq!(body.body.faces.len(), 6);
+        assert_eq!(body.colour, None);
+        let (min, max) = bounds(&body.body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "min");
+        assert_close(max, [10.0, 20.0, 30.0], 1e-9, "max");
+        assert_volume(&body.body, 6000.0, "box");
+    }
+
+    #[test]
+    fn coordinates_stay_in_the_file_unit_it_names() {
+        // A 1 × 2 × 3 inch box: the numbers are inches, and the unit says so;
+        // scaling to the drawing is the caller's.
+        let model = read(INCH_BOX).expect("a STEP model");
+        assert_eq!(model.unit_mm, Some(25.4));
+        let body = &only_product(&model).bodies[0].body;
+        let (min, max) = bounds(body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "min");
+        assert_close(max, [1.0, 2.0, 3.0], 1e-9, "max");
+        assert_volume(body, 6.0, "inch box");
+    }
+
+    #[test]
+    fn curved_solids_read_on_their_analytic_surfaces() {
+        use std::f64::consts::PI;
+        let model = read(CURVED).expect("a STEP model");
+        let root = &model.products[model.roots[0]];
+        assert!(root.bodies.is_empty());
+        let children: Vec<&StepProduct> = root
+            .children
+            .iter()
+            .map(|(k, _)| &model.products[*k])
+            .collect();
+        let names: Vec<&str> = children.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Sphere", "Cylinder", "Cone", "Torus"]);
+        for (_, placement) in &root.children {
+            assert_eq!(*placement, IDENTITY);
+        }
+        // (faces, min, max, volume)
+        let expected = [
+            (
+                1,
+                [-5.0, -5.0, -5.0],
+                [5.0, 5.0, 5.0],
+                4.0 / 3.0 * PI * 125.0,
+            ),
+            (3, [17.0, -3.0, 0.0], [23.0, 3.0, 10.0], PI * 9.0 * 10.0),
+            (
+                3,
+                [36.0, -4.0, 0.0],
+                [44.0, 4.0, 8.0],
+                PI * 8.0 / 3.0 * (16.0 + 4.0 + 1.0),
+            ),
+            (
+                1,
+                [52.0, -8.0, -2.0],
+                [68.0, 8.0, 2.0],
+                2.0 * PI * PI * 6.0 * 4.0,
+            ),
+        ];
+        for (product, (faces, min, max, v)) in children.iter().zip(expected) {
+            assert_eq!(product.bodies.len(), 1, "{}", product.name);
+            let body = &product.bodies[0].body;
+            assert_eq!(body.faces.len(), faces, "{}", product.name);
+            let (lo, hi) = bounds(body);
+            assert_close(lo, min, 1e-6, &product.name);
+            assert_close(hi, max, 1e-6, &product.name);
+            assert_volume(body, v, &product.name);
+        }
+        let kinds: Vec<&str> = children
+            .iter()
+            .flat_map(|p| {
+                p.bodies[0].body.surfaces.iter().map(|(_, s)| match s {
+                    Surface::Plane(_) => "plane",
+                    Surface::Sphere(_) => "sphere",
+                    Surface::Cylinder(_) => "cylinder",
+                    Surface::Cone(_) => "cone",
+                    Surface::Torus(_) => "torus",
+                    _ => "other",
+                })
+            })
+            .collect();
+        for kind in ["sphere", "cylinder", "cone", "torus"] {
+            assert!(kinds.contains(&kind), "{kind} in {kinds:?}");
+        }
+        assert!(!kinds.contains(&"other"), "{kinds:?}");
+    }
+
+    #[test]
+    fn a_rational_spline_surface_keeps_its_weights() {
+        // A sphere of radius 5 written as a rational B-spline surface (a
+        // complex entity). The builder turns a spline that is exactly an
+        // analytic surface into that surface, which it can only do here if
+        // the knots, control points and weights were all read right.
+        let model = read(NURBS_SPHERE).expect("a STEP model");
+        let body = &only_product(&model).bodies[0].body;
+        let surfaces: Vec<&Surface> = body.surfaces.iter().map(|(_, s)| s).collect();
+        assert_eq!(surfaces.len(), 1);
+        let Surface::Sphere(sphere) = surfaces[0] else {
+            panic!(
+                "the spline was not recognised as a sphere: {:?}",
+                surfaces[0]
+            );
+        };
+        assert!(
+            (sphere.radius - 5.0).abs() < 1e-9,
+            "radius {}",
+            sphere.radius
+        );
+        assert_close(sphere.frame.origin, [0.0, 0.0, 0.0], 1e-9, "centre");
+        assert_volume(body, 4.0 / 3.0 * std::f64::consts::PI * 125.0, "sphere");
+    }
+
+    #[test]
+    fn an_assembly_places_its_components() {
+        let model = read(ASSEMBLY).expect("a STEP model");
+        assert_eq!(model.roots.len(), 1);
+        let root = &model.products[model.roots[0]];
+        assert_eq!(root.name, "Assembly");
+        assert!(root.bodies.is_empty());
+        assert_eq!(root.children.len(), 2);
+        let child = |k: usize| (&model.products[root.children[k].0], root.children[k].1);
+        let (plate, at_plate) = child(0);
+        let (post, at_post) = child(1);
+        assert_eq!((plate.name.as_str(), post.name.as_str()), ("Plate", "Post"));
+        assert_eq!(at_plate, IDENTITY);
+        // Turned 90° about z, then moved 50 along x.
+        let expected = [
+            [0.0, -1.0, 0.0, 50.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ];
+        for r in 0..3 {
+            for c in 0..4 {
+                assert!((at_post[r][c] - expected[r][c]).abs() < 1e-9, "{at_post:?}");
+            }
+        }
+        // Each component's solid is in its own frame.
+        let (min, max) = bounds(&plate.bodies[0].body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "plate min");
+        assert_close(max, [10.0, 20.0, 2.0], 1e-9, "plate max");
+        let (min, max) = bounds(&post.bodies[0].body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "post min");
+        assert_close(max, [2.0, 2.0, 15.0], 1e-9, "post max");
+        // Neither component is a root of its own.
+        assert!(!model.roots.contains(&root.children[0].0));
+        assert!(!model.roots.contains(&root.children[1].0));
+    }
+
+    #[test]
+    fn a_shell_model_reads_as_an_open_body() {
+        let model = read(OPEN_BOX).expect("a STEP model");
+        let product = only_product(&model);
+        assert_eq!(product.name, "OpenBox");
+        let body = &product.bodies[0].body;
+        assert_eq!(body.faces.len(), 5, "a box without its top");
+        let (min, max) = bounds(body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "min");
+        assert_close(max, [10.0, 10.0, 10.0], 1e-9, "max");
+    }
+
+    #[test]
+    fn solid_and_face_colours_come_from_their_styles() {
+        let model = read(COLOURED_BOX).expect("a STEP model");
+        let body = &only_product(&model).bodies[0];
+        assert_eq!(body.colour, Some([0.8, 0.2, 0.1]), "the solid's own RGB");
+        assert_eq!(body.faces.len(), 6);
+        assert_eq!(body.faces[0], Some([0.0, 0.0, 1.0]), "a predefined colour");
+        assert_eq!(
+            body.faces[1],
+            Some([1.0, 1.0, 0.0]),
+            "an overriding style wins"
+        );
+        assert_eq!(body.faces[2], Some([0.25, 0.5, 0.75]), "a rendering style");
+        assert_eq!(&body.faces[3..], &[None, None, None]);
+        // The styles change nothing else.
+        assert_volume(&body.body, 6000.0, "coloured box");
+    }
+
+    #[test]
+    fn a_file_without_products_puts_its_solids_straight_in() {
+        let model = read(NO_PRODUCTS).expect("a STEP model");
+        assert_eq!(model.unit_mm, Some(1.0));
+        assert!(model.roots.is_empty());
+        assert_eq!(model.direct.len(), 1);
+        let body = &model.direct[0].body;
+        assert_eq!(body.faces.len(), 6);
+        let (min, max) = bounds(body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-9, "min");
+        assert_close(max, [10.0, 20.0, 30.0], 1e-9, "max");
+    }
+
+    #[test]
+    fn input_that_is_not_step_reads_as_nothing() {
+        assert!(read(b"").is_none());
+        assert!(read(b"not a STEP file").is_none());
+        assert!(read(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n").is_none());
+        // A data section with no shape is an empty model.
+        let model = read(b"ISO-10303-21;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\nENDSEC;\n")
+            .expect("a STEP file");
+        assert!(model.direct.is_empty() && model.roots.is_empty());
+    }
+
+    /// Damaged copies of every fixture: cut at every third line, each line
+    /// left out, and every fourth number replaced by a value a careless
+    /// writer might leave there. None may panic.
+    #[test]
+    fn damaged_files_never_panic() {
+        const VALUES: [&str; 6] = ["0.", "-1.", "1.E308", "-1.E308", "1.E-308", "99999999"];
+        let mut cases = 0;
+        for bytes in [
+            BOX,
+            INCH_BOX,
+            CURVED,
+            NURBS_SPHERE,
+            ASSEMBLY,
+            OPEN_BOX,
+            COLOURED_BOX,
+            NO_PRODUCTS,
+        ] {
+            let text = std::str::from_utf8(bytes).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            let mut check = |damaged: String| {
+                cases += 1;
+                let _ = read(damaged.as_bytes());
+            };
+            for n in 0..lines.len() {
+                if n % 3 == 0 {
+                    check(lines[..n].join("\n"));
+                }
+                check([&lines[..n], &lines[n + 1..]].concat().join("\n"));
+            }
+            let mut value = 0;
+            let mut number = 0;
+            for (n, line) in lines.iter().enumerate() {
+                if !line.starts_with('#') {
+                    continue;
+                }
+                // Each number after the instance's `=`.
+                let Some(eq) = line.find('=') else { continue };
+                let mut start = None;
+                for (i, c) in line.char_indices().skip(eq + 1).chain([(line.len(), ',')]) {
+                    let numeric = c.is_ascii_digit() || matches!(c, '.' | '-' | 'E' | '+');
+                    match (start, numeric) {
+                        (None, true) if !line[..i].ends_with('#') => start = Some(i),
+                        (Some(s), false) => {
+                            number += 1;
+                            start = None;
+                            if number % 4 != 0 {
+                                continue;
+                            }
+                            let replaced = format!(
+                                "{}{}{}",
+                                &line[..s],
+                                VALUES[value % VALUES.len()],
+                                &line[i..]
+                            );
+                            value += 1;
+                            let mut damaged = lines.clone();
+                            damaged[n] = &replaced;
+                            check(damaged.join("\n"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(cases > 1000, "{cases} damaged files");
+    }
+
+    /// A whole sphere bounded by a vertex loop gets its seam and meshes
+    /// (#3051), whether written analytic or as a spline.
+    #[test]
+    fn a_sphere_on_a_vertex_loop_gets_a_seam_and_meshes() {
+        let curved = read(CURVED).expect("a STEP model");
+        let analytic = &curved.products[curved.products[curved.roots[0]].children[0].0];
+        let spline = read(NURBS_SPHERE).expect("a STEP model");
+        for body in [&analytic.bodies[0].body, &only_product(&spline).bodies[0].body] {
+            assert_eq!((body.edges.len(), body.vertices.len()), (1, 2));
+            assert!(body.validate().is_empty(), "{:?}", body.validate());
+            let mesh = kernel::brep::mesh_body(body, 0.1, 0.01);
+            assert!(!mesh.triangles.is_empty(), "the sphere meshes");
+        }
+    }
+
+}

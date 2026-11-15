@@ -111,7 +111,28 @@ def blank(text: str) -> str:
     return "".join(out)
 
 
-TEST_ATTR = re.compile(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*([{;])")
+TEST_ATTR = re.compile(r"#\[cfg\(((?:[^()\]]|\((?:[^()]|\([^()]*\))*\))*)\)\]\s*(?:#\[[^\]]*\]\s*)*"
+                       r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*([{;])")
+
+
+def test_only(cfg: str) -> bool:
+    """Whether a cfg predicate holds only in test builds: `test`, or `all(...)`
+    with `test` among its arguments, e.g. `all(test, not(target_arch = "wasm32"))`."""
+    cfg = cfg.strip()
+    if cfg == "test":
+        return True
+    m = re.fullmatch(r"all\((.*)\)", cfg, re.S)
+    if not m:
+        return False
+    args, depth, cur = [], 0, ""
+    for ch in m.group(1):
+        if ch == "," and depth == 0:
+            args.append(cur)
+            cur = ""
+            continue
+        depth += (ch == "(") - (ch == ")")
+        cur += ch
+    return any(a.strip() == "test" for a in args + [cur])
 
 
 def drop_test_blocks(code: str):
@@ -119,10 +140,12 @@ def drop_test_blocks(code: str):
     out-of-line test modules (`#[cfg(test)] mod name;`)."""
     out, i, external = [], 0, []
     for m in TEST_ATTR.finditer(code):
+        if not test_only(m.group(1)):
+            continue
         if m.start() < i:
             continue
-        if m.group(2) == ";":
-            external.append(m.group(1))
+        if m.group(3) == ";":
+            external.append(m.group(2))
             continue
         out.append(code[i:m.start()])
         depth, j = 1, m.end()
@@ -236,8 +259,10 @@ def measure(root: Path):
         for name in external:
             test_files.update(child_paths(rel, name))
     # Files below a test module (its own `mod x;` children) are test code too.
-    test_dirs = {t.parent if t.name == "mod.rs" else t.with_suffix("") for t in test_files}
-    test_files.update(rel for rel in files if any(d in rel.parents for d in test_dirs))
+    # Compared as strings: Path.parents is slow over a thousand files.
+    prefixes = tuple((t.parent if t.name == "mod.rs" else t.with_suffix("")).as_posix() + "/" for t in test_files)
+    if prefixes:
+        test_files.update(rel for rel in files if rel.as_posix().startswith(prefixes))
 
     edges = defaultdict(dict)
     unlayered = set()

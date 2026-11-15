@@ -1010,6 +1010,9 @@ impl Transformable for AttributeDefinition {
                 p1,
                 p2,
             );
+            let line_angle = (p2.y - p1.y).atan2(p2.x - p1.x);
+            entity.rotation = 2.0 * line_angle - entity.rotation;
+            entity.oblique_angle = -entity.oblique_angle;
         });
     }
 }
@@ -1322,6 +1325,9 @@ impl Transformable for AttributeEntity {
                 p1,
                 p2,
             );
+            let line_angle = (p2.y - p1.y).atan2(p2.x - p1.x);
+            entity.rotation = 2.0 * line_angle - entity.rotation;
+            entity.oblique_angle = -entity.oblique_angle;
         });
     }
 }

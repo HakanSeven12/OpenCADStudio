@@ -13,6 +13,11 @@ use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
 
+/// Pallet-menu listing cap: the first N plugin panels per edge, sorted by
+/// title. Registration beyond the cap still works (commands, value updates)
+/// and reports itself on stderr (gui.log); see docs/plugin-pallet-menu.md.
+pub(crate) const PLUGIN_PALLET_MENU_MAX_ROWS: usize = 32;
+
 /// Session adapter: one active document tab, command line, undo.
 pub(crate) struct HostSession<'a> {
     app: &'a mut OpenCADStudio,
@@ -774,9 +779,12 @@ impl<'a> HostSession<'a> {
                     self.app.tabs[self.tab].scene.selection_fingerprint(),
                 ));
             }
-            crate::plugin::v4_support::publish_selection_changed_v4(
+            let revision = self.app.bump_selection_revision(self.tab_id());
+            crate::plugin::v4_support::publish_selection_changed_versioned(
                 self.tab_id(),
                 self.selection(),
+                revision,
+                false,
             );
         }
         Ok(())
@@ -5164,6 +5172,16 @@ impl HostApi for HostSession<'_> {
         let state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
         self.app.plugin_panels.insert(id.clone(), state);
 
+        // Pallet-menu listing is capped per edge so a plugin cannot widen
+        // the palette beyond a bounded length (see docs/plugin-pallet-menu.md).
+        if self.app.plugin_panels.len() > PLUGIN_PALLET_MENU_MAX_ROWS {
+            eprintln!(
+                "[plugin] {id}: registered beyond the {}-row pallet-menu cap; \
+                 the edge (+) menu lists the first {} plugin panels only",
+                PLUGIN_PALLET_MENU_MAX_ROWS, PLUGIN_PALLET_MENU_MAX_ROWS
+            );
+        }
+
         // Keep command line autocomplete updated with dynamic panel commands
         if let Some(ref c) = cmd_opt {
             let cu = c.to_uppercase();
@@ -5824,6 +5842,16 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             .get_modal_dialog(self.command_id)
             .ok()
             .flatten()
+    }
+    fn on_dialog_action(
+        &mut self,
+        event: ocs_plugin_api::dialog::DialogEvent,
+    ) -> ocs_plugin_api::dialog::DialogActionResponse {
+        // A runner without `DialogAction` answers with an error; the host
+        // then falls back to the panel-action notification.
+        self.process
+            .dialog_action(self.command_id, event)
+            .unwrap_or(ocs_plugin_api::dialog::DialogActionResponse::None)
     }
     fn on_dialog_response(
         &mut self,

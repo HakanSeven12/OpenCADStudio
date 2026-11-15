@@ -1467,6 +1467,24 @@ pub fn create(
     // The copies must not keep the sources' extension dictionaries.
     if let Some(record) = scene.document.block_records.get(&source_name) {
         let copies = record.entity_handles.clone();
+        // A table in the block evaluates fields of its own: the sources,
+        // which own the fields its cells name, are erased below.
+        for (source, copy) in originals.iter().zip(&copies) {
+            let fields = match scene.document.get_entity(*source) {
+                Some(EntityType::Table(table)) => {
+                    super::table_fields::table_fields(&scene.document, table)
+                }
+                _ => Vec::new(),
+            };
+            if !fields.is_empty() {
+                super::table_fields::adopt_table_fields(
+                    &mut scene.document,
+                    *copy,
+                    *source,
+                    &fields,
+                );
+            }
+        }
         scene.own_copied_xdicts(originals, copies);
     }
 

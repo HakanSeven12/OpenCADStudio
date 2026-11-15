@@ -3098,6 +3098,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: __ocs_fmt_0__ एट्रिब्यूट अपडेट किए गए [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = आर्क लंबाई प्रतीक (DIMARCSYM)
     .axis = एक्सिस
+    .axis-x = aXis
     .axis-end = एक्सिस, एंड
     .boundary-pick-internal-point-miss = BOUNDARY  आंतरिक बिंदु चुनें:__ocs_arg_miss__
     .boundary = सीमा
@@ -3319,7 +3320,7 @@ draw =
     .tan-tan-radius = टैन, टैन, त्रिज्या
     .tan-tan-tan = टैन, टैन
     .trace = ट्रेस
-    .ttt = टीटी
+    .ttt = TTt
     .usage-attdisp-on-off-normal = उपयोग: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = उपयोग: POLYSOLID <width> <height>   (select a polyline first)
     .usage-pyramid-radius-height-sides-default-4-si = उपयोग: PYRAMID <radius> <height> [sides]   (default 4 sides)

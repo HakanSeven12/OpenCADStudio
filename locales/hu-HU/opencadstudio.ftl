@@ -3105,6 +3105,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: __ocs_fmt_0__ attribútum frissítve [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Ívhossz-szimbólum (DIMARCSYM)
     .axis = Tengely
+    .axis-x = aXis
     .axis-end = Tengely, vég
     .boundary-pick-internal-point-miss = BOUNDARY  Jelöljön ki egy belső pontot:__ocs_arg_miss__
     .boundary = Kontúr
@@ -3326,7 +3327,7 @@ draw =
     .tan-tan-radius = Érintő, érintő, sugár
     .tan-tan-tan = Érintő, érintő, érintő
     .trace = Nyom
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Használat: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Használat: POLYSOLID <width> <height>   (előbb jelöljön ki egy vonalláncot)
     .usage-pyramid-radius-height-sides-default-4-si = Használat: PYRAMID <radius> <height> [sides] (alapértelmezett 4 oldal)

@@ -222,19 +222,28 @@ impl PluginManager {
     /// queue flushes once (logged), and the process is treated as attached
     /// from then on.
     pub fn broadcast_notification(&self, command_id: Option<u64>, notification: HostNotification) {
+        self.broadcast_for_api(command_id, &|_| Some(notification.clone()));
+    }
+
+    /// Fan out a notification chosen PER PLUGIN by its manifest API major
+    /// (`None` skips the endpoint entirely). Same deferral/boot-window
+    /// semantics and best-effort error handling as
+    /// [`Self::broadcast_notification`]; the per-endpoint choice lets a v22+
+    /// plugin receive an O(1) digest while pre-v22 plugins keep the exact
+    /// legacy streams.
+    pub fn broadcast_for_api(
+        &self,
+        command_id: Option<u64>,
+        for_api: &dyn Fn(u32) -> Option<HostNotification>,
+    ) {
         for p in &self.plugins {
-            if !p.process.is_alive() {
+            if !p.process.is_alive() || !p.process.is_v4() {
                 continue;
             }
-            if !p.process.is_v4() {
-                if crate::process::verbose() {
-                    eprintln!(
-                        "[plugin] skipping notification for {} (not V4)",
-                        p.process.id()
-                    );
-                }
-                continue;
-            }
+            let notification = match for_api(p.process.manifest().api_version) {
+                Some(notification) => notification,
+                None => continue,
+            };
             let flush_now = {
                 let mut attach = p.attach.lock().unwrap_or_else(|e| e.into_inner());
                 if attach.attached {
@@ -304,6 +313,39 @@ impl PluginManager {
                     p.process.id()
                 );
             }
+        }
+    }
+
+    /// Selection-boundary router (v22): API-22+ endpoints receive the O(1)
+    /// `SelectionChangedDigest`; older endpoints keep the tab-tagged handle
+    /// list (`SelectionChangedV4`) and, when `legacy_plain` is set (the app's
+    /// own selection boundary), the plain `SelectionChanged` after it, as
+    /// before v22.
+    pub fn broadcast_selection_changed(
+        &self,
+        tab_id: u64,
+        handles: &[crate::ipc::protocol::Handle],
+        revision: u64,
+        legacy_plain: bool,
+    ) {
+        let count = handles.len() as u64;
+        self.broadcast_for_api(None, &|api: u32| match api {
+            22.. => Some(HostNotification::SelectionChangedDigest {
+                tab_id,
+                revision,
+                count,
+            }),
+            _ => Some(HostNotification::SelectionChangedV4 {
+                tab_id,
+                handles: handles.to_vec(),
+            }),
+        });
+        if legacy_plain {
+            self.broadcast_for_api(None, &|api: u32| {
+                (api < 22).then(|| HostNotification::SelectionChanged {
+                    handles: handles.to_vec(),
+                })
+            });
         }
     }
 

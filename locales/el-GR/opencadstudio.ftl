@@ -3107,6 +3107,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: ενημερώθηκαν __ocs_fmt_0__ χαρακτηριστικό(ά) [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Σύμβολο μήκους τόξου (DIMARCSYM)
     .axis = Άξονας
+    .axis-x = aXis
     .axis-end = Άξονας, τέλος
     .boundary-pick-internal-point-miss = BOUNDARY  Επιλέξτε εσωτερικό σημείο:__ocs_arg_miss__
     .boundary = Όριο
@@ -3331,7 +3332,7 @@ draw =
     .tan-tan-radius = Εφαπ., εφαπ., ακτίνα
     .tan-tan-tan = Εφαπ., εφαπ., εφαπ.
     .trace = Ίχνος
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Χρήση: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Χρήση: POLYSOLID <πλάτος> <ύψος>   (επιλέξτε πρώτα μια πολυγραμμή)
     .usage-pyramid-radius-height-sides-default-4-si = Χρήση: PYRAMID <ακτίνα> <ύψος> [πλευρές]   (προεπιλογή 4 πλευρές)

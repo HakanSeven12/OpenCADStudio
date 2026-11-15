@@ -2487,11 +2487,7 @@ fn emit_text(
                 screening = ctb.resolve_style_screening(wire.aci);
             }
         }
-        let mut gi = 0;
-        while gi + 6 <= verts.len() {
-            let quad = &verts[gi..gi + 6];
-            gi += 6;
-
+        for quad in verts.as_chunks::<6>().0 {
             let a = quad[0].color[3];
             if a < 0.01 {
                 continue;
@@ -2506,7 +2502,7 @@ fn emit_text(
 
             // Quad corners in world XY; `tl` carries uv = (uv_min.x, uv_min.y)
             // — the atlas tile key.
-            let key = glyph_to_world::quad_uv_key(quad.try_into().expect("six verts"));
+            let key = glyph_to_world::quad_uv_key(quad);
 
             // Cancel the offset in f64, then narrow: the sheet-mm result is a
             // small number even when the world coordinate is UTM-scale.
@@ -2516,9 +2512,7 @@ fn emit_text(
                 // Affine basis of the quad: plane_min → bl, +x → br, +y → tl,
                 // shared with the SVG outline path. `None` on a degenerate
                 // plane measure, which draws nothing.
-                let Some(basis) =
-                    glyph_to_world::QuadBasis::of(quad.try_into().expect("six verts"), ge)
-                else {
+                let Some(basis) = glyph_to_world::QuadBasis::of(quad, ge) else {
                     continue;
                 };
                 let (bl, br, tl) = (basis.bl, basis.br, basis.tl);
@@ -3110,6 +3104,86 @@ mod tests {
         assert!((placement.y_scale - 12.7).abs() < 1e-5);
     }
 
+    // The precise GPTS/bounds rewrite lengthens objects after lopdf has
+    // written the file, so it rebuilds the classic xref table by hand. Readers
+    // such as hayro repair a broken table silently, so check the table itself:
+    // startxref finds it, every entry has the 20-byte form the PDF specification
+    // requires (`nnnnnnnnnn ggggg n \n`, as lopdf writes it), every in-use
+    // offset lands on its own `N G obj`, and the entry count matches the
+    // trailer's /Size.
+    #[test]
+    fn geopdf_precision_rewrite_keeps_a_valid_classic_xref_table() {
+        fn number(bytes: &[u8]) -> usize {
+            let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            std::str::from_utf8(&bytes[..digits])
+                .unwrap()
+                .parse()
+                .unwrap()
+        }
+        let bytes = render_plot_pdf_bytes(&[geopdf_test_page(0)], None).unwrap();
+        assert!(
+            bytes.ends_with(b"%%EOF\n"),
+            "file ends with the EOF marker line"
+        );
+
+        let marker = bytes
+            .windows(b"startxref\n".len())
+            .rposition(|window| window == b"startxref\n")
+            .expect("startxref");
+        let xref = number(&bytes[marker + b"startxref\n".len()..]);
+        assert!(
+            bytes[xref..].starts_with(b"xref\n"),
+            "startxref points at the table"
+        );
+
+        let trailer = xref
+            + bytes[xref..]
+                .windows(b"trailer".len())
+                .position(|window| window == b"trailer")
+                .expect("trailer");
+        let table = std::str::from_utf8(&bytes[xref + b"xref\n".len()..trailer]).unwrap();
+        let mut lines = table.split_terminator('\n');
+        let mut entries = 0;
+        let mut in_use = 0;
+        while let Some(header) = lines.next() {
+            let (start, count) = header.split_once(' ').expect("subsection header");
+            let (start, count): (usize, usize) = (start.parse().unwrap(), count.parse().unwrap());
+            for number_in_section in start..start + count {
+                let entry = lines.next().expect("entry line");
+                // 19 bytes plus the '\n' split off: the last field is followed by a space.
+                assert!(entry.len() == 19 && entry.ends_with(' '), "entry {entry:?}");
+                let fields: Vec<&str> = entry.trim_end().split(' ').collect();
+                assert_eq!(fields.len(), 3, "entry {entry:?}");
+                assert!(fields[0].len() == 10 && fields[0].bytes().all(|b| b.is_ascii_digit()));
+                assert!(fields[1].len() == 5 && fields[1].bytes().all(|b| b.is_ascii_digit()));
+                let generation: u16 = fields[1].parse().unwrap();
+                match fields[2] {
+                    "n" => {
+                        let offset: usize = fields[0].parse().unwrap();
+                        let header = format!("{number_in_section} {generation} obj");
+                        assert!(
+                            bytes[offset..].starts_with(header.as_bytes()),
+                            "xref entry for object {number_in_section} points at {:?}",
+                            String::from_utf8_lossy(&bytes[offset..(offset + 20).min(bytes.len())])
+                        );
+                        in_use += 1;
+                    }
+                    "f" => assert!(number_in_section != 0 || generation == 65535),
+                    kind => panic!("entry kind {kind:?}"),
+                }
+                entries += 1;
+            }
+        }
+        assert!(in_use > 1, "the table lists the document's objects");
+
+        let size_at = trailer
+            + bytes[trailer..]
+                .windows(b"/Size ".len())
+                .position(|window| window == b"/Size ")
+                .expect("/Size in the trailer");
+        assert_eq!(entries, number(&bytes[size_at + b"/Size ".len()..]));
+    }
+
     #[test]
     fn invalid_geopdf_page_transforms_are_export_errors() {
         for case in 0..3 {
@@ -3529,6 +3603,51 @@ mod tests {
                 ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
             },
             draw_depth: 0.0,
+        }
+    }
+
+    // Draw ops `emit_text` produces for one run of glyph vertices.
+    fn glyph_draw_ops(verts: &[crate::scene::pipeline::text_gpu::TextVertex]) -> usize {
+        let wire = WireModel {
+            text_verts: verts.to_vec(),
+            ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
+        };
+        let mut ops = Vec::new();
+        emit_text(
+            &mut ops,
+            &mut TextFonts::default(),
+            &[wire],
+            0.0,
+            0.0,
+            1.0,
+            None,
+            PdfPlotOptions::default(),
+        );
+        ops.iter()
+            .filter(|op| matches!(op, Op::DrawLine { .. } | Op::DrawPolygon { .. }))
+            .count()
+    }
+
+    // Each glyph is one 6-vertex quad. Every quad of a stroke-font run is
+    // drawn, the run draws exactly what its quads draw one at a time, and
+    // 1 to 5 stray vertices after the last whole quad are ignored, not drawn
+    // and not a panic.
+    #[test]
+    fn every_glyph_quad_is_drawn_and_a_partial_trailing_quad_is_ignored() {
+        let verts = text_wire("HELLO", [20.0, 20.0, 0.0]).wire.text_verts;
+        assert_eq!(verts.len() % 6, 0);
+        let per_quad: Vec<usize> = verts.chunks(6).map(glyph_draw_ops).collect();
+        assert_eq!(per_quad.len(), 5, "one quad per glyph");
+        assert!(
+            per_quad.iter().all(|&ops| ops > 0),
+            "every glyph draws: {per_quad:?}"
+        );
+        let whole = glyph_draw_ops(&verts);
+        assert_eq!(whole, per_quad.iter().sum::<usize>());
+        for stray in 1..6 {
+            let mut padded = verts.clone();
+            padded.extend_from_slice(&verts[..stray]);
+            assert_eq!(glyph_draw_ops(&padded), whole, "{stray} stray vertices");
         }
     }
 

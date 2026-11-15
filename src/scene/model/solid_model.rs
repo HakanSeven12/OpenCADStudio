@@ -353,6 +353,28 @@ pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
         .map(|(key, _)| key)
 }
 
+/// The boundary edges of `face` as world-space polylines.
+pub fn face_outline(body: &Body, face: FaceKey) -> Vec<Vec<[f64; 3]>> {
+    body.face_coedges(face)
+        .into_iter()
+        .filter_map(|coedge| {
+            let edge = body.edges.get(body.coedges.get(coedge)?.edge)?;
+            let curve = body.curves.get(edge.curve)?;
+            let steps = if matches!(curve, Curve3::Line(_)) { 1 } else { 48 };
+            Some(
+                (0..=steps)
+                    .map(|step| {
+                        let t = edge.start_parameter
+                            + (edge.end_parameter - edge.start_parameter) * step as f64
+                                / steps as f64;
+                        curve.point_at(t)
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 /// Planar face nearest a world-space surface pick.
 pub fn nearest_planar_face(body: &Body, pick: [f64; 3]) -> Option<FaceKey> {
     let face = body

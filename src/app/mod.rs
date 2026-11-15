@@ -1871,6 +1871,10 @@ pub(super) struct OpenCADStudio {
     /// `SelectionChangedV4` fires once per real change rather than per message.
     #[cfg(not(target_arch = "wasm32"))]
     last_plugin_selection: Option<(u64, u64)>,
+    /// Monotonic per-tab selection revisions, bumped only on an actual
+    /// selection change; carried by the v22 `SelectionChangedDigest`.
+    #[cfg(not(target_arch = "wasm32"))]
+    selection_revision_by_tab: rustc_hash::FxHashMap<u64, u64>,
     /// `(tab id, geometry epoch)` last published to the V4 document view.
     /// Built-in edits bypass HostSession, so this is checked at message
     /// boundaries as well as after plugin-initiated writes.
@@ -2671,6 +2675,10 @@ pub struct ClipboardDeps {
     /// the same name, so it never names an object of the source drawing.
     #[serde(with = "dim_style_refs_serde", default)]
     pub dim_style_refs: rustc_hash::FxHashMap<document::Handle, String>,
+    /// The FIELD objects the copied tables' cells use, nested fields
+    /// included, by source handle. A paste gives each pasted table its own
+    /// clones of them, in this drawing or another.
+    pub table_fields: Vec<document::objects::Field>,
 }
 
 mod dim_style_refs_serde {
@@ -3044,6 +3052,16 @@ impl ClipboardDeps {
             app_ids,
             dim_style_refs,
             mleader_styles,
+            table_fields: entities
+                .iter()
+                .filter_map(|e| match e {
+                    EntityType::Table(table) => {
+                        Some(crate::scene::table_fields::table_fields(doc, table))
+                    }
+                    _ => None,
+                })
+                .flatten()
+                .collect(),
         }
     }
 
@@ -6637,6 +6655,8 @@ impl OpenCADStudio {
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            selection_revision_by_tab: rustc_hash::FxHashMap::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_document: None,
             external_plugins: Vec::new(),

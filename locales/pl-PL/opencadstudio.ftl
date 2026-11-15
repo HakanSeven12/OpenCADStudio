@@ -3109,6 +3109,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: zaktualizowano atrybut(y) __ocs_fmt_0__ [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Symbol długości łuku (DIMARCSYM)
     .axis = Oś
+    .axis-x = aXis
     .axis-end =Oś, koniec
     .boundary-pick-internal-point-miss = BOUNDARY Wybierz punkt wewnętrzny:__ocs_arg_miss__
     .boundary = Granica
@@ -3330,7 +3331,7 @@ draw =
     .tan-tan-radius = Opalenizna, Opalenizna, Promień
     .tan-tan-tan = Opalenizna, Opalona, Opalona
     .trace = Ślad
-    .ttt = Tt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Zastosowanie: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Sposób użycia: POLYSOLID <width> <height> (najpierw wybierz polilinię)
     .usage-pyramid-radius-height-sides-default-4-si = Zastosowanie: PYRAMID <radius> <height> [sides] (domyślnie 4 strony)

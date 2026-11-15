@@ -3109,6 +3109,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: päivitetty __ocs_fmt_0__-attribuutit [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Kaaren pituuden symboli (DIMARCSYM)
     .axis = Akseli
+    .axis-x = aXis
     .axis-end =Akseli, loppu
     .boundary-pick-internal-point-miss = BOUNDARY Valitse sisäinen piste: __ocs_arg_miss__
     .boundary = Raja
@@ -3330,7 +3331,7 @@ draw =
     .tan-tan-radius = Tan, Tan, Säde
     .tan-tan-tan = Tangentti, tangentti, tangentti
     .trace = Jäljittää
-    .ttt = Ttt
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Käyttö: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Käyttö: POLYSOLID <width> <height> (valitse ensin polyline)
     .usage-pyramid-radius-height-sides-default-4-si = Käyttö: PYRAMID <radius> <height> [sides] (oletus 4 sivua)

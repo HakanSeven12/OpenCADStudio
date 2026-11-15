@@ -3113,6 +3113,7 @@ draw =
     .attedit-updated-changed-attribute-s-tag-up-new = ATTEDIT: обновленный атрибут(атрибуты) __ocs_fmt_0__ [__ocs_fmt_1__] = __ocs_fmt_2__.
     .arc-length-symbol-dimarcsym = Символ длины дуги (DIMARCSYM)
     .axis = ось
+    .axis-x = aXis
     .axis-end = Ось, конец
     .boundary-pick-internal-point-miss = BOUNDARY Выберите внутреннюю точку: __ocs_arg_miss__
     .boundary = Граница
@@ -3334,7 +3335,7 @@ draw =
     .tan-tan-radius = Тан, Тан, Радиус
     .tan-tan-tan = Тан, Тан, Тан
     .trace = Чертёж на кальке
-    .ttt = Ттт
+    .ttt = TTt
     .usage-attdisp-on-off-normal = Использование: ATTDISP ON | OFF | NORMAL
     .usage-polysolid-width-height-select-a-polyline = Использование: POLYSOLID <width> <height>   (select a polyline first)
     .usage-pyramid-radius-height-sides-default-4-si = Использование: PYRAMID <radius> <height> [sides]   (default 4 sides)

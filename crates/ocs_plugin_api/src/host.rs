@@ -493,6 +493,22 @@ pub enum HostNotification {
         type_keys: Vec<String>,
         pick_point: [f64; 3],
     },
+    /// V22 digest of a tab's active selection, sent INSTEAD OF the legacy
+    /// handle-list selection notifications (`SelectionChangedV4` /
+    /// `SelectionChanged`) to plugins whose exported
+    /// `ocs_plugin_api_version` reports 22 or newer (the host routes
+    /// per plugin, so no variant is duplicated). `revision` increases
+    /// monotonically per tab whenever the selection fingerprint actually
+    /// changes — the same dedup gate the legacy variants use — and `count`
+    /// is the exact selection size, so the notification is O(1) even for
+    /// selections of tens of thousands of entities. A plugin fetches
+    /// handles lazily via [`HostApi::selection`] only when it needs them.
+    /// Discriminant 14.
+    SelectionChangedDigest {
+        tab_id: u64,
+        revision: u64,
+        count: u64,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -589,6 +605,13 @@ impl Serialize for HostNotification {
                     .map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, pick_point)
                     .map_err(serde::ser::Error::custom)?;
+            }
+            HostNotification::SelectionChangedDigest { tab_id, revision, count } => {
+                bytes.push(14);
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, revision)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
@@ -687,6 +710,11 @@ impl<'de> Deserialize<'de> for HostNotification {
                     pick_point,
                 })
             }
+            14 => bincode::deserialize(rest)
+                .map(|(tab_id, revision, count)| {
+                    HostNotification::SelectionChangedDigest { tab_id, revision, count }
+                })
+                .map_err(serde::de::Error::custom),
             _ => Ok(HostNotification::Unknown(bytes)),
         }
     }

@@ -81,24 +81,40 @@ pub(crate) fn guard<T>(what: &str, f: impl FnOnce() -> T) -> Option<T> {
             // The plugin hooks run deep inside the update / render loop where
             // the app's command line isn't reachable, so queue the error and
             // let the next update tick drain it into the command line. (#145)
-            errors().lock().unwrap_or_else(|e| e.into_inner()).push(line);
+            with_errors(|errors| errors.push(line));
             None
         }
     }
 }
 
-/// Process-wide queue of plugin-guard errors waiting to surface in the host's
+/// Queue of plugin-guard errors waiting to surface in the host's
 /// command-line history. Flushed by [`drain_errors`] from the app loop.
+///
+/// Process-wide in the app. Under `cfg(test)` each thread has its own, so
+/// tests running in parallel drain only the errors their own app queued:
+/// errors are queued and drained on the thread that runs the app's update.
 #[cfg(not(target_arch = "wasm32"))]
-fn errors() -> &'static std::sync::Mutex<Vec<String>> {
-    static E: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
-    E.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+fn with_errors<R>(f: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    #[cfg(test)]
+    {
+        use std::cell::RefCell;
+        thread_local! {
+            static E: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+        E.with(|errors| f(&mut errors.borrow_mut()))
+    }
+    #[cfg(not(test))]
+    {
+        static E: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+        let errors = E.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+        f(&mut errors.lock().unwrap_or_else(|e| e.into_inner()))
+    }
 }
 
 /// Take and return every queued plugin-guard error since the last drain.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn drain_errors() -> Vec<String> {
-    std::mem::take(&mut *errors().lock().unwrap_or_else(|e| e.into_inner()))
+    with_errors(std::mem::take)
 }
 
 /// Queue one line for the command-line history from plugin paths that cannot
@@ -106,7 +122,7 @@ pub(crate) fn drain_errors() -> Vec<String> {
 /// failures). Surfaced by [`drain_errors`] on the next update tick.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn push_guard_error(line: String) {
-    errors().lock().unwrap_or_else(|e| e.into_inner()).push(line);
+    with_errors(|errors| errors.push(line));
 }
 
 #[cfg(test)]

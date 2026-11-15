@@ -223,7 +223,7 @@ impl CadCommand for EllipseCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
-            CtrStep::Center => vec![CmdOption::new("Arc", "ARC"), CmdOption::new("Axis", "AXIS")],
+            CtrStep::Center => vec![CmdOption::new("Arc", "ARC"), CmdOption::new("aXis", "AXIS")],
             _ => vec![],
         }
     }
@@ -264,7 +264,7 @@ impl CadCommand for EllipseCommand {
         if matches!(self.step, CtrStep::Center) {
             return match text.trim().to_uppercase().as_str() {
                 "A" | "ARC" => Some(CmdResult::Dispatch("ELLIPSE_ARC".into())),
-                "AXIS" => Some(CmdResult::Dispatch("ELLIPSE".into())),
+                "X" | "AXIS" => Some(CmdResult::Dispatch("ELLIPSE".into())),
                 _ => None,
             };
         }

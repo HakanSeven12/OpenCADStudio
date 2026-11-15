@@ -855,6 +855,28 @@ impl OpenCADStudio {
     /// the UCS to that face for the rest of the command. Returns the picked
     /// point on the face. A snapped point (`snapped`) off the face's plane
     /// belongs to other geometry, so it leaves the UCS alone.
+    /// Dynamic UCS: outline the solid face under the cursor while a command
+    /// that would align to it waits for its first point.
+    pub(in crate::app) fn refresh_ducs_face_highlight(&mut self, i: usize, cursor: iced::Point) {
+        let wanted = self.dynamic_ucs
+            && self.dynamic_ucs_restore.is_none()
+            && self.last_point.is_none()
+            && self.tabs[i].editing_model_space()
+            && self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| dynamic_ucs_applies(command.name()));
+        let at = wanted.then(|| {
+            let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+            let bounds = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
+            (
+                bounds,
+                iced::Point::new(cursor.x - bounds.x, cursor.y - bounds.y),
+            )
+        });
+        self.tabs[i].scene.set_ducs_face_at(at);
+    }
+
     pub(in crate::app) fn apply_dynamic_ucs(
         &mut self,
         snapped: Option<glam::DVec3>,

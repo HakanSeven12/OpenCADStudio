@@ -1229,7 +1229,21 @@ pub(crate) fn paste_entities_kernel(
                     }
                 }
             }
-            add_entity_clone_doc(doc, entity, space)
+            let source = entity.common().handle;
+            let is_table = matches!(entity, document::EntityType::Table(_));
+            let pasted = add_entity_clone_doc(doc, entity, space);
+            // A pasted table gets its own clones of its cell fields, taken
+            // from the clipboard (the source may be gone or in another
+            // drawing).
+            if is_table && !pasted.is_null() {
+                crate::scene::table_fields::adopt_table_fields(
+                    doc,
+                    pasted,
+                    source,
+                    &deps.table_fields,
+                );
+            }
+            pasted
         })
         .collect();
 

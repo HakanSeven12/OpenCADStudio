@@ -383,7 +383,7 @@ fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
         "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "IsSelectionGathering"
         | "AcceptsDragSelection" | "SelectionRejectsLockedLayers" | "DropInteractive"
-        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" => {
+        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" | "DialogAction" => {
             Some(Duration::from_secs(10))
         }
         _ => None,
@@ -411,6 +411,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
             crate::host::CustomGripPhase::Cancel => "CustomGripCancel",
         },
         HostRequest::GetModalDialog { .. } => "GetModalDialog",
+        HostRequest::DialogAction { .. } => "DialogAction",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -1124,6 +1125,36 @@ impl PluginProcess {
                 "get_modal_dialog",
                 |resp| match resp {
                     HostResponse::ModalDialog(d) => Ok(d),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
+    /// Forward an event of an interactive command's open modal dialog to the
+    /// plugin process and return the command's `on_dialog_action` answer.
+    pub fn dialog_action(
+        &self,
+        command_id: u64,
+        event: crate::dialog::DialogEvent,
+    ) -> Result<crate::dialog::DialogActionResponse, PluginError> {
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call(
+                &mut NullHost::default(),
+                HostRequest::DialogAction { command_id, event },
+                &mut |_| {},
+            )?;
+            match resp {
+                HostResponse::DialogAction(answer) => Ok(answer),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::DialogAction { command_id, event },
+                "DialogAction",
+                "dialog_action",
+                |resp| match resp {
+                    HostResponse::DialogAction(answer) => Ok(answer),
                     other => Err(Box::new(other)),
                 },
             )

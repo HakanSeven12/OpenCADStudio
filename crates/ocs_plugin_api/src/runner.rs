@@ -351,6 +351,7 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
+        N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
         N::CommandStateChanged { .. } | N::DrawingChanged { .. } => 7,
@@ -359,6 +360,23 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
         | N::SelectionChangedV4 { .. } => 4,
         _ => 0,
     }
+}
+
+/// `on_dialog_action` of the interactive command `command_id`; `None` when the
+/// command is gone or panics.
+fn run_dialog_action(
+    interactive: &InteractiveRegistry,
+    command_id: u64,
+    event: crate::dialog::DialogEvent,
+) -> crate::dialog::DialogActionResponse {
+    let mut registry = interactive.borrow_mut();
+    registry
+        .get_mut(&command_id)
+        .and_then(|cmd| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.on_dialog_action(event)))
+                .ok()
+        })
+        .unwrap_or(crate::dialog::DialogActionResponse::None)
 }
 
 fn handle_host_request(
@@ -553,6 +571,9 @@ fn handle_host_request(
                 })
             };
             HostResponse::ModalDialog(result)
+        }
+        HostRequest::DialogAction { command_id, event } => {
+            HostResponse::DialogAction(run_dialog_action(interactive, command_id, event))
         }
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
@@ -803,6 +824,9 @@ fn handle_host_request_v4(
             };
             Some(HostResponse::ModalDialog(result))
         }
+        HostRequest::DialogAction { command_id, event } => Some(HostResponse::DialogAction(
+            run_dialog_action(interactive, command_id, event),
+        )),
         HostRequest::ExecuteCode {
             command_id,
             source,
@@ -1031,6 +1055,78 @@ mod tests {
             }
             other => panic!("expected unsupported error, got {other:?}"),
         }
+        drop(host_stream);
+    }
+
+    /// A command that replaces its dialog on a button and remembers the event.
+    struct DialogActionCommand {
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl InteractiveCommand for DialogActionCommand {
+        fn prompt(&self) -> String {
+            String::new()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+            CommandStep::NeedPoint
+        }
+        fn on_dialog_action(
+            &mut self,
+            event: crate::dialog::DialogEvent,
+        ) -> crate::dialog::DialogActionResponse {
+            self.seen
+                .lock()
+                .expect("seen")
+                .push(event.control_id.clone());
+            if event.control_id == "next" {
+                crate::dialog::DialogActionResponse::ReplaceDialog(Box::new(
+                    crate::dialog::DialogDef::new("Page 2"),
+                ))
+            } else {
+                crate::dialog::DialogActionResponse::None
+            }
+        }
+    }
+
+    #[test]
+    fn dialog_action_reaches_the_command_and_returns_its_answer() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        interactive.borrow_mut().insert(
+            7,
+            Box::new(DialogActionCommand { seen: seen.clone() }) as Box<dyn InteractiveCommand>,
+        );
+        let mut plugin = UnsupportedReplPlugin;
+        let event = |id: &str| crate::dialog::DialogEvent {
+            control_id: id.to_string(),
+            action: "click".to_string(),
+            value: None,
+            current_values: HashMap::new(),
+        };
+        let req = HostRequest::DialogAction {
+            command_id: 7,
+            event: event("next"),
+        };
+        match handle_host_request_v4(&mut plugin, &interactive, &client, 1, 19, req) {
+            Some(HostResponse::DialogAction(
+                crate::dialog::DialogActionResponse::ReplaceDialog(dialog),
+            )) => assert_eq!(dialog.title, "Page 2"),
+            other => panic!("expected the replaced dialog, got {other:?}"),
+        }
+        // An unknown command answers None instead of failing.
+        let req = HostRequest::DialogAction {
+            command_id: 8,
+            event: event("next"),
+        };
+        assert!(matches!(
+            handle_host_request_v4(&mut plugin, &interactive, &client, 2, 19, req),
+            Some(HostResponse::DialogAction(
+                crate::dialog::DialogActionResponse::None
+            ))
+        ));
+        assert_eq!(*seen.lock().expect("seen"), ["next"]);
         drop(host_stream);
     }
 

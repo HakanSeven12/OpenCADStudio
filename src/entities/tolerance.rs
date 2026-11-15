@@ -660,6 +660,12 @@ impl Transformable for Tolerance {
                 p1,
                 p2,
             );
+            transform::reflect_xy_point(
+                &mut entity.direction.x,
+                &mut entity.direction.y,
+                glam::DVec3::ZERO,
+                p2 - p1,
+            );
         });
     }
 }

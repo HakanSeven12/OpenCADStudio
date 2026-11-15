@@ -8,6 +8,37 @@ use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_FLOAT_BAR_W, RAIL_ICON};
 use iced::widget::{button, canvas, column, container, mouse_area, row, stack, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
+/// One row of the edge (+) pallet menu: a built-in panel, or a panel a
+/// plugin registered, identified by its numeric dock id and carrying the
+/// title the plugin authored (a `PanelId::Plugin(_)` literal is not a title).
+pub(in crate::app) enum MenuPanel {
+    Builtin(crate::ui::dock::PanelId),
+    Plugin(u32, String),
+}
+
+impl MenuPanel {
+    /// The dockable panel id the menu row toggles.
+    fn id(&self) -> crate::ui::dock::PanelId {
+        match self {
+            MenuPanel::Builtin(id) => *id,
+            MenuPanel::Plugin(num, _) => crate::ui::dock::PanelId::Plugin(*num),
+        }
+    }
+
+    /// Resolved menu text: built-ins localized, plugin titles as authored.
+    pub(super) fn title(&self) -> String {
+        match self {
+            MenuPanel::Builtin(id) => t!(id.title()).into_owned(),
+            MenuPanel::Plugin(_, title) => title.clone(),
+        }
+    }
+
+    /// The generic plugin icon; built-ins keep their own.
+    fn icon(&self) -> &'static [u8] {
+        self.id().icon()
+    }
+}
+
 impl OpenCADStudio {
     /// Everything the dock draws over the workspace (the row of edges and
     /// viewport): floating pallets, an open + menu, the drag preview, and
@@ -95,20 +126,7 @@ impl OpenCADStudio {
         if let Some(side) = self.dock_edge_menu {
             if !self.dock_visible_groups(side).is_empty() {
                 // Checked = open and docked on this edge.
-                let checked: Vec<_> = crate::ui::dock::PanelId::ALL
-                    .iter()
-                    .filter(|p| {
-                        !matches!(
-                            **p,
-                            crate::ui::dock::PanelId::AuthoringPalettes
-                                | crate::ui::dock::PanelId::ParametersManager
-                        ) || tab.active_block_edit_session().is_some()
-                    })
-                    .map(|p| {
-                        let here = self.dock.location(*p).map(|(s, _)| s) == Some(side);
-                        (*p, here && self.dock_panel_visible(*p))
-                    })
-                    .collect();
+                let checked = self.pallet_menu_entries(side, tab);
                 let (_, plus_top) = self.dock_strip_layout(side);
                 let items = dock_edge_menu_items(side, &checked, self.dock.strip_names);
                 let menu_w = crate::ui::kit::menu::width(&items);
@@ -185,6 +203,67 @@ impl OpenCADStudio {
                 });
         }
         capture.into()
+    }
+
+    /// The edge (+) pallet menu rows for one edge: built-ins first in their
+    /// historical order, then every registered plugin panel in title order.
+    /// `checked` means open and docked on this edge — the same rule the
+    /// built-ins show, so a plugin panel toggles like any pallet.
+    pub(in crate::app) fn pallet_menu_entries(
+        &self,
+        side: crate::app::config::DockSide,
+        tab: &DocumentTab,
+    ) -> Vec<(MenuPanel, bool)> {
+        use crate::ui::dock::PanelId;
+        let edit_session = tab.active_block_edit_session().is_some();
+        let mut entries: Vec<(MenuPanel, bool)> = PanelId::ALL
+            .iter()
+            .filter(|p| {
+                !matches!(
+                    **p,
+                    PanelId::AuthoringPalettes | PanelId::ParametersManager
+                ) || edit_session
+            })
+            .map(|p| {
+                let here = self.dock.location(*p).map(|(s, _)| s) == Some(side);
+                (MenuPanel::Builtin(*p), here && self.dock_panel_visible(*p))
+            })
+            .collect();
+        // Plugin panels: title-ordered, keyed by the numeric dock id the
+        // menu's toggle needs. `plugin_panel_by_num` is num -> id; one
+        // reverse pass hands each row its number.
+        let num_by_id: std::collections::HashMap<&str, u32> = self
+            .plugin_panel_by_num
+            .iter()
+            .map(|(num, id)| (id.as_str(), *num))
+            .collect();
+        let mut plugins: Vec<(u32, String, bool)> = self
+            .plugin_panels
+            .iter()
+            .filter_map(|(id, state)| {
+                let num = *num_by_id.get(id.as_str())?;
+                let here = self
+                    .dock
+                    .location(PanelId::Plugin(num))
+                    .map(|(s, _)| s)
+                    == Some(side);
+                Some((
+                    num,
+                    state.def.title.clone(),
+                    here && self.dock_panel_visible(PanelId::Plugin(num)),
+                ))
+            })
+            .collect();
+        plugins.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        // Abuse ceiling: one buggy plugin cannot widen the palette
+        // indefinitely. The registration path reports the overflow.
+        plugins.truncate(crate::app::plugin_host::PLUGIN_PALLET_MENU_MAX_ROWS);
+        entries.extend(
+            plugins
+                .into_iter()
+                .map(|(num, title, visible)| (MenuPanel::Plugin(num, title), visible)),
+        );
+        entries
     }
 
     /// Build one edge: the vertical icon strip at the very edge plus the
@@ -1342,20 +1421,20 @@ const GRIP_LIT: f32 = 0.55;
 /// holds each pallet with that state.
 fn dock_edge_menu_items(
     side: crate::app::config::DockSide,
-    checked: &[(crate::ui::dock::PanelId, bool)],
+    checked: &[(MenuPanel, bool)],
     names: crate::ui::dock::StripNames,
 ) -> Vec<crate::ui::kit::menu::Item> {
     use crate::ui::dock::{DockMsg, StripNames};
     use crate::ui::kit::menu::{Item, Mark};
     let mut items: Vec<Item> = checked
         .iter()
-        .map(|(id, checked)| {
+        .map(|(entry, checked)| {
             Item::new(
-                t!(id.title()),
-                Message::Dock(DockMsg::EdgeMenuToggle(side, *id)),
+                entry.title(),
+                Message::Dock(DockMsg::EdgeMenuToggle(side, entry.id())),
             )
             .mark(Mark::Check(*checked))
-            .icon(id.icon())
+            .icon(entry.icon())
         })
         .collect();
     items.push(Item::Separator);

@@ -1064,6 +1064,23 @@ fn fallback_content_centers(
     result
 }
 
+/// What a cell shows: each content's value, field or formula result.
+#[cfg(test)]
+pub(crate) fn shown_cell_text(
+    document: &document::Document,
+    table: &Table,
+    row: usize,
+    column: usize,
+) -> String {
+    table.cell(row, column).map_or_else(String::new, |cell| {
+        cell.contents
+            .iter()
+            .map(|content| content_display_value(document, table, content))
+            .collect::<Vec<_>>()
+            .join("|")
+    })
+}
+
 fn content_display_value(
     document: &document::Document,
     table: &Table,
@@ -1676,7 +1693,14 @@ impl RenderConvertible for Table {
             let row_style = named_row_style.as_ref().or(legacy_row_style);
 
             for (ci, cell) in row.cells.iter().enumerate() {
-                let text = cell.text_value();
+                // What the cell shows (a field's value, a formula's result),
+                // as for a table drawn from its cells outside a block.
+                let shown = cell
+                    .contents
+                    .first()
+                    .map(|content| content_display_value(document, self, content))
+                    .unwrap_or_default();
+                let text = shown.as_str();
                 if text.is_empty() {
                     continue;
                 }
@@ -4488,8 +4512,11 @@ impl PropertyEditable for Table {
     }
 }
 
+pub(crate) mod scaling;
+
 impl Transformable for Table {
     fn apply_transform(&mut self, t: &EntityTransform) {
+        scaling::prepare_unstyled(self, t);
         transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
@@ -4504,6 +4531,7 @@ impl Transformable for Table {
             entity.horizontal_direction.x = tip_x - entity.insertion_point.x;
             entity.horizontal_direction.y = tip_y - entity.insertion_point.y;
         });
+        scaling::finish(self, t);
     }
 }
 
@@ -4685,7 +4713,27 @@ pub fn table_indicator(
         .and_then(|handle| document.text_styles.iter().find(|s| s.handle == handle))
         .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
     let style = crate::entities::text_support::resolve_text_style(&style_name, document);
-    let text_h = text_height as f32;
+    // The grid's typical row / column (the median), not its smallest: one
+    // row or column dragged down to almost nothing must not shrink every
+    // band and label with it.
+    let typical = |sizes: &mut dyn Iterator<Item = f32>| {
+        let mut sizes: Vec<f32> = sizes.filter(|size| *size > 0.0).collect();
+        if sizes.is_empty() {
+            return f32::INFINITY;
+        }
+        sizes.sort_by(f32::total_cmp);
+        sizes[sizes.len() / 2]
+    };
+    let min_row = typical(&mut tab.rows.iter().map(|row| row.height as f32));
+    let min_column = typical(&mut tab.columns.iter().map(|column| column.width as f32));
+    let label_chars = column_label(tab.columns.len() - 1).len().max(3) as f32;
+    // Labels and padding must fit the current grid, including multi-letter
+    // columns and tables whose inherited text style is much larger than a cell.
+    let text_h = (text_height as f32)
+        .min(min_row * 0.3)
+        .min(min_column / (label_chars * 2.0));
+    let hm = (hm as f32).min(min_column * 0.1);
+    let vm = (vm as f32).min(min_row * 0.1);
     // The row numbers' column: the ink width of three of the font's widest
     // digits, plus the cell margins (measured at height 4.5: txt 12, romans
     // 11.57, Arial 9.95 — twice that at height 9).
@@ -4722,8 +4770,8 @@ pub fn table_indicator(
         .copied()
         .unwrap_or(text_h * 3.0)
     });
-    let band_h = text_h + 2.0 * vm as f32;
-    let band_w = digits + 2.0 * hm as f32;
+    let band_h = (text_h + 2.0 * vm).min(min_row);
+    let band_w = (digits + 2.0 * hm).min(min_column);
     let range = range.map(|r| widen_to_merged(tab, r));
     let in_range = |index: usize, row: bool| {
         range.is_some_and(|(r0, c0, r1, c1)| {
@@ -4948,8 +4996,11 @@ mod tests {
                 .insert(handle, document::objects::ObjectType::TableStyle(style));
             let mut table = Table::new(Vector3::ZERO, rows, 1);
             table.table_style_handle = Some(handle);
+            // Cells large enough for the text, so the band is not shrunk to fit them.
+            table.columns[0].width = 100.0;
             for row in &mut table.rows {
                 row.style_id = 3;
+                row.height = 30.0;
             }
             table_indicator(&table, &document, None)
                 .expect("the table has cells")
@@ -5102,6 +5153,42 @@ mod tests {
             bottom >= -height,
             "text reaches {bottom}, below the cell's bottom edge at {}",
             -height
+        );
+    }
+
+    /// An empty row keeps the height of one line of its text and its
+    /// margins, like a row with text: a row grip dragged onto the row above
+    /// must not squeeze it to nothing, or its grips sit on the neighbour's
+    /// and it can no longer be dragged back.
+    #[test]
+    fn an_empty_row_squeezed_by_its_grip_keeps_one_line() {
+        let document = document::Document::new();
+        let mut table = Table::new(document::types::Vector3::ZERO, 2, 1);
+        table.columns[0].width = 20.0;
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        table.set_cell_text(0, 0, "x");
+        let (origin, _, down) = grip_frame(&table);
+        apply_cell_grip(
+            &mut table,
+            (1, 0, 1, 0),
+            CELL_GRIP_BOTTOM,
+            origin + down * 10.0,
+        );
+        assert!(table.rows[1].height < 1e-3, "the drag squeezes the row");
+        settle_table(&mut table, &document);
+        let mut one_line = Table::new(document::types::Vector3::ZERO, 1, 1);
+        one_line.columns[0].width = 20.0;
+        one_line.rows[0].height = 1e-6;
+        one_line.set_cell_text(0, 0, "x");
+        settle_table(&mut one_line, &document);
+        let need = one_line.rows[0].height;
+        assert!(need > 0.1, "a line of text needs {need}");
+        assert!(
+            (table.rows[1].height - need).abs() < 1e-9,
+            "the empty row is {} high, a line needs {need}",
+            table.rows[1].height
         );
     }
 
@@ -5314,6 +5401,32 @@ mod tests {
                 "{expression}"
             );
         }
+    }
+
+    /// A table inside a block is drawn by `to_render`: a formula cell shows
+    /// its result there too, not the formula as typed.
+    #[test]
+    fn a_table_drawn_inside_a_block_shows_a_formula_result() {
+        let document = document::Document::new();
+        let drawn = |third: &str| -> Vec<[u64; 3]> {
+            let mut table = Table::new(document::types::Vector3::ZERO, 2, 2);
+            table.set_cell_text(0, 0, "2");
+            table.set_cell_text(0, 1, "3");
+            table.set_cell_text(1, 0, third);
+            match table.to_render(&document).map(|entity| entity.object) {
+                Some(RenderObject::Lines(points)) => points
+                    .iter()
+                    .map(|p| [p[0].to_bits(), p[1].to_bits(), p[2].to_bits()])
+                    .collect(),
+                _ => panic!("a table draws as lines"),
+            }
+        };
+        assert_ne!(
+            drawn("6"),
+            drawn("7"),
+            "the cell text is part of the drawing"
+        );
+        assert_eq!(drawn("=A1*B1"), drawn("6"));
     }
 
     /// The same expression reaches the rendered cell text: `content_display_value`
@@ -6389,7 +6502,6 @@ struct CellTextExtent {
     last_row: usize,
     last_column: usize,
     height: f64,
-    empty: bool,
     ink: [f64; 2],
     margins: [f64; 4],
     /// Top and bottom margins the text is drawn between (half the text
@@ -6399,8 +6511,15 @@ struct CellTextExtent {
 
 /// Lays out the text of every text cell in its wrapped width. A cell
 /// whose text content is empty has no ink: no width, one text height.
+/// With `blank_cells`, a cell without any content counts as such an empty
+/// one (row fitting); without, it is left out (stored cell geometry).
 // ponytail: lays out every text cell; cache per cell if large tables slow edits.
-fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTextExtent> {
+fn cell_text_extents(
+    table: &Table,
+    document: &document::Document,
+    blank_cells: bool,
+) -> Vec<CellTextExtent> {
+    let blank = document::entities::table::CellContent::new();
     use document::entities::table::CellStylePropertyFlags as P;
     let table_style =
         table
@@ -6422,12 +6541,11 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
             if r0 != ri || c0 != ci {
                 continue;
             }
-            let Some(content) = cell
-                .contents
-                .first()
-                .filter(|content| content.block_handle.is_none())
-            else {
-                continue;
+            let content = match cell.contents.first() {
+                Some(content) if content.block_handle.is_some() => continue,
+                Some(content) => content,
+                None if blank_cells => &blank,
+                None => continue,
             };
             let text = cell.text_value();
             let role = table_style.map(|ts| {
@@ -6530,7 +6648,6 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
                 last_row: r1,
                 last_column: c1,
                 height: height + (lines - 1.0) * layout.line_height as f64,
-                empty: text.trim().is_empty(),
                 ink,
                 margins: [
                     margin(P::MARGIN_LEFT, h_margin),
@@ -6558,8 +6675,10 @@ fn cell_text_extents(table: &Table, document: &document::Document) -> Vec<CellTe
 /// lines 15, four 30).
 fn fitted_row_heights(table: &Table, document: &document::Document) -> Vec<f64> {
     let mut needed = vec![0.0f64; table.rows.len()];
-    for extent in cell_text_extents(table, document) {
-        if extent.last_row == extent.row && !extent.empty {
+    // A cell without content counts as one blank line, so an empty row
+    // keeps the height of a line and its margins.
+    for extent in cell_text_extents(table, document, true) {
+        if extent.last_row == extent.row {
             let need = extent.height + extent.drawn_margins[0] + extent.drawn_margins[1];
             needed[extent.row] = needed[extent.row].max(need);
         }
@@ -6592,7 +6711,7 @@ pub(crate) fn store_cell_geometry(
     let title_suppressed = resolved_title_suppressed(table, table_style.as_ref());
     let header_suppressed = resolved_header_suppressed(table, table_style.as_ref());
     let mut placed = Vec::new();
-    for extent in cell_text_extents(table, document) {
+    for extent in cell_text_extents(table, document, false) {
         let row = &table.rows[extent.row];
         let cell = &row.cells[extent.column];
         let role = table_style.as_ref().map(|ts| {
@@ -6681,3 +6800,7 @@ pub(crate) fn store_cell_geometry(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "table/scaling_tests.rs"]
+mod scaling_tests;

@@ -14,7 +14,7 @@ use kernel::brep::{
     Body, Coedge, Curve3, Edge, EdgeKey, Face, Loop, Lump, Provenance, Shell, Surface, Vertex,
     VertexKey,
 };
-use kernel::space::Vec3;
+use kernel::space::{Plane, Vec3};
 
 /// A face as the file gives it: its surface, whether its outward normal
 /// agrees with the surface's, and its loops — the outer one first — as
@@ -163,6 +163,29 @@ impl Builder {
         }))
     }
 
+    /// The seam of a whole sphere: the meridian through the frame's x
+    /// direction, from the south pole to the north, once each way.
+    fn sphere_seam(&mut self, sphere: &kernel::brep::Sphere) -> Option<Vec<(EdgeKey, bool)>> {
+        let frame = &sphere.frame;
+        let c = Vec3::from(frame.origin);
+        let x = Vec3::from(frame.x_axis).normalize()?;
+        let z = Vec3::from(frame.normal()?);
+        // Its plane's second axis is the pole axis: normal x × z.
+        let meridian = Plane::orthonormal(c.to_array(), x.to_array(), x.cross(z).to_array())?;
+        let r = sphere.radius;
+        let south = self.vertex((c - z * r).to_array());
+        let north = self.vertex((c + z * r).to_array());
+        let seam = self.edge(
+            Curve3::Circle(kernel::brep::Circle3 {
+                plane: meridian,
+                radius: r,
+            }),
+            south,
+            north,
+        )?;
+        Some(vec![(seam, true), (seam, false)])
+    }
+
     /// A lump of shells — the outer one first, then voids — each a list of
     /// faces. `None` when a face has no surface or an edge has gone.
     pub fn lump(&mut self, shells: Vec<Vec<FaceSpec>>) -> Option<()> {
@@ -190,6 +213,14 @@ impl Builder {
                     },
                     other => (other, spec.forward),
                 };
+                // A whole sphere bounded only by a vertex loop (one vertex at
+                // a pole) gets the seam a closed sphere face needs.
+                let mut loops = spec.loops;
+                if let Surface::Sphere(sphere) = &surface {
+                    if !loops.is_empty() && loops.iter().all(Vec::is_empty) {
+                        loops = vec![self.sphere_seam(sphere)?];
+                    }
+                }
                 let surface = self.body.surfaces.insert(surface);
                 let face = self.body.faces.insert(Face {
                     surface,
@@ -198,7 +229,7 @@ impl Builder {
                     owner: shell,
                     provenance: Provenance::Synthesized,
                 });
-                for ring in spec.loops {
+                for ring in loops {
                     let key = self.body.loops.insert(Loop {
                         coedges: Vec::new(),
                         owner: face,

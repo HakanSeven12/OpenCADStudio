@@ -1265,24 +1265,169 @@ impl OpenCADStudio {
         controls: &[ocs_plugin_api::dialog::DialogControl],
         control_id: &str,
     ) -> Option<String> {
+        Self::panel_control(controls, control_id).and_then(|control| match control {
+            ocs_plugin_api::dialog::DialogControl::Button { action, .. } => action.clone(),
+            _ => None,
+        })
+    }
+
+    /// Find one registered panel control by id, descending Row / Column /
+    /// Fields containers exactly like the button-action lookup.
+    pub(super) fn panel_control<'a>(
+        controls: &'a [ocs_plugin_api::dialog::DialogControl],
+        control_id: &str,
+    ) -> Option<&'a ocs_plugin_api::dialog::DialogControl> {
         for control in controls {
             match control {
-                ocs_plugin_api::dialog::DialogControl::Button { id, action, .. }
-                    if id == control_id =>
-                {
-                    return action.clone();
-                }
                 ocs_plugin_api::dialog::DialogControl::Row { controls, .. }
                 | ocs_plugin_api::dialog::DialogControl::Column { controls, .. }
                 | ocs_plugin_api::dialog::DialogControl::Fields { controls, .. } => {
-                    if let Some(action) = Self::panel_button_action(controls, control_id) {
-                        return Some(action);
+                    if let Some(found) = Self::panel_control(controls, control_id) {
+                        return Some(found);
                     }
                 }
-                _ => {}
+                other => {
+                    let id = match other {
+                        ocs_plugin_api::dialog::DialogControl::Button { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Text { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Number { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Checkbox { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Choice { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Color { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::FilePicker { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Fields { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Table { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Label { id, .. }
+                        | ocs_plugin_api::dialog::DialogControl::Svg { id, .. } => id,
+                        _ => continue,
+                    };
+                    if id == control_id {
+                        return Some(other);
+                    }
+                }
             }
         }
         None
+    }
+
+    /// Automation: fire ONE panel control's real GUI interaction — the exact
+    /// message the rendered widget would send — so plugin behavior that has
+    /// no declared command (a plain `click` button) and typed control edits
+    /// (checkbox/choice/color drafts) stay driveable non-interactively.
+    /// No document records, edit_revision or undo state is touched here; the
+    /// resulting `PanelAction` remains the plugin's notification.
+    pub(super) fn control_panel_action(&mut self, req: &Value) -> Result<Task<Message>, Value> {
+        let panel_id = req["panel_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "panel_id is required"))?;
+        let control_id = req["control_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
+        let action = req["action"].as_str().unwrap_or("click");
+        let bad_kind = |expected: &str| {
+            failure(
+                "invalid_request",
+                &format!("control {control_id} needs action '{expected}'"),
+            )
+        };
+        let panel = self
+            .plugin_panels
+            .get(panel_id)
+            .ok_or_else(|| failure("panel_not_found", "The requested panel is not registered"))?;
+        let control = Self::panel_control(&panel.def.controls, control_id).ok_or_else(|| {
+            failure(
+                "panel_not_found",
+                "The requested panel control does not exist",
+            )
+        })?;
+        use ocs_plugin_api::dialog::DialogControl;
+        match (control, action) {
+            // A plain (action-less) button: its click is the plugin event
+            // itself — the host's bulk keywords and declared commands run
+            // through panel_button / dispatch instead.
+            (DialogControl::Button { action: None, .. }, "click") => Ok(
+                self.update(Message::PluginPanelButtonClick(
+                    panel_id.to_string(),
+                    control_id.to_string(),
+                    None,
+                )),
+            ),
+            (DialogControl::Button { .. }, "click") => Err(bad_kind(
+                "panel_button (this button declares a command)",
+            )),
+            (DialogControl::Button { .. }, _) => Err(bad_kind("click")),
+            (DialogControl::Checkbox { .. }, "change") => {
+                // The schema contract is the RAW shape (a plain boolean);
+                // the tagged `{"Bool": …}` DialogValue JSON is tolerated.
+                let pick = req["value"].get("Bool").unwrap_or(&req["value"]);
+                let Some(checked) = pick.as_bool() else {
+                    return Err(failure(
+                        "invalid_request",
+                        "checkbox change needs boolean `value`",
+                    ));
+                };
+                Ok(self.update(Message::PluginPanelBoolToggle(
+                    panel_id.to_string(),
+                    control_id.to_string(),
+                    checked,
+                )))
+            }
+            (DialogControl::Choice { options, .. }, "change") => {
+                // RAW: `{index, text?}`; text defaults to options[index],
+                // exactly like the rendered widget's selection. Tagged
+                // `{"Choice": …}` DialogValue JSON is tolerated.
+                let pick = req["value"].get("Choice").unwrap_or(&req["value"]);
+                let Some(index) = pick["index"].as_u64() else {
+                    return Err(failure(
+                        "invalid_request",
+                        "choice change needs {\"index\": <n> (optional \"text\")",
+                    ));
+                };
+                let Ok(index) = usize::try_from(index) else {
+                    return Err(failure("invalid_request", "index out of range"));
+                };
+                let text = match pick["text"].as_str() {
+                    Some(text) => text.to_string(),
+                    None => options.get(index).cloned().unwrap_or_default(),
+                };
+                Ok(self.update(Message::PluginPanelChoiceSelect(
+                    panel_id.to_string(),
+                    control_id.to_string(),
+                    index,
+                    text,
+                )))
+            }
+            (DialogControl::Text { .. } | DialogControl::Number { .. }, "change") => {
+                // RAW: a plain string or finite number (the widget sends
+                // the draft text); tagged `{"Text": …}` / `{"Number": …}`
+                // DialogValue JSON is tolerated.
+                let pick = req["value"]
+                    .get("Text")
+                    .or_else(|| req["value"].get("Number"))
+                    .unwrap_or(&req["value"]);
+                let text = if let Some(text) = pick.as_str() {
+                    text.to_string()
+                } else if let Some(number) = pick.as_f64().filter(|n| n.is_finite()) {
+                    format!("{number}")
+                } else {
+                    return Err(failure(
+                        "invalid_request",
+                        "text/number change needs string or finite number `value`",
+                    ));
+                };
+                Ok(self.update(Message::PluginPanelTextChange(
+                    panel_id.to_string(),
+                    control_id.to_string(),
+                    text,
+                )))
+            }
+            (DialogControl::Color { .. }, "change") => Err(bad_kind(
+                "change (colors flow through the interactive picker; use the plugin's own draft default)",
+            )),
+            _ => Err(bad_kind(action)),
+        }
     }
 
     /// Edit a native panel widget only. This does not touch document records,

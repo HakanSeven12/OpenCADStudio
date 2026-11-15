@@ -56,6 +56,23 @@ def tearDownModule():
         temp.cleanup()
 
 
+class TestOnlyCfg(unittest.TestCase):
+    def test_all_with_test_is_test_code(self):
+        found = edges({"entities/a.rs": '#[cfg(all(test, not(target_arch = "wasm32")))]\nmod tests {\n    use crate::scene::S;\n}\n'})
+        self.assertEqual(found, {})
+
+    def test_other_cfgs_are_production_code(self):
+        found = edges({"entities/a.rs": '#[cfg(any(test, feature = "x"))]\nmod m {\n    use crate::scene::S;\n}\n'
+                                        '#[cfg(all(not(test), unix))]\nmod n {\n    use crate::scene::T;\n}\n'})
+        self.assertEqual(found, {"entities -> scene": {"src/entities/a.rs": 3}})
+
+    def test_predicates(self):
+        self.assertTrue(arch_check.test_only("test"))
+        self.assertTrue(arch_check.test_only('all(test, not(target_arch = "wasm32"))'))
+        self.assertFalse(arch_check.test_only("all(not(test), unix)"))
+        self.assertFalse(arch_check.test_only("any(test, unix)"))
+
+
 class Direction(unittest.TestCase):
     def test_upward_reference_is_reported_with_its_line(self):
         found = edges({"entities/a.rs": "fn f() {}\nfn g() { crate::scene::draw(); }\n"})

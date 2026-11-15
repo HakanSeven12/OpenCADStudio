@@ -98,6 +98,7 @@ mod layout_viewport_tests;
 mod limits;
 mod modify;
 pub(crate) mod table_content;
+pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;
 pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
@@ -2750,6 +2751,10 @@ pub struct Scene {
     /// drawn separately so hovering one constraint does not light the whole chain.
     constraint_hover_refs: Vec<crate::scene::parametric_constraints::ParametricRef>,
     constraint_hover_wires: Vec<WireModel>,
+    /// Dynamic UCS: the outline of the planar solid face a first point
+    /// would align the UCS to, with the solid and face it outlines.
+    ducs_face: Option<(Handle, kernel::brep::FaceKey)>,
+    ducs_face_wires: Vec<WireModel>,
     /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
     pub selection_color: [f32; 4],
     /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
@@ -3635,6 +3640,8 @@ impl Scene {
             filter_preview_highlights: HashSet::default(),
             constraint_hover_refs: Vec::new(),
             constraint_hover_wires: Vec::new(),
+            ducs_face: None,
+            ducs_face_wires: Vec::new(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_widen: 0.0,
             edge_color: None,
@@ -5174,11 +5181,19 @@ impl Scene {
                         Some(EntityType::Table(t)) => t.block_name.clone(),
                         _ => String::new(),
                     };
-                    let shared = !name.is_empty()
+                    let from_cells = !name.is_empty();
+                    let named = self
+                        .document
+                        .block_records
+                        .get(&name)
+                        .filter(|_| from_cells)
+                        .map(|record| record.handle);
+                    let shared = from_cells
                         && self.document.entities().any(|e| {
                             e.common().handle != *handle
                                 && matches!(e, EntityType::Table(o)
-                                    if o.block_name.eq_ignore_ascii_case(&name))
+                                    if o.block_name.eq_ignore_ascii_case(&name)
+                                        || (named.is_some() && o.block_record_handle == named))
                         });
                     if shared {
                         if let Some(EntityType::Table(t)) = self.document.get_entity_mut(*handle) {
@@ -5202,6 +5217,17 @@ impl Scene {
                         table_content::sync_table_content_object(&mut self.document, *handle)
                     {
                         self.record_undo_object_before(content, Some(before));
+                    }
+                    // A table that had let go of its picture (no handle, the
+                    // name kept) is drawn from its cells. It stays so when the
+                    // picture had to be made anew, as for a copy of such a
+                    // table: the copy then shows its formulas, fields and
+                    // wrapping as its source does. The picture stays, found
+                    // by name, for saving.
+                    if from_cells {
+                        if let Some(EntityType::Table(t)) = self.document.get_entity_mut(*handle) {
+                            t.block_record_handle = None;
+                        }
                     }
                 }
             }
@@ -15517,6 +15543,48 @@ impl Scene {
         let face = crate::scene::model::solid_model::nearest_planar_face(body, pick.to_array())?;
         crate::scene::model::solid_model::planar_face_ucs(body, face, pick.to_array())
             .map(|ucs| (ucs, pick))
+    }
+
+    /// Outline the planar solid face under `local` (relative to `bounds`), the
+    /// face a Dynamic UCS would align to; `None` clears the outline.
+    pub fn set_ducs_face_at(&mut self, at: Option<(iced::Rectangle, iced::Point)>) {
+        let face = at.and_then(|(bounds, local)| {
+            let camera = self.camera.borrow();
+            let view_rot = camera.view_proj_rte(bounds);
+            let eye = camera.eye();
+            drop(camera);
+            let (handle, pick) = self.solid_click_hit_point(local, view_rot, eye, bounds)?;
+            self.restore_solid_models(&[handle]);
+            let body = self.solid_models.get(&handle)?;
+            let face =
+                crate::scene::model::solid_model::nearest_planar_face(body, pick.to_array())?;
+            Some((handle, face))
+        });
+        if face == self.ducs_face {
+            return;
+        }
+        self.ducs_face = face;
+        self.ducs_face_wires = face
+            .and_then(|(handle, face)| {
+                let body = self.solid_models.get(&handle)?;
+                Some(
+                    crate::scene::model::solid_model::face_outline(body, face)
+                        .into_iter()
+                        .map(|points| {
+                            let mut wire = WireModel::solid_f64(
+                                format!("ducs-face:{}", handle.value()),
+                                points,
+                                WireModel::HOVER,
+                                false,
+                            );
+                            wire.set_fixed_screen_width(2.0);
+                            wire
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap_or_default();
+        self.bump_selection();
     }
 
     /// The nearest drawn surface under `local` (relative to `bounds`): a solid

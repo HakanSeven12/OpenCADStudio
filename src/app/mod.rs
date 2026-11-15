@@ -6112,6 +6112,18 @@ pub enum Message {
     // variant's own boundary, so the lint is allowed AT the variant.
     #[allow(private_interfaces)]
     WidgetMountMsg(crate::ui::window::plugin_widget_mount::WidgetMountMsg),
+    /// The prompt-dialog bridge (SCN-015): one armed confirmation's dialog
+    /// decision (OK/cancel), routed onto the SAME dispatcher the arming
+    /// click used by `app::update::widget_prompt` (confirm → forward +
+    /// settle; dismiss → no event). Tail-append on purpose (no
+    /// index-bearing consumers) and host-local ONLY: this enum carries no
+    /// serialization derives (no wire/discriminant risk).
+    // The payload type lives in the mount's `pub(crate)` module (the same
+    // boundary as `Message::WidgetMountMsg`): the deliberate visibility
+    // mismatch is this variant's own boundary, so the lint is allowed AT
+    // the variant.
+    #[allow(private_interfaces)]
+    WidgetPromptMsg(crate::ui::window::plugin_widget_mount::WidgetPromptMsg),
 }
 
 #[derive(Debug, Clone)]

@@ -37,9 +37,9 @@
 //!   which cancels the mount's VIEW of pending lazy page fetches — the
 //!   genuine in-flight IPC fetch cancellations still need the request-id
 //!   vocabulary the wire era brings (RECORDED, not silently claimed).
-//! Additionally the prompt dialog UI (a `PromptRequested` opening the
-//! app's real confirm dialog, riding the existing modal patterns) and the
-//! app-OWNED registry migration are the SCN-015 follow-up.
+//! Additionally the prompt dialog's SEMANTIC half shipped here (SCN-015 —
+//! see "The armed prompt's dialog lifecycle" below); the app-OWNED registry
+//! migration stays the crossings follow-up.
 //!
 //! # The mount becomes INPUT-CAPABLE (SCN-020 — hover, capture, coalescing)
 //!
@@ -101,6 +101,40 @@
 //! cell cursor, Escape the FREE draft cancel. The mount's TABLE placeholder
 //! is not interactive yet (the typed-table MOUNT integration is the later
 //! task), so the table keys are pure-layer complete and headless-tested.
+//!
+//! # The armed prompt's dialog lifecycle (SCN-015 — the semantic half)
+//!
+//! A `ConfirmPolicy::Prompt` activation becomes a THREE-state host flow,
+//! all keyed to the ONE `PromptRequested` routing the bridge already runs:
+//!
+//! 1. **arm** — the routing records the surface-ready dialog desc
+//!    ([`MountPromptDesc`] — prompt text from the machine's captured
+//!    stage, command + targets captured at arm time like the machine's own
+//!    `PromptStage`) into the registry's `prompts` map, alongside the
+//!    SCN-020 escape hint;
+//! 2. **show** — [`MountRegistry::prompt_dialog`] is the READ the app's
+//!    confirm modal displays (and [`prompt_modal_element`] the mount-side
+//!    body builder: the message text + the Cancel/OK pair);
+//! 3. **decide** — the decisions ride [`WidgetPromptMsg`] →
+//!    `Message::WidgetPromptMsg` → `app::update::widget_prompt`:
+//!    confirm → [`WidgetDispatcher::confirm`] + the collecting sink +
+//!    settle (exactly one captured command); dismiss →
+//!    [`WidgetDispatcher::dismiss_prompt`] (no event; a re-click
+//!    re-prompts). Escape rides the SAME edge through
+//!    [`MountRegistry::mount_escape_cancel`].
+//!
+//! Refusals (a decision naming no pending interaction, an unknown surface,
+//! a stale/mismatched key) are graceful: only the refusal's own probe
+//! counter moves ([`MountCounters::prompts_refused`]), nothing machines,
+//! nothing panics. The REGISTRY desc is display copy; the machine's stage
+//! is the exchange's authority — recorded verbatim at
+//! [`MountRegistry::resolve_prompt_desc`].
+//!
+//! The VISUAL modal placement (the desc shown inside the app's existing
+//! modal overlay machinery) is the app view's composition seam — the
+//! SCN-016 wiring consumes exactly [`MountRegistry::prompt_dialog`] +
+//! [`prompt_modal_element`] + [`prompt_app_message`]; recorded, not
+//! claimed here.
 //!
 //! # Wiring status (recorded — the one-line seams outside this task)
 //!
@@ -1346,6 +1380,16 @@ pub(crate) struct MountRegistry {
     /// [`MountRegistry::counters`]. SCN-020 added the interaction probes
     /// ([`MountCounters::mount_move_calls`] and siblings).
     counters: MountCounters,
+    /// (SCN-015) The armed confirmation prompts' surface-ready descs — the
+    /// [`MountPromptDesc`] the app's confirm modal displays, ONE per surface
+    /// (the surface's latest armed interaction; a re-arm replaces). Lives in
+    /// the registry so its lifetime is exactly the armed interaction's (the
+    /// same lifecycle rule as the input store): recorded on the
+    /// `PromptRequested` arm ([`MountRegistry::mount_record_prompt_armed`]),
+    /// consumed on BOTH completion edges (the modal's confirm/dismiss
+    /// decision and Escape's machine-direct cancel) and swept with the
+    /// surfaces. Host-local only, never serialized (§3 transient class).
+    prompts: HashMap<StableId, MountPromptDesc>,
 }
 
 thread_local! {
@@ -1486,10 +1530,26 @@ pub(crate) struct MountCounters {
     /// (`Message::WidgetMountMsg` arm → routed, whatever the verdict).
     pub messages_routed: usize,
     /// Prompt requests the bridge surfaced (`MountRouting::PromptRequested`
-    /// routed) — the §16 tick-count handle for the interactions awaiting
-    /// the real dialog UI (SCN-015: the dialog rides the app's modal
-    /// patterns; nothing prompt-sided runs yet).
+    /// routed) — the §16 tick-count handle for the armed confirmations.
+    /// SCN-015: each surfacing lands the surface-ready desc in the
+    /// registry's `prompts` map (the modal content); the VISUAL dialog
+    /// itself rides the app's modal machinery (SCN-016 wiring, recorded).
     pub prompts_surfaced: usize,
+    /// (SCN-015) Prompt-dialog decisions CONFIRMED: the pending stage's
+    /// captured command emitted through the bridge (forward-then-settle,
+    /// the same policy as any command) and the armed desc consumed.
+    pub prompts_confirmed: usize,
+    /// (SCN-015) Prompt-dialog decisions DISMISSED with no event — the
+    /// modal's Cancel AND Escape's machine-direct cancel (both consume the
+    /// armed interaction the same way; the machine's own dismissal moves no
+    /// counter of its own, so this is the §16 probe for the cancel edge).
+    pub prompts_dismissed: usize,
+    /// (SCN-015) Dialog decisions routed to NO pending interaction (an
+    /// unknown surface, an address that is not the armed one, or a machine
+    /// that reports nothing pending anymore). Probe discipline: a refusal
+    /// moves ONLY its own counter — here and in
+    /// [`MountCounters::prompts_surfaced`]/[`prompts_confirmed`]/[`prompts_dismissed`].
+    pub prompts_refused: usize,
     //
     // -- SCN-020 interaction probes (defect instruments, §16) --------------
     /// Mount moves DELIVERED by the coalescer ([`MountRegistry::mount_flush_moves`]
@@ -1642,6 +1702,11 @@ impl MountRegistry {
             } else {
                 if let Some(previous) = registry.by_panel.remove(panel_id) {
                     release_mount(&previous);
+                    // The replaced surface's armed desc dies with the
+                    // surface (the §16 lifecycle: a replacement releases
+                    // the machines; the desc is registry-side of the same
+                    // interaction).
+                    registry.prompts.remove(&previous.surface_id());
                     registry.counters.registers_replaced += 1;
                     registry.counters.torn_down += 1;
                 }
@@ -1666,6 +1731,10 @@ impl MountRegistry {
             let mut registry = registry.borrow_mut();
             if let Some(handle) = registry.by_panel.remove(panel_id) {
                 release_mount(&handle);
+                // The surface's armed desc dies with the surface (same
+                // lifecycle rule as the input store's sweep — the §16
+                // teardown contract).
+                registry.prompts.remove(&handle.surface_id());
                 registry.counters.torn_down += 1;
             }
         });
@@ -2034,20 +2103,89 @@ impl MountRegistry {
         });
     }
 
-    /// The bridge's hint-write (SCN-020): `key` armed a pending
-    /// confirmation for `surface_id` (a `PromptRequested` routing) — the
-    /// address Escape's cancel route will dismiss. The dispatcher stays
-    /// the semantic authority; this is the keyboard layer's naming of the
-    /// armed interaction (the frozen dispatcher exposes no key
-    /// enumeration).
+    /// The bridge's prompt-arm record for one `PromptRequested` routing —
+    /// TWO coordinated writes, one lifecycle (the surface's armed
+    /// interaction):
+    ///
+    /// 1. (SCN-020, unchanged) the ESCAPE hint: `key` is the armed address
+    ///    Escape's cancel route will dismiss. The dispatcher stays the
+    ///    semantic authority; this is the keyboard layer's naming of the
+    ///    armed interaction (the frozen dispatcher exposes no key
+    ///    enumeration).
+    /// 2. (SCN-015) the DESC arm: resolve the surface-ready dialog desc
+    ///    ([`MountPromptDesc`]) NOW and place it in the registry's
+    ///    `prompts` map — the modal content the app's confirm modal
+    ///    displays (its wiring is SCN-016). Resolution facts mirror the
+    ///    machine's own arm-time capture (see [`Self::resolve_prompt_desc`]);
+    ///    a resolution failure records nothing here (the interaction stays
+    ///    machine-pending and its lifecycle continues through the machine
+    ///    edges) — a graceful no-op, never a panic.
+    ///
+    /// A re-arm on the same surface REPLACES the desc (the surface shows
+    /// its latest armed interaction; the machine layers stay total — their
+    /// stages are keyed per address).
     pub(crate) fn mount_record_prompt_armed(surface_id: StableId, key: DispatchKey) {
         MOUNT_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
                 .input
                 .escape_cancel
-                .insert(surface_id, key);
+                .insert(surface_id, key.clone());
         });
+        // The desc's resolution runs OUTSIDE the registry borrow (the
+        // machines live in the handle's own `RefCell`s, not the thread-local
+        // cell), then the one insert lands it.
+        if let Some(desc) = MountRegistry::resolve_prompt_desc(surface_id, &key) {
+            MOUNT_REGISTRY.with(|registry| {
+                registry.borrow_mut().prompts.insert(surface_id, desc);
+            });
+        }
+    }
+
+    /// The arm-time desc resolution ([`Self::mount_record_prompt_armed`]'s
+    /// second write): machine reads ONLY, in the same synchronous scope as
+    /// the arming `dispatch` — the "captured at arm time" rule. `None` when
+    /// any fact cannot be named (no machine stage, unregistered surface, no
+    /// surface def for a button address) — record nothing, never a panic:
+    /// - `prompt`: the machine's captured stage text
+    ///   ([`WidgetDispatcher::pending_prompt`] — the same text the confirm
+    ///   emission rides, so a concurrent re-sync cannot retarget the
+    ///   dialog's message);
+    /// - `targets`: the surface's CURRENT selection — exactly what the
+    ///   arming dispatch routed ([`apply_mount_msg`]'s command routes);
+    /// - `command_id`: the surface def's command for a button address
+    ///   ([`surface_button_command`] — the defs the mount renders FROM, the
+    ///   same source the dispatched read model synced); the command id the
+    ///   address itself carries for a menu item.
+    ///
+    /// The machine's `PromptStage` (private to the frozen SWG-003 layer)
+    /// remains the exchange's semantic authority: `confirm` re-emits from
+    /// ITS captured stage. This copy is the DISPLAY contract
+    /// (the desc's fields), reconstructed from the same guards `dispatch`
+    /// validated, at the same instant.
+    fn resolve_prompt_desc(surface_id: StableId, key: &DispatchKey) -> Option<MountPromptDesc> {
+        let handle = MountRegistry::handle_for_surface(surface_id)?;
+        let prompt = handle
+            .dispatcher
+            .borrow()
+            .pending_prompt(key)
+            .map(|prompt| prompt.to_string())?;
+        let command_id = match key {
+            // A menu item's address itself carries the command id — the
+            // dispatcher captured exactly that. No def walk needed.
+            DispatchKey::MenuItem(_, command) => command.clone(),
+            DispatchKey::Button(button_id) => {
+                surface_button_command(&handle.surface, *button_id)?
+            }
+        };
+        let targets = handle.state.borrow().selection().to_vec();
+        Some(MountPromptDesc {
+            surface_id,
+            key: key.clone(),
+            prompt,
+            command_id,
+            targets,
+        })
     }
 
     /// Escape's mounted-surface cancel (the machine-direct half — Escape
@@ -2055,7 +2193,11 @@ impl MountRegistry {
     /// like blur, not a widget gesture). Dismisses the surface's ARMED
     /// prompt through the dispatcher's own hook
     /// (`WidgetDispatcher::dismiss_prompt` — the frozen state layer's
-    /// cancel edge) and consumes the hint. Returns `true` when an armed
+    /// cancel edge) and consumes the hint. SCN-015: the dismissal consumes
+    /// the registry's armed desc TOO (the dialog leaves with the
+    /// interaction — the same lifecycle edge the modal's own Cancel runs),
+    /// and a REAL dismissal counts the dismissal probe (a silent Escape
+    /// with nothing armed moves nothing). Returns `true` when an armed
     /// interaction was cancelled. NO DRAG here: drag cancel is SCN-021's
     /// (its hook slot will join this arm).
     #[cfg_attr(not(test), allow(dead_code))]
@@ -2068,7 +2210,14 @@ impl MountRegistry {
         let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
             return false;
         };
-        let dismissed = handle.dispatcher.borrow_mut().dismiss_prompt(key);
+        let dismissed = handle.dispatcher.borrow_mut().dismiss_prompt(key.clone());
+        // The armed desc leaves in the SAME dismiss (a stale desc with no
+        // machine stage is a defect the self-heal takes down quietly — the
+        // machine said the interaction is over).
+        MountRegistry::take_prompt_dialog(surface_id, &key);
+        if dismissed {
+            MountRegistry::record_prompt_dismissed();
+        }
         dismissed
     }
 
@@ -2097,6 +2246,10 @@ impl MountRegistry {
             .per_surface
             .retain(|surface_id, _| registered(*surface_id));
         self.input.escape_cancel.retain(|surface_id, _| registered(*surface_id));
+        // (SCN-015) The armed descs are the surfaces' mirror too: a raw
+        // register/unregister path (no release runs there) still cannot
+        // leave an orphaned desc behind.
+        self.prompts.retain(|surface_id, _| registered(*surface_id));
         if self.input.key_target.is_some_and(|target| !registered(target)) {
             self.input.key_target = None;
         }
@@ -2526,6 +2679,279 @@ pub(crate) struct RegisteredGuard {
 impl Drop for RegisteredGuard {
     fn drop(&mut self) {
         MountRegistry::teardown_surface(&self.panel_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SCN-015 — the prompt half: the armed prompt's dialog desc, the decision
+// vocabulary, and the modal-body builder.
+//
+// The CONFIRMATION LIFECYCLE's semantic half is the frozen SWG-003
+// dispatcher (its `PromptStage` captures command + targets at arm time and
+// `confirm`/`dismiss_prompt`/`settle` own the machine edges). THIS section
+// is the interaction half the mount owns:
+//
+// - the arm records a SURFACE-READY desc ([`MountPromptDesc`]) through the
+//   existing bridge hook ([`MountRegistry::mount_record_prompt_armed`] —
+//   the one `PromptRequested` routing is where both handlers meet);
+// - the desc accessor ([`MountRegistry::prompt_dialog`]) is the app modal
+//   integration's READ: the content + address a confirm modal displays and
+//   routes back by;
+// - the decisions ride their own vocabulary ([`WidgetPromptMsg`]) →
+//   `Message::WidgetPromptMsg` (tail-append, host-local only) →
+//   `app::update::widget_prompt` (the confirm/dismiss routing reusing the
+//   SCN-014 bridge's sink + settle policy).
+//
+// The modal's VISUAL surface (overlay/backdrop placement inside the app's
+// existing modal machinery) is the app view's composition — the SCN-016
+// wiring; the mount side is COMPLETE here: this is the full headless
+// lifecycle (arm → desc → decision → machine edge → counters), and the
+// desc accessor + the [`prompt_modal_element`] body builder are exactly
+// the surface that wiring consumes.
+// ---------------------------------------------------------------------------
+
+/// One armed confirmation's SURFACE-READY dialog desc (SCN-015): the
+/// complete content a confirm modal displays and routes back by.
+///
+/// Fields (the desc contract, exact — pinned by
+/// `prompt_desc_accessor_shape`):
+/// - `surface_id` — the surface the armed interaction belongs to (the
+///   registry's key; the panel id's join is
+///   [`MountRegistry::handle_for_surface`]'s reverse direction);
+/// - `prompt` — the prompt text the modal displays (the machine's captured
+///   stage text — [`WidgetDispatcher::pending_prompt`]);
+/// - `command_id` — the captured command the confirm will emit;
+/// - `targets` — the captured targets the confirm will emit;
+/// - `key` — the armed address the dialog's decision routes back through
+///   ([`WidgetDispatcher::confirm`] / [`WidgetDispatcher::dismiss_prompt`]).
+///
+/// THE DESC IS THE DISPLAY COPY, not the exchange's truth: the SWG-003
+/// dispatcher's own `PromptStage` holds the armed stage, and the confirm
+/// emission re-reads THAT (a concurrent re-sync cannot retarget it). Every
+/// field above is captured AT ARM TIME from the same synchronous scope the
+/// arming `dispatch` resolved (see
+/// [`MountRegistry::resolve_prompt_desc`]) — the panel-id/surface-id pair
+/// is the registry's surface key (the desc names the interaction, so both
+/// vocabularies resolve from it). Host-local only, never serialized (§3).
+///
+// Constructed on every live arm (the `PromptRequested` routing); the
+// fields' READ consumers are the assertion tests until the SCN-016 modal
+// wiring consumes them — the assert-only allowance, naming why it stays.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MountPromptDesc {
+    /// The surface the armed interaction belongs to (the registry's key).
+    pub surface_id: StableId,
+    /// The armed address the dialog's decision routes back by.
+    pub key: DispatchKey,
+    /// The prompt text the modal displays (the machine's captured stage).
+    pub prompt: String,
+    /// The captured command the confirm will emit.
+    pub command_id: String,
+    /// The captured targets the confirm will emit.
+    pub targets: Vec<StableId>,
+}
+
+/// The prompt dialog's decision vocabulary (SCN-015): what the armed
+/// confirmation's modal emits for one user decision, FULLY addressed
+/// (surface + the desc's key) so the routing can refuse a decision whose
+/// armed interaction is gone GRACEFULLY — the mount bridge's
+/// unknown-surface pattern, mirrored (refusals move only their own probe
+/// counter; nothing machines; no panics).
+///
+/// Host-local, NOT a wire change: the payload rides the app's
+/// `Message::WidgetPromptMsg` variant (tail-append; `Message` carries no
+/// serialization derives — restate by grep — so the variant has no wire
+/// implication) and routes through `app::update::widget_prompt`
+/// ([`route_prompt_decision`]'s confirm/dismiss edges over the SAME
+/// dispatcher the click path used).
+// The vocabulary is production-reachable end-to-end (the update arm's
+// handler matches these variants); a builder EMITS it today only through
+// the tests — the SCN-016 modal wiring consummates the emission, recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WidgetPromptMsg {
+    /// The OK decision: the user confirmed the armed interaction.
+    Confirmed {
+        /// The surface the armed interaction belongs to.
+        surface_id: StableId,
+        /// The armed address the dialog displayed (the desc's key).
+        key: DispatchKey,
+    },
+    /// The cancel decision: the armed interaction clears, no event ever
+    /// exists for it; a later re-click re-prompts (the policy is per-def).
+    Dismissed {
+        /// The surface the armed interaction belongs to.
+        surface_id: StableId,
+        /// The armed address the dialog displayed (the desc's key).
+        key: DispatchKey,
+    },
+}
+
+/// `WidgetPromptMsg` → app `Message` — the ONE mapping site for the prompt
+/// dialog's decisions (mirrors [`app_message`]). The modal body's buttons
+/// emit through this; the app's update arm unwraps the variant back into
+/// the prompt handler (`app::update::widget_prompt`).
+///
+// The one-decision gate the SCN-016 modal wiring calls (the modal body is
+// not attached to the app's modal machinery yet — recorded); today only
+// the headless tests drive it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn prompt_app_message(msg: WidgetPromptMsg) -> crate::app::Message {
+    crate::app::Message::WidgetPromptMsg(msg)
+}
+
+/// The query the desc asks for one BUTTON address (SCN-015's arm-time
+/// resolution): the surface's published command for the button — the defs
+/// the mount renders FROM (the same source the shipped read model synced).
+/// Plain explicit-stack walk (the ring's discipline); visibility does NOT
+/// gate the read — the dispatcher's sync set is def-complete, not
+/// render-complete.
+fn surface_button_command(surface: &WidgetSurface, id: StableId) -> Option<String> {
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        if let WidgetNode::Group(def) = node {
+            walker.extend(def.children.iter());
+            continue;
+        }
+        if let WidgetNode::IconButton(def) = node {
+            if def.id == id {
+                return Some(def.command.clone());
+            }
+        }
+    }
+    None
+}
+
+/// The armed prompt's MODAL BODY facts (SCN-015) — the headless assertion
+/// surface for what [`prompt_modal_element`] renders, the [`MountFacts`]
+/// pattern: prompt text + the decision pair's labels.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MountPromptFacts {
+    /// The message text the body displays (the desc's prompt, verbatim).
+    pub prompt: String,
+    /// The OK button's label (its press routes `WidgetPromptMsg::Confirmed`).
+    pub ok: String,
+    /// The Cancel button's label (`WidgetPromptMsg::Dismissed`).
+    pub cancel: String,
+}
+
+/// Build the armed prompt's modal BODY — the pure builder over `desc`
+/// (SCN-015): the prompt text, then the decision pair
+/// (Cancel → [`WidgetPromptMsg::Dismissed`], OK →
+/// [`WidgetPromptMsg::Confirmed`], each addressed with the desc's
+/// (surface, key)). The app's REAL modal form (overlay placement,
+/// backdrop, Enter/Escape key handling) is the app's existing modal
+/// machinery — the SCN-016 wiring hosts this element inside it; the mount
+/// side stays the plain body (its labels' semantics: Cancel DISMISSES —
+/// no event — and OK CONFIRMS — exactly one captured command — the app
+/// modal policy applied onto the machine's two edges).
+///
+// Consumed today by the assertion tests (the element shape is
+// un-introspectable headless; the facts carry the assertions); the SCN-016
+// modal wiring takes the element itself.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn prompt_modal_element(
+    desc: &MountPromptDesc,
+) -> (Element<'static, WidgetPromptMsg>, MountPromptFacts) {
+    let surface_id = desc.surface_id;
+    let key = desc.key.clone();
+    let facts = MountPromptFacts {
+        prompt: desc.prompt.clone(),
+        ok: "OK".to_string(),
+        cancel: "Cancel".to_string(),
+    };
+    let body = column![
+        text(desc.prompt.clone()).size(MOUNT_TEXT_SIZE),
+        row![
+            button(text(facts.cancel.clone()).size(MOUNT_TEXT_SIZE))
+                .padding([3, 10])
+                .style(button_style(false))
+                .on_press(WidgetPromptMsg::Dismissed { surface_id, key: key.clone() }),
+            button(text(facts.ok.clone()).size(MOUNT_TEXT_SIZE))
+                .padding([3, 10])
+                .style(button_style(true))
+                .on_press(WidgetPromptMsg::Confirmed { surface_id, key }),
+        ]
+        .spacing(MOUNT_GROUP_SPACING),
+    ]
+    .spacing(MOUNT_GROUP_SPACING)
+    .width(Fill);
+
+    (
+        container(body).padding([12, 16]).width(Fill).into(),
+        facts,
+    )
+}
+
+impl MountRegistry {
+    /// The armed prompt's dialog desc for `surface_id` (SCN-015) — the app
+    /// modal integration's READ: `Some(desc)` while the surface's armed
+    /// interaction awaits its decision; the desc STAYS in the registry
+    /// (read-only) until the interaction completes — the decision routes
+    /// ([`route_prompt_decision`] and Escape's cancel) are the consumption
+    /// points, so a view pass may re-read per frame while the dialog shows.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn prompt_dialog(surface_id: StableId) -> Option<MountPromptDesc> {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .prompts
+                .get(&surface_id)
+                .cloned()
+        })
+    }
+
+    /// The desc's CONSUMPTION (the two completion edges call this — the
+    /// decision routes and the Escape cancel): remove the surface's armed
+    /// desc ONLY when it still names `key` (a newer arm on the same
+    /// surface survives a stale decision's cleanup), and clear the escape
+    /// hint when it names the same address (a completed interaction can no
+    /// longer be cancelled). Returns whether the desc was taken.
+    pub(crate) fn take_prompt_dialog(surface_id: StableId, key: &DispatchKey) -> bool {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            // The key match reads FIRST (the borrow ends at the comparison),
+            // then the removal — a newer arm on the same surface survives a
+            // stale decision's cleanup.
+            let names_this_address = registry
+                .prompts
+                .get(&surface_id)
+                .is_some_and(|armed| &armed.key == key);
+            let taken = if names_this_address {
+                registry.prompts.remove(&surface_id);
+                true
+            } else {
+                false
+            };
+            if registry.input.escape_cancel.get(&surface_id) == Some(key) {
+                registry.input.escape_cancel.remove(&surface_id);
+            }
+            taken
+        })
+    }
+
+    /// The confirmed-decision probe tick (§16).
+    pub(crate) fn record_prompt_confirmed() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.prompts_confirmed += 1;
+        });
+    }
+
+    /// The dismissed-decision probe tick (§16) — the modal's Cancel and
+    /// the Escape cancel are the same edge; both tick here.
+    pub(crate) fn record_prompt_dismissed() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.prompts_dismissed += 1;
+        });
+    }
+
+    /// The refused-decision probe tick (§16) — a decision that named no
+    /// pending interaction; moves ONLY its own counter.
+    pub(crate) fn record_prompt_refused() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.prompts_refused += 1;
+        });
     }
 }
 

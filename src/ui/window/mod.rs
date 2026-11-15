@@ -55,6 +55,7 @@ pub mod plot;
 pub mod plugin_dialog;
 pub mod plugin_manager;
 pub mod plugin_scene;
+pub(crate) mod plugin_scene_cache;
 pub mod plugin_panel;
 pub mod print_all;
 pub mod purge;

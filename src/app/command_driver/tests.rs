@@ -9446,3 +9446,77 @@ mod battman_tests {
     }
 }
 
+
+
+#[cfg(test)]
+mod hatch_panel_edit_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings};
+    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::types::{Color, Vector2};
+
+    fn app_base_settings(fill: HatchFill) -> HatchSettings {
+        HatchSettings {
+            fill,
+            angle_deg: 0.0,
+            scale: 1.0,
+            origin: [0.0, 0.0],
+            method: 0,
+            islands: document::entities::HatchStyleType::Normal,
+            associative: true,
+            separate: false,
+            keep_boundaries: false,
+            gap_tolerance: 0.0,
+            color: None,
+            background: None,
+            layer: None,
+            transparency: None,
+            gradient_colors: [Color::Index(5), Color::Index(1)],
+            draw_order: 0,
+            annotative: false,
+        }
+    }
+
+    /// The Hatch panel is one of the paths that writes onto the entity. The
+    /// prebuilt fill model has to follow, like every other editing path; a
+    /// stale cache would keep showing the old pattern after OK.
+    #[test]
+    fn the_panel_edit_rebuilds_the_cached_fill_model() {
+        use document::entities::BoundaryPath as BoundaryPathType;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        let mut path = BoundaryPathType::new();
+        path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+                .into_iter()
+                .map(|p| Vector2::new(p[0], p[1]))
+                .collect(),
+            true,
+        )));
+        hatch.paths.push(path);
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Hatch(Box::new(hatch)));
+        app.tabs[i].scene.refresh_fill_model(handle);
+        assert_eq!(
+            app.tabs[i].scene.hatches.get(&handle).map(|m| m.name.clone()),
+            Some("SOLID".to_string())
+        );
+
+        let before = app_base_settings(HatchFill::Solid);
+        let after = app_base_settings(HatchFill::Pattern("ANSI31".to_string()));
+        app.apply_hatch_panel_edit(handle, &before, &after);
+
+        let model = app.tabs[i]
+            .scene
+            .hatches
+            .get(&handle)
+            .expect("the fill model was rebuilt");
+        assert_eq!(model.name, "ANSI31");
+    }
+}

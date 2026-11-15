@@ -129,9 +129,26 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .is_some_and(|c| c.name() == "SS_CATCHMENT");
+        let table_cell = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|c| c.table_cell());
         self.push_undo_snapshot(i, label);
         for (handle, entities) in replacements {
             self.replace_command_entity(i, handle, entities);
+        }
+        // A formula typed on the command line is stored as a formula field,
+        // as the cell editor does.
+        if let Some((table, row, column)) = table_cell {
+            let document = &mut self.tabs[i].scene.document;
+            if crate::entities::table::typed_formula_to_field(document, table, row, column) {
+                if let Some(document::EntityType::Table(target)) = document.get_entity_mut(table) {
+                    target.block_record_handle = None;
+                }
+                self.tabs[i]
+                    .scene
+                    .bump_entities(&[(table, crate::scene::ChangeKind::Modified)]);
+            }
         }
         for entity in additions {
             self.tabs[i].scene.add_entity(entity);

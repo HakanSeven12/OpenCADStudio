@@ -98,6 +98,7 @@ mod layout_viewport_tests;
 mod limits;
 mod modify;
 pub(crate) mod table_content;
+pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;
 pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
@@ -5174,11 +5175,19 @@ impl Scene {
                         Some(EntityType::Table(t)) => t.block_name.clone(),
                         _ => String::new(),
                     };
-                    let shared = !name.is_empty()
+                    let from_cells = !name.is_empty();
+                    let named = self
+                        .document
+                        .block_records
+                        .get(&name)
+                        .filter(|_| from_cells)
+                        .map(|record| record.handle);
+                    let shared = from_cells
                         && self.document.entities().any(|e| {
                             e.common().handle != *handle
                                 && matches!(e, EntityType::Table(o)
-                                    if o.block_name.eq_ignore_ascii_case(&name))
+                                    if o.block_name.eq_ignore_ascii_case(&name)
+                                        || (named.is_some() && o.block_record_handle == named))
                         });
                     if shared {
                         if let Some(EntityType::Table(t)) = self.document.get_entity_mut(*handle) {
@@ -5202,6 +5211,17 @@ impl Scene {
                         table_content::sync_table_content_object(&mut self.document, *handle)
                     {
                         self.record_undo_object_before(content, Some(before));
+                    }
+                    // A table that had let go of its picture (no handle, the
+                    // name kept) is drawn from its cells. It stays so when the
+                    // picture had to be made anew, as for a copy of such a
+                    // table: the copy then shows its formulas, fields and
+                    // wrapping as its source does. The picture stays, found
+                    // by name, for saving.
+                    if from_cells {
+                        if let Some(EntityType::Table(t)) = self.document.get_entity_mut(*handle) {
+                            t.block_record_handle = None;
+                        }
                     }
                 }
             }

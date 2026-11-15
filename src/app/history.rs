@@ -986,15 +986,16 @@ impl OpenCADStudio {
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
-    /// Dimension copies clone a fresh anonymous `*D` block record. Copies
-    /// with extension dictionaries deep-clone object trees. Both need a
+    /// Dimension copies clone a fresh anonymous `*D` block record, table copies
+    /// a fresh `*T` picture block and their cell fields. Copies
+    /// with extension dictionaries deep-clone object trees. All need a
     /// structure snapshot so undo can remove those new records.
     pub(super) fn delta_copy_safe(&self, i: usize, handles: &[Handle]) -> bool {
         let doc = &self.tabs[i].scene.document;
         !handles
             .iter()
             .any(|h| match doc.get_entity(*h) {
-                Some(EntityType::Dimension(_)) => true,
+                Some(EntityType::Dimension(_) | EntityType::Table(_)) => true,
                 Some(entity) => {
                     entity.common().xdictionary_handle.is_some()
                         || matches!(entity, EntityType::Insert(insert) if insert.attributes.iter().any(|attribute| attribute.common.xdictionary_handle.is_some()))

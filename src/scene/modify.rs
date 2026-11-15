@@ -779,8 +779,15 @@ impl Scene {
             EntityType::Table(table) => {
                 // A table exclusively owns its anonymous picture block. The
                 // codec also resolves by name, so detach both references.
+                // A table drawn from its cells (no handle, the name kept)
+                // keeps the name as that mark: the scene gives the copy a
+                // block of its own and goes on drawing it from its cells.
+                let from_cells =
+                    table.block_record_handle.is_none() && !table.block_name.is_empty();
                 table.block_record_handle = None;
-                table.block_name.clear();
+                if !from_cells {
+                    table.block_name.clear();
+                }
             }
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {
@@ -1395,6 +1402,21 @@ impl Scene {
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
                 Self::adopt_attributes(&mut self.document, h);
+                // A copied table evaluates its own fields, not the source's.
+                let fields = match self.document.get_entity(src_handle) {
+                    Some(EntityType::Table(table)) => {
+                        super::table_fields::table_fields(&self.document, table)
+                    }
+                    _ => Vec::new(),
+                };
+                if !fields.is_empty() {
+                    super::table_fields::adopt_table_fields(
+                        &mut self.document,
+                        h,
+                        src_handle,
+                        &fields,
+                    );
+                }
                 // Deep-clone the extension-dictionary tree so edits on the
                 // copy never touch the source. A dangling or missing root
                 // leaves the copy without one — never shared.

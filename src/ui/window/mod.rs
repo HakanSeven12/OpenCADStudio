@@ -58,6 +58,7 @@ pub mod plugin_scene;
 pub(crate) mod plugin_scene_cache;
 pub mod plugin_panel;
 pub(crate) mod plugin_widgets;
+pub(crate) mod plugin_widgets_dispatch;
 pub mod print_all;
 pub mod purge;
 pub mod quick_calc;

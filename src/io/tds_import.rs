@@ -137,7 +137,7 @@ impl Reader<'_> {
                 break;
             };
             let len = len as usize;
-            if len < 6 || at + len > to {
+            if len < 6 || len > to - at {
                 break;
             }
             out.push((id, at + 6, at + len));

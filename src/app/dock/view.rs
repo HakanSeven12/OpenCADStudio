@@ -230,7 +230,7 @@ impl OpenCADStudio {
         plugins.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
         // Abuse ceiling: one buggy plugin cannot widen the palette
         // indefinitely. The registration path reports the overflow.
-        plugins.truncate(crate::app::plugin_host::PLUGIN_PALLET_MENU_MAX_ROWS);
+        plugins.truncate(super::PLUGIN_PALLET_MENU_MAX_ROWS);
         entries.extend(
             plugins
                 .into_iter()

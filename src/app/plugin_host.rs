@@ -13,10 +13,7 @@ use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::plugin::v4_support;
 
-/// Pallet-menu listing cap: the first N plugin panels per edge, sorted by
-/// title. Registration beyond the cap still works (commands, value updates)
-/// and reports itself on stderr (gui.log); see docs/plugin-pallet-menu.md.
-pub(crate) const PLUGIN_PALLET_MENU_MAX_ROWS: usize = 32;
+use super::dock::PLUGIN_PALLET_MENU_MAX_ROWS;
 
 /// Session adapter: one active document tab, command line, undo.
 pub(crate) struct HostSession<'a> {

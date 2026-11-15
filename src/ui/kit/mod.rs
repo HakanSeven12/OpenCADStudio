@@ -1,6 +1,7 @@
-//! The palette kit: the widgets every palette is built from, so all
-//! palettes share one look (the Properties palette's) and no palette styles
-//! a row, a bar or a field by hand.
+//! The UI kit: the widgets the palettes, menus, dropdowns, ribbon lists,
+//! command line and tooltips are built from, so they share one look (the
+//! Properties palette's) and nothing styles a row, a bar, a field or a menu
+//! by hand.
 //!
 //! A palette is the same stack, top to bottom; every band but the title bar
 //! and the content is optional:
@@ -19,9 +20,25 @@
 //! | Frame | [`palette`], [`band`], [`crate::ui::dock::SplitterGrip`] |
 //! | Menus, tooltips | [`crate::ui::kit::menu`], [`tooltip`] |
 //!
-//! Colours come from [`crate::ui::style::chrome`], text sizes from
-//! [`crate::ui::style::text`], sizes from
-//! [`crate::ui::style::kit_metrics`].
+//! Dropdowns are [`dropdown`] (a field-style head over a list as wide as
+//! its longest option); menus are [`menu`], whose frame
+//! ([`menu::frame_style`], [`menu::inset`]) every popup list shares.
+//!
+//! Rules for code built on the kit:
+//!
+//! - Colours come from [`crate::ui::style::chrome`] (`surface` and
+//!   `surface_raised` for palette and field backgrounds), never from
+//!   `theme.palette()` or a literal colour.
+//! - Text sizes come from [`crate::ui::style::text`]; sizes from
+//!   [`crate::ui::style::kit_metrics`] (imported as `km`), or
+//!   `ribbon_metrics` / `start_metrics` for the ribbon and the Start page.
+//! - Drawn lines are [`crate::ui::style::kit_metrics::line`], one physical
+//!   pixel.
+//! - Context menus press their rows through a `mouse_area`: a menu overlay
+//!   is rebuilt every view pass and a button would lose its press.
+//! - `docs/ui/audit_counts.sh` counts generic colours and literal sizes in
+//!   the kit's users; CI reports a file that goes above its baseline in
+//!   `docs/ui/audit_counts.txt`, and the baseline only goes down.
 
 mod dropdown;
 mod field;

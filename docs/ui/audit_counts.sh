@@ -1,10 +1,10 @@
 #!/bin/sh
-# Palette family audit: per palette file, how many generic iced colours
+# Kit audit: per file built on the UI kit, how many generic iced colours
 # (`theme.palette()`, `background.*` / `primary.*` pairs, `Color::from_rgb*`)
 # and literal sizes (`.size/.padding/.spacing/.width/.height` or
 # `Length::Fixed` with a number) it still has. Colours belong in
 # `chrome::`, text sizes in `text::` and measurements in `kit_metrics`
-# (docs/ui/PALETTE_FAMILY_PLAN.md).
+# (the kit rules in src/ui/kit/mod.rs).
 #
 #   sh docs/ui/audit_counts.sh           print the counts
 #   sh docs/ui/audit_counts.sh --check   fail when a count is above its

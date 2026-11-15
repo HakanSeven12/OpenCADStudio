@@ -1092,3 +1092,28 @@ fn a_formula_typed_in_a_cell_is_stored_as_a_formula_field() {
         "the picture should follow C1: {texts:?}"
     );
 }
+
+/// A formula entered on the command line (TABLEDIT, scripts) is stored as
+/// a formula field too, and undo brings back the cell as it was.
+#[test]
+fn a_formula_entered_on_the_command_line_is_stored_as_a_formula_field() {
+    let (mut app, handle) = fixture("before");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    let _ = app.run_command_line("TABLEDIT 10,-5 =C1+D1");
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (C1+D1)")
+    );
+    assert_eq!(source(&app, handle), "5");
+    let _ = app.update(Message::Undo);
+    assert_eq!(formula_code(&app, handle), None);
+    assert_eq!(source(&app, handle), "before");
+}

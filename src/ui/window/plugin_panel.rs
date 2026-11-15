@@ -574,11 +574,24 @@ impl PluginPanelState {
         // `app_message` mapping — into `app::update::widget_mount`, which
         // applies it to the registered machines and settles the forwarded
         // commands' addresses (bridge-forwards-then-settle).
+        // SCN-020 adds the mounted body's pointer-capture wrapper: the
+        // surface-level press/move/release ride the SAME mount vocabulary
+        // (host-local; capture + coalesced moves in the registry's input
+        // store). Nothing registers a surface yet, so the legacy branch
+        // below stays byte-identical for every panel today.
         let body = match crate::ui::window::plugin_widget_mount::MountRegistry::mounted_body(
             self.def.id.as_str(),
         ) {
             Some(surface_view) => {
-                surface_view.map(crate::ui::window::plugin_widget_mount::app_message)
+                let surface_id =
+                    crate::ui::window::plugin_widget_mount::MountRegistry::panel_surface_id(
+                        self.def.id.as_str(),
+                    );
+                crate::ui::window::plugin_widget_mount::pointer_capture_body(
+                    surface_view,
+                    surface_id,
+                )
+                .map(crate::ui::window::plugin_widget_mount::app_message)
             }
             None => {
                 let mut body_col = column![].spacing(8).width(Fill);

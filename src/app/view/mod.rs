@@ -3382,23 +3382,9 @@ bg={bg_ms:.1}ms n={view_count}"
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace
-        } else if tab.is_start {
-            column![
-                workspace,
-                iced::widget::container(command_line)
-                    .width(Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .padding(iced::Padding {
-                        top: 0.0,
-                        right: 0.0,
-                        bottom: 2.0,
-                        left: 0.0,
-                    }),
-            ]
-            .width(Fill)
-            .height(Fill)
-            .into()
         } else {
+            // The command line floats over the bottom of the workspace, on
+            // the Start page as over a drawing, so no band runs under it.
             // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
             // collapsed, so it keeps the keyboard; Dynamic Input shows the
             // prompt and the typing at the cursor.

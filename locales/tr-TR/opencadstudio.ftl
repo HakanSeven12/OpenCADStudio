@@ -764,6 +764,7 @@ common =
     .dimension = Ölçü
     .dimensions = Ölçüler
     .discard = Vazgeç
+    .dont-save = Kaydetme
     .discussions = Tartışmalar
     .discussions-load-from-github = Tartışmalar GitHub'dan yüklenir.
     .display = Görüntü

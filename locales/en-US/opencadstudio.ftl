@@ -775,6 +775,7 @@ common =
     .dimension = Dimension
     .dimensions = Dimensions
     .discard = Discard
+    .dont-save = Don't Save
     .discussions = Discussions
     .discussions-load-from-github = Discussions load from GitHub.
     .display = Display

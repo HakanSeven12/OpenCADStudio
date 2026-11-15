@@ -783,6 +783,7 @@ common =
     .dimension = Размер
     .dimensions = Размеры
     .discard = выбросить
+    .dont-save = Не сохранять
     .discussions = Обсуждения
     .discussions-load-from-github = Дискуссии загружаются с GitHub.
     .display = Внешний вид

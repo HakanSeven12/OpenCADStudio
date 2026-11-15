@@ -779,6 +779,7 @@ common =
     .dimension = 標註
     .dimensions = 標註
     .discard = 捨棄
+    .dont-save = 不儲存
     .discussions = 討論
     .discussions-load-from-github = 討論已從 GitHub 載入。
     .display = 顯示

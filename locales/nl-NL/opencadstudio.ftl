@@ -778,6 +778,7 @@ common =
     .dimension = Bemating
     .dimensions = Bematingen
     .discard = Weggooien
+    .dont-save = Niet opslaan
     .discussions = Discussies
     .discussions-load-from-github = Discussies laden van GitHub.
     .display = Weergave

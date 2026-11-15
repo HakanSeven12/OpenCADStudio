@@ -770,6 +770,7 @@ common =
     .dimension = 寸法
     .dimensions = 寸法
     .discard = 破棄
+    .dont-save = 保存しない
     .discussions = ディスカッション
     .discussions-load-from-github = ディスカッションは GitHub から読み込まれます。
     .display = 表示

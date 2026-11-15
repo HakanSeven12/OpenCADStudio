@@ -782,6 +782,7 @@ common =
     .dimension = ຂະໜາດ
     .dimensions = ຂະໜາດ
     .discard = ຍົກເລີກການປ່ຽນແປງ
+    .dont-save = ບໍ່ບັນທຶກ
     .discussions = ການສົນທະນາ
     .discussions-load-from-github = ການສົນທະນາໂຫຼດມາຈາກ GitHub.
     .display = ການສະແດງຜົນ

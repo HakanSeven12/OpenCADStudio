@@ -779,6 +779,7 @@ common =
     .dimension = 차원
     .dimensions = 치수
     .discard = 폐기
+    .dont-save = 저장 안 함
     .discussions = 토론
     .discussions-load-from-github = GitHub에서 토론이 로드됩니다.
     .display = 디스플레이

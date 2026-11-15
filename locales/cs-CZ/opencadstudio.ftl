@@ -784,6 +784,7 @@ common =
     .dimension = Kóta
     .dimensions = Kóty
     .discard = Zahodit
+    .dont-save = Neukládat
     .discussions = Diskuze
     .discussions-load-from-github = Načítání diskuzí z GitHubu.
     .display = Zobrazení

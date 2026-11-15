@@ -775,6 +775,7 @@ common =
     .dimension = Kích thước
     .dimensions = Kích thước
     .discard = Loại bỏ
+    .dont-save = Không lưu
     .discussions = Thảo luận
     .discussions-load-from-github = Tải các cuộc thảo luận từ GitHub.
     .display = Hiển thị

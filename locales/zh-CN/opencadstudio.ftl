@@ -767,6 +767,7 @@ common =
     .dimension = 尺寸
     .dimensions = 尺寸
     .discard = 放弃
+    .dont-save = 不保存
     .discussions = 讨论
     .discussions-load-from-github = 讨论从 GitHub 加载。
     .display = 显示

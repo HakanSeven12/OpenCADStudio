@@ -779,6 +779,7 @@ common =
     .dimension = Mitat
     .dimensions = Mitat
     .discard = Hävitä
+    .dont-save = Älä tallenna
     .discussions = Keskustelut
     .discussions-load-from-github = Keskustelut ladataan kohteesta GitHub.
     .display = Näyttö

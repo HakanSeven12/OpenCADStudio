@@ -780,6 +780,7 @@ common =
     .dimension = Διάσταση
     .dimensions = Διαστάσεις
     .discard = Απόρριψη
+    .dont-save = Χωρίς αποθήκευση
     .discussions = Συζητήσεις
     .discussions-load-from-github = Οι συζητήσεις φορτώνονται από το GitHub.
     .display = Εμφάνιση

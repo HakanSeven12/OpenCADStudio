@@ -779,6 +779,7 @@ common =
     .dimension = Оразмеряване
     .dimensions = Оразмерявания
     .discard = Отхвърли
+    .dont-save = Не записвай
     .discussions = Дискусии
     .discussions-load-from-github = Дискусиите се зареждат от GitHub.
     .display = Показване

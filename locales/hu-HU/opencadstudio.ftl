@@ -778,6 +778,7 @@ common =
     .dimension = Méretezés
     .dimensions = Méretek
     .discard = Elvetés
+    .dont-save = Ne mentse
     .discussions = Beszélgetések
     .discussions-load-from-github = A beszélgetések a GitHubról töltődnek be.
     .display = Megjelenítés

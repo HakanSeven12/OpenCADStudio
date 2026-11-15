@@ -2007,6 +2007,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Discard" => Some(("common", "discard")),
         "Discard Block Edit" => Some(("modify", "discard-block-edit")),
         "Discussions" => Some(("common", "discussions")),
+        "Don't Save" => Some(("common", "dont-save")),
         "Discussions load from GitHub." => Some(("common", "discussions-load-from-github")),
         "Display" => Some(("common", "display")),
         "Display but not plot" => Some(("draw", "display-but-not-plot")),

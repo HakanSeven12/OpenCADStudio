@@ -780,6 +780,7 @@ common =
     .dimension = Cota
     .dimensions = Cotas
     .discard = Descartar
+    .dont-save = Não salvar
     .discussions = Discussões
     .discussions-load-from-github = As discussões são carregadas do GitHub.
     .display = Exibição

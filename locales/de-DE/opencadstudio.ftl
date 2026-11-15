@@ -780,6 +780,7 @@ common =
     .dimension = Bemaßung
     .dimensions = Bemaßungen
     .discard = Verwerfen
+    .dont-save = Nicht speichern
     .discussions = Diskussionen
     .discussions-load-from-github = Diskussionen von GitHub laden.
     .display = Anzeige

@@ -768,6 +768,7 @@ common =
     .dimension = आयाम
     .dimensions = आयाम
     .discard = साक्ष्य
+    .dont-save = सहेजें नहीं
     .discussions = चर्चा
     .discussions-load-from-github = GitHub से चर्चा लोड।
     .display = प्रदर्शन

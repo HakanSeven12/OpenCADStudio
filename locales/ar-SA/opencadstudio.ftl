@@ -792,6 +792,7 @@ common =
     .dimension = البُعد
     .dimensions = الأبعاد
     .discard = تجاهل
+    .dont-save = عدم الحفظ
     .discussions = المناقشات
     .discussions-load-from-github = تُحمّل المناقشات من GitHub.
     .display = العرض

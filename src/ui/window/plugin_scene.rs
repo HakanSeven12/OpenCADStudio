@@ -36,8 +36,8 @@
 use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Size};
 use ocs_plugin_api::scene::{
-    CubicSegment, MarkerKind, PanelScene, Rect2D, SceneColor, SceneElement, SceneError, StableId,
-    Stroke as ApiStroke, ThemeColor, Vec2,
+    AppliedPatchReport, CubicSegment, MarkerKind, PanelScene, Rect2D, SceneColor, SceneElement,
+    SceneError, SceneRevision, StableId, Stroke as ApiStroke, ThemeColor, Vec2,
 };
 
 /// Mirror of `ocs_plugin_api::scene`'s crate-private `MAX_SCENE_NODES`
@@ -756,6 +756,473 @@ fn matching_clip_pop(prims: &[ScenePrim], push_index: usize) -> Option<usize> {
 /// Casing is exactly `count_prims` (pinned by the task assignment).
 pub(crate) fn count_prims(prims: &[ScenePrim]) -> usize {
     prims.len()
+}
+
+// ---------------------------------------------------------------------------
+// Per-subtree prim store (SCN-011b): report-driven retained projection
+// ---------------------------------------------------------------------------
+//
+// `ScenePrimStore` retains the projected prims of a panel scene SEGMENTED at
+// top-level subtrees, and refreshes the segments a patch report names — so a
+// patch's projection cost is O(touched subtrees), not O(scene). It is the
+// per-subtree half of the milestone-2 acceptance ("changed-element counts
+// tracked independently of total scene size"); `plugin_scene_cache`'s
+// `CachedOverlayLayer` stays the pixel-path carrier (the store's counters are
+// the honest cost proof, not the layer rebuilds).
+//
+// ── v1 segmentation rule (DECIDED, verbatim) ──
+// SEGMENT AT ROOT-LEVEL ELEMENTS ONLY. A nested group's clip bracket is always
+// complete within the root subtree that carries it (`project_element` pushes
+// and pops the clip around the group's OWN children), so every segment is
+// clip-balanced and the segments concatenate into exactly `project_scene`'s
+// prim stream (pinned by test). Nested segmentation (per-child-id Arcs inside
+// a root segment) is deferred on purpose: a nested segment cut inside its
+// parent's clip span cannot be retained independently (the bracket must not
+// split across segments), and the added segmentation buys nothing until root
+// segments grow wide. The nested retention half of the report (retired NESTED
+// ids, nested touched ids) is carried by the report for that future store.
+
+// The palette fingerprint is SCN-011a's FNV-1a-64 digest (pinned in
+// `plugin_scene_cache`); the store compares the SAME digest family as the
+// layer key. Layering note: both modules sit in the same `ui` module layer
+// (`scripts/arch_check.py` reports no upward dependency for same-layer use);
+// the digest lives with the cache module as of SCN-011a.
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use crate::ui::window::plugin_scene_cache::palette_fingerprint;
+
+/// One retained prim segment: the prims of ONE top-level subtree, keyed by
+/// the root element's stable id, in paint order (see the v1 segmentation
+/// rule in the store docs).
+pub(crate) struct SubtreePrims {
+    /// The segment's root element id — the segment's identity for the
+    /// report-driven resolution.
+    root_id: StableId,
+    /// The subtree's prims in paint order, Arc-shared so retained segments
+    /// survive a refresh untouched (the pointer-equality retention contract:
+    /// an untouched segment keeps its exact Arc instance bit-for-bit).
+    prims: Arc<Vec<ScenePrim>>,
+}
+
+/// Why a [`ScenePrimStore`] ran the whole-tree flatten (the counted
+/// breakdown of [`StoreCounters::full_reprojects`]; every reason's counter
+/// sums into the total).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullReprojectReason {
+    /// A direct [`ScenePrimStore::sync_full`] call (panel snapshot / first
+    /// provisioning flows).
+    Explicit,
+    /// The first report-driven sync on a never-synced store: the segments
+    /// must exist before the report can drive their retention.
+    FirstSync,
+    /// The palette fingerprint moved since the last sync. DOCUMENTED policy:
+    /// a palette change is a whole-store event (colors are resolved inside
+    /// the prims; no segment can be kept safely), mirroring the layer key's
+    /// own palette invalidation.
+    Palette,
+    /// The report was truncated past either cap
+    /// ([`MAX_REPORT_TOUCHED`](ocs_plugin_api::scene::MAX_REPORT_TOUCHED) /
+    /// [`MAX_REPORT_RETIRED`](ocs_plugin_api::scene::MAX_REPORT_RETIRED)) —
+    /// the documented SAFETY rule: on ANY truncation the incremental path
+    /// falls back to sync_full semantics, so a truncated report can never
+    /// leave a segment stale by silently missing touched ids.
+    ReportTruncation,
+    /// A touched/retired id resolved to no root segment — i.e. it names a
+    /// NESTED element. The report carries no ancestor fact, and the v1
+    /// root-only segmentation has no id→segment index: the conservative
+    /// (never-wrong) answer is the whole-tree flatten. Rescuing nested ops
+    /// (an id→root index maintained on re-projection) is the documented v2
+    /// extension; the fixture graph scenes patch ROOT-level subtrees, so the
+    /// O(touched) path is exercised by construction.
+    UnmappedTouch,
+    /// The report's revision is BEHIND the store's (an out-of-order or
+    /// foreign-report delivery): defensively re-sync from the given scene.
+    StaleReport,
+}
+
+/// Rebuild instrumentation for one [`ScenePrimStore`]: the milestone-2
+/// acceptance read. `subtree_reprojects` grows with the PATCH (touched
+/// segments), never with the scene; `full_reprojects` (with its per-reason
+/// breakdown) is the defect surface — "a full flatten per patch is the
+/// defect, not the norm", mirroring the cache module's counter policy.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StoreCounters {
+    /// Segments re-projected by report-driven incremental syncs (an in-place
+    /// Arc swap or a newly appended root segment each count once).
+    pub subtree_reprojects: u64,
+    /// Segments whose Arc survived an incremental sync untouched (the
+    /// retention win, per segment per sync — the milestone's headline
+    /// number: patch cost that stays flat as scenes grow).
+    pub subtree_retained_hits: u64,
+    /// Whole-tree flatten runs (sync_full calls plus every fallback that
+    /// runs the same flatten), broken down by the per-reason counters below.
+    pub full_reprojects: u64,
+    /// Full re-projections caused by [`FullReprojectReason::Explicit`].
+    pub full_reprojects_explicit: u64,
+    /// Full re-projections caused by [`FullReprojectReason::FirstSync`].
+    pub full_reprojects_first_sync: u64,
+    /// Full re-projections caused by [`FullReprojectReason::Palette`].
+    pub full_reprojects_palette: u64,
+    /// Full re-projections caused by [`FullReprojectReason::ReportTruncation`].
+    pub full_reprojects_truncation: u64,
+    /// Full re-projections caused by [`FullReprojectReason::UnmappedTouch`].
+    pub full_reprojects_unmapped: u64,
+    /// Full re-projections caused by [`FullReprojectReason::StaleReport`].
+    pub full_reprojects_stale: u64,
+    /// Segments tombstoned because a patch removed (or did not re-adopt)
+    /// their root subtree — one count per dropped segment; the dropped Arc's
+    /// prims are released immediately.
+    pub retired_purges: u64,
+}
+
+/// Per-subtree retained prim store for one panel scene (SCN-011b).
+///
+/// Structure: `segments` holds one [`SubtreePrims`] per TOP-LEVEL subtree in
+/// paint order. A segment the current scene no longer carries becomes a
+/// `None` TOMBSTONE: its Arc's prims are released immediately and the hole
+/// keeps the paint order of the survivors stable (root-level patches only
+/// replace in place, append, or remove, so survivor positions never move —
+/// tombstones are collected by the next `sync_full`). `root_index` maps the
+/// live root ids to their segment positions for O(1) report resolution; its
+/// key set IS the live key set by construction.
+///
+/// Sync protocol (the documented contract):
+///
+/// - `sync_full(scene, palette)` — the flatten baseline (panel snapshots,
+///   first provisioning, and every internally-triggered fallback; validate
+///   first, exactly like `project_scene`).
+/// - `sync_incremental(scene, report, palette)` — call ONCE per applied
+///   patch, with the post-patch scene and the report the single mutation
+///   path returned. The guards (first match wins):
+///   1. never-synced store → full (`FirstSync`);
+///   2. palette fingerprint moved → full (`Palette`);
+///   3. report revision EQUALS the stored one → idempotent re-delivery, an
+///      `Ok` no-op (the first sync already consumed it);
+///   4. report revision BEHIND the stored one → full (`StaleReport`);
+///   5. ANY truncation in the report → full (`ReportTruncation` — the
+///      documented safety rule);
+///   6. touched/retired resolution (the v1 rule, per id, touched ids then
+///      retired ids, in report order, deduped):
+///      - id live as a segment root AND a current scene root → re-project
+///        that segment in place (root-level Replace);
+///      - id NOT a segment root but a current scene root → new segment
+///        appended at the end (root-level Add — Add appends);
+///      - id a segment root but NOT a current scene root → tombstone (its
+///        root subtree left the scene; joint with the defensive retired
+///        purge below);
+///      - id in NEITHER set → full (`UnmappedTouch` — nested ops; see
+///        [`FullReprojectReason::UnmappedTouch`]).
+///      Retired ids drive ONLY the defensive purge (a retired root id not
+///      covered by the touched resolution gets tombstoned; retired NESTED
+///      ids have no store entries at root-level segmentation — nothing to
+///      purge, and their prims already vanished with their segment's refresh).
+///
+/// Cost honesty: the resolution consults the CURRENT scene's root list once
+/// (a flat top-level id scan / membership set — no prim work, no per-node
+/// walk), then touches exactly the report's ids and their segments. One
+/// `Vec<Option<..>>` header pass handles the tombstones. Neither scan
+/// materializes prims for untouched subtrees — that is the retention win the
+/// counters measure.
+///
+/// Failure contract: `sync_full` validates first (identical gate to
+/// `project_scene`); any failure leaves the store EMPTY and never-synced
+/// (the next `is_fresh` is false, so the layer build falls back to the
+/// classic flatten) while the counters keep their history.
+pub(crate) struct ScenePrimStore {
+    /// The panel-scene identity this store serves.
+    surface_id: StableId,
+    /// Root-level segments in paint order (tombstoned on removal; see the
+    /// struct docs).
+    segments: Vec<Option<SubtreePrims>>,
+    /// Live root id → index into `segments` (the O(1) resolution map; the
+    /// key set IS the live key set). Never renumbered: tombstones keep their
+    /// slots and are collected by the next full sync.
+    root_index: HashMap<StableId, usize>,
+    /// Live (non-tombstone) segment count — O(1) retention math.
+    live_segments: usize,
+    /// Revision of the tree the segments were last synced from; `None` while
+    /// never-synced (fresh stores, failed syncs).
+    revision: Option<SceneRevision>,
+    /// [`palette_fingerprint`] of the palette the segments resolved against.
+    /// `0` while never-synced (the FNV digest is never zero — pinned by the
+    /// cache module's tests).
+    palette_fingerprint: u64,
+    /// The counters (the milestone-2 acceptance read).
+    counters: StoreCounters,
+}
+
+impl ScenePrimStore {
+    /// A fresh, empty (never-synced) store for `surface_id`.
+    pub(crate) fn new(surface_id: StableId) -> Self {
+        Self {
+            surface_id,
+            segments: Vec::new(),
+            root_index: HashMap::new(),
+            live_segments: 0,
+            revision: None,
+            palette_fingerprint: 0,
+            counters: StoreCounters::default(),
+        }
+    }
+
+    /// The panel-scene identity this store serves.
+    pub(crate) fn surface_id(&self) -> StableId {
+        self.surface_id
+    }
+
+    /// The counters (read side).
+    pub(crate) fn counters(&self) -> &StoreCounters {
+        &self.counters
+    }
+
+    /// `true` when the segments are synced at exactly `revision` under
+    /// `fingerprint` — the build path may paint from the segment lists.
+    pub(crate) fn is_fresh(&self, revision: SceneRevision, fingerprint: u64) -> bool {
+        self.revision == Some(revision) && self.palette_fingerprint == fingerprint
+    }
+
+    /// The live segments as `(root_id, Arc)` pairs in paint order
+    /// (tombstones skipped). Clones Arcs (refcounts), never prims — the
+    /// pointer-equality retention tests read these.
+    pub(crate) fn live_segments(&self) -> Vec<(StableId, Arc<Vec<ScenePrim>>)> {
+        self.segments
+            .iter()
+            .flatten()
+            .map(|segment| (segment.root_id, Arc::clone(&segment.prims)))
+            .collect()
+    }
+
+    /// The live prim lists in paint order (the layer build path paints these
+    /// segment-wise; concatenation equals `project_scene`'s output — pinned).
+    pub(crate) fn live_arcs(&self) -> Vec<Arc<Vec<ScenePrim>>> {
+        self.segments
+            .iter()
+            .flatten()
+            .map(|segment| Arc::clone(&segment.prims))
+            .collect()
+    }
+
+    /// Full re-projection (the flatten baseline). One prim-list segment per
+    /// TOP-LEVEL subtree (the v1 segmentation rule). Validates first; a
+    /// failure leaves the store empty and never-synced (counters keep their
+    /// history). Counts as [`FullReprojectReason::Explicit`].
+    pub(crate) fn sync_full(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+    ) -> Result<(), SceneError> {
+        self.sync_full_reasoned(scene, palette, FullReprojectReason::Explicit)
+    }
+
+    /// `sync_full` with the reason bookkeeping — the internal flatten every
+    /// `sync_incremental` fallback shares, so there is exactly one segment
+    /// builder and one counter path.
+    fn sync_full_reasoned(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        reason: FullReprojectReason,
+    ) -> Result<(), SceneError> {
+        // Defensive revalidation: budget and structural failures must
+        // surface here, never silently (identical gate to `project_scene`).
+        scene.validate()?;
+        let fingerprint = palette_fingerprint(palette);
+        let mut segments = Vec::with_capacity(scene.elements.len());
+        let mut total = 0usize;
+        for element in &scene.elements {
+            let mut prims = Vec::new();
+            project_element(element, palette, &mut prims);
+            debug_assert!(
+                prims.len() <= MAX_SCENE_PRIMS,
+                "subtree projection exceeded its prim budget ({} > {MAX_SCENE_PRIMS})",
+                prims.len()
+            );
+            total += prims.len();
+            segments.push(Some(SubtreePrims {
+                root_id: element.stable_id(),
+                prims: Arc::new(prims),
+            }));
+        }
+        debug_assert!(total <= MAX_SCENE_PRIMS);
+        self.segments = segments;
+        self.root_index = self
+            .segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                (
+                    segment
+                        .as_ref()
+                        .expect("fresh segments have no holes")
+                        .root_id,
+                    index,
+                )
+            })
+            .collect();
+        self.live_segments = self.segments.len();
+        self.revision = Some(scene.revision);
+        self.palette_fingerprint = fingerprint;
+        self.counters.full_reprojects += 1;
+        match reason {
+            FullReprojectReason::Explicit => self.counters.full_reprojects_explicit += 1,
+            FullReprojectReason::FirstSync => self.counters.full_reprojects_first_sync += 1,
+            FullReprojectReason::Palette => self.counters.full_reprojects_palette += 1,
+            FullReprojectReason::ReportTruncation => self.counters.full_reprojects_truncation += 1,
+            FullReprojectReason::UnmappedTouch => self.counters.full_reprojects_unmapped += 1,
+            FullReprojectReason::StaleReport => self.counters.full_reprojects_stale += 1,
+        }
+        Ok(())
+    }
+
+    /// Report-driven incremental retention (the point of the task): refresh
+    /// ONLY the segments the patch report names, keep every other segment's
+    /// Arc bit-for-bit. See the struct docs for the guard/resolution rules
+    /// and the cost honesty note. The scene must be the post-patch tree the
+    /// report describes (checked in debug).
+    pub(crate) fn sync_incremental(
+        &mut self,
+        scene: &PanelScene,
+        report: &AppliedPatchReport,
+        palette: &iced::theme::Palette,
+    ) -> Result<(), SceneError> {
+        debug_assert_eq!(
+            scene.revision, report.revision,
+            "sync_incremental requires the post-patch scene the report describes"
+        );
+        let fingerprint = palette_fingerprint(palette);
+
+        // Guard 1: never-synced → full flatten (the segments must exist
+        // before a report can drive their retention).
+        let Some(stored) = self.revision else {
+            return self.sync_full_reasoned(scene, palette, FullReprojectReason::FirstSync);
+        };
+        // Guard 2: palette change → full (whole-store event; colors are
+        // resolved inside the prims).
+        if self.palette_fingerprint != fingerprint {
+            return self.sync_full_reasoned(scene, palette, FullReprojectReason::Palette);
+        }
+        // Guard 3: idempotent re-delivery of the already-applied report.
+        if report.revision == stored {
+            return Ok(());
+        }
+        // Guard 4: out-of-order / foreign report → defensive full.
+        if report.revision < stored {
+            return self.sync_full_reasoned(scene, palette, FullReprojectReason::StaleReport);
+        }
+        // Guard 5: SAFETY — on ANY truncation the report cannot name its
+        // touched set individually, so the incremental return path falls
+        // back to sync_full semantics (never wrong-by-truncation staleness).
+        if report.touched_truncated > 0 || report.retired_truncated > 0 {
+            return self.sync_full_reasoned(scene, palette, FullReprojectReason::ReportTruncation);
+        }
+
+        // Guard 6: touched/retired resolution (the v1 rule).
+        // Membership sets: the CURRENT scene's roots (the post-patch truth
+        // the resolution measures against) — one flat top-level scan.
+        let desired_roots: HashSet<StableId> =
+            scene.elements.iter().map(|e| e.stable_id()).collect();
+        let mut reproject: Vec<StableId> = Vec::new();
+        let mut appended: Vec<StableId> = Vec::new();
+        let mut dropped: HashSet<StableId> = HashSet::new();
+        for event in report
+            .touched_subtree_ids
+            .iter()
+            .chain(report.retired_ids.iter())
+            .copied()
+        {
+            if self.root_index.contains_key(&event) {
+                if desired_roots.contains(&event) {
+                    if !reproject.contains(&event) {
+                        // Root-level Replace: re-project that segment in place.
+                        reproject.push(event);
+                    }
+                } else if dropped.insert(event) {
+                    // Root left the scene (root-level Remove; joint with the
+                    // defensive retired purge — deduped).
+                }
+            } else if desired_roots.contains(&event) {
+                if !appended.contains(&event) {
+                    // New root subtree the patch appended (root-level Add).
+                    appended.push(event);
+                }
+            } else {
+                // Nested op id (or unknown): no ancestor fact in the report
+                // and no id→segment index at root-level segmentation → the
+                // conservative whole-tree flatten (documented v1 rule).
+                return self.sync_full_reasoned(scene, palette, FullReprojectReason::UnmappedTouch);
+            }
+        }
+
+        let live_before = self.live_segments;
+
+        // Tombstones first (one header pass; the Arc's prims drop with the
+        // segment).
+        for segment in self.segments.iter_mut() {
+            if let Some(held) = segment {
+                if dropped.contains(&held.root_id) {
+                    self.root_index.remove(&held.root_id);
+                    *segment = None;
+                    self.live_segments -= 1;
+                    self.counters.retired_purges += 1;
+                }
+            }
+        }
+
+        // ONE walk over the scene roots: re-project the in-place segments
+        // (position-stable — the patch replaced in place) and capture the
+        // appended subtrees' prims (root-level Adds append, so the walk's
+        // order matches the segment order they end up in).
+        let wanted: HashSet<StableId> = reproject.iter().copied().collect();
+        let append_wanted: HashSet<StableId> = appended.iter().copied().collect();
+        let mut new_segments: Vec<(StableId, Vec<ScenePrim>)> = Vec::new();
+        for root in &scene.elements {
+            let id = root.stable_id();
+            if wanted.contains(&id) {
+                let index = self.root_index[&id];
+                let mut prims = Vec::new();
+                project_element(root, palette, &mut prims);
+                debug_assert!(
+                    prims.len() <= MAX_SCENE_PRIMS,
+                    "subtree projection exceeded its prim budget ({} > {MAX_SCENE_PRIMS})",
+                    prims.len()
+                );
+                let slot = &mut self.segments[index];
+                match slot {
+                    Some(held) => held.prims = Arc::new(prims),
+                    None => unreachable!("re-projected segment is live by resolution"),
+                }
+                self.counters.subtree_reprojects += 1;
+            } else if append_wanted.contains(&id) {
+                let mut prims = Vec::new();
+                project_element(root, palette, &mut prims);
+                debug_assert!(
+                    prims.len() <= MAX_SCENE_PRIMS,
+                    "subtree projection exceeded its prim budget ({} > {MAX_SCENE_PRIMS})",
+                    prims.len()
+                );
+                new_segments.push((id, prims));
+            }
+        }
+        debug_assert_eq!(new_segments.len(), appended.len());
+        for (id, prims) in new_segments {
+            self.segments.push(Some(SubtreePrims {
+                root_id: id,
+                prims: Arc::new(prims),
+            }));
+            self.root_index.insert(id, self.segments.len() - 1);
+            self.live_segments += 1;
+            self.counters.subtree_reprojects += 1;
+        }
+
+        // Retention math: every live segment not dropped and not re-projected
+        // kept its exact Arc.
+        self.counters.subtree_retained_hits +=
+            (live_before - dropped.len()) as u64 - reproject.len() as u64;
+
+        self.revision = Some(report.revision);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1490,5 +1957,270 @@ mod tests {
             panic!("two-sided rect is FillStroke");
         };
         assert_eq!(*stroke_width, 0.5);
+    }
+
+    // -- SCN-011b additions (per-subtree prim store) --------------------------
+    //
+    // Headless discipline as everywhere in this module: no renderer, no
+    // pixel-path work; the store's retention contract is asserted on Arc
+    // identity and deep prim equality.
+
+    use ocs_plugin_api::scene::{PanelScenePatch, SceneOp};
+
+    /// A patch fixture for the host-side flows (mirrors the API crate's
+    /// `patch` helper shape; local to these tests).
+    fn patch(base: u64, next: u64, ops: Vec<SceneOp>) -> PanelScenePatch {
+        PanelScenePatch {
+            base_revision: SceneRevision(base),
+            revision: SceneRevision(next),
+            ops,
+        }
+    }
+
+    /// A fully synced store over `fixture` (the snapshot-flow baseline).
+    fn synced_store(
+        fixture: &PanelScene,
+        palette: &iced::theme::Palette,
+        surface: u64,
+    ) -> ScenePrimStore {
+        let mut store = ScenePrimStore::new(StableId(surface));
+        store
+            .sync_full(fixture, palette)
+            .expect("fixture store syncs");
+        store
+    }
+
+    #[test]
+    fn store_segments_match_full_projection() {
+        let palette = pinned_palette();
+        // Root elements with nested clip-carrying groups INSIDE them: the
+        // v1 segmentation must keep every clip bracket whole within its
+        // root segment, and the segments must concatenate into exactly the
+        // full projection's prim stream.
+        let fixture = scene(vec![
+            filled_rect(1, 0.0, 0.0),
+            group(
+                10,
+                vec![
+                    filled_rect(11, 0.0, 0.0),
+                    clipped_group(
+                        12,
+                        clip_at(0.0, 0.0, 50.0, 50.0),
+                        vec![text_element(13, "T")],
+                    ),
+                ],
+            ),
+            filled_rect(2, 5.0, 5.0),
+        ]);
+        let store = synced_store(&fixture, &palette, 9_001);
+        // One segment per TOP-LEVEL subtree (the v1 segmentation rule).
+        assert_eq!(store.live_segments().len(), fixture.elements.len());
+        // Concatenated segments == project_scene prims (deep equal).
+        let concatenated: Vec<ScenePrim> = store
+            .live_arcs()
+            .iter()
+            .flat_map(|part| part.iter().cloned())
+            .collect();
+        assert_eq!(concatenated, project(&fixture, &palette));
+    }
+
+    #[test]
+    fn incremental_sync_touches_only_touched_segments() {
+        let palette = pinned_palette();
+        // 60 root-level subtrees (one fill-only rect each = one segment).
+        let mut scene = scene(
+            (0..60u64)
+                .map(|id| filled_rect(id, id as f64, 0.0))
+                .collect(),
+        );
+        let mut store = synced_store(&scene, &palette, 9_002);
+        assert_eq!(store.counters().full_reprojects, 1);
+        assert_eq!(store.counters().full_reprojects_explicit, 1);
+        assert_eq!(store.counters().subtree_reprojects, 0);
+
+        // Hold every segment's Arc BEFORE the patch for the identity check.
+        let before = store.live_segments();
+
+        // A real host flow: apply the patch through the SINGLE mutation path
+        // and feed the returned report to the store's incremental sync.
+        let report = scene
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: filled_rect(7, 40.0, 40.0),
+                }],
+            ))
+            .expect("patch applies");
+        store
+            .sync_incremental(&scene, &report, &palette)
+            .expect("incremental sync");
+
+        // Exactly ONE segment re-projected; the other 59 kept their Arcs.
+        let counters = store.counters();
+        assert_eq!(counters.subtree_reprojects, 1);
+        assert_eq!(counters.subtree_retained_hits, 59);
+        assert_eq!(counters.full_reprojects, 1, "no fallback fired");
+        assert_eq!(counters.retired_purges, 0);
+        let after = store.live_segments();
+        assert_eq!(after.len(), before.len());
+        for ((old_id, old_arc), (new_id, new_arc)) in before.iter().zip(after.iter()) {
+            assert_eq!(old_id, new_id);
+            if *old_id == StableId(7) {
+                // The touched segment's prims were re-projected: the Arc was
+                // swapped (old content dropped with the new tree's prims).
+                assert!(
+                    !Arc::ptr_eq(old_arc, new_arc),
+                    "the touched segment must refresh its Arc"
+                );
+                assert_ne!(**old_arc, **new_arc, "the replacement moved the rect");
+            } else {
+                // Pointer equality: the retention contract, bit-for-bit.
+                assert!(
+                    Arc::ptr_eq(old_arc, new_arc),
+                    "untouched segment {old_id:?} must keep its exact Arc"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn palette_change_full_reproject_documented() {
+        let palette = pinned_palette();
+        let mut scene = scene(vec![filled_rect(1, 0.0, 0.0), filled_rect(2, 20.0, 0.0)]);
+        let mut store = synced_store(&scene, &palette, 9_003);
+        let before = store.live_segments();
+
+        let report = scene
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: filled_rect(1, 40.0, 40.0),
+                }],
+            ))
+            .expect("patch applies");
+
+        // The palette moved (a bound slot flips): the documented policy is a
+        // whole-store full re-projection — colors are resolved inside the
+        // prims, so no segment can be kept safely.
+        let mut darkened = pinned_palette();
+        darkened.background.base.text = tint(99, 0, 0);
+        store
+            .sync_incremental(&scene, &report, &darkened)
+            .expect("palette-change sync");
+
+        let counters = store.counters();
+        assert_eq!(
+            counters.full_reprojects, 2,
+            "sync_full + the palette fallback"
+        );
+        assert_eq!(counters.full_reprojects_palette, 1);
+        assert_eq!(counters.subtree_reprojects, 0);
+        assert_eq!(counters.subtree_retained_hits, 0);
+        // No stale Arc reused: every segment is a NEW Arc under the new
+        // palette.
+        let after = store.live_segments();
+        assert_eq!(after.len(), before.len());
+        for ((_, old_arc), (_, new_arc)) in before.iter().zip(after.iter()) {
+            assert!(!Arc::ptr_eq(old_arc, new_arc));
+        }
+    }
+
+    #[test]
+    fn report_truncation_preserves_segment_safety() {
+        let palette = pinned_palette();
+        let mut scene = scene(vec![filled_rect(1, 0.0, 0.0)]);
+        let mut store = synced_store(&scene, &palette, 9_004);
+        let before = store.live_segments();
+
+        // A patch whose touched set runs past the report cap: 70 root adds
+        // name 70 touched ids — 64 kept, 6 truncated.
+        let ops: Vec<SceneOp> = (100..170u64)
+            .map(|id| SceneOp::Add {
+                parent: None,
+                element: filled_rect(id, id as f64, 0.0),
+            })
+            .collect();
+        let report = scene
+            .apply_patch_report(patch(1, 2, ops))
+            .expect("70 adds apply");
+        assert_eq!(report.touched_truncated, 6, "the safety trigger is armed");
+
+        // The documented SAFETY rule: on ANY truncation sync_incremental
+        // returns to sync_full semantics — no wrong-by-truncation staleness.
+        store
+            .sync_incremental(&scene, &report, &palette)
+            .expect("truncation fallback sync");
+        let counters = store.counters();
+        assert_eq!(counters.full_reprojects_truncation, 1);
+        assert_eq!(counters.full_reprojects, 2);
+        assert_eq!(
+            counters.subtree_reprojects, 0,
+            "the fallback is a FULL flatten"
+        );
+        assert_eq!(counters.subtree_retained_hits, 0);
+        // Full-flatten semantics hold exactly: segments == full projection,
+        // no stale Arc anywhere.
+        let concatenated: Vec<ScenePrim> = store
+            .live_arcs()
+            .iter()
+            .flat_map(|part| part.iter().cloned())
+            .collect();
+        assert_eq!(concatenated, project(&scene, &palette));
+        assert_eq!(store.live_segments().len(), 71);
+        let after = store.live_segments();
+        for ((_, old_arc), (_, new_arc)) in before.iter().zip(after.iter()) {
+            assert!(!Arc::ptr_eq(old_arc, new_arc));
+        }
+    }
+
+    #[test]
+    fn store_rejects_out_of_order_reports() {
+        let palette = pinned_palette();
+        // The store is synced at revision 3 (panel snapshot flow).
+        let scene3 = PanelScene {
+            revision: SceneRevision(3),
+            elements: vec![filled_rect(1, 0.0, 0.0), filled_rect(2, 20.0, 0.0)],
+        };
+        let mut store = synced_store(&scene3, &palette, 9_005);
+
+        // A report from an older revision chain (a foreign/late delivery):
+        // base 1 → 2 applied to its own scene copy.
+        let mut older = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![filled_rect(1, 0.0, 0.0)],
+        };
+        let report = older
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Add {
+                    parent: None,
+                    element: filled_rect(5, 5.0, 5.0),
+                }],
+            ))
+            .expect("the older chain applies to its own copy");
+
+        store
+            .sync_incremental(&older, &report, &palette)
+            .expect("stale-report delivery is handled defensively");
+        // The documented defensive answer: a full re-projection from the
+        // given scene, counted under its own reason.
+        let counters = store.counters();
+        assert_eq!(counters.full_reprojects_stale, 1);
+        assert_eq!(counters.full_reprojects, 2);
+        assert_eq!(counters.subtree_reprojects, 0);
+        // The store re-synced at the delivered revision (consistency).
+        assert!(store.is_fresh(
+            SceneRevision(2),
+            crate::ui::window::plugin_scene_cache::palette_fingerprint(&palette)
+        ));
+        let concatenated: Vec<ScenePrim> = store
+            .live_arcs()
+            .iter()
+            .flat_map(|part| part.iter().cloned())
+            .collect();
+        assert_eq!(concatenated, project(&older, &palette));
     }
 }

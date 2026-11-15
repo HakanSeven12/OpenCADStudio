@@ -81,9 +81,9 @@ pub use manifest::{
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 pub use scene::{
-    AssetKind, CubicSegment, DragMeta, MarkerKind, PanelScene, PanelScenePatch, Rect2D, Rgba8,
-    SceneColor, SceneElement, SceneError, SceneKindCounts, SceneOp, SceneRevision, SceneSummary,
-    StableId, Stroke, ThemeColor, Vec2,
+    AppliedPatchReport, AssetKind, CubicSegment, DragMeta, MarkerKind, PanelScene, PanelScenePatch,
+    Rect2D, Rgba8, SceneColor, SceneElement, SceneError, SceneKindCounts, SceneOp, SceneRevision,
+    SceneSummary, StableId, Stroke, ThemeColor, Vec2,
 };
 pub use scene_builder::{
     fixture_graph_scene, fixture_graph_scene_plan, fixture_scene_with_files, try_fixture_graph_scene,

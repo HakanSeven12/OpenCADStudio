@@ -42,6 +42,7 @@ pub mod scene_builder;
 pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
+pub mod widgets;
 
 /// Runtime host surface — only built with the `host` feature (pulls `document`).
 #[cfg(feature = "host")]
@@ -93,6 +94,12 @@ pub use type_registry::{
     TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
+pub use widgets::{
+    Axis, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef, ItemListDef, MenuDef,
+    MenuItemDef, TableRef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetError,
+    WidgetEvent, WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary,
+    WidgetSurface, WidgetSurfacePatch, WidgetTreeDef,
+};
 
 #[cfg(test)]
 pub(crate) mod test_lock {

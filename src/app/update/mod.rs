@@ -1302,11 +1302,18 @@ impl OpenCADStudio {
             }
             Message::SpaceMouseFocus(id, focused) => {
                 #[cfg(not(target_arch = "wasm32"))]
-                if focused {
-                    self.focused_window = Some(id);
-                } else if self.focused_window == Some(id) {
-                    self.focused_window = None;
-                }
+                let float = {
+                    if focused {
+                        self.focused_window = Some(id);
+                    } else if self.focused_window == Some(id) {
+                        self.focused_window = None;
+                    }
+                    // Moving between the app's own windows sends Unfocused then
+                    // Focused, so they end up floating again.
+                    crate::app::tool_windows::float_os_windows(&self.os_windows, focused)
+                };
+                #[cfg(target_arch = "wasm32")]
+                let float = Task::none();
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
                 }
@@ -1315,9 +1322,9 @@ impl OpenCADStudio {
                 // no longer counts as a lone tap.
                 crate::ui::ribbon::keytip_note_focus_changed();
                 if !focused && self.ribbon.keytips_active() {
-                    return self.hide_keytips();
+                    return Task::batch([float, self.hide_keytips()]);
                 }
-                Task::none()
+                float
             }
             Message::SpaceMouseEnabled(enabled) => {
                 self.spacemouse_preferences.enabled = enabled;

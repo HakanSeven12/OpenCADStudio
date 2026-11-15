@@ -22,7 +22,7 @@
 //! within this task only, until the host projection task lands.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Maximum nesting depth accepted when decoding scene/patch data. Real
@@ -31,18 +31,39 @@ use std::fmt;
 /// decoding thread's stack (which aborts the host/runner process). The cap
 /// mirrors `MAX_DIALOG_NESTING` and sits well above every legitimate layout
 /// while staying far below any stack limit.
-pub(crate) const MAX_SCENE_DEPTH: usize = 64;
+///
+/// Budget errors report the FIRST CROSSING point, not a total: when a scene
+/// trips this cap, [`SceneError::DepthBudgetExceeded`] names the depth of the
+/// first element that sits past it (cap + 1 or deeper), matching the
+/// first-crossing semantics of the structural gate.
+pub const MAX_SCENE_DEPTH: usize = 64;
 
 /// Maximum total element nodes accepted per top-level decoded scene frame,
 /// bounding allocation and CPU magnification from shared sub-blocks. Mirrors
 /// `MAX_DIALOG_NODES`: the cap is well above any authored panel and the same
 /// magnitude the dialog decoder tolerates per frame.
-pub(crate) const MAX_SCENE_NODES: usize = 10_000;
+///
+/// The host's scene projection privately mirrors this value (see
+/// `src/ui/window/plugin_scene.rs` `MAX_SCENE_NODES`) until a public
+/// import path exists; the two must change together.
+///
+/// Budget errors report the FIRST CROSSING point, not a total: when a scene
+/// trips this cap, [`SceneError::NodeBudgetExceeded`] names the node count at
+/// the crossing (cap + 1, never the true total the payload would carry),
+/// matching the first-crossing semantics of the structural gate.
+pub const MAX_SCENE_NODES: usize = 10_000;
 
 /// Maximum op count accepted in one [`PanelScenePatch`]. A patch is replayed
 /// whole against the base revision; bounding its op count bounds the largest
 /// single mutation a plugin can ask the host to attempt per frame.
-pub(crate) const MAX_PATCH_OPS: usize = 10_000;
+///
+/// ⚠ Load-bearing coincidence: [`MAX_PATCH_OPS`] equals [`MAX_SCENE_NODES`]
+/// by today's choice, and [`budgeted_ops`] charges ops against the SAME
+/// per-frame counter as scene nodes, so one decoded patch frame can never
+/// carry ops that outgrow the node budget independently of elements. The
+/// equality is also asserted by a test. Revisit both endpoints together if
+/// [`MAX_SCENE_NODES`] ever changes; do not move one alone.
+pub const MAX_PATCH_OPS: usize = 10_000;
 
 /// Maximum serialized byte length of one [`SceneElement::Text`] `content`
 /// run. Text in a panel is a label, not a document; the cap keeps a single
@@ -470,9 +491,9 @@ fn default_text_size() -> f32 {
 /// Everything structural validation rejects about a scene, patch, or op.
 ///
 /// A structural error leaves the scene completely unchanged: [`apply_patch`]
-/// validates the whole op sequence against the current tree before a single
-/// mutation is made (the crate contract that an error leaves the drawing and
-/// undo history unchanged).
+/// validates the whole op sequence through an internal planning pass and only
+/// mutates the tree after the plan completes (the crate contract that an
+/// error leaves the drawing and undo history unchanged).
 #[derive(Debug, Clone, PartialEq)]
 pub enum SceneError {
     /// The patch was built against an outdated snapshot.
@@ -491,7 +512,9 @@ pub enum SceneError {
     },
     /// An element id appears twice in the tree (or an op reuses a live id).
     DuplicateId(StableId),
-    /// The tree nests past the [`MAX_SCENE_DEPTH`] cap.
+    /// The tree nests past the [`MAX_SCENE_DEPTH`] cap. First-crossing
+    /// semantics: `depth` is the depth of the first element found past the
+    /// cap (cap + 1 or deeper), never the deepest nesting of the whole tree.
     DepthBudgetExceeded {
         /// Depth observed.
         depth: usize,
@@ -499,6 +522,8 @@ pub enum SceneError {
         max: usize,
     },
     /// The tree carries more element nodes than the [`MAX_SCENE_NODES`] cap.
+    /// First-crossing semantics: `nodes` is the count at the first crossing
+    /// (cap + 1), never the true total of the candidate tree.
     NodeBudgetExceeded {
         /// Node count observed.
         nodes: usize,
@@ -746,20 +771,49 @@ impl PanelScene {
         validate_root(&self.elements)
     }
 
-    /// Apply an incremental patch atomically.
+    /// Apply an incremental patch atomically (two phases, in place).
     ///
     /// The patch must name the current scene revision as its base and a
-    /// strictly greater successor. Validation runs the WHOLE op sequence
-    /// against a staged copy of the current tree first (parent existence,
-    /// id adoption and collisions, resulting-tree budgets) and only commits
-    /// afterwards — the staged tree is swapped in and the revision adopted
-    /// in a single step, after every op has passed. A rejection leaves
-    /// `self` exactly as it was: no element moves and the revision stands,
-    /// mirroring the crate contract that an error leaves the drawing and
-    /// undo history unchanged.
+    /// strictly greater successor; a rejection leaves `self` exactly as it
+    /// was (no element moves, the revision stands), mirroring the crate
+    /// contract that an error leaves the drawing and undo history unchanged.
+    ///
+    /// Phase 0 — three cheap checks with nothing written: base freshness,
+    /// monotonic successor, and the [`MAX_PATCH_OPS`] op budget.
+    ///
+    /// Phase 1 — planning pass, still without any mutation: the whole op
+    /// sequence is replayed against [`PlannedIndex`], a lightweight id/position
+    /// mirror of the current tree (built by ONE walk), and every op is
+    /// expanded into a pre-located journal step ([`PlannedOp`]). Each op is
+    /// fully validated against the current post-prior-ops state — payload
+    /// structure, id collisions, parent existence and group anchoring, and
+    /// the resulting depth/node budgets — before its journal step is
+    /// recorded; any failure aborts the whole patch.
+    ///
+    /// Phase 2 — the journal is spliced into the real children vecs strictly
+    /// in order (append / swap / `Vec::remove`), then the successor revision
+    /// is adopted. Journal locations were derived from the mirror precisely
+    /// as the mirror accounted for the same mutations, so after a successful
+    /// phase 1 every phase-2 step is infallible by construction; the whole
+    /// patch commits in one step with no partial writes possible.
+    ///
+    /// Cost contract (retiring the ADR-002 staged-clone debt): NO full-tree
+    /// clone and no per-op full-tree walk. One O(scene) walk builds the
+    /// mirror; each op then does work local to what it touches — O(depth) for
+    /// location/parent-chain derivation, plus the payload/adoption subtree
+    /// size, plus (for removal) the spliced container's child list, whose
+    /// sibling entries shift. Total cost is scene-linear once plus the touched
+    /// regions, not scene-linear per op; the patch-scaling evidence is the
+    /// SCN-012 benchmark. The earlier staged pass' whole-result `validate()`
+    /// no longer runs here: phase 1 proves the same properties on the planned
+    /// state, which assumes the base tree is itself structurally valid (the
+    /// builder/`validate` gate's job). An invalid base therefore no longer
+    /// fails a patch that does not rewrite the offending region — revalidate
+    /// or resnapshot in that situation.
     ///
     /// An empty op list is a legitimate no-op that advances the revision.
     pub fn apply_patch(&mut self, patch: PanelScenePatch) -> Result<(), SceneError> {
+        // Phase 0: cheap whole-patch checks; nothing written yet.
         if patch.base_revision != self.revision {
             return Err(SceneError::StaleBase {
                 current: self.revision,
@@ -779,98 +833,604 @@ impl PanelScene {
             });
         }
 
-        // Pass 1: simulate the whole op sequence against a staged copy of
-        // the CURRENT tree; self is untouched until every op has passed.
-        let mut staged = self.clone();
-        let mut live_ids: HashSet<StableId> = HashSet::new();
-        for root in &staged.elements {
-            collect_ids(root, &mut live_ids);
-        }
-        for op in &patch.ops {
-            match op {
-                SceneOp::Add { parent, element } => {
-                    // Subtree-internal validation (ids, scalars, shapes, caps)
-                    // never touches the tree, so it can run first.
-                    let mut fresh_ids: HashSet<StableId> = HashSet::new();
-                    validate_root(std::slice::from_ref(element))?;
-                    collect_ids(element, &mut fresh_ids);
-                    for id in &fresh_ids {
-                        if live_ids.contains(id) {
-                            return Err(SceneError::DuplicateId(*id));
-                        }
-                    }
-                    let slot = match parent {
-                        None => &mut staged.elements,
-                        Some(anchor) => {
-                            match find_group_children_mut(&mut staged.elements, *anchor) {
-                                Some(children) => children,
-                                None => return Err(SceneError::ParentMissing(*anchor)),
-                            }
-                        }
-                    };
-                    slot.push(element.clone());
-                    for id in fresh_ids {
-                        live_ids.insert(id);
-                    }
-                }
-                SceneOp::Replace { element } => {
-                    // Replace IS keyed by element.id: the id the element
-                    // carries is the id that gets swapped. A replacement that
-                    // "renames" its target does not express that as a second
-                    // field — it is expressed as a Remove + an Add.
-                    let target = element.stable_id();
-                    if !live_ids.contains(&target) {
-                        return Err(SceneError::ElementMissing(target));
-                    }
-                    validate_root(std::slice::from_ref(element))?;
-                    let slot = match find_element_mut(&mut staged.elements, target) {
-                        Some(slot) => slot,
-                        // Unreachable with a live id in `live_ids`; defensive.
-                        None => return Err(SceneError::ElementMissing(target)),
-                    };
-                    let mut outgoing_ids: HashSet<StableId> = HashSet::new();
-                    collect_ids(slot, &mut outgoing_ids);
-                    *slot = element.clone();
-                    for id in &outgoing_ids {
-                        live_ids.remove(id);
-                    }
-                    // The replacement re-adopts the target id (it was just
-                    // retired along with the outgoing subtree) and may not
-                    // collide with any id that survives outside that subtree.
-                    let mut fresh_ids: HashSet<StableId> = HashSet::new();
-                    collect_ids(element, &mut fresh_ids);
-                    for id in &fresh_ids {
-                        if !live_ids.insert(*id) {
-                            return Err(SceneError::DuplicateId(*id));
-                        }
-                    }
-                }
-                SceneOp::Remove { id } => {
-                    if !live_ids.contains(id) {
-                        return Err(SceneError::ElementMissing(*id));
-                    }
-                    let removed = match remove_subtree(&mut staged.elements, *id) {
-                        Some(removed) => removed,
-                        // Unreachable with a live id in `live_ids`; defensive.
-                        None => return Err(SceneError::ElementMissing(*id)),
-                    };
-                    let mut outgoing_ids: HashSet<StableId> = HashSet::new();
-                    collect_ids(&removed, &mut outgoing_ids);
-                    for id in &outgoing_ids {
-                        live_ids.remove(id);
-                    }
-                }
-            }
-        }
-        // Resulting-tree gate: ids across the whole result, depth, node
-        // count, scalars, shapes — everything structural, checked once.
-        staged.validate()?;
-        // Commit: swapping the fully validated tree in is the single
-        // mutation point; every failure above left `self` untouched.
-        self.elements = staged.elements;
+        // Phase 1: validate the whole op sequence and journal pre-located
+        // steps; without writing `self`.
+        let journal = plan_patch(&self.elements, patch.ops)?;
+
+        // Phase 2: single commit point — replay the plan in place.
+        apply_journal(&mut self.elements, journal);
         self.revision = patch.revision;
         Ok(())
     }
+
+    /// Bounded recovery read ([`SceneSummary`]): revision, node total,
+    /// per-kind counts, and the capped root-id list. Pure read — one walk,
+    /// no validation, never fails.
+    pub fn scene_summary(&self) -> SceneSummary {
+        SceneSummary::of(self)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bounded recovery read (SceneSummary)
+// ---------------------------------------------------------------------------
+
+/// Root-id cap of [`SceneSummary::root_ids`]: the summary keeps the first
+/// [`MAX_SUMMARY_ROOT_IDS`] root ids in paint order and reports what was
+/// dropped in [`SceneSummary::root_ids_truncated`].
+pub const MAX_SUMMARY_ROOT_IDS: usize = 64;
+
+/// Element-kind counts carried by [`SceneSummary`] — one fixed field per
+/// [`SceneElement`] variant (9 today). The summary's counting match below is
+/// exhaustive, so appending a new element variant later is a compile error
+/// that guides the summary (and every other by-kind consumer) to update,
+/// mirroring how the host projection treats `scene_color`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SceneKindCounts {
+    /// [`SceneElement::Group`] nodes.
+    pub groups: usize,
+    /// [`SceneElement::Rect`] nodes.
+    pub rects: usize,
+    /// [`SceneElement::Path`] nodes.
+    pub paths: usize,
+    /// [`SceneElement::CubicPath`] nodes.
+    pub cubic_paths: usize,
+    /// [`SceneElement::Text`] nodes.
+    pub texts: usize,
+    /// [`SceneElement::Asset`] nodes.
+    pub assets: usize,
+    /// [`SceneElement::Port`] nodes.
+    pub ports: usize,
+    /// [`SceneElement::Marker`] nodes.
+    pub markers: usize,
+    /// [`SceneElement::Edge`] nodes.
+    pub edges: usize,
+}
+
+impl SceneKindCounts {
+    /// Sum over all kinds; always equals [`SceneSummary::nodes`].
+    pub fn total(&self) -> usize {
+        self.groups
+            + self.rects
+            + self.paths
+            + self.cubic_paths
+            + self.texts
+            + self.assets
+            + self.ports
+            + self.markers
+            + self.edges
+    }
+}
+
+/// Bounded snapshot read of a panel scene — the stale-base recovery surface
+/// of `ARCHITECTURE.md` §4 (invariant PATCH-3): a host that rejects a patch
+/// for a stale base reports this summary so the plugin can rebuild against
+/// the authoritative state with a bounded read instead of the full snapshot.
+///
+/// `root_ids` is capped to [`MAX_SUMMARY_ROOT_IDS`] entries (first root ids
+/// in paint order); the exact truncation contract is
+/// `root_ids.len() + root_ids_truncated == total root count` and
+/// `overflow_roots` is the convenience flag for
+/// `root_ids_truncated > 0`. The summary is computed by one walk of the
+/// current tree ([`PanelScene::scene_summary`]); it never fails, validates
+/// nothing, and its only data allocation is the capped root-id vec (plus a
+/// transient walker stack).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneSummary {
+    /// The scene's authoritative revision (the base a recovery patch must
+    /// name).
+    pub revision: SceneRevision,
+    /// Total element nodes in the tree (the same node count `validate`
+    /// checks against [`MAX_SCENE_NODES`]).
+    pub nodes: usize,
+    /// One count per element kind (sums to [`SceneSummary::nodes`]).
+    pub by_kind: SceneKindCounts,
+    /// First [`MAX_SUMMARY_ROOT_IDS`] root ids in paint order; fewer when
+    /// the scene roots fewer elements than the cap.
+    pub root_ids: Vec<StableId>,
+    /// Root ids dropped beyond the [`MAX_SUMMARY_ROOT_IDS`] cap; `0` when
+    /// nothing was truncated.
+    pub root_ids_truncated: usize,
+    /// `true` iff the root list was capped (mirror of
+    /// [`SceneSummary::root_ids_truncated`] being non-zero).
+    pub overflow_roots: bool,
+}
+
+impl SceneSummary {
+    /// One-walk computation of the whole summary. Counting walks every node
+    /// (iterative; document-order); the root-id list copies at most the cap
+    /// straight from the root vector.
+    fn of(scene: &PanelScene) -> SceneSummary {
+        let mut summary = SceneSummary {
+            revision: scene.revision,
+            nodes: 0,
+            by_kind: SceneKindCounts::default(),
+            root_ids: Vec::with_capacity(scene.elements.len().min(MAX_SUMMARY_ROOT_IDS)),
+            root_ids_truncated: 0,
+            overflow_roots: false,
+        };
+        for element in scene.elements.iter().take(MAX_SUMMARY_ROOT_IDS) {
+            summary.root_ids.push(element.stable_id());
+        }
+        summary.root_ids_truncated = scene.elements.len().saturating_sub(MAX_SUMMARY_ROOT_IDS);
+        summary.overflow_roots = summary.root_ids_truncated > 0;
+
+        // One walk for the node total and the per-kind counts: an
+        // explicit stack popped in document order, no recursion (the
+        // crate's iterative-walk discipline).
+        let mut walker: Vec<&SceneElement> = scene.elements.iter().collect();
+        while let Some(element) = walker.pop() {
+            summary.nodes += 1;
+            match element {
+                SceneElement::Group { children, .. } => {
+                    summary.by_kind.groups += 1;
+                    walker.extend(children.iter().rev());
+                }
+                SceneElement::Rect { .. } => summary.by_kind.rects += 1,
+                SceneElement::Path { .. } => summary.by_kind.paths += 1,
+                SceneElement::CubicPath { .. } => summary.by_kind.cubic_paths += 1,
+                SceneElement::Text { .. } => summary.by_kind.texts += 1,
+                SceneElement::Asset { .. } => summary.by_kind.assets += 1,
+                SceneElement::Port { .. } => summary.by_kind.ports += 1,
+                SceneElement::Marker { .. } => summary.by_kind.markers += 1,
+                SceneElement::Edge { .. } => summary.by_kind.edges += 1,
+            }
+        }
+        // Kind counts and the node total agree by construction; a
+        // debug_assert keeps the walker honest without release-path work.
+        debug_assert_eq!(summary.by_kind.total(), summary.nodes);
+        summary
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Two-phase in-place patch planning (SCN-010)
+// ---------------------------------------------------------------------------
+
+/// Placement of one element in the PLANNED (post-journal) tree, exactly as
+/// phase 2 will splice it: parent chain, position inside the parent's
+/// ordered child list, planned depth (root = 1), and whether the element
+/// anchors a group. The planner keeps every field in lockstep with the
+/// journal it records (sibling entries shift back on remove, appends extend
+/// positions), so locations derived from the mirror equal what phase 2 finds.
+#[derive(Debug, Clone, Copy)]
+struct PlannedSlot {
+    /// Parent group id (`None` in the root element list).
+    parent: Option<StableId>,
+    /// Position within the parent's ordered child list (root list order when
+    /// [`PlannedSlot::parent`] is `None`).
+    pos: usize,
+    /// Planned depth of the element; root elements sit at depth 1.
+    depth: usize,
+    /// Whether the element anchors a group in the planned state.
+    is_group: bool,
+}
+
+/// One planned mutation — the journal phase 1 produces and phase 2 replays.
+///
+/// Locations are array paths from the root element list whose last component
+/// is where the node itself lives ([`PlannedOp::Insert`] names its host group
+/// instead). Every path was derived from [`PlannedIndex`] after the mirror
+/// accounted for every journal entry ahead of it, and phase 2 replays the
+/// journal in exactly that order — so at its turn the real tree is precisely
+/// the mirror state the path was derived from. That lockstep is what makes
+/// phase 2 infallible once planning has succeeded.
+#[derive(Debug)]
+enum PlannedOp {
+    /// Push an element into the child list of the group at `group_path`
+    /// (empty path = the root element list).
+    Insert {
+        /// Path to the host group (empty = root list).
+        group_path: Vec<usize>,
+        /// Element to append.
+        element: SceneElement,
+    },
+    /// Swap the element at `element_path` for `element` (same id; in place,
+    /// so no sibling positions move).
+    Swap {
+        /// Path to the element including its own position.
+        element_path: Vec<usize>,
+        /// Replacement element.
+        element: SceneElement,
+    },
+    /// Remove the subtree rooted at the element at `element_path`.
+    Take {
+        /// Path to the element including its own position.
+        element_path: Vec<usize>,
+    },
+}
+
+/// Planner-side mirror of the tree the journal will produce if committed.
+/// Lean data only — ids, positions, and flags; never element clones. Kept
+/// across phase 1 so every op validates and locates against the CURRENT
+/// post-prior-ops state.
+#[derive(Debug)]
+struct PlannedIndex {
+    /// Live id → planned placement.
+    slots: HashMap<StableId, PlannedSlot>,
+    /// Live group id → its ordered child ids (groups only; leaves have no
+    /// entry).
+    children: HashMap<StableId, Vec<StableId>>,
+    /// Ordered root ids (mirror of the root element list).
+    roots: Vec<StableId>,
+    /// Planned total node count (base-counted, then advanced per payload)
+    /// for the result node budget.
+    nodes: usize,
+}
+
+impl PlannedIndex {
+    /// Build the mirror from the CURRENT base tree with exactly one walk,
+    /// O(scene) in time and lean-data memory (no element clones).
+    fn from_elements(elements: &[SceneElement]) -> Self {
+        let mut index = Self {
+            slots: HashMap::new(),
+            children: HashMap::new(),
+            roots: elements.iter().map(|element| element.stable_id()).collect(),
+            nodes: 0,
+        };
+        // Reverse-pushed work stack so pops visit document order; root
+        // elements sit at depth 1 and each group level adds one.
+        let mut stack: Vec<(&SceneElement, Option<StableId>, usize, usize)> = elements
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(pos, element)| (element, None, pos, 1usize))
+            .collect();
+        while let Some((element, parent, pos, depth)) = stack.pop() {
+            let id = element.stable_id();
+            let is_group = matches!(element, SceneElement::Group { .. });
+            index.slots.insert(
+                id,
+                PlannedSlot {
+                    parent,
+                    pos,
+                    depth,
+                    is_group,
+                },
+            );
+            index.nodes += 1;
+            if let SceneElement::Group { children, .. } = element {
+                index
+                    .children
+                    .insert(id, children.iter().map(|child| child.stable_id()).collect());
+                for (pos, child) in children.iter().enumerate().rev() {
+                    stack.push((child, Some(id), pos, depth + 1));
+                }
+            }
+        }
+        index
+    }
+
+    /// `true` while `id` is live in the planned state.
+    fn is_live(&self, id: StableId) -> bool {
+        self.slots.contains_key(&id)
+    }
+
+    /// Array path from the root element list to the live element `id`,
+    /// ending at its own position. O(depth) parent-chain walk; the parent
+    /// chain of a live id is live, so unreachability would be planner
+    /// corruption.
+    fn path_of(&self, id: StableId) -> Vec<usize> {
+        debug_assert!(self.is_live(id), "path derivation for a retired id");
+        let mut path = Vec::with_capacity(8);
+        let mut current = Some(id);
+        while let Some(node) = current {
+            let slot = &self.slots[&node]; // parents of live nodes are live
+            path.push(slot.pos);
+            current = slot.parent;
+        }
+        path.reverse();
+        path
+    }
+
+    /// Planned length of a container's ordered child list (the root list for
+    /// a `None` parent).
+    fn child_len(&self, parent: Option<StableId>) -> usize {
+        match parent {
+            None => self.roots.len(),
+            Some(group) => self
+                .children
+                .get(&group)
+                .expect("planner invariant: live group has a child list")
+                .len(),
+        }
+    }
+
+    /// Forget a live subtree in the mirror: the id, every descendant id, and
+    /// their group child lists leave the planner. The container list keeps
+    /// the subtree's root when `keep_top_in_parent` (Replace re-adopts into
+    /// exactly that slot); otherwise the slot is dropped and the siblings to
+    /// the right of it shift back by one, matching the `Vec::remove` phase 2
+    /// will splice. Returns the retired node count for the node-budget math.
+    fn retire_subtree(&mut self, id: StableId, keep_top_in_parent: bool) -> usize {
+        let (parent, pos) = match self.slots.get(&id) {
+            Some(slot) => (slot.parent, slot.pos),
+            None => unreachable!("retire target is live in the planned state"),
+        };
+        let mut retired = 0usize;
+        let mut stack: Vec<StableId> = vec![id];
+        while let Some(node) = stack.pop() {
+            self.slots.remove(&node);
+            if let Some(kids) = self.children.remove(&node) {
+                stack.extend(kids);
+            }
+            retired += 1;
+        }
+        if !keep_top_in_parent {
+            // Detach from the container (root list or parent children) and
+            // repair the sibling positions phase 2's `Vec::remove` shifts.
+            let list = match parent {
+                None => &mut self.roots,
+                Some(group) => self
+                    .children
+                    .get_mut(&group)
+                    .expect("planner invariant: live group has a child list"),
+            };
+            debug_assert_eq!(list[pos], id, "retire slot matches the mirror");
+            list.remove(pos);
+            for &sibling in list.iter().skip(pos) {
+                if let Some(slot) = self.slots.get_mut(&sibling) {
+                    slot.pos -= 1;
+                }
+            }
+        }
+        retired
+    }
+
+    /// Adopt a validated payload subtree into the planned state at the slot
+    /// its top element will occupy: `top_pos: None` attaches at the end of
+    /// the parent's child list (Add), `Some(pos)` re-adopts an already-held
+    /// container slot (Replace). Checks the result budgets per adopted node
+    /// (first-crossing values, payload order — the same cap+1 report shape
+    /// the whole-tree gate used), records planned slots and child lists. The
+    /// caller has already validated the payload structure and its id
+    /// disjointness from the live set.
+    fn adopt_subtree(
+        &mut self,
+        element: &SceneElement,
+        parent: Option<StableId>,
+        top_depth: usize,
+        top_pos: Option<usize>,
+    ) -> Result<(), SceneError> {
+        let pos = match top_pos {
+            Some(pos) => pos,
+            None => self.child_len(parent),
+        };
+        if top_pos.is_none() {
+            // Attach: the payload's top element extends the parent's child
+            // list, keeping list position and slot in lockstep.
+            match parent {
+                None => self.roots.push(element.stable_id()),
+                Some(group) => self
+                    .children
+                    .get_mut(&group)
+                    .expect("planner invariant: live group has a child list")
+                    .push(element.stable_id()),
+            }
+        }
+        // Reverse-pushed stack, document order; depth carries absolute
+        // planned depth (root = 1, the container's + 1 here).
+        let mut stack: Vec<(&SceneElement, Option<StableId>, usize, usize)> =
+            vec![(element, parent, top_depth, pos)];
+        while let Some((element, parent, depth, pos)) = stack.pop() {
+            let id = element.stable_id();
+            let is_group = matches!(element, SceneElement::Group { .. });
+            self.nodes += 1;
+            if self.nodes > MAX_SCENE_NODES {
+                return Err(SceneError::NodeBudgetExceeded {
+                    nodes: self.nodes,
+                    max: MAX_SCENE_NODES,
+                });
+            }
+            if depth > MAX_SCENE_DEPTH {
+                return Err(SceneError::DepthBudgetExceeded {
+                    depth,
+                    max: MAX_SCENE_DEPTH,
+                });
+            }
+            self.slots.insert(
+                id,
+                PlannedSlot {
+                    parent,
+                    pos,
+                    depth,
+                    is_group,
+                },
+            );
+            if let SceneElement::Group { children, .. } = element {
+                self.children
+                    .insert(id, children.iter().map(|child| child.stable_id()).collect());
+                for (pos, child) in children.iter().enumerate().rev() {
+                    stack.push((child, Some(id), pos, depth + 1));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Phase 1 of [`PanelScene::apply_patch`]: replay `ops` against a mirror of
+/// `elements`, validating each op fully (payload structure, id collisions,
+/// parent/anchoring, result budgets) against the state all prior ops leave
+/// behind, and journaling each op's pre-located mutation. Any error leaves
+/// the mirror (and the caller's tree) exactly as the ops would have had it
+/// had nothing happened, because only the mirror mutates during planning.
+///
+/// Per-op planning order matches the staged-clone pass so error selections
+/// stay pinned: payload structural validation → id-collision check →
+/// parent-anchoring check, then mirror adoption and result budgets.
+fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<PlannedOp>, SceneError> {
+    let mut planned = PlannedIndex::from_elements(elements);
+    let mut journal: Vec<PlannedOp> = Vec::new();
+    for op in ops {
+        match op {
+            SceneOp::Add { parent, element } => {
+                // Subtree-internal validation (ids, scalars, shapes, caps)
+                // never touches the tree, so it runs first.
+                validate_root(std::slice::from_ref(&element))?;
+                // One payload walk for the fresh-id set, then the collision
+                // check against the planned state.
+                let fresh_ids = scan_payload_ids(&element);
+                for id in &fresh_ids {
+                    if planned.is_live(*id) {
+                        return Err(SceneError::DuplicateId(*id));
+                    }
+                }
+                // The parent must anchor a group in the planned state.
+                let parent_depth = match parent {
+                    None => 0usize,
+                    Some(anchor) => {
+                        let slot = planned
+                            .slots
+                            .get(&anchor)
+                            .ok_or(SceneError::ParentMissing(anchor))?;
+                        if !slot.is_group {
+                            return Err(SceneError::ParentMissing(anchor));
+                        }
+                        slot.depth
+                    }
+                };
+                // Adopt into the mirror (result budgets, planned slots).
+                planned.adopt_subtree(&element, parent, parent_depth + 1, None)?;
+                // Journal the push, located for THIS entry's phase-2 time
+                // slot (the path is derived from the mirror state the phase
+                // 2 replay of this entry will find).
+                let group_path = match parent {
+                    None => Vec::new(),
+                    Some(anchor) => planned.path_of(anchor),
+                };
+                journal.push(PlannedOp::Insert {
+                    group_path,
+                    element,
+                });
+            }
+            SceneOp::Replace { element } => {
+                // Replace IS keyed by element.id: the id the element carries
+                // is the id that gets swapped. A replacement that "renames"
+                // its target does not express that as a second field — it is
+                // expressed as a Remove + an Add.
+                let target = element.stable_id();
+                if !planned.is_live(target) {
+                    return Err(SceneError::ElementMissing(target));
+                }
+                validate_root(std::slice::from_ref(&element))?;
+                // Capture the target's slot, derive its pre-retire path (the
+                // path is valid at THIS entry's phase-2 time slot), then
+                // retire the outgoing subtree while keeping the container's
+                // slot: the replacement re-adopts the very slot (same id,
+                // per the keyed-by-id rule).
+                let (parent, pos, top_depth) = {
+                    let slot = &planned.slots[&target];
+                    (slot.parent, slot.pos, slot.depth)
+                };
+                let element_path = planned.path_of(target);
+                planned.nodes -= planned.retire_subtree(target, true);
+                // The replacement may re-adopt ids retired with the outgoing
+                // subtree, but must not collide with ids that survived of it.
+                let fresh_ids = scan_payload_ids(&element);
+                for id in &fresh_ids {
+                    if planned.is_live(*id) {
+                        return Err(SceneError::DuplicateId(*id));
+                    }
+                }
+                planned.adopt_subtree(&element, parent, top_depth, Some(pos))?;
+                journal.push(PlannedOp::Swap {
+                    element_path,
+                    element,
+                });
+            }
+            SceneOp::Remove { id } => {
+                if !planned.is_live(id) {
+                    return Err(SceneError::ElementMissing(id));
+                }
+                // Derive the pre-retire path, then retire the subtree in the
+                // mirror and detach it from its container (siblings shift
+                // back, matching the `Vec::remove` phase 2 splices).
+                let element_path = planned.path_of(id);
+                planned.nodes -= planned.retire_subtree(id, false);
+                journal.push(PlannedOp::Take { element_path });
+            }
+        }
+    }
+    Ok(journal)
+}
+
+/// Phase 2 of [`PanelScene::apply_patch`]: replay the pre-validated journal
+/// into the real children vecs, strictly in order, with no further decisions
+/// and no allocation beyond what the mutations themselves need. Every step
+/// is infallible by construction (paths came from the planning mirror exactly
+/// as the mirror tracked the same mutations); the commit point is the
+/// journal replay plus the revision adoption, which is why a planning failure
+/// leaves everything untouched.
+fn apply_journal(elements: &mut Vec<SceneElement>, journal: Vec<PlannedOp>) {
+    for entry in journal {
+        match entry {
+            PlannedOp::Insert {
+                group_path,
+                element,
+            } => {
+                children_at_mut(elements, &group_path).push(element);
+            }
+            PlannedOp::Swap {
+                element_path,
+                element,
+            } => {
+                *element_at_mut(elements, &element_path) = element;
+            }
+            PlannedOp::Take { element_path } => {
+                let (last, parent_path) = element_path
+                    .split_last()
+                    .expect("journal element paths are non-empty");
+                children_at_mut(elements, parent_path).remove(*last);
+            }
+        }
+    }
+}
+
+/// The child list of the group at `group_path` (empty path = the root
+/// element list). Path components index children of the previous list; the
+/// referenced node must exist and anchor a group — the phase-2 guarantee,
+/// so a disagreement is an `unreachable`, not an error path.
+fn children_at_mut<'a>(
+    elements: &'a mut Vec<SceneElement>,
+    group_path: &[usize],
+) -> &'a mut Vec<SceneElement> {
+    let mut level = elements;
+    for &index in group_path {
+        level = match &mut level[index] {
+            SceneElement::Group { children, .. } => children,
+            other => unreachable!("journal location refers to a live group, found {other:?}"),
+        };
+    }
+    level
+}
+
+/// Mutable view of the element at `element_path` (the last component is its
+/// position inside the referenced container list).
+fn element_at_mut<'a>(
+    elements: &'a mut Vec<SceneElement>,
+    element_path: &[usize],
+) -> &'a mut SceneElement {
+    let (last, parent_path) = element_path
+        .split_last()
+        .expect("journal element paths are non-empty");
+    &mut children_at_mut(elements, parent_path)[*last]
+}
+
+/// Doc-order scan of one op payload (top element first), collecting the
+/// fresh-id set the collision check compares against the planned state.
+/// Single walk, O(payload); the payload itself is walked again by
+/// [`PlannedIndex::adopt_subtree`], so this returns no deep payload data.
+fn scan_payload_ids(element: &SceneElement) -> Vec<StableId> {
+    let mut ids = Vec::new();
+    let mut stack = vec![element];
+    while let Some(element) = stack.pop() {
+        ids.push(element.stable_id());
+        if let SceneElement::Group { children, .. } = element {
+            stack.extend(children.iter().rev());
+        }
+    }
+    ids
 }
 
 /// Incremental scene update requests (API pre-pin).
@@ -1083,77 +1643,6 @@ fn validate_stroke(stroke: &Option<Stroke>) -> Result<(), SceneError> {
         }
     }
     Ok(())
-}
-
-/// Collect the ids of the whole subtree rooted at `element` (the element's
-/// own id included). Plain iterative walk; never fails.
-fn collect_ids(element: &SceneElement, out: &mut HashSet<StableId>) {
-    let mut stack: Vec<&SceneElement> = vec![element];
-    while let Some(element) = stack.pop() {
-        out.insert(element.stable_id());
-        if let SceneElement::Group { children, .. } = element {
-            stack.extend(children.iter());
-        }
-    }
-}
-
-/// Find the child list of the group carrying `id`, searching the whole tree.
-/// Returns `None` when the id is absent or does not anchor a group.
-fn find_group_children_mut(
-    elements: &mut Vec<SceneElement>,
-    id: StableId,
-) -> Option<&mut Vec<SceneElement>> {
-    let mut stack: Vec<&mut Vec<SceneElement>> = vec![elements];
-    while let Some(level) = stack.pop() {
-        for element in level.iter_mut() {
-            if let SceneElement::Group {
-                id: group_id,
-                children,
-                ..
-            } = element
-            {
-                if *group_id == id {
-                    return Some(children);
-                }
-                stack.push(children);
-            }
-        }
-    }
-    None
-}
-
-/// Find the element carrying `id` anywhere in the tree (mutable view).
-fn find_element_mut(elements: &mut Vec<SceneElement>, id: StableId) -> Option<&mut SceneElement> {
-    let mut stack: Vec<&mut Vec<SceneElement>> = vec![elements];
-    while let Some(level) = stack.pop() {
-        for element in level.iter_mut() {
-            if element.stable_id() == id {
-                return Some(element);
-            }
-            if let SceneElement::Group { children, .. } = element {
-                stack.push(children);
-            }
-        }
-    }
-    None
-}
-
-/// Remove the subtree rooted at the element carrying `id` from the tree and
-/// return it. Returns `None` when the id is absent.
-fn remove_subtree(elements: &mut Vec<SceneElement>, id: StableId) -> Option<SceneElement> {
-    let mut stack: Vec<&mut Vec<SceneElement>> = vec![elements];
-    while let Some(level) = stack.pop() {
-        // First match at this level wins (document order).
-        if let Some(index) = level.iter().position(|element| element.stable_id() == id) {
-            return Some(level.remove(index));
-        }
-        for element in level.iter_mut() {
-            if let SceneElement::Group { children, .. } = element {
-                stack.push(children);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -1977,5 +2466,249 @@ mod tests {
 
         // The default color is the Normal theme token everywhere it is used.
         assert_eq!(SceneColor::default(), SceneColor::Theme(ThemeColor::Normal));
+    }
+
+    // -- SCN-010 additions (two-phase in-place patching, SceneSummary) -------
+
+    #[test]
+    fn apply_patch_in_place_matches_staged_semantics() {
+        // Kitchen-sink patch over a five-node base exercising every op in
+        // order: add at root, add into a group added EARLIER IN THE SAME
+        // PATCH, a replace that retires ids a fresh subtree re-adopts, a
+        // remove, and a replace (keyed at the root level) re-adopting an id
+        // the remove retired. The expected result is HAND-WRITTEN below (not
+        // derived from any staged-clone run): the in-place journal must
+        // produce the identical tree.
+        //
+        // base (rev 1): g1[ r2, g3[ p4 ] ], r5
+        let mut scene = simple_scene(
+            1,
+            vec![
+                group(1, vec![plain_rect(2), group(3, vec![plain_port(4)])]),
+                plain_rect(5),
+            ],
+        );
+        scene
+            .apply_patch(patch(
+                1,
+                2,
+                vec![
+                    SceneOp::Add {
+                        parent: None,
+                        element: group(6, vec![]),
+                    },
+                    SceneOp::Add {
+                        parent: Some(StableId(6)),
+                        element: plain_text(7, "hi"),
+                    },
+                    // Retires ids {3, 4}; the replacement re-adopts both
+                    // (keyed id 3 plus retired id 4 inside it).
+                    SceneOp::Replace {
+                        element: group(3, vec![plain_rect(4), plain_port(8)]),
+                    },
+                    SceneOp::Remove { id: StableId(2) },
+                    // Swaps the root rect (keyed by id 5) and re-adopts
+                    // id 2, retired by the previous op's remove.
+                    SceneOp::Replace {
+                        element: group(5, vec![plain_rect(2)]),
+                    },
+                ],
+            ))
+            .expect("kitchen-sink patch applies");
+        assert_eq!(scene.revision, SceneRevision(2));
+
+        // Hand-written expected literal:
+        // g1[ g3[ r4, p8 ] ], g5[ r2 ], g6[ t7 ].
+        assert_eq!(
+            scene.elements,
+            vec![
+                group(1, vec![group(3, vec![plain_rect(4), plain_port(8)])]),
+                group(5, vec![plain_rect(2)]),
+                group(6, vec![plain_text(7, "hi")]),
+            ]
+        );
+        scene.validate().expect("patched tree is valid");
+    }
+
+    #[test]
+    fn apply_patch_failure_leaves_no_clone_and_no_mutation() {
+        // The in-place path reasserts the atomicity contract: failures
+        // BETWEEN ops — including one whose first op would have applied
+        // cleanly — leave scene and revision byte-for-byte unchanged.
+        let mut scene = simple_scene(7, vec![group(1, vec![plain_rect(2)]), plain_port(3)]);
+        let before = shot(&scene);
+
+        // The second remove targets an id the first op's deletion retired;
+        // phase 1 must fail on it with zero writes to `self`.
+        let error = scene
+            .apply_patch(patch(
+                7,
+                8,
+                vec![
+                    SceneOp::Remove { id: StableId(2) },
+                    SceneOp::Remove { id: StableId(2) }, // no longer live
+                ],
+            ))
+            .expect_err("remove of an id retired mid-patch must refuse");
+        assert_eq!(error, SceneError::ElementMissing(StableId(2)));
+        assert_eq!(shot(&scene), before);
+        assert_eq!(scene.revision, SceneRevision(7));
+
+        // A stale base refuses in phase 0 before any planning happens.
+        let error = scene
+            .apply_patch(patch(6, 9, vec![SceneOp::Remove { id: StableId(2) }]))
+            .expect_err("stale base must refuse");
+        assert_eq!(
+            error,
+            SceneError::StaleBase {
+                current: SceneRevision(7),
+                given: SceneRevision(6),
+            }
+        );
+        assert_eq!(shot(&scene), before);
+    }
+
+    #[test]
+    fn apply_patch_journal_is_bounded() {
+        // Load-bearing coincidence per MAX_PATCH_OPS' docs: the op cap and
+        // the node cap coincide today, and `budgeted_ops` charges both kinds
+        // of nodes against the same per-frame counter — pin the equality so
+        // moving one budget alone cannot slip through review.
+        assert_eq!(MAX_PATCH_OPS, MAX_SCENE_NODES);
+
+        // One op applied to a full-budget 10_000-node scene. Portable
+        // allocation behavior is not directly assertable, so the no-clone
+        // contract is pinned behaviorally: the root element list keeps its
+        // ORIGINAL buffer (the address of the untouched first root element
+        // is identical before and after) — the staged-clone pass would have
+        // rebuilt the root list with a fresh buffer on every patch — and the
+        // result stays exactly at budget, valid, revision-advanced. The
+        // patch-scaling evidence proper is the SCN-012 benchmark (ADR-004).
+        let children = (1..MAX_SCENE_NODES as u64).map(plain_port).collect();
+        let mut scene = simple_scene(1, vec![group(0, children)]);
+        scene.validate().expect("base at exact node budget");
+        let root_addr_before = scene.elements.first().map(|e| e as *const _ as usize);
+
+        scene
+            .apply_patch(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: SceneElement::Port {
+                        id: StableId(4_242),
+                        name: Some("moved".to_string()),
+                        actions: vec![],
+                        drag: None,
+                        at: v2(9.0, 9.0),
+                        label: None,
+                    },
+                }],
+            ))
+            .expect("one-op patch applies to a full-budget scene");
+        let root_addr_after = scene.elements.first().map(|e| e as *const _ as usize);
+
+        // The patch never grows the scene past budget; the replaced op is
+        // budget-neutral, so the node count stands exactly.
+        let summary = scene.scene_summary();
+        assert_eq!(summary.revision, SceneRevision(2));
+        assert_eq!(summary.nodes, MAX_SCENE_NODES);
+        assert!(
+            summary.nodes <= MAX_SCENE_NODES,
+            "in-place result stays within the node budget"
+        );
+        assert_eq!(summary.by_kind.groups, 1);
+        assert_eq!(summary.by_kind.ports, MAX_SCENE_NODES - 1);
+        scene
+            .validate()
+            .expect("in-place-patched full-budget tree is valid");
+        assert_eq!(
+            root_addr_before, root_addr_after,
+            "an untouched root element keeps its buffer: patching must not clone the tree"
+        );
+    }
+
+    #[test]
+    fn scene_summary_of_fixture() {
+        // Hetero hand-built scene with independently counted kinds/roots.
+        // g1[ r2, p3, t4 ], a5, m6, e7 → 7 nodes, 4 roots.
+        let scene = simple_scene(
+            12,
+            vec![
+                group(1, vec![plain_rect(2), plain_port(3), plain_text(4, "t")]),
+                plain_asset(5, "svg:x"),
+                SceneElement::Marker {
+                    id: sid(6),
+                    name: None,
+                    actions: vec![],
+                    drag: None,
+                    at: v2(1.0, 1.0),
+                    kind: MarkerKind::Dot,
+                    color: SceneColor::Theme(ThemeColor::Normal),
+                },
+                SceneElement::Edge {
+                    id: sid(7),
+                    name: None,
+                    actions: vec![],
+                    drag: None,
+                    a: StableId(3),
+                    b: StableId(1),
+                    route: vec![v2(0.0, 0.0)],
+                    stroke: None,
+                    start_marker: None,
+                    end_marker: None,
+                },
+            ],
+        );
+        let summary = scene.scene_summary();
+        assert_eq!(summary.revision, SceneRevision(12));
+        assert_eq!(summary.nodes, 7);
+        assert_eq!(summary.by_kind.groups, 1);
+        assert_eq!(summary.by_kind.rects, 1);
+        assert_eq!(summary.by_kind.paths, 0);
+        assert_eq!(summary.by_kind.cubic_paths, 0);
+        assert_eq!(summary.by_kind.texts, 1);
+        assert_eq!(summary.by_kind.assets, 1);
+        assert_eq!(summary.by_kind.ports, 1);
+        assert_eq!(summary.by_kind.markers, 1);
+        assert_eq!(summary.by_kind.edges, 1);
+        assert_eq!(summary.by_kind.total(), summary.nodes);
+        assert_eq!(
+            summary.root_ids,
+            vec![StableId(1), StableId(5), StableId(6), StableId(7)]
+        );
+        assert_eq!(summary.root_ids_truncated, 0);
+        assert!(!summary.overflow_roots);
+
+        // Deep nesting reads identically: counts by kind, not by depth.
+        let mut next = 100u64;
+        let scene = simple_scene(3, vec![nested_chain(4, &mut next)]);
+        let summary = scene.scene_summary();
+        assert_eq!(summary.nodes, 5); // 4 groups + the port leaf
+        assert_eq!(summary.by_kind.groups, 4);
+        assert_eq!(summary.by_kind.ports, 1);
+        assert_eq!(summary.root_ids.len(), 1);
+
+        // Truncation contract at the cap boundary: exactly 64 roots is
+        // untruncated; 65 caps and reports the dropped count.
+        let mut next = 0u64;
+        let mut scene = simple_scene(
+            3,
+            (0..MAX_SUMMARY_ROOT_IDS as u64)
+                .map(|_| nested_chain(0, &mut next))
+                .collect(),
+        );
+        let summary = scene.scene_summary();
+        assert_eq!(summary.root_ids.len(), MAX_SUMMARY_ROOT_IDS);
+        assert_eq!(summary.root_ids_truncated, 0);
+        assert!(!summary.overflow_roots);
+        assert_eq!(summary.nodes, MAX_SUMMARY_ROOT_IDS);
+
+        scene.elements.push(nested_chain(0, &mut next));
+        let summary = scene.scene_summary();
+        assert_eq!(summary.root_ids.len(), MAX_SUMMARY_ROOT_IDS);
+        assert_eq!(summary.root_ids_truncated, 1);
+        assert!(summary.overflow_roots);
+        assert_eq!(summary.nodes, MAX_SUMMARY_ROOT_IDS + 1);
+        assert_eq!(summary.by_kind.ports, MAX_SUMMARY_ROOT_IDS + 1);
     }
 }

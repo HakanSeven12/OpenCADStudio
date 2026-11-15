@@ -892,7 +892,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   first_point: (3.696534292, -1.949890442, 0.000000000)
@@ -1030,7 +1030,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   first_point: (3.957227434, -0.559912353, 0.000000000)
@@ -1158,7 +1158,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   definition_point: (4.696050668, 7.215313703, 0.000000000)
@@ -1280,7 +1280,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   definition_point: (5.043256190, 1.394708208, 0.000000000)
@@ -1407,8 +1407,8 @@
   base.text_middle_point: (7.172057513, 8.909241123, 0.000000000)
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
-  base.text_rotation: 0.800000000
-  base.horizontal_direction: 0.600000000
+  base.text_rotation: 0.200000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   definition_point: (6.911364371, 7.519263035, 0.000000000)
@@ -1530,7 +1530,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: -0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.000000000
   definition_point: (3.696534292, -1.949890442, 0.000000000)
@@ -1569,7 +1569,7 @@
   base.insertion_point: (0.000000000, 0.000000000, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: -2.214297436
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.000000000
   definition_point: (0.000000000, 0.000000000, 0.000000000)
@@ -1595,7 +1595,7 @@
   base.insertion_point: (3.230769231, -2.153846154, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: -1.965587446
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.000000000
   definition_point: (3.230769231, -2.153846154, 0.000000000)
@@ -1662,7 +1662,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   definition_point: (4.869653429, 4.305010956, 0.000000000)
@@ -1801,8 +1801,8 @@
   base.text_middle_point: (4.530752345, 2.498039441, 0.000000000)
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
-  base.text_rotation: 0.950000000
-  base.horizontal_direction: 0.600000000
+  base.text_rotation: 0.350000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   dimension_arc: (4.478613717, 2.220043823, 0.000000000)
@@ -1942,7 +1942,7 @@
   base.insertion_point: (3.696534292, -1.949890442, 0.000000000)
   base.normal: (0.000000000, 0.000000000, 1.000000000)
   base.text_rotation: 0.000000000
-  base.horizontal_direction: 0.600000000
+  base.horizontal_direction: 0.000000000
   base.insertion_scale: (1.000000000, 1.000000000, 1.000000000)
   base.insertion_rotation: 0.600000000
   definition_point: (3.696534292, -1.949890442, 0.000000000)
@@ -2341,7 +2341,7 @@
 == leader / mirror
   vertices: (0.000000000, 0.000000000, 0.000000000) (-0.200000000, 3.600000000, 0.000000000) (-2.000000000, 6.000000000, 0.000000000)
   normal: (0.000000000, 0.000000000, 1.000000000)
-  horizontal_direction: (1.000000000, 0.000000000, 0.000000000)
+  horizontal_direction: (-0.600000000, 0.800000000, 0.000000000)
   block_offset: (-0.100000000, 0.550000000, 0.000000000)
   annotation_offset: (-0.850000000, 0.300000000, 0.000000000)
   text_height: 1.200000000
@@ -2357,7 +2357,7 @@
 == leader / mirror_offset
   vertices: (3.230769231, -2.153846154, 0.000000000) (3.923076923, 1.384615385, 0.000000000) (2.769230769, 4.153846154, 0.000000000)
   normal: (0.000000000, 0.000000000, 1.000000000)
-  horizontal_direction: (1.000000000, 0.000000000, 0.000000000)
+  horizontal_direction: (-0.384615385, 0.923076923, 0.000000000)
   block_offset: (0.038461538, 0.557692308, 0.000000000)
   annotation_offset: (-0.750000000, 0.500000000, 0.000000000)
   text_height: 1.200000000
@@ -2405,7 +2405,7 @@
   text_height: 1.250000000
 == tolerance / mirror
   insertion_point: (1.400000000, 4.800000000, 0.000000000)
-  direction: (0.800000000, 0.600000000, 0.000000000)
+  direction: (0.000000000, 1.000000000, 0.000000000)
   normal: (0.000000000, 0.000000000, 1.000000000)
   text_height: 0.500000000
 == tolerance / affine_tilted
@@ -2415,7 +2415,7 @@
   text_height: 0.500000000
 == tolerance / mirror_offset
   insertion_point: (5.769230769, 2.153846154, 0.000000000)
-  direction: (0.800000000, 0.600000000, 0.000000000)
+  direction: (0.246153846, 0.969230769, 0.000000000)
   normal: (0.000000000, 0.000000000, 1.000000000)
   text_height: 0.500000000
 == tolerance / mirror_tilted
@@ -2542,9 +2542,9 @@
   insertion_point: (-2.200000000, -0.400000000, 0.000000000)
   alignment_point: (-4.000000000, 2.000000000, 0.000000000)
   height: 0.800000000
-  rotation: 0.450000000
+  rotation: 1.764297436
   width_factor: 0.900000000
-  oblique_angle: 0.150000000
+  oblique_angle: -0.150000000
   normal: (0.000000000, 0.000000000, 1.000000000)
 == attribute_definition / affine_tilted
   insertion_point: (-49.000000000, 23.000000000, 100.000000000)
@@ -2558,9 +2558,9 @@
   insertion_point: (1.000000000, -2.000000000, 0.000000000)
   alignment_point: (-0.153846154, 0.769230769, 0.000000000)
   height: 0.800000000
-  rotation: 0.450000000
+  rotation: 1.515587446
   width_factor: 0.900000000
-  oblique_angle: 0.150000000
+  oblique_angle: -0.150000000
   normal: (0.000000000, 0.000000000, 1.000000000)
 == attribute_definition / mirror_tilted
   insertion_point: (-1.000000000, 98.000000000, -50.000000000)

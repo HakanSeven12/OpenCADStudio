@@ -1,13 +1,14 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
 use super::*;
 
-/// Orientation fields of a text-like entity, captured so a mirror can keep the
-/// glyphs right-reading when MIRRTEXT (`header.mirror_text`) is off.
+/// What a mirror needs to keep a text-like entity right-reading when MIRRTEXT
+/// (`header.mirror_text`) is off: its stored angles and the size of its box
+/// along and across the baseline.
 struct TextOrient {
     rotation: f64,
     oblique: f64,
-    x_scale: f64,
-    size: f64,
+    width: f64,
+    height: f64,
 }
 
 pub(crate) fn inverse_affine(
@@ -48,56 +49,250 @@ pub(crate) fn inverse_affine(
     }))
 }
 
-/// Snapshot the orientation of a text / mtext / shape entity, or `None` for any
-/// other kind.
-fn capture_text_orient(e: &EntityType) -> Option<TextOrient> {
+/// The pen advance of one line of text in `style`.
+fn single_line_width(
+    document: &document::Document,
+    value: &str,
+    style: &str,
+    height: f64,
+    width_factor: f64,
+) -> f64 {
+    let font = crate::entities::text_support::resolve_text_style(style, document);
+    let width_factor = if width_factor.abs() > 1e-9 {
+        width_factor.abs()
+    } else {
+        font.width_factor.abs() as f64
+    };
+    let text = crate::entities::text_support::resolve_dxf_special_chars(value);
+    crate::entities::text_support::text_local_bounds(
+        &font.font_name,
+        &text,
+        height as f32,
+        width_factor as f32,
+        0.0,
+    )
+    .map(|bounds| bounds.advance as f64)
+    .unwrap_or_else(|| height * width_factor * text.chars().count() as f64 * 0.6)
+}
+
+/// Snapshot the orientation of a text, attribute or mtext, or `None` for any
+/// other kind. Shapes are not text: MIRRTEXT leaves them mirrored.
+fn capture_text_orient(e: &EntityType, document: &document::Document) -> Option<TextOrient> {
     match e {
         EntityType::Text(t) => Some(TextOrient {
             rotation: t.rotation,
             oblique: t.oblique_angle,
-            x_scale: 0.0,
-            size: 0.0,
+            width: single_line_width(document, &t.value, &t.style, t.height, t.width_factor),
+            height: t.height,
+        }),
+        EntityType::AttributeDefinition(a) => Some(TextOrient {
+            rotation: a.rotation,
+            oblique: a.oblique_angle,
+            width: single_line_width(
+                document,
+                &a.default_value,
+                &a.text_style,
+                a.height,
+                a.width_factor,
+            ),
+            height: a.height,
+        }),
+        EntityType::AttributeEntity(a) => Some(TextOrient {
+            rotation: a.rotation,
+            oblique: a.oblique_angle,
+            width: single_line_width(document, &a.value, &a.text_style, a.height, a.width_factor),
+            height: a.height,
         }),
         EntityType::MText(m) => Some(TextOrient {
             rotation: m.rotation,
             oblique: 0.0,
-            x_scale: 0.0,
-            size: 0.0,
-        }),
-        EntityType::Shape(s) => Some(TextOrient {
-            rotation: s.rotation,
-            oblique: s.oblique_angle,
-            x_scale: s.relative_x_scale,
-            size: s.size,
+            width: 0.0,
+            height: 0.0,
         }),
         _ => None,
     }
 }
 
-/// Restores readable text orientation after a mirror.
-fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
+/// Whether text running at `angle` reads the right way up: from -90°
+/// (exclusive) to 90° (inclusive).
+fn reads_upright(angle: f64) -> bool {
+    let (sin, cos) = angle.sin_cos();
+    cos > 1e-9 || (cos.abs() <= 1e-9 && sin > 0.0)
+}
+
+/// Fractions of the text box a justification sits at, along (`u`) and across
+/// (`v`) the baseline. Bottom is taken as the baseline.
+fn justification_fractions(horizontal: i16, vertical: i16) -> (f64, f64) {
+    // Group 72 / 73 values: Left 0, Center 1, Right 2, Aligned 3, Middle 4,
+    // Fit 5; Baseline 0, Bottom 1, Middle 2, Top 3.
+    match horizontal {
+        4 => (0.5, 0.5),
+        _ => (
+            match horizontal {
+                1 => 0.5,
+                2 | 3 | 5 => 1.0,
+                _ => 0.0,
+            },
+            match vertical {
+                2 => 0.5,
+                3 => 1.0,
+                _ => 0.0,
+            },
+        ),
+    }
+}
+
+/// Make a mirrored single-line text right-reading in the box the mirror left
+/// it: `rotation` is the reflected baseline, `insertion` / `alignment` the
+/// reflected points. The text turns half a turn against the reflected baseline
+/// when that reads upright (the start moves to the far end), else keeps the
+/// reflected baseline and moves across it to the other side of its box.
+fn readable_single_line(
+    rotation: &mut f64,
+    insertion: &mut document::types::Vector3,
+    alignment: &mut document::types::Vector3,
+    (horizontal, vertical): (i16, i16),
+    o: &TextOrient,
+) {
+    let (u, v) = justification_fractions(horizontal, vertical);
+    let aligned = matches!(horizontal, 3 | 5);
+    let width = if aligned {
+        (alignment.x - insertion.x).hypot(alignment.y - insertion.y)
+    } else {
+        o.width
+    };
+    let turned = *rotation + std::f64::consts::PI;
+    let shift = |fraction: f64, size: f64, angle: f64| {
+        let d = (1.0 - 2.0 * fraction) * size;
+        (angle.cos() * d, angle.sin() * d)
+    };
+    let (ins, al) = if reads_upright(turned) {
+        *rotation = turned.rem_euclid(std::f64::consts::TAU);
+        (shift(0.0, width, turned), shift(u, width, turned))
+    } else {
+        let across = *rotation + std::f64::consts::FRAC_PI_2;
+        (shift(0.0, o.height, across), shift(v, o.height, across))
+    };
+    insertion.x -= ins.0;
+    insertion.y -= ins.1;
+    alignment.x -= al.0;
+    alignment.y -= al.1;
+}
+
+/// Restores readable text orientation after a mirror (MIRRTEXT off).
+fn restore_text_orient(e: &mut EntityType, o: &TextOrient, t: &EntityTransform) {
+    let in_plane = |normal: &document::types::Vector3| {
+        matches!(t, EntityTransform::Mirror { working_normal, .. }
+            if working_normal.normalize_or(glam::DVec3::Z).abs_diff_eq(glam::DVec3::Z, 1e-10))
+            && normal.x.abs() < 1e-9
+            && normal.y.abs() < 1e-9
+            && normal.z > 0.0
+    };
     match e {
         EntityType::Text(t) => {
-            t.rotation = o.rotation;
             t.oblique_angle = o.oblique;
-            use document::entities::TextHorizontalAlignment as HA;
-            t.horizontal_alignment = match t.horizontal_alignment {
-                HA::Left => HA::Right,
-                HA::Right => HA::Left,
-                other => other,
-            };
-            crate::entities::text::sync_text_alignment_point(t);
+            if !in_plane(&t.normal) {
+                t.rotation = o.rotation;
+                return;
+            }
+            let mut alignment = t.alignment_point.unwrap_or(t.insertion_point);
+            let justification = (
+                t.horizontal_alignment as i16,
+                t.vertical_alignment as i16,
+            );
+            readable_single_line(
+                &mut t.rotation,
+                &mut t.insertion_point,
+                &mut alignment,
+                justification,
+                o,
+            );
+            if t.alignment_point.is_some() {
+                t.alignment_point = Some(alignment);
+            }
+        }
+        EntityType::AttributeDefinition(a) => {
+            a.oblique_angle = o.oblique;
+            if !in_plane(&a.normal) {
+                a.rotation = o.rotation;
+                return;
+            }
+            let justification = (
+                a.horizontal_alignment.to_value(),
+                a.vertical_alignment.to_value(),
+            );
+            readable_single_line(
+                &mut a.rotation,
+                &mut a.insertion_point,
+                &mut a.alignment_point,
+                justification,
+                o,
+            );
+        }
+        EntityType::AttributeEntity(a) => {
+            a.oblique_angle = o.oblique;
+            if !in_plane(&a.normal) {
+                a.rotation = o.rotation;
+                return;
+            }
+            let justification = (
+                a.horizontal_alignment.to_value(),
+                a.vertical_alignment.to_value(),
+            );
+            readable_single_line(
+                &mut a.rotation,
+                &mut a.insertion_point,
+                &mut a.alignment_point,
+                justification,
+                o,
+            );
         }
         EntityType::MText(m) => {
-            m.rotation = o.rotation;
-        }
-        EntityType::Shape(s) => {
-            s.rotation = o.rotation;
-            s.oblique_angle = o.oblique;
-            s.relative_x_scale = o.x_scale;
-            s.size = o.size;
+            if !in_plane(&m.normal) {
+                m.rotation = o.rotation;
+                return;
+            }
+            use document::entities::AttachmentPoint as AP;
+            let turned = m.rotation + std::f64::consts::PI;
+            m.dwg_x_direction = None;
+            if reads_upright(turned) {
+                m.rotation = turned.rem_euclid(std::f64::consts::TAU);
+                m.attachment_point = match m.attachment_point {
+                    AP::TopLeft => AP::TopRight,
+                    AP::TopRight => AP::TopLeft,
+                    AP::MiddleLeft => AP::MiddleRight,
+                    AP::MiddleRight => AP::MiddleLeft,
+                    AP::BottomLeft => AP::BottomRight,
+                    AP::BottomRight => AP::BottomLeft,
+                    other => other,
+                };
+            } else {
+                m.attachment_point = match m.attachment_point {
+                    AP::TopLeft => AP::BottomLeft,
+                    AP::TopCenter => AP::BottomCenter,
+                    AP::TopRight => AP::BottomRight,
+                    AP::BottomLeft => AP::TopLeft,
+                    AP::BottomCenter => AP::TopCenter,
+                    AP::BottomRight => AP::TopRight,
+                    other => other,
+                };
+            }
         }
         _ => {}
+    }
+}
+
+/// MIRRTEXT off: a leader with text runs the way its text now reads, half a
+/// turn from its reflected direction when the text turned that way.
+fn readable_leader_direction(e: &mut EntityType) {
+    if let EntityType::Leader(l) = e {
+        if l.annotation_handle.is_null() {
+            return;
+        }
+        let d = l.horizontal_direction;
+        if reads_upright((-d.y).atan2(-d.x)) {
+            l.horizontal_direction = document::types::Vector3::new(-d.x, -d.y, -d.z);
+        }
     }
 }
 
@@ -108,23 +303,54 @@ fn restore_text_orient(e: &mut EntityType, o: &TextOrient) {
 /// keeps a double mirror an involution. Only single-line TEXT carries group 71;
 /// MTEXT / Shape keep the reflected rotation (readable-but-rotated), which is
 /// standard-conforming.
+/// The backward glyphs are the mirror image, slant included, so the oblique
+/// angle the reflected baseline negated comes back.
 fn mirror_true_text_flags(e: &mut EntityType) {
-    if let EntityType::Text(t) = e {
-        t.generation_flags ^= 0x2;
-        t.rotation = (t.rotation + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
-    }
+    let (flags, rotation, oblique) = match e {
+        EntityType::Text(t) => (
+            &mut t.generation_flags,
+            &mut t.rotation,
+            &mut t.oblique_angle,
+        ),
+        EntityType::AttributeDefinition(a) => (
+            &mut a.text_generation_flags,
+            &mut a.rotation,
+            &mut a.oblique_angle,
+        ),
+        EntityType::AttributeEntity(a) => (
+            &mut a.text_generation_flags,
+            &mut a.rotation,
+            &mut a.oblique_angle,
+        ),
+        _ => return,
+    };
+    *flags ^= 0x2;
+    *rotation = (*rotation + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+    *oblique = -*oblique;
 }
 
 /// Transform one entity of a dimension's `*D` block. Its text reads the
 /// right way after a mirror, whatever MIRRTEXT says.
-fn transform_dimension_part(entity: &mut EntityType, t: &EntityTransform) {
-    let orient = matches!(t, EntityTransform::Mirror { .. })
-        .then(|| capture_text_orient(entity))
-        .flatten();
+fn transform_dimension_part(
+    entity: &mut EntityType,
+    orient: Option<TextOrient>,
+    t: &EntityTransform,
+) {
     view::dispatch::apply_transform(entity, t);
     if let Some(orient) = orient {
-        restore_text_orient(entity, &orient);
+        restore_text_orient(entity, &orient, t);
     }
+}
+
+/// The orientation a dimension part's mirror restores.
+fn dimension_part_orient(
+    entity: &EntityType,
+    document: &document::Document,
+    t: &EntityTransform,
+) -> Option<TextOrient> {
+    matches!(t, EntityTransform::Mirror { .. })
+        .then(|| capture_text_orient(entity, document))
+        .flatten()
 }
 
 impl Scene {
@@ -318,7 +544,7 @@ impl Scene {
         if preserve_text_orientation {
             for &h in handles {
                 if let Some(entity) = self.document.get_entity(h) {
-                    if let Some(o) = capture_text_orient(entity) {
+                    if let Some(o) = capture_text_orient(entity, &self.document) {
                         text_orient_backup.push((h, o));
                     }
                 }
@@ -493,7 +719,13 @@ impl Scene {
         if preserve_text_orientation {
             for (h, o) in text_orient_backup {
                 if let Some(entity) = self.document.get_entity_mut(h) {
-                    restore_text_orient(entity, &o);
+                    restore_text_orient(entity, &o, t);
+                }
+            }
+            let unique: rustc_hash::FxHashSet<Handle> = handles.iter().copied().collect();
+            for h in unique {
+                if let Some(entity) = self.document.get_entity_mut(h) {
+                    readable_leader_direction(entity);
                 }
             }
         }
@@ -509,11 +741,15 @@ impl Scene {
                 let before = self.document.get_entity_arc(*h);
                 self.record_undo_before(*h, before);
             }
+            let orient = self
+                .document
+                .get_entity(*h)
+                .and_then(|entity| dimension_part_orient(entity, &self.document, t));
             if let Some(entity) = self.document.get_entity_mut(*h) {
                 if let Some(placement) = placement {
                     view::dispatch::apply_transform(entity, placement);
                 }
-                transform_dimension_part(entity, t);
+                transform_dimension_part(entity, orient, t);
             }
         }
         // The moved `*D` contents are a block definition the block cache holds;
@@ -1247,7 +1483,8 @@ impl Scene {
         self.document.add_entity(EntityType::Block(block)).ok()?;
         for sub in subs {
             let mut sub = sub.clone();
-            transform_dimension_part(&mut sub, t);
+            let orient = dimension_part_orient(&sub, &self.document, t);
+            transform_dimension_part(&mut sub, orient, t);
             Self::reset_clone_subhandles(&mut self.document, &mut sub);
             sub.common_mut().handle = Handle::NULL;
             sub.common_mut().owner_handle = br_handle;
@@ -1338,7 +1575,7 @@ impl Scene {
                 _ => Vec::new(),
             };
             let text_orient = if preserve_text_orientation {
-                capture_text_orient(&entity)
+                capture_text_orient(&entity, &self.document)
             } else {
                 None
             };
@@ -1353,7 +1590,10 @@ impl Scene {
             view::dispatch::apply_transform(&mut entity, t);
             render_graph::clear_dim_picture_placement(&mut entity);
             if let Some(o) = &text_orient {
-                restore_text_orient(&mut entity, o);
+                restore_text_orient(&mut entity, o, t);
+            }
+            if preserve_text_orientation {
+                readable_leader_direction(&mut entity);
             }
             if mirror_true {
                 mirror_true_text_flags(&mut entity);

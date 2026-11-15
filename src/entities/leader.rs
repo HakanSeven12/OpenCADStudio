@@ -508,6 +508,12 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
             glam::DVec3::ZERO,
             axis,
         );
+        crate::scene::view::transform::reflect_xy_point(
+            &mut entity.horizontal_direction.x,
+            &mut entity.horizontal_direction.y,
+            glam::DVec3::ZERO,
+            axis,
+        );
     });
 }
 

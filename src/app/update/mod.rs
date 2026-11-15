@@ -155,6 +155,7 @@ pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
 mod widget_mount;
+pub(crate) mod widget_drag;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {

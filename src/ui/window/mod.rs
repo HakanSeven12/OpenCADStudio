@@ -52,6 +52,7 @@ pub mod pdf_dialogs;
 pub mod pdf_password_dialog;
 pub mod pdf_shx_dialog;
 pub mod plot;
+pub(crate) mod plugin_drag;
 pub mod plugin_dialog;
 pub mod plugin_manager;
 pub mod plugin_scene;

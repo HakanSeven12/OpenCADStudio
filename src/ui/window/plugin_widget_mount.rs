@@ -284,6 +284,7 @@ use crate::ui::window::plugin_widgets_dispatch::{
 };
 use crate::ui::window::plugin_widgets_tables::{CellFocus, TableUiState};
 
+
 /// The mount's iced_aw menu element types with the crate's theme/renderer
 /// set (the vendored `Item`/`Menu` carry explicit generics).
 type MountItem<'a> = Item<'a, WidgetMountMsg, iced::Theme, iced::Renderer>;
@@ -331,8 +332,11 @@ pub(crate) const DEFAULT_WINDOW_SPEC: WindowSpec = WindowSpec {
 /// app arm hands them to the coalescer/capture routes
 /// (`app::update::widget_mount`), and a pointer message that still reached
 /// [`apply_mount_msg`] would be refused by name.
+// Bench seam, SCN-024; ADR-007 item 3; never wire — the mount vocabulary the bench
+// reads (the keyboard route's step messages). Host-local; NOT a wire change.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum WidgetMountMsg {
+pub enum WidgetMountMsg {
     /// A row's activation gesture (a press on an already-selected list item —
     /// the native "press again to open" form, see [`list_element`]).
     RowActivated {
@@ -1359,8 +1363,16 @@ pub(crate) fn materialized_row_count_of_list(
 ///
 /// The panel's `view()` only BORROWS through the registry read; the
 /// machines are mutated (bridge-side, SCN-014) through the SAME `Rc`s.
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only widening so the
+// `widget_interaction` bench (a separate crate) constructs the handle the REAL registry
+// registers. The pub(crate)-typed machine fields (`state`/`dispatcher`) stay private to
+// the crate's own drive paths; the bench borrows THROUGH them (type never named
+// cross-crate), hence the targeted `private_interfaces` allowance on THIS seam only.
+// Not part of the host's documentary API; NOT a wire change.
+#[doc(hidden)]
+#[allow(private_interfaces)]
 #[derive(Clone)]
-pub(crate) struct SurfaceMountHandle {
+pub struct SurfaceMountHandle {
     /// The surface verbatim (patch application replaces the registry entry —
     /// the documented re-register flow for SCN-014's patch plumbing).
     pub surface: WidgetSurface,
@@ -1376,8 +1388,11 @@ impl SurfaceMountHandle {
     /// model syncs separately, when the owner plugin publishes its command
     /// defs). The §16 "closing a tab cancels pending requests and releases
     /// state" teardown is [`MountRegistry::teardown_surface_owned`] (SCN-014).
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the SurfaceMountHandle construction
+    // path the bench's registration drives.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn from_surface(surface_id: StableId, surface: WidgetSurface) -> Self {
+    pub fn from_surface(surface_id: StableId, surface: WidgetSurface) -> Self {
         let mut state = WidgetUiState::new(surface_id);
         state.sync(&surface);
         SurfaceMountHandle {
@@ -1425,8 +1440,13 @@ impl SurfaceMountHandle {
 /// registers a surface (the real registration calls arrive with the wire
 /// era) — which is exactly why every legacy panel stays byte-identical
 /// today (zero entries = the legacy `view()` path), by construction.
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only widening so the
+// `widget_interaction` bench (a separate crate) constructs and drives the REAL app-owned
+// registry instance and reads its real `MountCounters`. Not part of the host's documentary
+// API; NOT a wire change.
+#[doc(hidden)]
 #[derive(Default)]
-pub(crate) struct MountRegistry {
+pub struct MountRegistry {
     by_panel: HashMap<String, SurfaceMountHandle>,
     /// The mount's host-local INPUT store (SCN-020): per-surface
     /// [`HoverState`] (hover + pointer capture + the owed-move slot), the
@@ -1562,9 +1582,12 @@ impl WidgetEventSink for CollectingSink {
 /// the registry is a thread-local, so tests compare DELTAS around their
 /// actions (a test thread always starts fresh, but the comparison is also
 /// topologically stable if the test pool ever reuses threads).
+// Bench seam, SCN-024; ADR-007 item 3; never wire — the real probe counters' type the
+// bench reads (mount_move_calls / coalesced_moves_superseded / keyboard_nav_steps).
+#[doc(hidden)]
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct MountCounters {
+pub struct MountCounters {
     /// [`MountRegistry::register_surface_owned`] calls (fresh, preserved and
     /// replaced registrations).
     pub registers: usize,
@@ -1737,8 +1760,10 @@ impl MountRegistry {
     /// registration path (SCN-016) calls
     /// [`Self::register_surface_owned`] over the app's own registry — the
     /// production registration CALLS still arrive with the wire era.
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the bench's registration drive.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn register_surface_owned(&mut self, panel_id: &str, handle: SurfaceMountHandle) {
+    pub fn register_surface_owned(&mut self, panel_id: &str, handle: SurfaceMountHandle) {
         let identical = self
             .by_panel
             .get(panel_id)
@@ -1800,6 +1825,7 @@ impl MountRegistry {
     /// `WidgetEvent::surface_id` names one surface): two registered
     /// surfaces sharing an id would make this lookup order-dependent.
     /// `None` for an unregistered id — the bridge refuses gracefully.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn handle_for_surface_owned(
         &self,
         surface_id: StableId,
@@ -1811,8 +1837,11 @@ impl MountRegistry {
     }
 
     /// The lifecycle counters' read side (§16 probes; tests/benches).
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the real MountCounters read
+    // (evolution deltas) the bench prints.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn counters_owned(&self) -> MountCounters {
+    pub fn counters_owned(&self) -> MountCounters {
         self.counters
     }
 
@@ -1857,9 +1886,13 @@ impl MountRegistry {
 /// state belongs together (SCN-021's drag previews consume exactly
 /// these fields — `hover`, `last_move`, `captured`, `capture_origin` — read
 /// through [`MountRegistry::mount_hover_state_owned`]).
+// Bench seam, SCN-024; ADR-007 item 3; never wire — the per-surface input snapshot the
+// bench reads (last_move defines the delivered newest position). Not part of the host's
+// documentary API; NOT a wire change.
+#[doc(hidden)]
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct HoverState {
+pub struct HoverState {
     /// The row/widget under the pointer, per what the wiring last
     /// reported ([`MountRegistry::mount_set_hover_owned`]; a coalesced move
     /// flush does NOT hit-test — the mount has no per-row geometry of its
@@ -1936,7 +1969,10 @@ impl MountRegistry {
     /// viewport's adaptive gate there is NO pass-cost threshold: the
     /// mount's move half must be CHEAP per event unconditionally (a slot
     /// write only), so it defers every move.
-    pub(crate) fn mount_move_defer_owned(
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the real coalescer entry
+    // the bench's parked-move storm drives.
+    #[doc(hidden)]
+    pub fn mount_move_defer_owned(
         &mut self,
         surface_id: StableId,
         position: Point,
@@ -1962,7 +1998,10 @@ impl MountRegistry {
     /// flush, updating the surface's [`HoverState`] (host-local §14) and
     /// NOTHING else — no machine route, no event, no counter wobble
     /// beyond the probe. Returns how many surfaces were delivered.
-    pub(crate) fn mount_flush_moves_owned(&mut self) -> usize {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the real coalescer flush
+    // the bench's storm drives.
+    #[doc(hidden)]
+    pub fn mount_flush_moves_owned(&mut self) -> usize {
         let mut delivered = 0usize;
         for entry in self.input.per_surface.values_mut() {
             if let Some(position) = entry.move_owed.take() {
@@ -1991,7 +2030,10 @@ impl MountRegistry {
     /// the press does NOT deliver it and does NOT count it as an overwrite
     /// (the probe counts latest-wins overwrites only). Unregistered →
     /// `false`, registered → `true`.
-    pub(crate) fn mount_press_owned(&mut self, surface_id: StableId) -> bool {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the capture arm the bench's
+    // drag storm drives.
+    #[doc(hidden)]
+    pub fn mount_press_owned(&mut self, surface_id: StableId) -> bool {
         let handle_registered = self
             .by_panel
             .values()
@@ -2014,7 +2056,10 @@ impl MountRegistry {
     /// viewport's press-answers-the-owed-move rule). Returns the delivered
     /// count (0 or 1: ≤1 in flight per surface — the contract the tests
     /// pin). An unknown surface is a quiet 0.
-    pub(crate) fn mount_pointer_released_owned(&mut self, surface_id: StableId) -> usize {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the completion path the bench's
+    // storm drives.
+    #[doc(hidden)]
+    pub fn mount_pointer_released_owned(&mut self, surface_id: StableId) -> usize {
         let Some(entry) = self.input.per_surface.get_mut(&surface_id) else {
             return 0;
         };
@@ -2095,8 +2140,11 @@ impl MountRegistry {
     /// The full per-surface input snapshot — SCN-021's drag previews read
     /// hover + capture + origin + last position from ONE place (the
     /// registry stays the single truth for all of them).
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the delivered-position read
+    // the bench's newest-wins assertions use.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_hover_state_owned(&self, surface_id: StableId) -> Option<HoverState> {
+    pub fn mount_hover_state_owned(&self, surface_id: StableId) -> Option<HoverState> {
         self.input.per_surface.get(&surface_id).copied()
     }
 
@@ -2123,8 +2171,11 @@ impl MountRegistry {
     ///    with exactly one mounted panel and no pointer, arrows/Tab can
     ///    only mean that panel;
     /// 3. else `None` (no mount surface the keys could mean — graceful).
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the keyboard target
+    // resolution the bench asserts before its key-step burst.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_key_surface_owned(&self) -> Option<StableId> {
+    pub fn mount_key_surface_owned(&self) -> Option<StableId> {
         self.input.key_target.or_else(|| {
             let sole: Option<StableId> =
                 self.by_panel.values().next().map(|handle| handle.surface_id());
@@ -2135,8 +2186,11 @@ impl MountRegistry {
     /// The point-free keyboard-grab seam (for tests + the app-owned
     /// registry's roving-panel focus, the wire era): name `surface_id` as
     /// the keys' target without a pointer press. `None` clears.
+    // Bench seam, SCN-024; ADR-007 item 3; never wire — the "set the target surface first"
+    // seam the bench's keyboard burst drives.
+    #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn set_mount_key_target_owned(&mut self, surface_id: Option<StableId>) {
+    pub fn set_mount_key_target_owned(&mut self, surface_id: Option<StableId>) {
         self.input.key_target = surface_id;
     }
 
@@ -2477,6 +2531,42 @@ pub(crate) fn key_route_owned(
         registry.record_key_nav_step_owned();
     }
     msgs
+}
+
+/// The BENCH seam (SCN-024; ADR-007 item 3; NEVER WIRE — inspect/drive-only,
+/// not part of the host's documentary API, no logic of its own): the app's
+/// `on_mount_key` route body —
+/// `crate::app::update::widget_mount::handle_mount_key_owned` — restated
+/// here PIECE-FOR-PIECE out of THE SAME pre-existing pieces
+/// ([`Self::mount_key_surface_owned`] target resolution, Escape's
+/// machine-direct cancel, [`Self::handle_for_surface_owned`],
+/// [`key_route_owned`]), because that app fn's module chain
+/// (`crate::app::update`) is PRIVATE and cannot be reached from a bench
+/// crate. The bench drives the production route's EXACT body through this
+/// seam (the app fn stays the routing authority; the tests on both sides
+/// pin them to the same shape; a divergence is a defect either file's
+/// reviewer must refuse).
+#[doc(hidden)]
+pub fn bench_handle_mount_key_owned(
+    registry: &mut MountRegistry,
+    key: Key,
+    modifiers: Modifiers,
+) -> Vec<WidgetMountMsg> {
+    let Some(surface_id) = registry.mount_key_surface_owned() else {
+        return Vec::new();
+    };
+    // Escape: the mounted surface's cancel is machine-direct (the state
+    // layers' own hooks — the armed prompt's dismissal); no route message
+    // exists for it and no machine sees a KEY. (Same shape as the app fn.)
+    if key == Key::Named(keyboard_key::Named::Escape) {
+        registry.mount_escape_cancel_owned(surface_id);
+        return Vec::new();
+    }
+    let Some(handle) = registry.handle_for_surface_owned(surface_id) else {
+        return Vec::new();
+    };
+    let mut state = handle.state.borrow_mut();
+    key_route_owned(registry, surface_id, &handle.surface, &mut state, key, modifiers)
 }
 
 /// The headless tests' facade: the SAME [`key_route_owned`] core over the

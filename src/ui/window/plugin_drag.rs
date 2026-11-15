@@ -170,7 +170,10 @@ use ocs_plugin_api::scene::{DragMeta, StableId};
 /// The ARM→InFlight threshold in pixels: the first pointer move at or beyond
 /// this distance from the armed origin IS a drag (see the module docs for
 /// the magnitude decision).
-pub(crate) const DRAG_THRESHOLD_PX: f32 = 3.0;
+// Bench seam, SCN-024; ADR-007 item 3; never wire — the widget_interaction bench reads the
+// REAL threshold magnitude for its crossing-move geometry.
+#[doc(hidden)]
+pub const DRAG_THRESHOLD_PX: f32 = 3.0;
 
 // ---------------------------------------------------------------------------
 // Phases, facts, refusals
@@ -179,8 +182,11 @@ pub(crate) const DRAG_THRESHOLD_PX: f32 = 3.0;
 /// The drag session's phase. `Idle` and the two terminal dispositions
 /// (`Settled`/`Cancelled`) form the CONSUMED family: any of them accepts a
 /// fresh `begin` (the session re-arms); only `Armed`/`InFlight` are live.
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only widening so the
+// `widget_interaction` bench (a separate crate) drives the REAL machine (phase read).
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum DragPhase {
+pub enum DragPhase {
     /// No interaction on this surface.
     #[default]
     Idle,
@@ -199,8 +205,10 @@ pub(crate) enum DragPhase {
 /// exact payload any settle/cancel of this interaction returns (the §7
 /// losslessness). `start_tick` is a caller-supplied monotonic logical tick
 /// (headless/route input — never wall-clock), part of the start context.
+// Bench seam, SCN-024; ADR-007 item 3; never wire (begin's captured origin, verbatim).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DragOrigin {
+pub struct DragOrigin {
     /// The dragged element's address.
     pub address: StableId,
     /// The plugin's drag payload, VERBATIM (never interpreted).
@@ -213,8 +221,10 @@ pub(crate) struct DragOrigin {
 
 /// What begin did (the ARM receipt): the captured origin facts, returned so
 /// the caller doesn't have to re-read them via an accessor.
+// Bench seam, SCN-024; ADR-007 item 3; never wire (begin's ARM receipt).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DragBegan {
+pub struct DragBegan {
     /// The surface the drag armed on (the session's own).
     pub surface_id: StableId,
     /// The captured origin (the source of truth for this interaction).
@@ -224,8 +234,10 @@ pub(crate) struct DragBegan {
 /// The settle FACT: what the §7 completion hands the caller. The event
 /// conversion (if the caller binds one) happens OUTSIDE the machine — the
 /// machine stays event-agnostic (INT-4).
+// Bench seam, SCN-024; ADR-007 item 3; never wire (the settle FACT the bench asserts).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DragSettled {
+pub struct DragSettled {
     /// The surface the drag ran on.
     pub surface_id: StableId,
     /// The dragged element (the origin's address, verbatim).
@@ -247,8 +259,10 @@ pub(crate) struct DragSettled {
 
 /// Why the drag was cancelled. 1:1 with the lossless invariant: every begin
 /// ends in a settle OR one of these (each names the §7 cancel context).
+// Bench seam, SCN-024; ADR-007 item 3; never wire (the caller's cancel reason).
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum DragCancelReason {
+pub enum DragCancelReason {
     /// Escape (the grip ride's Esc-cancels — `plugin_grips.rs` lines 1–15).
     #[default]
     Escape,
@@ -262,8 +276,10 @@ pub(crate) enum DragCancelReason {
 
 /// The cancel FACT: the origin verbatim plus the reason (§7 "plugin
 /// receives … cancel reason").
+// Bench seam, SCN-024; ADR-007 item 3; never wire (the cancel FACT the bench asserts).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DragCancelled {
+pub struct DragCancelled {
     /// The surface the drag ran on.
     pub surface_id: StableId,
     /// The dragged element (the origin's address, verbatim).
@@ -284,8 +300,10 @@ pub(crate) struct DragCancelled {
 
 /// What one machine-level `move_drag` did — every disposition is terminal
 /// for that gesture.
+// Bench seam, SCN-024; ADR-007 item 3; never wire (move_drag's disposition the bench asserts).
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum MoveDisposition {
+pub enum MoveDisposition {
     /// No drag on this surface (the pointer move is host-local noise).
     Inactive,
     /// Armed but still below [`DRAG_THRESHOLD_PX`]: parked nothing,
@@ -302,8 +320,10 @@ pub(crate) enum MoveDisposition {
 
 /// Why `begin` / `settle` / `cancel` refused. Display text follows the
 /// machines' refusal convention (the SWG-002/003 string style).
+// Bench seam, SCN-024; ADR-007 item 3; never wire (the refusals the bench's probes assert).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DragRefusal {
+pub enum DragRefusal {
     /// A begin while the surface's session is already `Armed`/`InFlight`
     /// (the SWG-003 `AlreadyInFlight` shape).
     DuplicateBegin(StableId),
@@ -363,8 +383,11 @@ impl fmt::Display for DragRefusal {
 /// do); the `refusals_*` pair counts their refusals. A refusal never moves
 /// a counter other than its own — `NotInFlight` and `ForeignSurface` move
 /// none at all (pinned by `counters_are_the_defect_probe`).
+// Bench seam, SCN-024; ADR-007 item 3; never wire (the §16 evolution the bench prints
+// before/after at storm milestones). Not part of the host's documentary API; NOT a wire change.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct DragCounters {
+pub struct DragCounters {
     /// `begin` calls that armed a session.
     pub begins: usize,
     /// Accepted move parks (the crossing move + every InFlight park).
@@ -390,8 +413,12 @@ pub(crate) struct DragCounters {
 /// One surface's drag rail: the machine ALL drag gestures of ONE widget
 /// surface route through. The newest pointer point always wins; the origin
 /// never changes once armed; every completion is exactly-once.
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only widening so the
+// `widget_interaction` bench (a separate crate) constructs and drives the REAL per-surface
+// rail. Not part of the host's documentary API; NOT a wire change.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
-pub(crate) struct DragSession {
+pub struct DragSession {
     /// The surface this rail answers (its registry key — never mutated).
     surface_id: StableId,
     phase: DragPhase,
@@ -414,7 +441,9 @@ pub(crate) struct DragSession {
 
 impl DragSession {
     /// A fresh Idle rail for `surface_id`.
-    pub(crate) fn new(surface_id: StableId) -> Self {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn new(surface_id: StableId) -> Self {
         Self {
             surface_id,
             phase: DragPhase::Idle,
@@ -429,7 +458,9 @@ impl DragSession {
 
     /// A fresh Idle rail with the initial synced draggable set (the mount
     /// registration convenience — sync the def walk's result at once).
-    pub(crate) fn with_draggables(
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn with_draggables(
         surface_id: StableId,
         addresses: impl IntoIterator<Item = StableId>,
     ) -> Self {
@@ -439,17 +470,23 @@ impl DragSession {
     }
 
     /// The rail's surface id (its registry key).
-    pub(crate) fn surface_id(&self) -> StableId {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn surface_id(&self) -> StableId {
         self.surface_id
     }
 
     /// The current phase (the exactly-once guard's observable).
-    pub(crate) fn phase(&self) -> DragPhase {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn phase(&self) -> DragPhase {
         self.phase
     }
 
     /// The §16 counter snapshot (the tests' defect probe).
-    pub(crate) fn counters(&self) -> DragCounters {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn counters(&self) -> DragCounters {
         self.counters
     }
 
@@ -477,7 +514,9 @@ impl DragSession {
     ///   counter; the SWG-003 exactly-once shape),
     /// - [`DragRefusal::NotDraggable`] — not in the synced draggable set
     ///   (its own counter).
-    pub(crate) fn begin(
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn begin(
         &mut self,
         surface: StableId,
         address: StableId,
@@ -522,7 +561,9 @@ impl DragSession {
     /// One pointer move into the rail. Honors the arm threshold
     /// ([`DRAG_THRESHOLD_PX`]); otherwise parks the newest point (latest
     /// wins — INT-2) and reports the disposition.
-    pub(crate) fn move_drag(&mut self, point: Point) -> MoveDisposition {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn move_drag(&mut self, point: Point) -> MoveDisposition {
         match self.phase {
             DragPhase::Armed => {
                 let origin = match &self.origin {
@@ -562,7 +603,9 @@ impl DragSession {
     /// emission ([`DragSession::release_delivered_move`]) — the headless
     /// twin of the grip pump's `take_sendable_move` (grip_points.rs line
     /// 586).
-    pub(crate) fn take_deliverable_move(&mut self) -> Option<Point> {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn take_deliverable_move(&mut self) -> Option<Point> {
         if self.phase != DragPhase::InFlight || self.moves_in_flight {
             return None;
         }
@@ -576,7 +619,9 @@ impl DragSession {
     /// The delivery completed (the router's same-tick release — the host-
     /// local channel is synchronous; the wire era keeps the slot held until
     /// the plugin answers). Returns whether a delivery was pending release.
-    pub(crate) fn release_delivered_move(&mut self) -> bool {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn release_delivered_move(&mut self) -> bool {
         std::mem::replace(&mut self.moves_in_flight, false)
     }
 
@@ -611,7 +656,9 @@ impl DragSession {
     /// click); calling settle while Armed refuses [`DragRefusal::NotInFlight`]
     /// without counters. Re-settling the consumed session refuses
     /// [`DragRefusal::NotInFlight`] the same way (exactly-once).
-    pub(crate) fn settle(&mut self, end_point: Point) -> Result<DragSettled, DragRefusal> {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn settle(&mut self, end_point: Point) -> Result<DragSettled, DragRefusal> {
         if self.phase != DragPhase::InFlight {
             return Err(DragRefusal::NotInFlight);
         }
@@ -656,7 +703,9 @@ impl DragSession {
     /// below threshold — Escape during a pressed pointer — is still a 1:1
     /// completion); the consumed family refuses [`DragRefusal::NotInFlight`]
     /// exactly-once.
-    pub(crate) fn cancel(&mut self, reason: DragCancelReason) -> Result<DragCancelled, DragRefusal> {
+    // Bench seam, SCN-024; ADR-007 item 3; never wire.
+    #[doc(hidden)]
+    pub fn cancel(&mut self, reason: DragCancelReason) -> Result<DragCancelled, DragRefusal> {
         if !matches!(self.phase, DragPhase::Armed | DragPhase::InFlight) {
             return Err(DragRefusal::NotInFlight);
         }

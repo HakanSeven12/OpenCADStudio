@@ -253,6 +253,7 @@ fn base_surface() -> WidgetSurface {
     }
     let surface = WidgetSurface {
         revision: SceneRevision(BASE_REVISION),
+        tables: std::collections::BTreeMap::new(),
         roots: vec![WidgetNode::Group(WidgetGroup {
             id: StableId(ROOT_GROUP_ID),
             name: Some("patch base".to_owned()),
@@ -323,6 +324,7 @@ fn scenario_surface_scale(out: &mut Vec<ScenarioRecord>) {
             };
             let surface = WidgetSurface {
                 revision: SceneRevision(BASE_REVISION),
+                tables: std::collections::BTreeMap::new(),
                 roots: vec![WidgetNode::Group(WidgetGroup {
                     id: StableId(ROOT_GROUP_ID),
                     name: None,
@@ -670,6 +672,7 @@ fn scenario_widget_patch_scaling(out: &mut Vec<ScenarioRecord>) {
 fn big_list_surface(items: usize) -> WidgetSurface {
     let surface = WidgetSurface {
         revision: SceneRevision(BASE_REVISION),
+        tables: std::collections::BTreeMap::new(),
         roots: vec![WidgetNode::Group(WidgetGroup {
             id: StableId(ROOT_GROUP_ID),
             name: None,
@@ -1021,6 +1024,7 @@ fn scenario_selection_window_math(out: &mut Vec<ScenarioRecord>) {
 fn surface_with_list(items: usize) -> WidgetSurface {
     WidgetSurface {
         revision: SceneRevision(BASE_REVISION),
+        tables: std::collections::BTreeMap::new(),
         roots: vec![WidgetNode::Group(WidgetGroup {
             id: StableId(ROOT_GROUP_ID),
             name: None,

@@ -515,10 +515,15 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
     let mut current = [0.0, 0.0];
     for (function, p) in &records {
         let s = |k: usize| p.get(k).map(|w| *w as i16 as f64).unwrap_or(0.0);
-        let points = |from: usize, count: usize| -> Vec<[f64; 2]> {
-            (0..count)
-                .map(|k| [s(from + 2 * k), s(from + 2 * k + 1)])
-                .collect()
+        // `None` when the record holds fewer points than it claims: a
+        // record cut short is skipped, so a count read from the file
+        // never makes more points than the file has.
+        let points = |from: usize, count: usize| -> Option<Vec<[f64; 2]>> {
+            (from + 2 * count <= p.len()).then(|| {
+                (0..count)
+                    .map(|k| [s(from + 2 * k), s(from + 2 * k + 1)])
+                    .collect()
+            })
         };
         let create = |table: &mut Vec<Option<Object>>, object: Object| match table
             .iter()
@@ -606,24 +611,32 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
             // POLYLINE
             0x0325 => {
                 if !pen.null {
-                    let line = points(1, s(0) as usize);
-                    player.polyline(&line, false, pen.width, pen.rgb);
+                    if let Some(line) = points(1, s(0) as usize) {
+                        player.polyline(&line, false, pen.width, pen.rgb);
+                    }
                 }
             }
             // POLYGON
             0x0324 => {
-                let ring = points(1, s(0) as usize);
-                player.shape(&ring, &pen, &brush);
+                if let Some(ring) = points(1, s(0) as usize) {
+                    player.shape(&ring, &pen, &brush);
+                }
             }
-            // POLYPOLYGON: counts, then every ring's points
+            // POLYPOLYGON: counts, then every ring's points; one ring cut
+            // short skips them all
             0x0538 => {
                 let rings = s(0) as usize;
                 let mut from = 1 + rings;
-                for k in 0..rings {
-                    let count = s(1 + k) as usize;
-                    let ring = points(from, count);
+                let shapes: Option<Vec<_>> = (0..rings)
+                    .map(|k| {
+                        let count = s(1 + k) as usize;
+                        let ring = points(from, count);
+                        from += 2 * count;
+                        ring
+                    })
+                    .collect();
+                for ring in shapes.unwrap_or_default() {
                     player.shape(&ring, &pen, &brush);
-                    from += 2 * count;
                 }
             }
             // RECTANGLE, ROUNDRECT (bottom, right, top, left; corner
@@ -738,4 +751,108 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
         fonts: player.fonts,
         text_fonts: player.text_fonts,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const POLYGON: u16 = 0x0324;
+    const POLYLINE: u16 = 0x0325;
+    const POLYPOLYGON: u16 = 0x0538;
+    /// Three points (x, y): (0, 0), (500, 0), (500, 500).
+    const TRIANGLE: [u16; 6] = [0, 0, 500, 0, 500, 500];
+
+    /// A record: its size in words, its function, its parameters.
+    fn record(function: u16, params: &[u16]) -> Vec<u8> {
+        let mut out = (3 + params.len() as u32).to_le_bytes().to_vec();
+        out.extend(function.to_le_bytes());
+        for p in params {
+            out.extend(p.to_le_bytes());
+        }
+        out
+    }
+
+    /// A metafile: the header, a 1000 by 1000 window, `records`, the end.
+    fn metafile(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut body = record(0x020C, &[1000, 1000]);
+        for r in records {
+            body.extend(r);
+        }
+        body.extend(record(0x0000, &[]));
+        let mut out = Vec::new();
+        for word in [1u16, 9, 0x0300] {
+            out.extend(word.to_le_bytes());
+        }
+        out.extend(((18 + body.len() as u32) / 2).to_le_bytes());
+        out.extend([0; 8]); // objects, largest record, parameters: not read
+        out.extend(body);
+        out
+    }
+
+    /// The vertex count of each polyline the file gives, in order.
+    fn polylines(bytes: &[u8]) -> Vec<usize> {
+        read(bytes, [100.0, 100.0])
+            .expect("a metafile")
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                EntityType::Polyline2D(p) => Some(p.vertices.len()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn with_count(count: u16, points: &[u16]) -> Vec<u16> {
+        [&[count][..], points].concat()
+    }
+
+    #[test]
+    fn records_that_hold_their_points_are_drawn() {
+        let rings = [&[2, 3, 3][..], &TRIANGLE, &TRIANGLE].concat();
+        let file = metafile(&[
+            record(POLYLINE, &with_count(3, &TRIANGLE)),
+            record(POLYGON, &with_count(3, &TRIANGLE)),
+            record(POLYPOLYGON, &rings),
+        ]);
+        assert_eq!(polylines(&file), [3, 3, 3, 3]);
+    }
+
+    #[test]
+    fn a_record_cut_short_is_skipped() {
+        // Each claims more points than it holds; the triangle after them
+        // is still drawn.
+        let file = metafile(&[
+            record(POLYLINE, &with_count(4, &TRIANGLE)),
+            record(POLYGON, &with_count(4, &TRIANGLE)),
+            record(POLYLINE, &[32767]),
+            record(POLYLINE, &with_count(3, &TRIANGLE)),
+        ]);
+        assert_eq!(polylines(&file), [3]);
+    }
+
+    #[test]
+    fn a_polypolygon_cut_short_is_skipped_whole() {
+        // The second ring is one point short; then ring counts that are
+        // not all there.
+        let short_ring = [&[2, 3, 4][..], &TRIANGLE, &TRIANGLE].concat();
+        let file = metafile(&[
+            record(POLYPOLYGON, &short_ring),
+            record(POLYPOLYGON, &[3, 3]),
+        ]);
+        assert_eq!(polylines(&file), [0usize; 0]);
+    }
+
+    #[test]
+    fn no_file_gives_more_points_than_it_holds() {
+        let mut records = vec![record(POLYLINE, &[32767]); 100];
+        records.push(record(POLYPOLYGON, &[&[100][..], &[32767; 100]].concat()));
+        let file = metafile(&records);
+        let vertices: usize = polylines(&file).iter().sum();
+        assert!(
+            vertices <= file.len() / 4,
+            "{vertices} vertices from {} bytes",
+            file.len()
+        );
+    }
 }

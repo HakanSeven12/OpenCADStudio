@@ -113,22 +113,30 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Resolves once `delay` has passed, for hover delays (the dock's, a drawing
-/// tab's layouts list): a sleeping helper thread; the web build has none and
-/// resolves at once.
-pub(in crate::app) fn rest(
-    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] delay: std::time::Duration,
-) -> impl std::future::Future<Output = ()> {
+/// tab's layouts list): a sleeping helper thread, or a browser timer on the
+/// web build.
+pub(in crate::app) fn rest(delay: std::time::Duration) -> impl std::future::Future<Output = ()> {
+    let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
     #[cfg(not(target_arch = "wasm32"))]
-    let rx = {
-        let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
-        std::thread::spawn(move || {
-            std::thread::sleep(delay);
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        let _ = tx.send(());
+    });
+    #[cfg(target_arch = "wasm32")]
+    if let Some(window) = web_sys::window() {
+        let fire = wasm_bindgen::closure::Closure::once_into_js(move || {
             let _ = tx.send(());
         });
-        rx
-    };
+        let fire = js_sys::Function::from(fire);
+        let ms = i32::try_from(delay.as_millis()).unwrap_or(i32::MAX);
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments(
+            fire.as_ref(),
+            ms,
+            &js_sys::Array::new(),
+        );
+    }
+    // A dropped sender (no window, failed timer) resolves at once.
     async move {
-        #[cfg(not(target_arch = "wasm32"))]
         let _ = rx.await;
     }
 }
@@ -4048,6 +4056,11 @@ impl OpenCADStudio {
                 } else {
                     self.update(Message::TabSwitch(idx))
                 };
+                // The switch can be refused (a recovery prompt is open); the
+                // layout belongs to that tab, not to the one still active.
+                if self.active_tab != idx {
+                    return switch;
+                }
                 let layout = if self.tabs[self.active_tab].scene.current_layout == layout {
                     Task::none()
                 } else {

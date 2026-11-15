@@ -98,6 +98,44 @@ def release_notes(previous, tag, repo, head="HEAD"):
     return "\n".join(lines)
 
 
+UNRELEASED = Path("changelogs/unreleased.md")
+EMPTY_SUMMARY = "> **Summary:** Nothing yet."
+
+
+def changelog_page(tag, day):
+    """changelogs/unreleased.md titled for the release: published verbatim as
+    the release notes and kept as changelogs/<tag>.md. None when empty."""
+    if not UNRELEASED.is_file():
+        return None
+    body = UNRELEASED.read_text(encoding="utf-8").partition("\n")[2]
+    if body.strip() in ("", EMPTY_SUMMARY):
+        return None
+    return f"# OpenCADStudio - Release {tag} ({day})\n{body}"
+
+
+def rotate_changelog(tag, day, page):
+    """Keep the release page as changelogs/<tag>.md and start a new unreleased
+    page; CHANGELOG.md's index row and summary follow."""
+    UNRELEASED.with_name(f"{tag}.md").write_text(page, encoding="utf-8")
+    UNRELEASED.write_text(f"# OpenCADStudio - Unreleased ({day} to Present)\n\n{EMPTY_SUMMARY}\n", encoding="utf-8")
+    index = Path("CHANGELOG.md")
+    text = index.read_text(encoding="utf-8")
+    row = re.search(r"^\| \*\*\[Unreleased\]\(changelogs/unreleased\.md\)\*\* \| [^|]* \| ([^|]*) \|.*$", text, re.M)
+    section = re.search(r"^## \[Unreleased\] - .*$", text, re.M)
+    if not row or not section:
+        raise ValueError("CHANGELOG.md has no Unreleased row or section")
+    new_row = (f"| **[Unreleased](changelogs/unreleased.md)** | *{day} to Present* | — | [changelogs/unreleased.md](changelogs/unreleased.md) |\n"
+               f"| **[{tag}](changelogs/{tag}.md)** | *{day}* | {row[1]} | [changelogs/{tag}.md](changelogs/{tag}.md) |")
+    new_section = (f"## [Unreleased] - {day}\n\n> **Summary:** Nothing yet. See the [full Unreleased notes](changelogs/unreleased.md).\n\n"
+                   f"## [{tag}] - {day}")
+    # The old Unreleased summary now links the release page.
+    end = text.find("\n## ", section.end())
+    end = len(text) if end < 0 else end
+    old = text[section.end():end].replace("[full Unreleased notes](changelogs/unreleased.md)", f"[full {tag} release notes](changelogs/{tag}.md)")
+    text = text[:row.start()] + new_row + text[row.end():section.start()] + new_section + old + text[end:]
+    index.write_text(text, encoding="utf-8")
+
+
 def prepare(publish):
     if run("git", "status", "--porcelain"):
         raise ValueError("Release preparation requires a clean working tree")
@@ -122,7 +160,16 @@ def prepare(publish):
     elif run("git", "rev-list", "--count", f"{latest}..HEAD") == "0":
         output({"ready": "false"})
         return
-    notes = release_notes(latest, tag, repo, tag if existing else "HEAD")
+    day = current.strftime("%Y-%m-%d")
+    if existing:
+        # A retry publishes the page the release commit already keeps.
+        try:
+            page = run("git", "show", f"{tag}:changelogs/{tag}.md") + "\n"
+        except subprocess.CalledProcessError:
+            page = None
+    else:
+        page = changelog_page(tag, day)
+    notes = page or release_notes(latest, tag, repo, tag if existing else "HEAD")
     print(notes)
     if not publish:
         output({"ready": "false", **version, "commit": run("git", "rev-parse", "HEAD")})
@@ -141,6 +188,9 @@ def prepare(publish):
         run("git", "config", "user.name", "github-actions[bot]")
         run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
         run("git", "add", "Cargo.toml", "Cargo.lock")
+        if page:
+            rotate_changelog(tag, day, page)
+            run("git", "add", "changelogs", "CHANGELOG.md")
         run("git", "commit", "-m", f"Release {tag}")
         run("git", "tag", "-a", tag, "-m", f"Release {tag}")
         run("git", "push", "--atomic", "origin", "HEAD:main", f"refs/tags/{tag}")

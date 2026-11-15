@@ -6,7 +6,8 @@
 //! routing INTO the machines (`apply_mount_msg`); this is the app half:
 //!
 //! 1. find the registered surface by the message's surface id
-//!    ([`MountRegistry::handle_for_surface`]) — an unknown/unregistered id
+//!    ([`MountRegistry::handle_for_surface_owned`], the app-owned registry
+//!    since SCN-016) — an unknown/unregistered id
 //!    is a graceful no-op (no panic, nothing routed, no event exists);
 //! 2. FORWARD: `apply_mount_msg` runs and every emitted [`WidgetEvent`]
 //!    leaves through the COLLECTING sink ([`CollectingSink`]) — the
@@ -22,10 +23,12 @@
 //!    focus arm nothing and settle nothing.
 //!
 //! A `PromptRequested` routing records the bridge's prompt tick-count and
-//! collects NO event — the real confirm dialog rides the app's existing
-//! modal patterns and is the SCN-015 follow-up (recorded, not claimed).
-//! Host-local only: `Message` carries no serialization derives (no wire
-//! type), so the appended variant's only consumer is this arm.
+//! collects NO event — the real confirm dialog LANDED (SCN-016): the arm's
+//! tail `arm_widget_prompt_modal` (`app::update::widget_prompt`) runs the
+//! SHOW POLICY and the app's existing modal machinery displays the desc
+//! (`ModalKind::WidgetPrompt`). Host-local only: `Message` carries no
+//! serialization derives (no wire type), so the appended variants' only
+//! consumers are these arms.
 
 use iced::keyboard::{Key, Modifiers, key as keyboard_key};
 use iced::{Point, Task};
@@ -33,10 +36,12 @@ use iced::{Point, Task};
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::plugin_widget_mount::{
     CollectingSink, MountRegistry, MountRouting, SurfaceMountHandle, WidgetMountMsg,
-    apply_mount_msg, key_route, mount_table_key_route, msg_surface_id,
+    apply_mount_msg, key_route_owned, msg_surface_id,
 };
+#[cfg(test)]
 use crate::ui::window::plugin_widgets::WindowSpec;
 use crate::ui::window::plugin_widgets_dispatch::DispatchKey;
+#[cfg(test)]
 use crate::ui::window::plugin_widgets_tables::{CellFocus, TableUiState};
 use ocs_plugin_api::scene::StableId;
 use ocs_plugin_api::widgets::WidgetEvent;
@@ -73,10 +78,14 @@ fn settle_address_of(msg: &WidgetMountMsg) -> Option<DispatchKey> {
         | WidgetMountMsg::SelectionChanged { .. }
         | WidgetMountMsg::Scrolled { .. }
         | WidgetMountMsg::FocusMoved { .. }
-        // Pointer messages capture/never arm the dispatcher (§14).
+        // Pointer messages capture/never arm the dispatcher (§14); the
+        // keyboard route's own tail variants never reach this bridge core
+        // either (their arms pre-route them).
         | WidgetMountMsg::PointerPressed { .. }
         | WidgetMountMsg::PointerMoved { .. }
-        | WidgetMountMsg::PointerReleased { .. } => None,
+        | WidgetMountMsg::PointerReleased { .. }
+        | WidgetMountMsg::KeyPressed { .. }
+        | WidgetMountMsg::PointerReleasedAnywhere => None,
     }
 }
 
@@ -86,7 +95,13 @@ fn settle_address_of(msg: &WidgetMountMsg) -> Option<DispatchKey> {
 /// Forward-then-settle (see the module docs): the sink drains after the
 /// machines returned, the settle runs after the sink drained. The counters
 /// move with the verdict (routed/prompts — the §16 tick-count handles).
-pub(crate) fn route_mount_msg(
+///
+/// The registry rides as the FIRST parameter (SCN-016's app-owned
+/// migration): every lifecycle probe is the app-owned store's own, so this
+/// core asks the caller for the store it updates — the arm passes
+/// `&mut self.mount_registry`.
+pub(crate) fn route_mount_msg_owned(
+    registry: &mut MountRegistry,
     handle: &SurfaceMountHandle,
     msg: &WidgetMountMsg,
 ) -> MountBridgeOutcome {
@@ -107,14 +122,16 @@ pub(crate) fn route_mount_msg(
             .settle(key),
         _ => false,
     };
-    MountRegistry::record_message_routed();
+    registry.record_message_routed_owned();
     if matches!(routing, MountRouting::PromptRequested { .. }) {
-        MountRegistry::record_prompt_surfaced();
+        registry.record_prompt_surfaced_owned();
         // SCN-020: name the armed interaction for the keyboard layer's
         // Escape cancel (the hint; the dispatcher's dismiss_prompt stays
-        // the cancel edge).
+        // the cancel edge). SCN-016: this SAME record arms the app's prompt
+        // MODAL (the desc read in `app::view::modal` — the registry's
+        // `prompts` map is the modal's content source).
         if let Some(key) = settle_address_of(msg) {
-            MountRegistry::mount_record_prompt_armed(msg_surface_id(msg), key);
+            registry.mount_record_prompt_armed_owned(msg_surface_id(msg), key);
         }
     }
     let events = sink.take();
@@ -123,6 +140,19 @@ pub(crate) fn route_mount_msg(
         events,
         settled,
     }
+}
+
+/// The headless tests' facade: the SAME [`route_mount_msg_owned`] core over
+/// the mount module's cfg(test) registry cell (the pre-migration static
+/// signature — see the seam block in `plugin_widget_mount.rs`).
+#[cfg(test)]
+pub(crate) fn route_mount_msg(
+    handle: &SurfaceMountHandle,
+    msg: &WidgetMountMsg,
+) -> MountBridgeOutcome {
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        route_mount_msg_owned(registry, handle, msg)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -156,8 +186,12 @@ pub(crate) struct MountMoveOutcome {
 /// never runs a pass per move, so it defers unconditionally — there is no
 /// pass-cost gate to measure (the viewport's measured-gate discipline reduced
 /// to its invariant).
-pub(crate) fn route_mount_move(surface_id: StableId, position: Point) -> MountMoveOutcome {
-    match MountRegistry::mount_move_defer(surface_id, position) {
+pub(crate) fn route_mount_move_owned(
+    registry: &mut MountRegistry,
+    surface_id: StableId,
+    position: Point,
+) -> MountMoveOutcome {
+    match registry.mount_move_defer_owned(surface_id, position) {
         Some(superseded) => MountMoveOutcome {
             registered: true,
             superseded,
@@ -170,11 +204,11 @@ pub(crate) fn route_mount_move(surface_id: StableId, position: Point) -> MountMo
 }
 
 /// The press route: pointer capture ON for the surface
-/// ([`MountRegistry::mount_press`]); the press also makes the surface the
+/// ([`MountRegistry::mount_press_owned`]); the press also makes the surface the
 /// keyboard's target (the desktop input model). `false` = unknown surface
 /// (graceful).
-pub(crate) fn route_mount_press(surface_id: StableId) -> bool {
-    MountRegistry::mount_press(surface_id)
+pub(crate) fn route_mount_press_owned(registry: &mut MountRegistry, surface_id: StableId) -> bool {
+    registry.mount_press_owned(surface_id)
 }
 
 /// The release route: capture completes (release ANYWHERE — the pure
@@ -183,64 +217,93 @@ pub(crate) fn route_mount_press(surface_id: StableId) -> bool {
 /// [`OpenCADStudio::on_mount_key`]'s sibling note) and the surface's owed
 /// move — if the gesture left one — is delivered NOW (exactly ≤1). Returns
 /// the delivered count.
+pub(crate) fn route_mount_release_owned(registry: &mut MountRegistry, surface_id: StableId) -> usize {
+    registry.mount_pointer_released_owned(surface_id)
+}
+
+#[cfg(test)]
+pub(crate) fn route_mount_move(surface_id: StableId, position: Point) -> MountMoveOutcome {
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        route_mount_move_owned(registry, surface_id, position)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn route_mount_press(surface_id: StableId) -> bool {
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        route_mount_press_owned(registry, surface_id)
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn route_mount_release(surface_id: StableId) -> usize {
-    MountRegistry::mount_pointer_released(surface_id)
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        route_mount_release_owned(registry, surface_id)
+    })
 }
 
 /// The keyboard routing RESOLUTION (SCN-020, the pure layer): one key event
 /// against the mounted keyboard target → the mount messages to route, in
 /// order, through the ordinary bridge (`Message::WidgetMountMsg` →
-/// [`route_mount_msg`]). The resolution:
+/// [`route_mount_msg_owned`]). The resolution:
 ///
-/// - the TARGET surface is [`MountRegistry::mount_key_surface`]'s (the
+/// - the TARGET surface is [`MountRegistry::mount_key_surface_owned`]'s (the
 ///   press-captured surface, else the sole registered mount — the
 ///   keyboard-only §16 path; `None` → no messages, graceful);
 /// - translation is [`key_route`]'s (the mount module's pure keyboard
 ///   layer — arrows/Tab/Enter over the machines' ring; disabled skipped BY
 ///   the state layer; chords own nothing);
 /// - ESCAPE is the machine-direct cancel (no message): the armed prompt
-///   dismissal runs HERE ([`MountRegistry::mount_escape_cancel`]); the
+///   dismissal runs HERE ([`MountRegistry::mount_escape_cancel_owned`]); the
 ///   drag cancel is deliberately NOT coupled in (SCN-021 adds its own arm).
 ///
 /// The "app-ish state" the original brief sketched stays UNPARAMETERIZED
 /// in v1 on purpose: the mount's routes resolve entirely through the
-/// registry-side surfaces, so there is nothing of `OpenCADStudio` to read
-/// yet — the app-owned registry migration (SCN-015) is the crossing where
-/// this signature would grow the app state in.
-///
-/// The app-hook completion status (RECORDED, the SCN-015-style deferral):
-/// the pure layer is COMPLETE here (this fn + [`route_mount_msg`]);
-/// `OpenCADStudio::on_mount_key` below is the one-delegation call the real
-/// keyboard listener hands to — but the LISTENER lives in the app
-/// `view/mod.rs` event composition (`main_window_event`), which SCN-020
-/// does not own. Until that one-line hookup lands, no live key event
-/// reaches this layer; the headless tests drive the full path.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn handle_mount_key(key: Key, modifiers: Modifiers) -> Vec<WidgetMountMsg> {
-    let Some(surface_id) = MountRegistry::mount_key_surface() else {
+/// app-owned registry (`self.mount_registry` since SCN-016) — the store
+/// rides as this core's FIRST parameter, and there is still nothing of
+/// `OpenCADStudio` beyond it to read.
+pub(crate) fn handle_mount_key_owned(
+    registry: &mut MountRegistry,
+    key: Key,
+    modifiers: Modifiers,
+) -> Vec<WidgetMountMsg> {
+    let Some(surface_id) = registry.mount_key_surface_owned() else {
         return Vec::new();
     };
     // Escape: the mounted surface's cancel is machine-direct (the state
     // layers' own hooks — the armed prompt's dismissal); no route message
     // exists for it and no machine sees a KEY.
     if key == Key::Named(keyboard_key::Named::Escape) {
-        MountRegistry::mount_escape_cancel(surface_id);
+        registry.mount_escape_cancel_owned(surface_id);
         return Vec::new();
     }
-    let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
+    let Some(handle) = registry.handle_for_surface_owned(surface_id) else {
         return Vec::new();
     };
     let mut state = handle.state.borrow_mut();
-    key_route(surface_id, &handle.surface, &mut state, key, modifiers)
+    key_route_owned(registry, surface_id, &handle.surface, &mut state, key, modifiers)
+}
+
+/// The headless tests' facade: the SAME [`handle_mount_key_owned`] core
+/// over the mount module's cfg(test) registry cell (the pre-migration
+/// static signature — see the seam block in `plugin_widget_mount.rs`).
+#[cfg(test)]
+pub(crate) fn handle_mount_key(key: Key, modifiers: Modifiers) -> Vec<WidgetMountMsg> {
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        handle_mount_key_owned(registry, key, modifiers)
+    })
 }
 
 /// The typed-table keyboard route's REACH-THROUGH (SCN-020): the typed
 /// table machine is state-layer-complete and the mount's table placeholder
 /// is not interactive yet, so the table's keyboard layer is exposed as the
 /// PURE consumption [`mount_table_key_route`] (tested at the mount module;
-/// the typed-table MOUNT integration rides it). Reached only by tests
-/// today — surfaced here so the ONE route surface stays discoverable.
-#[cfg_attr(not(test), allow(dead_code))]
+/// the typed-table MOUNT integration rides it). cfg(test): the mount-side
+/// core ([`mount_table_key_route_owned`]) writes the app-owned registry's
+/// nav-step probe, so this reach-through is the tests' cell-backed seam —
+/// the TABLE route surface stays discoverable here for the MOUNT
+/// integration of the later task.
+#[cfg(test)]
 pub(crate) fn handle_mount_table_key(
     state: &mut TableUiState,
     cell_cursor: &mut Option<CellFocus>,
@@ -249,15 +312,22 @@ pub(crate) fn handle_mount_table_key(
     spec: &WindowSpec,
     column_order: &[StableId],
 ) -> Option<crate::ui::window::plugin_widget_mount::MountTableKeyStep> {
-    mount_table_key_route(state, cell_cursor, key, modifiers, spec, column_order)
+    crate::ui::window::plugin_widget_mount::mount_table_key_route(
+        state,
+        cell_cursor,
+        key,
+        modifiers,
+        spec,
+        column_order,
+    )
 }
 
 impl OpenCADStudio {
     /// The `Message::WidgetMountMsg` arm's handler: route one
     /// builder-emitted mount gesture into its registered surface's
-    /// machines (forward → settle; see [`route_mount_msg`]) and drop the
-    /// drained events at the collecting seam (the publish hang-off is the
-    /// ADR-004 crossing — SCN-015).
+    /// machines (forward → settle; see [`route_mount_msg_owned`]) and drop
+    /// the drained events at the collecting seam (the publish hang-off is
+    /// the ADR-004 crossing — SCN-015).
     ///
     /// UNKNOWN surface: a graceful no-op — no panic, nothing routed, no
     /// event; a REGISTERED surface's stale content (a cross-surface or
@@ -267,49 +337,98 @@ impl OpenCADStudio {
     /// SCN-020: the mount's POINTER messages do NOT take the machine
     /// route — they OWN the input layer ([`route_mount_press`]/[`route_mount_move`]
     /// /[`route_mount_release`]: capture + the latest-wins coalescer, §14
-    /// host-local) and are resolved before the machine path.
+    /// host-local) and are resolved before the machine path. The
+    /// window-level release variant completes EVERY armed capture (the
+    /// release-anywhere contract; the catcher rides
+    /// `app::view::mod`'s subscription composition).
+    ///
+    /// SCN-016: the KEY-variant is the live keyboard join — the app's real
+    /// listener hands keys to the complete [`Self::on_mount_key`] route.
+    /// A `PromptRequested` machine routing ARMS the app's prompt-modal
+    /// flow: the reveal state lives on the app (see
+    /// `app::update::widget_prompt`), the desc rides in the registry
+    /// (unchanged), and the modal machinery itself is the app's existing
+    /// modal overlay.
     pub(in crate::app) fn on_widget_mount_msg(
         &mut self,
         msg: WidgetMountMsg,
     ) -> Task<Message> {
         match &msg {
             WidgetMountMsg::PointerPressed { surface_id, .. } => {
-                route_mount_press(*surface_id);
+                route_mount_press_owned(&mut self.mount_registry.borrow_mut(), *surface_id);
                 return Task::none();
             }
             WidgetMountMsg::PointerMoved { surface_id, position } => {
-                let _ = route_mount_move(*surface_id, *position);
+                let _ = route_mount_move_owned(&mut self.mount_registry.borrow_mut(), *surface_id, *position);
                 return Task::none();
             }
             WidgetMountMsg::PointerReleased { surface_id, .. } => {
-                route_mount_release(*surface_id);
+                route_mount_release_owned(&mut self.mount_registry.borrow_mut(), *surface_id);
                 return Task::none();
+            }
+            // The window-level release pulled inside any panel's area is
+            // the ordinary release route; the ANYWHERE catcher (this
+            // variant) completes every capture that still stands.
+            WidgetMountMsg::PointerReleasedAnywhere => {
+                let captured = self.mount_registry.borrow().captured_surfaces();
+                for surface_id in captured {
+                    route_mount_release_owned(
+                        &mut self.mount_registry.borrow_mut(),
+                        surface_id,
+                    );
+                }
+                return Task::none();
+            }
+            // SCN-016's keyboard join: live keys land on the complete
+            // route (resolve → translate → route → apply) — see
+            // [`Self::on_mount_key`].
+            WidgetMountMsg::KeyPressed { key, modifiers } => {
+                return self.on_mount_key(key.clone(), *modifiers);
             }
             _ => {}
         }
-        let Some(handle) = MountRegistry::handle_for_surface(msg_surface_id(&msg)) else {
+        let Some(handle) = self
+            .mount_registry
+            .borrow()
+            .handle_for_surface_owned(msg_surface_id(&msg))
+        else {
             // Unregistered surface: the bridge refuses gracefully.
             return Task::none();
         };
-        let outcome = route_mount_msg(&handle, &msg);
+        let outcome =
+            route_mount_msg_owned(&mut self.mount_registry.borrow_mut(), &handle, &msg);
         // Pre-wire drain — see the module docs (the collecting sink's
         // contract; the publish hang-off is the ADR-004 crossing).
         let _ = outcome.events;
+        // SCN-016: the arm's prompt-modal seam — the machine surfaced an
+        // armed confirmation, so the app's modal flow picks it up (open
+        // NOW when no other modal holds the slot; queued behind it
+        // otherwise — the SHOW POLICY in `app::update::widget_prompt`).
+        if matches!(outcome.routing, MountRouting::PromptRequested { .. }) {
+            self.arm_widget_prompt_modal(msg_surface_id(&msg));
+        }
         Task::none()
     }
 
     /// The mount keyboard route's app join (SCN-020): resolve the key
-    /// ([`handle_mount_key`]) and route EVERY produced message through the
-    /// ordinary `Message::WidgetMountMsg` bridge half.
+    /// ([`handle_mount_key_owned`]) and route EVERY produced message
+    /// through the ordinary `Message::WidgetMountMsg` bridge half.
     ///
-    /// WIRING STATUS (recorded — the records repeat [`handle_mount_key`]'s):
-    /// the real key listener is app `view/mod.rs` territory (SCN-020 does
-    /// not own it); this method is the complete, tested route the
-    /// listener's one-line hookup will hand to.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// WIRING STATUS (SCN-016 landed the join): the app's key event flow
+    /// hands a pressed key here through `Message::WidgetMountMsg(
+    /// WidgetMountMsg::KeyPressed { .. })` — the mount-key listener
+    /// `view/mod.rs`'s subscription composition selects exactly while a
+    /// mount surface holds the keyboard (and, for the prompt modal, while
+    /// it shows, for Escape's machine-direct dismissal). While no mount
+    /// owns the keyboard the ordinary `main_window_event` listener runs —
+    /// the unchanged app flow.
     pub(in crate::app) fn on_mount_key(&mut self, key: Key, modifiers: Modifiers) -> Task<Message> {
-        let msgs = handle_mount_key(key, modifiers);
+        let msgs = handle_mount_key_owned(&mut self.mount_registry.borrow_mut(), key, modifiers);
         if msgs.is_empty() {
+            // Escape's machine-direct cancel CAN consume an armed prompt
+            // (the route message list is empty all the same) — the prompt
+            // modal's close follows its consumed desc here.
+            self.close_widget_prompt_modal_if_consumed();
             return Task::none();
         }
         Task::batch(
@@ -320,17 +439,15 @@ impl OpenCADStudio {
     }
 
     /// The mount side of the move-coalesce tick (SCN-020): answer every
-    /// surface's LAST owed move ([`MountRegistry::mount_flush_moves`] —
-    /// ≤1 mount call per surface per tick, host-local state only). Joined
+    /// surface's LAST owed move ([`MountRegistry::mount_flush_moves_owned`]
+    /// — ≤1 mount call per surface per tick, host-local state only). Joined
     /// onto the EXISTING `Message::MoveCoalesceTick` arm
     /// (`app::update::mod.rs`) so both coalescers answer on the same
-    /// tick channel. NOTE (recorded): the tick subscription's PUMP
-    /// condition (`view/mod.rs`) still names only the viewport's owed
-    /// move — widening it is the same view-side seam as the keyboard
-    /// hookup; a mount move that stops while no other move arrives waits
-    /// for the next gesture (never a queue: the slot overwrites).
+    /// tick channel. SCN-016: the tick subscription's PUMP condition
+    /// (`view/mod.rs`) also flows while the MOUNT
+    /// ([`MountRegistry::any_move_owed`]) has a move owed.
     pub(in crate::app) fn on_mount_move_coalesce_tick(&mut self) -> Task<Message> {
-        let _ = MountRegistry::mount_flush_moves();
+        let _ = self.mount_registry.borrow_mut().mount_flush_moves_owned();
         Task::none()
     }
 }
@@ -706,6 +823,132 @@ mod tests {
         assert!(handle.state.borrow().selection().is_empty());
         assert_eq!(handle.state.borrow().mutations().row_state_changes, 0);
         assert_eq!(handle.state.borrow().pending_children().len(), 0);
+    }
+
+    // -- 4b. SCN-016: the LIVE-key hookup (the recorded join, landed) --------
+
+    /// The app's real key-event mapper (`app::view::mount_key_event` — the
+    /// listener the subscription chooser selects while a mount surface
+    /// holds the keyboard) hands a LIVE main-window key to the bridge as
+    /// `Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { .. })`, whose
+    /// arm runs the complete `on_mount_key` route: the key resolves ONCE
+    /// into the ring's focus + selection write and applies ONCE (the
+    /// bridge's message-count and the machines' end state are exact).
+    #[test]
+    fn live_key_through_mapper_routes_once() {
+        use crate::app::view as app_view;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("scn016_keyjoin");
+        // The keyboard grab — what a mount-panel press leaves (the events
+        // below run with no pointer in flight; the sole-surface resolution
+        // would name the same surface).
+        MountRegistry::set_mount_key_target(Some(sid(200)));
+        let before = MountRegistry::counters();
+
+        // A REAL key event (the mapper's input shape). The main-window id:
+        // with no OS main window registered (the headless default),
+        // `is_main_window` treats any id as the main window — the mapper's
+        // own rule, exercised as-is.
+        let key = iced::keyboard::Key::Named(keyboard_key::Named::ArrowDown);
+        let key_event = iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key.clone(),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: Modifiers::NONE,
+            text: None,
+            repeat: false,
+        });
+
+        // The mapper's join: a mount-routing key → the bridge message.
+        let msg = app_view::mount_key_event(
+            key_event,
+            iced::event::Status::Ignored,
+            iced::window::Id::unique(),
+        )
+        .expect("a mount-held keyboard hands the key through");
+        let Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { key, modifiers }) = msg else {
+            panic!("the join rides Message::WidgetMountMsg");
+        };
+        assert_eq!(modifiers, Modifiers::NONE);
+
+        // The arm: resolve → translate → route → apply, ONCE each.
+        let _ = app.update(Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { key, modifiers }));
+
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("the registered surface");
+        {
+            let state = handle.state.borrow();
+            assert_eq!(state.focus(), Some(sid(7)), "the arrow landed once");
+            assert_eq!(state.selection(), [sid(7)]);
+        }
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.keyboard_nav_steps - before.keyboard_nav_steps,
+            1,
+            "one resolved navigation step for the one key"
+        );
+        assert_eq!(
+            after.messages_routed - before.messages_routed,
+            2,
+            "the arrow's pair (focus + selection) routed exactly once each"
+        );
+    }
+
+    // -- 4c. SCN-016: the move-coalesce tick pump (the recorded join) -------
+
+    /// The mount owing a move keeps the EXISTING tick channel alive (the
+    /// pump condition's `any_move_owed` half); the tick ANSWERS the owed
+    /// move latest-wins: two moves owed = ONE mount call, the newest
+    /// position delivered (the older counted superseded, never queued),
+    /// and the capture's drag origin lands with the first delivered move.
+    #[test]
+    fn tick_pump_answers_mount_move_latest_wins() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("scn016_tickpump");
+        let _ = route_mount_press(sid(200));
+        assert!(MountRegistry::mount_captured(sid(200)), "press arms capture");
+
+        // Two moves: the LATEST wins (the first is counted superseded,
+        // never answered), the slot holds ONE position, the pump's gate
+        // sees the owed move.
+        let _ = route_mount_move(sid(200), iced::Point::new(1.0, 1.0));
+        let _ = route_mount_move(sid(200), iced::Point::new(9.0, 5.0));
+        assert!(
+            crate::ui::window::plugin_widget_mount::with_test_registry(|registry| {
+                registry.any_move_owed()
+            }),
+            "the pump condition flows while the mount owes a move"
+        );
+        let before = MountRegistry::counters();
+
+        // The REAL tick arm (the joined channel: `Message::MoveCoalesceTick`
+        // → `on_mount_move_coalesce_tick`): answers ≤1 per surface.
+        let _ = app.update(crate::app::Message::MoveCoalesceTick);
+
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.mount_move_calls - before.mount_move_calls,
+            1,
+            "exactly one mount call for the surface's owed move"
+        );
+        let hover = MountRegistry::mount_hover_state(sid(200)).expect("the input entry");
+        assert_eq!(
+            hover.last_move,
+            Some(iced::Point::new(9.0, 5.0)),
+            "latest wins"
+        );
+        assert_eq!(
+            hover.capture_origin,
+            Some(iced::Point::new(9.0, 5.0)),
+            "the capture origin lands with the first delivered move"
+        );
+        // And nothing is owed anymore (the pumped tick settled the slot).
+        assert!(!crate::ui::window::plugin_widget_mount::with_test_registry(
+            |registry| registry.any_move_owed()
+        ));
     }
 
     // -- 5. SCN-020: Enter activates the focused row through the bridge -------

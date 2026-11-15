@@ -22,7 +22,7 @@
 //!   [`WidgetDispatcher::dismiss_prompt`]: the pending stage + the armed
 //!   mark clear, NO event exists, and a later genuine click re-prompts
 //!   (the policy is per-def, not per-machine). The Escape cancel
-//!   ([`MountRegistry::mount_escape_cancel`]) lands in the SAME lifecycle
+//!   ([`MountRegistry::mount_escape_cancel_owned`]) lands in the SAME lifecycle
 //!   edges (machine dismiss + desc consumed + the dismissal probe).
 //!
 //! Refusals are the unknown-surface pattern, mirrored: a decision whose
@@ -110,40 +110,65 @@ pub(crate) struct PromptBridgeOutcome {
 ///    dismiss → `dismiss_prompt` → desc consumed + the probe (no settle:
 ///    the machine's dismissal IS the release).
 ///
+/// A refusal verdict under one probe tick — [`route_prompt_decision_owned`]'s
+/// refusal shape, hoisted out of the route body so the store borrow never
+/// lives across a closure (the app-owned registry rides as the first
+/// parameter).
+fn prompt_refused(
+    registry: &mut MountRegistry,
+    reason: String,
+) -> PromptBridgeOutcome {
+    registry.record_prompt_refused_owned();
+    PromptBridgeOutcome {
+        routing: PromptRouting::Refused(reason),
+        events: Vec::new(),
+        settled: false,
+    }
+}
+
+/// The FULL prompt-decision route (SCN-015) — the small wrapper the arm
+/// delegates to: ONE decision, ONE verdict, the TWO machine edges and ONE
+/// registry lifecycle:
+///
+/// 1. the surface must be a REGISTERED one (the unknown-surface no-op);
+/// 2. the registry's armed desc must name the decision's address (the
+///    not-pending / wrong-address graceful refusals — the registry stays
+///    the decision's gate so the machines are never touched by a decision
+///    naming nothing pending);
+/// 3. confirm → `confirm` → sink → settle → desc consumed + the probe;
+///    dismiss → `dismiss_prompt` → desc consumed + the probe (no settle:
+///    the machine's dismissal IS the release).
+///
 /// A machine-level refusal under a valid desc (unreachable in one
 /// synchronous route; defense in depth) also consumes the stale desc and
 /// refuses gracefully — the machines stay the semantic authority, the
 /// display copy self-heals.
-pub(crate) fn route_prompt_decision(
+///
+/// The registry rides as the FIRST parameter (SCN-016's app-owned
+/// migration): the store is the app's own (`&mut self.mount_registry`).
+pub(crate) fn route_prompt_decision_owned(
+    registry: &mut MountRegistry,
     surface_id: StableId,
     key: &DispatchKey,
     confirming: bool,
 ) -> PromptBridgeOutcome {
-    let refused = |reason: String| {
-        MountRegistry::record_prompt_refused();
-        PromptBridgeOutcome {
-            routing: PromptRouting::Refused(reason),
-            events: Vec::new(),
-            settled: false,
-        }
-    };
-    let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
-        return refused(format!("surface {} is not registered", surface_id.0));
+    let Some(handle) = registry.handle_for_surface_owned(surface_id) else {
+        return prompt_refused(registry, format!("surface {} is not registered", surface_id.0));
     };
     // The pending-prompt guard: the decision must name the address the
     // armed desc carries (the modal's own content); anything else refuses
     // BEFORE the machine is touched.
-    let Some(desc) = MountRegistry::prompt_dialog(surface_id) else {
-        return refused(format!(
-            "surface {} has no prompt pending to decide",
-            surface_id.0
-        ));
+    let Some(desc) = registry.prompt_dialog_owned(surface_id) else {
+        return prompt_refused(
+            registry,
+            format!("surface {} has no prompt pending to decide", surface_id.0),
+        );
     };
     if &desc.key != key {
-        return refused(format!(
-            "surface {}'s pending prompt names a different address",
-            surface_id.0
-        ));
+        return prompt_refused(
+            registry,
+            format!("surface {}'s pending prompt names a different address", surface_id.0),
+        );
     }
 
     if confirming {
@@ -152,7 +177,7 @@ pub(crate) fn route_prompt_decision(
         match confirmed {
             Ok(DispatchOutcome::ConfirmedEmitted(event)) => {
                 // (2) the sink drains (the same bridge half
-                // [route_mount_msg] runs), THEN (3) the address settles —
+                // [route_mount_msg_owned] runs), THEN (3) the address settles —
                 // forward-then-settle, the click path's policy.
                 let mut sink = CollectingSink::default();
                 sink.emit(event);
@@ -160,8 +185,8 @@ pub(crate) fn route_prompt_decision(
                 let settled = handle.dispatcher.borrow_mut().settle(key.clone());
                 // (4) the dialog's state completes: the desc (and the
                 // matching escape hint) leave the registry; the probe ticks.
-                MountRegistry::take_prompt_dialog(surface_id, key);
-                MountRegistry::record_prompt_confirmed();
+                registry.take_prompt_dialog_owned(surface_id, key);
+                registry.record_prompt_confirmed_owned();
                 PromptBridgeOutcome {
                     routing: PromptRouting::Confirmed {
                         forwarded: events.len(),
@@ -174,8 +199,8 @@ pub(crate) fn route_prompt_decision(
                 // The stage is gone on the machine (or its re-validation
                 // failed): the interaction is dead per the machine; the
                 // stale display copy consumes (self-heal).
-                MountRegistry::take_prompt_dialog(surface_id, key);
-                refused(machine_refusal.to_string())
+                registry.take_prompt_dialog_owned(surface_id, key);
+                prompt_refused(registry, machine_refusal.to_string())
             }
             // `confirm` resolves ONLY to `ConfirmedEmitted` (the machine's
             // own contract — pinned by SWG-003); the remaining outcomes are
@@ -184,8 +209,8 @@ pub(crate) fn route_prompt_decision(
             // means the machine OVERRULED the registry's desc — the same
             // self-heal refusal, no event taken from it.
             Ok(other) => {
-                MountRegistry::take_prompt_dialog(surface_id, key);
-                refused(format!("the machine did not confirm: {other:?}"))
+                registry.take_prompt_dialog_owned(surface_id, key);
+                prompt_refused(registry, format!("the machine did not confirm: {other:?}"))
             }
         }
     } else {
@@ -193,14 +218,14 @@ pub(crate) fn route_prompt_decision(
         // itself (no settle is needed — its own semantics); the desc
         // consumes on this edge too.
         let dismissed = handle.dispatcher.borrow_mut().dismiss_prompt(key.clone());
-        MountRegistry::take_prompt_dialog(surface_id, key);
+        registry.take_prompt_dialog_owned(surface_id, key);
         if !dismissed {
-            return refused(format!(
-                "surface {} had no prompt pending on the machine",
-                surface_id.0
-            ));
+            return prompt_refused(
+                registry,
+                format!("surface {} had no prompt pending on the machine", surface_id.0),
+            );
         }
-        MountRegistry::record_prompt_dismissed();
+        registry.record_prompt_dismissed_owned();
         PromptBridgeOutcome {
             routing: PromptRouting::Dismissed,
             events: Vec::new(),
@@ -209,15 +234,38 @@ pub(crate) fn route_prompt_decision(
     }
 }
 
+/// The headless tests' facade: the SAME [`route_prompt_decision_owned`]
+/// core over the mount module's cfg(test) registry cell (the
+/// pre-migration static signature — see the seam block in
+/// `plugin_widget_mount.rs`).
+#[cfg(test)]
+pub(crate) fn route_prompt_decision(
+    surface_id: StableId,
+    key: &DispatchKey,
+    confirming: bool,
+) -> PromptBridgeOutcome {
+    crate::ui::window::plugin_widget_mount::with_test_registry_mut(|registry| {
+        route_prompt_decision_owned(registry, surface_id, key, confirming)
+    })
+}
+
 impl OpenCADStudio {
     /// The `Message::WidgetPromptMsg` arm's handler: route the modal's
     /// decision into its registered surface's dispatcher
-    /// ([`route_prompt_decision`]) and drop the drained events at the
+    /// ([`route_prompt_decision_owned`]) and drop the drained events at the
     /// collecting seam (the same pre-wire hang-off as the mount bridge's
     /// arm; the publish is the ADR-004 crossing).
     ///
     /// UNKNOWN surface / UNGUARDED decision: a graceful no-op — no panic,
     /// nothing routed, no event, only the refusal probe.
+    ///
+    /// SCN-016: THIS is the decision path the modal body's buttons
+    /// (SCN-015's [`prompt_modal_element`], mapped through
+    /// [`prompt_app_message`]) emit into, and the modal's ✕ too (the view
+    /// composes its close as the SAME Dismissed decision for this kind).
+    /// A decision for the surface whose prompt the modal shows ALSO clears
+    /// the modal: the reveal state + the modal slot release, and the next
+    /// queued armed prompt (if any) reveals at this boundary.
     pub(in crate::app) fn on_widget_prompt_msg(
         &mut self,
         msg: WidgetPromptMsg,
@@ -226,11 +274,108 @@ impl OpenCADStudio {
             WidgetPromptMsg::Confirmed { surface_id, key } => (*surface_id, key.clone(), true),
             WidgetPromptMsg::Dismissed { surface_id, key } => (*surface_id, key.clone(), false),
         };
-        let outcome = route_prompt_decision(surface_id, &key, confirming);
+        let outcome = route_prompt_decision_owned(
+            &mut self.mount_registry.borrow_mut(),
+            surface_id,
+            &key,
+            confirming,
+        );
         // Pre-wire drain — the collecting sink's contract (see the module
         // docs); the publish hang-off is the ADR-004 crossing.
         let _ = outcome.events;
+        // SCN-016: the decision completes the interaction the modal stands
+        // for — the modal closes through the SAME edge (exactly-once: any
+        // refused/mismatched decision names the armed surface and closes
+        // the modal the desc's read supports; the machine edges were the
+        // routing's to run, once).
+        self.close_widget_prompt_modal_for(surface_id);
         Task::none()
+    }
+
+    /// A `PromptRequested` bridge routing ARMS the app's prompt-modal flow
+    /// (SCN-016, the SHOW POLICY's entry): the surface's armed desc is
+    /// already surface-ready in the registry; this records the modal
+    /// request. A re-arm of an already-queued surface moves the request to
+    /// the back (the LATEST armed interaction reveals first — the desc the
+    /// registry keeps is the re-armed one), then the reveal check runs.
+    pub(in crate::app) fn arm_widget_prompt_modal(&mut self, surface_id: StableId) {
+        self.widget_prompt_modal_pending
+            .retain(|queued| *queued != surface_id);
+        self.widget_prompt_modal_pending.push_back(surface_id);
+        self.show_next_widget_prompt_modal();
+    }
+
+    /// Reveal the next queued armed prompt when the modal slot is free
+    /// (SCN-016's SHOW POLICY; the `pending_startup_modals` precedent):
+    /// a modal-free arm reveals NOW; an armed prompt behind another modal
+    /// waits at a boundary. THE LANDED DRIVERS (all owned): the prompt
+    /// modal's own close chain (its ✕-composed Dismissed decision, the
+    /// body's Cancel/OK, the Escape tail), and every later arm's check —
+    /// each of them calls this. The generic third-party close path
+    /// (update/mod.rs's post-message hook — not this task's files) does
+    /// NOT run this check; a prompt queued behind a foreign modal reveals
+    /// at the next owned boundary rather than that hook (RECORDED — the
+    /// one-line neighbor of `show_next_startup_modal()` remains the
+    /// coordinator's option; the queue is inert-safe until then). The
+    /// front's desc must still stand (a surface whose interaction was
+    /// consumed/removed in the meantime is skipped quietly — the machine
+    /// layers stay total).
+    pub(in crate::app) fn show_next_widget_prompt_modal(&mut self) {
+        while self.active_modal.is_none()
+            && self.widget_prompt_modal.is_none()
+            && !self.widget_prompt_modal_pending.is_empty()
+        {
+            let front = self
+                .widget_prompt_modal_pending
+                .pop_front()
+                .expect("the front was non-empty");
+            if self.mount_registry.borrow().prompt_dialog_owned(front).is_some() {
+                self.widget_prompt_modal = Some(front);
+                self.active_modal = Some(crate::app::ModalKind::WidgetPrompt);
+                self.reset_modal_geometry();
+                return;
+            }
+        }
+    }
+
+    /// The decision path's modal tail: the decision named the surface
+    /// whose prompt the modal displays → clear the reveal state, close the
+    /// modal, and chain the next armed prompt's reveal at this modal-close
+    /// boundary. A decision naming a DIFFERENT surface (a refusal's
+    /// graceful probe path) leaves the modal standing.
+    fn close_widget_prompt_modal_for(&mut self, surface_id: StableId) {
+        if self.widget_prompt_modal != Some(surface_id) {
+            return;
+        }
+        self.widget_prompt_modal = None;
+        if self.active_modal == Some(crate::app::ModalKind::WidgetPrompt) {
+            self.close_active_modal();
+        }
+        self.show_next_widget_prompt_modal();
+    }
+
+    /// The mount keyboard route's empty tail ([`Self::on_mount_key`]): an
+    /// Escape inside a mount-focused keyboard runs the machine-direct
+    /// cancel, which produces NO route message — when the prompt modal is
+    /// showing and its desc was consumed by that cancel, the modal closes
+    /// here (Escape stays 1:1 with the armed interaction: the machine edge
+    /// ran once, the modal follows).
+    pub(in crate::app) fn close_widget_prompt_modal_if_consumed(&mut self) {
+        if self.active_modal != Some(crate::app::ModalKind::WidgetPrompt) {
+            return;
+        }
+        let Some(surface_id) = self.widget_prompt_modal else {
+            return;
+        };
+        if self
+            .mount_registry
+            .borrow().prompt_dialog_owned(surface_id)
+            .is_none()
+        {
+            self.widget_prompt_modal = None;
+            self.close_active_modal();
+            self.show_next_widget_prompt_modal();
+        }
     }
 }
 
@@ -1022,6 +1167,193 @@ mod tests {
         assert_eq!(machine.confirmations_requested, 2);
         assert_eq!(machine.confirmations_completed, 1);
         assert_eq!(machine.commands_emitted, 1);
+    }
+
+    // -- 10b. SCN-016: the modal SHOW POLICY (the visual half) -----------------
+
+    use crate::app::ModalKind;
+
+    /// The arm with a FREE modal slot reveals the prompt modal immediately:
+    /// `ModalKind::WidgetPrompt` holds the slot, keyed to the armed
+    /// surface, and the modal body (the mount's builder over the
+    /// registry's desc) is the armed interaction's display copy (the
+    /// message text + the Cancel/OK pair).
+    #[test]
+    fn prompt_modal_reveals_on_arm() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn016_reveal");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        assert_eq!(app.active_modal, None);
+
+        // THE ARM — the click rides the app's full mount arm.
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt), "the slot-free arm shows NOW");
+        assert_eq!(app.widget_prompt_modal, Some(sid(200)), "keyed to the armed surface");
+        // The modal's frame title + the body's display facts (the desc's
+        // read is what the view pass would consume).
+        assert_eq!(app.modal_title_for(ModalKind::WidgetPrompt), "Widget Confirmation");
+        assert!(app.modal_content_for(ModalKind::WidgetPrompt, iced::Vector::ZERO).is_some(), "the modal body builds");
+        let desc = MountRegistry::prompt_dialog(sid(200)).expect("the armed desc");
+        let (_element, facts) = prompt_modal_element(&desc);
+        assert_eq!(facts.prompt, PROMPT_A);
+        assert_eq!(facts.ok, "OK");
+        assert_eq!(facts.cancel, "Cancel");
+    }
+
+    /// No preemption: an arm while ANOTHER modal owns the slot queues and
+    /// leaves that modal standing. The boundary reveal (the check the
+    /// prompt-modal's own close chain and every later boundary runs) pops
+    /// the queue at the next slot-free moment.
+    #[test]
+    fn arm_behind_modal_queues_then_reveals_at_boundary() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn016_queue");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        // Another modal owns the slot.
+        app.active_modal = Some(ModalKind::About);
+
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+
+        assert_eq!(app.active_modal, Some(ModalKind::About), "no preemption");
+        assert!(app.widget_prompt_modal.is_none(), "nothing showing");
+        assert_eq!(app.widget_prompt_modal_pending.back(), Some(&sid(200)), "queued");
+
+        // The other modal leaves (its own close path — no prompt mixin).
+        let _ = app.update(Message::CloseModal);
+        assert_eq!(app.active_modal, None, "the blocker left");
+        // The boundary reveal: the CHECK runs — the prompt modal's own close
+        // chain (`close_widget_prompt_modal_for` / the Escape tail) and the
+        // next arm's check call this at every boundary they own; the check
+        // itself is the boundary semantics this test pins (see the wiring
+        // note below for the drivers' landed truth).
+        app.show_next_widget_prompt_modal();
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt));
+        assert_eq!(app.widget_prompt_modal, Some(sid(200)));
+        assert!(app.widget_prompt_modal_pending.is_empty(), "the queue drained");
+    }
+
+    /// The ✕ is the modal's CANCEL decision: `modal_close_msg` composes the
+    /// shown desc's Dismissed edge (the SAME decision the body's Cancel
+    /// button routes) — updating with it dismisses the machine's armed
+    /// stage ONCE, consumes the desc, closes the modal, and the probe
+    /// discipline is exact (one dismissed tick, nothing else).
+    #[test]
+    fn close_x_routes_dismissed_edge_once() {
+        use crate::ui::window::plugin_widget_mount::WidgetPromptMsg as XMsg;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn016_closex");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+        let key = DispatchKey::Button(sid(1));
+        let before = MountRegistry::counters();
+
+        // The ✕'s composed message (what the shared overlay would emit).
+        let x_msg = app.modal_close_msg();
+        let Message::WidgetPromptMsg(XMsg::Dismissed { surface_id, key: msg_key }) = x_msg.clone()
+        else {
+            panic!("the prompt modal's ✕ is its Dismissed decision");
+        };
+        assert_eq!(surface_id, sid(200));
+        assert_eq!(msg_key, key, "addressed with the armed desc's key");
+
+        let _ = app.update(x_msg);
+
+        assert_eq!(handle.dispatcher.borrow().pending_prompt(&key), None, "the machine stage cleared");
+        assert!(MountRegistry::prompt_dialog(sid(200)).is_none(), "the desc consumed");
+        assert_eq!(app.active_modal, None, "the modal closed through the same edge");
+        assert_eq!(app.widget_prompt_modal, None);
+        let after = MountRegistry::counters();
+        assert_eq!(after.prompts_dismissed - before.prompts_dismissed, 1, "the Dismissed edge, exactly once");
+        assert_eq!(after.prompts_confirmed - before.prompts_confirmed, 0);
+        assert_eq!(after.prompts_refused - before.prompts_refused, 0);
+        // Unknown/gone interactions stay graceful: a second ✕ (nothing
+        // armed or showing) is the ordinary CloseModal, a quiet no-op.
+        assert!(
+            matches!(app.modal_close_msg(), Message::CloseModal),
+            "without a showing prompt the ✕ is the ordinary close"
+        );
+    }
+
+    /// The OK decision: the body's confirm edge runs ONCE — the captured
+    /// command emitted (the routing's event), the desc consumed, the modal
+    /// closed by the same edge, and the probe discipline exact.
+    #[test]
+    fn ok_confirm_routes_confirmed_edge_once() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn016_ok");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+        let key = DispatchKey::Button(sid(1));
+        let machine_before = *handle.dispatcher.borrow().counters();
+        let before = MountRegistry::counters();
+
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt));
+        let _ = app.update(Message::WidgetPromptMsg(WidgetPromptMsg::Confirmed {
+            surface_id: sid(200),
+            key: key.clone(),
+        }));
+
+        assert_eq!(app.active_modal, None, "the decision closed the modal");
+        assert_eq!(app.widget_prompt_modal, None);
+        assert!(MountRegistry::prompt_dialog(sid(200)).is_none(), "the desc consumed");
+        let machine = *handle.dispatcher.borrow().counters();
+        assert_eq!(
+            machine.commands_emitted - machine_before.commands_emitted,
+            1,
+            "the captured command emitted exactly once"
+        );
+        assert_eq!(handle.dispatcher.borrow().pending_prompt(&key), None);
+        let after = MountRegistry::counters();
+        assert_eq!(after.prompts_confirmed - before.prompts_confirmed, 1);
+        assert_eq!(after.prompts_dismissed - before.prompts_dismissed, 0);
+        assert_eq!(after.prompts_refused - before.prompts_refused, 0);
+    }
+
+    /// Escape stays 1:1 with the armed interaction: the mount key route's
+    /// machine-direct cancel consumes the desc, the `on_mount_key` empty
+    /// tail closes the prompt modal, and the probe moved once (a second
+    /// Escape with nothing armed moves nothing and cannot reopen).
+    #[test]
+    fn escape_dismisses_prompt_modal_once() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn016_escape");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        MountRegistry::set_mount_key_target(Some(sid(200)));
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+        let key = DispatchKey::Button(sid(1));
+        let before = MountRegistry::counters();
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt));
+
+        let _ = app.on_mount_key(
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            iced::keyboard::Modifiers::NONE,
+        );
+
+        assert_eq!(handle.dispatcher.borrow().pending_prompt(&key), None);
+        assert!(MountRegistry::prompt_dialog(sid(200)).is_none());
+        assert_eq!(app.active_modal, None, "the escaped cancel closed the modal");
+        assert_eq!(app.widget_prompt_modal, None);
+        let after = MountRegistry::counters();
+        assert_eq!(after.prompts_dismissed - before.prompts_dismissed, 1, "one dismissal for the one Escape");
+        // 1:1 verified both ways: the NEXT Escape (nothing armed) moves
+        // nothing.
+        let _ = app.on_mount_key(
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            iced::keyboard::Modifiers::NONE,
+        );
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            MountRegistry::counters().prompts_dismissed,
+            after.prompts_dismissed,
+            "no armed interaction, no edge"
+        );
     }
 
     // -- 10. Escape lands in the same dismissal lifecycle ----------------------

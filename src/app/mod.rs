@@ -1770,6 +1770,27 @@ pub(super) struct OpenCADStudio {
     /// Persistent dockable side panels registered by plugins.
     pub(crate) plugin_panels:
         std::collections::BTreeMap<String, crate::ui::window::plugin_panel::PluginPanelState>,
+    /// The APP-OWNED widget-mount registry (SCN-016): the panel-keyed side
+    /// map's storage — surfaces/guards, the host-local input layer, the
+    /// §16 probes, and the armed prompts — moved off the thread-local the
+    /// mount module held before SCN-016. Every production path (update
+    /// arms, the view, the subscriptions) touches THIS field; the
+    /// cfg(test) seam in `plugin_widget_mount.rs` binds the headless
+    /// tests' cell to the SAME `Rc` store (see [`Self::new_for_test`]), so
+    /// the pre-migration static-form tests stayed pinned untouched.
+    /// (`Rc<RefCell<..>>` is the one-share shape the app field needs: the
+    /// registry is the ui-thread store, the app is its sole producer.)
+    pub(crate) mount_registry:
+        std::rc::Rc<std::cell::RefCell<crate::ui::window::plugin_widget_mount::MountRegistry>>,
+    /// The armed prompt currently filling the modal slot (SCN-016): the
+    /// surface whose [`MountPromptDesc`] the `ModalKind::WidgetPrompt`
+    /// modal displays. `None` = no prompt modal on screen.
+    widget_prompt_modal: Option<ocs_plugin_api::scene::StableId>,
+    /// Armed prompts waiting for the modal slot (SCN-016's
+    /// `pending_startup_modals` precedent): an arm made while another
+    /// modal holds the slot does NOT preempt — it queues here and reveals
+    /// at the next modal-close boundary the owned reveal checks run at.
+    widget_prompt_modal_pending: std::collections::VecDeque<ocs_plugin_api::scene::StableId>,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -3417,6 +3438,17 @@ pub enum ModalKind {
     AutosaveRestore,
     /// Declarative modal dialog opened by a plugin.
     PluginDialog,
+    /// A plugin widget-surface's armed confirmation prompt (SCN-016): the
+    /// mount bridge's `PromptRequested` display. The content is the
+    /// surface-ready desc the app-owned mount registry keeps
+    /// ([`crate::ui::window::plugin_widget_mount::MountRegistry::prompt_dialog_owned`],
+    /// rendered by the mount's [`crate::ui::window::plugin_widget_mount::prompt_modal_element`]
+    /// body builder); the dispatcher's own `PromptStage` remains the
+    /// exchange's authority — this modal is DISPLAY COPY. The decisions
+    /// ride `Message::WidgetPromptMsg`; the modal's ✕ and Escape route the
+    /// same Dismissed edge once (the SHOW POLICY and its reveal state live
+    /// on the app: `widget_prompt_modal` / `widget_prompt_modal_pending`).
+    WidgetPrompt,
 }
 
 /// A property group controlled by a layer state's restore mask.
@@ -6597,6 +6629,11 @@ impl OpenCADStudio {
             active_modal: None,
             plugin_dialog_state: None,
             plugin_panels: std::collections::BTreeMap::new(),
+            mount_registry: std::rc::Rc::new(std::cell::RefCell::new(
+                crate::ui::window::plugin_widget_mount::MountRegistry::default(),
+            )),
+            widget_prompt_modal: None,
+            widget_prompt_modal_pending: std::collections::VecDeque::new(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),
@@ -6936,6 +6973,16 @@ impl OpenCADStudio {
         // only grows.
         app.apply_config(crate::app::config::AppConfig::default());
         app.last_saved_config = Some(app.current_config());
+        // SCN-016's headless seam: the tests' static registry facades
+        // (`MountRegistry::counters()`, `register_test_surface`, … in
+        // `plugin_widget_mount.rs`) delegate to ONE cfg(test) cell binding.
+        // The app's mount store IS that binding's store, so the mixed
+        // tests — register a surface through the static seam, drive an
+        // `app.update` arm, read the counters through the SAME statics —
+        // stay one storage, exactly the pre-migration thread-local world.
+        crate::ui::window::plugin_widget_mount::test_bind_app_store(std::rc::Rc::clone(
+            &app.mount_registry,
+        ));
         app
     }
 

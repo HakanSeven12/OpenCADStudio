@@ -685,7 +685,7 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
                     if let Some(state) = self.plugin_panels.get(panel_id) {
-                        state.view(num, width, chrome)
+                        state.view(num, width, chrome, self.mount_registry.as_ref())
                     } else {
                         Space::new().into()
                     }

@@ -23,7 +23,7 @@
 //! > maps each emitted message through [`app_message`] into
 //! > `app::Message::WidgetMountMsg`, whose update arm routes into
 //! > `app::update::widget_mount`: find the registered surface
-//! > ([`MountRegistry::handle_for_surface`]), `apply_mount_msg(.., state,
+//! > ([`MountRegistry::handle_for_surface_owned`]), `apply_mount_msg(.., state,
 //! > dispatcher, msg, sink)`, drain the sink, and settle every forwarded
 //! > command's originating address — **bridge-forwards-then-settle**, so
 //! > the in-flight exactly-once guard re-arms after the handler completes.
@@ -38,8 +38,9 @@
 //!   genuine in-flight IPC fetch cancellations still need the request-id
 //!   vocabulary the wire era brings (RECORDED, not silently claimed).
 //! Additionally the prompt dialog's SEMANTIC half shipped here (SCN-015 —
-//! see "The armed prompt's dialog lifecycle" below); the app-OWNED registry
-//! migration stays the crossings follow-up.
+//! see "The armed prompt's dialog lifecycle" below); SCN-016 landed its
+//! VISUAL half (the app-modal placement) and the APP-OWNED registry
+//! migration.
 //!
 //! # The mount becomes INPUT-CAPABLE (SCN-020 — hover, capture, coalescing)
 //!
@@ -48,10 +49,10 @@
 //!   capture origin, last delivered move, owed-move slot) living INSIDE the
 //!   [`MountRegistry`], so its lifetime is exactly its surface's (every
 //!   register/teardown path sweeps it). Hover is host-local by contract:
-//!   set through [`MountRegistry::mount_set_hover`] (the wiring's report —
+//!   set through [`MountRegistry::mount_set_hover_owned`] (the wiring's report —
 //!   the flush deliberately does NOT hit-test; the mount owns no per-row
 //!   geometry), read by SCN-021's drag previews through
-//!   [`MountRegistry::mount_hover_state`]. NO machine ever sees a hover or
+//!   [`MountRegistry::mount_hover_state_owned`]. NO machine ever sees a hover or
 //!   a move (§14).
 //! - **Pointer capture** — the panel hook wraps the mounted body with
 //!   [`pointer_capture_body`] (this iced revision's `mouse_area` idiom):
@@ -60,9 +61,10 @@
 //!   [`WidgetMountMsg::PointerMoved`] → the coalescer entry; release →
 //!   [`WidgetMountMsg::PointerReleased`] → capture OFF + the owed move
 //!   delivered NOW. Release ANYWHERE is the pure completion contract
-//!   ([`MountRegistry::mount_pointer_released`]) — the wrapper wires the
-//!   releases this iced revision delivers inside the area, and a
-//!   window-level release catcher is app-view wiring (recorded below).
+//!   ([`MountRegistry::mount_pointer_released_owned`]) — the wrapper wires
+//!   the releases this iced revision delivers inside the area, and the
+//!   window-level release catcher (SCN-016) is the app's gated listener
+//!   completing every armed capture.
 //! - **Latest-wins move coalescing** — the viewport coalescer's contract
 //!   (its `defer_pointer_move`/`on_move_coalesce_tick` precedent, measured
 //!   there) reduced to the mount: every move DEFERS into the surface's
@@ -87,7 +89,7 @@
 //! (FocusMoved + SelectionChanged); Left/Right = a TREE row's expansion
 //! toggle; Enter/Space = the focused thing's activation; Tab/Shift+Tab =
 //! the ring advance with wrap; Escape = the machine-direct cancel of the
-//! surface's armed prompt ([`MountRegistry::mount_escape_cancel`]; drag
+//! surface's armed prompt ([`MountRegistry::mount_escape_cancel_owned`]; drag
 //! cancel is SCN-021's). Chords (Ctrl/Alt/Logo) are the app's accelerator
 //! space and route nothing. The app-side resolution ([`handle_mount_key`]
 //! in `app::update::widget_mount`) resolves the TARGET surface (the
@@ -112,7 +114,7 @@
 //!    stage, command + targets captured at arm time like the machine's own
 //!    `PromptStage`) into the registry's `prompts` map, alongside the
 //!    SCN-020 escape hint;
-//! 2. **show** — [`MountRegistry::prompt_dialog`] is the READ the app's
+//! 2. **show** — [`MountRegistry::prompt_dialog_owned`] is the READ the app's
 //!    confirm modal displays (and [`prompt_modal_element`] the mount-side
 //!    body builder: the message text + the Cancel/OK pair);
 //! 3. **decide** — the decisions ride [`WidgetPromptMsg`] →
@@ -121,45 +123,58 @@
 //!    settle (exactly one captured command); dismiss →
 //!    [`WidgetDispatcher::dismiss_prompt`] (no event; a re-click
 //!    re-prompts). Escape rides the SAME edge through
-//!    [`MountRegistry::mount_escape_cancel`].
+//!    [`MountRegistry::mount_escape_cancel_owned`].
 //!
 //! Refusals (a decision naming no pending interaction, an unknown surface,
 //! a stale/mismatched key) are graceful: only the refusal's own probe
 //! counter moves ([`MountCounters::prompts_refused`]), nothing machines,
 //! nothing panics. The REGISTRY desc is display copy; the machine's stage
 //! is the exchange's authority — recorded verbatim at
-//! [`MountRegistry::resolve_prompt_desc`].
+//! [`MountRegistry::resolve_prompt_desc_owned`].
 //!
-//! The VISUAL modal placement (the desc shown inside the app's existing
-//! modal overlay machinery) is the app view's composition seam — the
-//! SCN-016 wiring consumes exactly [`MountRegistry::prompt_dialog`] +
-//! [`prompt_modal_element`] + [`prompt_app_message`]; recorded, not
-//! claimed here.
+//! The VISUAL modal placement landed with SCN-016 (its own section below
+//! the "Wiring status" update): the app's `ModalKind::WidgetPrompt` modal
+//! consumes exactly [`MountRegistry::prompt_dialog_owned`] +
+//! [`prompt_modal_element`] + [`prompt_app_message`].
 //!
-//! # Wiring status (recorded — the one-line seams outside this task)
+//! # Wiring status (SCN-016 LANDED — the recorded one-line seams)
 //!
-//! - The real keyboard LISTENER (`main_window_event`, app view/mod.rs) and
-//!   the move-coalesce tick's subscription PUMP condition (`move_owed.is_some()`,
-//!   view/mod.rs) are app-view territory. `OpenCADStudio::on_mount_key` +
-//!   `on_mount_move_coalesce_tick` are the complete, headless-tested routes
-//!   those one-line hookups hand to; until then no live key/tick reaches
-//!   the mount input layer (and NOTHING registers a surface in the live
-//!   app, so the currently-shipped behavior is unaffected either way — the
-//!   deferral is NOT a behavior risk today).
+//! - The real keyboard LISTENER join is in: the app's key event flow hands
+//!   a main-window key to the mount route as
+//!   `Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { .. })` the
+//!   moment a mount surface holds the keyboard (the subscription chooser
+//!   in `app/view/mod.rs` picks the mount mapper over the ordinary
+//!   `main_window_event` listener exactly while
+//!   [`MountRegistry::mount_key_surface_owned`] resolves; the prompt
+//!   modal's own showing state swaps to the Escape-only mapper, so its
+//!   Escape dismiss rides the machine-direct cancel). With no mount
+//!   holding the keyboard — the shipping default, since NOTHING registers
+//!   a surface yet — the ordinary listener runs and NOTHING changes.
+//! - The move-coalesce tick's subscription PUMP condition also flows while
+//!   the MOUNT has a move owed ([`MountRegistry::any_move_owed`]) — the
+//!   mount's coalescer driver answers through the existing
+//!   `Message::MoveCoalesceTick` arm.
+//! - The window-level RELEASE catch (the release-ANYWHERE completion
+//!   contract) is a gated listener too: subscribed exactly while a capture
+//!   is armed ([`MountRegistry::any_capture_active`]), it completes every
+//!   armed capture with `WidgetMountMsg::PointerReleasedAnywhere`.
+//! - Hover stays host-local as designed: nothing production-side can name
+//!   a per-row hover yet (the flush deliberately does not hit-test; the
+//!   per-row hover wiring is a later mount slice, and
+//!   [`MountRegistry::mount_set_hover_owned`] remains its seam).
 //! - Headless tests set the keyboard target through
-//!   [`MountRegistry::set_mount_key_target`] (the same seam the app-owned
-//!   registry's roving-panel focus will own).
+//!   [`MountRegistry::set_mount_key_target_owned`] (the same seam the
+//!   app-owned registry's roving-panel focus will own in the wire era).
 //!
-//! # The panel hook is the registry side-map (the owned seam)
+//! # The panel hook consults the APP-OWNED store (the migration, SCN-016)
 //!
 //! `PluginPanelState` derives `Clone` + `PartialEq`; an
 //! `Rc<RefCell<WidgetUiState>>`-shaped field cannot join those derives (the
 //! panel's Clone usages are test conveniences this task may not disturb),
-//! and this task owns neither `app/mod.rs` (where an app-owned mount store
-//! would live) nor any other host-registry file. The ONLY sane seam within
-//! ownership is therefore a SIDE registry in THIS module: [`MountRegistry`]
-//! keyed by panel id, and the panel's `view()` consults it in one additive
-//! branch (see `plugin_panel.rs`). Every panel without a registry entry —
+//! so the registry stays a SIDE store — SCN-016 moves its STORAGE into the
+//! app: a `mount_registry` field on `OpenCADStudio` (the update arms hold
+//! `self`; the dock's panel composition passes the store's reference into
+//! `PluginPanelState::view`). Every panel without a registry entry —
 //! every panel registered today, since nothing registers a widget surface
 //! yet — takes the legacy path byte-identically, so the legacy-behavior
 //! guarantee holds BY CONSTRUCTION.
@@ -258,6 +273,7 @@ use ocs_plugin_api::widgets::{
 
 use crate::ui::style::form::button_style;
 use crate::ui::style::readable::muted_text;
+#[cfg(test)]
 use crate::ui::window::plugin_panel::PluginPanelState;
 use crate::ui::window::plugin_widgets::{
     FlatRow, VisibleWindow, WidgetStateError, WidgetUiState, WindowSpec, visible_window,
@@ -385,7 +401,7 @@ pub(crate) enum WidgetMountMsg {
     },
     /// The pointer moved over the mounted body. NEVER routed per event:
     /// the app arm hands it to the latest-wins coalescer
-    /// ([`MountRegistry::mount_move_defer`]) — the slot overwrites, the
+    /// ([`MountRegistry::mount_move_defer_owned`]) — the slot overwrites, the
     /// tick/flush answers ONLY the last one (≤1 mount call per surface per
     /// tick), and no machine ever sees a raw move (§14).
     PointerMoved {
@@ -394,13 +410,37 @@ pub(crate) enum WidgetMountMsg {
     },
     /// The pointer released completing whatever capture held it —
     /// release ANYWHERE completes (the pure completion contract is
-    /// [`MountRegistry::mount_pointer_released`]; the wrapper wires the
+    /// [`MountRegistry::mount_pointer_released_owned`]; the wrapper wires the
     /// releases this iced revision delivers inside the area and the
-    /// window-level release-anywhere catcher is the app-view seam — see
-    /// the module docs' wiring note).
+    /// window-level release catcher rides the other tail variant).
+    /// The surface is the one whose `mouse_area` saw the release.
     PointerReleased {
         surface_id: StableId,
     },
+    // The vocabulary's tail variants (SCN-016's input hookups) — both ride
+    // the ONE `Message::WidgetMountMsg` wagon (no new `Message` variant):
+    // neither routes into the machines.
+    /// One LIVE keyboard key handed to the mount's keyboard layer by the
+    /// app's event flow (SCN-016's `main_window_event`/subscription join —
+    /// the mapper in `app::view::mod`). Carries NO surface id: the target
+    /// is the keyboard ROUTE's resolution
+    /// ([`MountRegistry::mount_key_surface_owned`] — the press-captured
+    /// surface, else the sole registered mount), so the arm routes this
+    /// variant straight into [`OpenCADStudio::on_mount_key`]
+    /// (`app::update::widget_mount`) and it never touches
+    /// [`apply_mount_msg`]/the machines.
+    // The app-hook completion: this variant is the join the wiring note
+    // recorded — key events produced by the REAL listener land as this
+    // message, whose arm runs the complete, headless-tested route.
+    KeyPressed {
+        key: Key,
+        modifiers: Modifiers,
+    },
+    /// The window-level pointer release (the release-ANYWHERE catcher):
+    /// complete EVERY armed capture — "release anywhere completes capture"
+    /// resolved for the releases that land outside any panel's mouse area
+    /// (no surface id: the captured surfaces are the store's own list).
+    PointerReleasedAnywhere,
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +626,17 @@ pub(crate) fn apply_mount_msg<S: WidgetEventSink + ?Sized>(
             "pointer messages drive the mount's host-local input store, not the machines (§14)"
                 .to_string(),
         ),
+        // The keyboard events ride their OWN route (the app's
+        // `on_mount_key` never calls this apply; the arm pre-routes
+        // `KeyPressed`), and the window-level release has no surface —
+        // reaching here means the message BYPASSED its route (a defect);
+        // refuse by name, exactly the pointer discipline.
+        WidgetMountMsg::KeyPressed { .. } | WidgetMountMsg::PointerReleasedAnywhere => {
+            MountRouting::Refused(
+                "this variant owns a route of its own; it is not a machine message (§14)"
+                    .to_string(),
+            )
+        }
     }
 }
 
@@ -604,6 +655,11 @@ pub(crate) fn msg_surface_id(msg: &WidgetMountMsg) -> StableId {
         | WidgetMountMsg::PointerPressed { surface_id, .. }
         | WidgetMountMsg::PointerMoved { surface_id, .. }
         | WidgetMountMsg::PointerReleased { surface_id, .. } => *surface_id,
+        // The keyboard route resolves its own target (no surface in the
+        // variant — see `WidgetMountMsg::KeyPressed`); the arm pre-routes
+        // it, so a direct apply never reaches this arm. `StableId(0)` keeps
+        // this accessor total; it names no real mount.
+        WidgetMountMsg::KeyPressed { .. } | WidgetMountMsg::PointerReleasedAnywhere => StableId(0),
     }
 }
 
@@ -1319,7 +1375,7 @@ impl SurfaceMountHandle {
     /// machines' registered starting point — the dispatcher's command read
     /// model syncs separately, when the owner plugin publishes its command
     /// defs). The §16 "closing a tab cancels pending requests and releases
-    /// state" teardown is [`MountRegistry::teardown_surface`] (SCN-014).
+    /// state" teardown is [`MountRegistry::teardown_surface_owned`] (SCN-014).
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_surface(surface_id: StableId, surface: WidgetSurface) -> Self {
         let mut state = WidgetUiState::new(surface_id);
@@ -1354,16 +1410,21 @@ impl SurfaceMountHandle {
     }
 }
 
-/// The mount registry: the PANEL-ID keyed side map the panel hook consults.
+/// The mount registry: the PANEL-ID keyed side store the panel hook consults.
 ///
-/// Held thread-locally (the iced view pass builds the whole element tree on
-/// the UI thread; `thread_local!` beats a global mutex for a read-hot,
-/// UI-thread-only map). SCN-014 ships the registration LIFECYCLE
-/// ([`MountRegistry::register_surface`] / [`MountRegistry::teardown_surface`]
-/// + the [`RegisteredGuard`] test seam), but still no HOST flow registers a
-/// surface yet — the app-owned registry and the real registration calls are
-/// the SCN-015 follow-up — which is exactly why every legacy panel stays
-/// byte-identical today (zero entries = the legacy `view()` path).
+/// APP-OWNED since SCN-016 (`OpenCADStudio::mount_registry`): the update
+/// arms hold `self` and the app's view composition passes the store's
+/// reference down (the dock → panel `view()` call), so every PRODUCTION
+/// path reads/writes it through the app field. The earlier thread-local
+/// moved under `#[cfg(test)]` as the HEADLESS TESTS' seam (the seam block
+/// near the file end: the tests' static facades keep their exact names and
+/// delegate to the SAME instance methods there). The registration LIFECYCLE
+/// ([`MountRegistry::register_surface_owned`] /
+/// [`MountRegistry::teardown_surface_owned`] + the [`RegisteredGuard`]
+/// test seam) is SCN-014's, semantics untouched; still NO HOST flow
+/// registers a surface (the real registration calls arrive with the wire
+/// era) — which is exactly why every legacy panel stays byte-identical
+/// today (zero entries = the legacy `view()` path), by construction.
 #[derive(Default)]
 pub(crate) struct MountRegistry {
     by_panel: HashMap<String, SurfaceMountHandle>,
@@ -1377,7 +1438,7 @@ pub(crate) struct MountRegistry {
     /// machine-visible).
     input: MountInputState,
     /// The lifecycle instrumentation (§16 probes) — read via
-    /// [`MountRegistry::counters`]. SCN-020 added the interaction probes
+    /// [`MountRegistry::counters_owned`]. SCN-020 added the interaction probes
     /// ([`MountCounters::mount_move_calls`] and siblings).
     counters: MountCounters,
     /// (SCN-015) The armed confirmation prompts' surface-ready descs — the
@@ -1385,70 +1446,60 @@ pub(crate) struct MountRegistry {
     /// (the surface's latest armed interaction; a re-arm replaces). Lives in
     /// the registry so its lifetime is exactly the armed interaction's (the
     /// same lifecycle rule as the input store): recorded on the
-    /// `PromptRequested` arm ([`MountRegistry::mount_record_prompt_armed`]),
+    /// `PromptRequested` arm ([`MountRegistry::mount_record_prompt_armed_owned`]),
     /// consumed on BOTH completion edges (the modal's confirm/dismiss
     /// decision and Escape's machine-direct cancel) and swept with the
     /// surfaces. Host-local only, never serialized (§3 transient class).
     prompts: HashMap<StableId, MountPromptDesc>,
 }
 
-thread_local! {
-    static MOUNT_REGISTRY: RefCell<MountRegistry> = RefCell::new(MountRegistry::default());
-}
-
 impl MountRegistry {
     /// Register the mounted surface for `panel_id` (the RAW primitive — a
     /// re-register replaces the prior entry untouched, no machine release,
-    /// no counters; the LIFECYCLE registration is [`Self::register_surface`].
+    /// no counters; the LIFECYCLE registration is [`Self::register_surface_owned`].
     /// The SCN-013 tests drive this raw form deliberately).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn register(panel_id: &str, handle: SurfaceMountHandle) {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .by_panel
-                .insert(panel_id.to_string(), handle);
-        });
-        MountRegistry::prune_input();
+    pub(crate) fn register_owned(&mut self, panel_id: &str, handle: SurfaceMountHandle) {
+        self.by_panel.insert(panel_id.to_string(), handle);
+        self.prune_input_entries();
     }
 
     /// Remove a panel's mount (the RAW primitive — no machine release, the
-    /// lifecycle teardown is [`Self::teardown_surface`]).
+    /// lifecycle teardown is [`Self::teardown_surface_owned`]).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn unregister(panel_id: &str) {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().by_panel.remove(panel_id);
-        });
-        MountRegistry::prune_input();
+    pub(crate) fn unregister_owned(&mut self, panel_id: &str) {
+        self.by_panel.remove(panel_id);
+        self.prune_input_entries();
     }
 
     /// The gate read: is a widget-surface mount registered for `panel_id`?
-    pub(crate) fn mount_registered(panel_id: &str) -> bool {
-        MOUNT_REGISTRY.with(|registry| registry.borrow().by_panel.contains_key(panel_id))
+    // (the tests' gate probe ([`mounts_surface`]) consumes this; no
+    // production caller until the wire-era registration path lands.)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_registered_owned(&self, panel_id: &str) -> bool {
+        self.by_panel.contains_key(panel_id)
     }
 
     /// The mounted body for `panel_id` (see [`SurfaceMountHandle::body`]);
     /// `None` = no registered mount → the caller renders its legacy view.
-    pub(crate) fn mounted_body(panel_id: &str) -> Option<Element<'static, WidgetMountMsg>> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .by_panel
-                .get(panel_id)
-                .map(|handle| handle.body())
-        })
+    pub(crate) fn mounted_body_owned(
+        &self,
+        panel_id: &str,
+    ) -> Option<Element<'static, WidgetMountMsg>> {
+        self.by_panel.get(panel_id).map(|handle| handle.body())
     }
 }
 
-/// The panel gate READ (`plugin_panel.rs` consults [`MountRegistry`] through
-/// the direct lookup; the state-shaped signature is the tests'/reviewers'
-/// handle on THE SAME decision). `false` for every legacy state — the
-/// legacy-behavior guarantee, stated in one line.
+/// The panel gate READ (`plugin_panel.rs` consults the app-owned registry
+/// through the direct lookup; the state-shaped signature is the
+/// tests'/reviewers' handle on THE SAME decision). `false` for every legacy
+/// state — the legacy-behavior guarantee, stated in one line.
 // The gate hook itself runs inside the view pass; this wrapper is the
-// assertion surface.
-#[cfg_attr(not(test), allow(dead_code))]
+// assertion surface (the headless tests' facade over the app-owned form —
+// see the cfg(test) seam block near the file end).
+#[cfg(test)]
 pub(crate) fn mounts_surface(state: &PluginPanelState) -> bool {
-    MountRegistry::mount_registered(&state.def.id)
+    with_test_registry(|registry| registry.mount_registered_owned(&state.def.id))
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,18 +1558,18 @@ impl WidgetEventSink for CollectingSink {
 }
 
 /// The bridge lifecycle counters (§16 probes) — what the SCN-014
-/// registration/teardown flow did. Read via [`MountRegistry::counters`];
+/// registration/teardown flow did. Read via [`MountRegistry::counters_owned`];
 /// the registry is a thread-local, so tests compare DELTAS around their
 /// actions (a test thread always starts fresh, but the comparison is also
 /// topologically stable if the test pool ever reuses threads).
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct MountCounters {
-    /// [`MountRegistry::register_surface`] calls (fresh, preserved and
+    /// [`MountRegistry::register_surface_owned`] calls (fresh, preserved and
     /// replaced registrations).
     pub registers: usize,
     /// Re-registers that PRESERVED the running machines (the
-    /// PRESERVE-ON-IDENTICAL rule — see [`MountRegistry::register_surface`]).
+    /// PRESERVE-ON-IDENTICAL rule — see [`MountRegistry::register_surface_owned`]).
     pub registers_preserved: usize,
     /// Re-registers that REPLACED the machines (the surface shape moved).
     pub registers_replaced: usize,
@@ -1533,7 +1584,8 @@ pub(crate) struct MountCounters {
     /// routed) — the §16 tick-count handle for the armed confirmations.
     /// SCN-015: each surfacing lands the surface-ready desc in the
     /// registry's `prompts` map (the modal content); the VISUAL dialog
-    /// itself rides the app's modal machinery (SCN-016 wiring, recorded).
+    /// rides the app's modal machinery (SCN-016 landed:
+    /// `ModalKind::WidgetPrompt`).
     pub prompts_surfaced: usize,
     /// (SCN-015) Prompt-dialog decisions CONFIRMED: the pending stage's
     /// captured command emitted through the bridge (forward-then-settle,
@@ -1552,7 +1604,7 @@ pub(crate) struct MountCounters {
     pub prompts_refused: usize,
     //
     // -- SCN-020 interaction probes (defect instruments, §16) --------------
-    /// Mount moves DELIVERED by the coalescer ([`MountRegistry::mount_flush_moves`]
+    /// Mount moves DELIVERED by the coalescer ([`MountRegistry::mount_flush_moves_owned`]
     /// / the release completion): ≤1 per surface per tick. A burst that
     /// moves this per-event (or whose delivered position lags the cursor)
     /// is the defect this probe names.
@@ -1630,22 +1682,23 @@ fn release_mount(handle: &SurfaceMountHandle) {
 }
 
 /// The headless test/bench registration seam: build the mount from an
-/// owned `surface`, register it under `panel_id` ([`MountRegistry::register_surface`]
+/// owned `surface`, register it under `panel_id` ([`MountRegistry::register_surface_owned`]
 /// — the PRESERVE-ON-IDENTICAL lifecycle), and return a guard whose drop
 /// tears the surface down (RAII — a test scope cannot leak a registration
 /// into its thread neighbors).
 ///
-// The seam the future GUI/panels/benches call (SCN-015 keeps it); only the
-// tests drive it today.
+// The seam the headless tests call (the cfg(test) seam block below backs
+// it with the cfg(test)-only registry cell); production registration is
+// the wire era's.
 ///
 /// The mount state opens under the surface's FIRST root's id (every real
 /// surface roots at least one node; an empty surface falls back to
 /// `StableId(0)`): messages address a surface by that id, so a test routes
-/// with the same id it rooted. (App-owned registration, SCN-015, will name
-/// the id explicitly — this helper is the pre-app seam; the migration is
-/// "the guard's register call moves into the app update, keeping this
-/// signature".)
-#[cfg_attr(not(test), allow(dead_code))]
+/// with the same id it rooted. (App-owned registration, SCN-016, names the
+/// id explicitly; this helper is the tests' seam over the SAME lifecycle
+/// the app path runs — "the guard's register call moves into the app
+/// update, keeping this signature".)
+#[cfg(test)]
 pub(crate) fn register_test_surface(panel_id: &str, surface: WidgetSurface) -> RegisteredGuard {
     let surface_id = surface
         .roots
@@ -1680,43 +1733,41 @@ impl MountRegistry {
     /// Idempotent per panel id by construction (at most one entry per id;
     /// re-registers move a counter, never duplicate state).
     ///
-    /// THE test/bench entry is [`register_test_surface`]; the future
-    /// app-owned registration (SCN-015) calls this seam once the registry
-    /// moves from the thread-local side map into the app state.
+    /// THE test/bench entry is [`register_test_surface`]; the app-owned
+    /// registration path (SCN-016) calls
+    /// [`Self::register_surface_owned`] over the app's own registry — the
+    /// production registration CALLS still arrive with the wire era.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn register_surface(panel_id: &str, handle: SurfaceMountHandle) {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let identical = registry
-                .by_panel
-                .get(panel_id)
-                .is_some_and(|existing| {
-                    surface_shape(&existing.surface) == surface_shape(&handle.surface)
-                });
-            registry.counters.registers += 1;
-            if identical {
-                // PRESERVE-ON-IDENTICAL: the registered handle stays; the
-                // caller's fresh machines are simply dropped (byte-cheap:
-                // the unused surface clone dies with the handle).
-                registry.counters.registers_preserved += 1;
-            } else {
-                if let Some(previous) = registry.by_panel.remove(panel_id) {
-                    release_mount(&previous);
-                    // The replaced surface's armed desc dies with the
-                    // surface (the §16 lifecycle: a replacement releases
-                    // the machines; the desc is registry-side of the same
-                    // interaction).
-                    registry.prompts.remove(&previous.surface_id());
-                    registry.counters.registers_replaced += 1;
-                    registry.counters.torn_down += 1;
-                }
-                registry.by_panel.insert(panel_id.to_string(), handle);
+    pub(crate) fn register_surface_owned(&mut self, panel_id: &str, handle: SurfaceMountHandle) {
+        let identical = self
+            .by_panel
+            .get(panel_id)
+            .is_some_and(|existing| {
+                surface_shape(&existing.surface) == surface_shape(&handle.surface)
+            });
+        self.counters.registers += 1;
+        if identical {
+            // PRESERVE-ON-IDENTICAL: the registered handle stays; the
+            // caller's fresh machines are simply dropped (byte-cheap:
+            // the unused surface clone dies with the handle).
+            self.counters.registers_preserved += 1;
+        } else {
+            if let Some(previous) = self.by_panel.remove(panel_id) {
+                release_mount(&previous);
+                // The replaced surface's armed desc dies with the
+                // surface (the §16 lifecycle: a replacement releases
+                // the machines; the desc is registry-side of the same
+                // interaction).
+                self.prompts.remove(&previous.surface_id());
+                self.counters.registers_replaced += 1;
+                self.counters.torn_down += 1;
             }
-        });
+            self.by_panel.insert(panel_id.to_string(), handle);
+        }
         // The input store is the surfaces' mirror: sweep it after ANY
         // registration path (a replaced surface's stale hover/capture/
         // owed-move state has nothing to point at anymore).
-        MountRegistry::prune_input();
+        self.prune_input_entries();
     }
 
     /// The explicit teardown (§16 "closing a tab cancels pending requests
@@ -1726,19 +1777,16 @@ impl MountRegistry {
     /// leaves. Idempotent: an unknown/already-torn-down panel id is a
     /// graceful no-op (no release runs, no counter moves).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn teardown_surface(panel_id: &str) {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            if let Some(handle) = registry.by_panel.remove(panel_id) {
-                release_mount(&handle);
-                // The surface's armed desc dies with the surface (same
-                // lifecycle rule as the input store's sweep — the §16
-                // teardown contract).
-                registry.prompts.remove(&handle.surface_id());
-                registry.counters.torn_down += 1;
-            }
-        });
-        MountRegistry::prune_input();
+    pub(crate) fn teardown_surface_owned(&mut self, panel_id: &str) {
+        if let Some(handle) = self.by_panel.remove(panel_id) {
+            release_mount(&handle);
+            // The surface's armed desc dies with the surface (same
+            // lifecycle rule as the input store's sweep — the §16
+            // teardown contract).
+            self.prompts.remove(&handle.surface_id());
+            self.counters.torn_down += 1;
+        }
+        self.prune_input_entries();
     }
 
     /// The bridge's lookup: the registered mount whose state owns
@@ -1752,50 +1800,43 @@ impl MountRegistry {
     /// `WidgetEvent::surface_id` names one surface): two registered
     /// surfaces sharing an id would make this lookup order-dependent.
     /// `None` for an unregistered id — the bridge refuses gracefully.
-    pub(crate) fn handle_for_surface(surface_id: StableId) -> Option<SurfaceMountHandle> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .by_panel
-                .values()
-                .find(|handle| handle.surface_id() == surface_id)
-                .cloned()
-        })
+    pub(crate) fn handle_for_surface_owned(
+        &self,
+        surface_id: StableId,
+    ) -> Option<SurfaceMountHandle> {
+        self.by_panel
+            .values()
+            .find(|handle| handle.surface_id() == surface_id)
+            .cloned()
     }
 
     /// The lifecycle counters' read side (§16 probes; tests/benches).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn counters() -> MountCounters {
-        MOUNT_REGISTRY.with(|registry| registry.borrow().counters)
+    pub(crate) fn counters_owned(&self) -> MountCounters {
+        self.counters
     }
 
     /// The bridge's prompt tick-count (a `PromptRequested` routed): the
-    /// §16 handle the future dialog wiring picks up.
-    pub(crate) fn record_prompt_surfaced() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.prompts_surfaced += 1;
-        });
+    /// §16 handle the prompt-modal wiring picks up.
+    pub(crate) fn record_prompt_surfaced_owned(&mut self) {
+        self.counters.prompts_surfaced += 1;
     }
 
     /// The bridge's routed-message tick — every
     /// `Message::WidgetMountMsg` the handler resolved against a registered
     /// surface (not the unknown-surface no-ops).
-    pub(crate) fn record_message_routed() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.messages_routed += 1;
-        });
+    pub(crate) fn record_message_routed_owned(&mut self) {
+        self.counters.messages_routed += 1;
     }
 
     /// The keyboard layer's nav-step probe tick ([`MountCounters::keyboard_nav_steps`]):
     /// one resolved navigation step (a key whose route produced ≥1 mount
     /// message). Called by [`key_route`]/[`mount_table_key_route`] — the
     /// pure keyboard layers' single registry-side side effect.
-    /// (registry-side; test-consumed probes + the deferred keyboard hookups)
+    /// (registry-side; test-consumed probes + the keyboard hookup of SCN-016)
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn record_key_nav_step() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.keyboard_nav_steps += 1;
-        });
+    pub(crate) fn record_key_nav_step_owned(&mut self) {
+        self.counters.keyboard_nav_steps += 1;
     }
 }
 
@@ -1815,12 +1856,12 @@ impl MountRegistry {
 /// surface entry because press→capture→move→release is ONE gesture whose
 /// state belongs together (SCN-021's drag previews consume exactly
 /// these fields — `hover`, `last_move`, `captured`, `capture_origin` — read
-/// through [`MountRegistry::mount_hover_state`]).
+/// through [`MountRegistry::mount_hover_state_owned`]).
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct HoverState {
     /// The row/widget under the pointer, per what the wiring last
-    /// reported ([`MountRegistry::mount_set_hover`]; a coalesced move
+    /// reported ([`MountRegistry::mount_set_hover_owned`]; a coalesced move
     /// flush does NOT hit-test — the mount has no per-row geometry of its
     /// own, the flush's single mount call records the position only).
     pub hover: Option<StableId>,
@@ -1828,7 +1869,7 @@ pub(crate) struct HoverState {
     /// the newest owed move at the tick/release rate, never per event).
     pub last_move: Option<Point>,
     /// Pointer capture: press over the surface → ON; release ANYWHERE →
-    /// OFF (the completion contract is [`MountRegistry::mount_pointer_released`]
+    /// OFF (the completion contract is [`MountRegistry::mount_pointer_released_owned`]
     /// — the pure fn "release anywhere" asserts against).
     pub captured: bool,
     /// Where the capture's pointer stood when it first reported after a
@@ -1859,15 +1900,15 @@ pub(crate) struct MountInputState {
     /// Set when a press captures a surface (a press-keyed panel owns the
     /// keys until another gesture moves them); cleared by the profile
     /// sweep when the surface unregisters. The keyboard-ONLY §16 path
-    /// (no click at all) resolves in [`MountRegistry::mount_key_surface`]:
+    /// (no click at all) resolves in [`MountRegistry::mount_key_surface_owned`]:
     /// with no explicit target but EXACTLY ONE registered surface, that
     /// surface is the target (the sole mounted panel is the only thing
     /// arrows can mean; the app-owned registry's real roving-panel focus
     /// is the SCN-015 crossings concern).
     key_target: Option<StableId>,
     /// The armed command address the bridge last surfaced for a surface
-    /// ([`MountRegistry::mount_record_prompt_armed`]) — the hint Escape's
-    /// cancel reads ([`MountRegistry::mount_escape_cancel`]; the dispatcher
+    /// ([`MountRegistry::mount_record_prompt_armed_owned`]) — the hint Escape's
+    /// cancel reads ([`MountRegistry::mount_escape_cancel_owned`]; the dispatcher
     /// stays the semantic authority, the hint merely NAMES the armed
     /// interaction without a key-enumeration read on the frozen
     /// dispatcher).
@@ -1882,7 +1923,7 @@ impl MountRegistry {
     /// - LATEST-WINS (§7): a pending slot is OVERWRITTEN — the newer move
     ///   is, by definition, where the cursor is; the older one is dropped
     ///   unanswered and counted ([`MountCounters::coalesced_moves_superseded`]).
-    ///   N moves per tick = ≤1 mount call per surface ([`MountRegistry::mount_flush_moves`]).
+    ///   N moves per tick = ≤1 mount call per surface ([`MountRegistry::mount_flush_moves_owned`]).
     /// - NOTHING routes yet, and NO machine sees the move raw (§14): the
     ///   whole effect is this slot write.
     /// - Unregistered surface → `None` (graceful no-op — nothing stored,
@@ -1895,23 +1936,24 @@ impl MountRegistry {
     /// viewport's adaptive gate there is NO pass-cost threshold: the
     /// mount's move half must be CHEAP per event unconditionally (a slot
     /// write only), so it defers every move.
-    pub(crate) fn mount_move_defer(surface_id: StableId, position: Point) -> Option<bool> {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let handle_registered = registry
-                .by_panel
-                .values()
-                .any(|handle| handle.surface_id() == surface_id);
-            if !handle_registered {
-                return None;
-            }
-            let entry = registry.input.per_surface.entry(surface_id).or_default();
-            let superseded = entry.move_owed.replace(position).is_some();
-            if superseded {
-                registry.counters.coalesced_moves_superseded += 1;
-            }
-            Some(superseded)
-        })
+    pub(crate) fn mount_move_defer_owned(
+        &mut self,
+        surface_id: StableId,
+        position: Point,
+    ) -> Option<bool> {
+        let handle_registered = self
+            .by_panel
+            .values()
+            .any(|handle| handle.surface_id() == surface_id);
+        if !handle_registered {
+            return None;
+        }
+        let entry = self.input.per_surface.entry(surface_id).or_default();
+        let superseded = entry.move_owed.replace(position).is_some();
+        if superseded {
+            self.counters.coalesced_moves_superseded += 1;
+        }
+        Some(superseded)
     }
 
     /// Answer every surface's LAST owed move — the coalescer's delivery
@@ -1920,27 +1962,24 @@ impl MountRegistry {
     /// flush, updating the surface's [`HoverState`] (host-local §14) and
     /// NOTHING else — no machine route, no event, no counter wobble
     /// beyond the probe. Returns how many surfaces were delivered.
-    pub(crate) fn mount_flush_moves() -> usize {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let mut delivered = 0usize;
-            for entry in registry.input.per_surface.values_mut() {
-                if let Some(position) = entry.move_owed.take() {
-                    entry.last_move = Some(position);
-                    // The capture's drag ORIGIN is the first delivered move
-                    // during capture (the press carries no position in this
-                    // iced revision); SCN-021's drag previews read it.
-                    if entry.captured && entry.capture_origin.is_none() {
-                        entry.capture_origin = Some(position);
-                    }
-                    delivered += 1;
+    pub(crate) fn mount_flush_moves_owned(&mut self) -> usize {
+        let mut delivered = 0usize;
+        for entry in self.input.per_surface.values_mut() {
+            if let Some(position) = entry.move_owed.take() {
+                entry.last_move = Some(position);
+                // The capture's drag ORIGIN is the first delivered move
+                // during capture (the press carries no position in this
+                // iced revision); SCN-021's drag previews read it.
+                if entry.captured && entry.capture_origin.is_none() {
+                    entry.capture_origin = Some(position);
                 }
+                delivered += 1;
             }
-            // The probe counts AFTER the iteration borrow released (one
-            // number: the delivered calls).
-            registry.counters.mount_move_calls += delivered as u64;
-            delivered
-        })
+        }
+        // The probe counts AFTER the iteration (one number: the delivered
+        // calls).
+        self.counters.mount_move_calls += delivered as u64;
+        delivered
     }
 
     /// Pointer capture ON for `surface_id` (the press route): capture arms
@@ -1952,23 +1991,20 @@ impl MountRegistry {
     /// the press does NOT deliver it and does NOT count it as an overwrite
     /// (the probe counts latest-wins overwrites only). Unregistered →
     /// `false`, registered → `true`.
-    pub(crate) fn mount_press(surface_id: StableId) -> bool {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let handle_registered = registry
-                .by_panel
-                .values()
-                .any(|handle| handle.surface_id() == surface_id);
-            if !handle_registered {
-                return false;
-            }
-            let entry = registry.input.per_surface.entry(surface_id).or_default();
-            entry.captured = true;
-            entry.capture_origin = None; // lands with the first delivered move
-            let _already_superseded = entry.move_owed.take();
-            registry.input.key_target = Some(surface_id);
-            true
-        })
+    pub(crate) fn mount_press_owned(&mut self, surface_id: StableId) -> bool {
+        let handle_registered = self
+            .by_panel
+            .values()
+            .any(|handle| handle.surface_id() == surface_id);
+        if !handle_registered {
+            return false;
+        }
+        let entry = self.input.per_surface.entry(surface_id).or_default();
+        entry.captured = true;
+        entry.capture_origin = None; // lands with the first delivered move
+        let _already_superseded = entry.move_owed.take();
+        self.input.key_target = Some(surface_id);
+        true
     }
 
     /// Pointer capture completion — release ANYWHERE (pressed inside,
@@ -1978,23 +2014,53 @@ impl MountRegistry {
     /// viewport's press-answers-the-owed-move rule). Returns the delivered
     /// count (0 or 1: ≤1 in flight per surface — the contract the tests
     /// pin). An unknown surface is a quiet 0.
-    pub(crate) fn mount_pointer_released(surface_id: StableId) -> usize {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let Some(entry) = registry.input.per_surface.get_mut(&surface_id) else {
-                return 0;
-            };
-            entry.captured = false;
-            entry.capture_origin = None;
-            let delivered = entry.move_owed.take().map(|position| {
-                entry.last_move = Some(position);
-                1
-            });
-            // (the entry borrow may end here; the probe counts outside it)
-            let delivered = delivered.unwrap_or(0);
-            registry.counters.mount_move_calls += delivered as u64;
-            delivered
-        })
+    pub(crate) fn mount_pointer_released_owned(&mut self, surface_id: StableId) -> usize {
+        let Some(entry) = self.input.per_surface.get_mut(&surface_id) else {
+            return 0;
+        };
+        entry.captured = false;
+        entry.capture_origin = None;
+        let delivered = entry.move_owed.take().map(|position| {
+            entry.last_move = Some(position);
+            1
+        });
+        // (the entry borrow ends here; the probe counts outside it)
+        let delivered = delivered.unwrap_or(0);
+        self.counters.mount_move_calls += delivered as u64;
+        delivered
+    }
+
+    /// Is ANY registered surface's capture armed? — the app subscription's
+    /// window-level release-catcher gate (SCN-016): the catcher subscribes
+    /// exactly while a capture could be waiting for its outside release.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn any_capture_active(&self) -> bool {
+        self.input.per_surface.values().any(|entry| entry.captured)
+    }
+
+    /// Is there any surface with an owed (unanswered) move? — the app
+    /// subscription's move-coalesce tick pump extension (SCN-016): the
+    /// EXISTING pump condition widens by this predicate so the mount's
+    /// coalescer driver keeps flowing after the last pointer event.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn any_move_owed(&self) -> bool {
+        self.input
+            .per_surface
+            .values()
+            .any(|entry| entry.move_owed.is_some())
+    }
+
+    /// The surfaces with capture armed, in registry order — the release
+    /// catcher's completion route input (each named surface's release runs
+    /// the ordinary [`Self::mount_pointer_released_owned`]).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn captured_surfaces(&self) -> Vec<StableId> {
+        self.input
+            .per_surface
+            .iter()
+            .filter(|(_, entry)| entry.captured)
+            .map(|(surface_id, _)| *surface_id)
+            .collect()
     }
 
     /// Record the wired hover: `row_id` is what the pointer is over (the
@@ -2004,73 +2070,49 @@ impl MountRegistry {
     /// ("hover does not storm the machines"). Returns `false` when the
     /// surface is unknown (a quiet no-op); `true` when recorded.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_set_hover(surface_id: StableId, row: StableId) -> bool {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let handle_registered = registry
-                .by_panel
-                .values()
-                .any(|handle| handle.surface_id() == surface_id);
-            if !handle_registered {
-                return false;
-            }
-            registry.input.per_surface.entry(surface_id).or_default().hover = Some(row);
-            true
-        })
+    pub(crate) fn mount_set_hover_owned(&mut self, surface_id: StableId, row: StableId) -> bool {
+        let handle_registered = self
+            .by_panel
+            .values()
+            .any(|handle| handle.surface_id() == surface_id);
+        if !handle_registered {
+            return false;
+        }
+        self.input.per_surface.entry(surface_id).or_default().hover = Some(row);
+        true
     }
 
     /// The hover read (SCN-021's drag previews + the tests' probe): what
     /// surface `surface_id`'s pointer last hovered.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_hover(surface_id: StableId) -> Option<StableId> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .input
-                .per_surface
-                .get(&surface_id)
-                .and_then(|entry| entry.hover)
-        })
+    pub(crate) fn mount_hover_owned(&self, surface_id: StableId) -> Option<StableId> {
+        self.input
+            .per_surface
+            .get(&surface_id)
+            .and_then(|entry| entry.hover)
     }
 
     /// The full per-surface input snapshot — SCN-021's drag previews read
     /// hover + capture + origin + last position from ONE place (the
     /// registry stays the single truth for all of them).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_hover_state(surface_id: StableId) -> Option<HoverState> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .input
-                .per_surface
-                .get(&surface_id)
-                .copied()
-        })
+    pub(crate) fn mount_hover_state_owned(&self, surface_id: StableId) -> Option<HoverState> {
+        self.input.per_surface.get(&surface_id).copied()
     }
 
     /// The capture read (the press/release route's assertion surface).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_captured(surface_id: StableId) -> bool {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .input
-                .per_surface
-                .get(&surface_id)
-                .is_some_and(|entry| entry.captured)
-        })
+    pub(crate) fn mount_captured_owned(&self, surface_id: StableId) -> bool {
+        self.input
+            .per_surface
+            .get(&surface_id)
+            .is_some_and(|entry| entry.captured)
     }
 
     /// The panel → surface-id read for the panel hook (the capture wrapper
     /// needs the address its pointer messages carry).
-    pub(crate) fn panel_surface_id(panel_id: &str) -> Option<StableId> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .by_panel
-                .get(panel_id)
-                .map(|handle| handle.surface_id())
-        })
+    pub(crate) fn panel_surface_id_owned(&self, panel_id: &str) -> Option<StableId> {
+        self.by_panel.get(panel_id).map(|handle| handle.surface_id())
     }
 
     /// The keyboard target resolution (SCN-020): the surface a mount key
@@ -2082,25 +2124,20 @@ impl MountRegistry {
     ///    only mean that panel;
     /// 3. else `None` (no mount surface the keys could mean — graceful).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_key_surface() -> Option<StableId> {
-        MOUNT_REGISTRY.with(|registry| {
-            let registry = registry.borrow();
-            registry.input.key_target.or_else(|| {
-                let sole: Option<StableId> =
-                    registry.by_panel.values().next().map(|handle| handle.surface_id());
-                (registry.by_panel.len() == 1).then_some(sole).flatten()
-            })
+    pub(crate) fn mount_key_surface_owned(&self) -> Option<StableId> {
+        self.input.key_target.or_else(|| {
+            let sole: Option<StableId> =
+                self.by_panel.values().next().map(|handle| handle.surface_id());
+            (self.by_panel.len() == 1).then_some(sole).flatten()
         })
     }
 
-    /// The point-free keyboard-grab seam (for tests + the future app-owned
-    /// registry's roving-panel focus, SCN-015): name `surface_id` as the
-    /// keys' target without a pointer press. `None` clears.
+    /// The point-free keyboard-grab seam (for tests + the app-owned
+    /// registry's roving-panel focus, the wire era): name `surface_id` as
+    /// the keys' target without a pointer press. `None` clears.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn set_mount_key_target(surface_id: Option<StableId>) {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().input.key_target = surface_id;
-        });
+    pub(crate) fn set_mount_key_target_owned(&mut self, surface_id: Option<StableId>) {
+        self.input.key_target = surface_id;
     }
 
     /// The bridge's prompt-arm record for one `PromptRequested` routing —
@@ -2115,8 +2152,9 @@ impl MountRegistry {
     /// 2. (SCN-015) the DESC arm: resolve the surface-ready dialog desc
     ///    ([`MountPromptDesc`]) NOW and place it in the registry's
     ///    `prompts` map — the modal content the app's confirm modal
-    ///    displays (its wiring is SCN-016). Resolution facts mirror the
-    ///    machine's own arm-time capture (see [`Self::resolve_prompt_desc`]);
+    ///    displays (SCN-016 landed that wiring: `ModalKind::WidgetPrompt`).
+    ///    Resolution facts mirror the
+    ///    machine's own arm-time capture (see [`Self::resolve_prompt_desc_owned`]);
     ///    a resolution failure records nothing here (the interaction stays
     ///    machine-pending and its lifecycle continues through the machine
     ///    edges) — a graceful no-op, never a panic.
@@ -2124,25 +2162,16 @@ impl MountRegistry {
     /// A re-arm on the same surface REPLACES the desc (the surface shows
     /// its latest armed interaction; the machine layers stay total — their
     /// stages are keyed per address).
-    pub(crate) fn mount_record_prompt_armed(surface_id: StableId, key: DispatchKey) {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .input
-                .escape_cancel
-                .insert(surface_id, key.clone());
-        });
-        // The desc's resolution runs OUTSIDE the registry borrow (the
-        // machines live in the handle's own `RefCell`s, not the thread-local
-        // cell), then the one insert lands it.
-        if let Some(desc) = MountRegistry::resolve_prompt_desc(surface_id, &key) {
-            MOUNT_REGISTRY.with(|registry| {
-                registry.borrow_mut().prompts.insert(surface_id, desc);
-            });
+    pub(crate) fn mount_record_prompt_armed_owned(&mut self, surface_id: StableId, key: DispatchKey) {
+        self.input.escape_cancel.insert(surface_id, key.clone());
+        // The desc's resolution reads the handle's own `RefCell`s (the
+        // machines), then the one insert lands it.
+        if let Some(desc) = self.resolve_prompt_desc_owned(surface_id, &key) {
+            self.prompts.insert(surface_id, desc);
         }
     }
 
-    /// The arm-time desc resolution ([`Self::mount_record_prompt_armed`]'s
+    /// The arm-time desc resolution ([`Self::mount_record_prompt_armed_owned`]'s
     /// second write): machine reads ONLY, in the same synchronous scope as
     /// the arming `dispatch` — the "captured at arm time" rule. `None` when
     /// any fact cannot be named (no machine stage, unregistered surface, no
@@ -2163,8 +2192,8 @@ impl MountRegistry {
     /// ITS captured stage. This copy is the DISPLAY contract
     /// (the desc's fields), reconstructed from the same guards `dispatch`
     /// validated, at the same instant.
-    fn resolve_prompt_desc(surface_id: StableId, key: &DispatchKey) -> Option<MountPromptDesc> {
-        let handle = MountRegistry::handle_for_surface(surface_id)?;
+    fn resolve_prompt_desc_owned(&self, surface_id: StableId, key: &DispatchKey) -> Option<MountPromptDesc> {
+        let handle = self.handle_for_surface_owned(surface_id)?;
         let prompt = handle
             .dispatcher
             .borrow()
@@ -2201,33 +2230,22 @@ impl MountRegistry {
     /// interaction was cancelled. NO DRAG here: drag cancel is SCN-021's
     /// (its hook slot will join this arm).
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn mount_escape_cancel(surface_id: StableId) -> bool {
-        let Some(key) = MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().input.escape_cancel.remove(&surface_id)
-        }) else {
+    pub(crate) fn mount_escape_cancel_owned(&mut self, surface_id: StableId) -> bool {
+        let Some(key) = self.input.escape_cancel.remove(&surface_id) else {
             return false;
         };
-        let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
+        let Some(handle) = self.handle_for_surface_owned(surface_id) else {
             return false;
         };
         let dismissed = handle.dispatcher.borrow_mut().dismiss_prompt(key.clone());
         // The armed desc leaves in the SAME dismiss (a stale desc with no
         // machine stage is a defect the self-heal takes down quietly — the
         // machine said the interaction is over).
-        MountRegistry::take_prompt_dialog(surface_id, &key);
+        self.take_prompt_dialog_owned(surface_id, &key);
         if dismissed {
-            MountRegistry::record_prompt_dismissed();
+            self.record_prompt_dismissed_owned();
         }
         dismissed
-    }
-
-    /// The static prune seam: one `MOUNT_REGISTRY` borrow running the
-    /// input sweep (the lifecycle paths call this AFTER their own borrow
-    /// used a different borrow cell scope — nesting the sweep inside the
-    /// same `with` would re-borrow the registry cell).
-    #[cfg_attr(not(test), allow(dead_code))]
-    fn prune_input() {
-        MOUNT_REGISTRY.with(|registry| registry.borrow_mut().prune_input_entries());
     }
 
     /// Sweep every input entry whose SURFACE left the registry (the
@@ -2348,7 +2366,7 @@ pub(crate) fn nav_ring(
 ///   (plain [`WidgetMountMsg::FocusMoved`], no selection write — Tab
 ///   moves focus, it does not re-litigate selection).
 /// - Escape — nothing here: cancel is the host control operation the app
-///   join runs machine-directly ([`MountRegistry::mount_escape_cancel`];
+///   join runs machine-directly ([`MountRegistry::mount_escape_cancel_owned`];
 ///   drag cancel is SCN-021's).
 ///
 /// A chord (Ctrl/Alt/Logo) routes nothing: chords are the app's
@@ -2363,7 +2381,8 @@ pub(crate) fn nav_ring(
 /// authority — and the applied messages re-assert the SAME row through
 /// [`apply_mount_msg`]'s `focus_set`, a no-op re-write), plus the
 /// registry-side nav-step probe.
-pub(crate) fn key_route(
+pub(crate) fn key_route_owned(
+    registry: &mut MountRegistry,
     surface_id: StableId,
     surface: &WidgetSurface,
     state: &mut WidgetUiState,
@@ -2455,9 +2474,25 @@ pub(crate) fn key_route(
         _ => Vec::new(),
     };
     if !msgs.is_empty() {
-        MountRegistry::record_key_nav_step();
+        registry.record_key_nav_step_owned();
     }
     msgs
+}
+
+/// The headless tests' facade: the SAME [`key_route_owned`] core over the
+/// cfg(test) registry cell (the pre-migration static signature — see the
+/// seam block near the file end).
+#[cfg(test)]
+pub(crate) fn key_route(
+    surface_id: StableId,
+    surface: &WidgetSurface,
+    state: &mut WidgetUiState,
+    key: Key,
+    modifiers: Modifiers,
+) -> Vec<WidgetMountMsg> {
+    with_test_registry_mut(|registry| {
+        key_route_owned(registry, surface_id, surface, state, key, modifiers)
+    })
 }
 
 /// The landed row's owning widget from the ring pairs.
@@ -2592,7 +2627,12 @@ pub(crate) enum MountTableKeyStep {
 /// graceful). NO counters, NO events: the state machine's own counters
 /// are its §16 probes; `keyboard_nav_steps` ticks once per non-empty
 /// route.
-pub(crate) fn mount_table_key_route(
+///
+// (the typed-table MOUNT integration (the later task) is the production
+// caller; the tests' facade consumes it today.)
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn mount_table_key_route_owned(
+    registry: &mut MountRegistry,
     state: &mut TableUiState,
     cell_cursor: &mut Option<CellFocus>,
     key: Key,
@@ -2633,9 +2673,27 @@ pub(crate) fn mount_table_key_route(
         _ => None,
     };
     if step.is_some() {
-        MountRegistry::record_key_nav_step();
+        registry.record_key_nav_step_owned();
     }
     step
+}
+
+/// The headless tests' facade: the SAME [`mount_table_key_route_owned`]
+/// core over the cfg(test) registry cell.
+#[cfg(test)]
+pub(crate) fn mount_table_key_route(
+    state: &mut TableUiState,
+    cell_cursor: &mut Option<CellFocus>,
+    key: Key,
+    modifiers: Modifiers,
+    spec: &WindowSpec,
+    column_order: &[StableId],
+) -> Option<MountTableKeyStep> {
+    with_test_registry_mut(|registry| {
+        mount_table_key_route_owned(
+            registry, state, cell_cursor, key, modifiers, spec, column_order,
+        )
+    })
 }
 
 /// The panel hook's pointer-capture wrapper (SCN-020, the FEW-LINE form) —
@@ -2650,7 +2708,7 @@ pub(crate) fn mount_table_key_route(
 /// exactly the gestures they were).
 ///
 /// `surface_id` `None` (a body without a registry entry — cannot happen
-/// through [`MountRegistry::mounted_body`], but total by construction)
+/// through [`MountRegistry::mounted_body_owned`], but total by construction)
 /// passes the element through untouched.
 pub(crate) fn pointer_capture_body(
     element: Element<'static, WidgetMountMsg>,
@@ -2667,19 +2725,31 @@ pub(crate) fn pointer_capture_body(
 }
 
 /// RAII registration: the guarded surface tears down on drop
-/// ([`teardown_surface`]) — the test and bench seam ("register once; the
-/// scope closes; the state releases"). Migrating to the app-owned registry
-/// (SCN-015) keeps this type as the panels' keep-alive token; only its
-/// drop target moves (the app field, not the thread-local).
+/// ([`MountRegistry::teardown_surface_owned`]) — the test and bench seam ("register once; the
+/// scope closes; the state releases"). The app-owned registry migration
+/// (SCN-016) keeps this type as the panels' keep-alive token; only its
+/// drop target moved (the app-owned field, not a thread-local). In test
+/// builds the drop runs the cfg(test) cell's teardown (the seam below);
+/// in production builds the keep-alive's teardown is the app-owned
+/// registration flow's obligation — no drop side effect runs there until
+/// a production flow holds a guard (the wire era brings that flow).
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct RegisteredGuard {
     panel_id: String,
 }
 
+#[cfg(test)]
 impl Drop for RegisteredGuard {
     fn drop(&mut self) {
         MountRegistry::teardown_surface(&self.panel_id);
     }
+}
+
+// (production builds: the natural drop — the type remains the keep-alive
+// token; see the doc above for the wire-era drop contract.)
+#[cfg(not(test))]
+impl Drop for RegisteredGuard {
+    fn drop(&mut self) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -2692,9 +2762,9 @@ impl Drop for RegisteredGuard {
 // is the interaction half the mount owns:
 //
 // - the arm records a SURFACE-READY desc ([`MountPromptDesc`]) through the
-//   existing bridge hook ([`MountRegistry::mount_record_prompt_armed`] —
+//   existing bridge hook ([`MountRegistry::mount_record_prompt_armed_owned`] —
 //   the one `PromptRequested` routing is where both handlers meet);
-// - the desc accessor ([`MountRegistry::prompt_dialog`]) is the app modal
+// - the desc accessor ([`MountRegistry::prompt_dialog_owned`]) is the app modal
 //   integration's READ: the content + address a confirm modal displays and
 //   routes back by;
 // - the decisions ride their own vocabulary ([`WidgetPromptMsg`]) →
@@ -2703,11 +2773,11 @@ impl Drop for RegisteredGuard {
 //   SCN-014 bridge's sink + settle policy).
 //
 // The modal's VISUAL surface (overlay/backdrop placement inside the app's
-// existing modal machinery) is the app view's composition — the SCN-016
-// wiring; the mount side is COMPLETE here: this is the full headless
-// lifecycle (arm → desc → decision → machine edge → counters), and the
-// desc accessor + the [`prompt_modal_element`] body builder are exactly
-// the surface that wiring consumes.
+// existing modal machinery) LANDED with SCN-016 (the `ModalKind::WidgetPrompt`
+// content arm); the mount side was COMPLETE before it: this is the full
+// headless lifecycle (arm → desc → decision → machine edge → counters),
+// and the desc accessor + the [`prompt_modal_element`] body builder are
+// exactly the surface that wiring consumes.
 // ---------------------------------------------------------------------------
 
 /// One armed confirmation's SURFACE-READY dialog desc (SCN-015): the
@@ -2717,7 +2787,7 @@ impl Drop for RegisteredGuard {
 /// `prompt_desc_accessor_shape`):
 /// - `surface_id` — the surface the armed interaction belongs to (the
 ///   registry's key; the panel id's join is
-///   [`MountRegistry::handle_for_surface`]'s reverse direction);
+///   [`MountRegistry::handle_for_surface_owned`]'s reverse direction);
 /// - `prompt` — the prompt text the modal displays (the machine's captured
 ///   stage text — [`WidgetDispatcher::pending_prompt`]);
 /// - `command_id` — the captured command the confirm will emit;
@@ -2730,13 +2800,12 @@ impl Drop for RegisteredGuard {
 /// emission re-reads THAT (a concurrent re-sync cannot retarget it). Every
 /// field above is captured AT ARM TIME from the same synchronous scope the
 /// arming `dispatch` resolved (see
-/// [`MountRegistry::resolve_prompt_desc`]) — the panel-id/surface-id pair
+/// [`MountRegistry::resolve_prompt_desc_owned`]) — the panel-id/surface-id pair
 /// is the registry's surface key (the desc names the interaction, so both
 /// vocabularies resolve from it). Host-local only, never serialized (§3).
 ///
-// Constructed on every live arm (the `PromptRequested` routing); the
-// fields' READ consumers are the assertion tests until the SCN-016 modal
-// wiring consumes them — the assert-only allowance, naming why it stays.
+// Constructed on every live arm (the `PromptRequested` routing); since
+// SCN-016 the modal-content arm is the READ consumer in production too.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MountPromptDesc {
@@ -2766,8 +2835,8 @@ pub(crate) struct MountPromptDesc {
 /// ([`route_prompt_decision`]'s confirm/dismiss edges over the SAME
 /// dispatcher the click path used).
 // The vocabulary is production-reachable end-to-end (the update arm's
-// handler matches these variants); a builder EMITS it today only through
-// the tests — the SCN-016 modal wiring consummates the emission, recorded.
+// handler matches these variants); since SCN-016 the modal body's buttons
+// emit it for real (the body builder inside `ModalKind::WidgetPrompt`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WidgetPromptMsg {
     /// The OK decision: the user confirmed the armed interaction.
@@ -2792,10 +2861,8 @@ pub(crate) enum WidgetPromptMsg {
 /// emit through this; the app's update arm unwraps the variant back into
 /// the prompt handler (`app::update::widget_prompt`).
 ///
-// The one-decision gate the SCN-016 modal wiring calls (the modal body is
-// not attached to the app's modal machinery yet — recorded); today only
-// the headless tests drive it.
-#[cfg_attr(not(test), allow(dead_code))]
+// Landed as the ONE mapping the prompt modal's body (SCN-016) maps its
+// element through — `app::update::widget_prompt` unwraps it back.
 pub(crate) fn prompt_app_message(msg: WidgetPromptMsg) -> crate::app::Message {
     crate::app::Message::WidgetPromptMsg(msg)
 }
@@ -2842,15 +2909,15 @@ pub(crate) struct MountPromptFacts {
 /// [`WidgetPromptMsg::Confirmed`], each addressed with the desc's
 /// (surface, key)). The app's REAL modal form (overlay placement,
 /// backdrop, Enter/Escape key handling) is the app's existing modal
-/// machinery — the SCN-016 wiring hosts this element inside it; the mount
-/// side stays the plain body (its labels' semantics: Cancel DISMISSES —
-/// no event — and OK CONFIRMS — exactly one captured command — the app
-/// modal policy applied onto the machine's two edges).
+/// machinery — SCN-016 hosts this element inside it
+/// (`ModalKind::WidgetPrompt`'s content); the mount side stays the plain
+/// body (its labels' semantics: Cancel DISMISSES — no event — and OK
+/// CONFIRMS — exactly one captured command — the app modal policy applied
+/// onto the machine's two edges).
 ///
-// Consumed today by the assertion tests (the element shape is
-// un-introspectable headless; the facts carry the assertions); the SCN-016
-// modal wiring takes the element itself.
-#[cfg_attr(not(test), allow(dead_code))]
+// Landed: the modal-content arm maps the element through
+// [prompt_app_message]; the facts stay the headless tests' surface (the
+// element shape is un-introspectable without a renderer).
 pub(crate) fn prompt_modal_element(
     desc: &MountPromptDesc,
 ) -> (Element<'static, WidgetPromptMsg>, MountPromptFacts) {
@@ -2885,21 +2952,16 @@ pub(crate) fn prompt_modal_element(
 }
 
 impl MountRegistry {
-    /// The armed prompt's dialog desc for `surface_id` (SCN-015) — the app
-    /// modal integration's READ: `Some(desc)` while the surface's armed
+    /// The armed prompt's dialog desc for `surface_id` (SCN-015) — the
+    /// app modal's READ (`ModalKind::WidgetPrompt`'s content, landed
+    /// SCN-016): `Some(desc)` while the surface's armed
     /// interaction awaits its decision; the desc STAYS in the registry
     /// (read-only) until the interaction completes — the decision routes
     /// ([`route_prompt_decision`] and Escape's cancel) are the consumption
     /// points, so a view pass may re-read per frame while the dialog shows.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn prompt_dialog(surface_id: StableId) -> Option<MountPromptDesc> {
-        MOUNT_REGISTRY.with(|registry| {
-            registry
-                .borrow()
-                .prompts
-                .get(&surface_id)
-                .cloned()
-        })
+    pub(crate) fn prompt_dialog_owned(&self, surface_id: StableId) -> Option<MountPromptDesc> {
+        self.prompts.get(&surface_id).cloned()
     }
 
     /// The desc's CONSUMPTION (the two completion edges call this — the
@@ -2908,50 +2970,228 @@ impl MountRegistry {
     /// surface survives a stale decision's cleanup), and clear the escape
     /// hint when it names the same address (a completed interaction can no
     /// longer be cancelled). Returns whether the desc was taken.
-    pub(crate) fn take_prompt_dialog(surface_id: StableId, key: &DispatchKey) -> bool {
-        MOUNT_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            // The key match reads FIRST (the borrow ends at the comparison),
-            // then the removal — a newer arm on the same surface survives a
-            // stale decision's cleanup.
-            let names_this_address = registry
-                .prompts
-                .get(&surface_id)
-                .is_some_and(|armed| &armed.key == key);
-            let taken = if names_this_address {
-                registry.prompts.remove(&surface_id);
-                true
-            } else {
-                false
-            };
-            if registry.input.escape_cancel.get(&surface_id) == Some(key) {
-                registry.input.escape_cancel.remove(&surface_id);
-            }
-            taken
-        })
+    pub(crate) fn take_prompt_dialog_owned(&mut self, surface_id: StableId, key: &DispatchKey) -> bool {
+        // The key match reads FIRST, then the removal — a newer arm on the
+        // same surface survives a stale decision's cleanup.
+        let names_this_address = self
+            .prompts
+            .get(&surface_id)
+            .is_some_and(|armed| &armed.key == key);
+        let taken = if names_this_address {
+            self.prompts.remove(&surface_id);
+            true
+        } else {
+            false
+        };
+        if self.input.escape_cancel.get(&surface_id) == Some(key) {
+            self.input.escape_cancel.remove(&surface_id);
+        }
+        taken
     }
 
     /// The confirmed-decision probe tick (§16).
-    pub(crate) fn record_prompt_confirmed() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.prompts_confirmed += 1;
-        });
+    pub(crate) fn record_prompt_confirmed_owned(&mut self) {
+        self.counters.prompts_confirmed += 1;
     }
 
     /// The dismissed-decision probe tick (§16) — the modal's Cancel and
-    /// the Escape cancel are the same edge; both tick here.
-    pub(crate) fn record_prompt_dismissed() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.prompts_dismissed += 1;
-        });
+    /// the machine-direct Escape cancel are the same edge; both tick here.
+    pub(crate) fn record_prompt_dismissed_owned(&mut self) {
+        self.counters.prompts_dismissed += 1;
     }
 
     /// The refused-decision probe tick (§16) — a decision that named no
     /// pending interaction; moves ONLY its own counter.
-    pub(crate) fn record_prompt_refused() {
-        MOUNT_REGISTRY.with(|registry| {
-            registry.borrow_mut().counters.prompts_refused += 1;
+    pub(crate) fn record_prompt_refused_owned(&mut self) {
+        self.counters.prompts_refused += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// THE cfg(test) SEAM (SCN-016's app-owned registry migration): the storage
+// that was a PRODUCTION thread_local moves ONTO the app
+// (`OpenCADStudio::mount_registry`); every registry accessor is an INSTANCE
+// method over that app-owned store (the `*_owned` forms above — the
+// production call sites touch ONLY the app field). What stays here, under
+// `cfg(test)` ONLY, is the test-friendly STATIC form the headless tests
+// already pin: the same names/signatures the
+// SCN-014/015/020 test modules (here and in `app::update`) drive, backed by
+// a cfg(test)-only thread-local cell that delegates to the SAME instance
+// forms — so the tests keep exercising the production logic with ZERO call
+// churn. The production grep guarantee holds by construction: a `grep
+// MOUNT_REGISTRY` outside cfg(test) code has nothing to find.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+thread_local! {
+    static MOUNT_REGISTRY: RefCell<std::rc::Rc<RefCell<MountRegistry>>> =
+        RefCell::new(std::rc::Rc::new(RefCell::new(MountRegistry::default())));
+}
+
+/// Bind the headless tests' cell to the app's own mount store (`Rc` — the
+/// app's field and the facades' delegation target become ONE storage; see
+/// `OpenCADStudio::new_for_test`, the single caller).
+#[cfg(test)]
+pub(crate) fn test_bind_app_store(store: std::rc::Rc<RefCell<MountRegistry>>) {
+    MOUNT_REGISTRY.with(|cell| {
+        *cell.borrow_mut() = store;
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_registry<R>(read: impl FnOnce(&MountRegistry) -> R) -> R {
+    let store = MOUNT_REGISTRY.with(|cell| cell.borrow().clone());
+    let guard = store.borrow();
+    let value = read(&guard);
+    value
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_registry_mut<R>(mutate: impl FnOnce(&mut MountRegistry) -> R) -> R {
+    let store = MOUNT_REGISTRY.with(|cell| cell.borrow().clone());
+    let mut guard = store.borrow_mut();
+    let value = mutate(&mut guard);
+    value
+}
+
+#[cfg(test)]
+impl MountRegistry {
+    /// The raw registration primitive's test form — see
+    /// [`Self::register_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn register(panel_id: &str, handle: SurfaceMountHandle) {
+        with_test_registry_mut(|registry| registry.register_owned(panel_id, handle));
+    }
+
+    /// The raw removal's test form — see [`Self::unregister_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn unregister(panel_id: &str) {
+        with_test_registry_mut(|registry| registry.unregister_owned(panel_id));
+    }
+
+    /// The gate read's test form — see [`Self::mount_registered_owned`].
+    pub(crate) fn mount_registered(panel_id: &str) -> bool {
+        with_test_registry(|registry| registry.mount_registered_owned(panel_id))
+    }
+
+    /// The mounted-body read's test form — see [`Self::mounted_body_owned`].
+    pub(crate) fn mounted_body(panel_id: &str) -> Option<Element<'static, WidgetMountMsg>> {
+        with_test_registry(|registry| registry.mounted_body_owned(panel_id))
+    }
+
+    /// The PRESERVE-ON-IDENTICAL lifecycle's test form — see
+    /// [`Self::register_surface_owned`].
+    pub(crate) fn register_surface(panel_id: &str, handle: SurfaceMountHandle) {
+        with_test_registry_mut(|registry| registry.register_surface_owned(panel_id, handle));
+    }
+
+    /// The teardown's test form — see [`Self::teardown_surface_owned`].
+    pub(crate) fn teardown_surface(panel_id: &str) {
+        with_test_registry_mut(|registry| registry.teardown_surface_owned(panel_id));
+    }
+
+    /// The surface lookup's test form — see
+    /// [`Self::handle_for_surface_owned`].
+    pub(crate) fn handle_for_surface(surface_id: StableId) -> Option<SurfaceMountHandle> {
+        with_test_registry(|registry| registry.handle_for_surface_owned(surface_id))
+    }
+
+    /// The counters read's test form — see [`Self::counters_owned`].
+    pub(crate) fn counters() -> MountCounters {
+        with_test_registry(|registry| registry.counters_owned())
+    }
+
+    /// The coalescer ENTRY's test form — see
+    /// [`Self::mount_move_defer_owned`].
+    pub(crate) fn mount_move_defer(surface_id: StableId, position: Point) -> Option<bool> {
+        with_test_registry_mut(|registry| registry.mount_move_defer_owned(surface_id, position))
+    }
+
+    /// The coalescer FLUSH's test form — see
+    /// [`Self::mount_flush_moves_owned`].
+    pub(crate) fn mount_flush_moves() -> usize {
+        with_test_registry_mut(|registry| registry.mount_flush_moves_owned())
+    }
+
+    /// The press route's test form — see [`Self::mount_press_owned`].
+    pub(crate) fn mount_press(surface_id: StableId) -> bool {
+        with_test_registry_mut(|registry| registry.mount_press_owned(surface_id))
+    }
+
+    /// The release completion's test form — see
+    /// [`Self::mount_pointer_released_owned`].
+    pub(crate) fn mount_pointer_released(surface_id: StableId) -> usize {
+        with_test_registry_mut(|registry| registry.mount_pointer_released_owned(surface_id))
+    }
+
+    /// The hover write's test form — see [`Self::mount_set_hover_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn mount_set_hover(surface_id: StableId, row: StableId) -> bool {
+        with_test_registry_mut(|registry| registry.mount_set_hover_owned(surface_id, row))
+    }
+
+    /// The hover read's test form — see [`Self::mount_hover_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn mount_hover(surface_id: StableId) -> Option<StableId> {
+        with_test_registry(|registry| registry.mount_hover_owned(surface_id))
+    }
+
+    /// The hover-snapshot read's test form — see
+    /// [`Self::mount_hover_state_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn mount_hover_state(surface_id: StableId) -> Option<HoverState> {
+        with_test_registry(|registry| registry.mount_hover_state_owned(surface_id))
+    }
+
+    /// The capture read's test form — see [`Self::mount_captured_owned`].
+    pub(crate) fn mount_captured(surface_id: StableId) -> bool {
+        with_test_registry(|registry| registry.mount_captured_owned(surface_id))
+    }
+
+    /// The panel→surface read's test form — see
+    /// [`Self::panel_surface_id_owned`].
+    pub(crate) fn panel_surface_id(panel_id: &str) -> Option<StableId> {
+        with_test_registry(|registry| registry.panel_surface_id_owned(panel_id))
+    }
+
+    /// The keyboard target resolution's test form — see
+    /// [`Self::mount_key_surface_owned`].
+    pub(crate) fn mount_key_surface() -> Option<StableId> {
+        with_test_registry(|registry| registry.mount_key_surface_owned())
+    }
+
+    /// The keyboard-grab seam's test form — see
+    /// [`Self::set_mount_key_target_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn set_mount_key_target(surface_id: Option<StableId>) {
+        with_test_registry_mut(|registry| registry.set_mount_key_target_owned(surface_id));
+    }
+
+    /// The prompt-arm record's test form — see
+    /// [`Self::mount_record_prompt_armed_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn mount_record_prompt_armed(surface_id: StableId, key: DispatchKey) {
+        with_test_registry_mut(|registry| {
+            registry.mount_record_prompt_armed_owned(surface_id, key)
         });
+    }
+
+    /// Escape's mounted-surface cancel's test form — see
+    /// [`Self::mount_escape_cancel_owned`].
+    #[allow(dead_code)]
+    pub(crate) fn mount_escape_cancel(surface_id: StableId) -> bool {
+        with_test_registry_mut(|registry| registry.mount_escape_cancel_owned(surface_id))
+    }
+
+    /// The prompt desc read's test form — see [`Self::prompt_dialog_owned`].
+    pub(crate) fn prompt_dialog(surface_id: StableId) -> Option<MountPromptDesc> {
+        with_test_registry(|registry| registry.prompt_dialog_owned(surface_id))
+    }
+
+    /// The desc consumption's test form — see
+    /// [`Self::take_prompt_dialog_owned`].
+    pub(crate) fn take_prompt_dialog(surface_id: StableId, key: &DispatchKey) -> bool {
+        with_test_registry_mut(|registry| registry.take_prompt_dialog_owned(surface_id, key))
     }
 }
 

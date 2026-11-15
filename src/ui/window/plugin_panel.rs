@@ -560,14 +560,25 @@ impl PluginPanelState {
         }
     }
 
-    pub fn view<'a>(&'a self, num_id: u32, width: f32, chrome: Chrome) -> Element<'a, Message> {
+    pub(crate) fn view<'a>(
+        &'a self,
+        num_id: u32,
+        width: f32,
+        chrome: Chrome,
+        // The app-owned mount store (SCN-016): the view reads the registry's
+        // entry for THIS panel through this shared-cell reference. The
+        // lending caller (`app::dock::view`) derefs the app's `Rc`; the
+        // view borrows per read (the body element is 'static, nothing
+        // holds the borrow).
+        mount_store: &'a std::cell::RefCell<crate::ui::window::plugin_widget_mount::MountRegistry>,
+    ) -> Element<'a, Message> {
         let tbar = title_bar(PanelId::Plugin(num_id), self.def.title.clone(), chrome);
 
         // SCN-013 widget-surface mount hook (additive): when the host has a
         // registered WidgetSurface for THIS panel id, the mounted body renders
         // and the legacy control loop below never runs. NOTHING registers a
-        // widget surface yet (the app-owned registration flow is the SCN-015
-        // follow-up), so every panel today — and every existing test — falls
+        // widget surface yet (the real registration calls arrive with the
+        // wire era), so every panel today — and every existing test — falls
         // to `None` and takes the legacy branch byte-identically.
         // SCN-014 made the gate's mapping REAL: each builder-emitted gesture
         // rides `Message::WidgetMountMsg` — through the bridge's one
@@ -579,14 +590,13 @@ impl PluginPanelState {
         // (host-local; capture + coalesced moves in the registry's input
         // store). Nothing registers a surface yet, so the legacy branch
         // below stays byte-identical for every panel today.
-        let body = match crate::ui::window::plugin_widget_mount::MountRegistry::mounted_body(
-            self.def.id.as_str(),
-        ) {
+        // SCN-016: the registry's storage is APP-OWNED
+        // (`OpenCADStudio::mount_registry`), and the view pass reads it
+        // through the registry ref handed down by the dock composition —
+        // zero entries still means the zero-code legacy path below.
+        let body = match mount_store.borrow().mounted_body_owned(self.def.id.as_str()) {
             Some(surface_view) => {
-                let surface_id =
-                    crate::ui::window::plugin_widget_mount::MountRegistry::panel_surface_id(
-                        self.def.id.as_str(),
-                    );
+                let surface_id = mount_store.borrow().panel_surface_id_owned(self.def.id.as_str());
                 crate::ui::window::plugin_widget_mount::pointer_capture_body(
                     surface_view,
                     surface_id,

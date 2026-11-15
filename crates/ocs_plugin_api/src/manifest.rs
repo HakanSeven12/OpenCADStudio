@@ -171,7 +171,10 @@
 /// the grip's original world-XY plane. The default preserves legacy behavior.
 /// v22 adds `HostApi::set_geo_location` / `remove_geo_location`, writing the
 /// drawing's model-space GEODATA object (appended requests).
-pub const API_VERSION: u32 = 22;
+/// v23 appends `TableOperation::LayoutSetTabOrder`: a plugin sets the order of
+/// the paper-space layout tabs in one undo step. A v22 host cannot decode it,
+/// so a plugin that sends it declares v23.
+pub const API_VERSION: u32 = 23;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

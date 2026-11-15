@@ -286,6 +286,9 @@ mod tests {
                 rotation: Some(90),
                 scale: Some([1.0, 50.0]),
             },
+            TableOperation::LayoutSetTabOrder {
+                names: vec!["T".into(), "S".into()],
+            },
         ] {
             let bytes = bincode::serialize(&PluginRequest::TableOperation {
                 operation: operation.clone(),

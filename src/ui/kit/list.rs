@@ -121,11 +121,18 @@ pub fn column_header<'a>(columns: Vec<Column>) -> Element<'a, Message> {
                 .padding(0)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(|theme: &Theme, status| button::Style {
-                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                        .then(|| Background::Color(chrome::hover(theme))),
-                    text_color: chrome::text(theme),
-                    ..Default::default()
+                .style(|theme: &Theme, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: hovered.then(|| Background::Color(chrome::hover(theme))),
+                        text_color: if hovered {
+                            chrome::strong(theme)
+                        } else {
+                            chrome::text(theme)
+                        },
+                        ..Default::default()
+                    }
                 })
                 .into(),
             None => title.into(),

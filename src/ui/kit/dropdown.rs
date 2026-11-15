@@ -17,12 +17,19 @@ use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 
 /// An option: lit under the pointer, and lit when it is the `current` value.
 pub fn dropdown_option_style(current: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |theme: &Theme, status: button::Status| button::Style {
-        background: (current
-            || matches!(status, button::Status::Hovered | button::Status::Pressed))
-        .then(|| Background::Color(chrome::hover(theme))),
-        text_color: chrome::text(theme),
-        ..Default::default()
+    move |theme: &Theme, status: button::Status| {
+        let lit = current || matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: lit.then(|| Background::Color(chrome::hover(theme))),
+            // Strong on the hover surface, where the plain text colour is
+            // too faint in some themes (WCAG AA).
+            text_color: if lit {
+                chrome::strong(theme)
+            } else {
+                chrome::text(theme)
+            },
+            ..Default::default()
+        }
     }
 }
 

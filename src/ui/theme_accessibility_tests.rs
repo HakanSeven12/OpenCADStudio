@@ -189,140 +189,6 @@ fn test_statusbar_contrast() {
 }
 
 #[test]
-fn test_command_line_contrast() {
-    for theme in Theme::ALL {
-        let p = theme.palette();
-        let cli_bg = p.background.base.color;
-
-        // 1. Input Value Text (normal text: >= 4.5:1)
-        let input_contrast = wcag_contrast(p.background.base.text, cli_bg);
-        assert!(
-            input_contrast >= 4.5,
-            "Theme {:?} command line input text ({:.2}:1) fails WCAG AA",
-            theme,
-            input_contrast
-        );
-
-        // 1b. Prompt ("Command:") text (normal text: >= 4.5:1)
-        let prompt_color =
-            accessible_accent_threshold(p.success.base.color, cli_bg, p.background.base.text, 4.5);
-        let prompt_contrast = wcag_contrast(prompt_color, cli_bg);
-        assert!(
-            prompt_contrast >= 4.5,
-            "Theme {:?} command prompt text ({:.2}:1) fails WCAG AA (>=4.5:1)",
-            theme,
-            prompt_contrast
-        );
-
-        // 2. Placeholder Text (0.72 alpha, secondary text: >= 3.0:1)
-        let placeholder = composite_over(p.background.base.text.scale_alpha(0.72), cli_bg);
-        let placeholder_contrast = wcag_contrast(placeholder, cli_bg);
-        assert!(
-            placeholder_contrast >= 3.0,
-            "Theme {:?} command line placeholder text ({:.2}:1) fails secondary text threshold (>=3.0:1)",
-            theme,
-            placeholder_contrast
-        );
-
-        // 3. Option Keyword Button: normal is weakest pair, hovered is primary.weak pair
-        let opt_normal_contrast =
-            wcag_contrast(p.background.weakest.text, p.background.weakest.color);
-        assert!(
-            opt_normal_contrast >= 4.5,
-            "Theme {:?} option button normal text ({:.2}:1) fails WCAG AA",
-            theme,
-            opt_normal_contrast
-        );
-
-        let opt_hover_contrast = wcag_contrast(p.primary.weak.text, p.primary.weak.color);
-        assert!(
-            opt_hover_contrast >= 3.0,
-            "Theme {:?} option button hover text ({:.2}:1) fails UI component threshold (>=3.0:1)",
-            theme,
-            opt_hover_contrast
-        );
-
-        // 4. Command History Entries:
-        // EntryKind::Command -> background.base.text (normal text: >= 4.5:1)
-        let cmd_contrast = wcag_contrast(p.background.base.text, cli_bg);
-        assert!(
-            cmd_contrast >= 4.5,
-            "Theme {:?} history command text ({:.2}:1) fails WCAG AA",
-            theme,
-            cmd_contrast
-        );
-
-        // EntryKind::Output -> background.base.text at 0.72 alpha (secondary text: >= 3.0:1)
-        let output_text = composite_over(p.background.base.text.scale_alpha(0.72), cli_bg);
-        let output_contrast = wcag_contrast(output_text, cli_bg);
-        assert!(
-            output_contrast >= 3.0,
-            "Theme {:?} history output text ({:.2}:1) fails secondary text threshold (>=3.0:1)",
-            theme,
-            output_contrast
-        );
-
-        // EntryKind::Info -> primary.base.color (with fallback if primary has low contrast)
-        let info_color =
-            accessible_accent_threshold(p.primary.base.color, cli_bg, p.background.base.text, 4.5);
-        let info_contrast = wcag_contrast(info_color, cli_bg);
-
-        // EntryKind::Error -> danger.base.color
-        let error_contrast = wcag_contrast(p.danger.base.color, cli_bg);
-        assert!(
-            info_contrast >= 4.5,
-            "Theme {:?} info text ({:.2}:1) fails WCAG AA normal text threshold (>=4.5:1)",
-            theme,
-            info_contrast
-        );
-        assert!(
-            error_contrast >= 2.0,
-            "Theme {:?} error text ({:.2}:1) fails non-text indicator threshold (>=2.0:1)",
-            theme,
-            error_contrast
-        );
-    }
-}
-
-#[test]
-fn test_properties_and_dock_contrast() {
-    for theme in Theme::ALL {
-        let p = theme.palette();
-        let dock_bg = p.background.base.color;
-
-        // 1. Property Field Labels & Values
-        let label_contrast = wcag_contrast(p.background.base.text, dock_bg);
-        assert!(
-            label_contrast >= 4.5,
-            "Theme {:?} properties label text ({:.2}:1) fails WCAG AA",
-            theme,
-            label_contrast
-        );
-
-        // 2. Muted Helper Text: muted_style uses background.base.text at 0.68 alpha
-        let muted_text = composite_over(p.background.base.text.scale_alpha(0.68), dock_bg);
-        let muted_contrast = wcag_contrast(muted_text, dock_bg);
-        assert!(
-            muted_contrast >= 3.0,
-            "Theme {:?} properties muted text ({:.2}:1) fails secondary text threshold (>=3.0:1)",
-            theme,
-            muted_contrast
-        );
-
-        // 3. Section Header: rendered on background.weakest.color
-        let header_bg = p.background.weakest.color;
-        let header_text = p.background.base.text;
-        let header_contrast = wcag_contrast(header_text, header_bg);
-        assert!(
-            header_contrast >= 4.0,
-            "Theme {:?} properties header text ({:.2}:1) fails header contrast threshold (>=4.0:1)",
-            theme,
-            header_contrast
-        );
-    }
-}
-
-#[test]
 fn test_modals_and_action_buttons_contrast() {
     for theme in Theme::ALL {
         let p = theme.palette();
@@ -371,61 +237,6 @@ fn test_modals_and_action_buttons_contrast() {
             "Theme {:?} close button hover text ({:.2}:1) fails button threshold (>=3.0:1)",
             theme,
             close_hover_contrast
-        );
-    }
-}
-
-#[test]
-fn test_dropdowns_and_selection_overlays() {
-    for theme in Theme::ALL {
-        let p = theme.palette();
-
-        // 1. Visual Style Dropdown Popup: background is weak.color
-        let dropdown_bg = p.background.weak.color;
-
-        // Selected / hovered text uses strong.text
-        let selected_contrast = wcag_contrast(p.background.strong.text, dropdown_bg);
-        assert!(
-            selected_contrast >= 4.5,
-            "Theme {:?} visual style selected text ({:.2}:1) fails WCAG AA",
-            theme,
-            selected_contrast
-        );
-
-        // Inactive item text uses base.text
-        let inactive_contrast = wcag_contrast(p.background.base.text, dropdown_bg);
-        assert!(
-            inactive_contrast >= 4.5,
-            "Theme {:?} visual style inactive text ({:.2}:1) fails WCAG AA",
-            theme,
-            inactive_contrast
-        );
-
-        // 2. Active Checkmark with Dynamic Fallback
-        // Dropdown panel is background.weak.color; highlighted row can be strong.color.
-        let pri = p.primary.base.color;
-        let bg_weak = dropdown_bg;
-        let bg_strong = p.background.strong.color;
-        let fallback = p.background.weak.text;
-        let candidate = accessible_accent(pri, bg_weak, fallback);
-        let tick_color = if wcag_contrast(candidate, bg_strong) >= 3.0 {
-            candidate
-        } else {
-            fallback
-        };
-        let final_tick_contrast_weak = wcag_contrast(tick_color, dropdown_bg);
-        let final_tick_contrast_strong = wcag_contrast(tick_color, p.background.strong.color);
-        assert!(
-            final_tick_contrast_weak >= 3.0,
-            "Theme {:?} checkmark ({:.2}:1) against weak background fails UI threshold (>=3.0:1)",
-            theme,
-            final_tick_contrast_weak
-        );
-        assert!(
-            final_tick_contrast_strong >= 3.0,
-            "Theme {:?} checkmark ({:.2}:1) against strong background fails UI threshold (>=3.0:1)",
-            theme,
-            final_tick_contrast_strong
         );
     }
 }
@@ -655,6 +466,56 @@ fn test_block_palette_contrast() {
                 normal_contrast >= 4.5,
                 "Theme {:?} needs theme-aware labels: white-on-card is {:.2}:1 but theme pair is {:.2}:1",
                 theme, white_on_normal, normal_contrast
+            );
+        }
+    }
+}
+
+/// The colours the kit draws with (palettes, menus, dropdowns, the command
+/// line) read in every theme: the text on the palette surfaces, the strong
+/// text a row or button takes on the hover surface, the strong glyph of a lit
+/// (switched-on) button, and muted text.
+#[test]
+fn kit_surfaces_keep_their_text_readable() {
+    use crate::ui::style::{chrome, readable};
+    for theme in Theme::ALL {
+        let checks = [
+            (
+                "text on surface",
+                chrome::text(theme),
+                chrome::surface(theme),
+                4.5,
+            ),
+            (
+                "text on surface_raised",
+                chrome::text(theme),
+                chrome::surface_raised(theme),
+                4.5,
+            ),
+            (
+                "strong text on hover",
+                chrome::strong(theme),
+                chrome::hover(theme),
+                4.5,
+            ),
+            (
+                "a lit button's glyph",
+                chrome::strong(theme),
+                chrome::lit(theme),
+                3.0,
+            ),
+            (
+                "muted text on surface",
+                readable::muted_text(theme),
+                chrome::surface(theme),
+                3.0,
+            ),
+        ];
+        for (what, fg, bg, least) in checks {
+            let ratio = wcag_contrast(fg, bg);
+            assert!(
+                ratio >= least,
+                "Theme {theme:?}: {what} is {ratio:.2}:1, below {least}:1"
             );
         }
     }

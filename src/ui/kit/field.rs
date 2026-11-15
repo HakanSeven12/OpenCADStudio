@@ -66,7 +66,11 @@ pub fn box_button_style(
             } else {
                 chrome::surface_raised(theme)
             })),
-            text_color: chrome::text(theme),
+            text_color: if hovered {
+                chrome::strong(theme)
+            } else {
+                chrome::text(theme)
+            },
             border: iced::Border {
                 color: if open {
                     chrome::accent(theme)
@@ -96,7 +100,11 @@ pub fn pick_list_style(
         }
     };
     iced::widget::pick_list::Style {
-        text_color: chrome::text(theme),
+        text_color: if matches!(status, Status::Hovered) {
+            chrome::strong(theme)
+        } else {
+            chrome::text(theme)
+        },
         placeholder_color: chrome::muted(theme),
         handle_color: chrome::text(theme),
         background: Background::Color(background),
@@ -118,7 +126,7 @@ pub fn pick_menu_style(theme: &Theme) -> iced::overlay::menu::Style {
         background: Background::Color(chrome::surface(theme)),
         border: frame.border,
         text_color: chrome::text(theme),
-        selected_text_color: chrome::text(theme),
+        selected_text_color: chrome::strong(theme),
         selected_background: Background::Color(chrome::hover(theme)),
         shadow: frame.shadow,
     }

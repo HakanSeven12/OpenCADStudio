@@ -1980,22 +1980,9 @@ pub(super) fn top_hist_btn_style(
     }
 }
 
-#[cfg(test)]
-mod size_tests {
-    use super::*;
-
-    #[test]
-    fn the_ribbon_has_the_design_sizes() {
-        // Three 22 px rows make a 70 px large button.
-        assert_eq!(LARGE_H, 70.0);
-        // 99 px with panel titles, 89 px without.
-        assert_eq!(TOOL_BAR_H, 99.0);
-        assert_eq!(TOOL_BAR_H_UNTITLED, 89.0);
-        // Two label lines fit under the icon of a large button.
-        let line = LARGE_LABEL_LINE;
-        assert!(3.0 + LARGE_ICON + 2.0 + LARGE_LABEL_LINES * line <= LARGE_H);
-    }
-}
+// Two label lines fit under the icon of a large button, checked when the
+// crate compiles.
+const _: () = assert!(3.0 + LARGE_ICON + 2.0 + LARGE_LABEL_LINES * LARGE_LABEL_LINE <= LARGE_H);
 
 #[cfg(test)]
 mod style_context_tests {

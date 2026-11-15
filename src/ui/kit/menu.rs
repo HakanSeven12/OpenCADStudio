@@ -212,7 +212,11 @@ fn row_area<'a>(
         move |theme: &Theme| container::Style {
             background: (lit || (hovered && enabled))
                 .then(|| Background::Color(chrome::hover(theme))),
-            text_color: Some(if enabled {
+            // A lit row takes the strong text: the plain text colour is
+            // too faint on the hover surface in some themes (WCAG AA).
+            text_color: Some(if enabled && (lit || hovered) {
+                chrome::strong(theme)
+            } else if enabled {
                 chrome::text(theme)
             } else {
                 chrome::muted(theme)

@@ -397,10 +397,14 @@ pub fn cell_field_pair(theme: &Theme, status: button::Status) -> iced::theme::pa
 }
 
 pub fn cell_button_style(theme: &Theme, status: button::Status) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-            .then(|| Background::Color(chrome::hover(theme))),
-        text_color: chrome::text(theme),
+        background: hovered.then(|| Background::Color(chrome::hover(theme))),
+        text_color: if hovered {
+            chrome::strong(theme)
+        } else {
+            chrome::text(theme)
+        },
         border: Border::default(),
         ..Default::default()
     }

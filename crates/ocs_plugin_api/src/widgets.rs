@@ -20,9 +20,10 @@
 //! existing plugins keep their bincode discriminant indices. The wire grows
 //! append-only the same way dialogs, panels, and scenes do. The enums in
 //! this module are pinned **from creation** (discriminant-pin tests at the
-//! bottom of this file): [`WidgetNode`] `0..=5`, [`WidgetOp`] `0..=2`,
-//! [`WidgetEvent`] `0..=5`, [`WidgetCellValue`] `0..=2`, [`Axis`] `0..=1`,
-//! and [`ConfirmPolicy`] (one variant today). [`ConfirmPolicy`] in
+//! bottom of this file): [`WidgetNode`] `0..=5`, [`WidgetOp`] `0..=3`,
+//! [`WidgetEvent`] `0..=6`, [`WidgetCellValue`] `0..=2`, [`Axis`] `0..=1`,
+//! [`CellKind`] `0..=7`, [`BadgeTone`] `0..=4`, [`TableCell`] `0..=7`, and
+//! [`ConfirmPolicy`] (one variant today). [`ConfirmPolicy`] in
 //! particular is a single version now (`Prompt`); future policies are
 //! appended, never rewritten.
 //!
@@ -64,13 +65,91 @@
 //! (cap + 1), matching the scene and dialog decoders. Deserialization is
 //! bounded exactly like the scene/dialog carriers: a hostile frame past the
 //! depth/node budget refuses at decode before recursing into the stack.
+//!
+//! # Typed tables (`SWG-004`)
+//!
+//! [`WidgetNode::Table`] is a REFERENCE ([`TableRef::table_id`]) into the
+//! typed-table contract this section defines; the registry itself rides the
+//! surface's [`WidgetSurface::tables`] map, keyed by table id. Table ids are
+//! a DIFFERENT identity space from the surface-wide widget namespace
+//! (invariant WGT-ID, foreign registry): a table id colliding with a widget
+//! id is meaningless by construction, several [`TableRef`]s may name ONE
+//! backing table, and a table id resolves exactly once (the map's key) —
+//! [`WidgetError::DuplicateWidgetId`] never fires for table ids.
+//!
+//! PLACEHOLDER TRANSITION (sole-owner resolution, recorded): `SWG-001`
+//! shipped [`TableRef`] into a contract that did not exist yet, and its
+//! creation surfaces (unmodifiable by the append-only test rule) carry
+//! placeholder refs over an EMPTY registry. Resolution therefore ENGAGES
+//! when the registry is non-empty and is resolve-check-free while it is
+//! empty (the pre-`SWG-004` placeholder era, in both the snapshot gate and
+//! the patch planner). A PUBLISHING surface (one registry entry or more)
+//! is fully registry-contracted: every ref on it must resolve
+//! ([`WidgetError::UnknownTableRef`] otherwise).
+//!
+//! ## Legacy string tables (the gate)
+//!
+//! `DialogControl::Table` / `DialogValue::Table` (`crate::dialog`, the
+//! string-cell grids) stay BYTE-COMPATIBLE and untouched; the typed table is
+//! a NEW capability layered BESIDE them — never a replacement of the legacy
+//! control in place. The one-way bridge is tests-only: this module's types
+//! never import `dialog`.
+//!
+//! ## Events vs patches (the documented split)
+//!
+//! [`WidgetEvent::TableCellChanged`] keeps the THREE-variant
+//! [`WidgetCellValue`] skeleton — it is the read/notify shape (MCP read-back
+//! summarizes through it; its pins must not break). The FULLY typed fact
+//! travels as PATCH DATA: [`WidgetOp::TableCell`] names the
+//! (table, row key, column) address and carries the skeleton value, and the
+//! column's [`CellKind`] resolves the typed [`TableCell`] written. Only the
+//! scalar kinds (`text`/`number`/`bool`) are patch-writable through the
+//! skeleton — icon/link/badge/progress/date cells are plugin-PUBLISHED
+//! through the registry (a snapshot carries the defs) and a patch naming
+//! one refuses with [`WidgetError::InvalidCell`]. "One cell edit transfers
+//! only its cell-level event/patch" is the ARCHITECTURE §16 acceptance this
+//! design enforces byte-wise (see the size-A vs size-B tests).
+//!
+//! ## Paging and state classes
+//!
+//! A def states `total_rows: Some(total)` when it windows; `rows` carries
+//! the published window (≤ [`MAX_WIDGET_ROWS_INITIAL`] per payload) and
+//! [`WidgetEvent::TablePageRequested`] — the tree's `ChildrenRequested`
+//! analog — asks for the next keyed window. The def carries NO selection/
+//! scroll/expansion state: transient interaction state is HOST-LOCAL
+//! (ARCHITECTURE §3, state class 3). Row-mode rows also matter for budgets:
+//! the published window is a payload vec, exactly like tree rows.
+//!
+//! ## Wire notes (⚠ read before freezing)
+//!
+//! The registry is a TRAILING struct field with `#[serde(default)]`:
+//! JSON payloads without the key decode with an empty registry, while a
+//! BINCODE 1 struct decode reads EVERY field — an old-shape bincode frame
+//! would end before this field and fail with `UnexpectedEof` (the exact
+//! trailing-field hazard the host resolves via `deserialize_selectable_custom`
+//! for `PluginClassInstance::selectable_custom`). PRE-PIN CLEARANCE:
+//! `WidgetSurface` was created by `SWG-001` inside this same unreleased
+//! series — no frozen wire ever carried the 2-field shape, so no old
+//! payload exists to decode; the literal old-frame TLV decode test becomes
+//! MANDATORY at the ADR-004 wire freeze (API-23), when a shipped shape
+//! exists to snapshot. Until then the JSON-absence + bincode/JSON roundtrip
+//! tests gate the trailing field, and this comment is the WARN record.
+//!
+//! ## Deferred mirror (SCN-012 open question)
+//!
+//! The scene's `apply_patch_report` mirror for widget/table writes is
+//! deliberately NOT part of this package (an unpublished half-done wire
+//! surface is prohibited). SCN-012's recorded open question stays open
+//! HERE on purpose: the mirror lands with the ADR-004 wire/stream work,
+//! when tables cross IPC and the host mount consumes cell facts (SCN-013's
+//! workers). Patch audit today: bounded bytes + validate facts.
 
 use crate::scene::{
     MAX_ASSET_URI_BYTES, MAX_PATCH_OPS, MAX_SCENE_DEPTH, MAX_SCENE_NODES, MAX_SUMMARY_ROOT_IDS,
     MAX_TEXT_BYTES, SceneRevision, StableId,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 // ---------------------------------------------------------------------------
@@ -124,6 +203,15 @@ fn default_true() -> bool {
 /// when the field is absent on the wire.
 fn default_icon_size() -> f32 {
     16.0
+}
+
+/// serde default for [`WidgetSurface::tables`]: a payload without the
+/// trailing registry field decodes as an empty (no-tables) surface — the
+/// JSON-side old-shape tolerance of the SWG-004 trailing field (see the
+/// [wire notes](self)). Empty is also the common non-table surface: most
+/// panels publish no tables at all.
+fn empty_tables() -> BTreeMap<StableId, PanelTableDef> {
+    BTreeMap::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +452,95 @@ fn menu_decode_enter() -> Result<(), String> {
         }
         Ok(())
     })
+}
+
+// ---------------------------------------------------------------------------
+// Typed-table budgets (SWG-004 payload caps)
+// ---------------------------------------------------------------------------
+
+/// Bounded deserialize helper for the trailing [`WidgetSurface::tables`]
+/// registry map (serde default [`empty_tables`] covers the absent key). The
+/// cap reuses the payload magnitude: a hostile frame carrying a registry
+/// wider than [`MAX_WIDGET_ROWS_INITIAL`] tables per surface refuses at
+/// decode before the allocation is fully materialized. The registry KEY set
+/// is the foreign table identity space — no interaction with the
+/// surface-wide widget namespace.
+fn budgeted_table_registry<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<StableId, PanelTableDef>, D::Error> {
+    let tables = BTreeMap::<StableId, PanelTableDef>::deserialize(deserializer)?;
+    if tables.len() > MAX_WIDGET_ROWS_INITIAL {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table registry exceeds the decoded payload budget ({MAX_WIDGET_ROWS_INITIAL})"
+        )));
+    }
+    Ok(tables)
+}
+
+/// Bounded deserialize helper for one [`PanelTableDef`]'s column registry.
+/// Decode-sanity cap at the shared payload magnitude: no dedicated column
+/// budget exists (a real grid's column registry is far thinner than this),
+/// and the exact per-table equality (cells shadow columns 1:1) is enforced
+/// by [`PanelTableDef::validate`], not here.
+fn budgeted_table_columns<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<TableColumnDef>, D::Error> {
+    let columns = Vec::<TableColumnDef>::deserialize(deserializer)?;
+    if columns.len() > MAX_WIDGET_ROWS_INITIAL {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table columns exceed the decoded payload budget ({MAX_WIDGET_ROWS_INITIAL})"
+        )));
+    }
+    Ok(columns)
+}
+
+/// Bounded deserialize helper for one [`PanelTableDef`]'s published row
+/// window — the same cap [`budgeted_tree_rows`] enforces: rows beyond
+/// [`MAX_WIDGET_ROWS_INITIAL`] per payload/window refuse at decode, per the
+/// "100k backing objects do not create 100k host widgets" windowing rule
+/// (large backing data pages through `total_rows` +
+/// [`WidgetEvent::TablePageRequested`]).
+fn budgeted_table_rows<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<TableRowDef>, D::Error> {
+    let rows = Vec::<TableRowDef>::deserialize(deserializer)?;
+    if rows.len() > MAX_WIDGET_ROWS_INITIAL {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table rows exceed the decoded payload budget ({MAX_WIDGET_ROWS_INITIAL})"
+        )));
+    }
+    Ok(rows)
+}
+
+/// Bounded deserialize helper for one row's cell vec. Decode-sanity cap at
+/// the shared payload magnitude; the exact equality (one cell per column,
+/// shadowing by position) is [`PanelTableDef::validate`]'s job.
+fn budgeted_table_cells<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<TableCell>, D::Error> {
+    let cells = Vec::<TableCell>::deserialize(deserializer)?;
+    if cells.len() > MAX_WIDGET_ROWS_INITIAL {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table row cells exceed the decoded payload budget ({MAX_WIDGET_ROWS_INITIAL})"
+        )));
+    }
+    Ok(cells)
+}
+
+/// Bounded deserialize helper for [`WidgetEvent::TablePageRequested`]'s
+/// `len` (cap [`MAX_WIDGET_RANGE_LEN`], the same page width
+/// [`WidgetEvent::ChildrenRequested`]'s range carries). Matches the
+/// construct-level [`WidgetEvent::validate`] bound (both levels equal).
+fn bounded_table_page_len<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<usize, D::Error> {
+    let len = usize::deserialize(deserializer)?;
+    if len > MAX_WIDGET_RANGE_LEN {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table page request exceeds the decoded range budget ({MAX_WIDGET_RANGE_LEN})"
+        )));
+    }
+    Ok(len)
 }
 
 // ---------------------------------------------------------------------------
@@ -653,8 +830,18 @@ pub struct MenuItemDef {
 /// contract that `SWG-004` ships. This tier does NOT restate the legacy
 /// `DialogControl::Table` grid (string cells live there and stay compatible)
 /// nor a typed-cell vocabulary; `table_id` names the backing table in the
-/// typed-table registry (foreign to the surface id namespace; several refs
-/// may share one backing table).
+/// typed-table registry ([`WidgetSurface::tables`] — `SWG-004`'s
+/// [`PanelTableDef`] map; see the [module docs](self)).
+///
+/// Identity rule: `table_id` is FOREIGN to the surface id namespace (WGT-ID)
+/// — it is a DIFFERENT identity space, several refs may name one backing
+/// table, and a PUBLISHING surface (a non-empty registry) requires every
+/// ref's target to resolve ([`WidgetError::UnknownTableRef`] otherwise;
+/// empty-registry placeholder surfaces are the recorded `SWG-001` era —
+/// see the placeholder transition in the [module docs](self)).
+/// The registry's own per-table rule: NO interaction state (row selection,
+/// scroll, expansion) travels in a [`PanelTableDef`] — that is host-local
+/// state class 3; the def is pure data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableRef {
     /// Stable widget id.
@@ -788,6 +975,12 @@ impl WidgetNode {
 /// [`SceneRevision`] space with its `PanelScene` — one panel, one revision
 /// cadence, so widgets and scenes compose without cross-referencing
 /// revisions. Decoded under the widget budget.
+///
+/// SWG-004 grew ONE trailing field: the typed-table registry
+/// ([`WidgetSurface::tables`]) keyed by table id — a DIFFERENT identity
+/// space from the widget namespace (see the [module docs](self)). The
+/// trailing-field wire hazard and its pre-pin clearance are documented on
+/// the field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WidgetSurface {
     /// The surface's revision; raises monotonically per panel.
@@ -798,6 +991,27 @@ pub struct WidgetSurface {
     /// [`MAX_WIDGETS_PER_PANEL`].
     #[serde(deserialize_with = "budgeted_widget_nodes")]
     pub roots: Vec<WidgetNode>,
+    /// The typed-table registry (`SWG-004`): the defs every
+    /// [`WidgetNode::Table`] reference resolves against, keyed by
+    /// `PanelTableDef::id_table` — a per-surface FOREIGN identity space
+    /// (not the widget namespace; several refs may share one backing
+    /// table). Empty is the ordinary surface (most panels publish no
+    /// tables).
+    ///
+    /// ⚠ TRAILING-FIELD HAZARD (documented WARN record): serde(default)
+    /// makes JSON old-shape-tolerant (payloads without the key decode with
+    /// an empty registry), but a BINCODE 1 struct decode reads EVERY
+    /// field — a frame emitted before this field existed would end here
+    /// (`UnexpectedEof`) instead of tolerating the absence. Pre-pin
+    /// clearance: no frozen release wire ever carried the 2-field surface
+    /// (this type is the project's own, created unreleased), so the
+    /// literal old-frame decode TEST is N/A until the ADR-004 wire freeze
+    /// (API-23) ships a pinned shape to snapshot — at that freeze the
+    /// test becomes mandatory, mirroring the host's
+    /// `deserialize_selectable_custom` old-payload tolerance story.
+    /// Registry values are decode-bounded ([`budgeted_table_registry`]).
+    #[serde(default = "empty_tables", deserialize_with = "budgeted_table_registry")]
+    pub tables: BTreeMap<StableId, PanelTableDef>,
 }
 
 impl WidgetSurface {
@@ -807,13 +1021,28 @@ impl WidgetSurface {
     /// within [`MAX_SCENE_NODES`], non-group widget count within
     /// [`MAX_WIDGETS_PER_PANEL`], per-payload row/item/menu-item counts
     /// within [`MAX_WIDGET_ROWS_INITIAL`], required non-empty texts, and
-    /// text/asset-uri byte caps.
+    /// text/asset-uri byte caps — PLUS the SWG-004 registry contract: every
+    /// table def validated against its per-table rules, every registry
+    /// entry keyed by its own `id_table`, and every [`WidgetNode::Table`]
+    /// reference resolving into a PUBLISHING (non-empty) registry
+    /// ([`WidgetError::UnknownTableRef`]; empty-registry placeholder
+    /// surfaces are the documented `SWG-001` era).
     ///
     /// This is deliberately structural only: host presentation concerns
     /// (ratio/size hints, expansion state, windowing, hit zones) are NOT
     /// checked here.
     pub fn validate(&self) -> Result<(), WidgetError> {
-        validate_root(&self.roots)
+        validate_root(&self.roots)?;
+        // Registry: entries keyed by their own id (a miskeyed entry would
+        // put the table under an id its patches/refs cannot agree on), then
+        // the per-def rules, then every TableRef's target resolving.
+        for (key, def) in &self.tables {
+            if def.id_table != *key {
+                return Err(WidgetError::UnknownTableRef(def.id_table));
+            }
+            def.validate()?;
+        }
+        validate_table_refs(&self.roots, &self.tables)
     }
 
     /// Apply an incremental patch atomically (two phases, in place) — the
@@ -850,6 +1079,21 @@ impl WidgetSurface {
     /// patch that does not rewrite the offending region.
     ///
     /// An empty op list is a legitimate no-op that advances the revision.
+    ///
+    /// # Op families (SWG-004)
+    ///
+    /// [`WidgetOp::TableCell`] addresses the typed-table REGISTRY
+    /// ([`WidgetSurface::tables`]); the structural ops address the widget
+    /// tree. The op list is therefore split into its families and each is
+    /// planned against its own store: table calls write CELLS ONLY (never
+    /// table/row/column structure), so the table family needs no mutation
+    /// mirror, and structural ops never touch the registry. One patch may
+    /// mix families — atomicity is unchanged (any family refusal leaves
+    /// `self` untouched); family order is unobservable (disjoint stores),
+    /// and when BOTH families would refuse, the table family's defect is
+    /// reported (its address-ful [`WidgetError::InvalidCell`] /
+    /// [`WidgetError::UnknownTableRef`] names the narrower cause; a refusal
+    /// is total either way).
     pub fn apply_patch(&mut self, patch: WidgetSurfacePatch) -> Result<(), WidgetError> {
         // Phase 0: cheap whole-patch checks; nothing written yet.
         if patch.base_revision != self.revision {
@@ -871,12 +1115,23 @@ impl WidgetSurface {
             });
         }
 
-        // Phase 1: validate the whole op sequence; journal pre-located
+        // Phase 1: split the op families (they never share a store), then
+        // validate each family's whole sequence; journals hold pre-located
         // steps without writing `self`.
-        let journal = plan_patch(&self.roots, patch.ops)?;
+        let mut table_ops = Vec::new();
+        let mut structural_ops = Vec::with_capacity(patch.ops.len());
+        for op in patch.ops {
+            match op {
+                WidgetOp::TableCell { .. } => table_ops.push(op),
+                other => structural_ops.push(other),
+            }
+        }
+        let table_journal = plan_table_writes(&self.tables, table_ops)?;
+        let journal = plan_patch(&self.roots, &self.tables, structural_ops)?;
 
-        // Phase 2: single commit point — replay the plan in place.
+        // Phase 2: single commit point — replay the plans in place.
         apply_journal(&mut self.roots, journal);
+        apply_table_writes(&mut self.tables, table_journal);
         self.revision = patch.revision;
         Ok(())
     }
@@ -892,8 +1147,12 @@ impl WidgetSurface {
 /// Incremental widget-surface update requests (additive pre-pin).
 ///
 /// Compatibility rule: new variants MUST be appended at the end so existing
-/// plugins keep their bincode discriminant indices (`0..=2`; pinned by the
-/// tests in this module).
+/// plugins keep their bincode discriminant indices (`0..=3`; pinned by the
+/// tests in this module). The table-cell write family lives beside the
+/// three structural ops but addresses a DIFFERENT store: cell writes mutate
+/// the typed-table REGISTRY ([`WidgetSurface::tables`]), the structural ops
+/// mutate the widget tree — see [`WidgetSurface::apply_patch`]'s family
+/// split.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WidgetOp {
     /// Append a new widget. `parent: None` appends at the surface root;
@@ -922,6 +1181,32 @@ pub enum WidgetOp {
         /// Root id of the widget to remove.
         id: StableId,
     },
+    /// ONE typed-table cell write — a PATCH FACT the plugin publishes (the
+    /// patch = data leg of the documented events-vs-patches split; the
+    /// `WidgetEvent::TableCellChanged` notify leg stays the three-variant
+    /// [`WidgetCellValue`] skeleton). The address names the registry table,
+    /// the stable ROW key, and the stable COLUMN id; the column's
+    /// [`CellKind`] resolves the typed [`TableCell`] replacement, so only
+    /// the scalar kinds (`text`/`number`/`bool`) are patch-writable through
+    /// the skeleton. One op = one cell; "one cell edit transfers only its
+    /// cell-level patch" is byte-proven by the size tests. Addressing is
+    /// resolved against the CURRENT registry: plan/validation report an
+    /// unknown table as [`WidgetError::UnknownTableRef`] and an unknown
+    /// key/column (or a kind mismatch) as [`WidgetError::InvalidCell`].
+    ///
+    /// Compatibility: appended at the tail — bincode tag `3`.
+    TableCell {
+        /// The registry table id ([`TableRef::table_id`] space, NOT the
+        /// widget-node namespace).
+        table: StableId,
+        /// Stable row key inside that table's published window.
+        key: StableId,
+        /// Stable column id inside that table's column registry.
+        column: StableId,
+        /// The new cell value (skeleton vocabulary; resolved to the typed
+        /// cell by the column kind).
+        value: WidgetCellValue,
+    },
 }
 
 /// A whole widget-surface update: declared base, declared successor, and the
@@ -948,12 +1233,12 @@ pub struct WidgetSurfacePatch {
 /// Events are VALUES the host produces and the plugin consumes (host→plugin
 /// notification direction when later wired; ADR-004 defers that crossing).
 /// In THIS crate they are plain data: serde + bincode pins (pinned
-/// `0..=5`) plus bounded deserialization. Never send a complete tree/list/
+/// `0..=6`) plus bounded deserialization. Never send a complete tree/list/
 /// table after one interaction — full-collection retransmits are DEFECTS
 /// (ARCHITECTURE §14).
 ///
 /// Compatibility rule: new variants MUST be appended at the end so existing
-/// plugins keep their bincode discriminant indices (`0..=5`; pinned by the
+/// plugins keep their bincode discriminant indices (`0..=6`; pinned by the
 /// tests in this module).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WidgetEvent {
@@ -1007,7 +1292,11 @@ pub enum WidgetEvent {
         target_ids: Vec<StableId>,
     },
     /// One typed-table cell changed (`row_key` x `column_id`). The value
-    /// skeleton widens with `SWG-004`.
+    /// rides the [`WidgetCellValue`] skeleton — deliberately UNWIDENED
+    /// (pins `0..=2` must not break): this event is the read/notify shape
+    /// (MCP read-back summarizes through it), while the FULLY typed fact
+    /// travels as [`WidgetOp::TableCell`] patch data (the documented
+    /// events-vs-patches split in the [module docs](self)).
     TableCellChanged {
         /// Panel surface id.
         surface_id: StableId,
@@ -1017,6 +1306,29 @@ pub enum WidgetEvent {
         column_id: StableId,
         /// The new cell value (skeleton vocabulary).
         value: WidgetCellValue,
+    },
+    /// Paged-table window fetch: the host requests the next window of a
+    /// table whose def windows (`total_rows: Some(_)` standing for a
+    /// backing set larger than its published `rows`). The
+    /// [`WidgetEvent::ChildrenRequested`] analog for the typed-table
+    /// contract — the plugin answers by publishing the window (a snapshot
+    /// cycle regains the registry), keeping stable row keys end to end.
+    ///
+    /// Compatibility: appended at the tail — bincode tag `6`.
+    TablePageRequested {
+        /// Panel surface id.
+        surface_id: StableId,
+        /// The registry table the page belongs to.
+        table: StableId,
+        /// The row key the requested page STARTS at: the first row the
+        /// plugin must include. The host addresses keyed windows (not
+        /// offsets) because row keys are the stable identities the
+        /// contract guarantees; keys are learned from the published
+        /// registry (the initial window publishes the table's first row).
+        first_key: StableId,
+        /// Rows requested (bounded by [`MAX_WIDGET_RANGE_LEN`]).
+        #[serde(deserialize_with = "bounded_table_page_len")]
+        len: usize,
     },
 }
 
@@ -1064,6 +1376,15 @@ impl WidgetEvent {
                 }
                 Ok(())
             }
+            Self::TablePageRequested { len, .. } => {
+                if *len > MAX_WIDGET_RANGE_LEN {
+                    return Err(WidgetError::BudgetExceeded {
+                        current: *len,
+                        max: MAX_WIDGET_RANGE_LEN,
+                    });
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -1093,8 +1414,14 @@ impl WidgetRange {
     }
 }
 
-/// Cell value skeleton of [`WidgetEvent::TableCellChanged`]; widens with the
-/// typed-table contract (`SWG-004`).
+/// Cell value skeleton of [`WidgetEvent::TableCellChanged`].
+///
+/// Deliberately NOT widened with the typed-table contract (`SWG-004`): the
+/// typed cell vocabulary is [`TableCell`] and it travels as PATCH data
+/// ([`WidgetOp::TableCell`]) — the event stays the compact three-variant
+/// read/notify shape so its pins (`0..=2`) never break and MCP read-back
+/// keeps a stable summary vocabulary. WIDENING this enum later (a table
+/// tier that must notify icon/badge/… cells summarily) appends at the tail.
 ///
 /// Compatibility rule: new variants appended; bincode discriminants pinned
 /// `0..=2`.
@@ -1605,16 +1932,25 @@ impl PlannedIndex {
 
 /// Phase 1 of `WidgetSurface`'s patch application: replay `ops` against a
 /// mirror of `roots`, validating each op fully (payload structure, id
-/// collisions, parent/anchoring, result budgets) against the state all prior
-/// ops leave behind, and journaling each op's pre-located mutation. Any
-/// error leaves the mirror (and the caller's surface) exactly as the ops
-/// would have had it had nothing happened, because only the mirror mutates
-/// during planning.
+/// collisions, parent/anchoring, result budgets, and — since `SWG-004` —
+/// every table reference in the payload resolving against the CURRENT
+/// registry `tables`) against the state all prior ops leave behind, and
+/// journaling each op's pre-located mutation. Any error leaves the mirror
+/// (and the caller's surface) exactly as the ops would have had it had
+/// nothing happened, because only the mirror mutates during planning.
 ///
 /// Per-op planning order matches the scene planner so error selections stay
 /// pinned: payload structural validation → id-collision check →
 /// parent-anchoring check, then mirror adoption and result budgets.
-fn plan_patch(roots: &[WidgetNode], ops: Vec<WidgetOp>) -> Result<Vec<PlannedOp>, WidgetError> {
+///
+/// Precondition: `ops` carry NO [`WidgetOp::TableCell`] (the caller's
+/// family split already routed table writes through [`plan_table_writes`] —
+/// cell writes address the registry, not the widget tree).
+fn plan_patch(
+    roots: &[WidgetNode],
+    tables: &BTreeMap<StableId, PanelTableDef>,
+    ops: Vec<WidgetOp>,
+) -> Result<Vec<PlannedOp>, WidgetError> {
     let mut planned = PlannedIndex::from_surface(roots);
     let mut journal: Vec<PlannedOp> = Vec::new();
     for op in ops {
@@ -1623,6 +1959,11 @@ fn plan_patch(roots: &[WidgetNode], ops: Vec<WidgetOp>) -> Result<Vec<PlannedOp>
                 // Subtree-internal validation (ids, rows bindings, texts,
                 // caps) never touches the surface, so it runs first.
                 validate_root(std::slice::from_ref(&widget))?;
+                // The registry never grows through patch ops (it rides
+                // snapshots), so a payload's table refs resolve against the
+                // CURRENT registry or the patch is a defect — a dangling
+                // ref added now could never become valid later.
+                validate_table_refs(std::slice::from_ref(&widget), tables)?;
                 // One payload walk for the fresh-id set (widget ids + row
                 // ids + list item ids), then the collision check against
                 // the planned state's FULL namespace.
@@ -1669,6 +2010,7 @@ fn plan_patch(roots: &[WidgetNode], ops: Vec<WidgetOp>) -> Result<Vec<PlannedOp>
                     return Err(WidgetError::ElementMissing(id));
                 }
                 validate_root(std::slice::from_ref(&content))?;
+                validate_table_refs(std::slice::from_ref(&content), tables)?;
                 // Capture the target's slot, derive its pre-retire path (the
                 // path is valid at THIS entry's phase-2 time slot), then
                 // retire the outgoing subtree while keeping the container's
@@ -1707,6 +2049,12 @@ fn plan_patch(roots: &[WidgetNode], ops: Vec<WidgetOp>) -> Result<Vec<PlannedOp>
                 planned.nodes -= retired_nodes;
                 planned.widgets -= retired_widgets;
                 journal.push(PlannedOp::Take { element_path });
+            }
+            WidgetOp::TableCell { .. } => {
+                // The caller's family split routes table writes through
+                // `plan_table_writes` (they address the registry, not this
+                // mirror); reaching this arm would be planner corruption.
+                unreachable!("table cell writes plan through plan_table_writes");
             }
         }
     }
@@ -2197,6 +2545,49 @@ pub enum WidgetError {
         /// Which required text is missing.
         what: &'static str,
     },
+    /// A typed-table CELL defect (SWG-004, appended at the enum tail;
+    /// non-wire like the whole enum): an address-ful (table, row key,
+    /// column) rejection from the registry contract. Fires for —
+    /// unknown row key / unknown column id in a patch; a cell whose kind
+    /// does not match its column's [`CellKind`]; a patch naming a column
+    /// kind that is not patch-writable through the value skeleton; a
+    /// row whose cells do not shadow the column registry 1:1 (the
+    /// undershoot names the first uncovered column, the overshoot has no
+    /// column to name); a duplicate row key / duplicate column id inside
+    /// one table; a cell's own cap crossing (text bytes, uri bytes,
+    /// non-finite or out-of-range progress/dates).
+    ///
+    /// ADDRESS CONVENTION (this variant is the ONLY address-ful table
+    /// arm): `table` always names the registry table; for a PER-CELL
+    /// defect `key` + `column` name the cell address; for a DEF-shape
+    /// defect with no row axis (column-registry issues) `key` carries the
+    /// offending id and `column` repeats it; for a row-shape defect with
+    /// no column to name (overshoot) `column` repeats the offending row
+    /// key. `reason` states the defect class in words — it is the
+    /// authoritative field, the address fields only lobby.
+    ///
+    /// Compatibility: appended at the tail; the enum is non-wire, so
+    /// nothing already-written re-orders.
+    InvalidCell {
+        /// The registry table the defect addresses.
+        table: StableId,
+        /// The row key of the cell (or the involved id per the address
+        /// convention).
+        key: StableId,
+        /// The column id of the cell (or the repeated involved id per
+        /// the address convention).
+        column: StableId,
+        /// The defect class in words (authoritative).
+        reason: String,
+    },
+    /// A table identity does not resolve in the surface's registry
+    /// (SWG-004 tail append after [`WidgetError::InvalidCell`]; non-wire):
+    /// a [`TableRef::table_id`] naming an id the registry does not serve
+    /// (validate + patch payloads), or a registry entry whose declared
+    /// `id_table` is not its own map key.
+    ///
+    /// Compatibility: appended at the tail; the enum is non-wire.
+    UnknownTableRef(StableId),
 }
 
 impl fmt::Display for WidgetError {
@@ -2244,11 +2635,761 @@ impl fmt::Display for WidgetError {
                 Some(id) => write!(f, "widget id {} carries an empty required text ({what})", id.0),
                 None => write!(f, "a widget event carries an empty required text ({what})"),
             },
+            WidgetError::InvalidCell {
+                table,
+                key,
+                column,
+                reason,
+            } => write!(
+                f,
+                "invalid table cell (table {} row-key {} column {}): {reason}",
+                table.0, key.0, column.0
+            ),
+            WidgetError::UnknownTableRef(id) => {
+                write!(f, "table identity {} does not resolve in the surface registry", id.0)
+            }
         }
     }
 }
 
 impl std::error::Error for WidgetError {}
+
+// ---------------------------------------------------------------------------
+// Typed tables (SWG-004): column/cell vocabulary, row/table defs, registry
+// ---------------------------------------------------------------------------
+
+/// Column DATA KIND of one [`TableColumnDef`] — the vocabulary a cell write
+/// must MATCH (`WidgetOp::TableCell`'s skeleton value resolves into the
+/// typed [`TableCell`] of exactly this kind).
+///
+/// Widens the three-variant [`WidgetCellValue`] skeleton to the full cell
+/// vocabulary the addendum's "typed cells" demands; only the scalar kinds
+/// (`Text`/`Number`/`Bool`) are patch-writable through the skeleton — the
+/// presentation kinds (`Icon`/`Link`/`Badge`/`Progress`/`Date`) are
+/// plugin-published through the registry.
+///
+/// Compatibility rule: new kinds appended at the end; bincode discriminants
+/// pinned `0..=7`; serde tags lowercase (pinned by the tests in this
+/// module).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CellKind {
+    /// Text (byte-capped like every widget text).
+    Text,
+    /// Numeric (finite; renderable numeral).
+    Number,
+    /// Boolean.
+    Bool,
+    /// Host-managed icon reference ([`IconRef`]; the plugin never sends
+    /// bytes).
+    Icon,
+    /// Hyperlink: visible `label` + host-loaded `uri` (byte-capped like a
+    /// scene asset uri).
+    Link,
+    /// Status chip: `label` + [`BadgeTone`].
+    Badge,
+    /// Progress meter: finite `fraction` in `0..=1` + optional `label`.
+    Progress,
+    /// Calendar day (`y`/`m`/`d`); magnitude gates `1..=12` months and
+    /// `1..=31` days (month-length/calendar accuracy is the host's
+    /// rendering business).
+    Date,
+}
+
+impl fmt::Display for CellKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Text => "text",
+            Self::Number => "number",
+            Self::Bool => "bool",
+            Self::Icon => "icon",
+            Self::Link => "link",
+            Self::Badge => "badge",
+            Self::Progress => "progress",
+            Self::Date => "date",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Tone of a [`TableCell::Badge`] (presentation hint; the host maps it to
+/// its chip palette).
+///
+/// Compatibility rule: new tones appended; bincode discriminants pinned
+/// `0..=4`; serde tags lowercase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BadgeTone {
+    /// Informational.
+    Info,
+    /// Success/healthy.
+    Success,
+    /// Warning.
+    Warning,
+    /// Danger/error.
+    Danger,
+    /// No tone (plain chip).
+    Neutral,
+}
+
+impl fmt::Display for BadgeTone {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Info => "info",
+            Self::Success => "success",
+            Self::Warning => "warning",
+            Self::Danger => "danger",
+            Self::Neutral => "neutral",
+        };
+        f.write_str(name)
+    }
+}
+
+/// One TYPED cell of a [`TableRowDef`] — the real cell value the addendum's
+/// "typed cells" names (the [`WidgetCellValue`] skeleton stays the
+/// event-side read/notify vocabulary; the split is documented in the
+/// [module docs](self)).
+///
+/// Cell identity: cells are addressed (table, row key, column id) and
+/// shadow their table's columns 1:1 BY POSITION in the row's `cells` vec —
+/// the column registry owns id→position mapping ([`PanelTableDef::column_position`]);
+/// a cell never names its own column on the wire.
+///
+/// Compatibility rule: new variants appended; bincode discriminants pinned
+/// `0..=7`; serde tags lowercase (pinned from creation).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TableCell {
+    /// Plain text cell (byte-capped like every widget text).
+    Text(#[serde(deserialize_with = "capped_text_cell")] String),
+    /// Numeric cell (finite: a renderable numeral — a non-finite is a
+    /// producer defect, refused at validation).
+    #[serde(deserialize_with = "finite_number_cell")]
+    Number(f64),
+    /// Boolean cell.
+    Bool(bool),
+    /// Host-managed icon (see [`IconRef`]; the plugin never sends bytes).
+    Icon(#[serde(deserialize_with = "capped_icon_cell")] IconRef),
+    /// Hyperlink: the visible text plus the host-loaded uri (≤
+    /// [`MAX_ASSET_URI_BYTES`], the scene asset cap — the plugin never
+    /// sends bytes).
+    Link {
+        /// Visible label of the link (byte-capped).
+        #[serde(deserialize_with = "capped_text_cell")]
+        label: String,
+        /// Host-loaded asset/uri reference (≤ [`MAX_ASSET_URI_BYTES`]).
+        #[serde(deserialize_with = "capped_link_uri")]
+        uri: String,
+    },
+    /// Status chip: label + tone.
+    Badge {
+        /// Visible chip text (byte-capped).
+        #[serde(deserialize_with = "capped_text_cell")]
+        label: String,
+        /// Presentation tone.
+        tone: BadgeTone,
+    },
+    /// Progress meter.
+    Progress {
+        /// Completed fraction; MUST be finite within `0.0..=1.0`
+        /// (validation rejects the rest — meter arithmetic is contract,
+        /// not presentation).
+        #[serde(deserialize_with = "capped_progress_fraction")]
+        fraction: f32,
+        /// Optional status text (byte-capped).
+        #[serde(deserialize_with = "capped_optional_text_cell")]
+        label: Option<String>,
+    },
+    /// Calendar day. Magnitude gates only: `m: 1..=12`, `d: 1..=31`;
+    /// month-length/calendar accuracy is the host's rendering business.
+    Date {
+        /// Year.
+        y: u16,
+        /// Month `1..=12` (validation rejects `13`+).
+        #[serde(deserialize_with = "bounded_date_month")]
+        m: u8,
+        /// Day `1..=31` (validation rejects `0` and `32`+).
+        #[serde(deserialize_with = "bounded_date_day")]
+        d: u8,
+    },
+}
+
+impl TableCell {
+    /// The cell's data kind (the column kind a cell write must match).
+    pub const fn kind(&self) -> CellKind {
+        match self {
+            Self::Text(_) => CellKind::Text,
+            Self::Number(_) => CellKind::Number,
+            Self::Bool(_) => CellKind::Bool,
+            Self::Icon(_) => CellKind::Icon,
+            Self::Link { .. } => CellKind::Link,
+            Self::Badge { .. } => CellKind::Badge,
+            Self::Progress { .. } => CellKind::Progress,
+            Self::Date { .. } => CellKind::Date,
+        }
+    }
+}
+
+// -- bounded cell decode helpers (the bounded vec pattern, typed) ----------
+
+/// String-cell decode cap ([`MAX_TEXT_BYTES`]) — every capped TEXT on a
+/// cell uses this helper.
+fn capped_text_cell<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    if text.len() > MAX_TEXT_BYTES {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table cell text exceeds the decoded payload budget ({MAX_TEXT_BYTES})"
+        )));
+    }
+    Ok(text)
+}
+
+/// Optional-text-cell decode cap (same [`MAX_TEXT_BYTES`] magnitude).
+fn capped_optional_text_cell<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let text = Option::<String>::deserialize(deserializer)?;
+    if let Some(text) = &text {
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(<D::Error as serde::de::Error>::custom(format!(
+                "table cell text exceeds the decoded payload budget ({MAX_TEXT_BYTES})"
+            )));
+        }
+    }
+    Ok(text)
+}
+
+/// Link-uri decode cap ([`MAX_ASSET_URI_BYTES`] — the scene asset cap the
+/// plugin-side uri rides).
+fn capped_link_uri<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let uri = String::deserialize(deserializer)?;
+    if uri.len() > MAX_ASSET_URI_BYTES {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table cell uri exceeds the decoded payload budget ({MAX_ASSET_URI_BYTES})"
+        )));
+    }
+    Ok(uri)
+}
+
+/// Icon-cell decode: reuses the icon uri cap check at decode (the uri cap
+/// of [`IconRef`]).
+fn capped_icon_cell<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<IconRef, D::Error> {
+    let icon = IconRef::deserialize(deserializer)?;
+    if icon.uri.len() > MAX_ASSET_URI_BYTES {
+        return Err(<D::Error as serde::de::Error>::custom(format!(
+            "table cell icon uri exceeds the decoded payload budget ({MAX_ASSET_URI_BYTES})"
+        )));
+    }
+    Ok(icon)
+}
+
+/// Numeric-cell decode: REJECTS non-finite at decode (a renderable numeral
+/// is contract, not presentation — and JSON could not express it anyway).
+fn finite_number_cell<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    let n = f64::deserialize(deserializer)?;
+    if !n.is_finite() {
+        return Err(<D::Error as serde::de::Error>::custom(
+            "table cell number must be finite",
+        ));
+    }
+    Ok(n)
+}
+
+/// Progress-fraction decode: finite and within `0.0..=1.0`.
+fn capped_progress_fraction<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<f32, D::Error> {
+    let fraction = f32::deserialize(deserializer)?;
+    if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+        return Err(<D::Error as serde::de::Error>::custom(
+            "table cell progress fraction must be finite within 0..=1",
+        ));
+    }
+    Ok(fraction)
+}
+
+/// Date-month decode gate (`1..=12`).
+fn bounded_date_month<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
+    let m = u8::deserialize(deserializer)?;
+    if !(1..=12).contains(&m) {
+        return Err(<D::Error as serde::de::Error>::custom(
+            "table cell date month must be within 1..=12",
+        ));
+    }
+    Ok(m)
+}
+
+/// Date-day decode gate (`1..=31`, magnitude only).
+fn bounded_date_day<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
+    let d = u8::deserialize(deserializer)?;
+    if !(1..=31).contains(&d) {
+        return Err(<D::Error as serde::de::Error>::custom(
+            "table cell date day must be within 1..=31",
+        ));
+    }
+    Ok(d)
+}
+
+/// Cell-level structural checks, address-ful: every cap/gate of
+/// [`TableCell`] reported as [`WidgetError::InvalidCell`] (the decode
+/// helpers already refuse hostile frames; this validates the hand-authored
+/// leg with the full (table, key, column) address in the report).
+fn check_table_cell(
+    table: StableId,
+    key: StableId,
+    column: StableId,
+    cell: &TableCell,
+) -> Result<(), WidgetError> {
+    let invalid = |reason: String| {
+        Err(WidgetError::InvalidCell {
+            table,
+            key,
+            column,
+            reason,
+        })
+    };
+    match cell {
+        TableCell::Text(text) => {
+            if text.len() > MAX_TEXT_BYTES {
+                return invalid(format!(
+                    "cell text is {} bytes past the {MAX_TEXT_BYTES}-byte cap",
+                    text.len()
+                ));
+            }
+        }
+        TableCell::Number(n) => {
+            if !n.is_finite() {
+                return invalid("number cell must be finite".to_string());
+            }
+        }
+        TableCell::Bool(_) => {}
+        TableCell::Icon(icon) => {
+            if icon.uri.len() > MAX_ASSET_URI_BYTES {
+                return invalid(format!(
+                    "icon uri is {} bytes past the {MAX_ASSET_URI_BYTES}-byte cap",
+                    icon.uri.len()
+                ));
+            }
+        }
+        TableCell::Link { label, uri } => {
+            if label.len() > MAX_TEXT_BYTES {
+                return invalid(format!(
+                    "link label is {} bytes past the {MAX_TEXT_BYTES}-byte cap",
+                    label.len()
+                ));
+            }
+            if uri.len() > MAX_ASSET_URI_BYTES {
+                return invalid(format!(
+                    "link uri is {} bytes past the {MAX_ASSET_URI_BYTES}-byte cap",
+                    uri.len()
+                ));
+            }
+        }
+        TableCell::Badge { label, .. } => {
+            if label.len() > MAX_TEXT_BYTES {
+                return invalid(format!(
+                    "badge label is {} bytes past the {MAX_TEXT_BYTES}-byte cap",
+                    label.len()
+                ));
+            }
+        }
+        TableCell::Progress { fraction, label } => {
+            if !fraction.is_finite() || !(0.0..=1.0).contains(fraction) {
+                return invalid("progress fraction must be finite within 0.0..=1.0".to_string());
+            }
+            if let Some(label) = label {
+                if label.len() > MAX_TEXT_BYTES {
+                    return invalid(format!(
+                        "progress label is {} bytes past the {MAX_TEXT_BYTES}-byte cap",
+                        label.len()
+                    ));
+                }
+            }
+        }
+        TableCell::Date { m, d, .. } => {
+            if !(1..=12).contains(m) {
+                return invalid(format!("date month {m} is outside 1..=12"));
+            }
+            if !(1..=31).contains(d) {
+                return invalid(format!("date day {d} is outside 1..=31"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One COLUMN of a [`PanelTableDef`]: stable id (the patch/registry
+/// address), visible label, the DATA KIND its cells must carry, and
+/// presentation hints only (width/stretch are HOST decisions — a
+/// nonsensical hint is clampable, never validated: the split_ratio
+/// doctrine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableColumnDef {
+    /// Stable column id — the address cell patches name. Unique within the
+    /// table (per-table registry; a duplicate refuses as
+    /// [`WidgetError::InvalidCell`]).
+    pub id: StableId,
+    /// Visible header label (REQUIRED, non-empty; byte-capped).
+    pub label: String,
+    /// The kind every cell of this column must carry.
+    pub kind: CellKind,
+    /// Preferred width in logical units (presentation HINT; the host may
+    /// clamp or ignore it).
+    #[serde(default)]
+    pub width_hint: Option<f32>,
+    /// The column may stretch into leftover width (presentation hint).
+    #[serde(default)]
+    pub stretch: bool,
+}
+
+/// One ROW of a [`PanelTableDef`]'s published window: a stable key (the
+/// patch/event address — never an index; WGT-ID forbids index identity) and
+/// its cells, one per column, shadowing the column registry 1:1 BY
+/// POSITION. No per-row interaction state (expansion/selection is
+/// host-local; the def is pure data).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableRowDef {
+    /// Stable row key (unique within THIS table's registry; different
+    /// tables may freely re-use keys — the per-table namespace is the
+    /// registry keyed by table id). A duplicate refuses as
+    /// [`WidgetError::InvalidCell`].
+    pub key: StableId,
+    /// The row's cells — exactly one per column ([`PanelTableDef::columns`]),
+    /// shadowing by POSITION. Budget: one payload-vec cap at decode
+    /// ([`budgeted_table_cells`]); the exact equality is validated by
+    /// [`PanelTableDef::validate`].
+    #[serde(deserialize_with = "budgeted_table_cells")]
+    pub cells: Vec<TableCell>,
+    /// The EXPLICIT domain-object mapping ([`DomainRef`]); absent on pure
+    /// presentation rows.
+    #[serde(default)]
+    pub domain_ref: Option<DomainRef>,
+}
+
+/// One typed TABLE definition of the surface's registry (`SWG-004`): the
+/// target every [`WidgetNode::Table`] reference resolves against.
+///
+/// Identity: `id_table` is the table's id — FOREIGN to the surface-wide
+/// widget namespace (WGT-ID). The registry is a per-surface map keyed by
+/// EXACTLY this id ([`WidgetSurface::tables`]); a def whose `id_table`
+/// disagrees with its map key is a defect
+/// ([`WidgetError::UnknownTableRef`]).
+///
+/// Paging: `total_rows: Some(total)` states the backing set's size while
+/// `rows` carries the published window (≤ [`MAX_WIDGET_ROWS_INITIAL`] per
+/// payload); the host asks for further windows through
+/// [`WidgetEvent::TablePageRequested`]. `None` = the table is fully
+/// materialized (small tables).
+///
+/// State classes: this def is pure DATA — row selection, scroll position,
+/// expansion/draft state are HOST-LOCAL (ARCHITECTURE §3 state class 3)
+/// and deliberately absent here.
+///
+/// NOT part of the widget-node namespace: table ids never collide with
+/// widget ids by construction (separate registry map), and
+/// [`WidgetError::DuplicateWidgetId`] never fires for them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelTableDef {
+    /// Stable table id (the [`TableRef::table_id`] target; the registry
+    /// map's key).
+    pub id_table: StableId,
+    /// Column vocabulary (stable column ids — the addresses cell patches
+    /// name). Cells shadow these 1:1 by position; the id→position mapping
+    /// is [`PanelTableDef::column_position`].
+    #[serde(deserialize_with = "budgeted_table_columns")]
+    pub columns: Vec<TableColumnDef>,
+    /// The backing set's total when the def windows (`None` = fully
+    /// materialized).
+    pub total_rows: Option<u64>,
+    /// The published row window (bounded
+    /// [`MAX_WIDGET_ROWS_INITIAL`]/payload — paged backing data keeps keys
+    /// stable across windows).
+    #[serde(deserialize_with = "budgeted_table_rows")]
+    pub rows: Vec<TableRowDef>,
+}
+
+impl PanelTableDef {
+    /// The position a column id shadows (the mapping cell patches rely
+    /// on); `None` when the id is not in the column registry.
+    pub fn column_position(&self, id: StableId) -> Option<usize> {
+        self.columns.iter().position(|column| column.id == id)
+    }
+
+    /// Per-table structural validation: unique column ids and row keys
+    /// (per-table registries → [`WidgetError::InvalidCell`] per the
+    /// address convention), every row's cells shadowing the column
+    /// registry 1:1 BY position with MATCHING kinds, and the per-cell
+    /// caps/gates of [`check_table_cell`]. Budget: rows past
+    /// [`MAX_WIDGET_ROWS_INITIAL`] refuse as [`WidgetError::BudgetExceeded`]
+    /// (first crossing; matching the surface/decode levels).
+    pub fn validate(&self) -> Result<(), WidgetError> {
+        if self.rows.len() > MAX_WIDGET_ROWS_INITIAL {
+            return Err(WidgetError::BudgetExceeded {
+                current: self.rows.len(),
+                max: MAX_WIDGET_ROWS_INITIAL,
+            });
+        }
+        // Column registry: unique ids + label contract.
+        let mut columns: HashMap<StableId, CellKind> = HashMap::with_capacity(self.columns.len());
+        for column in &self.columns {
+            if columns.contains_key(&column.id) {
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: column.id,
+                    column: column.id,
+                    reason: "duplicate column id in the column registry".to_string(),
+                });
+            }
+            if column.label.is_empty() {
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: column.id,
+                    column: column.id,
+                    reason: "empty column label".to_string(),
+                });
+            }
+            if column.label.len() > MAX_TEXT_BYTES {
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: column.id,
+                    column: column.id,
+                    reason: format!(
+                        "column label is {} bytes past the {MAX_TEXT_BYTES}-byte cap",
+                        column.label.len()
+                    ),
+                });
+            }
+            columns.insert(column.id, column.kind);
+        }
+        // Row registry: unique keys + 1:1 kind-matched cell shadowing.
+        let mut keys: HashSet<StableId> = HashSet::with_capacity(self.rows.len());
+        for row in &self.rows {
+            if !keys.insert(row.key) {
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: row.key,
+                    column: row.key,
+                    reason: "duplicate row key in the published window".to_string(),
+                });
+            }
+            if row.cells.len() < self.columns.len() {
+                // Undershoot: name the FIRST column the row does not cover.
+                let first_uncovered = &self.columns[row.cells.len()];
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: row.key,
+                    column: first_uncovered.id,
+                    reason: format!(
+                        "row carries {} cells for a {}-column registry (does not shadow every column)",
+                        row.cells.len(),
+                        self.columns.len()
+                    ),
+                });
+            }
+            if row.cells.len() > self.columns.len() {
+                return Err(WidgetError::InvalidCell {
+                    table: self.id_table,
+                    key: row.key,
+                    column: row.key,
+                    reason: format!(
+                        "row carries {} cells for a {}-column registry (no column shadows the extra cells)",
+                        row.cells.len(),
+                        self.columns.len()
+                    ),
+                });
+            }
+            for (pos, cell) in row.cells.iter().enumerate() {
+                let column = &self.columns[pos];
+                if cell.kind() != column.kind {
+                    return Err(WidgetError::InvalidCell {
+                        table: self.id_table,
+                        key: row.key,
+                        column: column.id,
+                        reason: format!(
+                            "cell kind `{}` does not match column kind `{}`",
+                            cell.kind(),
+                            column.kind
+                        ),
+                    });
+                }
+                check_table_cell(self.id_table, row.key, column.id, cell)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Typed-table patch planning (cell writes; the apply_patch family split)
+// ---------------------------------------------------------------------------
+
+/// One planned cell write — the journal the table planner produces and
+/// [`apply_table_writes`] replays. Positions are resolved against the
+/// CURRENT registry at plan time; cell writes never alter table/row/column
+/// structure, so the positions stay valid through the replay and the phase-2
+/// step is infallible by construction.
+#[derive(Debug)]
+struct PlannedTableWrite {
+    /// The registry table under write.
+    table: StableId,
+    /// Resolved row position (the `rows` vec index of the keyed row).
+    row_pos: usize,
+    /// Resolved cell position (== the column position the registry maps
+    /// the column id to).
+    cell_pos: usize,
+    /// The typed replacement (kind-resolved + cap-validated at plan time).
+    cell: TableCell,
+}
+
+/// Phase 1 of the table half of `apply_patch`: validate each
+/// [`WidgetOp::TableCell`] against the CURRENT registry and journal the
+/// pre-resolved writes. No mutation of `tables` happens here, and none is
+/// needed during planning: cell writes replace VALUES only (structure is
+/// untouched), so later ops in the same patch resolve identically (the
+/// last write to one cell wins at replay).
+///
+/// Rejections: an unknown TABLE → [`WidgetError::UnknownTableRef`]; an
+/// unknown row key / column id, a kind mismatch, a non-writable column
+/// kind, or a cap crossing on the replacement →
+/// [`WidgetError::InvalidCell`] with the full address.
+fn plan_table_writes(
+    tables: &BTreeMap<StableId, PanelTableDef>,
+    ops: Vec<WidgetOp>,
+) -> Result<Vec<PlannedTableWrite>, WidgetError> {
+    let mut journal = Vec::with_capacity(ops.len());
+    for op in ops {
+        let WidgetOp::TableCell {
+            table,
+            key,
+            column,
+            value,
+        } = op
+        else {
+            // The caller's family split routes non-cell ops to the widget
+            // planner; a structural op reaching here is planner corruption.
+            unreachable!("table planner receives WidgetOp::TableCell ops only");
+        };
+        let Some(def) = tables.get(&table) else {
+            return Err(WidgetError::UnknownTableRef(table));
+        };
+        let Some(row_pos) = def.rows.iter().position(|row| row.key == key) else {
+            return Err(WidgetError::InvalidCell {
+                table,
+                key,
+                column,
+                reason: "no such row key in the published window".to_string(),
+            });
+        };
+        let Some(cell_pos) = def.column_position(column) else {
+            return Err(WidgetError::InvalidCell {
+                table,
+                key,
+                column,
+                reason: "no such column id in the column registry".to_string(),
+            });
+        };
+        let cell = planned_cell_for(table, key, column, def.columns[cell_pos].kind, value)?;
+        journal.push(PlannedTableWrite {
+            table,
+            row_pos,
+            cell_pos,
+            cell,
+        });
+    }
+    Ok(journal)
+}
+
+/// The typed replacement a [`WidgetOp::TableCell`] writes into a column of
+/// `kind`: the op carries the three-variant skeleton, so exactly the scalar
+/// column kinds are patch-writable — icon/link/badge/progress/date columns
+/// are plugin-PUBLISHED through the registry (see the [module docs] split)
+/// and a write to one refuses with [`WidgetError::InvalidCell`]. The scalar
+/// legs re-run the cell caps/gates so the REPLACEMENT is as valid as the
+/// published def cells.
+fn planned_cell_for(
+    table: StableId,
+    key: StableId,
+    column: StableId,
+    kind: CellKind,
+    value: WidgetCellValue,
+) -> Result<TableCell, WidgetError> {
+    let cell = match (kind, value) {
+        (CellKind::Text, WidgetCellValue::Text(text)) => TableCell::Text(text),
+        (CellKind::Number, WidgetCellValue::Number(n)) => TableCell::Number(n),
+        (CellKind::Bool, WidgetCellValue::Bool(b)) => TableCell::Bool(b),
+        (kind, _) => {
+            return Err(WidgetError::InvalidCell {
+                table,
+                key,
+                column,
+                reason: format!(
+                    "column kind `{kind}` is not writable through the value skeleton (published through the registry)"
+                ),
+            });
+        }
+    };
+    check_table_cell(table, key, column, &cell)?;
+    Ok(cell)
+}
+
+/// Phase 2 of the table half of `apply_patch`: replay the pre-validated
+/// journal into the REAL registry, strictly in order, with no further
+/// decisions. Every step is infallible by construction (positions were
+/// resolved at plan time and cell writes do not move structure; a
+/// disagreement would be planner corruption and panics, matching the
+/// widget journal's unreachable discipline).
+fn apply_table_writes(
+    tables: &mut BTreeMap<StableId, PanelTableDef>,
+    journal: Vec<PlannedTableWrite>,
+) {
+    for PlannedTableWrite {
+        table,
+        row_pos,
+        cell_pos,
+        cell,
+    } in journal
+    {
+        let def = tables
+            .get_mut(&table)
+            .expect("journal table resolved at plan time");
+        def.rows[row_pos].cells[cell_pos] = cell;
+    }
+}
+
+/// Every [`WidgetNode::Table`] reference's `table_id` resolving against
+/// `tables` (one walk, iterative — the same explicit-stack discipline as
+/// `validate_root`). Refs are checked WHERE THE TARGET LIVES: standalone
+/// payload validation ([`validate_root`]) stays registry-blind; this helper
+/// receives the registry (the surface gate and the patch planner both have
+/// it) so the surface-wide rule "every table identity resolves" holds for
+/// snapshot and patch alike.
+///
+/// PLACEHOLDER TRANSITION: while `tables` is EMPTY this check is a no-op —
+/// `SWG-001` shipped refs into a contract that did not exist yet and its
+/// creation surfaces (append-only, unmodifiable) encode that era; the FIRST
+/// registry entry engages full resolution for the surface and every patch
+/// payload applied to it (see the [module docs](self)).
+fn validate_table_refs(
+    nodes: &[WidgetNode],
+    tables: &BTreeMap<StableId, PanelTableDef>,
+) -> Result<(), WidgetError> {
+    if tables.is_empty() {
+        return Ok(());
+    }
+    let mut stack: Vec<&WidgetNode> = nodes.iter().collect();
+    while let Some(node) = stack.pop() {
+        if let WidgetNode::Table(def) = node {
+            if !tables.contains_key(&def.table_id) {
+                return Err(WidgetError::UnknownTableRef(def.table_id));
+            }
+        } else if let WidgetNode::Group(group) = node {
+            stack.extend(group.children.iter());
+        }
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -2397,6 +3538,10 @@ mod tests {
         WidgetSurface {
             revision: SceneRevision(revision),
             roots,
+            // SWG-004 trailing registry field; the pre-existing widget tests
+            // publish no tables (the only line touch the registry decision
+            // forced on this module's test plumbing — assertions untouched).
+            tables: BTreeMap::new(),
         }
     }
 
@@ -2597,6 +3742,8 @@ mod tests {
                     ),
                 ],
             )],
+            // SWG-004 trailing registry field (see the wsurface helper note).
+            tables: BTreeMap::new(),
         };
         surface.validate().expect("representative surface is valid");
         let summary = surface.widget_summary();
@@ -3597,5 +4744,1066 @@ mod tests {
             matches!(split.children[1], WidgetNode::Group(_)),
             "expected the scene-cell placeholder group"
         );
+    }
+
+    // -------------------------------------------------------------------
+    // SWG-004 tests (typed tables: registry/cells/patches/paging/legacy)
+    // -------------------------------------------------------------------
+
+    // -- construction helpers (appended; no existing helper touched) ------
+
+    fn column(id: u64, kind: CellKind, label: &str) -> TableColumnDef {
+        TableColumnDef {
+            id: sid(id),
+            label: label.to_string(),
+            kind,
+            width_hint: None,
+            stretch: false,
+        }
+    }
+
+    fn trow_typed(key: u64, cells: Vec<TableCell>) -> TableRowDef {
+        TableRowDef {
+            key: sid(key),
+            cells,
+            domain_ref: None,
+        }
+    }
+
+    fn table_def(id: u64, columns: Vec<TableColumnDef>, rows: Vec<TableRowDef>) -> PanelTableDef {
+        PanelTableDef {
+            id_table: sid(id),
+            columns,
+            total_rows: None,
+            rows,
+        }
+    }
+
+    fn surface_with_table(
+        revision: u64,
+        ref_id: u64,
+        table_id: u64,
+        def: PanelTableDef,
+    ) -> WidgetSurface {
+        WidgetSurface {
+            revision: SceneRevision(revision),
+            roots: vec![wtable(ref_id, table_id)],
+            tables: BTreeMap::from([(sid(table_id), def)]),
+        }
+    }
+
+    fn patch_cell(
+        base: u64,
+        next: u64,
+        table: u64,
+        key: u64,
+        column: u64,
+        value: WidgetCellValue,
+    ) -> WidgetSurfacePatch {
+        WidgetSurfacePatch {
+            base_revision: SceneRevision(base),
+            revision: SceneRevision(next),
+            ops: vec![WidgetOp::TableCell {
+                table: sid(table),
+                key: sid(key),
+                column: sid(column),
+                value,
+            }],
+        }
+    }
+
+    /// The all-kinds reference def: 8 columns (one per [`CellKind`]) × 2 rows
+    /// (pure-presentation + domain-backed), paged. Shared by the roundtrip
+    /// and the cap/gate tests.
+    fn all_kinds_table(id: u64) -> PanelTableDef {
+        table_def(
+            id,
+            vec![
+                column(1, CellKind::Text, "name"),
+                column(2, CellKind::Number, "length"),
+                column(3, CellKind::Bool, "locked"),
+                column(4, CellKind::Icon, "icon"),
+                column(5, CellKind::Link, "link"),
+                column(6, CellKind::Badge, "status"),
+                column(7, CellKind::Progress, "progress"),
+                column(8, CellKind::Date, "opened"),
+            ],
+            vec![
+                trow_typed(
+                    10,
+                    vec![
+                        TableCell::Text("AL-1".to_string()),
+                        TableCell::Number(42.5),
+                        TableCell::Bool(true),
+                        TableCell::Icon(icon_ref("svg:alignment")),
+                        TableCell::Link {
+                            label: "docs".to_string(),
+                            uri: "https://example.test/a".to_string(),
+                        },
+                        TableCell::Badge {
+                            label: "wip".to_string(),
+                            tone: BadgeTone::Warning,
+                        },
+                        TableCell::Progress {
+                            fraction: 0.25,
+                            label: Some("quarter".to_string()),
+                        },
+                        TableCell::Date {
+                            y: 2026,
+                            m: 11,
+                            d: 15,
+                        },
+                    ],
+                ),
+                TableRowDef {
+                    domain_ref: Some(DomainRef {
+                        kind: "alignment".to_string(),
+                        id: 77,
+                    }),
+                    ..trow_typed(
+                        11,
+                        vec![
+                            TableCell::Text("AL-2".to_string()),
+                            TableCell::Number(0.0),
+                            TableCell::Bool(false),
+                            TableCell::Icon(icon_ref("svg:x")),
+                            TableCell::Link {
+                                label: "l".to_string(),
+                                uri: "svg:l".to_string(),
+                            },
+                            TableCell::Badge {
+                                label: "ok".to_string(),
+                                tone: BadgeTone::Success,
+                            },
+                            TableCell::Progress {
+                                fraction: 1.0,
+                                label: None,
+                            },
+                            TableCell::Date {
+                                y: 2025,
+                                m: 1,
+                                d: 31,
+                            },
+                        ],
+                    )
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn panel_table_registry_roundtrips() {
+        // The registry rides the surface (trailing map); the ref resolves;
+        // all 8 cell kinds + paged total + domain refs survive BOTH wire
+        // formats; the JSON-absent-registry decode (the serde(default)
+        // facet) reads EMPTY.
+        let def = all_kinds_table(2000);
+        let surface = surface_with_table(4, 2000, 2000, def);
+        surface
+            .validate()
+            .expect("registry + refs validate (the table id == the ref id PROVES the foreign identity spaces do not collide)");
+
+        let summary = surface.widget_summary();
+        assert_eq!(summary.by_kind.tables, 1);
+
+        let bytes = bincode::serialize(&surface).expect("serialize surface");
+        let decoded: WidgetSurface = bincode::deserialize(&bytes).expect("decode surface");
+        assert_eq!(surface, decoded);
+        assert_eq!(decoded.tables.len(), 1);
+        let decoded_def = &decoded.tables[&sid(2000)];
+        assert_eq!(decoded_def.rows.len(), 2);
+        assert_eq!(decoded_def.columns.len(), 8);
+        assert_eq!(
+            decoded_def.column_position(sid(5)),
+            Some(4),
+            "the registry's id→position mapping survives the frame"
+        );
+        decoded.validate().expect("decoded surface valid");
+
+        let json = serde_json::to_string(&surface).expect("surface json");
+        let from_json: WidgetSurface = serde_json::from_str(&json).expect("decode surface json");
+        assert_eq!(surface, from_json);
+
+        // Old-shape JSON (no trailing registry member) decodes with an empty
+        // registry — the JSON-side tolerance documented in the wire notes.
+        let mut value = serde_json::to_value(&surface).expect("surface json value");
+        let removed = value
+            .as_object_mut()
+            .expect("the surface is a JSON object")
+            .remove("tables");
+        assert!(removed.is_some(), "the registry member was carried");
+        let old_shape: WidgetSurface =
+            serde_json::from_value(value).expect("old-shape json decodes");
+        assert!(old_shape.tables.is_empty());
+        assert_eq!(old_shape.roots, surface.roots);
+    }
+
+    #[test]
+    fn cell_kind_must_match_column() {
+        // DEF leg: a Text cell under a Number column refuses (address-ful
+        // InvalidCell per the documented convention).
+        let def = table_def(
+            1,
+            vec![column(2, CellKind::Number, "length")],
+            vec![trow_typed(3, vec![TableCell::Text("oops".to_string())])],
+        );
+        assert_eq!(
+            def.validate(),
+            Err(WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(3),
+                column: sid(2),
+                reason: "cell kind `text` does not match column kind `number`".to_string(),
+            })
+        );
+
+        // PATCH leg: a skeleton-Text write into a Number column refuses and
+        // leaves the surface untouched (phase-1 rejection, zero writes).
+        let def = table_def(
+            1,
+            vec![
+                column(2, CellKind::Text, "name"),
+                column(3, CellKind::Number, "length"),
+            ],
+            vec![
+                trow_typed(
+                    4,
+                    vec![TableCell::Text("a".to_string()), TableCell::Number(1.0)],
+                ),
+                trow_typed(
+                    5,
+                    vec![TableCell::Text("b".to_string()), TableCell::Number(2.0)],
+                ),
+            ],
+        );
+        let mut surface = surface_with_table(7, 100, 1, def);
+        surface.validate().expect("valid base");
+        let patch = patch_cell(7, 8, 1, 4, 3, WidgetCellValue::Text("nope".to_string()));
+        let error = surface
+            .apply_patch(patch)
+            .expect_err("skeleton text into a number column must refuse");
+        assert!(
+            matches!(
+                &error,
+                WidgetError::InvalidCell { table, key, column, .. }
+                    if *table == sid(1) && *key == sid(4) && *column == sid(3)
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(surface.revision, SceneRevision(7), "refusal stands");
+        assert_eq!(
+            surface.tables[&sid(1)].rows[0].cells[1],
+            TableCell::Number(1.0),
+            "the addressed cell is unchanged"
+        );
+
+        // The MATCHED write applies to exactly the addressed cell.
+        surface
+            .apply_patch(patch_cell(7, 8, 1, 4, 3, WidgetCellValue::Number(9.0)))
+            .expect("matched kind applies");
+        assert_eq!(
+            surface.tables[&sid(1)].rows[0].cells[1],
+            TableCell::Number(9.0)
+        );
+        assert_eq!(surface.revision, SceneRevision(8));
+
+        // Presentation kinds are NOT patch-writable through the skeleton.
+        let def = table_def(
+            1,
+            vec![column(2, CellKind::Date, "day")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Date {
+                    y: 2026,
+                    m: 1,
+                    d: 1,
+                }],
+            )],
+        );
+        let mut surface = surface_with_table(1, 100, 1, def);
+        let error = surface
+            .apply_patch(patch_cell(
+                1,
+                2,
+                1,
+                3,
+                2,
+                WidgetCellValue::Text("even a right-shaped text".to_string()),
+            ))
+            .expect_err("a date column is not patch-writable");
+        assert!(
+            matches!(
+                &error,
+                WidgetError::InvalidCell { reason, .. }
+                    if reason.contains("not writable through the value skeleton")
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(surface.revision, SceneRevision(1));
+    }
+
+    #[test]
+    fn row_keys_unique_and_column_registry_complete() {
+        // Duplicate ROW keys (per-table registry; InvalidCell per the
+        // documented def-shape address convention).
+        let dup_rows = table_def(
+            1,
+            vec![column(2, CellKind::Text, "a")],
+            vec![
+                trow_typed(3, vec![TableCell::Text("x".to_string())]),
+                trow_typed(3, vec![TableCell::Text("y".to_string())]),
+            ],
+        );
+        let error = dup_rows
+            .validate()
+            .expect_err("duplicate row key must refuse");
+        assert_eq!(
+            error,
+            WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(3),
+                column: sid(3),
+                reason: "duplicate row key in the published window".to_string(),
+            }
+        );
+
+        // Duplicate column ids (per-table registry).
+        let dup_columns = table_def(
+            1,
+            vec![
+                column(2, CellKind::Text, "a"),
+                column(2, CellKind::Text, "b"),
+            ],
+            vec![],
+        );
+        let error = dup_columns
+            .validate()
+            .expect_err("duplicate column id must refuse");
+        assert_eq!(
+            error,
+            WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(2),
+                column: sid(2),
+                reason: "duplicate column id in the column registry".to_string(),
+            }
+        );
+
+        // Cells UNDERshoot (2 cells, 3 columns): the first uncovered column
+        // is named.
+        let short = table_def(
+            1,
+            vec![
+                column(2, CellKind::Text, "a"),
+                column(3, CellKind::Number, "b"),
+                column(4, CellKind::Bool, "c"),
+            ],
+            vec![trow_typed(
+                5,
+                vec![TableCell::Text("x".to_string()), TableCell::Number(1.0)],
+            )],
+        );
+        assert_eq!(
+            short.validate(),
+            Err(WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(5),
+                column: sid(4),
+                reason:
+                    "row carries 2 cells for a 3-column registry (does not shadow every column)"
+                        .to_string(),
+            })
+        );
+
+        // Cells OVERshoot (4 cells, 3 columns): no column exists for the
+        // extra cells; the address convention repeats the row key.
+        let long = table_def(
+            1,
+            vec![
+                column(2, CellKind::Text, "a"),
+                column(3, CellKind::Number, "b"),
+                column(4, CellKind::Bool, "c"),
+            ],
+            vec![trow_typed(
+                5,
+                vec![
+                    TableCell::Text("x".to_string()),
+                    TableCell::Number(1.0),
+                    TableCell::Bool(true),
+                    TableCell::Bool(false),
+                ],
+            )],
+        );
+        assert_eq!(
+            long.validate(),
+            Err(WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(5),
+                column: sid(5),
+                reason:
+                    "row carries 4 cells for a 3-column registry (no column shadows the extra cells)"
+                        .to_string(),
+            })
+        );
+
+        // Registry miskey: a def whose id_table is not its map key.
+        let def = table_def(
+            999,
+            vec![column(2, CellKind::Text, "a")],
+            vec![trow_typed(3, vec![TableCell::Text("x".to_string())])],
+        );
+        let surface = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: vec![wtable(100, 999)],
+            tables: BTreeMap::from([(sid(777), def)]),
+        };
+        assert_eq!(
+            surface.validate(),
+            Err(WidgetError::UnknownTableRef(sid(999)))
+        );
+
+        // PATCH routing: unknown column → InvalidCell; unknown row key →
+        // InvalidCell; unknown TABLE → UnknownTableRef (the identity arm).
+        let def = table_def(
+            1,
+            vec![column(2, CellKind::Text, "a")],
+            vec![trow_typed(3, vec![TableCell::Text("x".to_string())])],
+        );
+        let mut surface = surface_with_table(1, 100, 1, def);
+        let error = surface
+            .apply_patch(patch_cell(
+                1,
+                2,
+                1,
+                3,
+                404,
+                WidgetCellValue::Text("y".to_string()),
+            ))
+            .expect_err("unknown column must refuse");
+        assert!(
+            matches!(
+                &error,
+                WidgetError::InvalidCell { column, reason, .. }
+                    if *column == sid(404) && reason == "no such column id in the column registry"
+            ),
+            "unexpected error: {error:?}"
+        );
+        let error = surface
+            .apply_patch(patch_cell(
+                1,
+                2,
+                1,
+                404,
+                2,
+                WidgetCellValue::Text("y".to_string()),
+            ))
+            .expect_err("unknown row key must refuse");
+        assert!(
+            matches!(
+                &error,
+                WidgetError::InvalidCell { key, reason, .. }
+                    if *key == sid(404) && reason == "no such row key in the published window"
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(
+            surface
+                .apply_patch(patch_cell(
+                    1,
+                    2,
+                    404,
+                    3,
+                    2,
+                    WidgetCellValue::Text("y".to_string())
+                ))
+                .expect_err("unknown table must refuse"),
+            WidgetError::UnknownTableRef(sid(404))
+        );
+        // All three refusals left the surface untouched.
+        assert_eq!(surface.revision, SceneRevision(1));
+        assert_eq!(
+            surface.tables[&sid(1)].rows[0].cells[0],
+            TableCell::Text("x".to_string())
+        );
+    }
+
+    #[test]
+    fn one_cell_patch_is_small() {
+        // 4_096-row window (AT the payload cap), two columns; ONE cell
+        // edited by ONE patch fact.
+        let def = table_def(
+            1,
+            vec![
+                column(2, CellKind::Number, "quantity"),
+                column(3, CellKind::Bool, "locked"),
+            ],
+            (0..MAX_WIDGET_ROWS_INITIAL)
+                .map(|i| {
+                    trow_typed(
+                        i as u64 + 1,
+                        vec![TableCell::Number(i as f64), TableCell::Bool(i % 2 == 0)],
+                    )
+                })
+                .collect(),
+        );
+        let mut surface = surface_with_table(1, 10_000, 1, def);
+        surface
+            .validate()
+            .expect("the 4_096-row window validates at the cap");
+
+        let patch = patch_cell(
+            1,
+            2,
+            1,
+            MAX_WIDGET_ROWS_INITIAL as u64,
+            2,
+            WidgetCellValue::Number(1234.5),
+        );
+        let bytes = bincode::serialize(&patch).expect("serialize 1-cell patch");
+        assert!(
+            bytes.len() <= 300,
+            "1-cell patch payload = {} bytes (the single-cell acceptance is ~200B)",
+            bytes.len()
+        );
+        surface.apply_patch(patch).expect("1-cell patch applies");
+
+        // Surgical mutation assert: EXACTLY one cell moved — every other
+        // cell of every other row is byte-identical to its original.
+        let def = &surface.tables[&sid(1)];
+        assert_eq!(def.rows.len(), MAX_WIDGET_ROWS_INITIAL);
+        let mut changed_cells = 0usize;
+        for (row_index, row) in def.rows.iter().enumerate() {
+            let originals = [
+                TableCell::Number(row_index as f64),
+                TableCell::Bool(row_index % 2 == 0),
+            ];
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                if cell != &originals[cell_index] {
+                    changed_cells += 1;
+                }
+            }
+        }
+        assert_eq!(
+            changed_cells, 1,
+            "exactly ONE cell mutated across the 4_096x2 grid (ARCHITECTURE §16)"
+        );
+        assert_eq!(
+            def.rows[MAX_WIDGET_ROWS_INITIAL - 1].cells[0],
+            TableCell::Number(1234.5)
+        );
+        assert_eq!(surface.revision, SceneRevision(2));
+    }
+
+    #[test]
+    fn single_cell_patch_bytes_versus_full_table_write() {
+        // The §16 proof, byte-wise (no wall clock): the FULL-TABLE REPUBLISH
+        // (the whole def a snapshot retransmits) versus the ONE-cell patch.
+        let def = table_def(
+            1,
+            vec![column(2, CellKind::Text, "note")],
+            (0..MAX_WIDGET_ROWS_INITIAL)
+                .map(|i| {
+                    trow_typed(
+                        i as u64 + 1,
+                        vec![TableCell::Text(format!(
+                            "material row {i:04} description text"
+                        ))],
+                    )
+                })
+                .collect(),
+        );
+        def.validate()
+            .expect("the full-table republish shape validates");
+        let full_bytes = bincode::serialize(&def).expect("serialize full table");
+        let one_bytes = bincode::serialize(&patch_cell(
+            1,
+            2,
+            1,
+            1,
+            2,
+            WidgetCellValue::Text("one cell".to_string()),
+        ))
+        .expect("serialize 1-cell patch");
+        assert!(
+            one_bytes.len() < 300,
+            "one-cell patch = {} bytes; full-table republish = {} bytes (ARCHITECTURE §16: one cell edit transfers only its cell)",
+            one_bytes.len(),
+            full_bytes.len()
+        );
+        assert!(
+            full_bytes.len() >= 100_000,
+            "one-cell patch = {} bytes; full-table republish = {} bytes (ARCHITECTURE §16: one cell edit transfers only its cell)",
+            one_bytes.len(),
+            full_bytes.len()
+        );
+        println!(
+            "one-cell patch: {} bytes — full-table republish: {} bytes ({:0.0}x)",
+            one_bytes.len(),
+            full_bytes.len(),
+            full_bytes.len() as f64 / one_bytes.len() as f64
+        );
+    }
+
+    #[test]
+    fn table_page_request_bounds() {
+        let seq_tag = |event: &WidgetEvent| -> u32 {
+            let bytes = bincode::serialize(event).expect("serialize event");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+        let page = |len: usize| WidgetEvent::TablePageRequested {
+            surface_id: sid(1),
+            table: sid(2),
+            first_key: sid(3),
+            len,
+        };
+
+        // Tail pin 6 (the six prior event pins are untouched — see the
+        // creation-tail test).
+        assert_eq!(seq_tag(&page(4)), 6);
+
+        // At the cap: construct-level + bounded decode both green.
+        let at_cap = page(MAX_WIDGET_RANGE_LEN);
+        assert_eq!(at_cap.validate(), Ok(()));
+        let bytes = bincode::serialize(&at_cap).expect("serialize page request");
+        assert_eq!(
+            bincode::deserialize::<WidgetEvent>(&bytes).expect("the cap-sized page decodes"),
+            at_cap
+        );
+
+        // Cap + 1: BudgetExceeded at construct level AND at decode.
+        let over = page(MAX_WIDGET_RANGE_LEN + 1);
+        assert_eq!(
+            over.validate(),
+            Err(WidgetError::BudgetExceeded {
+                current: MAX_WIDGET_RANGE_LEN + 1,
+                max: MAX_WIDGET_RANGE_LEN,
+            })
+        );
+        let bytes = bincode::serialize(&over).expect("serialize over page request");
+        assert!(
+            bincode::deserialize::<WidgetEvent>(&bytes).is_err(),
+            "cap+1 page width must refuse at decode"
+        );
+    }
+
+    #[test]
+    fn widget_op_tablecell_pin_extends_0_to_3() {
+        let op_tag = |op: &WidgetOp| -> u32 {
+            let bytes = bincode::serialize(op).expect("serialize widget op");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+        let cell_tag = |cell: &TableCell| -> u32 {
+            let bytes = bincode::serialize(cell).expect("serialize table cell");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+        let tone_tag = |tone: &BadgeTone| -> u32 {
+            let bytes = bincode::serialize(tone).expect("serialize badge tone");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+        let kind_tag = |kind: &CellKind| -> u32 {
+            let bytes = bincode::serialize(kind).expect("serialize cell kind");
+            u32::from_le_bytes(bytes[..4].try_into().expect("variant tag"))
+        };
+
+        // The ORIGINAL three op pins re-asserted (the table cell extends;
+        // nothing shifted).
+        let icon = wicon(71, "noop");
+        assert_eq!(
+            op_tag(&WidgetOp::Add {
+                parent: None,
+                widget: icon.clone()
+            }),
+            0
+        );
+        assert_eq!(
+            op_tag(&WidgetOp::Update {
+                id: sid(71),
+                content: icon
+            }),
+            1
+        );
+        assert_eq!(op_tag(&WidgetOp::Remove { id: sid(71) }), 2);
+        // The NEW tail pin.
+        assert_eq!(
+            op_tag(&WidgetOp::TableCell {
+                table: sid(1),
+                key: sid(2),
+                column: sid(3),
+                value: WidgetCellValue::Text("v".to_string()),
+            }),
+            3
+        );
+
+        // The typed-cell vocabulary pins 0..=7 + the tone/kind pins.
+        assert_eq!(cell_tag(&TableCell::Text("t".to_string())), 0);
+        assert_eq!(cell_tag(&TableCell::Number(1.0)), 1);
+        assert_eq!(cell_tag(&TableCell::Bool(true)), 2);
+        assert_eq!(cell_tag(&TableCell::Icon(icon_ref("svg:i"))), 3);
+        assert_eq!(
+            cell_tag(&TableCell::Link {
+                label: "l".to_string(),
+                uri: "svg:u".to_string(),
+            }),
+            4
+        );
+        assert_eq!(
+            cell_tag(&TableCell::Badge {
+                label: "b".to_string(),
+                tone: BadgeTone::Neutral,
+            }),
+            5
+        );
+        assert_eq!(
+            cell_tag(&TableCell::Progress {
+                fraction: 0.5,
+                label: None,
+            }),
+            6
+        );
+        assert_eq!(
+            cell_tag(&TableCell::Date {
+                y: 2026,
+                m: 1,
+                d: 2
+            }),
+            7
+        );
+        let tones: Vec<BadgeTone> = vec![
+            BadgeTone::Info,
+            BadgeTone::Success,
+            BadgeTone::Warning,
+            BadgeTone::Danger,
+            BadgeTone::Neutral,
+        ];
+        for (index, tone) in tones.iter().enumerate() {
+            assert_eq!(tone_tag(tone), index as u32, "BadgeTone pin drift");
+        }
+        assert_eq!(kind_tag(&CellKind::Text), 0);
+        assert_eq!(kind_tag(&CellKind::Number), 1);
+        assert_eq!(kind_tag(&CellKind::Bool), 2);
+        assert_eq!(kind_tag(&CellKind::Icon), 3);
+        assert_eq!(kind_tag(&CellKind::Link), 4);
+        assert_eq!(kind_tag(&CellKind::Badge), 5);
+        assert_eq!(kind_tag(&CellKind::Progress), 6);
+        assert_eq!(kind_tag(&CellKind::Date), 7);
+
+        // serde tags lowercase on both enums (externally tagged JSON).
+        assert_eq!(
+            serde_json::to_value(TableCell::Badge {
+                label: "b".to_string(),
+                tone: BadgeTone::Danger,
+            })
+            .expect("cell json"),
+            serde_json::json!({"badge": {"label": "b", "tone": "danger"}})
+        );
+        assert_eq!(
+            serde_json::to_value(CellKind::Date).expect("kind json"),
+            serde_json::json!("date")
+        );
+        assert_eq!(
+            serde_json::to_value(BadgeTone::Info).expect("tone json"),
+            serde_json::json!("info")
+        );
+    }
+
+    #[test]
+    fn legacy_string_table_bytes_stay_stable() {
+        // THE gate: the legacy string-table (`DialogControl::Table` +
+        // `DialogValue::Table`) stays BYTE-COMPATIBLE. The typed tables are
+        // layered BESIDE the legacy control, never replacing it in place;
+        // the only bridge into `dialog` is this TEST (one-way: the module's
+        // types never import it). The bytes of a `DialogValue::Table` are a
+        // COMMITTED FIXTURE (copied verbatim from a run — the same discipline
+        // as the creation pins).
+        let legacy = crate::dialog::DialogValue::Table(vec![vec!["a".to_string()]]);
+        let bytes = bincode::serialize(&legacy).expect("serialize legacy table value");
+        let fixture: [u8; 29] = [
+            // DialogValue::Table = tag 7 (u32 LE) + outer vec len 1 (u64)
+            // + inner vec len 1 (u64) + "a" len 1 (u64) + 'a'.
+            7, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, b'a',
+        ];
+        assert_eq!(
+            bytes, fixture,
+            "legacy DialogValue::Table bytes drifted (THE gate)"
+        );
+        assert_eq!(
+            bincode::deserialize::<crate::dialog::DialogValue>(&bytes).expect("legacy decode"),
+            legacy
+        );
+
+        // The legacy CONTROL stays tag 8 and roundtrips (headers/rows/
+        // allow_add/allow_delete untouched).
+        let control = crate::dialog::DialogControl::Table {
+            id: "bom".to_string(),
+            label: Some("Bill of Materials".to_string()),
+            headers: vec!["Item".to_string(), "Qty".to_string()],
+            rows: vec![
+                vec!["Bolt M6".to_string(), "8".to_string()],
+                vec!["Nut M6".to_string(), "8".to_string()],
+            ],
+            allow_add: true,
+            allow_delete: false,
+        };
+        let bytes = bincode::serialize(&control).expect("serialize legacy control");
+        assert_eq!(
+            u32::from_le_bytes(bytes[..4].try_into().expect("tag")),
+            8,
+            "DialogControl::Table pin drifted"
+        );
+        assert_eq!(
+            bincode::deserialize::<crate::dialog::DialogControl>(&bytes)
+                .expect("legacy control decode"),
+            control
+        );
+    }
+
+    #[test]
+    fn cell_value_fraction_badge_link_date_roundtrip() {
+        // GATES: progress fraction finite 0..=1 (1.5 / NaN / -0.5 refused);
+        // date magnitude 1..=12 × 1..=31 (month 13 / day 32 / day 0
+        // refused); number cells finite; text/uri caps.
+        let bad_fraction = table_def(
+            1,
+            vec![column(2, CellKind::Progress, "p")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Progress {
+                    fraction: 1.5,
+                    label: None,
+                }],
+            )],
+        );
+        assert_eq!(
+            bad_fraction.validate(),
+            Err(WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(3),
+                column: sid(2),
+                reason: "progress fraction must be finite within 0.0..=1.0".to_string(),
+            })
+        );
+        let negative = table_def(
+            1,
+            vec![column(2, CellKind::Progress, "p")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Progress {
+                    fraction: -0.5,
+                    label: None,
+                }],
+            )],
+        );
+        assert_eq!(
+            negative.validate(),
+            Err(WidgetError::InvalidCell {
+                table: sid(1),
+                key: sid(3),
+                column: sid(2),
+                reason: "progress fraction must be finite within 0.0..=1.0".to_string(),
+            })
+        );
+        let nan = table_def(
+            1,
+            vec![column(2, CellKind::Progress, "p")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Progress {
+                    fraction: f32::NAN,
+                    label: None,
+                }],
+            )],
+        );
+        assert!(
+            matches!(nan.validate(), Err(WidgetError::InvalidCell { .. })),
+            "NaN fraction must refuse (NaN compares false, so matches! is the assert)"
+        );
+
+        let month_13 = table_def(
+            1,
+            vec![column(2, CellKind::Date, "d")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Date {
+                    y: 2026,
+                    m: 13,
+                    d: 1,
+                }],
+            )],
+        );
+        assert!(
+            matches!(
+                month_13.validate(),
+                Err(WidgetError::InvalidCell { reason, .. }) if reason.contains("month")
+            ),
+            "month 13 must refuse"
+        );
+        let day_32 = table_def(
+            1,
+            vec![column(2, CellKind::Date, "d")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Date {
+                    y: 2026,
+                    m: 7,
+                    d: 32,
+                }],
+            )],
+        );
+        assert!(
+            matches!(
+                day_32.validate(),
+                Err(WidgetError::InvalidCell { reason, .. }) if reason.contains("day")
+            ),
+            "day 32 must refuse"
+        );
+        let day_0 = table_def(
+            1,
+            vec![column(2, CellKind::Date, "d")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Date {
+                    y: 2026,
+                    m: 7,
+                    d: 0,
+                }],
+            )],
+        );
+        assert!(
+            matches!(
+                day_0.validate(),
+                Err(WidgetError::InvalidCell { reason, .. }) if reason.contains("day")
+            ),
+            "day 0 must refuse"
+        );
+
+        let nan_number = table_def(
+            1,
+            vec![column(2, CellKind::Number, "n")],
+            vec![trow_typed(3, vec![TableCell::Number(f64::NAN)])],
+        );
+        assert!(
+            matches!(
+                nan_number.validate(),
+                Err(WidgetError::InvalidCell { reason, .. }) if reason.contains("finite")
+            ),
+            "NaN number cell must refuse"
+        );
+        let long_text = table_def(
+            1,
+            vec![column(2, CellKind::Text, "t")],
+            vec![trow_typed(
+                3,
+                vec![TableCell::Text("x".repeat(MAX_TEXT_BYTES + 1))],
+            )],
+        );
+        assert!(
+            matches!(
+                long_text.validate(),
+                Err(WidgetError::InvalidCell { reason, .. }) if reason.contains("cap")
+            ),
+            "over-cap cell text must refuse"
+        );
+
+        // The VALID all-kinds def roundtrips BOTH formats; badge/link/icon/
+        // progress/date facts travel the registry verbatim.
+        let def = all_kinds_table(1);
+        def.validate().expect("the all-kinds def validates");
+        let bytes = bincode::serialize(&def).expect("serialize def");
+        let decoded: PanelTableDef = bincode::deserialize(&bytes).expect("decode def");
+        assert_eq!(def, decoded);
+        let json = serde_json::to_string(&def).expect("def json");
+        let from_json: PanelTableDef = serde_json::from_str(&json).expect("decode def json");
+        assert_eq!(def, from_json);
+        // Sample the typed facts out of the decoded def.
+        assert_eq!(
+            decoded.rows[0].cells[5],
+            TableCell::Badge {
+                label: "wip".to_string(),
+                tone: BadgeTone::Warning,
+            }
+        );
+        assert_eq!(
+            decoded.rows[0].cells[6],
+            TableCell::Progress {
+                fraction: 0.25,
+                label: Some("quarter".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn table_ref_registry_missing_ref_rejected() {
+        // A table ref naming an id absent from a PUBLISHING registry
+        // refuses (UnknownTableRef — the "a table identity does not
+        // resolve" arm), both at surface validate AND at patch-apply (a
+        // payload can never add a dangling ref once the registry is
+        // engaged). The PLACEHOLDER TRANSITION regimes are asserted first:
+        // empty registry = the SWG-001 era (refs resolve-check-free).
+        let def = table_def(
+            2,
+            vec![column(3, CellKind::Text, "a")],
+            vec![trow_typed(4, vec![TableCell::Text("x".to_string())])],
+        );
+
+        // Regime 1: EMPTY registry + placeholder ref → the SWG-001 era
+        // shape (the creation tests' surfaces) — valid.
+        let placeholder = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: vec![wtable(10, 404)],
+            tables: BTreeMap::new(),
+        };
+        assert_eq!(placeholder.validate(), Ok(()));
+
+        // Regime 2: PUBLISHING registry + RESOLVED ref → valid.
+        let mut surface = surface_with_table(1, 10, 2, def.clone());
+        surface.validate().expect("referencing surface validates");
+
+        // Regime 3: PUBLISHING registry + dangling ref → refuses, address
+        // in the error.
+        let dangling = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: vec![wtable(10, 404)],
+            tables: BTreeMap::from([(sid(2), def)]),
+        };
+        let error = dangling
+            .validate()
+            .expect_err("dangling table ref must refuse");
+        assert_eq!(error, WidgetError::UnknownTableRef(sid(404)));
+        assert!(
+            error.to_string().contains("does not resolve"),
+            "the UnknownTableRef arm reports the unresolvable identity: {error}"
+        );
+
+        // Patch leg: Add of a dangling ref refuses; the surface unchanged
+        // (the registry rides snapshots only, so the payload could never
+        // become resolvable later).
+        let before = surface.roots.clone();
+        let patch = WidgetSurfacePatch {
+            base_revision: SceneRevision(1),
+            revision: SceneRevision(2),
+            ops: vec![WidgetOp::Add {
+                parent: None,
+                widget: wtable(11, 404),
+            }],
+        };
+        let error = surface
+            .apply_patch(patch)
+            .expect_err("dangling ref patch must refuse");
+        assert_eq!(error, WidgetError::UnknownTableRef(sid(404)));
+        assert_eq!(surface.roots, before);
+        assert_eq!(surface.revision, SceneRevision(1));
+
+        // A ref to a RESOLVED table adds fine.
+        surface
+            .apply_patch(WidgetSurfacePatch {
+                base_revision: SceneRevision(1),
+                revision: SceneRevision(2),
+                ops: vec![WidgetOp::Add {
+                    parent: None,
+                    widget: wtable(11, 2),
+                }],
+            })
+            .expect("ref to a registry table applies");
+        surface.validate().expect("still valid");
     }
 }

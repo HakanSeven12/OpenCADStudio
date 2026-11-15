@@ -418,6 +418,14 @@ harness = false
 name = "cache_memory_budget"
 harness = false
 
+[[bench]]
+name = "scene_scaling"
+harness = false
+
+[[bench]]
+name = "widget_state_scaling"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

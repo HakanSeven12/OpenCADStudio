@@ -9292,3 +9292,92 @@ mod data_extraction_tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
+
+#[cfg(test)]
+mod attsync_order_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::EntityType;
+    use document::types::Vector3;
+
+    fn redefine(app: &mut OpenCADStudio, name: &str, attributes: &[(&str, &str)]) {
+        let definition = |tag: &str, index: usize| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0 + index as f64 * 3.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), String::new())
+            })
+        };
+        app.tabs[app.active_tab].scene.define_block_raw(
+            name,
+            Vector3::ZERO,
+            attributes
+                .iter()
+                .enumerate()
+                .map(|(index, (tag, _))| definition(tag, index))
+                .collect(),
+        );
+    }
+
+    fn placed(app: &mut OpenCADStudio, name: &str, values: &[(&str, &str)]) -> document::Handle {
+        let mut insert = Insert::new(name, Vector3::new(100.0, 100.0, 0.0));
+        for (tag, value) in values {
+            insert
+                .attributes
+                .push(AttributeEntity::new(tag.to_string(), value.to_string()));
+        }
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(EntityType::Insert(insert))
+    }
+
+    #[test]
+    fn attsync_reorders_the_reference_to_follow_the_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        redefine(&mut app, "PANEL", &[("ALPHA", "a"), ("BRAVO", "b")]);
+        let reference = placed(&mut app, "PANEL", &[("ALPHA", "first"), ("BRAVO", "second")]);
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "PANEL",
+                Vector3::ZERO,
+                vec![
+                    EntityType::AttributeDefinition(AttributeDefinition {
+                        insertion_point: Vector3::new(2.0, 5.0, 0.0),
+                        height: 1.0,
+                        ..AttributeDefinition::new("BRAVO".into(), "b".into(), String::new())
+                    }),
+                    EntityType::AttributeDefinition(AttributeDefinition {
+                        insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                        height: 1.0,
+                        ..AttributeDefinition::new("ALPHA".into(), "a".into(), String::new())
+                    }),
+                ],
+            )
+            .expect("the definition takes the reordered tags");
+
+        let _ = app.run_command_line("ATTSYNC PANEL");
+
+        let document = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = document.get_entity(reference).expect("reference")
+        else {
+            panic!("not an insert");
+        };
+        let pairs: Vec<(String, String)> = insert
+            .attributes
+            .iter()
+            .map(|attribute| (attribute.tag.clone(), attribute.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("BRAVO".into(), "second".into()),
+                ("ALPHA".into(), "first".into())
+            ],
+            "the reference follows the definition's order, by tag"
+        );
+    }
+}

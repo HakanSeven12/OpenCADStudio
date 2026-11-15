@@ -9520,3 +9520,57 @@ mod hatch_panel_edit_tests {
         assert_eq!(model.name, "ANSI31");
     }
 }
+
+#[cfg(test)]
+mod group_roundtrip_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn scratch_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ocs-groups-{}-{}.dwg",
+            std::process::id(),
+            tag
+        ))
+    }
+
+    /// Groups are document objects with real records: they must survive the
+    /// round trip through the file, with their membership, the same as every
+    /// other object. The mission this pins claimed they were missing.
+    #[test]
+    fn a_group_survives_a_save_and_reload() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let a = app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+        );
+        let b = app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 5.0, 0.0),
+                Vector3::new(10.0, 5.0, 0.0),
+            )),
+        );
+        let i = app.active_tab;
+        app.tabs[i].scene.create_group("FRAME".to_string(), vec![a, b]);
+        let path = scratch_path("roundtrip");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));
+        assert_eq!(saved["ok"], true, "the save reported success: {saved}");
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));
+        assert_eq!(opened["ok"], true, "the open reported success: {opened}");
+
+        let groups: Vec<String> = app.tabs[app.active_tab]
+            .scene
+            .groups()
+            .map(|group| group.name.clone())
+            .collect();
+        assert_eq!(groups, vec!["FRAME".to_string()]);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+

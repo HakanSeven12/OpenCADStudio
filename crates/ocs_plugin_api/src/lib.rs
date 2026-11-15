@@ -95,10 +95,11 @@ pub use type_registry::{
 };
 pub use version_info::get_embedded_version_info_json;
 pub use widgets::{
-    Axis, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef, ItemListDef, MenuDef,
-    MenuItemDef, TableRef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetError,
-    WidgetEvent, WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary,
-    WidgetSurface, WidgetSurfacePatch, WidgetTreeDef,
+    Axis, BadgeTone, CellKind, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef,
+    ItemListDef, MenuDef, MenuItemDef, PanelTableDef, TableCell, TableColumnDef, TableRef,
+    TableRowDef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetError, WidgetEvent,
+    WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary, WidgetSurface,
+    WidgetSurfacePatch, WidgetTreeDef,
 };
 
 #[cfg(test)]

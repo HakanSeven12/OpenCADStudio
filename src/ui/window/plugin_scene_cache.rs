@@ -35,12 +35,24 @@
 //!   (milestone 6+), exactly like the overlay tests which assert decisions
 //!   and key math headlessly.
 //!
-//! Scope (SCN-011a only): layer-level retention. Per-subtree prim retention
-//! via a patch report needs `ocs_plugin_api::scene` API surface owned by
-//! another task and is deliberately NOT here. Pending-request cancellation
+//! Scope: layer-level retention (SCN-011a) plus the report-driven per-subtree
+//! prim-store hook (SCN-011b). Pending-request cancellation
 //! (dropping in-flight patch requests when a surface goes away) is a
-//! wire-era concern for the same later task and is likewise documented as
+//! wire-era concern for a later task and is likewise documented as
 //! out of scope here.
+//!
+//! SCN-011b layered truth (per-subtree retention): the cache optionally
+//! carries a [`ScenePrimStore`](crate::ui::window::plugin_scene::ScenePrimStore)
+//! that retains the projection SEGMENTED at root-level subtrees and refreshes,
+//! per applied patch, ONLY the segments the `AppliedPatchReport` names. The
+//! `CachedOverlayLayer` stays the pixel-path carrier: the layer still rebuilds
+//! on a revision bump (`layer_builds` — the cheap emit), but when the store is
+//! fresh the build paints from the store's segment Arcs instead of re-running
+//! the semantic flatten, and the honest cost proof is the store's
+//! `StoreCounters.subtree_reprojects` (segments actually re-projected, ==
+//! segments touched) vs `layer_builds`: prim re-projection avoided for
+//! untouched segments is the win being instrumented. The SCN-012 benchmark
+//! consumes these counters.
 //!
 //! Palette-fingerprint scope decision: [`palette_fingerprint`] hashes EVERY
 //! bound slot named in its doc — deliberately WIDER than
@@ -58,10 +70,15 @@ use std::collections::HashMap;
 
 use iced::widget::canvas;
 use iced::{Color, Rectangle};
-use ocs_plugin_api::scene::{PanelScene, SceneError, SceneRevision, SceneSummary, StableId};
+use ocs_plugin_api::scene::{
+    AppliedPatchReport, PanelScene, SceneError, SceneRevision, SceneSummary, StableId,
+};
+use std::sync::Arc;
 
 use crate::ui::overlay::CachedOverlayLayer;
-use crate::ui::window::plugin_scene::{count_prims, emit_prims, project_scene, ScenePrim};
+use crate::ui::window::plugin_scene::{
+    count_prims, emit_prims, project_scene, ScenePrim, ScenePrimStore, StoreCounters,
+};
 
 // ── Layer keys + palette fingerprinting ─────────────────────────────────────
 
@@ -285,6 +302,19 @@ pub(crate) struct ProjectionCounters {
 
 // ── Per-panel retained projection ───────────────────────────────────────────
 
+/// The paint plan one committed rebuild produced: either the classic
+/// full flatten (a fresh prim list), or the store's segment lists
+/// (Arc-shared, paint order; the report-driven retention products).
+/// Both paint with `emit_prims`; the segments variant emits segment-wise
+/// — each segment is clip-balanced at root boundaries (the store's v1
+/// segmentation rule), so segment-wise emit equals the whole-list emit.
+enum PaintPlan {
+    /// The classic `project_scene` output.
+    Prims(Vec<ScenePrim>),
+    /// The store's live segment prim lists in paint order.
+    Segments(Vec<Arc<Vec<ScenePrim>>>),
+}
+
 /// One retained projection of one panel scene: the identity (`surface_id`),
 /// the one cached layer, the counters, and a local mirror of the last
 /// successfully-built scene's [`SceneSummary`].
@@ -301,6 +331,11 @@ pub(crate) struct SceneProjectionCache {
     /// [`SceneLayerKey`]).
     layer: CachedOverlayLayer<SceneLayerKey>,
     counters: ProjectionCounters,
+    /// Optional per-subtree prim store (SCN-011b): when attached,
+    /// `sync_after_patch` refreshes exactly the report-named segments and a
+    /// fresh store feeds the layer build (see the module docs' layered
+    /// truth). `None` keeps the classic full-flatten build path.
+    store: Option<ScenePrimStore>,
     /// Local mirror of the last SUCCESSFUL build's scene summary (see the
     /// struct docs). Reset on a failed build.
     last_summary: Option<SceneSummary>,
@@ -320,6 +355,7 @@ impl std::fmt::Debug for SceneProjectionCache {
             .field("surface_id", &self.surface_id)
             .field("layer_key", &key)
             .field("counters", &self.counters)
+            .field("store_attached", &self.store.is_some())
             .field("last_summary", &self.last_summary)
             .field("cleared", &self.cleared)
             .finish()
@@ -328,12 +364,13 @@ impl std::fmt::Debug for SceneProjectionCache {
 
 impl SceneProjectionCache {
     /// A fresh cache for `surface_id`: no key, no geometry, counters at
-    /// defaults.
+    /// defaults (store detached until `attach_store`).
     pub(crate) fn new(surface_id: StableId) -> Self {
         Self {
             surface_id,
             layer: CachedOverlayLayer::default(),
             counters: ProjectionCounters::default(),
+            store: None,
             last_summary: None,
             cleared: false,
         }
@@ -358,6 +395,69 @@ impl SceneProjectionCache {
     /// The local mirror of the last successful build's scene summary.
     pub(crate) fn last_summary(&self) -> Option<&SceneSummary> {
         self.last_summary.as_ref()
+    }
+
+    /// Attach the per-subtree prim store (SCN-011b): from here on
+    /// [`Self::sync_after_patch`] refreshes exactly the report-named segments
+    /// and a fresh store feeds the layer build (the module docs' layered
+    /// truth). Idempotent.
+    pub(crate) fn attach_store(&mut self) {
+        self.store
+            .get_or_insert_with(|| ScenePrimStore::new(self.surface_id));
+    }
+
+    /// The attached store's counters (read side); `None` while detached.
+    pub(crate) fn store_counters(&self) -> Option<&StoreCounters> {
+        self.store.as_ref().map(|store| store.counters())
+    }
+
+    /// Full re-provisioning of the attached store (panel snapshot / first
+    /// provisioning flows): the whole-tree flatten the report path falls
+    /// back to. A no-op while detached. `Err` when the scene fails
+    /// validation — the store ends up empty and never-synced (see
+    /// `ScenePrimStore::sync_full`).
+    pub(crate) fn sync_store_full(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+    ) -> Result<(), SceneError> {
+        match &mut self.store {
+            Some(store) => store.sync_full(scene, palette),
+            None => Ok(()),
+        }
+    }
+
+    /// The report-driven seam (SCN-011b): refresh the attached store's
+    /// segments from the patch report (O(touched) — the store's own counters
+    /// prove it), then run the layer's counted decision funnel. The LAYER
+    /// still rebuilds on the revision bump (the pixel-path carrier), but the
+    /// rebuild paints from the freshly synced segment lists — no semantic
+    /// flatten — and reuses the report's post-patch summary (computed once
+    /// by the single mutation path, `apply_patch_report`). Returns the same
+    /// decision `draw` would make.
+    ///
+    /// Detached store: the layer decision still runs (the classic path).
+    /// A store sync failure (an invalid post-patch scene) leaves the store
+    /// empty and never-synced, so the build below falls back to the classic
+    /// flatten and records the error exactly like a failed build.
+    #[doc(hidden)]
+    pub(crate) fn sync_after_patch(
+        &mut self,
+        scene: &PanelScene,
+        report: &AppliedPatchReport,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> DrawDecision {
+        if let Some(store) = self.store.as_mut() {
+            let _ = store.sync_incremental(scene, report, palette);
+        }
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, Some(&report.summary));
+        if let Some((key, _paint)) = paint {
+            // Key install AFTER the build commit (overlay discipline), the
+            // same post-build step the draw path performs.
+            *self.layer.key.borrow_mut() = Some(key);
+        }
+        decision
     }
 
     /// Clone of the currently stored layer key, if any.
@@ -433,15 +533,26 @@ impl SceneProjectionCache {
         decision
     }
 
-    /// Record one build outcome's stats exactly as the draw path commits
-    /// them (shared by the renderer and headless paths — the only shared
-    /// MUTATION of the outcome stats).
-    fn record_built(&mut self, scene: &PanelScene, prims: &[ScenePrim]) {
-        self.counters.prims_last_build = count_prims(prims);
-        self.counters.path_work_last_build = prim_vertex_count(prims);
-        // The summary mirror rides every successful build (the scene revalidates
-        // inside the projection anyway).
-        self.last_summary = Some(scene.scene_summary());
+    /// Record one committed build's outcome exactly as the draw paths commit
+    /// it (shared by the renderer, headless, and store-fed paths — the only
+    /// shared MUTATION of the outcome stats). `summary_override` is the
+    /// report's post-patch [`SceneSummary`] when the build rides a patch
+    /// report (computed once by the single mutation path and reused as-is);
+    /// `None` recomputes the scene's own bounded walk, exactly like the
+    /// pre-store builds did.
+    fn record_committed(
+        &mut self,
+        prims_len: usize,
+        path_work: usize,
+        summary_override: Option<&SceneSummary>,
+        scene: &PanelScene,
+    ) {
+        self.counters.prims_last_build = prims_len;
+        self.counters.path_work_last_build = path_work;
+        self.last_summary = Some(match summary_override {
+            Some(summary) => summary.clone(),
+            None => scene.scene_summary(),
+        });
         // The `cleared` flag is spent the moment a build actually commits.
         self.cleared = false;
     }
@@ -460,33 +571,63 @@ impl SceneProjectionCache {
         self.last_summary = None;
     }
 
-    /// Shared first half of [`Self::draw`] and [`Self::apply_build`]: key
-    /// math, the counted decision, the projection on a rebuild, and outcome
-    /// recording (stats; the key install is returned to the caller so it
-    /// lands after the frame work, matching the overlay's key-write discipline).
-    /// Returns the decision plus, on a rebuild, the prim list to paint
-    /// together with the key to install (`None` both on hits — replay — and
-    /// on failed rebuilds — blank layer, key stays unset).
+    /// Shared first half of [`Self::draw`], [`Self::apply_build`], and
+    /// [`Self::sync_after_patch`]: key math, the counted decision, the
+    /// projection on a rebuild, and outcome recording (stats; the key install
+    /// is returned to the caller so it lands after the frame work, matching
+    /// the overlay's key-write discipline). Returns the decision plus, on a
+    /// rebuild, the [`PaintPlan`] to paint together with the key to install
+    /// (`None` both on hits — replay — and on failed rebuilds — blank layer,
+    /// key stays unset).
+    ///
+    /// Paint-source rule (the SCN-011b layered truth): the decision and its
+    /// counters are exactly the SCN-011a key math, but when the attached
+    /// store is FRESH at this scene revision + palette fingerprint the build
+    /// paints from the store's segment lists instead of re-running the
+    /// semantic flatten — the report-driven sync already refreshed exactly
+    /// the touched segments, and [`Self::record_committed`] reuses the
+    /// report's post-patch summary instead of re-walking the scene.
     fn prepare_build(
         &mut self,
         scene: &PanelScene,
         palette: &iced::theme::Palette,
         bounds: Rectangle,
-    ) -> (DrawDecision, Option<(SceneLayerKey, Vec<ScenePrim>)>) {
+        report_summary: Option<&SceneSummary>,
+    ) -> (DrawDecision, Option<(SceneLayerKey, PaintPlan)>) {
         let key = self.key_for(scene, palette, bounds);
         let decision = self.decide_counted(&key);
         if matches!(decision, DrawDecision::LayerHit) {
             return (decision, None);
         }
-        let rebuilt = match project_scene(scene, palette, bounds.size()) {
-            Ok(prims) => {
-                self.record_built(scene, &prims);
-                Some((key, prims))
+        // Owned paint plan: the store borrow ends here, before the outcome
+        // recording below can take the cache mutably.
+        let from_store = self
+            .store
+            .as_ref()
+            .filter(|store| store.is_fresh(scene.revision, key.palette_fingerprint))
+            .map(|store| store.live_arcs());
+        let rebuilt = match from_store {
+            Some(parts) => {
+                let prims_len: usize = parts.iter().map(|part| part.len()).sum();
+                let path_work: usize = parts.iter().map(|part| prim_vertex_count(part)).sum();
+                self.record_committed(prims_len, path_work, report_summary, scene);
+                Some((key, PaintPlan::Segments(parts)))
             }
-            Err(error) => {
-                self.record_error(&error);
-                None
-            }
+            None => match project_scene(scene, palette, bounds.size()) {
+                Ok(prims) => {
+                    self.record_committed(
+                        count_prims(&prims),
+                        prim_vertex_count(&prims),
+                        report_summary,
+                        scene,
+                    );
+                    Some((key, PaintPlan::Prims(prims)))
+                }
+                Err(error) => {
+                    self.record_error(&error);
+                    None
+                }
+            },
         };
         (decision, rebuilt)
     }
@@ -508,7 +649,7 @@ impl SceneProjectionCache {
         palette: &iced::theme::Palette,
         bounds: Rectangle,
     ) -> canvas::Geometry {
-        let (decision, paint) = self.prepare_build(scene, palette, bounds);
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, None);
         match decision {
             DrawDecision::LayerHit => {}
             DrawDecision::LayerRebuild(_) => {
@@ -520,13 +661,29 @@ impl SceneProjectionCache {
             }
         }
         match paint {
-            Some((key, prims)) => {
-                let geometry =
-                    self.layer
-                        .cache
-                        .draw_with_bounds(renderer, bounds, move |frame| {
-                            emit_prims(frame, &prims);
-                        });
+            Some((key, PaintPlan::Prims(prims))) => {
+                let geometry = self
+                    .layer
+                    .cache
+                    .draw_with_bounds(renderer, bounds, move |frame| {
+                        emit_prims(frame, &prims);
+                    });
+                // Key install AFTER the build commit (overlay discipline).
+                *self.layer.key.borrow_mut() = Some(key);
+                geometry
+            }
+            // Store-fed build: segment-wise emit over the (possibly
+            // partially refreshed) segment Arcs — the pixel path identical
+            // to painting the concatenated list; no semantic flatten ran.
+            Some((key, PaintPlan::Segments(parts))) => {
+                let geometry = self
+                    .layer
+                    .cache
+                    .draw_with_bounds(renderer, bounds, move |frame| {
+                        for part in parts {
+                            emit_prims(frame, &part);
+                        }
+                    });
                 // Key install AFTER the build commit (overlay discipline).
                 *self.layer.key.borrow_mut() = Some(key);
                 geometry
@@ -555,9 +712,9 @@ impl SceneProjectionCache {
         palette: &iced::theme::Palette,
         bounds: Rectangle,
     ) -> DrawDecision {
-        let (decision, paint) = self.prepare_build(scene, palette, bounds);
-        if let Some((key, _prims)) = paint {
-            // Prims recorded in `record_built`, then dropped: there is no
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, None);
+        if let Some((key, _paint)) = paint {
+            // Prims recorded in `record_committed`, then dropped: there is no
             // renderer frame to paint them onto. The install mirrors the
             // draw path's post-build step.
             *self.layer.key.borrow_mut() = Some(key);
@@ -1335,5 +1492,115 @@ mod tests {
         let summary = cache.last_summary().expect("mirror refreshed");
         assert_eq!(summary.revision, SceneRevision(5));
         assert_eq!(summary.nodes, 1);
+    }
+
+    // -- SCN-011b additions (store + cache parity, counters only) ------------
+
+    use ocs_plugin_api::scene::{PanelScenePatch, SceneOp};
+
+    /// A patch fixture for the report-driven flows (mirrors the API crate's
+    /// `patch` helper shape; local to these tests).
+    fn patch(base: u64, next: u64, ops: Vec<SceneOp>) -> PanelScenePatch {
+        PanelScenePatch {
+            base_revision: SceneRevision(base),
+            revision: SceneRevision(next),
+            ops,
+        }
+    }
+
+    #[test]
+    fn store_driven_sync_reprojects_only_touched_segments() {
+        let palette = distinct_palette(false);
+        // 60 root-level fill-only rect subtrees; the store syncs full once
+        // (the snapshot flow), then two patches ride the report path.
+        let mut cache = SceneProjectionCache::new(StableId(31));
+        assert!(cache.store_counters().is_none(), "detached by default");
+        cache.attach_store();
+        let scene1 = scene_at(1, 60);
+        cache
+            .sync_store_full(&scene1, &palette)
+            .expect("full store sync");
+        let store = cache.store_counters().expect("store attached");
+        assert_eq!(store.full_reprojects, 1);
+        assert_eq!(store.full_reprojects_explicit, 1);
+        assert_eq!(store.subtree_reprojects, 0);
+
+        // First build: the layer rebuild paints from the fresh segments (no
+        // semantic flatten; the store counters stay put).
+        assert_eq!(
+            cache.apply_build(&scene1, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(cache.counters().layer_builds, 1);
+        assert_eq!(cache.counters().prims_last_build, 60);
+        let store = cache.store_counters().unwrap();
+        assert_eq!(
+            store.full_reprojects, 1,
+            "the store-fed build re-flattens nothing"
+        );
+
+        // Patch 1 replaces root subtree 7 wholesale (a real report from the
+        // single mutation path); the sync re-projects exactly that segment
+        // while the layer rebuild (RevisionChanged) repaints from segments.
+        let mut scene2 = scene1.clone();
+        let report = scene2
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: filled_rect(7, 99.0),
+                }],
+            ))
+            .expect("patch 1 applies");
+        assert_eq!(
+            cache.sync_after_patch(&scene2, &report, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        let store = cache.store_counters().unwrap();
+        assert_eq!(store.subtree_reprojects, 1);
+        assert_eq!(store.subtree_retained_hits, 59);
+        assert_eq!(store.full_reprojects, 1, "no fallback fired");
+        // The layer build reused the report's post-patch summary (no re-walk).
+        assert_eq!(cache.counters().layer_builds, 2);
+        assert_eq!(cache.counters().prims_last_build, 60);
+        assert_eq!(cache.last_summary().unwrap().revision, SceneRevision(2));
+        assert_eq!(
+            *cache.last_summary().expect("mirror refreshed from the report"),
+            report.summary,
+            "the report's summary is reused as-is"
+        );
+
+        // The installed key replays: the same scene draws as a hit.
+        assert_eq!(
+            cache.apply_build(&scene2, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        assert_eq!(cache.counters().probe_hits, 1);
+
+        // Patch 2 touches a DIFFERENT subtree: the total re-projection count
+        // grows by exactly one — untouched segments are NEVER re-projected
+        // (the counter-only proof of the retention win).
+        let mut scene3 = scene2.clone();
+        let report2 = scene3
+            .apply_patch_report(patch(
+                2,
+                3,
+                vec![SceneOp::Replace {
+                    element: filled_rect(40, 77.0),
+                }],
+            ))
+            .expect("patch 2 applies");
+        assert_eq!(
+            cache.sync_after_patch(&scene3, &report2, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        let store = cache.store_counters().unwrap();
+        assert_eq!(
+            store.subtree_reprojects, 2,
+            "second run touched one more segment, nothing else"
+        );
+        assert_eq!(store.subtree_retained_hits, 118, "59 + 59 retained");
+        assert_eq!(store.full_reprojects, 1, "still no fallback");
+        assert_eq!(cache.counters().layer_builds, 3);
     }
 }

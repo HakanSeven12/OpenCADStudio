@@ -777,10 +777,29 @@ impl PanelScene {
 
     /// Apply an incremental patch atomically (two phases, in place).
     ///
+    /// Thin wrapper over [`PanelScene::apply_patch_report`] that DROPS the
+    /// report: the mutation is routed through the single report path, so the
+    /// two cannot drift semantically — identical phases, identical atomicity,
+    /// and a rejection leaves `self` exactly as it was with no report. (The
+    /// full phase-by-phase and cost contract now lives on
+    /// [`PanelScene::apply_patch_report`]; the one behavior difference is that
+    /// this wrapper also pays the report's post-patch [`SceneSummary`] walk,
+    /// which is then dropped.)
+    ///
+    /// An empty op list is a legitimate no-op that advances the revision.
+    pub fn apply_patch(&mut self, patch: PanelScenePatch) -> Result<(), SceneError> {
+        self.apply_patch_report(patch).map(|_| ())
+    }
+
+    /// Apply an incremental patch atomically (two phases, in place) and
+    /// report the invalidation plan ([`AppliedPatchReport`]) the host's
+    /// retained caches consume.
+    ///
     /// The patch must name the current scene revision as its base and a
     /// strictly greater successor; a rejection leaves `self` exactly as it
-    /// was (no element moves, the revision stands), mirroring the crate
-    /// contract that an error leaves the drawing and undo history unchanged.
+    /// was (no element moves, the revision stands) and returns `Err` with NO
+    /// report, mirroring the crate contract that an error leaves the drawing
+    /// and undo history unchanged.
     ///
     /// Phase 0 — three cheap checks with nothing written: base freshness,
     /// monotonic successor, and the [`MAX_PATCH_OPS`] op budget.
@@ -788,11 +807,12 @@ impl PanelScene {
     /// Phase 1 — planning pass, still without any mutation: the whole op
     /// sequence is replayed against [`PlannedIndex`], a lightweight id/position
     /// mirror of the current tree (built by ONE walk), and every op is
-    /// expanded into a pre-located journal step ([`PlannedOp`]). Each op is
-    /// fully validated against the current post-prior-ops state — payload
-    /// structure, id collisions, parent existence and group anchoring, and
-    /// the resulting depth/node budgets — before its journal step is
-    /// recorded; any failure aborts the whole patch.
+    /// expanded into a pre-located journal step ([`PlannedOp`]) plus its
+    /// per-op report facts ([`ReportFacts`], index-aligned with the journal).
+    /// Each op is fully validated against the current post-prior-ops state —
+    /// payload structure, id collisions, parent existence and group
+    /// anchoring, and the resulting depth/node budgets — before its journal
+    /// step is recorded; any failure aborts the whole patch.
     ///
     /// Phase 2 — the journal is spliced into the real children vecs strictly
     /// in order (append / swap / `Vec::remove`), then the successor revision
@@ -801,22 +821,33 @@ impl PanelScene {
     /// phase 1 every phase-2 step is infallible by construction; the whole
     /// patch commits in one step with no partial writes possible.
     ///
+    /// The report is assembled after the commit from the planner's facts:
+    /// the per-op touched/retired id lists are capped in op order (exact
+    /// truncation counts — the facts carry the full regions before the cap
+    /// pass drops them) and the post-patch [`SceneSummary`] is computed once
+    /// by the same bounded one-walk read [`PanelScene::scene_summary`] uses.
+    ///
     /// Cost contract (retiring the ADR-002 staged-clone debt): NO full-tree
     /// clone and no per-op full-tree walk. One O(scene) walk builds the
     /// mirror; each op then does work local to what it touches — O(depth) for
     /// location/parent-chain derivation, plus the payload/adoption subtree
     /// size, plus (for removal) the spliced container's child list, whose
     /// sibling entries shift. Total cost is scene-linear once plus the touched
-    /// regions, not scene-linear per op; the patch-scaling evidence is the
-    /// SCN-012 benchmark. The earlier staged pass' whole-result `validate()`
+    /// regions, not scene-linear per op (plus one bounded post-patch summary
+    /// walk for the report); the patch-scaling evidence is the SCN-012
+    /// benchmark. The earlier staged pass' whole-result `validate()`
     /// no longer runs here: phase 1 proves the same properties on the planned
     /// state, which assumes the base tree is itself structurally valid (the
     /// builder/`validate` gate's job). An invalid base therefore no longer
     /// fails a patch that does not rewrite the offending region — revalidate
     /// or resnapshot in that situation.
     ///
-    /// An empty op list is a legitimate no-op that advances the revision.
-    pub fn apply_patch(&mut self, patch: PanelScenePatch) -> Result<(), SceneError> {
+    /// An empty op list is a legitimate no-op that advances the revision (and
+    /// reports an empty touched/retired plan with the post-patch summary).
+    pub fn apply_patch_report(
+        &mut self,
+        patch: PanelScenePatch,
+    ) -> Result<AppliedPatchReport, SceneError> {
         // Phase 0: cheap whole-patch checks; nothing written yet.
         if patch.base_revision != self.revision {
             return Err(SceneError::StaleBase {
@@ -838,13 +869,43 @@ impl PanelScene {
         }
 
         // Phase 1: validate the whole op sequence and journal pre-located
-        // steps; without writing `self`.
-        let journal = plan_patch(&self.elements, patch.ops)?;
+        // steps with their id facts; without writing `self`.
+        let (journal, facts) = plan_patch(&self.elements, patch.ops)?;
 
         // Phase 2: single commit point — replay the plan in place.
         apply_journal(&mut self.elements, journal);
         self.revision = patch.revision;
-        Ok(())
+
+        // The report: cap the planner's per-op facts into the bounded lists
+        // (exact overflow counts; op order preserved) and stamp the
+        // post-patch bounded summary.
+        let mut touched_subtree_ids = Vec::with_capacity(facts.len().min(MAX_REPORT_TOUCHED));
+        let mut touched_truncated = 0usize;
+        let mut retired_ids = Vec::with_capacity(MAX_REPORT_RETIRED);
+        let mut retired_truncated = 0usize;
+        for fact in facts {
+            if touched_subtree_ids.len() < MAX_REPORT_TOUCHED {
+                touched_subtree_ids.push(fact.touched);
+            } else {
+                touched_truncated += 1;
+            }
+            for id in fact.retired {
+                if retired_ids.len() < MAX_REPORT_RETIRED {
+                    retired_ids.push(id);
+                } else {
+                    retired_truncated += 1;
+                }
+            }
+        }
+        let summary = self.scene_summary();
+        Ok(AppliedPatchReport {
+            revision: self.revision,
+            touched_subtree_ids,
+            touched_truncated,
+            retired_ids,
+            retired_truncated,
+            summary,
+        })
     }
 
     /// Bounded recovery read ([`SceneSummary`]): revision, node total,
@@ -985,6 +1046,92 @@ impl SceneSummary {
         debug_assert_eq!(summary.by_kind.total(), summary.nodes);
         summary
     }
+}
+
+// ---------------------------------------------------------------------------
+// Applied-patch report (SCN-011b)
+// ---------------------------------------------------------------------------
+
+/// Cap of [`AppliedPatchReport::touched_subtree_ids`]: the report keeps the
+/// first [`MAX_REPORT_TOUCHED`] touched ids in op order and counts what it
+/// dropped in [`AppliedPatchReport::touched_truncated`].
+pub const MAX_REPORT_TOUCHED: usize = 64;
+
+/// Cap of [`AppliedPatchReport::retired_ids`]: the report keeps the first
+/// [`MAX_REPORT_RETIRED`] retired ids in op order and counts what it dropped
+/// in [`AppliedPatchReport::retired_truncated`].
+pub const MAX_REPORT_RETIRED: usize = 256;
+
+/// Bounded facts about one applied patch — the invalidation plan the host's
+/// retained caches consume. Produced ONLY by [`PanelScene::apply_patch_report`]
+/// on a successful patch; a failed patch returns `Err` and NO report (the
+/// scene is unchanged, so there is nothing to invalidate).
+///
+/// Bounded by construction: the two id lists are capped at
+/// [`MAX_REPORT_TOUCHED`] / [`MAX_REPORT_RETIRED`] entries, so the report
+/// never grows with tree size — only with op count up to the caps, then the
+/// truncation counts take over (kept exact, see below). Once dropped, the
+/// overflowed ids are unrecoverable by design; consumers that need the full
+/// set take the documented safety road (re-derive from the post-patch scene,
+/// or re-project whole — the host store treats any truncation as a full
+/// re-projection trigger).
+///
+/// Id semantics (PRECISE):
+///
+/// - `touched_subtree_ids` — the top id of the subtree each op changed, one
+///   entry per op in op order (repeats kept): `Add` reports the inserted
+///   element's id, `Replace` the target id, `Remove` the removed id. It is
+///   the per-op invalidation key: the host re-projects the segments these
+///   ids name (or that contain them) and keeps everything else.
+/// - `retired_ids` — ids that STOPPED existing, in op order:
+///   - `Add` retires nothing;
+///   - `Replace` retires the OUTGOING subtree's ids EXCEPT the target id,
+///     which the replacement re-adopts (the host purges the outgoing cached
+///     prim entries except the root it will overwrite). Ids the replacement
+///     re-adopts NESTED inside it are still reported retired here: their
+///     cached prims are purged and the re-projection of the touched subtree
+///     restores exactly the prims the new tree carries;
+///   - `Remove` retires the removed subtree's ids (the root id included).
+///
+/// `summary` mirrors the post-patch [`PanelScene::scene_summary`] exactly
+/// (the same one-walk bounded read, computed once and reused as-is).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedPatchReport {
+    /// The successor revision the patch installed (equals the post-patch
+    /// scene's revision).
+    pub revision: SceneRevision,
+    /// Top ids of the subtrees whose prims changed, in op order (see the
+    /// doc above for the per-op rule). Capped at [`MAX_REPORT_TOUCHED`].
+    pub touched_subtree_ids: Vec<StableId>,
+    /// Touched ids dropped beyond the [`MAX_REPORT_TOUCHED`] cap; `0` when
+    /// nothing was truncated.
+    pub touched_truncated: usize,
+    /// Ids that stopped existing, in op order (see the doc above for the
+    /// per-op rule). Capped at [`MAX_REPORT_RETIRED`].
+    pub retired_ids: Vec<StableId>,
+    /// Retired ids dropped beyond the [`MAX_REPORT_RETIRED`] cap; `0` when
+    /// nothing was truncated.
+    pub retired_truncated: usize,
+    /// Bounded post-patch read: identical to [`PanelScene::scene_summary`]
+    /// on the tree AFTER the commit (pinned by test).
+    pub summary: SceneSummary,
+}
+
+/// Per-op id facts the planner collects alongside the journal — one
+/// `ReportFacts` per journaled [`PlannedOp`], index-aligned by construction
+/// (each successful op pushes exactly one entry to both). Consumed by
+/// [`PanelScene::apply_patch_report`] to assemble the capped public report;
+/// the facts themselves are bounded by the ops' touched/retired REGIONS —
+/// the same regions phase 1 already walks — and are dropped by the capping
+/// pass, so the returned report never inherits tree-size memory.
+#[derive(Debug)]
+struct ReportFacts {
+    /// The op's touched top id (inserted / target / removed).
+    touched: StableId,
+    /// Ids the op retires, in document (pre-order) order: `Add` = none;
+    /// `Replace` = the outgoing subtree's ids minus the re-adopted target
+    /// id; `Remove` = the removed subtree's ids (root included).
+    retired: Vec<StableId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,20 +1292,27 @@ impl PlannedIndex {
     /// the subtree's root when `keep_top_in_parent` (Replace re-adopts into
     /// exactly that slot); otherwise the slot is dropped and the siblings to
     /// the right of it shift back by one, matching the `Vec::remove` phase 2
-    /// will splice. Returns the retired node count for the node-budget math.
-    fn retire_subtree(&mut self, id: StableId, keep_top_in_parent: bool) -> usize {
+    /// will splice. Returns the retired ids in DOCUMENT ORDER (pre-order:
+    /// each node before its descendants) for the patch report — the report
+    /// facts ride the removal walk itself (no second walk); the walk visits
+    /// the same set in any order, so the removal result is unchanged and only
+    /// the report order is pinned. Callers derive the node-budget count via
+    /// `.len()`.
+    fn retire_subtree(&mut self, id: StableId, keep_top_in_parent: bool) -> Vec<StableId> {
         let (parent, pos) = match self.slots.get(&id) {
             Some(slot) => (slot.parent, slot.pos),
             None => unreachable!("retire target is live in the planned state"),
         };
-        let mut retired = 0usize;
+        let mut retired_ids: Vec<StableId> = Vec::new();
         let mut stack: Vec<StableId> = vec![id];
         while let Some(node) = stack.pop() {
             self.slots.remove(&node);
             if let Some(kids) = self.children.remove(&node) {
-                stack.extend(kids);
+                // Reverse-pushed so pops visit children in document order
+                // (the same walk shape `scan_payload_ids` uses for payloads).
+                stack.extend(kids.iter().rev());
             }
-            retired += 1;
+            retired_ids.push(node);
         }
         if !keep_top_in_parent {
             // Detach from the container (root list or parent children) and
@@ -1178,7 +1332,7 @@ impl PlannedIndex {
                 }
             }
         }
-        retired
+        retired_ids
     }
 
     /// Adopt a validated payload subtree into the planned state at the slot
@@ -1253,19 +1407,29 @@ impl PlannedIndex {
     }
 }
 
-/// Phase 1 of [`PanelScene::apply_patch`]: replay `ops` against a mirror of
-/// `elements`, validating each op fully (payload structure, id collisions,
-/// parent/anchoring, result budgets) against the state all prior ops leave
-/// behind, and journaling each op's pre-located mutation. Any error leaves
-/// the mirror (and the caller's tree) exactly as the ops would have had it
-/// had nothing happened, because only the mirror mutates during planning.
+/// Phase 1 of [`PanelScene::apply_patch_report`]: replay `ops` against a
+/// mirror of `elements`, validating each op fully (payload structure, id
+/// collisions, parent/anchoring, result budgets) against the state all prior
+/// ops leave behind, and journaling each op's pre-located mutation. Any
+/// error leaves the mirror (and the caller's tree) exactly as the ops would
+/// have had it had nothing happened, because only the mirror mutates during
+/// planning.
+///
+/// Returns the journal plus the per-op report facts ([`ReportFacts`]) — one
+/// entry per journaled op, index-aligned: every successful op pushes exactly
+/// one journal entry and one facts entry, so the report assembly can consume
+/// the facts independently of the phase-2 replay.
 ///
 /// Per-op planning order matches the staged-clone pass so error selections
 /// stay pinned: payload structural validation → id-collision check →
 /// parent-anchoring check, then mirror adoption and result budgets.
-fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<PlannedOp>, SceneError> {
+fn plan_patch(
+    elements: &[SceneElement],
+    ops: Vec<SceneOp>,
+) -> Result<(Vec<PlannedOp>, Vec<ReportFacts>), SceneError> {
     let mut planned = PlannedIndex::from_elements(elements);
     let mut journal: Vec<PlannedOp> = Vec::new();
+    let mut facts: Vec<ReportFacts> = Vec::new();
     for op in ops {
         match op {
             SceneOp::Add { parent, element } => {
@@ -1303,9 +1467,16 @@ fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<Planne
                     None => Vec::new(),
                     Some(anchor) => planned.path_of(anchor),
                 };
+                // Report facts: the INSERTED subtree's top id; an Add retires
+                // nothing.
+                let touched = element.stable_id();
                 journal.push(PlannedOp::Insert {
                     group_path,
                     element,
+                });
+                facts.push(ReportFacts {
+                    touched,
+                    retired: Vec::new(),
                 });
             }
             SceneOp::Replace { element } => {
@@ -1328,7 +1499,17 @@ fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<Planne
                     (slot.parent, slot.pos, slot.depth)
                 };
                 let element_path = planned.path_of(target);
-                planned.nodes -= planned.retire_subtree(target, true);
+                // The retired-id set rides the removal walk (document order);
+                // the report keeps every OUTGOING id EXCEPT the target id the
+                // replacement re-adopts — the host purges the outgoing cached
+                // prim entries except the root it will overwrite. (Ids the
+                // replacement re-adopts nested inside it stay retired here:
+                // their cached prims are purged and the touched subtree's own
+                // re-projection restores exactly what the new tree carries.)
+                let outgoing = planned.retire_subtree(target, true);
+                planned.nodes -= outgoing.len();
+                let retired: Vec<StableId> =
+                    outgoing.into_iter().filter(|id| *id != target).collect();
                 // The replacement may re-adopt ids retired with the outgoing
                 // subtree, but must not collide with ids that survived of it.
                 let fresh_ids = scan_payload_ids(&element);
@@ -1342,6 +1523,10 @@ fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<Planne
                     element_path,
                     element,
                 });
+                facts.push(ReportFacts {
+                    touched: target,
+                    retired,
+                });
             }
             SceneOp::Remove { id } => {
                 if !planned.is_live(id) {
@@ -1349,14 +1534,20 @@ fn plan_patch(elements: &[SceneElement], ops: Vec<SceneOp>) -> Result<Vec<Planne
                 }
                 // Derive the pre-retire path, then retire the subtree in the
                 // mirror and detach it from its container (siblings shift
-                // back, matching the `Vec::remove` phase 2 splices).
+                // back, matching the `Vec::remove` phase 2 splices). The
+                // report keeps the removed subtree's ids root included.
                 let element_path = planned.path_of(id);
-                planned.nodes -= planned.retire_subtree(id, false);
+                let retired = planned.retire_subtree(id, false);
+                planned.nodes -= retired.len();
                 journal.push(PlannedOp::Take { element_path });
+                facts.push(ReportFacts {
+                    touched: id,
+                    retired,
+                });
             }
         }
     }
-    Ok(journal)
+    Ok((journal, facts))
 }
 
 /// Phase 2 of [`PanelScene::apply_patch`]: replay the pre-validated journal
@@ -2714,5 +2905,223 @@ mod tests {
         assert!(summary.overflow_roots);
         assert_eq!(summary.nodes, MAX_SUMMARY_ROOT_IDS + 1);
         assert_eq!(summary.by_kind.ports, MAX_SUMMARY_ROOT_IDS + 1);
+    }
+
+    // -- SCN-011b additions (applied-patch reports) ---------------------------
+
+    #[test]
+    fn patch_report_kitchen_sink() {
+        // Same base + op shape as `apply_patch_in_place_matches_staged_semantics`:
+        // base (rev 1): g1[ r2, g3[ p4 ] ], r5.
+        let mut scene = simple_scene(
+            1,
+            vec![
+                group(1, vec![plain_rect(2), group(3, vec![plain_port(4)])]),
+                plain_rect(5),
+            ],
+        );
+        let report = scene
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![
+                    SceneOp::Add {
+                        parent: None,
+                        element: group(6, vec![]),
+                    },
+                    SceneOp::Add {
+                        parent: Some(StableId(6)),
+                        element: plain_text(7, "hi"),
+                    },
+                    // Retires ids {3, 4}; the replacement re-adopts both
+                    // (keyed id 3 plus retired id 4 inside it).
+                    SceneOp::Replace {
+                        element: group(3, vec![plain_rect(4), plain_port(8)]),
+                    },
+                    SceneOp::Remove { id: StableId(2) },
+                    // Swaps the root rect (keyed by id 5) and re-adopts
+                    // id 2, retired by the previous op's remove.
+                    SceneOp::Replace {
+                        element: group(5, vec![plain_rect(2)]),
+                    },
+                ],
+            ))
+            .expect("kitchen-sink patch applies");
+
+        // Touched: one entry per op in op order — inserted / target / removed
+        // ids (repeats kept, none here).
+        assert_eq!(report.revision, SceneRevision(2));
+        assert_eq!(
+            report.touched_subtree_ids,
+            vec![
+                StableId(6), // Add(6)
+                StableId(7), // Add(7) into group 6
+                StableId(3), // Replace keyed at 3
+                StableId(2), // Remove(2)
+                StableId(5), // Replace keyed at 5
+            ]
+        );
+        assert_eq!(report.touched_truncated, 0);
+        // Retired: op 3's outgoing ids {3, 4} minus the re-adopted target 3
+        // = [4]; op 4's removed subtree = [2] (root included); op 5's outgoing
+        // {5} minus its re-adopted root = empty; Adds retire nothing.
+        assert_eq!(report.retired_ids, vec![StableId(4), StableId(2)]);
+        assert_eq!(report.retired_truncated, 0);
+        // The tree matches the hand-written staged-semantics result, and the
+        // report summary mirrors the post-patch read.
+        assert_eq!(
+            scene.elements,
+            vec![
+                group(1, vec![group(3, vec![plain_rect(4), plain_port(8)])]),
+                group(5, vec![plain_rect(2)]),
+                group(6, vec![plain_text(7, "hi")]),
+            ]
+        );
+        assert_eq!(report.summary, scene.scene_summary());
+    }
+
+    #[test]
+    fn apply_and_apply_report_parity() {
+        // The single-path contract: the same base + same patch through
+        // `apply_patch` (wrapper) and `apply_patch_report` on two deep copies
+        // must land on identical trees AND revisions.
+        let mut patched = simple_scene(7, vec![group(1, vec![plain_rect(2)]), plain_port(3)]);
+        let mut reported = patched.clone();
+        let ops = || {
+            patch(
+                7,
+                8,
+                vec![
+                    // Replace keyed at 1 re-adopting retired id 2, retiring 2.
+                    SceneOp::Replace {
+                        element: group(1, vec![plain_rect(2), plain_port(4)]),
+                    },
+                    SceneOp::Remove { id: StableId(3) },
+                ],
+            )
+        };
+        patched.apply_patch(ops()).expect("apply path");
+        let report = reported.apply_patch_report(ops()).expect("report path");
+
+        assert_eq!(patched.revision, reported.revision);
+        assert_eq!(patched.elements, reported.elements);
+        assert_eq!(patched.validate(), Ok(()));
+        // The report describes the same post-patch state both paths reach.
+        assert_eq!(report.revision, reported.revision);
+        assert_eq!(report.summary, reported.scene_summary());
+        assert_eq!(report.touched_subtree_ids, vec![StableId(1), StableId(3)]);
+        // Replace(1) retires outgoing {1, 2} minus re-adopted root 1 = [2];
+        // Remove(3) retires [3].
+        assert_eq!(report.retired_ids, vec![StableId(2), StableId(3)]);
+    }
+
+    #[test]
+    fn patch_report_truncation_caps() {
+        // TOUCHED cap: a 70-add patch keeps the first 64 op ids in order and
+        // counts the remaining 6. Adds retire nothing.
+        let ops: Vec<SceneOp> = (1..=70u64)
+            .map(|id| SceneOp::Add {
+                parent: None,
+                element: plain_rect(id),
+            })
+            .collect();
+        let mut scene = simple_scene(1, vec![]);
+        let report = scene.apply_patch_report(patch(1, 2, ops)).expect("70 adds");
+        assert_eq!(report.touched_subtree_ids.len(), MAX_REPORT_TOUCHED);
+        assert_eq!(
+            report.touched_subtree_ids,
+            (1..=MAX_REPORT_TOUCHED as u64)
+                .map(StableId)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(report.touched_truncated, 6);
+        assert!(report.retired_ids.is_empty());
+        assert_eq!(report.retired_truncated, 0);
+
+        // RETIRED cap: replace of a 300-node root subtree (group + 299 ports,
+        // ids 5 and 6..=304) re-adopting only the root id 5: the 299 outgoing
+        // child ids pass the 256 cap exactly once wide.
+        let children: Vec<SceneElement> = (6..=304u64).map(plain_port).collect();
+        let mut wide = simple_scene(1, vec![group(5, children)]);
+        wide.validate().expect("300-node base is valid");
+        let report = wide
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: group(5, vec![]),
+                }],
+            ))
+            .expect("wide replace applies");
+        assert_eq!(report.touched_subtree_ids, vec![StableId(5)]);
+        assert_eq!(report.touched_truncated, 0);
+        assert_eq!(report.retired_ids.len(), MAX_REPORT_RETIRED);
+        assert_eq!(report.retired_ids.first(), Some(&StableId(6)));
+        assert_eq!(report.retired_ids.last(), Some(&StableId(261)));
+        assert_eq!(report.retired_truncated, 299 - MAX_REPORT_RETIRED);
+        assert_eq!(report.retired_truncated, 43);
+    }
+
+    #[test]
+    fn patch_report_failures_produce_no_report() {
+        // Stale / non-monotonic / mid-patch failures refuse identically to
+        // apply_patch and hand back NO report; the scene stays byte-for-byte
+        // untouched.
+        let mut scene = simple_scene(3, vec![group(1, vec![plain_rect(2)])]);
+        let before = shot(&scene);
+
+        let error = scene
+            .apply_patch_report(patch(2, 4, vec![SceneOp::Remove { id: StableId(2) }]))
+            .expect_err("stale base must refuse");
+        assert_eq!(
+            error,
+            SceneError::StaleBase {
+                current: SceneRevision(3),
+                given: SceneRevision(2),
+            }
+        );
+        assert_eq!(shot(&scene), before);
+
+        let error = scene
+            .apply_patch_report(patch(3, 3, vec![]))
+            .expect_err("level revision must refuse");
+        assert!(matches!(&error, SceneError::NonMonotonicRevision { .. }));
+        assert_eq!(shot(&scene), before);
+
+        let error = scene
+            .apply_patch_report(patch(
+                3,
+                4,
+                vec![
+                    SceneOp::Add {
+                        parent: None,
+                        element: plain_rect(50),
+                    },
+                    SceneOp::Remove { id: StableId(999) },
+                ],
+            ))
+            .expect_err("missing remove target must refuse");
+        assert_eq!(error, SceneError::ElementMissing(StableId(999)));
+        assert_eq!(shot(&scene), before);
+        assert_eq!(scene.revision, SceneRevision(3));
+    }
+
+    #[test]
+    fn patch_report_summary_mirrors_scene_summary() {
+        // The report's summary IS the post-patch bounded read: same revision,
+        // same walk, same caps as calling scene_summary() on the patched tree.
+        let mut scene = simple_scene(
+            9,
+            vec![group(1, vec![plain_rect(2), plain_port(3)]), plain_rect(4)],
+        );
+        let report = scene
+            .apply_patch_report(patch(9, 10, vec![SceneOp::Remove { id: StableId(3) }]))
+            .expect("one-op patch applies");
+        assert_eq!(report.summary, scene.scene_summary());
+        assert_eq!(report.summary.revision, SceneRevision(10));
+        assert_eq!(report.summary.nodes, 3); // g1[ r2 ] + r4
+        assert_eq!(report.summary.root_ids, vec![StableId(1), StableId(4)]);
+        assert_eq!(report.touched_subtree_ids, vec![StableId(3)]);
+        assert_eq!(report.retired_ids, vec![StableId(3)]);
     }
 }

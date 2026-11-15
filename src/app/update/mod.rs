@@ -155,6 +155,7 @@ pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
 mod widget_mount;
+mod widget_prompt;
 pub(crate) mod widget_drag;
 
 impl OpenCADStudio {
@@ -3993,6 +3994,10 @@ impl OpenCADStudio {
             // The widget-mount bridge (SCN-014): route the mount's message
             // into its registered surface's machines (forward → settle).
             Message::WidgetMountMsg(msg) => self.on_widget_mount_msg(msg),
+            // The prompt-dialog lifecycle (SCN-015): route an armed
+            // confirmation's dialog decision onto its dispatcher (confirm
+            // → forward + settle; dismiss → no event).
+            Message::WidgetPromptMsg(msg) => self.on_widget_prompt_msg(msg),
 
             Message::TabClose(tab_id) => {
                 if self

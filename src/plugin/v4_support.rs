@@ -66,15 +66,28 @@ pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<document::Handle>)
 /// Broadcast a selection change with per-endpoint API routing (v22): v22+
 /// runners receive the O(1) `SelectionChangedDigest` ({tab_id, revision,
 /// count}); older endpoints keep their exact legacy notification streams
-/// (`SelectionChangedV4` for v4..v21, plain `SelectionChanged` below — which
-/// the broadcast's non-V4 skip already gated in today's behavior).
+/// (`SelectionChangedV4`, plus the plain `SelectionChanged` when
+/// `legacy_plain`).
 pub fn publish_selection_changed_versioned(
     tab_id: u64,
     handles: Vec<document::Handle>,
     revision: u64,
+    legacy_plain: bool,
 ) {
+    #[cfg(test)]
+    {
+        record_test_dispatch(&HostNotification::SelectionChangedV4 {
+            tab_id,
+            handles: Vec::new(),
+        });
+        if legacy_plain {
+            record_test_dispatch(&HostNotification::SelectionChanged {
+                handles: handles.clone(),
+            });
+        }
+    }
     crate::plugin::external::with_manager(|mgr| {
-        mgr.broadcast_selection_changed(tab_id, &handles, revision);
+        mgr.broadcast_selection_changed(tab_id, &handles, revision, legacy_plain);
     });
 }
 

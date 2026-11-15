@@ -784,6 +784,7 @@ impl<'a> HostSession<'a> {
                 self.tab_id(),
                 self.selection(),
                 revision,
+                false,
             );
         }
         Ok(())

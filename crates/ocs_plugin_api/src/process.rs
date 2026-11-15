@@ -383,7 +383,7 @@ fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
         "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "IsSelectionGathering"
         | "AcceptsDragSelection" | "SelectionRejectsLockedLayers" | "DropInteractive"
-        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" => {
+        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" | "DialogAction" => {
             Some(Duration::from_secs(10))
         }
         _ => None,

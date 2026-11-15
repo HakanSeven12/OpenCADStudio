@@ -178,18 +178,6 @@ impl OpenCADStudio {
         capture.into()
     }
 
-    /// Build one edge: the vertical icon strip at the very edge plus the
-    /// edge's shown group beside it. The strip lists every group as a grip
-    /// bar over its pallets' icons, with a + button below; clicking an icon
-    /// shows its group. The shown group's pallets stack top to bottom, each
-    /// at its weighted share of the height, with a draggable splitter between
-    /// neighbours. A group whose pallets all auto-hide shows only while one
-    /// of its icons (or the group itself) is hovered; leaving the edge hides
-    /// it again. `None` when nothing on the edge is open.
-    ///
-    /// An auto-hiding edge only holds room for its icon strip here: the edge
-    /// itself draws over the workspace (see `dock_overlay`), so revealing a
-    /// group covers the drawing instead of squeezing it.
     /// The edge (+) pallet menu rows for one edge: built-ins first in their
     /// historical order, then every registered plugin panel in title order.
     /// `checked` means open and docked on this edge — the same rule the
@@ -251,6 +239,18 @@ impl OpenCADStudio {
         entries
     }
 
+    /// Build one edge: the vertical icon strip at the very edge plus the
+    /// edge's shown group beside it. The strip lists every group as a grip
+    /// bar over its pallets' icons, with a + button below; clicking an icon
+    /// shows its group. The shown group's pallets stack top to bottom, each
+    /// at its weighted share of the height, with a draggable splitter between
+    /// neighbours. A group whose pallets all auto-hide shows only while one
+    /// of its icons (or the group itself) is hovered; leaving the edge hides
+    /// it again. `None` when nothing on the edge is open.
+    ///
+    /// An auto-hiding edge only holds room for its icon strip here: the edge
+    /// itself draws over the workspace (see `dock_overlay`), so revealing a
+    /// group covers the drawing instead of squeezing it.
     pub(in crate::app) fn build_edge_stack<'a>(
         &'a self,
         side: crate::app::config::DockSide,

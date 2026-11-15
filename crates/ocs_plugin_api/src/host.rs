@@ -615,7 +615,8 @@ impl Serialize for HostNotification {
             }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
-        bytes.serialize(serializer)    }
+        bytes.serialize(serializer)
+    }
 }
 
 impl<'de> Deserialize<'de> for HostNotification {

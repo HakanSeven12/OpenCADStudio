@@ -483,6 +483,7 @@ impl OpenCADStudio {
             tab_id,
             handles.clone(),
             revision,
+            true,
         );
         self.control_record_selection_event(&handles);
     }

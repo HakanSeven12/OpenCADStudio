@@ -317,14 +317,16 @@ impl PluginManager {
     }
 
     /// Selection-boundary router (v22): API-22+ endpoints receive the O(1)
-    /// `SelectionChangedDigest`; v4..v21 endpoints keep the tab-tagged
-    /// handle list (`SelectionChangedV4`); pre-v4 endpoints keep the plain
-    /// tab-less variant — every legacy stream stays exactly as it was.
+    /// `SelectionChangedDigest`; older endpoints keep the tab-tagged handle
+    /// list (`SelectionChangedV4`) and, when `legacy_plain` is set (the app's
+    /// own selection boundary), the plain `SelectionChanged` after it, as
+    /// before v22.
     pub fn broadcast_selection_changed(
         &self,
         tab_id: u64,
         handles: &[crate::ipc::protocol::Handle],
         revision: u64,
+        legacy_plain: bool,
     ) {
         let count = handles.len() as u64;
         self.broadcast_for_api(None, &|api: u32| match api {
@@ -333,14 +335,18 @@ impl PluginManager {
                 revision,
                 count,
             }),
-            4..=21 => Some(HostNotification::SelectionChangedV4 {
+            _ => Some(HostNotification::SelectionChangedV4 {
                 tab_id,
                 handles: handles.to_vec(),
             }),
-            _ => Some(HostNotification::SelectionChanged {
-                handles: handles.to_vec(),
-            }),
         });
+        if legacy_plain {
+            self.broadcast_for_api(None, &|api: u32| {
+                (api < 22).then(|| HostNotification::SelectionChanged {
+                    handles: handles.to_vec(),
+                })
+            });
+        }
     }
 
     /// Mark a plugin's notification channel verifiably live and flush every

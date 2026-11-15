@@ -349,6 +349,53 @@ impl PluginManager {
         }
     }
 
+    /// Router for the v23 scene/widget event tail: the bounded semantic
+    /// event batch goes to endpoints reporting API v23+ only (pre-v23
+    /// cdylibs have no such variant; the runner's
+    /// `notification_api_version` rows gate it too — this per-endpoint
+    /// choice keeps a legacy plugin's stream byte-exact). O(panels): the
+    /// notification is built ONCE (one event-batch copy at entry) and each
+    /// endpoint's writer clone is the loop's own per-plugin copy; nothing
+    /// here re-serializes or rebuilds per event.
+    ///
+    /// Callers (the mount publisher that attaches widget events to live
+    /// panels) are the recorded follow-up; the routing is in place first so
+    /// no attach can ever fan out unwrapped events to an unprepared plugin.
+    pub fn broadcast_panel_scene_events(
+        &self,
+        panel_id: &str,
+        surface_id: crate::scene::StableId,
+        events: &[crate::widgets::WidgetEvent],
+    ) {
+        let notification = HostNotification::PanelSceneEvents {
+            panel_id: panel_id.to_owned(),
+            surface_id,
+            events: Vec::from(events),
+        };
+        self.broadcast_for_api(None, &|api: u32| (api >= 23).then(|| notification.clone()));
+    }
+
+    /// Router for the v23 store-demand tail: the bounded lazy-fetch demand
+    /// (`parent_id` + windowed `range`) goes to endpoints reporting API
+    /// v23+ only — the same per-endpoint gate as the event tail. O(panels):
+    /// one notification build at entry, per-plugin writer clones only,
+    /// nothing rebuilt per demand.
+    pub fn broadcast_panel_store_demand(
+        &self,
+        panel_id: &str,
+        surface_id: crate::scene::StableId,
+        parent_id: Option<crate::scene::StableId>,
+        range: crate::widgets::WidgetRange,
+    ) {
+        let notification = HostNotification::PanelStoreDemand {
+            panel_id: panel_id.to_owned(),
+            surface_id,
+            parent_id,
+            range,
+        };
+        self.broadcast_for_api(None, &|api: u32| (api >= 23).then(|| notification.clone()));
+    }
+
     /// Mark a plugin's notification channel verifiably live and flush every
     /// notification deferred during its boot window (API v13). Called when
     /// the runner acks `PluginNotification::ChannelReady`.
@@ -876,6 +923,51 @@ mod tests {
         assert!(
             manager.entity_class_declarations(|_| false).is_empty(),
             "a dead plugin process must contribute no declarations"
+        );
+    }
+
+    #[test]
+    fn v23_scene_notification_routers_are_benign_without_routable_endpoints() {
+        // The v23 routers fan out O(panels) through `broadcast_for_api`:
+        // endpoints that are not alive V4 processes are skipped outright,
+        // and the api gate (`api >= 23`) is the per-endpoint decision the
+        // runner's `notification_api_version` rows redouble. Without a live
+        // v4 endpoint (the unit-test depth every other router here has)
+        // both routers must be a bounded no-op: no panic, no send.
+        let manager = PluginManager::new();
+        manager.broadcast_panel_scene_events(
+            "align_tools",
+            crate::scene::StableId(1),
+            &[crate::widgets::WidgetEvent::TreeExpanded {
+                surface_id: crate::scene::StableId(1),
+                node_id: crate::scene::StableId(2),
+                expanded: true,
+            }],
+        );
+        manager.broadcast_panel_store_demand(
+            "align_tools",
+            crate::scene::StableId(1),
+            Some(crate::scene::StableId(9)),
+            crate::widgets::WidgetRange { start: 0, len: 4 },
+        );
+        // And the same no-op-discipline holds when a fake (non-v4) endpoint
+        // is loaded: skipped by the V4 broadcast, never notified, never
+        // deferred.
+        let mut manager = PluginManager::new();
+        manager.plugins.push(LoadedPlugin {
+            process: Arc::new(PluginProcess::fake(plain_manifest("test.scene"))),
+            module: to_shared_module("test.scene".into(), "Scene".into(), vec![]),
+            attach: std::sync::Mutex::new(NotificationAttach {
+                grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
+                ..Default::default()
+            }),
+        });
+        manager.broadcast_panel_scene_events("align_tools", crate::scene::StableId(1), &[]);
+        manager.broadcast_panel_store_demand(
+            "align_tools",
+            crate::scene::StableId(1),
+            None,
+            crate::widgets::WidgetRange { start: 0, len: 1 },
         );
     }
 }

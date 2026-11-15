@@ -509,6 +509,55 @@ pub enum HostNotification {
         revision: u64,
         count: u64,
     },
+    /// V23 scene/widget semantic events for an attach-routed panel: the
+    /// SMALL semantic events the host produces and the owning plugin
+    /// consumes (tree expansions, selections, activations, command
+    /// invocations, cell facts) — the notify leg of the widgets module's
+    /// documented events-vs-patches split, forwarded when a panel's widget
+    /// mount is live. `surface_id` is the `WidgetSurface` identity the
+    /// panel's events stream names (the same id every event in `events`
+    /// carries); `events` is a bounded batch
+    /// ([`crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS`]). Older plugins
+    /// decode it through the `Unknown` passthrough. Discriminant 15.
+    ///
+    /// Boundary (recorded): the host-UI/mount publisher that ATTACHES this
+    /// notification to live widget mounts is a recorded follow-up — v23
+    /// ships the wire tail, gate rows, and routing only; nothing here
+    /// touches host-UI state.
+    PanelSceneEvents {
+        /// Panel id (wire-capped like the v23 request tails).
+        panel_id: String,
+        /// The `WidgetSurface` identity within the panel's event stream.
+        surface_id: crate::scene::StableId,
+        /// The bounded semantic event batch.
+        events: Vec<crate::widgets::WidgetEvent>,
+    },
+    /// V23 host-driven lazy fetch demand: the host asks the owning plugin
+    /// to publish a bounded page of a store the plugin owns — a lazy
+    /// tree-branch's children, an item-list window, a typed-table window,
+    /// or a scene region (`parent_id` + `range`, the exact shape
+    /// [`crate::widgets::WidgetEvent::ChildrenRequested`] /
+    /// `TablePageRequested` carry). The ANSWER never rides the notification
+    /// channel: the plugin publishes the page through the ordinary
+    /// publish/patch requests (`PanelScenePublish` / `PanelScenePatch`), so
+    /// demand and delivery stay decoupled and rejections keep ONE mutation
+    /// path. Range width is capped by
+    /// [`crate::widgets::MAX_WIDGET_RANGE_LEN`]: an over-cap demand is a
+    /// structured refusal, never a bigger page. Older plugins decode it
+    /// through the `Unknown` passthrough; the runner gate rows
+    /// (notifications 15/16 ⇒ 23) hold both v23 tails back from pre-v23
+    /// plugins. Discriminant 16.
+    PanelStoreDemand {
+        /// Panel id (wire-capped like the v23 request tails).
+        panel_id: String,
+        /// The `WidgetSurface` identity the demand addresses.
+        surface_id: crate::scene::StableId,
+        /// The store the demand addresses (`None` = surface root / whole
+        /// collection).
+        parent_id: Option<crate::scene::StableId>,
+        /// The requested window (width-capped).
+        range: crate::widgets::WidgetRange,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -613,6 +662,31 @@ impl Serialize for HostNotification {
                     .map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::PanelSceneEvents {
+                panel_id,
+                surface_id,
+                events,
+            } => {
+                bytes.push(15);
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, surface_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, events).map_err(serde::ser::Error::custom)?;
+            }
+            HostNotification::PanelStoreDemand {
+                panel_id,
+                surface_id,
+                parent_id,
+                range,
+            } => {
+                bytes.push(16);
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, surface_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, parent_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, range).map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -715,6 +789,64 @@ impl<'de> Deserialize<'de> for HostNotification {
                     HostNotification::SelectionChangedDigest { tab_id, revision, count }
                 })
                 .map_err(serde::de::Error::custom),
+            15 => {
+                // The v23 event batch: bounded at decode like the request
+                // tails — a past-cap batch (or a past-cap panel id) is a
+                // structured refusal, never materialized bigger.
+                let (panel_id, surface_id, events): (
+                    String,
+                    crate::scene::StableId,
+                    Vec<crate::widgets::WidgetEvent>,
+                ) = bincode::deserialize(rest).map_err(serde::de::Error::custom)?;
+                if panel_id.len()
+                    > crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "panel_id exceeds the {}-byte cap",
+                        crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                    )));
+                }
+                if events.len() > crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS {
+                    return Err(serde::de::Error::custom(format!(
+                        "event batch exceeds the decoded payload budget ({})",
+                        crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS
+                    )));
+                }
+                Ok(HostNotification::PanelSceneEvents {
+                    panel_id,
+                    surface_id,
+                    events,
+                })
+            }
+            16 => {
+                // The v23 store demand: same wire caps as the request tail.
+                let (panel_id, surface_id, parent_id, range): (
+                    String,
+                    crate::scene::StableId,
+                    Option<crate::scene::StableId>,
+                    crate::widgets::WidgetRange,
+                ) = bincode::deserialize(rest).map_err(serde::de::Error::custom)?;
+                if panel_id.len()
+                    > crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "panel_id exceeds the {}-byte cap",
+                        crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                    )));
+                }
+                if range.len > crate::widgets::MAX_WIDGET_RANGE_LEN {
+                    return Err(serde::de::Error::custom(format!(
+                        "store demand range exceeds the decoded page-width budget ({})",
+                        crate::widgets::MAX_WIDGET_RANGE_LEN
+                    )));
+                }
+                Ok(HostNotification::PanelStoreDemand {
+                    panel_id,
+                    surface_id,
+                    parent_id,
+                    range,
+                })
+            }
             _ => Ok(HostNotification::Unknown(bytes)),
         }
     }

@@ -397,6 +397,61 @@ pub fn handle_plugin_request(
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))
         }
         RemoveGeoLocation => PluginResponse::GeoLocationRemoved(host.remove_geo_location()),
+        // V23 scene/widget wire tails — TRANSPORT-ONLY in this package.
+        // The wire layer validates what the transport can verify (decode
+        // budgets ran at frame deserialize; the structural `validate()` of
+        // the carried surface is re-run here so a structurally broken
+        // publish refuses with the typed rejection even before any
+        // publisher exists) and answers with the typed acks/rejections.
+        // The host-UI/mount publisher attach — the per-panel store that
+        // holds a mounted `PanelScene`/`WidgetSurface`, applies patches and
+        // pages requests against it — is the recorded follow-up. Until it
+        // lands: mutating frames answer `PublisherUnattached` (honest, no
+        // silent Ok), reads answer empty/bounded.
+        PanelScenePublish { surface, .. } => {
+            let structural = match &surface {
+                crate::ipc::protocol::SceneOrWidgetSurface::Scene(scene) => scene
+                    .validate()
+                    .map_err(|error| error.to_string()),
+                crate::ipc::protocol::SceneOrWidgetSurface::Widgets(surface) => surface
+                    .validate()
+                    .map_err(|error| error.to_string()),
+            };
+            PluginResponse::PatchRejected {
+                code: if structural.is_err() {
+                    crate::ipc::protocol::PatchRejectCode::InvalidOp
+                } else {
+                    crate::ipc::protocol::PatchRejectCode::PublisherUnattached
+                },
+                report: crate::ipc::protocol::PatchRejectReport {
+                    current_revision: None,
+                    failed_op: None,
+                },
+            }
+        }
+        PanelScenePatch { .. } => PluginResponse::PatchRejected {
+            // The op budget and per-op staging are the publisher's phases
+            // (nothing is attached in this package, so nothing can stage);
+            // the wire decode already held the op budget.
+            code: crate::ipc::protocol::PatchRejectCode::PublisherUnattached,
+            report: crate::ipc::protocol::PatchRejectReport {
+                current_revision: None,
+                failed_op: None,
+            },
+        },
+        PanelStoreRead { .. } => PluginResponse::StorePage {
+            rows: Vec::new(),
+            total_hint: 0,
+        },
+        PanelSceneSnapshot2 { .. } => PluginResponse::StorePage {
+            rows: vec![crate::ipc::protocol::StoreRow::State(
+                crate::ipc::protocol::StoreStateDigest {
+                    scene: None,
+                    widgets: None,
+                },
+            )],
+            total_hint: 0,
+        },
     }
 }
 

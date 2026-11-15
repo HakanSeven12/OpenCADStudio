@@ -351,6 +351,11 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
+        // V23 scene/widget wire tails: the mount/publisher attach is a
+        // recorded follow-up, but the runner conversational gate must be in
+        // place BEFORE any publisher can exist (a pre-23 cdylib has no
+        // such variants and must never see the frames).
+        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 23,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
@@ -1248,5 +1253,51 @@ mod tests {
             }
             other => panic!("expected error response, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn notification_gate_rows_hold_the_v23_tails_back_from_pre_v23_plugins() {
+        use crate::host::HostNotification as N;
+
+        let events = || N::PanelSceneEvents {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            events: Vec::new(),
+        };
+        let demand = || N::PanelStoreDemand {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            parent_id: None,
+            range: crate::widgets::WidgetRange { start: 0, len: 4 },
+        };
+        // The v23 wire tails gate at 23: a runner serving an api_version < 23
+        // plugin must DROP both frames (the cdylib has no such variants).
+        assert_eq!(notification_api_version(&events()), 23);
+        assert_eq!(notification_api_version(&demand()), 23);
+        assert!(notification_api_version(&events()) > 22);
+        assert!(notification_api_version(&demand()) > 22);
+
+        // The v22 row is UNTOUCHED by the crossing: the digest still gates
+        // at 22 (this is the exact row the v22 selection router relies on).
+        assert_eq!(
+            notification_api_version(&N::SelectionChangedDigest {
+                tab_id: 1,
+                revision: 2,
+                count: 3,
+            }),
+            22
+        );
+
+        // And the pre-v22/v15 rows stay put (all legacy-gate discipline).
+        assert_eq!(
+            notification_api_version(&N::QuadAction {
+                panel_id: "p".to_owned(),
+                control_id: "c".to_owned(),
+                handles: Vec::new(),
+                type_keys: Vec::new(),
+                pick_point: [0.0; 3],
+            }),
+            15
+        );
     }
 }

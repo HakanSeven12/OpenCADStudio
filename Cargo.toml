@@ -426,6 +426,10 @@ harness = false
 name = "widget_state_scaling"
 harness = false
 
+[[bench]]
+name = "widget_interaction"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

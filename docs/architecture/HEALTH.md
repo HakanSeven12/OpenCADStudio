@@ -5,7 +5,7 @@ Open CAD Studio measures its own code health on every release and on every pull 
 ## Where to see it
 
 - **Code Health wiki page**: the scorecard, the trend over recent releases, thanks to the pull requests that improved a measure, and a list of cleanups anyone can pick up. Rebuilt on every release by `.github/workflows/wiki.yml`.
-- **Your pull request**: the `health (informational)` job compares your branch with the commit it merges into and lists what got better and what got worse, with the file and line. The lint job lists clippy and rustfmt warnings in the files you touched only, so the list is about your change, not the whole tree.
+- **Your pull request**: the `health (informational)` job compares your branch with the commit it merges into and lists what got better and what got worse, with the file and line, including the tests you add. If you edit a file that no test runs yet (as of the last release), it says so: a test there counts toward the coverage goal. The lint job lists clippy and rustfmt warnings in the files you touched only, so the list is about your change, not the whole tree.
 
 ## The measures
 
@@ -28,17 +28,25 @@ Goals, baselines and the reason for each measure are in [`health-goals.json`](he
 
 ### Tests and dependencies
 
-- <a id="tests-and-dependencies"></a>**Tests** (`cargo test --workspace -- --list`), **line coverage** (`cargo llvm-cov`, on releases only because it runs the tests again), **RustSec advisories** (`cargo audit`), and **crates in the dependency tree** (`cargo metadata`).
+- <a id="tests-and-dependencies"></a>**Test functions**: the number of `#[test]` functions in `src/`, `tests/` and the workspace crates (comments and strings are ignored). Counted on every pull request, so adding tests shows in your summary and in the release's thanks list. Also **RustSec advisories** (`cargo audit`) and **crates in the dependency tree** (`cargo metadata`), on releases.
+
+### Coverage
+
+- <a id="coverage"></a>**Line coverage of the core layers**: the share of production lines in layers 0 to 4 (see [`RULES.md`](RULES.md)) that the test suite runs, measured with `cargo llvm-cov` on each release. The long-term target is 100%; milestones are every 5 points.
+- **What counts:** production lines only. Test files and lines inside `#[cfg(test)]` / `#[cfg(all(test, ...))]` modules are left out (counting them would read about six points high), and so are generated files and the paths listed under `coverage.exclude` in [`health-goals.json`](health-goals.json), each with its reason (today: GPU rendering, which needs a graphics device, and the profiling aid `src/perf.rs`). An exclusion is a folder (it ends with a slash) or one exact file, so a new file is never excluded by accident. The release measurement runs on Linux; code for other platforms is not compiled there and not counted.
+- **On the wiki page:** coverage per layer, and **Add tests here**: the core files with the most lines no test runs, weighted by how often each changed in the last 28 days, plus the files no test runs at all.
+- Coverage is measured on releases only, because it runs the whole test suite again. Pull requests see the test functions they add instead.
 
 ## Thanks
 
-On each release the wiki job replays every commit merged since the previous release with the source measures (structure and robustness) and lists each pull request that improved one, with its author. Hygiene and test measures are compared release to release only, because rebuilding every commit would take hours. If the replay does not finish in its time limit, the page is still published and says the list was not computed.
+On each release the wiki job replays every commit merged since the previous release with the source measures (structure, robustness and test functions) and thanks each contributor whose merged work improved one: removing a panic site, or adding tests, both count. The list has one line per contributor, in alphabetical order, with the totals and the pull requests they came from; it is never a ranking, and nobody is listed for making a number worse. If the replay does not finish in its time limit, the page says the list was not computed. Hygiene and coverage are compared release to release only, because rebuilding and testing every commit would take hours.
 
 ## Running it yourself
 
 ```
 python3 scripts/health.py measure                 # source measures, a few seconds
 python3 scripts/health.py measure --cargo         # plus clippy, rustfmt, tests, dependencies
+python3 scripts/health.py measure --cargo --coverage   # plus core-layer line coverage (needs cargo-llvm-cov)
 python3 scripts/health.py diff ../main-checkout   # what your branch changes
 ```
 

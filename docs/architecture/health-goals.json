@@ -1,6 +1,16 @@
 {
- "about": "Goals for scripts/health.py, shown on the Code Health wiki page. A baseline of null is filled from the first release the scorecard measures. Each count's next milestone is half the previous one (baseline/2, /4, ...) until the long-term target; a count that should rise gets +10% steps (coverage: +5 points). Change goals in a reviewed pull request, like the layer rules. See docs/architecture/HEALTH.md.",
+ "about": "Goals for scripts/health.py, shown on the Code Health wiki page. A baseline of null is filled from the first release the scorecard measures. Each count's next milestone is half the previous one (baseline/2, /4, ...) until the long-term target; a count that should rise gets +10% steps (coverage: +5 points). A measure marked milestones: false is watched rather than driven: the page only flags it when it drifts past its baseline. Change goals in a reviewed pull request, like the layer rules. See docs/architecture/HEALTH.md.",
  "baseline_commit": "861d23c3849a9240e71827e59b3e31377feaf505",
+ "coverage": {
+  "about": "Scope of the coverage goal: production lines of the files in these layers (scripts/arch_check.py), minus generated files and these paths (a folder ends with a slash; anything else is one exact file).",
+  "layers": [0, 1, 2, 3, 4],
+  "exclude": [
+   {"path": "src/scene/pipeline/", "why": "GPU rendering: needs a graphics device, which unit tests do not have."},
+   {"path": "src/scene/view/render.rs", "why": "GPU rendering: needs a graphics device, which unit tests do not have."},
+   {"path": "src/gpu_backend.rs", "why": "Graphics backend selection: needs a graphics device."},
+   {"path": "src/perf.rs", "why": "Profiling aid, not application behaviour."}
+  ]
+ },
  "measures": [
   {"id": "upward_files", "area": "Structure", "label": "Upward dependencies (files)", "direction": "down", "baseline": 180, "target": 0,
    "why": "Lower layers that do not reach up can be built, tested and reused without the app.", "learn": "docs/architecture/RULES.md"},
@@ -26,13 +36,13 @@
    "why": "With zero warnings, a new one is noticed.", "learn": "docs/architecture/HEALTH.md#hygiene"},
   {"id": "rustfmt_files", "area": "Hygiene", "label": "Files rustfmt would change", "direction": "down", "baseline": null, "target": 0,
    "why": "One format means diffs show only real changes.", "learn": "https://github.com/rust-lang/rustfmt"},
-  {"id": "tests", "area": "Tests & dependencies", "label": "Tests", "direction": "up", "baseline": null, "target": null,
+  {"id": "coverage_core", "area": "Tests & dependencies", "label": "Line coverage of the core layers (%)", "direction": "up", "baseline": null, "target": 100,
+   "why": "Every line a test runs is a line a change cannot silently break.", "learn": "docs/architecture/HEALTH.md#coverage"},
+  {"id": "test_functions", "area": "Tests & dependencies", "label": "Test functions (#[test])", "direction": "up", "baseline": 6191, "target": null,
    "why": "Tests let contributors change code without fear of breaking it.", "learn": "docs/architecture/HEALTH.md#tests-and-dependencies"},
-  {"id": "coverage", "area": "Tests & dependencies", "label": "Line coverage (%)", "direction": "up", "baseline": null, "target": null,
-   "why": "Shows which code no test runs.", "learn": "https://github.com/taiki-e/cargo-llvm-cov"},
   {"id": "advisories", "area": "Tests & dependencies", "label": "RustSec advisories in dependencies", "direction": "down", "baseline": null, "target": 0,
    "why": "Known vulnerable or unmaintained crates.", "learn": "https://rustsec.org/"},
-  {"id": "dependencies_total", "area": "Tests & dependencies", "label": "Crates in the dependency tree", "direction": "down", "baseline": null, "target": null,
+  {"id": "dependencies_total", "area": "Tests & dependencies", "label": "Crates in the dependency tree", "direction": "down", "baseline": null, "target": null, "milestones": false,
    "why": "Each crate adds build time and supply-chain risk.", "learn": "docs/architecture/HEALTH.md#tests-and-dependencies"}
  ]
 }

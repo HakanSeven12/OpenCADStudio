@@ -105,7 +105,8 @@ jobs:
     # Compares a pull request with the commit it merges into on the source
     # measures in docs/architecture/HEALTH.md (upward dependencies, module
     # pairs that use each other, large files and functions, panic sites,
-    # undocumented unsafe) and lists what got better and what got worse, in
+    # undocumented unsafe, test functions) and lists what got better and what
+    # got worse, plus edited files that have no tests yet, in
     # the job summary and as warnings on the lines. Like the lint job it never
     # fails: every step carries continue-on-error.
     steps:
@@ -126,7 +127,11 @@ jobs:
         continue-on-error: true
         run: |
           git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
-          python3 scripts/health.py diff "$RUNNER_TEMP/base" --markdown >> "$GITHUB_STEP_SUMMARY"
+          # Files with no tests as of the last release, published by the wiki
+          # job; before the first such release the list is empty.
+          curl -fsSL "https://raw.githubusercontent.com/wiki/${GITHUB_REPOSITORY}/health/untested.json" \
+            -o "$RUNNER_TEMP/untested.json" || echo "[]" > "$RUNNER_TEMP/untested.json"
+          python3 scripts/health.py diff "$RUNNER_TEMP/base" --markdown --untested "$RUNNER_TEMP/untested.json" >> "$GITHUB_STEP_SUMMARY"
           python3 scripts/health.py diff "$RUNNER_TEMP/base"
 
       - name: Upward dependencies

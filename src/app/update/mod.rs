@@ -154,6 +154,7 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
+mod widget_mount;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -3988,6 +3989,9 @@ impl OpenCADStudio {
             // latency.
             #[cfg(not(target_arch = "wasm32"))]
             Message::PluginGripPump => self.pump_plugin_grips(),
+            // The widget-mount bridge (SCN-014): route the mount's message
+            // into its registered surface's machines (forward → settle).
+            Message::WidgetMountMsg(msg) => self.on_widget_mount_msg(msg),
 
             Message::TabClose(tab_id) => {
                 if self

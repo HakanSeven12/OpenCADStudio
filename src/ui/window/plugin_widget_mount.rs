@@ -13,23 +13,33 @@
 //! Nothing duplicates enablement/selection/validation logic; the machines
 //! remain the single semantic authority (§16).
 //!
-//! # The message bridge is DEFERRED (binding scope rule)
+//! # The message bridge (SCN-014 — shipped here)
 //!
 //! The mount emits its own host-local vocabulary [`WidgetMountMsg`] and owns
-//! its routing [`apply_mount_msg`] into the state machines — but the
-//! APP-side wiring is NOT in this task:
+//! its routing [`apply_mount_msg`] into the state machines; the APP-side
+//! wiring landed in SCN-014:
 //!
-//! > The mount emits `WidgetMountMsg` only; the app-side routing
-//! > (`Message::WidgetMount(_)` + the surface registry that hands registered
-//! > panels their mounts) is the integration task (SCN-014). Tests assert
-//! > message STRUCTURE, not iced Tasks.
+//! > The builders attach `on_press(WidgetMountMsg)`; the single panel gate
+//! > maps each emitted message through [`app_message`] into
+//! > `app::Message::WidgetMountMsg`, whose update arm routes into
+//! > `app::update::widget_mount`: find the registered surface
+//! > ([`MountRegistry::handle_for_surface`]), `apply_mount_msg(.., state,
+//! > dispatcher, msg, sink)`, drain the sink, and settle every forwarded
+//! > command's originating address — **bridge-forwards-then-settle**, so
+//! > the in-flight exactly-once guard re-arms after the handler completes.
 //!
-//! Concretely: the builders attach `on_press(WidgetMountMsg)` handlers; a
-//! later integration task (SCN-014) maps `Message::WidgetMount(msg)` →
-//! `apply_mount_msg(.., state, dispatcher, msg, sink)` — one route arm in
-//! `app::Message`. Until then the messages are inert scaffolding;
-//! `plugin_panel.rs` maps them to `Message::Noop` at the single gate (one
-//! line, documented there), so nothing at app level changed.
+//! Two boundaries stay open by DESIGN, both recorded for the ADR-004
+//! (API-23) crossing / SCN-015:
+//! - the events the bridge drains are NOT yet published to the plugin
+//!   (`v4_support::publish_*`) — the COLLECTING sink ([`CollectingSink`])
+//!   is the pipeline seam the future publisher hangs off;
+//! - teardown drops a surface's `pending_children` (state `reset_all`),
+//!   which cancels the mount's VIEW of pending lazy page fetches — the
+//!   genuine in-flight IPC fetch cancellations still need the request-id
+//!   vocabulary the wire era brings (RECORDED, not silently claimed).
+//! Additionally the prompt dialog UI (a `PromptRequested` opening the
+//! app's real confirm dialog, riding the existing modal patterns) and the
+//! app-OWNED registry migration are the SCN-015 follow-up.
 //!
 //! # The panel hook is the registry side-map (the owned seam)
 //!
@@ -52,7 +62,7 @@
 //!   native drop-down with overlay state. The mount uses exactly that for
 //!   [`menu_element`] (root button + native menu + recursive submenus);
 //!   a right-click/context-menu form is deferred because it needs per-widget
-//!   open state + toggle messages (the SCN-014 integration surface).
+//!   open state + toggle messages (the SCN-015 integration follow-up).
 //! - SplitView ratio: a `Group` with `split_ratio` divides via
 //!   `Length::FillPortion` splits (the vendored `Length` has portion fills);
 //!   the ratio is clamped host-side exactly per the contract's note
@@ -69,8 +79,9 @@
 //! - Visible window: the mount keeps a FIXED window budget
 //!   ([`DEFAULT_WINDOW_SPEC`], 48 rows + an 8-row warm margin) until the
 //!   dock reports real viewport geometry — the window's size then becomes
-//!   the dock's input (SCN-014); `Scrolled` messages already route the
-//!   scroll anchor through the state machine, so that change is plumbing.
+//!   the dock's input (the SCN-015 follow-up); `Scrolled` messages already
+//!   route the scroll anchor through the state machine, so that change is
+//!   plumbing.
 //!
 //! # Windowing is the mount's local bookkeeping (§16)
 //!
@@ -101,8 +112,8 @@
 //! target IDs"). The mount routes the surface's CURRENT SELECTION as the
 //! click's target ids; a click with an empty selection refuses at the state
 //! layer (`NoTargets`) — the semantic authority, not the builder, refuses.
-//! Per-button declared targets are an integration-layer concern (SCN-014)
-//! if a host contract later wants them.
+//! Per-button declared targets are an integration-layer concern (the
+//! SCN-015 follow-up) if a host contract later wants them.
 //!
 //! # A11y
 //!
@@ -115,13 +126,12 @@
 //! existing marker palette); the marker is decoration, the a11y fact stays
 //! the label verbatim.
 
-// Stage-1 surface: the registry + gate are consumed by the panel hook
-// (`plugin_panel.rs`); the builders + routing are consumed by the unit tests
-// in this module until the integration task (SCN-014) lands the app bridge.
-// The allow mirrors `plugin_widgets.rs` / `plugin_widgets_dispatch.rs`
-// stage-1 precedent.
-#![allow(dead_code)]
-
+// The stage-1 blanket allow is LIFTED where SCN-014's wiring lands (the
+// bridge: app_message, the gate mapping, registration lifecycle, sink, and
+// the builders/routing reachable from them — production dead-code analysis
+// now covers the whole wired surface). The remaining assert-only surface
+// carries targeted `cfg_attr(not(test), allow(dead_code))`s of its own,
+// each naming WHY it stays.
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -130,7 +140,7 @@ use iced::widget::tooltip::Position as TooltipPosition;
 use iced::widget::{Tooltip, button, column, container, row, text};
 use iced::{Element, Fill, Length, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
-use ocs_plugin_api::scene::StableId;
+use ocs_plugin_api::scene::{SceneRevision, StableId};
 use ocs_plugin_api::widgets::{
     Axis, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN, MenuDef, TableRef,
     TreeRowDef, WidgetEvent, WidgetGroup, WidgetNode, WidgetSurface, WidgetTreeDef,
@@ -219,6 +229,10 @@ pub(crate) enum WidgetMountMsg {
         command_id: String,
     },
     /// A scrolled list/tree re-anchored at `top_row` (flat-list row index).
+    // Wired vocabulary, but the v1 builders never construct it (the
+    // scroll wheel input is the next mount slice) — its routing
+    // (`apply_mount_msg`) is live all the same.
+    #[allow(dead_code)]
     Scrolled {
         surface_id: StableId,
         widget_id: StableId,
@@ -227,6 +241,8 @@ pub(crate) enum WidgetMountMsg {
     /// Keyboard focus moved to row/item `to` (`None` = away; the v1 mount
     /// keeps its current focus there — focus is a host-local slot and blur
     /// has no machine method to call).
+    // Same as `Scrolled`: routed, not yet emitted by a v1 builder.
+    #[allow(dead_code)]
     FocusMoved {
         surface_id: StableId,
         widget_id: StableId,
@@ -238,11 +254,11 @@ pub(crate) enum WidgetMountMsg {
 // Routing: one message into the layered state machines
 // ---------------------------------------------------------------------------
 
-/// The boundary a mount forwards emitted [`WidgetEvent`]s through. The
-/// production sink — the application edge that forwards each event to the
-/// plugin and then settles the dispatcher — is SCN-014's integration
-/// surface; the headless tests plug a `Vec<WidgetEvent>` in and pin that
-/// the EVENTS, not just counters, are exact.
+/// The boundary a mount forwards emitted [`WidgetEvent`]s through. SCN-014
+/// landed the bridge's collecting implementation ([`CollectingSink`] —
+/// drained, not yet published, until the ADR-004 crossing); the headless
+/// tests also plug a plain `Vec<WidgetEvent>` in and pin that the EVENTS,
+/// not just counters, are exact.
 pub(crate) trait WidgetEventSink {
     /// One emitted event. Implementations forward it; NOTHING else moves.
     fn emit(&mut self, event: WidgetEvent);
@@ -256,6 +272,10 @@ impl WidgetEventSink for Vec<WidgetEvent> {
 
 /// What [`apply_mount_msg`] did with one mount message — the routing
 /// verdict's total shape (each variant is terminal; nothing half-applies).
+///
+// The verdict's FIELDS are the tests' assertion surface (the bridge reads
+// the routing by shape, not by field).
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum MountRouting {
     /// The state layers accepted the message; `forwarded` semantic events
@@ -406,8 +426,9 @@ pub(crate) fn apply_mount_msg<S: WidgetEventSink + ?Sized>(
 }
 
 /// The surface address a mount message names (uniform access for the
-/// surface-mismatch check).
-fn msg_surface_id(msg: &WidgetMountMsg) -> StableId {
+/// surface-mismatch check — and the bridge lookup's key: the
+/// `Message::WidgetMountMsg` handler finds the registered mount by this).
+pub(crate) fn msg_surface_id(msg: &WidgetMountMsg) -> StableId {
     match msg {
         WidgetMountMsg::RowActivated { surface_id, .. }
         | WidgetMountMsg::RowExpandedToggled { surface_id, .. }
@@ -469,6 +490,10 @@ fn route_command<S: WidgetEventSink + ?Sized>(
 /// assertion surface (iced elements cannot be introspected without a
 /// renderer). Facts state the WIDGET-level truth the builder baked into the
 /// element; per-row routes gate themselves on the row view + the machines.
+///
+// Facts are consumed (read) by the assertion tests; the builders CONSTRUCT
+// them on every live build.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MountFacts {
     /// The widget the element answers for.
@@ -1072,6 +1097,9 @@ fn node_visible(node: &WidgetNode) -> bool {
 /// `mount_materializes_visible_window_only`): reads the SAME
 /// `flat_rows_of_tree` + `visible_window` math the builder uses, so the
 /// proof pins the builder's own windowing, not a parallel implementation.
+// The §16 windowing proofs read these off the builders' own math — test
+// surface only for now.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn materialized_row_count_of_tree(
     def: &WidgetTreeDef,
     state: &WidgetUiState,
@@ -1086,6 +1114,7 @@ pub(crate) fn materialized_row_count_of_tree(
 
 /// The VISIBLE-WINDOW row count the list mount materializes (see
 /// [`materialized_row_count_of_tree`]).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn materialized_row_count_of_list(
     def: &ItemListDef,
     state: &WidgetUiState,
@@ -1120,9 +1149,11 @@ pub(crate) struct SurfaceMountHandle {
 
 impl SurfaceMountHandle {
     /// Build a handle; the state opens for `surface_id` + syncs (the
-    /// machines' registered starting point — the §16 "closing a tab cancels
-    /// pending requests" teardown is the unregister + `reset_all` flow at
-    /// the integration task).
+    /// machines' registered starting point — the dispatcher's command read
+    /// model syncs separately, when the owner plugin publishes its command
+    /// defs). The §16 "closing a tab cancels pending requests and releases
+    /// state" teardown is [`MountRegistry::teardown_surface`] (SCN-014).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_surface(surface_id: StableId, surface: WidgetSurface) -> Self {
         let mut state = WidgetUiState::new(surface_id);
         state.sync(&surface);
@@ -1160,12 +1191,18 @@ impl SurfaceMountHandle {
 ///
 /// Held thread-locally (the iced view pass builds the whole element tree on
 /// the UI thread; `thread_local!` beats a global mutex for a read-hot,
-/// UI-thread-only map). Registration is the integration task's surface
-/// (SCN-014); zero registrations ship in this task, which is exactly why
-/// every legacy panel stays byte-identical today.
+/// UI-thread-only map). SCN-014 ships the registration LIFECYCLE
+/// ([`MountRegistry::register_surface`] / [`MountRegistry::teardown_surface`]
+/// + the [`RegisteredGuard`] test seam), but still no HOST flow registers a
+/// surface yet — the app-owned registry and the real registration calls are
+/// the SCN-015 follow-up — which is exactly why every legacy panel stays
+/// byte-identical today (zero entries = the legacy `view()` path).
 #[derive(Default)]
 pub(crate) struct MountRegistry {
     by_panel: HashMap<String, SurfaceMountHandle>,
+    /// The lifecycle instrumentation (§16 probes) — read via
+    /// [`MountRegistry::counters`].
+    counters: MountCounters,
 }
 
 thread_local! {
@@ -1173,8 +1210,11 @@ thread_local! {
 }
 
 impl MountRegistry {
-    /// Register the mounted surface for `panel_id` (a re-register replaces
-    /// the prior entry — the patch/teardown flow is the caller's contract).
+    /// Register the mounted surface for `panel_id` (the RAW primitive — a
+    /// re-register replaces the prior entry untouched, no machine release,
+    /// no counters; the LIFECYCLE registration is [`Self::register_surface`].
+    /// The SCN-013 tests drive this raw form deliberately).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn register(panel_id: &str, handle: SurfaceMountHandle) {
         MOUNT_REGISTRY.with(|registry| {
             registry
@@ -1184,8 +1224,9 @@ impl MountRegistry {
         });
     }
 
-    /// Remove a panel's mount (teardown; calling the machines' `reset_all`
-    /// first is the §16 contract at the integration task).
+    /// Remove a panel's mount (the RAW primitive — no machine release, the
+    /// lifecycle teardown is [`Self::teardown_surface`]).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn unregister(panel_id: &str) {
         MOUNT_REGISTRY.with(|registry| {
             registry.borrow_mut().by_panel.remove(panel_id);
@@ -1214,8 +1255,318 @@ impl MountRegistry {
 /// the direct lookup; the state-shaped signature is the tests'/reviewers'
 /// handle on THE SAME decision). `false` for every legacy state — the
 /// legacy-behavior guarantee, stated in one line.
+// The gate hook itself runs inside the view pass; this wrapper is the
+// assertion surface.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn mounts_surface(state: &PluginPanelState) -> bool {
     MountRegistry::mount_registered(&state.def.id)
+}
+
+// ---------------------------------------------------------------------------
+// SCN-014 — the bridge: Message mapping, registration lifecycle, sink
+// ---------------------------------------------------------------------------
+
+/// `WidgetMountMsg` → app `Message` — THE one mapping site. The globe's
+/// single gate (`plugin_panel.rs`'s mount hook) maps every builder-emitted
+/// message through this, and the app's `update` arm unwraps the variant
+/// back into the bridge handler (`app::update::widget_mount`).
+///
+/// Host-local ONLY: `app::Message` carries no serialization derives (no
+/// `Serialize`/`Deserialize` on the enum — verified by grep), so the
+/// appended tail variant has no wire implication whatsoever.
+pub(crate) fn app_message(msg: WidgetMountMsg) -> crate::app::Message {
+    crate::app::Message::WidgetMountMsg(msg)
+}
+
+/// The sink the bridge forwards events through — the REAL
+/// [`WidgetEventSink`] stand-in until the wire era: emitted
+/// [`WidgetEvent`]s gather in a shared `Vec` and the bridge drains them
+/// (`take`). The plugin-pipeline publishing (`v4_support::publish_*`) is
+/// explicitly OUT OF SCOPE until the API-23 crossing (ADR-004): this
+/// collecting buffer is the seam the future publisher hangs off (it needs
+/// no type change — the drain call becomes the publish call), and the
+/// tests pin the contract "the sink receives exactly the forwarded events,
+/// in emission order, drained once".
+///
+/// `Rc<RefCell<..>>` because sharing an emission buffer across the route
+/// tail (the settle half) is cheap clone-and-see; the sink never runs
+/// across threads (the same UI-thread discipline as the registry).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CollectingSink {
+    events: Rc<RefCell<Vec<WidgetEvent>>>,
+}
+
+impl CollectingSink {
+    /// Snapshot of the collected events, in emission order.
+    // The assertion tests' read (the bridge itself drains, never peeks).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn collected(&self) -> Vec<WidgetEvent> {
+        self.events.borrow().clone()
+    }
+
+    /// Drain the collected events (the bridge's consumption point). The
+    /// sink stays usable across drains.
+    pub(crate) fn take(&mut self) -> Vec<WidgetEvent> {
+        std::mem::take(&mut self.events.borrow_mut())
+    }
+}
+
+impl WidgetEventSink for CollectingSink {
+    fn emit(&mut self, event: WidgetEvent) {
+        self.events.borrow_mut().push(event);
+    }
+}
+
+/// The bridge lifecycle counters (§16 probes) — what the SCN-014
+/// registration/teardown flow did. Read via [`MountRegistry::counters`];
+/// the registry is a thread-local, so tests compare DELTAS around their
+/// actions (a test thread always starts fresh, but the comparison is also
+/// topologically stable if the test pool ever reuses threads).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct MountCounters {
+    /// [`MountRegistry::register_surface`] calls (fresh, preserved and
+    /// replaced registrations).
+    pub registers: usize,
+    /// Re-registers that PRESERVED the running machines (the
+    /// PRESERVE-ON-IDENTICAL rule — see [`MountRegistry::register_surface`]).
+    pub registers_preserved: usize,
+    /// Re-registers that REPLACED the machines (the surface shape moved).
+    pub registers_replaced: usize,
+    /// Completed machine releases — `teardown_surface` AND the release
+    /// half of a replacement (every removal flows through the one
+    /// `release_mount` path, so the accounting has no second truth).
+    pub torn_down: usize,
+    /// Mount messages the bridge resolved against a registered surface
+    /// (`Message::WidgetMountMsg` arm → routed, whatever the verdict).
+    pub messages_routed: usize,
+    /// Prompt requests the bridge surfaced (`MountRouting::PromptRequested`
+    /// routed) — the §16 tick-count handle for the interactions awaiting
+    /// the real dialog UI (SCN-015: the dialog rides the app's modal
+    /// patterns; nothing prompt-sided runs yet).
+    pub prompts_surfaced: usize,
+}
+
+/// The PRESERVE-ON-IDENTICAL comparison input: the surface's structural
+/// fingerprint (`revision` + root count + per-kind node counts, the same
+/// walk discipline as the crate's `WidgetSummary` — one explicit stack, no
+/// recursion). Deriving `PartialEq` keeps the registration rule ONE
+/// expression; the walk ignores KIND-LEVEL content on purpose — the
+/// revision is the plugin's freshness authority (§16), so equal shape at
+/// equal revision is an identical-refresh claim, not a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MountSurfaceShape {
+    revision: SceneRevision,
+    roots: usize,
+    trees: usize,
+    lists: usize,
+    icon_buttons: usize,
+    menus: usize,
+    tables: usize,
+    groups: usize,
+}
+
+/// One-walk shape of `surface` (see [`MountSurfaceShape`]).
+fn surface_shape(surface: &WidgetSurface) -> MountSurfaceShape {
+    let mut shape = MountSurfaceShape {
+        revision: surface.revision,
+        roots: surface.roots.len(),
+        trees: 0,
+        lists: 0,
+        icon_buttons: 0,
+        menus: 0,
+        tables: 0,
+        groups: 0,
+    };
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        match node {
+            WidgetNode::Tree(_) => shape.trees += 1,
+            WidgetNode::List(_) => shape.lists += 1,
+            WidgetNode::IconButton(_) => shape.icon_buttons += 1,
+            WidgetNode::Menu(_) => shape.menus += 1,
+            WidgetNode::Table(_) => shape.tables += 1,
+            WidgetNode::Group(group) => {
+                shape.groups += 1;
+                walker.extend(group.children.iter());
+            }
+        }
+    }
+    shape
+}
+
+/// THE machine-release path: every surface removal flows through here
+/// (teardown AND replacement) — the state's `pending_children` drop (§16
+/// "closing a tab cancels pending requests and releases state"), the
+/// dispatcher's read model + armed prompts + in-flight marks drop. One
+/// path, one counter ([`MountCounters::torn_down`]).
+///
+/// The wire-era gap, RECORDED not claimed: this cancels the MOUNT's view
+/// of pending lazy page fetches; genuinely cancelling in-flight IPC fetches
+/// needs the request-id vocabulary of the ADR-004 crossing (SCN-015).
+fn release_mount(handle: &SurfaceMountHandle) {
+    handle.state.borrow_mut().reset_all();
+    handle.dispatcher.borrow_mut().reset_all();
+}
+
+/// The headless test/bench registration seam: build the mount from an
+/// owned `surface`, register it under `panel_id` ([`MountRegistry::register_surface`]
+/// — the PRESERVE-ON-IDENTICAL lifecycle), and return a guard whose drop
+/// tears the surface down (RAII — a test scope cannot leak a registration
+/// into its thread neighbors).
+///
+// The seam the future GUI/panels/benches call (SCN-015 keeps it); only the
+// tests drive it today.
+///
+/// The mount state opens under the surface's FIRST root's id (every real
+/// surface roots at least one node; an empty surface falls back to
+/// `StableId(0)`): messages address a surface by that id, so a test routes
+/// with the same id it rooted. (App-owned registration, SCN-015, will name
+/// the id explicitly — this helper is the pre-app seam; the migration is
+/// "the guard's register call moves into the app update, keeping this
+/// signature".)
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn register_test_surface(panel_id: &str, surface: WidgetSurface) -> RegisteredGuard {
+    let surface_id = surface
+        .roots
+        .first()
+        .map(|node| node.widget_id())
+        .unwrap_or(StableId(0));
+    MountRegistry::register_surface(
+        panel_id,
+        SurfaceMountHandle::from_surface(surface_id, surface),
+    );
+    RegisteredGuard {
+        panel_id: panel_id.to_string(),
+    }
+}
+
+impl MountRegistry {
+    /// The lifecycle registration (SCN-014): mount `handle` for `panel_id`
+    /// on the PRESERVE-ON-IDENTICAL rule (SCN-014 decision, REG-1 spirit):
+    ///
+    /// - NO prior surface for the panel → register fresh.
+    /// - A prior surface whose [`surface_shape`] EQUALS the new one (equal
+    ///   `revision` + root count + per-kind node counts) → KEEP the
+    ///   existing handle: the running machines, their interaction state
+    ///   and their counters survive (an identical-resurface claim is a
+    ///   refresh, not a reset — the caller's fresh-but-identical handle is
+    ///   dropped unused).
+    /// - Anything else (different revision or shape) → REPLACE: the
+    ///   outgoing machines release through [`release_mount`] (pending
+    ///   children, armed prompts, in-flight marks — the §16 contract),
+    ///   then the new handle takes the slot with its own fresh machines.
+    ///
+    /// Idempotent per panel id by construction (at most one entry per id;
+    /// re-registers move a counter, never duplicate state).
+    ///
+    /// THE test/bench entry is [`register_test_surface`]; the future
+    /// app-owned registration (SCN-015) calls this seam once the registry
+    /// moves from the thread-local side map into the app state.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn register_surface(panel_id: &str, handle: SurfaceMountHandle) {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let identical = registry
+                .by_panel
+                .get(panel_id)
+                .is_some_and(|existing| {
+                    surface_shape(&existing.surface) == surface_shape(&handle.surface)
+                });
+            registry.counters.registers += 1;
+            if identical {
+                // PRESERVE-ON-IDENTICAL: the registered handle stays; the
+                // caller's fresh machines are simply dropped (byte-cheap:
+                // the unused surface clone dies with the handle).
+                registry.counters.registers_preserved += 1;
+            } else {
+                if let Some(previous) = registry.by_panel.remove(panel_id) {
+                    release_mount(&previous);
+                    registry.counters.registers_replaced += 1;
+                    registry.counters.torn_down += 1;
+                }
+                registry.by_panel.insert(panel_id.to_string(), handle);
+            }
+        });
+    }
+
+    /// The explicit teardown (§16 "closing a tab cancels pending requests
+    /// and releases state"): the machines release ([`release_mount`] — the
+    /// state's `pending_children` drop, the dispatcher's armed prompts/
+    /// in-flight marks and read model reset) and the registry entry
+    /// leaves. Idempotent: an unknown/already-torn-down panel id is a
+    /// graceful no-op (no release runs, no counter moves).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn teardown_surface(panel_id: &str) {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            if let Some(handle) = registry.by_panel.remove(panel_id) {
+                release_mount(&handle);
+                registry.counters.torn_down += 1;
+            }
+        });
+    }
+
+    /// The bridge's lookup: the registered mount whose state owns
+    /// `surface_id` — messages carry the surface id, the registry keys by
+    /// panel id, and this is the one place the two vocabularies meet (a
+    /// linear scan over the registered panels; panel counts are small,
+    /// clicks are human-rate).
+    ///
+    /// SURFACE-ID UNIQUENESS is the registration contract this lookup
+    /// exposes (the same contract the wire events make — a
+    /// `WidgetEvent::surface_id` names one surface): two registered
+    /// surfaces sharing an id would make this lookup order-dependent.
+    /// `None` for an unregistered id — the bridge refuses gracefully.
+    pub(crate) fn handle_for_surface(surface_id: StableId) -> Option<SurfaceMountHandle> {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .by_panel
+                .values()
+                .find(|handle| handle.surface_id() == surface_id)
+                .cloned()
+        })
+    }
+
+    /// The lifecycle counters' read side (§16 probes; tests/benches).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn counters() -> MountCounters {
+        MOUNT_REGISTRY.with(|registry| registry.borrow().counters)
+    }
+
+    /// The bridge's prompt tick-count (a `PromptRequested` routed): the
+    /// §16 handle the future dialog wiring picks up.
+    pub(crate) fn record_prompt_surfaced() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.prompts_surfaced += 1;
+        });
+    }
+
+    /// The bridge's routed-message tick — every
+    /// `Message::WidgetMountMsg` the handler resolved against a registered
+    /// surface (not the unknown-surface no-ops).
+    pub(crate) fn record_message_routed() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.messages_routed += 1;
+        });
+    }
+}
+
+/// RAII registration: the guarded surface tears down on drop
+/// ([`teardown_surface`]) — the test and bench seam ("register once; the
+/// scope closes; the state releases"). Migrating to the app-owned registry
+/// (SCN-015) keeps this type as the panels' keep-alive token; only its
+/// drop target moves (the app field, not the thread-local).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct RegisteredGuard {
+    panel_id: String,
+}
+
+impl Drop for RegisteredGuard {
+    fn drop(&mut self) {
+        MountRegistry::teardown_surface(&self.panel_id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1237,7 +1588,7 @@ mod tests {
     use ocs_plugin_api::dialog::PanelDef;
     use ocs_plugin_api::scene::SceneRevision;
     use ocs_plugin_api::widgets::{
-        ConfirmPolicy, IconRef, ItemDef, MenuItemDef, TreeCapabilities, TreeRowDef,
+        ConfirmPolicy, IconRef, ItemDef, MenuItemDef, TreeCapabilities, TreeRowDef, WidgetRange,
     };
 
     // -- construction helpers --------------------------------------------------
@@ -2201,5 +2552,427 @@ mod tests {
         // facts stay the assertion surface:
         assert_eq!(handle.state.borrow().explicit_expansion(sid(1)), Some(true));
         let _body = handle.body();
+    }
+
+    // -- 12. the SCN-014 registration lifecycle (headless seam) ---------------
+
+    /// A built handle routed + registered through the LIFECYCLE seam, moved
+    /// through the machines, then re-registered with an IDENTICAL surface
+    /// (equal revision + shape): the running state SURVIVES (the
+    /// PRESERVE-ON-IDENTICAL rule — REG-1 spirit) and the counters say
+    /// "preserved", never "replaced".
+    #[test]
+    fn register_preserves_state_on_identical_resurface() {
+        let fixture = || {
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "row"), item(8, "other")],
+            ))])
+        };
+        let _guard = register_test_surface("scn014_preserve", fixture());
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+
+        // Move the interaction state (apply through the machines).
+        {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+                &mut sink,
+            );
+        }
+        assert_eq!(handle.state.borrow().selection(), [sid(7)]);
+
+        // The identical resurface: same revision, same shape, rebuilt.
+        let before = MountRegistry::counters();
+        let _fresh_guard = register_test_surface("scn014_preserve", fixture());
+        let after = MountRegistry::counters();
+        assert_eq!(after.registers - before.registers, 1);
+        assert_eq!(
+            after.registers_preserved - before.registers_preserved,
+            1,
+            "the PRESERVE-ON-IDENTICAL rule counted"
+        );
+        assert_eq!(
+            after.registers_replaced - before.registers_replaced,
+            0,
+            "an identical resurface is not a replacement"
+        );
+
+        // The state survived: same machines (the SAME Rc pair), the
+        // selection lived through the resurface.
+        let still_registered = MountRegistry::handle_for_surface(sid(200))
+            .expect("the panel stays registered");
+        assert!(
+            Rc::ptr_eq(&still_registered.state, &handle.state),
+            "the ORIGINAL machines stayed registered"
+        );
+        assert_eq!(
+            still_registered.state.borrow().selection(),
+            [sid(7)],
+            "the interaction state survived the identical resurface"
+        );
+        assert_eq!(
+            still_registered.state.borrow().mutations().whole_state_resets,
+            0,
+            "no reset ran"
+        );
+    }
+
+    /// A re-register whose surface MOVED (different revision) REPLACES: the
+    /// outgoing machines release through the one dispose path (pending
+    /// children, armed marks), the counter says "replaced" + one
+    /// torn_down, and the slot's machines are fresh (no state carried
+    /// over).
+    #[test]
+    fn register_replaces_and_resets_on_changed_surface() {
+        let _guard = register_test_surface(
+            "scn014_replace",
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "row"), item(8, "other")],
+            ))]),
+        );
+        let old_handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        {
+            let mut state = old_handle.state.borrow_mut();
+            let mut dispatcher = old_handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+                &mut sink,
+            );
+        }
+        assert_eq!(old_handle.state.borrow().selection(), [sid(7)]);
+
+        // The CHANGED surface: a raised revision (+ a grown list to make
+        // the shape move too).
+        let changed = WidgetSurface {
+            revision: SceneRevision(2),
+            ..surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "row"), item(8, "other"), item(9, "new")],
+            ))])
+        };
+        let before = MountRegistry::counters();
+        let _replaced = register_test_surface("scn014_replace", changed);
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.registers_replaced - before.registers_replaced,
+            1,
+            "a moved surface replaces"
+        );
+        assert_eq!(
+            after.registers_preserved - before.registers_preserved,
+            0,
+            "a moved surface never preserves"
+        );
+        assert_eq!(
+            after.torn_down - before.torn_down,
+            1,
+            "the outgoing machine release flows through the ONE dispose path"
+        );
+
+        // The slot's machines are FRESH: a new Rc pair, no carried state.
+        let new_handle = MountRegistry::handle_for_surface(sid(200)).expect("still registered");
+        assert!(
+            !Rc::ptr_eq(&new_handle.state, &old_handle.state),
+            "a new machine pair took the slot"
+        );
+        assert!(new_handle.state.borrow().selection().is_empty());
+        assert_eq!(
+            new_handle.state.borrow().mutations().whole_state_resets,
+            0,
+            "the new state is fresh, not a reset"
+        );
+        // And the OUTGOING machines released: the interaction state is
+        // gone (the §16 contract ran on the old pair).
+        assert!(
+            old_handle.state.borrow().selection().is_empty(),
+            "the outgoing machines released"
+        );
+        assert_eq!(
+            old_handle.state.borrow().mutations().whole_state_resets,
+            1,
+            "the outgoing release reset them exactly once"
+        );
+    }
+
+    /// §16 "closing a tab cancels pending requests and releases state": a
+    /// lazy expand toggled ON parks a pending child-page request; the
+    /// teardown drops it (the state's `reset_all`) and releases the
+    /// registration; a second teardown — or the guard's drop after a
+    /// manual one — is a quiet idempotent no-op. (The WIRE era note: the
+    /// genuinely in-flight IPC fetch cancellation needs the request-id
+    /// vocabulary of the ADR-004 crossing — RECORDED, see the module docs.)
+    #[test]
+    fn teardown_cancels_pending_children() {
+        let lazy_row = TreeRowDef {
+            lazy_children: true,
+            ..expandable_row(1, None, "Root A")
+        };
+        let _guard = register_test_surface(
+            "scn014_teardown",
+            surface(vec![tree(
+                100,
+                vec![lazy_row, tree_row(11, Some(1), "A.1")],
+                false,
+            )]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(100)).expect("registered");
+        let state_rc = handle.state.clone();
+
+        // Open the lazy branch: the toggle emits the expanded notification
+        // AND the child-page request; the request parks in pending.
+        let (routing, _) = {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            let routing = apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::RowExpandedToggled {
+                    surface_id: sid(100),
+                    widget_id: sid(100),
+                    row_id: sid(1),
+                    expanded: true,
+                },
+                &mut sink,
+            );
+            (routing, sink)
+        };
+        assert_eq!(routing, MountRouting::Applied { forwarded: 2 });
+        assert_eq!(
+            state_rc.borrow().pending_children().len(),
+            1,
+            "the lazy page request parked"
+        );
+
+        // The teardown: pending dropped, registry released, counted.
+        let before = MountRegistry::counters();
+        MountRegistry::teardown_surface("scn014_teardown");
+        assert!(
+            !MountRegistry::mount_registered("scn014_teardown"),
+            "the registry released"
+        );
+        assert!(MountRegistry::handle_for_surface(sid(100)).is_none());
+        assert_eq!(
+            state_rc.borrow().pending_children().len(),
+            0,
+            "the pending requests DROPPED (state reset_all)"
+        );
+        assert_eq!(
+            state_rc.borrow().mutations().whole_state_resets,
+            1,
+            "exactly one explicit reset"
+        );
+        assert_eq!(MountRegistry::counters().torn_down - before.torn_down, 1);
+
+        // Idempotent: a second teardown — and the guard's drop after the
+        // manual one — change nothing and panic nowhere.
+        MountRegistry::teardown_surface("scn014_teardown");
+        drop(_guard);
+        assert_eq!(
+            MountRegistry::counters().torn_down - before.torn_down,
+            1,
+            "the idempotent no-ops moved no counters"
+        );
+    }
+
+    /// The guard owns the teardown when it drops; a MANUAL teardown during
+    /// the guard's life makes the drop a no-op (idempotent), and every
+    /// path accounts exactly.
+    #[test]
+    fn raii_guard_tears_down_on_drop() {
+        let before = MountRegistry::counters();
+        // (a) the guard owns the only teardown.
+        {
+            let _guard = register_test_surface(
+                "scn014_raii_a",
+                surface(vec![WidgetNode::List(item_list(
+                    201,
+                    vec![item(7, "row")],
+                ))]),
+            );
+            assert!(MountRegistry::mount_registered("scn014_raii_a"));
+        }
+        assert!(
+            !MountRegistry::mount_registered("scn014_raii_a"),
+            "the drop tore the surface down"
+        );
+        assert_eq!(MountRegistry::counters().torn_down - before.torn_down, 1);
+
+        // (b) a manual teardown during the guard's life: the guard's drop
+        // is the idempotent no-op (no double count, no panic).
+        {
+            let _guard = register_test_surface(
+                "scn014_raii_b",
+                surface(vec![WidgetNode::List(item_list(
+                    202,
+                    vec![item(7, "row")],
+                ))]),
+            );
+            MountRegistry::teardown_surface("scn014_raii_b");
+            assert!(!MountRegistry::mount_registered("scn014_raii_b"));
+        }
+        assert_eq!(
+            MountRegistry::counters().torn_down - before.torn_down,
+            2,
+            "accounted exactly once per teardown"
+        );
+    }
+
+    /// The bridge sink contract (headless): the COLLECTING sink receives
+    /// EXACTLY the forwarded events — in emission order, drained once, and
+    /// reusable across drains (`take` is the bridge's consumption point).
+    #[test]
+    fn collecting_sink_receives_exactly_the_forwarded_events() {
+        let lazy_row = TreeRowDef {
+            lazy_children: true,
+            ..expandable_row(1, None, "Root A")
+        };
+        let _guard = register_test_surface(
+            "scn014_sink",
+            surface(vec![tree(
+                100,
+                vec![lazy_row, tree_row(11, Some(1), "A.1")],
+                false,
+            )]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(100)).expect("registered");
+
+        let mut sink = CollectingSink::default();
+        let routing = {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::RowExpandedToggled {
+                    surface_id: sid(100),
+                    widget_id: sid(100),
+                    row_id: sid(1),
+                    expanded: true,
+                },
+                &mut sink,
+            )
+        };
+        assert_eq!(routing, MountRouting::Applied { forwarded: 2 });
+        assert_eq!(
+            sink.take(),
+            vec![
+                WidgetEvent::TreeExpanded {
+                    surface_id: sid(100),
+                    node_id: sid(1),
+                    expanded: true,
+                },
+                WidgetEvent::ChildrenRequested {
+                    surface_id: sid(100),
+                    parent_id: sid(1),
+                    range: WidgetRange {
+                        start: 0,
+                        len: MAX_WIDGET_RANGE_LEN
+                    },
+                },
+            ],
+            "exactly the forwarded events, in emission order"
+        );
+        assert_eq!(sink.take(), Vec::new(), "drained exactly once");
+        assert!(
+            sink.collected().is_empty(),
+            "the drained sink reports nothing collected"
+        );
+        assert_eq!(
+            sink.take(),
+            Vec::new(),
+            "the sink stays usable across drains"
+        );
+    }
+
+    /// Two panels registered side-by-side (the fixture surface ids pick
+    /// apart cleanly): a message for panel A's surface routes ONLY through
+    /// A's machines — B's state, B's machines and B's read model never see
+    /// it — and the surface-keyed lookup never hands a panel the other
+    /// panel's handle.
+    #[test]
+    fn mount_registry_isolation_between_panels() {
+        let surface_a = || {
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "A row")],
+            ))])
+        };
+        let surface_b = || {
+            surface(vec![tree(
+                300,
+                vec![tree_row(1, None, "B row")],
+                false,
+            )])
+        };
+        let _guard_a = register_test_surface("scn014_isolation_a", surface_a());
+        let _guard_b = register_test_surface("scn014_isolation_b", surface_b());
+
+        // The lookups separate the panels (surface 200 = A's, 300 = B's).
+        let handle_a = MountRegistry::handle_for_surface(sid(200)).expect("A registered");
+        let handle_b = MountRegistry::handle_for_surface(sid(300)).expect("B registered");
+        assert_eq!(handle_a.surface_id(), sid(200));
+        assert_eq!(handle_b.surface_id(), sid(300));
+        assert!(
+            !Rc::ptr_eq(&handle_a.state, &handle_b.state),
+            "the panels carry distinct machines"
+        );
+        assert!(
+            !Rc::ptr_eq(&handle_a.dispatcher, &handle_b.dispatcher),
+            "the panels carry distinct dispatchers"
+        );
+
+        // A's message routes through A's machines ONLY.
+        {
+            let mut state = handle_a.state.borrow_mut();
+            let mut dispatcher = handle_a.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+                &mut sink,
+            );
+        }
+        assert_eq!(
+            handle_a.state.borrow().selection(),
+            [sid(7)],
+            "A took its own message"
+        );
+        // B's machines never moved (no selection, no writes, no pending).
+        assert!(
+            handle_b.state.borrow().selection().is_empty(),
+            "B never saw A's message"
+        );
+        assert_eq!(handle_b.state.borrow().mutations().row_state_changes, 0);
+        assert_eq!(handle_b.state.borrow().pending_children().len(), 0);
+
+        // And B's disposition is gate-identical: unmounting A leaves B's
+        // registration exactly in place (per-panel accounting only).
+        MountRegistry::teardown_surface("scn014_isolation_a");
+        assert!(MountRegistry::mount_registered("scn014_isolation_b"));
+        assert!(MountRegistry::handle_for_surface(sid(300)).is_some());
+        assert!(MountRegistry::handle_for_surface(sid(200)).is_none());
     }
 }

@@ -566,17 +566,20 @@ impl PluginPanelState {
         // SCN-013 widget-surface mount hook (additive): when the host has a
         // registered WidgetSurface for THIS panel id, the mounted body renders
         // and the legacy control loop below never runs. NOTHING registers a
-        // widget surface yet (the integration task SCN-014 lands the registry
-        // wiring), so every panel today — and every existing test — falls to
-        // `None` and takes the legacy branch byte-identically.
-        // `WidgetMountMsg -> Message::Noop` is the DEFERRED one-line bridge:
-        // the mount's messages are not routed at app level until SCN-014 (the
-        // mount owns the vocabulary + routing into its state machines; tests
-        // assert message STRUCTURE, not Tasks).
+        // widget surface yet (the app-owned registration flow is the SCN-015
+        // follow-up), so every panel today — and every existing test — falls
+        // to `None` and takes the legacy branch byte-identically.
+        // SCN-014 made the gate's mapping REAL: each builder-emitted gesture
+        // rides `Message::WidgetMountMsg` — through the bridge's one
+        // `app_message` mapping — into `app::update::widget_mount`, which
+        // applies it to the registered machines and settles the forwarded
+        // commands' addresses (bridge-forwards-then-settle).
         let body = match crate::ui::window::plugin_widget_mount::MountRegistry::mounted_body(
             self.def.id.as_str(),
         ) {
-            Some(surface_view) => surface_view.map(|_mount_msg| Message::Noop),
+            Some(surface_view) => {
+                surface_view.map(crate::ui::window::plugin_widget_mount::app_message)
+            }
             None => {
                 let mut body_col = column![].spacing(8).width(Fill);
                 for control in &self.def.controls {

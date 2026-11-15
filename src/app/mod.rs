@@ -6101,6 +6101,17 @@ pub enum Message {
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),
+    /// The widget-mount bridge (SCN-014): one builder-emitted mount gesture,
+    /// routed into the registered panel's widget state machines by
+    /// `app::update::widget_mount` (apply → forward → settle). Tail-append
+    /// on purpose (no index-bearing consumers) and host-local ONLY: this
+    /// enum carries no serialization derives (no wire/discriminant risk).
+    // The payload type lives in the mount's `pub(crate)` module (the
+    // registry is host internals by design), while `Message` itself is the
+    // app's public type: the deliberate visibility mismatch is this
+    // variant's own boundary, so the lint is allowed AT the variant.
+    #[allow(private_interfaces)]
+    WidgetMountMsg(crate::ui::window::plugin_widget_mount::WidgetMountMsg),
 }
 
 #[derive(Debug, Clone)]

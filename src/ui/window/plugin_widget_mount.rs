@@ -1318,6 +1318,7 @@ mod tests {
         WidgetSurface {
             revision: SceneRevision(1),
             roots,
+            tables: std::collections::BTreeMap::new(),
         }
     }
 

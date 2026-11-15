@@ -365,6 +365,8 @@ fn command_category(name: &str) -> &'static str {
         "SPLINEDIT",
         "REVERSE",
         "ALIGN",
+        "ADDVERTEX",
+        "DELVERTEX",
     ]
     .contains(&name)
     {

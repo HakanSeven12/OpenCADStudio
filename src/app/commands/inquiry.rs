@@ -758,6 +758,18 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "ADDVERTEX" => {
+                let cmd = crate::modules::draw::modify::vertex_edit::AddVertexCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DELVERTEX" => {
+                let cmd = crate::modules::draw::modify::vertex_edit::DelVertexCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "DIVIDE" => {
                 use crate::modules::draw::inquiry::divide::DivideCommand;
                 let cmd = DivideCommand::new().with_blocks(self.tabs[i].scene.custom_block_names());

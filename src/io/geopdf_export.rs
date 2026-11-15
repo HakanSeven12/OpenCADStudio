@@ -8,7 +8,6 @@
 use crate::io::crs::CrsDefinition;
 use crate::io::plot::PlotPage;
 use lopdf::{Dictionary, Document, Object, ObjectId};
-use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeoPdfCoordinateSystem {
@@ -378,7 +377,7 @@ fn replace_precise_arrays(mut bytes: Vec<u8>, precise: &[PreciseArray]) -> Resul
     let mut output = bytes[..new_xref_offset].to_vec();
     let mut tail = String::from("xref\n");
     for section in &subsections {
-        writeln!(tail, "{} {}", section.start, section.entries.len()).unwrap();
+        tail.push_str(&format!("{} {}\n", section.start, section.entries.len()));
         for entry in &section.entries {
             let offset = if entry.in_use {
                 shifted(entry.offset)?
@@ -388,13 +387,11 @@ fn replace_precise_arrays(mut bytes: Vec<u8>, precise: &[PreciseArray]) -> Resul
             if offset as u64 > 9_999_999_999_u64 {
                 return Err("The rebuilt PDF exceeds classic xref offsets".to_string());
             }
-            writeln!(
-                tail,
-                "{offset:010} {:05} {}",
+            tail.push_str(&format!(
+                "{offset:010} {:05} {}\n",
                 entry.generation,
                 if entry.in_use { 'n' } else { 'f' }
-            )
-            .unwrap();
+            ));
         }
     }
     tail.push_str("trailer");
@@ -402,7 +399,7 @@ fn replace_precise_arrays(mut bytes: Vec<u8>, precise: &[PreciseArray]) -> Resul
         std::str::from_utf8(&original[trailer_offset + b"trailer".len()..startxref_offset])
             .map_err(|_| "The PDF trailer is not ASCII".to_string())?,
     );
-    writeln!(tail, "startxref\n{new_xref_offset}\n%%EOF").unwrap();
+    tail.push_str(&format!("startxref\n{new_xref_offset}\n%%EOF\n"));
     output.extend(tail.as_bytes());
     Ok(output)
 }

@@ -161,6 +161,9 @@ pub(super) struct DocumentTab {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) disk_fingerprint: Option<crate::io::edit_lock::FileFingerprint>,
     pub(super) dirty: bool,
+    /// USERS1..USERS5: the drawing's string registers. Like the reference
+    /// application they live with the open drawing and are not saved.
+    pub(super) user_strings: [String; 5],
     /// Direct Save is redirected to Save As after open-time repairs so the
     /// source drawing cannot be overwritten accidentally.
     pub(super) recovery_save_as_required: bool,
@@ -814,6 +817,7 @@ impl DocumentTab {
             #[cfg(not(target_arch = "wasm32"))]
             disk_fingerprint: None,
             dirty: false,
+            user_strings: Default::default(),
             recovery_save_as_required: false,
             ifccad_alpha_acknowledged: false,
             ifccad_session: None,

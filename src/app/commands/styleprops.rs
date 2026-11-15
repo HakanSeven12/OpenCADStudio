@@ -1166,6 +1166,10 @@ impl OpenCADStudio {
                 return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
             }
 
+            cmd if user_register(cmd).is_some() => {
+                return self.dispatch_styleprops(&format!("SETVAR {cmd}"), i);
+            }
+
             "SETVAR" => {
                 use crate::command::TwoValuePromptCommand;
                 let c = TwoValuePromptCommand::new(
@@ -1202,6 +1206,10 @@ impl OpenCADStudio {
                         "CANNOSCALE" | "ANNOALLVISIBLE" | "ANNOAUTOSCALE" | "HPLAYER" | "MSLTSCALE"
                     ) {
                         return Some(self.annotation_setvar(i, &name, value.as_deref()));
+                    }
+                    if let Some((kind, slot)) = user_register(&name) {
+                        self.user_register_setvar(i, kind, slot, value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
                     }
                     if name == "GROUPDISPLAYMODE" {
                         self.group_display_setvar(value.as_deref());
@@ -5510,5 +5518,94 @@ impl OpenCADStudio {
                 tab.scene.bump_geometry();
             }
         }
+    }
+}
+
+/// `USERI1`..`USERI5`, `USERR1`..`USERR5`, `USERS1`..`USERS5`: the register
+/// kind (`I`, `R` or `S`) and its index 0..=4.
+fn user_register(name: &str) -> Option<(char, usize)> {
+    let rest = name.strip_prefix("USER")?;
+    let mut chars = rest.chars();
+    let kind = chars.next().filter(|c| matches!(c, 'I' | 'R' | 'S'))?;
+    let slot = match chars.as_str() {
+        "1" => 0,
+        "2" => 1,
+        "3" => 2,
+        "4" => 3,
+        "5" => 4,
+        _ => return None,
+    };
+    Some((kind, slot))
+}
+
+impl OpenCADStudio {
+    /// Reads or sets one user register. Integers and reals are saved with
+    /// the drawing (header USERI/USERR); strings stay with the open tab.
+    fn user_register_setvar(&mut self, i: usize, kind: char, slot: usize, value: Option<&str>) {
+        fn int(h: &mut document::document::HeaderVariables, slot: usize) -> &mut i16 {
+            match slot {
+                0 => &mut h.user_int1,
+                1 => &mut h.user_int2,
+                2 => &mut h.user_int3,
+                3 => &mut h.user_int4,
+                _ => &mut h.user_int5,
+            }
+        }
+        fn real(h: &mut document::document::HeaderVariables, slot: usize) -> &mut f64 {
+            match slot {
+                0 => &mut h.user_real1,
+                1 => &mut h.user_real2,
+                2 => &mut h.user_real3,
+                3 => &mut h.user_real4,
+                _ => &mut h.user_real5,
+            }
+        }
+        let name = format!("USER{kind}{}", slot + 1);
+        let tab = &mut self.tabs[i];
+        let h = &mut tab.scene.document.header;
+        let current = match kind {
+            'I' => int(h, slot).to_string(),
+            'R' => real(h, slot).to_string(),
+            _ => tab.user_strings[slot].clone(),
+        };
+        let accepted = match value.map(str::trim).filter(|v| !v.is_empty()) {
+            None => None,
+            Some(value) => Some(match kind {
+                'I' => value.parse::<i16>().map(|v| *int(h, slot) = v).is_ok(),
+                'R' => value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .map(|v| *real(h, slot) = v)
+                    .is_some(),
+                _ => {
+                    tab.user_strings[slot] = value.to_string();
+                    true
+                }
+            }),
+        };
+        match accepted {
+            Some(true) => {
+                if kind != 'S' {
+                    tab.dirty = true;
+                }
+                return;
+            }
+            Some(false) => {
+                if kind == 'I' {
+                    let (min, max) = (i16::MIN, i16::MAX);
+                    self.command_line.push_rejection(&crate::tf!(
+                        "Requires an integer between {min} and {max}."
+                    ));
+                } else {
+                    self.command_line
+                        .push_rejection(crate::t!("Requires a number.").as_ref());
+                }
+            }
+            None => {}
+        }
+        self.command_line
+            .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+        self.pending_setvar = Some(name);
     }
 }

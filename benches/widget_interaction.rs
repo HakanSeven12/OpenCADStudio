@@ -16,22 +16,37 @@
 //! `src/ui/window/plugin_widget_mount.rs` — `MountInputState`/`HoverState`,
 //! `mount_move_defer`/`mount_flush_moves`/`mount_pointer_released`,
 //! `MountCounters.mount_move_calls`/`coalesced_moves_superseded` all
-//! `pub(crate)`). Wider `pub` seams on host sources are NOT this task's to
-//! make (no src/ edits), so per the coordinator's binding decision this
-//! bench is a CONTRACT-SHAPED **REPLICA** at the `ocs_plugin_api` pub layer:
+//! `pub(crate)`). That r0 branch-tip grep made the wall-clock layer a
+//! CONTRACT-SHAPED **REPLICA** at the `ocs_plugin_api` pub layer:
 //! bench-side structures that mirror the two machines field-for-field
 //! (same state shape, same transitions, same counter moves), driven over
 //! the pub API vocabulary — `WidgetSurface`/`WidgetNode`/`TreeRowDef`
 //! (the anchored draggable address space, validated at construction),
 //! `StableId`/`SceneRevision`, `DragMeta` (the verbatim payload), and the
-//! real `iced::Point` the host machines use.
+//! real `iced::Point` the host machines use. Those replica rows REMAIN in
+//! this bench (evidence kept, none deleted); each replica `surface` label
+//! now carries a `superseded-by-real` pointer to the matching REAL row.
+//!
+//! r1 (SCN-024, ADR-007 item 3): the deferred real-counter wall-clock rows
+//! LANDED through the host's own `#[doc(hidden)] pub` bench seams —
+//! `MountRegistry` (+ `SurfaceMountHandle` construction + the `*_owned`
+//! drive/read paths) and the REAL `DragSession`/`DragCounters` machines.
+//! The seams are inspect/drive-only (SCN-024's visibility-only widening;
+//! never wire; not part of the host's documentary API). The cfg(test)
+//! static facade in plugin_widget_mount.rs is still invisible to benches
+//! (benches compile WITHOUT cfg(test)) — the bench-visible surface is the
+//! INSTANCE world: a bench-local `MountRegistry::default()` the bench
+//! registers its anchored surface into.
 //!
 //! Honest-byte rule (SCN-012 convention, binding): every scenario labels
-//! WHICH surface it measured — these are REPLICA numbers, not regisistry
-//! numbers — and every `pub(crate)` half is recorded as a `scope:
-//! "deferred"` `Counter` pointing at the in-source unit tests that hold the
-//! authoritative evidence today. Both facts print every run. The replica
-//! CALIBRATES the contract; the real path PINS it via tests (§7
+//! WHICH surface it measured — REAL rows label `REAL host registry/machines`
+//! and carry their counters at `scope: "measured-real"` (the run record's
+//! deferred map moves those items from `deferred` to `measured-real`);
+//! replica rows label the bench-side replica structures, and the remaining
+//! pub(crate) halves stay `scope: "deferred"` counters pointing at the
+//! in-source unit tests that hold the authoritative evidence today. Both
+//! facts print every run. The replica CALIBRATES the contract; the real
+//! rows MEASURE the real machines' wall-clock + counter evolution (§7
 //! anti-defect: ≤1-in-flight under load, lossless storm settle/cancel).
 //!
 //! Deferred authority map (the real-path evidence this bench points at):
@@ -53,15 +68,18 @@
 //!
 //! # Scenarios
 //!
+//! r0 shape (the SCN-022 replica rows — kept running, honestly labeled):
 //! 1. `park_storm_10k` — 10 000 pointer moves deferred into ONE park slot
 //!    (the `move_owed` shape): the slot never grows (constant footprint,
 //!    asserted per sample), it holds EXACTLY the newest position, and the
 //!    bench-emulated `Vec` page-queue anti-pattern (the same 10 000 moves
 //!    queued) is measured beside it as the growth the slot must not have.
+//!    *(r1: wall-clock superseded by `mount_move_coalesce_real`.)*
 //! 2. `drain_delivers_latest_only` — the 10 000-park storm answered by ONE
 //!    tick flush = exactly one delivery = the storm's LAST position
 //!    (latest-wins delivery; lossless = the latest defines). Percentiles
 //!    over 1 000 tick-flushes and over the release-completion path.
+//!    *(r1: wall-clock superseded by `mount_move_coalesce_real`.)*
 //! 3. `settle_cancel_storm` — 1 000 begin/settle pairs + 250 cancels per
 //!    storm through the DragSession-replica rail: every interaction
 //!    completes exactly once, every completion DRAINS the parked slot
@@ -69,9 +87,29 @@
 //!    counter identity `begins == settles + cancels` holds, and re-arm
 //!    (armed→in-flight→settled→armed again) costs are timed beside fresh
 //!    rails. Counter evolution is printed at storm milestones.
-//! 4. `keyboard_nav_burst` — DEFERRED (recorded, not run): the §7 keyboard
-//!    focus ring is host state (`nav_ring`/`focus_next`/`focus_prev`,
-//!    pub(crate)); no pub api-crate surface exists. n=0, `executed=false`.
+//!    *(r1: wall-clock superseded by `drag_storm_real`.)*
+//! 4. `keyboard_nav_burst` — DEFERRED in r0 (recorded, not run: the §7
+//!    keyboard focus ring was pub(crate) host state). *(r1: EXECUTED as a
+//!    REAL row — see below; the r0 record keeps its skipped shape in that
+//!    untouched log.)*
+//!
+//! r1 additions (SCN-024, ADR-007 item 3 — the host-counter wall-clock
+//! rows through the pub `#[doc(hidden)]` bench seams):
+//! 5. `mount_move_coalesce_real` — the parked-move storm through the REAL
+//!    registry (`MountRegistry::mount_move_defer_owned` /
+//!    `mount_flush_moves_owned` / the release completion), real
+//!    `MountCounters::mount_move_calls` / `coalesced_moves_superseded`
+//!    evolution printed as before/after deltas, newest position asserted
+//!    from the real per-surface input snapshot.
+//! 6. `drag_storm_real` — the REAL `DragSession` begin/move/settle/cancel
+//!    storm (same interleave shape as the replica row) with the real
+//!    `DragCounters` scroll; printed plotted BESIDE the replica row.
+//! 7. `keyboard_nav_burst` — N key steps (e.g. 10 000 Tab steps per burst,
+//!    a 1 024-step Down/Up sawtooth) through the REAL ring + roving
+//!    machines (`key_route_owned`, which also ticks the real
+//!    `MountCounters::keyboard_nav_steps`), per-step deterministic
+//!    row-landing asserts (the newest-wins roving chain), wall-clock
+//!    percentiles + counter evolution. The r0 SKIPPED row is now real.
 //!
 //! Run: `cargo bench --locked --bench widget_interaction` (bench profile =
 //! release; per-scenario sample Ns documented beside the constants). The
@@ -85,10 +123,17 @@ use std::collections::HashSet;
 use std::hint::black_box;
 use std::mem;
 
+use iced::keyboard::{Key, Modifiers, key as keyboard_key};
 use iced::Point;
 use ocs_plugin_api::scene::{DragMeta, SceneRevision, StableId};
 use ocs_plugin_api::widgets::{
     TreeCapabilities, TreeRowDef, WidgetNode, WidgetSurface, WidgetTreeDef,
+};
+use OpenCADStudio::ui::window::plugin_drag::{
+    DragCancelReason, DragCounters, DragRefusal, DragSession, MoveDisposition, DRAG_THRESHOLD_PX,
+};
+use OpenCADStudio::ui::window::plugin_widget_mount::{
+    MountRegistry, SurfaceMountHandle, WidgetMountMsg, bench_handle_mount_key_owned,
 };
 
 #[path = "support/scene_support.rs"]
@@ -144,6 +189,32 @@ const PARKS_CANCEL: usize = 2; // cancels: cross + 2 parks, cancel drains
 /// that module's documented decision — 3 px sits below the grip pick
 /// apertures but above hand-shake jitter).
 const BENCH_DRAG_THRESHOLD_PX: f32 = 3.0;
+
+// ---------------------------------------------------------------------------
+// SCN-024 REAL-row workload constants (ADR-007 item 3; the bench seams)
+// ---------------------------------------------------------------------------
+
+/// The bench's registered panel id in its own REAL registry instance (the
+/// registration key is a plain string — the app's panel ids; a bench-local
+/// namespace so no real panel id can collide).
+const BENCH_PANEL_ID: &str = "bench-widget-interaction";
+
+/// Keyboard burst, main population: Tab steps per timed sample (the r0
+/// skipped row's planned burst order; the ring wraps every `ANCHOR_ROWS`
+/// steps — the seat model is exact for every i).
+const KEY_STEPS_TAB_BURST: usize = 10_000;
+/// Samples over the 10k-step Tab bursts (slow ops floor: >= 20).
+const SAMPLES_KEY_TAB_BURST: usize = 20;
+/// Down/Up sawtooth: cycles of (64 Downs + 64 Ups) = 1 024 keys per
+/// sample; the row-aligned shape keeps every productive step on either
+/// side of the ring edges and gives the edge REFUSALS exact counts (the
+/// clean-refusal part of the pure-layer contract).
+const KEY_SAWTOOTH_CYCLES: usize = 8;
+const KEY_SAWTOOTH_STEPS: usize = KEY_SAWTOOTH_CYCLES * 2 * ANCHOR_ROWS; // 1_024
+/// Samples over the 1 024-key sawtooth populations.
+const SAMPLES_KEY_SAWTOOTH: usize = 60;
+/// Single-step Tab population (per-step hop-cost percentiles).
+const SAMPLES_KEY_STEP: usize = 1_000;
 
 /// Deterministic storm position `i` (dyadic floats: exactly representable,
 /// so the newest-position comparisons are EXACT, not approximate).
@@ -616,6 +687,89 @@ fn deferred_counter(name: &str, note: String) -> Counter {
     }
 }
 
+/// Real-counter (SCN-024): read off the REAL host machines, driven through
+/// the #[doc(hidden)] pub bench seams. NOTE the scope switch: items the r0
+/// run recorded as `scope: "deferred"` print at `measured-real` from here
+/// on, with the value = the measured counter walk.
+fn measured_real_counter(name: &str, value: u64, machine: &str) -> Counter {
+    Counter {
+        name: name.to_owned(),
+        scope: "measured-real",
+        value: Some(value),
+        note: Some(format!(
+            "REAL {machine} driven through the #[doc(hidden)] bench seam              (SCN-024; ADR-007 item 3; never wire) — was scope \"deferred\" in              pointer-burst-r0.log"
+        )),
+    }
+}
+
+/// A REAL `MountRegistry` instance with the anchored surface registered and
+/// the keyboard target named — the "set the target surface first" setup
+/// step of every real row. Returns the registry and the registered
+/// surface's id (the mount state opens under the surface's FIRST root id —
+/// the same opener `register_test_surface` uses in-crate).
+fn registered_registry() -> (MountRegistry, StableId) {
+    let surface = anchored_surface();
+    let mount_id = surface
+        .roots
+        .first()
+        .map(|node| node.widget_id())
+        .unwrap_or(StableId(0));
+    let mut registry = MountRegistry::default();
+    registry.register_surface_owned(
+        BENCH_PANEL_ID,
+        SurfaceMountHandle::from_surface(mount_id, surface),
+    );
+    // The point-free keyboard-grab seam: name the surface as the keys'
+    // target without a pointer press (the bench's burst pre-step).
+    registry.set_mount_key_target_owned(Some(mount_id));
+    // The resolution read-back: the keyboard target resolution must honor
+    // the pointed target (the same read the app's route step 1 makes).
+    assert_eq!(
+        registry.mount_key_surface_owned(),
+        Some(mount_id),
+        "set-the-target-first: the REAL resolution honors the named target"
+    );
+    (registry, mount_id)
+}
+
+/// ONE real keyboard step — the app's `on_mount_key` route body, driven
+/// here call-for-call (the app fn itself sits behind the private
+/// `crate::app::update` module chain and is NOT bench-reachable; these are
+/// the SAME three in-crate calls it makes, in the same order):
+/// 1. target resolution ([`MountRegistry::mount_key_surface_owned`] — the
+///    press-captured surface, else the sole registered mount),
+/// 2. the handle lookup ([`MountRegistry::handle_for_surface_owned`]),
+/// 3. the REAL pure keyboard layer (the route's `key_route_owned` core —
+///    ring walk ([`nav_ring`]) + the roving machines + the mount-route
+///    translation + the real `MountCounters::keyboard_nav_steps` tick
+///    inside).
+///
+/// The route itself is the app's own `on_mount_key` body, restated
+/// piece-for-piece in the host as the #[doc(hidden)] seam
+/// `bench_handle_mount_key_owned` (the app fn's crate::app::update module
+/// chain is private and unreachable from a bench; the seam drives the SAME
+/// pieces — the bench never re-implements the route itself).
+fn real_key_step(
+    registry: &mut MountRegistry,
+    key: Key,
+    modifiers: Modifiers,
+) -> Vec<WidgetMountMsg> {
+    bench_handle_mount_key_owned(registry, key, modifiers)
+}
+
+/// The sawtooth key index -> key choice: the first 64 keys of a cycle are
+/// ArrowDown, the last 64 ArrowUp (rows are aligned so the productive
+/// steps never cross a hard frame except at the EXACT edge-refusal probes
+/// the pattern wants).
+fn sawtooth_key(k: usize) -> Key {
+    let in_cycle = k % (2 * ANCHOR_ROWS);
+    if in_cycle < ANCHOR_ROWS {
+        Key::Named(keyboard_key::Named::ArrowDown)
+    } else {
+        Key::Named(keyboard_key::Named::ArrowUp)
+    }
+}
+
 /// The mount-coalescer scenario's surface honesty label.
 fn mount_surface_note(machine: &str) -> String {
     format!(
@@ -624,7 +778,11 @@ fn mount_surface_note(machine: &str) -> String {
          pub ocs_plugin_api (WidgetSurface/StableId/SceneRevision). The \
          pub(crate) registry machines are bench-invisible — the wall-clock \
          numbers measure the REPLICA, the authoritative values are the \
-         in-source unit tests + registry counters (deferred counters below)"
+         in-source unit tests + registry counters (deferred counters below). \
+         superseded-by-real (SCN-024): the REAL registry's wall-clock + \
+         counters live in the mount_move_coalesce_real row (the #[doc(hidden)] \
+         bench seams, ADR-007 item 3); this replica row is kept as the \
+         calibrated contract evidence, superseded for wall-clock only"
     )
 }
 
@@ -636,7 +794,11 @@ fn drag_surface_note(machine: &str) -> String {
          ocs_plugin_api (StableId/DragMeta + iced::Point). The pub(crate) \
          DragSession/DragCounters are bench-invisible — the wall-clock \
          numbers measure the REPLICA, the authoritative values are the \
-         in-source unit tests (deferred counters below)"
+         in-source unit tests (deferred counters below). superseded-by-real \
+         (SCN-024): the REAL DragSession's wall-clock + DragCounters live in \
+         the drag_storm_real row (the #[doc(hidden)] bench seams, ADR-007 \
+         item 3); this replica row is kept as the calibrated contract \
+         evidence, superseded for wall-clock only"
     )
 }
 
@@ -1662,75 +1824,987 @@ fn scenario_settle_cancel_storm() -> ScenarioRecord {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 4: keyboard_nav_burst — DEFERRED (recorded, not run)
+// SCN-024 REAL rows: the wall-clock through the #[doc(hidden)] pub bench
+// seams (ADR-007 item 3; never wire; inspect/drive-only; NOT a wire change)
 // ---------------------------------------------------------------------------
 
-/// Hand-built zero-percentile block for a NOT-RUN scenario (samples_n 0,
-/// all zeros; the sink and the params name why — no invented numbers).
-const ZERO_WALL: WallPercentiles = WallPercentiles {
-    n: 0,
-    p50_ns: 0.0,
-    p95_ns: 0.0,
-    p99_ns: 0.0,
-    min_ns: 0.0,
-    max_ns: 0.0,
-};
+/// One REAL parked-move storm's verified outcome (each field the suffix
+/// asserts + the real counter evolution the caller prints).
+struct RealCoalesceOutcome {
+    defers_accepted: usize,
+    flush_delivered: usize,
+    release_delivered: usize,
+    last_move_is_newest: bool,
+    move_calls_delta: u64,
+    superseded_delta: u64,
+}
 
-fn scenario_keyboard_nav_deferred() -> ScenarioRecord {
+/// Drive ONE REAL parked-move storm through the REAL registry (the
+/// per-surface coalescer entry inside the registry's input store):
+/// STORM_MOVES defers -> ONE flush -> the newest position read back from
+/// the REAL input snapshot -> press/park/release completion probe on the
+/// same surface. Every contract leg asserts HERE (a defective storm panics
+/// the bench).
+fn real_coalesce_storm(registry: &mut MountRegistry, mount_id: StableId) -> RealCoalesceOutcome {
+    let before = registry.counters_owned();
+    for i in 0..STORM_MOVES {
+        let Some(superseded) = registry.mount_move_defer_owned(mount_id, storm_point(i)) else {
+            panic!("a registered surface defers (the unknown-surface grace is for OTHER ids)");
+        };
+        black_box(superseded);
+    }
+    let after_defers = registry.counters_owned();
+    assert_eq!(
+        after_defers.coalesced_moves_superseded - before.coalesced_moves_superseded,
+        (STORM_MOVES - 1) as u64,
+        "every storm park after the first SUPERSEDED (latest wins, REAL counters)"
+    );
+    assert_eq!(
+        after_defers.mount_move_calls - before.mount_move_calls,
+        0,
+        "no flush yet: the parks answered NOTHING (a defer is a slot write)"
+    );
+    let flush_delivered = registry.mount_flush_moves_owned();
+    assert_eq!(
+        flush_delivered, 1,
+        "10000 parks -> exactly ONE flush delivery per surface"
+    );
+    let state = registry
+        .mount_hover_state_owned(mount_id)
+        .expect("the driven surface's input entry");
+    assert_eq!(
+        state.last_move,
+        Some(storm_point(STORM_MOVES - 1)),
+        "lossless: the REAL flush delivered the storm's LAST position"
+    );
+    let after_flush = registry.counters_owned();
+    assert_eq!(
+        after_flush.mount_move_calls - after_defers.mount_move_calls,
+        1,
+        "one flush = one mount call (<=1/surface/tick)"
+    );
+    // The release completion: press re-captures, ONE park, release answers
+    // it NOW. The press SUPERSEDES a still-owed park WITHOUT counting it
+    // (the viewport press precedent: the press is the later truth).
+    assert!(
+        registry.mount_press_owned(mount_id),
+        "press captures the registered surface"
+    );
+    let final_park = registry
+        .mount_move_defer_owned(mount_id, storm_point(19))
+        .expect("the pressed surface defers");
+    assert_eq!(final_park, false, "the slot was drained by the flush");
+    let release_delivered = registry.mount_pointer_released_owned(mount_id);
+    assert_eq!(release_delivered, 1, "the completion answers the owed park NOW");
+    let after_release = registry.counters_owned();
+    assert_eq!(
+        after_release.mount_move_calls - after_flush.mount_move_calls,
+        1,
+        "the release completion delivered exactly one"
+    );
+    assert_eq!(
+        after_release.coalesced_moves_superseded - after_flush.coalesced_moves_superseded,
+        0,
+        "the press superseded the owed park WITHOUT counting it (press is the later truth)"
+    );
+    RealCoalesceOutcome {
+        defers_accepted: STORM_MOVES,
+        flush_delivered,
+        release_delivered,
+        last_move_is_newest: state.last_move == Some(storm_point(STORM_MOVES - 1)),
+        move_calls_delta: after_release.mount_move_calls - before.mount_move_calls,
+        superseded_delta: after_release.coalesced_moves_superseded
+            - before.coalesced_moves_superseded,
+    }
+}
+
+/// Scenario r1-1: the parked-move storm through the REAL registry: the
+/// superseding-real twin of `park_storm_10k` + `drain_delivers_latest_only`
+/// (printed side by side; the replica rows keep running as evidence).
+fn scenario_mount_move_coalesce_real(
+    replica_park: &ScenarioRecord,
+    replica_drain: &ScenarioRecord,
+) -> ScenarioRecord {
+    let scenario = "mount_move_coalesce_real";
+    println!();
     println!(
-        "\n=== scenario: keyboard_nav_burst — SKIPPED (recorded, not run): the §7 keyboard \
-         focus ring is HOST state (pub(crate)); no pub api-crate surface exists ==="
+        "=== scenario: {scenario} -- {STORM_MOVES} moves into the REAL registry's owed slot (REAL host registry/machines, the #[doc(hidden)] bench seams) ==="
+    );
+    // Counter evolution BEFORE the timed passes: a fresh instance's
+    // all-zero base, printed (the deltas print after the passes).
+    let (evolution_probe, _) = registered_registry();
+    let zero = evolution_probe.counters_owned();
+    println!(
+        "[mount_move_coalesce_real] REAL MountCounters before any storm: mount_move_calls {} coalesced_moves_superseded {} (fresh instance, all-zero base)",
+        zero.mount_move_calls, zero.coalesced_moves_superseded
+    );
+
+    // TIMED storms (assertions live: real_coalesce_storm panics on any
+    // contract defect; the wall measures REAL per-park registry work).
+    let samples = timed_ns(SAMPLES_STORM, WARMUP, || {
+        let (mut registry, mount_id) = registered_registry();
+        let outcome = real_coalesce_storm(&mut registry, mount_id);
+        let walk = registry.counters_owned();
+        black_box(&outcome);
+        black_box(&walk);
+    });
+    let wall = WallPercentiles::from_samples(&samples);
+    println!(
+        "[mount_move_coalesce_real] REAL storm pct ({SAMPLES_STORM} x {STORM_MOVES} parks + flush + release completion): p50 {:.0} ns | p95 {:.0} ns | p99 {:.0} ns | min {:.0} | max {:.0} (per-park mean ~ {:.3} ns)",
+        wall.p50_ns,
+        wall.p95_ns,
+        wall.p99_ns,
+        wall.min_ns,
+        wall.max_ns,
+        wall.p50_ns / STORM_MOVES as f64
     );
     println!(
-        "[keyboard_nav_burst] the ring walk (`nav_ring` naming what the builders rendered, \
-         `focus_next`/`focus_prev` roving, `key_route` translation, \
-         `MountCounters::keyboard_nav_steps`) all live in src/ui/window/\
-         plugin_widget_mount.rs — bench-invisible; NOT measured, NO numbers claimed"
+        "[mount_move_coalesce_real] counter evolution per storm (before -> after, REAL deltas): mount_move_calls {} -> {} (flush +1, release +1) | coalesced_moves_superseded {} -> {} ({superseded} storm parks superseded) | flush_delivered 1 | release_delivered 1 | last_move == storm-last, read from the REAL HoverState",
+        0, 2, 0, STORM_MOVES - 1, superseded = STORM_MOVES - 1
     );
+
+    // Per-tick population: ONE park + ONE flush per sample on a PERSISTENT
+    // registry (the tick's normal shape; the REAL counter accumulation is
+    // itself the assertion target: +1 mount move call per tick, a thousand
+    // of them, ZERO superseded: no storm here).
+    let (mut tick_registry, mount_id) = registered_registry();
+    let before = tick_registry.counters_owned();
+    // (warmup = 2 real resolved ticks on the SAME persistent registry: their
+    // counter movement is counted by the REAL counters below — the
+    // percentiles only time the population's samples; the assert accounts
+    // for both, honestly.)
+    const TICK_WARMUP: usize = 2;
+    let tick_wall = timed_ns(SAMPLES_FLUSH_TAKE, TICK_WARMUP, || {
+        let defer_accepted = tick_registry
+            .mount_move_defer_owned(mount_id, storm_point(7))
+            .expect("registered surface defers");
+        assert_eq!(
+            defer_accepted, false,
+            "a single park per tick supersedes nothing"
+        );
+        let delivered = tick_registry.mount_flush_moves_owned();
+        assert_eq!(delivered, 1, "every REAL tick-flush delivers exactly one");
+        let state = tick_registry
+            .mount_hover_state_owned(mount_id)
+            .expect("input entry");
+        assert_eq!(
+            state.last_move,
+            Some(storm_point(7)),
+            "the REAL flush delivered the newest"
+        );
+        black_box(&state);
+    });
+    let after = tick_registry.counters_owned();
+    let tick_delta_calls = after.mount_move_calls - before.mount_move_calls;
+    let tick_delta_superseded = after.coalesced_moves_superseded - before.coalesced_moves_superseded;
+    assert_eq!(
+        tick_delta_calls,
+        (SAMPLES_FLUSH_TAKE + TICK_WARMUP) as u64,
+        "each of the 1000 timed ticks (plus the 2 untimed warmup ticks, real resolved          ticks on the same persistent registry) is exactly one mount move call"
+    );
+    assert_eq!(
+        tick_delta_superseded, 0,
+        "no supersession across the tick population"
+    );
+    let tick_wall = WallPercentiles::from_samples(&tick_wall);
+    println!(
+        "[mount_move_coalesce_real] REAL tick population ({SAMPLES_FLUSH_TAKE} park->flush cycles, persistent registry): p50 {:.0} ns | p99 {:.0} ns | counter evolution: mount_move_calls {} -> {} (delta {tick_delta_calls}), coalesced_moves_superseded {} -> {} (delta {tick_delta_superseded})",
+        tick_wall.p50_ns,
+        tick_wall.p99_ns,
+        before.mount_move_calls,
+        after.mount_move_calls,
+        before.coalesced_moves_superseded,
+        after.coalesced_moves_superseded
+    );
+
+    // The side-by-side against the r0 replica rows (their evidence kept).
+    println!(
+        "[mount_move_coalesce_real] side-by-side (same shapes): park_storm_10k REPLICA p50 {:.0} ns per {STORM_MOVES}-park storm | REAL registry storm p50 {:.0} ns | drain_delivers_latest_only REPLICA p50 {:.0} ns per {STORM_MOVES}-park + flush | the REAL flush + completion are timed inside this row's storm samples",
+        replica_park.wall_ns.p50_ns, wall.p50_ns, replica_drain.wall_ns.p50_ns
+    );
+
     ScenarioRecord {
-        scenario: "keyboard_nav_burst".to_owned(),
-        surface: "NOT MEASURED — skipped (coordinator decision for SCN-022): the §7 keyboard \
-                  focus ring is host state (pub(crate) in src/ui/window/plugin_widget_mount.rs); \
-                  the API crate (WidgetSurface/PanelScene) carries NO ring/roving surface, so \
-                  a replica has nothing honest to walk"
-            .to_owned(),
+        scenario: scenario.to_owned(),
+        surface: "REAL host registry/machines: MountRegistry instance (mount_move_defer_owned / mount_flush_moves_owned / mount_press_owned / mount_pointer_released_owned / mount_hover_state_owned / counters_owned) over its SurfaceMountHandle::from_surface registration, driven through the #[doc(hidden)] bench seam (SCN-024; ADR-007 item 3; never wire; NOT the host's documentary API)".to_owned(),
         deferred: vec![
-            "the 100k-tab-step keyboard burst (wall-clock + ring advance percentiles) — \
-             planned when a bench-visible seam exists (SCN-012 precedent: kept deferred, \
-             never emulated against a different semantic)"
-                .to_owned(),
-            "MountCounters::keyboard_nav_steps at burst load (registry counter, deferred)"
-                .to_owned(),
+            "multi-surface + unknown-surface interleave loads (this row drives ONE registered surface; the unknown-surface grace is unit-tested — unknown_surface_moves_are_graceful — not timed)".to_owned(),
+            "the app-arm route AROUND the registry (Message::WidgetMountMsg handling + Task plumbing): not registry-side cost, stays unmeasured".to_owned(),
         ],
         params: vec![
-            param("executed", false),
-            param("reason", "pub(crate)-only surface (ring is host state)"),
-            param("planned_scope", "100_000 tab steps through the focus ring"),
+            param("parks_per_sample", STORM_MOVES),
+            param("flushes_per_sample", 1_u64),
+            param("surfaces_registered", 1_u64),
+            param("samples", SAMPLES_STORM),
+            param("tick_flush_population", SAMPLES_FLUSH_TAKE),
+            param("expected_flush_deliveries", 1_u64),
+            param("expected_superseded_per_storm", (STORM_MOVES - 1) as u64),
         ],
-        samples_n: 0,
-        wall_ns: ZERO_WALL,
-        extra_metrics: Vec::new(),
+        samples_n: SAMPLES_STORM,
+        wall_ns: wall,
+        extra_metrics: vec![ExtraMetric {
+            label: "real_tick_flush_1k".to_owned(),
+            samples_n: SAMPLES_FLUSH_TAKE,
+            wall_ns: tick_wall,
+            payload_bytes: None,
+            note: Some(format!(
+                "percentiles over {} REAL registry tick-flushes (park -> flush, persistent registry): delivered == 1 and newest == asserted per flush; cumulative REAL counter deltas: mount_move_calls +{} (the {} timed ticks + the {} untimed warmup ticks are all real resolved ticks on the one persistent registry), coalesced_moves_superseded +{}",
+                SAMPLES_FLUSH_TAKE, tick_delta_calls, SAMPLES_FLUSH_TAKE, TICK_WARMUP, tick_delta_superseded
+            )),
+        }],
         payload_bytes: None,
         payload_bytes_note: None,
-        counters: vec![deferred_counter(
-            "keyboard_nav_steps",
-            "pub(crate) MountCounters::keyboard_nav_steps; unit-test evidence: \
-             keyboard_ring_walks_and_skips_disabled, arrow_keys_drive_focus_and_selection_no_pointer, \
-             disabled_keyboard_selection_refuses_cleanly, \
-             table_keys_drive_row_and_cell_roving_and_escape_draft \
-             (src/ui/window/plugin_widget_mount.rs tests)"
-                .to_owned(),
-        )],
+        counters: vec![
+            measured_real_counter(
+                "mount_move_calls",
+                2,
+                "MountCounters per REAL storm: +1 flush +1 release completion",
+            ),
+            measured_real_counter(
+                "coalesced_moves_superseded",
+                (STORM_MOVES - 1) as u64,
+                "MountCounters per REAL storm (every park after the first supersedes)",
+            ),
+            measured_real_counter(
+                "mount_move_calls",
+                tick_delta_calls,
+                "cumulative real mount_move_calls across the 1000 real tick-flushes (persistent registry)",
+            ),
+            measured_real_counter(
+                "coalesced_moves_superseded",
+                tick_delta_superseded,
+                "cumulative real coalesced_moves_superseded across the tick population (zero: one park per tick never supersedes)",
+            ),
+        ],
         changed_elements: None,
         total_elements: None,
         changed_less_than_total: None,
-        sink: "not executed — deferred with reasons; nothing here is a measurement"
-            .to_owned(),
+        sink: format!(
+            "every sample asserted on the REAL machines: all {} defers accepted, ONE flush delivery == the storm's LAST position (read from the REAL HoverState.last_move), REAL deltas mount_move_calls == 2 (flush + completion), coalesced_moves_superseded == {} - 1, the press-supersede UNCOUNTED, the 1000 tick flushes +1 call each: a lost newest, a >1 delivery or a counted press-supersede panics the bench",
+            STORM_MOVES, STORM_MOVES
+        ),
         notes: vec![
-            "SKIPPED by coordinator decision — recorded so the run record shows the \
-             scenario was DELIBERATELY not measured (the honest-byte rule: never silently \
-             missing)"
-                .to_owned(),
+            "REAL row (SCN-024): the wall-clock + counters measure the REAL registry drive path through the #[doc(hidden)] bench seams (ADR-007 item 3); the r0 replica rows it supersedes for wall-clock are park_storm_10k and drain_delivers_latest_only (replica evidence kept in pointer-burst-r0.log and in this bench's rows)".to_owned(),
+            "the real defer is a per-call registry scan (by_panel values, any surface-id match) + the slot write — the app arm pays exactly this per move message".to_owned(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scenario r1-2: the REAL DragSession storm (the settle_cancel_storm
+// replica row's superseding-real twin)
+// ---------------------------------------------------------------------------
+
+/// The REAL full storm: INTERACTIONS through ONE REAL DragSession — the
+/// same loop the replica's drag_storm runs (the shape's mirror) on the
+/// real machines: begin/move_drag/take_deliverable_move/release_delivered_move/
+/// settle/cancel + the REAL DRAG_THRESHOLD_PX + the REAL DragCounters
+/// scroll. Every interaction completes exactly once; every completion
+/// DRAINS FIRST (the end == the interaction's newest accepted point); the
+/// 1:1 identity and the no-counter-movement refusals assert.
+/// print_evolution prints the REAL counter scroll at milestones (the
+/// untimed calibration pass).
+fn real_drag_storm(print_evolution: bool) -> StormProgress {
+    let draggable = anchor_addresses(&anchored_surface());
+    let rail_key = StableId(PANEL_SURFACE_ID);
+    let mut session = DragSession::with_draggables(rail_key, draggable);
+    let mut progress = StormProgress::default();
+    let storm_start = std::time::Instant::now();
+
+    // THE REAL NOT-DRAGGABLE PROBE (once per storm, before the interaction
+    // loop): an address the REAL synced set does NOT contain refuses arm,
+    // counts ONLY refusals_not_draggable, the rail stays Idle for the storm.
+    let probe_address = StableId(TREE_ROW_BASE + 999_999);
+    match session.begin(rail_key, probe_address, meta("probe"), Point::new(10.0, 10.0), 0) {
+        Err(DragRefusal::NotDraggable(addr)) => {
+            assert_eq!(addr, probe_address, "the refusal names the probed address");
+            progress.not_draggable_probes += 1;
+        }
+        Ok(_) => panic!("the probe address must refuse (NotDraggable)"),
+        Err(other) => panic!("the probe address refused as {other:?}, not NotDraggable"),
+    }
+
+    for k in 0..INTERACTIONS {
+        let cancelled_interaction = k % 5 == 4;
+        let address = StableId(TREE_ROW_BASE + (k % ANCHOR_ROWS) as u64);
+        let label = format!("row-{}", k % ANCHOR_ROWS);
+        let start = Point::new(10.0, 10.0);
+
+        let began = session
+            .begin(rail_key, address, meta(&label), start, k as u64)
+            .expect("arm (the rail was consumed by the previous interaction)");
+        progress.begins += 1;
+
+        // One duplicate-begin refusal probe every 250th interaction through
+        // the REAL exactly-once guard: the SECOND begin while Armed refuses,
+        // moves ONLY its own REAL counter, cannot retarget the armed origin.
+        if k % 250 == 7 {
+            let before = session.counters();
+            assert!(matches!(
+                session.begin(rail_key, address, meta("ignored"), start, k as u64),
+                Err(DragRefusal::DuplicateBegin(_))
+            ));
+            progress.dup_probes += 1;
+            let after = session.counters();
+            assert_eq!(
+                after,
+                DragCounters {
+                    refusals_duplicate_begin: before.refusals_duplicate_begin + 1,
+                    ..before
+                },
+                "the DuplicateBegin refusal moves ONLY its own REAL counter"
+            );
+        }
+
+        if cancelled_interaction {
+            // CANCEL storm route (the REAL machines): threshold-exact
+            // crossing + PARKS_CANCEL churn parks, then cancel: the REAL
+            // drain-first hands the NEWEST point back.
+            let crossed = Point::new(10.0 + DRAG_THRESHOLD_PX, 10.0);
+            assert_eq!(session.move_drag(crossed), MoveDisposition::Crossed);
+            let mut newest = crossed;
+            progress.offered_parks += 1;
+            for j in 1..=PARKS_CANCEL {
+                let p = Point::new(13.0 + (j * 8) as f32, 10.0 + j as f32 * 3.0);
+                assert_eq!(
+                    session.move_drag(p),
+                    MoveDisposition::Parked { superseded: true },
+                    "in-flight cancel-route park overwrites the still-owed one"
+                );
+                newest = p;
+                progress.offered_parks += 1;
+            }
+            let cancelled = session
+                .cancel(DragCancelReason::Escape)
+                .expect("the live drag cancels 1:1 with its begin");
+            assert_eq!(
+                cancelled.end_point, newest,
+                "cancel DRAINED FIRST: the newest move defines the end (lossless)"
+            );
+            assert_eq!(
+                cancelled.address, began.origin.address,
+                "address verbatim (origin facts captured at arm time)"
+            );
+            assert_eq!(
+                cancelled.drag_meta, began.origin.drag_meta,
+                "meta returned VERBATIM (the meta-never-interpreted rule INT-5)"
+            );
+            assert_eq!(cancelled.start_point, began.origin.start_point);
+            assert_eq!(
+                cancelled.reason,
+                DragCancelReason::Escape,
+                "the caller's reason rides the cancel fact verbatim"
+            );
+            // The REAL consumed-family observables: the park slot is empty,
+            // extra moves are graceful no-ops (MoveDisposition::Inactive —
+            // the REAL shape's way of saying no interaction is live).
+            assert!(
+                session.take_deliverable_move().is_none(),
+                "no move survives the boundary"
+            );
+            assert_eq!(
+                session.move_drag(Point::new(0.0, 0.0)),
+                MoveDisposition::Inactive,
+                "the consumed session treats further moves as noise"
+            );
+            progress.offered_deliveries += 1; // the cancel's own drain
+            progress.cancels += 1;
+        } else {
+            // SETTLE storm route (the REAL machines): alternate per-tick
+            // Drip and pure-CHURN shapes; EXACT same park pacing as the
+            // replica row.
+            let drip = k % 2 == 0;
+            let crossed = Point::new(10.0 + DRAG_THRESHOLD_PX, 10.0);
+            assert_eq!(session.move_drag(crossed), MoveDisposition::Crossed);
+            let mut newest = crossed;
+            progress.offered_parks += 1;
+            for j in 1..=PARKS_DRIP {
+                let p = Point::new(13.0 + (j * 8) as f32, 10.0 + j as f32 * 3.0);
+                assert_eq!(
+                    session.move_drag(p),
+                    MoveDisposition::Parked { superseded: !drip || j == 1 },
+                    "in-flight parks overwrite the still-owed one (latest wins)"
+                );
+                newest = p;
+                progress.offered_parks += 1;
+                if drip {
+                    let taken = session
+                        .take_deliverable_move()
+                        .expect("the <=1-in-flight gate");
+                    assert_eq!(taken, p, "the tick delivers the newest parked move");
+                    assert!(
+                        session.take_deliverable_move().is_none(),
+                        "NOTHING delivers while one is in flight (the REAL gate)"
+                    );
+                    assert!(session.release_delivered_move());
+                    progress.offered_deliveries += 1;
+                }
+            }
+            // The release argument is the DELIBERATE LIE ((999, -999)) — the
+            // REAL drain-first rule must make the end context ignore it.
+            let settled = session
+                .settle(Point::new(999.0, -999.0))
+                .expect("the live drag settles 1:1 with its begin");
+            assert_eq!(
+                settled.end_point, newest,
+                "settle DRAINED FIRST / last-delivered: the NEWEST move defines the end, never the (lying) release argument: lossless latest-wins"
+            );
+            assert_eq!(settled.address, began.origin.address, "address verbatim");
+            assert_eq!(
+                settled.drag_meta, began.origin.drag_meta,
+                "meta returned VERBATIM (INT-5)"
+            );
+            assert_eq!(settled.start_point, began.origin.start_point);
+            assert!(
+                session.take_deliverable_move().is_none(),
+                "no move survives the boundary"
+            );
+            assert_eq!(
+                session.move_drag(Point::new(0.0, 0.0)),
+                MoveDisposition::Inactive,
+                "the consumed session treats further moves as noise"
+            );
+            if !drip {
+                progress.offered_deliveries += 1; // the churn settle's drain
+            }
+            progress.settles += 1;
+        }
+        progress.newest_checked += 1;
+        progress.slot_drained_checked += 1;
+
+        // Every 250th interaction: the double-completion refusal probe —
+        // REAL NotInFlight, NEITHER moves a REAL counter.
+        if k % 250 == 49 {
+            let before = session.counters();
+            assert_eq!(
+                session.settle(Point::new(0.0, 0.0)),
+                Err(DragRefusal::NotInFlight),
+                "exactly-once: the consumed rail refuses a second settle"
+            );
+            assert_eq!(
+                session.cancel(DragCancelReason::Escape),
+                Err(DragRefusal::NotInFlight),
+                "exactly-once: the consumed rail refuses a second cancel"
+            );
+            assert_eq!(
+                session.counters(),
+                before,
+                "refused completions move NO REAL counter"
+            );
+        }
+
+        if print_evolution && (k + 1) % 250 == 0 {
+            let machine = session.counters();
+            println!(
+                "[drag_storm_real] REAL DragCounters evolution @ interaction {:>5}/{total}: begins {begins} settles {settles} cancels {cancels} | parked {parked} delivered {delivered} | refusals: dup-start {dup} not-draggable {nd} | previews {previews} | checked: end==newest {newest_checked}/{INT}, slots cleared {drained}/{INT}",
+                k + 1,
+                total = INTERACTIONS,
+                begins = machine.begins,
+                settles = machine.settles,
+                cancels = machine.cancels,
+                parked = machine.moves_parked,
+                delivered = machine.moves_delivered,
+                dup = progress.dup_probes,
+                nd = progress.not_draggable_probes,
+                previews = machine.previews_emitted,
+                newest_checked = progress.newest_checked,
+                INT = INTERACTIONS,
+                drained = progress.slot_drained_checked
+            );
+        }
+    }
+
+    // The dual-side SYNC (REAL counters == the storm's OFFERED history —
+    // the machine accepted exactly the storm it was driven with).
+    let machine = session.counters();
+    progress.moves_parked = machine.moves_parked;
+    progress.moves_delivered = machine.moves_delivered;
+    assert_eq!(machine.begins, progress.begins, "begins: REAL machine == offered");
+    assert_eq!(machine.settles, progress.settles, "settles: REAL machine == offered");
+    assert_eq!(machine.cancels, progress.cancels, "cancels: REAL machine == offered");
+    assert_eq!(
+        machine.moves_parked, progress.offered_parks,
+        "parks: REAL machine == offered (every park accepted, no more)"
+    );
+    assert_eq!(
+        machine.moves_delivered, progress.offered_deliveries,
+        "deliveries: REAL machine == offered (every take and every drain counted once)"
+    );
+    assert_eq!(
+        machine.refusals_duplicate_begin, progress.dup_probes,
+        "DuplicateBegin refusals == the probes (REAL)"
+    );
+    assert_eq!(
+        machine.refusals_not_draggable, progress.not_draggable_probes,
+        "NotDraggable refusals == the probes (REAL)"
+    );
+    progress.refusals_duplicate = progress.dup_probes;
+    progress.refusals_not_draggable = progress.not_draggable_probes;
+    // The lossless 1:1 storm identity (deterministic expectations).
+    assert_eq!(
+        progress.begins,
+        SETTLE_PER_STORM + CANCELS_PER_STORM,
+        "1:1 begins == settles + cancels (every begun interaction completed, REAL)"
+    );
+    assert_eq!(
+        progress.settles, SETTLE_PER_STORM,
+        "every settle route completed its begin"
+    );
+    assert_eq!(
+        progress.cancels, CANCELS_PER_STORM,
+        "every cancel route completed its begin"
+    );
+    assert_eq!(
+        machine.previews_emitted, 0,
+        "the storm emits no previews (the ghost path is not this storm's load; INT-3)"
+    );
+    if print_evolution {
+        println!(
+            "[drag_storm_real] REAL storm wall (calibration pass): {} ns | REAL counters agree (1:1 begins==settles+cancels) | every completion drained the park first",
+            storm_start.elapsed().as_nanos()
+        );
+    }
+    black_box(&session);
+    progress
+}
+
+fn scenario_drag_storm_real(replica: &ScenarioRecord) -> ScenarioRecord {
+    let scenario = "drag_storm_real";
+    println!();
+    println!(
+        "=== scenario: {scenario} -- {SETTLE_PER_STORM} begin/settle pairs + {CANCELS_PER_STORM} cancels through ONE REAL DragSession (REAL host registry/machines) ==="
+    );
+
+    // The CALIBRATION pass (untimed): full REAL storm with the counter-
+    // evolution printouts + every lossless assertion live.
+    let calibrated = real_drag_storm(true);
+
+    // The TIMED storms (assertions still live: a defect aborts the run).
+    let samples = timed_ns(SAMPLES_STORM_INTERACT, 1, || {
+        let p = real_drag_storm(false);
+        black_box(&p);
+    });
+    let wall = WallPercentiles::from_samples(&samples);
+    println!(
+        "[drag_storm_real] REAL storm pct ({SAMPLES_STORM_INTERACT} x {INTERACTIONS} interactions): p50 {:.0} ns | p95 {:.0} ns | p99 {:.0} ns | min {:.0} | max {:.0} (~ {:.0} ns/interaction)",
+        wall.p50_ns,
+        wall.p95_ns,
+        wall.p99_ns,
+        wall.min_ns,
+        wall.max_ns,
+        wall.p50_ns / INTERACTIONS as f64
+    );
+    // The side-by-side (same storm shape; the replica evidence kept).
+    println!(
+        "[drag_storm_real] side-by-side (same storm shape): settle_cancel_storm REPLICA p50 {:.0} ns | REAL rail p50 {:.0} ns | ratio real/replica {:.2} ({SAMPLES_STORM_INTERACT} storms x {INTERACTIONS} interactions each)",
+        replica.wall_ns.p50_ns, wall.p50_ns, wall.p50_ns / replica.wall_ns.p50_ns
+    );
+    // The REAL counter evolution (one storm, before -> after; the dual-side
+    // sync above asserted offered == machine).
+    println!(
+        "[drag_storm_real] counter evolution (REAL DragCounters, before -> after one storm): begins 0 -> {} | settles 0 -> {} | cancels 0 -> {} | moves_parked 0 -> {} | moved_delivered counted as moves_delivered 0 -> {} | refusals: duplicate_begin 0 -> {}, not_draggable 0 -> {} | previews_emitted 0 -> {} (no ghosts; the storm drives no preview path, INT-3 spec-only is elsewhere)",
+        calibrated.begins,
+        calibrated.settles,
+        calibrated.cancels,
+        calibrated.moves_parked,
+        calibrated.moves_delivered,
+        calibrated.refusals_duplicate,
+        calibrated.refusals_not_draggable,
+        0
+    );
+
+    ScenarioRecord {
+        scenario: scenario.to_owned(),
+        surface: "REAL host registry/machines: DragSession (with_draggables) instance, drives begin/move_drag/take_deliverable_move/release_delivered_move/settle/cancel + the REAL DragCounters scroll + the REAL DRAG_THRESHOLD_PX, driven through the #[doc(hidden)] bench seam (SCN-024; ADR-007 item 3; never wire; NOT the host's documentary API)".to_owned(),
+        deferred: vec![
+            "the preview/ghost path (INT-3) at storm load — this storm drives NO preview (previews_emitted stays 0); the machine's own test previews_never_mutate_machines_or_events pins the frozen semantic counters".to_owned(),
+            "the app-side rail router (app/update/widget_drag: begin->preview paths, the settle->WidgetEvent conversion): app-module scope, not bench-reachable".to_owned(),
+        ],
+        params: vec![
+            param("interactions_per_storm", INTERACTIONS as u64),
+            param("settle_pairs", SETTLE_PER_STORM as u64),
+            param("cancels", CANCELS_PER_STORM as u64),
+            param("threshold_px", DRAG_THRESHOLD_PX),
+            param("samples", SAMPLES_STORM_INTERACT),
+            param("parks_per_drip_settle", (1 + PARKS_DRIP) as u64),
+            param("parks_per_churn_settle", (1 + PARKS_CHURN) as u64),
+            param("parks_per_cancel", (1 + PARKS_CANCEL) as u64),
+            param("expected_parks_per_storm", calibrated.moves_parked as u64),
+            param("expected_delivered_per_storm", calibrated.moves_delivered as u64),
+        ],
+        samples_n: SAMPLES_STORM_INTERACT,
+        wall_ns: wall,
+        extra_metrics: Vec::new(),
+        payload_bytes: None,
+        payload_bytes_note: None,
+        counters: vec![
+            measured_real_counter(
+                "begins",
+                calibrated.begins as u64,
+                "DragCounters::begins (1:1 REAL storm)",
+            ),
+            measured_real_counter(
+                "settles",
+                calibrated.settles as u64,
+                "DragCounters::settles (REAL)",
+            ),
+            measured_real_counter(
+                "cancels",
+                calibrated.cancels as u64,
+                "DragCounters::cancels (REAL)",
+            ),
+            measured_real_counter(
+                "moves_parked",
+                calibrated.moves_parked as u64,
+                "DragCounters::moves_parked (every accepted park, overwrites included, REAL)",
+            ),
+            measured_real_counter(
+                "moves_delivered",
+                calibrated.moves_delivered as u64,
+                "DragCounters::moves_delivered (per-tick takes + completion drains, REAL)",
+            ),
+            measured_real_counter(
+                "refusals_duplicate_begin",
+                calibrated.refusals_duplicate as u64,
+                "DragCounters::refusals_duplicate_begin (REAL)",
+            ),
+            measured_real_counter(
+                "refusals_not_draggable",
+                calibrated.refusals_not_draggable as u64,
+                "DragCounters::refusals_not_draggable (the REAL synced-def re-check)",
+            ),
+            measured_real_counter(
+                "previews_emitted",
+                0,
+                "DragCounters::previews_emitted (storm emits no ghosts)",
+            ),
+        ],
+        changed_elements: None,
+        total_elements: None,
+        changed_less_than_total: None,
+        sink: format!(
+            "lossless storm identity asserted per REAL storm: begins == settles + cancels == 1:1 ({}+{}); every completion's end == the interaction's NEWEST accepted point (REAL drain-first; the release argument is a deliberate lie that must be ignored); every completion leaves the park slot empty (take == none) and treats later moves as noise; exactly-once refusals WITHOUT REAL counter movement; the REAL DragCounters scroll printed at storm milestones",
+            SETTLE_PER_STORM, CANCELS_PER_STORM
+        ),
+        notes: vec![
+            "REAL row (SCN-024): the wall-clock + DragCounters measure the REAL DragSession machines through the #[doc(hidden)] bench seams (ADR-007 item 3); the replica row it supersedes for wall-clock is settle_cancel_storm (replica evidence kept in pointer-burst-r0.log and in this bench's rows)".to_owned(),
+            "per-storm shape identical to the replica's (same interleave, same park pacing, same threshold-exact crossing) so the side-by-side columns are meaningful".to_owned(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scenario r1-3: keyboard_nav_burst — the r0 SKIPPED row, now REAL
+// ---------------------------------------------------------------------------
+
+/// The REAL keyboard burst (SCN-024): the r0 SKIPPED row, now real. The
+/// drive shape is the pure-layer contract's (the app fn `on_mount_key` /
+/// `handle_mount_key_owned` sits behind the private crate::app::update
+/// module chain and is NOT bench-reachable; the bench drives the SAME
+/// three in-crate calls it makes, in the same order — see real_key_step):
+/// - the main TAB wrap population: KEY_STEPS_TAB_BURST Tab keys per burst;
+///   each key resolves exactly ONE FocusMoved and lands the ring seat
+///   i % ANCHOR_ROWS (all ANCHOR_ROWS rows enabled, ring order == flat
+///   order, Tab wraps by the machine's own or_else at the bottom edge —
+///   the seat model is exact for every i),
+/// - the Down/Up sawtooth: the pure newest-wins roving chain. Each
+///   productive Arrow key lands the seat NEXT to the newest previous
+///   landing; the edge keys (at the bottom/top) produce ZERO messages and
+///   count NOTHING (the machines' clean refusal); the burst ENDS with ONE
+///   more ArrowDown landing the newest seat's successor (the
+///   newest-wins end probe, per the pure-layer contract),
+/// - the single-step population: per-key hop-cost percentiles.
+/// The REAL MountCounters::keyboard_nav_steps walks +1 per RESOLVED step
+/// (a key whose route produced >=1 mount message): evolution printed
+/// before/after and asserted for every leg.
+fn scenario_keyboard_nav_burst() -> ScenarioRecord {
+    let scenario = "keyboard_nav_burst";
+    println!();
+    println!(
+        "=== scenario: {scenario} -- the r0 SKIPPED row, now REAL (the #[doc(hidden)] bench seams): Tab burst + Down/Up sawtooth through the REAL ring ==="
+    );
+    println!(
+        "[keyboard_nav_burst] r0 cross-reference: SKIPPED in pointer-burst-r0.log (n=0, executed=false, reason pub(crate)-only surface); this r1 row EXECUTES that planned burst on the REAL machines; the skipped record in r0 stays untouched as the superseded one"
+    );
+
+    // -- the main TAB wrap population (10000-key bursts) --------------------
+    // The UNTIMED calibration burst with per-step asserts: the seat model
+    // must hold on a FRESH state machine; the counter walk comes along.
+    let tab_outcome = {
+        let (mut registry, _) = registered_registry();
+        let before = registry.counters_owned();
+        let mut route_msgs = 0usize;
+        for i in 0..KEY_STEPS_TAB_BURST {
+            let msgs = real_key_step(
+                &mut registry,
+                Key::Named(keyboard_key::Named::Tab),
+                Modifiers::empty(),
+            );
+            assert_eq!(msgs.len(), 1, "a Tab step resolves exactly ONE route message");
+            match &msgs[0] {
+                WidgetMountMsg::FocusMoved { to: Some(row), .. } => {
+                    // The seat model: all 64 rows enabled, ring order ==
+                    // flat order, Tab wraps (focus_next's or_else) — step
+                    // i lands seat i, ALWAYS (newest-wins at every wrap
+                    // boundary).
+                    assert_eq!(
+                        row.0,
+                        TREE_ROW_BASE + (i % ANCHOR_ROWS) as u64,
+                        "Tab step {i} landed the model's seat (exact wrap)"
+                    );
+                }
+                other => panic!("Tab step {i} landed {other:?}, not a FocusMoved"),
+            }
+            route_msgs += msgs.len();
+        }
+        let after = registry.counters_owned();
+        let delta = after.keyboard_nav_steps - before.keyboard_nav_steps;
+        assert_eq!(
+            delta, KEY_STEPS_TAB_BURST as u64,
+            "every RESOLVED step counts exactly itself (keyboard_nav_steps)"
+        );
+        assert_eq!(
+            route_msgs, KEY_STEPS_TAB_BURST,
+            "route messages == steps (one FocusMoved per Tab key)"
+        );
+        println!(
+            "[keyboard_nav_burst] REAL counter evolution (Tab burst, before -> after): keyboard_nav_steps {} -> {} (delta {delta} == every step resolved; the REAL walk counted by the route itself)",
+            before.keyboard_nav_steps, after.keyboard_nav_steps
+        );
+        (route_msgs, delta)
+    };
+
+    // TIMED: same-shape bursts with the full per-step assert.
+    let samples = timed_ns(SAMPLES_KEY_TAB_BURST, WARMUP, || {
+        let (mut registry, _) = registered_registry();
+        let before = registry.counters_owned();
+        let mut route_msgs = 0usize;
+        for i in 0..KEY_STEPS_TAB_BURST {
+            let msgs = real_key_step(
+                &mut registry,
+                Key::Named(keyboard_key::Named::Tab),
+                Modifiers::empty(),
+            );
+            assert_eq!(msgs.len(), 1, "a Tab step resolves exactly ONE route message");
+            assert!(matches!(
+                &msgs[0],
+                WidgetMountMsg::FocusMoved { to: Some(row), .. }
+                    if row.0 == TREE_ROW_BASE + (i % ANCHOR_ROWS) as u64
+            ));
+            route_msgs += msgs.len();
+        }
+        let after = registry.counters_owned();
+        assert_eq!(
+            after.keyboard_nav_steps - before.keyboard_nav_steps,
+            KEY_STEPS_TAB_BURST as u64
+        );
+        assert_eq!(route_msgs, KEY_STEPS_TAB_BURST);
+        black_box(&after);
+    });
+    let wall = WallPercentiles::from_samples(&samples);
+
+    // -- the Down/Up sawtooth (the newest-wins roving chain) ----------------
+    // Per cycle (64 Downs then 64 Ups): productive Downs land seat+1
+    // (fresh: start=0 => land 0..63), the 64th Down at the BOTTOM edge is
+    // REFUSED (focus_next's end: no enabled row after the last -> None,
+    // ZERO messages, the counter does NOT move); Ups mirror (the last one,
+    // at the ring's TOP seat, is refused); the FINAL end probe: ONE more
+    // ArrowDown from the settled top seat lands its successor — the
+    // newest-wins end check (per the pure-layer contract).
+    let sawtooth_wall = timed_ns(SAMPLES_KEY_SAWTOOTH, 2, || {
+        let (mut registry, _) = registered_registry();
+        let before = registry.counters_owned();
+        let mut seat: Option<isize> = None;
+        let mut productive = 0usize;
+        for k in 0..KEY_SAWTOOTH_STEPS {
+            let is_down = k % (2 * ANCHOR_ROWS) < ANCHOR_ROWS;
+            let key = if is_down {
+                Key::Named(keyboard_key::Named::ArrowDown)
+            } else {
+                Key::Named(keyboard_key::Named::ArrowUp)
+            };
+            let msgs = real_key_step(&mut registry, key, Modifiers::empty());
+            let expected: isize = match (seat, is_down) {
+                (Some(s), true) => s + 1,
+                (Some(s), false) => s - 1,
+                (None, true) => 0,
+                (None, false) => panic!("no up before any landing"),
+            };
+            let refused = if is_down {
+                expected > (ANCHOR_ROWS - 1) as isize
+            } else {
+                expected < 0
+            };
+            if refused {
+                assert!(
+                    msgs.is_empty(),
+                    "an edge-refusing key produces NO route message"
+                );
+                assert!(seat.is_some(), "refusal keeps the seat (the pure-layer note)");
+            } else {
+                assert_eq!(
+                    msgs.len(),
+                    2,
+                    "an Arrow step resolves FocusMoved + SelectionChanged"
+                );
+                let landed_ok = match (&msgs[0], &msgs[1]) {
+                    (
+                        WidgetMountMsg::FocusMoved { to: Some(row), .. },
+                        WidgetMountMsg::SelectionChanged { selected, .. },
+                    ) => {
+                        // Selection follows the landed row, replacing it
+                        // (the arrows' list-cursor semantics).
+                        row.0 == TREE_ROW_BASE + expected as u64
+                            && selected.len() == 1
+                            && selected[0].0 == TREE_ROW_BASE + expected as u64
+                    }
+                    _ => false,
+                };
+                assert!(
+                    landed_ok,
+                    "Arrow step {k} landed row {expected} (the newest-wins roving chain)"
+                );
+                seat = Some(expected);
+                productive += 1;
+            }
+        }
+        // The newest-wins END probe (the pure-layer contract): the burst
+        // settles seat 0 and ONE more ArrowDown lands EXACTLY its successor.
+        assert_eq!(seat, Some(0), "the sawtooth settles the ring's TOP seat");
+        let msgs = real_key_step(
+            &mut registry,
+            Key::Named(keyboard_key::Named::ArrowDown),
+            Modifiers::empty(),
+        );
+        assert_eq!(msgs.len(), 2, "the end probe step is a productive Arrow key");
+        let probe_landed_ok = match &msgs[0] {
+            WidgetMountMsg::FocusMoved { to: Some(row), .. } => row.0 == TREE_ROW_BASE + 1,
+            _ => false,
+        };
+        assert!(
+            probe_landed_ok,
+            "the end probe lands the NEWEST seat's successor (newest-wins, even at 1024 keys)"
+        );
+        let after = registry.counters_owned();
+        assert_eq!(
+            after.keyboard_nav_steps - before.keyboard_nav_steps,
+            (productive + 1) as u64,
+            "the REAL counter counts exactly the RESOLVED steps (refusals move nothing, the end probe counts)"
+        );
+        black_box(&productive);
+    });
+    let sawtooth_wall = WallPercentiles::from_samples(&sawtooth_wall);
+    println!(
+        "[keyboard_nav_burst] sawtooth ({SAMPLES_KEY_SAWTOOTH} x {KEY_SAWTOOTH_STEPS} Arrow keys, newest-wins chain asserted per key, edge refusals expected): p50 {:.0} ns | p99 {:.0} ns (the counters count ONLY the resolved keys)",
+        sawtooth_wall.p50_ns, sawtooth_wall.p99_ns
+    );
+
+    // -- the single-step population (per-hop percentiles) -------------------
+    let (mut step_registry, _) = registered_registry();
+    let mut seat0: usize = 0;
+    let step_wall = timed_ns(SAMPLES_KEY_STEP, 5, || {
+        let msgs = real_key_step(
+            &mut step_registry,
+            Key::Named(keyboard_key::Named::Tab),
+            Modifiers::empty(),
+        );
+        assert_eq!(msgs.len(), 1, "a Tab step resolves exactly ONE route message");
+        assert!(matches!(
+            &msgs[0],
+            WidgetMountMsg::FocusMoved { to: Some(row), .. }
+                if row.0 == TREE_ROW_BASE + (seat0 % ANCHOR_ROWS) as u64
+        ));
+        seat0 += 1;
+    });
+    let step_wall = WallPercentiles::from_samples(&step_wall);
+    println!(
+        "[keyboard_nav_burst] single Tab step pct ({SAMPLES_KEY_STEP} sequential steps on one persisted registry, wrap seat asserted per step): p50 {:.0} ns | p95 {:.0} ns | p99 {:.0} ns | min {:.0} | max {:.0}",
+        step_wall.p50_ns, step_wall.p95_ns, step_wall.p99_ns, step_wall.min_ns, step_wall.max_ns
+    );
+
+    // MAIN wall print.
+    println!(
+        "[keyboard_nav_burst] Tab burst pct ({SAMPLES_KEY_TAB_BURST} x {KEY_STEPS_TAB_BURST} steps): p50 {:.0} ns | p95 {:.0} ns | p99 {:.0} ns | min {:.0} | max {:.0} (per-step mean ~ {:.0} ns)",
+        wall.p50_ns,
+        wall.p95_ns,
+        wall.p99_ns,
+        wall.min_ns,
+        wall.max_ns,
+        wall.p50_ns / KEY_STEPS_TAB_BURST as f64
+    );
+    // The r0 -> r1 deferred-map movement prints here (bench stdout + the
+    // run record's counters below).
+    println!(
+        "[keyboard_nav_burst] deferred-map movement: keyboard_nav_steps deferred (r0) -> measured-real (r1): the counter walk is 0 -> per-burst delta, all REAL"
+    );
+
+    ScenarioRecord {
+        scenario: scenario.to_owned(),
+        surface: "REAL host registry/machines: the app's own keyboard route handle_mount_key_owned over the registered anchored instance (its key_route_owned core walks the nav_ring ring + focus_next/focus_prev roving and record_key_nav_step_owned ticks MountCounters::keyboard_nav_steps), target resolution through set_mount_key_target_owned / mount_key_surface_owned, driven through the #[doc(hidden)] bench seams (SCN-024; ADR-007 item 3; never wire; NOT the host's documentary API)".to_owned(),
+        deferred: vec![
+            "the typed-TABLE cell/row roving burst (mount_table_key_route, the SWG-004b table scope): same pure machinery, headless-tested, not timed here".to_owned(),
+            "Enter/Space ACTIVATION + Escape's machine-direct prompt cancel at burst load (activation arms commands; Escape rides the dialog cancel edge): neither is this row's pure-roving load".to_owned(),
+        ],
+        params: vec![
+            param("tab_steps_per_burst", KEY_STEPS_TAB_BURST),
+            param("samples", SAMPLES_KEY_TAB_BURST),
+            param("ring_rows", ANCHOR_ROWS),
+            param("all_rows_enabled", true),
+            param("sawtooth_steps_per_sample", KEY_SAWTOOTH_STEPS),
+            param("sawtooth_samples", SAMPLES_KEY_SAWTOOTH),
+            param("single_step_population", SAMPLES_KEY_STEP),
+            param(
+                "target_set_first",
+                "set_mount_key_target_owned(Some(mount_id))"
+            ),
+        ],
+        samples_n: SAMPLES_KEY_TAB_BURST,
+        wall_ns: wall,
+        extra_metrics: vec![
+            ExtraMetric {
+                label: "arrow_sawtooth_1024".to_owned(),
+                samples_n: SAMPLES_KEY_SAWTOOTH,
+                wall_ns: sawtooth_wall,
+                payload_bytes: None,
+                note: Some(format!(
+                    "the {}-key Down/Up sawtooth per sample (a fresh REAL state machine per sample): every productive key lands the NEWEST seat +-1, edge keys produce ZERO messages + move NO counters (machine refusal), the final probe lands the newest seat's successor: the REAL newest-wins roving chain",
+                    KEY_SAWTOOTH_STEPS
+                )),
+            },
+            ExtraMetric {
+                label: "single_tab_step".to_owned(),
+                samples_n: SAMPLES_KEY_STEP,
+                wall_ns: step_wall,
+                payload_bytes: None,
+                note: Some(format!(
+                    "per-key hop cost on ONE persistent registry ({} keys = 15 full ring wraps + change); the seat model asserted per step",
+                    SAMPLES_KEY_STEP
+                )),
+            },
+        ],
+        payload_bytes: None,
+        payload_bytes_note: None,
+        counters: vec![
+            measured_real_counter(
+                "keyboard_nav_steps",
+                tab_outcome.1,
+                "REAL MountCounters::keyboard_nav_steps walk across ONE 10000-step Tab burst (every resolved step counts exactly itself; refusals/edges move nothing)",
+            ),
+            measured_real_counter(
+                "tab_route_messages",
+                tab_outcome.0 as u64,
+                "route messages the REAL route produced for the Tab burst (exactly one per burst step)",
+            ),
+        ],
+        changed_elements: None,
+        total_elements: None,
+        changed_less_than_total: None,
+        sink: format!(
+            "per-step contract on the REAL machines' route output: every Tab key resolves exactly ONE FocusMoved landing seat i % {} (the wrap model exact); the sawtooth's productive Arrow keys land the newest seat +-1 (FocusMoved + SelectionChanged of the SAME row), edge keys produce ZERO messages and move NO counter; the bursts end with the REAL keyboard_nav_steps delta == the step count; the newest seat's successor probed at the end: a stale/lost seat, an edge message or an uncounted resolution panics the bench",
+            ANCHOR_ROWS
+        ),
+        notes: vec![
+            "REAL row (SCN-024): keyboard_nav_burst was SKIPPED in r0 (the honest byte rule kept it out with the deferred map); the seams landed (ADR-007 item 3) make this the FIRST wall-clock measurement of the REAL ring; the skipped row's record stays in pointer-burst-r0.log untouched".to_owned(),
+            "the pure-layer contract's drive shape (mount_key_surface_owned -> handle_for_surface_owned -> key_route_owned) is identical to the app's on_mount_key arm; its per-step cost also includes the per-view views snapshot clone + the ring rebuild (production pays the same per key)".to_owned(),
         ],
     }
 }
@@ -1739,15 +2813,16 @@ fn scenario_keyboard_nav_deferred() -> ScenarioRecord {
 // The SCN-022 run-record emitter (support pieces; task label SCN-022)
 // ---------------------------------------------------------------------------
 
-/// Print the env lines, assemble the run record with the SCN-022 task
+/// Print the env lines, assemble the run record with the SCN-024 task
 /// label, and print the pretty JSON (the stdout JSON IS the file). Reuses
-/// the support's `env_block`/`RunRecord` unchanged — only the task label
-/// differs from the SCN-012 emitter (which hardcodes its own task).
-fn emit_scn022_run_record(bench: &str, scenarios: Vec<ScenarioRecord>) -> RunRecord {
+/// the support's `env_block`/`RunRecord` unchanged; only the task label
+/// differs from the r0 emitter (SCN-022's, pointer-burst-r0.log).
+fn emit_scn024_run_record(bench: &str, scenarios: Vec<ScenarioRecord>) -> RunRecord {
     let env: EnvBlock = env_block(bench);
     println!(
-        "\n=== SCN-022 run: {bench} (replica of the pub(crate) pointer machines, at the \
-         ocs_plugin_api pub layer) ==="
+        "\n=== SCN-024 run: {bench} (the r0 replica rows + the r1 REAL rows through the \
+         #[doc(hidden)] bench seams; the run record's deferred map for the previously- \
+         deferred items moves them to measured-real) ==="
     );
     println!(
         "host={} os={} arch={} profile={} kernel={}",
@@ -1759,7 +2834,7 @@ fn emit_scn022_run_record(bench: &str, scenarios: Vec<ScenarioRecord>) -> RunRec
     );
     let record = RunRecord {
         run_record_format: RUN_RECORD_FORMAT,
-        task: "SCN-022",
+        task: "SCN-024",
         bench: bench.to_owned(),
         env,
         scenarios,
@@ -1781,22 +2856,29 @@ fn emit_scn022_run_record(bench: &str, scenarios: Vec<ScenarioRecord>) -> RunRec
 // ---------------------------------------------------------------------------
 
 fn main() {
-    println!("=== SCN-022 POINTER-BURST interaction bench (widget_interaction) ===");
-    println!("HONEST-BYTE SPLIT (both halves stated before any number):");
+    println!("=== SCN-024 POINTER-BURST interaction bench (widget_interaction) — r1 of SCN-022's pointer-burst-r0 ===");
+    println!("HONEST-BYTE SPLIT (all halves stated before any number):");
     println!(
-        "- bench-invisible (grep at this branch tip): src/ui/window/plugin_drag.rs prints \
-         pub(crate) for DragSession/DragCounters/DragPhase/its methods; \
-         src/ui/window/plugin_widget_mount.rs prints pub(crate) for MountInputState/HoverState \
-         + mount_move_defer/mount_flush_moves/mount_pointer_released/mount_press"
+        "- r0 (kept, see pointer-burst-r0.log): the CONTRACT-SHAPED REPLICA rows: the \
+         pub(crate) pointer machines were bench-invisible at that branch tip \
+         (DragSession/DragCounters/DragPhase, the MountInputState coalescer, MountCounters), \
+         so their wall-clock layer was the bench-side field-for-field mirrors over pub \
+         ocs_plugin_api types; those rows STILL RUN below, each `surface` labeled \
+         superseded-by-real"
     );
     println!(
-        "- so the wall-clock layers here are the CONTRACT-SHAPED REPLICA structures \
-         (bench-side, field-for-field mirrors over pub ocs_plugin_api types) — \
-         every scenario's `surface` labels this"
+        "- r1 (SCN-024, ADR-007 item 3): the REAL rows run the host's own #[doc(hidden)] pub \
+         bench seams: a bench-local MountRegistry::default() (the INSTANCE world, since the \
+         cfg(test) static facade is bench-invisible) with the anchored surface registered via \
+         SurfaceMountHandle::from_surface + register_surface_owned, the REAL *_owned drive/ \
+         read paths (mount_move_defer/__flush_moves/__press/__pointer_released/__hover_state_ \
+         ___owned/counters_owned + key_route_owned) and the REAL DragSession/DragCounters + \
+         DRAG_THRESHOLD_PX; inspect/drive-only, never wire"
     );
     println!(
-        "- the REAL-path halves are the host's unit tests + registry counters, named per \
-         scenario in the deferred counters / deferred vecs (the authoritative evidence)"
+        "- the run record's deferred map moves the previously-deferred items (keyboard_nav_steps, \
+         MountCounters mount-move probes, the DragCounters scroll) to scope measured-real; \
+         the replica rows' remaining pub(crate) halves stay deferred counters"
     );
 
     // The anchored fixture (validated; its row ids ARE the draggable set).
@@ -1808,14 +2890,18 @@ fn main() {
         ANCHOR_ROWS, ANCHOR_REVISION, PANEL_SURFACE_ID
     );
 
-    let scenarios = vec![
-        scenario_park_storm(),
-        scenario_drain_latest_only(),
-        scenario_settle_cancel_storm(),
-        scenario_keyboard_nav_deferred(),
-    ];
+    // The replica rows run FIRST (kept evidence); each REAL row follows the
+    // replica row it supersedes and prints the side-by-side columns.
+    let park = scenario_park_storm();
+    let drain = scenario_drain_latest_only();
+    let coalesce_real = scenario_mount_move_coalesce_real(&park, &drain);
+    let replica_storm = scenario_settle_cancel_storm();
+    let drag_real = scenario_drag_storm_real(&replica_storm);
+    let keyboard_real = scenario_keyboard_nav_burst();
 
-    let record = emit_scn022_run_record("widget_interaction", scenarios);
+    let scenarios = vec![park, drain, coalesce_real, replica_storm, drag_real, keyboard_real];
+
+    let record = emit_scn024_run_record("widget_interaction", scenarios);
     black_box(&record);
     // Bench convention: honest exit (0) — panics on any contract defect.
 }

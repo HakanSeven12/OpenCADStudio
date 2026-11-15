@@ -538,6 +538,10 @@ pub fn view_window<'a>(
         apply_blocked: v.apply_blocked,
         rows: Some(&v.rows),
         compact: false,
+        apply_pending: true,
+        delete_in_use: false,
+        on_context: None,
+        context_menu: None,
         editor,
     })
 }

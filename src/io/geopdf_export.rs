@@ -388,7 +388,7 @@ fn replace_precise_arrays(mut bytes: Vec<u8>, precise: &[PreciseArray]) -> Resul
                 return Err("The rebuilt PDF exceeds classic xref offsets".to_string());
             }
             tail.push_str(&format!(
-                "{offset:010} {:05} {}\n",
+                "{offset:010} {:05} {} \n",
                 entry.generation,
                 if entry.in_use { 'n' } else { 'f' }
             ));

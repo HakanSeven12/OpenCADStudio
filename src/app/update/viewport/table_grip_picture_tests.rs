@@ -103,6 +103,53 @@ fn drag(app: &mut OpenCADStudio, handle: Handle, id: usize, delta: glam::DVec3) 
     let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
 }
 
+/// A formula cell's picture MTEXT must carry the computed value (what the
+/// screen shows), not the raw "=A1+C1" text a program drawing the picture
+/// would then display as-is.
+#[test]
+fn table_picture_formula_cell_shows_computed_value_not_raw_text() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    let mut source = Table::new(Vector3::ZERO, 1, 3);
+    for column in &mut source.columns {
+        column.width = 20.0;
+    }
+    for row in &mut source.rows {
+        row.height = 10.0;
+    }
+    source.set_cell_text(0, 0, "2"); // A1
+    source.set_cell_text(0, 2, "3"); // C1
+    source.set_cell_text(0, 1, "=A1+C1"); // B1
+    let handle = app.tabs[i]
+        .scene
+        .add_entity(EntityType::Table(Box::new(source)));
+    let doc = &app.tabs[i].scene.document;
+    let t = table(doc, handle);
+    assert!(t.block_record_handle.is_some(), "no picture block");
+    let record = t
+        .block_record_handle
+        .and_then(|h| doc.block_records.iter().find(|r| r.handle == h))
+        .or_else(|| doc.block_records.get(&t.block_name))
+        .expect("picture block");
+    let values: Vec<String> = record
+        .entity_handles
+        .iter()
+        .filter_map(|h| match doc.get_entity(*h) {
+            Some(EntityType::MText(text)) => Some(text.value.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !values.iter().any(|v| v == "=A1+C1"),
+        "the picture stores the raw formula text: {values:?}"
+    );
+    assert!(
+        values.iter().any(|v| v == "5"),
+        "the picture should show B1's computed value 5: {values:?}"
+    );
+}
+
 #[test]
 fn table_grip_picture_width_preview_commit_and_cancel() {
     let (mut app, h) = fixture();

@@ -1579,3 +1579,319 @@ fn inside_out(body: &Body) -> bool {
         .sum();
     volume < 0.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOX: &[u8] = include_bytes!("../../tests/fixtures/iges/box.igs");
+    const CYLINDER: &[u8] = include_bytes!("../../tests/fixtures/iges/cylinder.igs");
+    const INCH_CUBE: &[u8] = include_bytes!("../../tests/fixtures/iges/inch_cube.igs");
+    const SPLINE: &[u8] = include_bytes!("../../tests/fixtures/iges/spline.igs");
+    const ATTRIBUTES: &[u8] = include_bytes!("../../tests/fixtures/iges/attributes.igs");
+    const RATIONAL_ARC: &[u8] = include_bytes!("../../tests/fixtures/iges/rational_arc.igs");
+    const TWO_SOLIDS: &[u8] = include_bytes!("../../tests/fixtures/iges/two_solids.igs");
+
+    fn bounds(body: &Body) -> ([f64; 3], [f64; 3]) {
+        let b = kernel::brep::body_bounds(body).expect("a body with geometry");
+        (b.min, b.max)
+    }
+
+    fn assert_close(actual: [f64; 3], expected: [f64; 3], tolerance: f64, what: &str) {
+        for k in 0..3 {
+            assert!(
+                (actual[k] - expected[k]).abs() <= tolerance,
+                "{what}: {actual:?} != {expected:?}"
+            );
+        }
+    }
+
+    /// The volume a closed body's mesh encloses.
+    fn volume(body: &Body) -> f64 {
+        let (min, max) = bounds(body);
+        let size = Vec3::from(min).distance(Vec3::from(max));
+        let mesh = kernel::brep::mesh_body(body, 0.1, size * 1e-3);
+        mesh.triangles
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|i| Vec3::from(mesh.positions[i]));
+                a.dot(b.cross(c))
+            })
+            .sum::<f64>()
+            / 6.0
+    }
+
+    /// The one solid a file holds, read into a millimetre drawing.
+    fn one_solid(bytes: &[u8]) -> Body {
+        let model = read(bytes, Some(1.0)).expect("an IGES model");
+        assert_eq!(
+            (model.bodies.len(), model.sheets.len(), model.curves.len()),
+            (1, 0, 0)
+        );
+        model.bodies.into_iter().next().unwrap().0
+    }
+
+    #[test]
+    fn a_box_solid_reads_as_one_closed_body_of_six_faces() {
+        let body = one_solid(BOX);
+        assert_eq!(body.faces.len(), 6);
+        let (min, max) = bounds(&body);
+        assert_close(min, [0.0, 0.0, 0.0], 1e-6, "min");
+        assert_close(max, [10.0, 20.0, 30.0], 1e-6, "max");
+        // Planar faces mesh exactly; a positive volume means outward faces.
+        assert!((volume(&body) - 6000.0).abs() < 1e-6, "{}", volume(&body));
+    }
+
+    #[test]
+    fn a_cylinder_solid_reads_with_its_curved_face() {
+        let body = one_solid(CYLINDER);
+        assert_eq!(body.faces.len(), 3, "the wall and two caps");
+        let (min, max) = bounds(&body);
+        assert_close(min, [-5.0, -5.0, 0.0], 1e-6, "min");
+        assert_close(max, [5.0, 5.0, 10.0], 1e-6, "max");
+        // The mesh approximates the wall: within 1 % of 250π.
+        let exact = 250.0 * std::f64::consts::PI;
+        let v = volume(&body);
+        assert!((v - exact).abs() < exact * 0.01, "{v} != {exact}");
+    }
+
+    #[test]
+    fn file_units_are_scaled_to_the_drawing_units() {
+        let size = |bytes: &[u8], drawing_mm| {
+            let model = read(bytes, drawing_mm).expect("an IGES model");
+            let (min, max) = bounds(&model.bodies[0].0);
+            [0, 1, 2].map(|k| max[k] - min[k])
+        };
+        // A cube written in inches: 25.4 mm, 1 inch, and 1 file unit in a
+        // drawing without units.
+        assert_close(size(INCH_CUBE, Some(1.0)), [25.4; 3], 1e-6, "mm drawing");
+        assert_close(size(INCH_CUBE, Some(25.4)), [1.0; 3], 1e-9, "inch drawing");
+        assert_close(size(INCH_CUBE, None), [1.0; 3], 1e-9, "unitless drawing");
+        // A box written in millimetres.
+        assert_close(
+            size(BOX, Some(25.4)),
+            [10.0 / 25.4, 20.0 / 25.4, 30.0 / 25.4],
+            1e-9,
+            "inch drawing",
+        );
+        assert_close(
+            size(BOX, Some(1000.0)),
+            [0.01, 0.02, 0.03],
+            1e-12,
+            "metre drawing",
+        );
+        assert_close(
+            size(BOX, None),
+            [10.0, 20.0, 30.0],
+            1e-9,
+            "unitless drawing",
+        );
+    }
+
+    #[test]
+    fn a_free_spline_curve_reads_through_its_interpolated_points() {
+        let model = read(SPLINE, Some(1.0)).expect("an IGES model");
+        assert_eq!(
+            (model.bodies.len(), model.sheets.len(), model.curves.len()),
+            (0, 0, 1)
+        );
+        let (curve, color, layer) = &model.curves[0];
+        assert_eq!(curve.degree(), 3);
+        assert_eq!(
+            (*color, layer.as_str()),
+            (document::types::Color::ByBlock, "0")
+        );
+        let (t0, t1) = curve.domain();
+        let samples: Vec<[f64; 3]> = (0..=4000)
+            .map(|k| curve.point_at_knot(t0 + (t1 - t0) * k as f64 / 4000.0))
+            .collect();
+        assert_close(samples[0], [0.0, 0.0, 0.0], 1e-9, "start");
+        assert_close(samples[4000], [30.0, 8.0, 0.0], 1e-9, "end");
+        for through in [[10.0, 5.0, 0.0], [20.0, 0.0, 3.0]] {
+            let nearest = samples
+                .iter()
+                .map(|p| distance(*p, through))
+                .fold(f64::INFINITY, f64::min);
+            assert!(nearest < 0.01, "passes {through:?}: {nearest}");
+        }
+        // Between them the curve overshoots; FreeCAD, sampling the same
+        // curve at 4,001 points, finds y down to -0.4543 and z from -0.8272
+        // to 3.3085.
+        let lowest = |k: usize| samples.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min);
+        let highest = |k: usize| {
+            samples
+                .iter()
+                .map(|p| p[k])
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        assert!((lowest(1) + 0.4543).abs() < 1e-3, "{}", lowest(1));
+        assert!((lowest(2) + 0.8272).abs() < 1e-3, "{}", lowest(2));
+        assert!((highest(2) - 3.3085).abs() < 1e-3, "{}", highest(2));
+    }
+
+    #[test]
+    fn a_rational_spline_keeps_its_weights() {
+        // A quarter circle of radius 10 as a rational quadratic: with the
+        // middle weight read wrongly it bulges off the circle.
+        let model = read(RATIONAL_ARC, Some(1.0)).expect("an IGES model");
+        assert_eq!(model.curves.len(), 1);
+        let curve = &model.curves[0].0;
+        assert_eq!(curve.degree(), 2);
+        let (t0, t1) = curve.domain();
+        for k in 0..=100 {
+            let p = curve.point_at_knot(t0 + (t1 - t0) * k as f64 / 100.0);
+            assert!(
+                (distance(p, [0.0; 3]) - 10.0).abs() < 1e-9,
+                "{p:?} is off the circle"
+            );
+            assert!(p[2].abs() < 1e-12);
+        }
+        assert_close(curve.point_at_knot(t0), [10.0, 0.0, 0.0], 1e-12, "start");
+        assert_close(curve.point_at_knot(t1), [0.0, 10.0, 0.0], 1e-12, "end");
+    }
+
+    #[test]
+    fn every_solid_of_a_file_is_read() {
+        let model = read(TWO_SOLIDS, Some(1.0)).expect("an IGES model");
+        assert_eq!((model.bodies.len(), model.sheets.len()), (2, 0));
+        // Compared by position: the order the file lists them in is not
+        // what this checks.
+        let mut solids: Vec<([f64; 3], [f64; 3], f64)> = model
+            .bodies
+            .iter()
+            .map(|(body, _, _)| {
+                let (min, max) = bounds(body);
+                (min, max, volume(body))
+            })
+            .collect();
+        solids.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
+        assert_close(solids[0].0, [0.0, 0.0, 0.0], 1e-6, "box min");
+        assert_close(solids[0].1, [10.0, 20.0, 30.0], 1e-6, "box max");
+        assert!((solids[0].2 - 6000.0).abs() < 1e-6, "{}", solids[0].2);
+        assert_close(solids[1].0, [100.0, 0.0, 0.0], 1e-6, "cube min");
+        assert_close(solids[1].1, [105.0, 5.0, 5.0], 1e-6, "cube max");
+        assert!((solids[1].2 - 125.0).abs() < 1e-6, "{}", solids[1].2);
+    }
+
+    #[test]
+    fn colours_levels_and_transforms_reach_the_curves() {
+        use document::types::Color;
+        let model = read(ATTRIBUTES, Some(1.0)).expect("an IGES model");
+        // The fourth curve is used by another entity, so it is not read.
+        let read: Vec<(Color, &str, [f64; 3], [f64; 3])> = model
+            .curves
+            .iter()
+            .map(|(curve, color, layer)| {
+                let (t0, t1) = curve.domain();
+                (
+                    *color,
+                    layer.as_str(),
+                    curve.point_at_knot(t0),
+                    curve.point_at_knot(t1),
+                )
+            })
+            .collect();
+        assert_eq!(read.len(), 3, "{read:?}");
+        assert_eq!(
+            (read[0].0, read[0].1),
+            (Color::Index(1), "0"),
+            "colour 2, red"
+        );
+        assert_eq!(
+            (read[1].0, read[1].1),
+            (
+                Color::Rgb {
+                    r: 153,
+                    g: 204,
+                    b: 255
+                },
+                "PIPES"
+            ),
+            "a colour definition, and a level named by a level property"
+        );
+        assert_eq!(
+            (read[2].0, read[2].1),
+            (Color::Index(250), "7"),
+            "black, an unnamed level"
+        );
+        assert_close(read[0].2, [0.0, 0.0, 0.0], 1e-12, "first start");
+        assert_close(read[0].3, [10.0, 0.0, 0.0], 1e-12, "first end");
+        assert_close(read[1].2, [0.0, 5.0, 0.0], 1e-12, "second start");
+        assert_close(read[2].2, [100.0, 10.0, 0.0], 1e-12, "moved by its matrix");
+        assert_close(read[2].3, [110.0, 10.0, 0.0], 1e-12, "moved by its matrix");
+    }
+
+    #[test]
+    fn input_that_is_not_iges_reads_as_nothing() {
+        assert!(read(b"", Some(1.0)).is_none());
+        assert!(read(b"not an IGES file\n", Some(1.0)).is_none());
+        // A directory section with nothing the reader keeps is an empty model.
+        let model = read(&SPLINE[..SPLINE.len() / 2], Some(1.0));
+        assert!(model.is_none_or(|m| m.bodies.is_empty() && m.sheets.is_empty()));
+    }
+
+    /// Damaged copies of every fixture: cut at each line, each line left
+    /// out, and each number in the parameter data replaced by a value a
+    /// careless writer might leave there. None may panic.
+    #[test]
+    fn damaged_files_never_panic() {
+        const VALUES: [&str; 6] = ["0", "-1", "1E308", "-1E308", "NaN", "99999999"];
+        let mut cases = 0;
+        for bytes in [
+            BOX,
+            CYLINDER,
+            INCH_CUBE,
+            SPLINE,
+            ATTRIBUTES,
+            RATIONAL_ARC,
+            TWO_SOLIDS,
+        ] {
+            let text = std::str::from_utf8(bytes).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            let mut check = |damaged: String| {
+                cases += 1;
+                let _ = read(damaged.as_bytes(), Some(1.0));
+            };
+            for n in 0..lines.len() {
+                check(lines[..n].join("\n"));
+                check([&lines[..n], &lines[n + 1..]].concat().join("\n"));
+            }
+            let mut value = 0;
+            for (n, line) in lines.iter().enumerate() {
+                if line.get(72..73) != Some("P") {
+                    continue;
+                }
+                let data = &line[..64];
+                let mut start = None;
+                for (i, c) in data.char_indices().chain([(64, ',')]) {
+                    match (
+                        start,
+                        c.is_ascii_digit() || matches!(c, '.' | '-' | 'E' | 'D'),
+                    ) {
+                        (None, true) => start = Some(i),
+                        (Some(s), false) => {
+                            let replaced = format!(
+                                "{:<64}{}",
+                                format!(
+                                    "{}{}{}",
+                                    &data[..s],
+                                    VALUES[value % VALUES.len()],
+                                    &data[i..]
+                                )
+                                .trim_end(),
+                                &line[64..]
+                            );
+                            value += 1;
+                            let mut damaged = lines.clone();
+                            damaged[n] = &replaced;
+                            check(damaged.join("\n"));
+                            start = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(cases > 1000, "{cases} damaged files");
+    }
+}

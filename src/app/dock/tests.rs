@@ -791,6 +791,64 @@ fn dock_edge_menu_adds_and_hides_pallets() {
 }
 
 #[test]
+fn edge_menu_lists_and_toggles_registered_plugin_panels() {
+    use crate::app::config::DockSide;
+    use crate::app::dock::view::MenuPanel;
+    use crate::ui::dock::{DockMsg, PanelId};
+    use crate::ui::window::plugin_panel::PluginPanelState;
+    use ocs_plugin_api::dialog::PanelDef;
+
+    let mut app = dock_app();
+    // Register exactly like the plugin-host does: numeric dock id, id and
+    // owned state; `visible` starts false until the menu (or a command)
+    // shows the pallet.
+    let panel = PanelDef::new("epl_panel", "Panel Example").with_command("EPL_OPEN");
+    let id = panel.id.clone();
+    let num = app.plugin_panel_ids.len() as u32 + 1;
+    app.plugin_panel_ids.insert(id.clone(), num);
+    app.plugin_panel_by_num.insert(num, id.clone());
+    app.plugin_panels
+        .insert(id, PluginPanelState::from_def(panel));
+
+    // A real drawing tab: the Start page hides every pallet regardless of
+    // state, which would make the checked column meaningless here.
+    let tab_index = app.active_tab;
+    app.tabs[tab_index].is_start = false;
+
+    // Built-ins first in their historical order (edit-session-gated entries
+    // are filtered out), then the plugin panel last by title.
+    let entries = app.pallet_menu_entries(DockSide::Right, &app.tabs[app.active_tab]);
+    assert_eq!(entries.len(), crate::ui::dock::PanelId::ALL.len() - 2 + 1);
+    assert!(matches!(entries[0].0, MenuPanel::Builtin(_)));
+    assert!(
+        entries[..entries.len() - 1]
+            .iter()
+            .all(|(e, _)| matches!(e, MenuPanel::Builtin(_))),
+        "plugin panels sort after every built-in"
+    );
+    let (last, checked) = entries.last().unwrap();
+    assert!(matches!(last, MenuPanel::Plugin(..)));
+    assert_eq!(last.title(), "Panel Example");
+    assert!(!checked, "not docked yet, so the row is unchecked");
+
+    // Checking the row docks the plugin panel on this edge and shows it —
+    // the generic PaletteId::Plugin plumbing, no pallet-menu special case.
+    let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Right, PanelId::Plugin(num)));
+    assert!(app.plugin_panels["epl_panel"].visible);
+    assert!(matches!(
+        app.dock.location(PanelId::Plugin(num)),
+        Some((DockSide::Right, _))
+    ));
+    let entries = app.pallet_menu_entries(DockSide::Right, &app.tabs[app.active_tab]);
+    assert!(entries.last().unwrap().1, "the row is checked while shown");
+
+    // Unchecking hides it but keeps its docked place for the next show.
+    let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Right, PanelId::Plugin(num)));
+    assert!(!app.plugin_panels["epl_panel"].visible);
+    assert!(app.dock.location(PanelId::Plugin(num)).is_some());
+}
+
+#[test]
 fn dock_divider_resizes_only_its_group() {
     use crate::app::config::DockSide;
     use crate::ui::dock::{DockGroup, DockMsg, PanelId};

@@ -1,8 +1,8 @@
 # Plugin panel API — behaviour as implemented (API v21 base + v22 additions)
 
 Behaviour documentation for the dockable-side-panel surface a plugin
-exercises, verified against a live host (the pallet-menu extension ships on
-its own review branch; the v22 additions from `selection-panel-v22` are in
+exercises, verified against a live host (see `plugin-pallet-menu.md` for the
+pallet-menu extension; the v22 additions from `selection-panel-v22` are in
 [value](#api-v22--selection-digest-structured-panel-state-panel_action)).
 Evidence: the `firetest-ocsgui` skill (native MCP bridge firetest,
 2026-11-14 session) plus host source references.

@@ -1544,6 +1544,26 @@ impl Scene {
                 Some((h, entity, annotation_scales, src_xdict))
             })
             .collect();
+        // A copy's effective drawing key follows its creation order, so the
+        // clones must be created in the same effective order the sources
+        // draw in — whatever was behind stays behind, whatever was in front
+        // stays in front — or copying several overlapping objects reorders
+        // them.
+        let overrides: std::collections::HashMap<u64, u64> = self
+            .document
+            .objects
+            .values()
+            .filter_map(|obj| match obj {
+                document::objects::ObjectType::SortEntitiesTable(t) => Some(t),
+                _ => None,
+            })
+            .filter(|t| !t.is_empty())
+            .flat_map(|t| t.entries().map(|e| (e.entity_handle.value(), e.sort_handle.value())))
+            .collect();
+        let effective_key =
+            |handle: Handle| overrides.get(&handle.value()).copied().unwrap_or(handle.value());
+        let mut clones = clones;
+        clones.sort_by_key(|(source, ..)| effective_key(*source));
         // MIRRTEXT also governs the copy path (default MIRROR keeps the source
         // and adds a mirrored copy): keep the copied text right-reading when the
         // header flag is off.

@@ -563,15 +563,33 @@ impl PluginPanelState {
     pub fn view<'a>(&'a self, num_id: u32, width: f32, chrome: Chrome) -> Element<'a, Message> {
         let tbar = title_bar(PanelId::Plugin(num_id), self.def.title.clone(), chrome);
 
-        let mut body_col = column![].spacing(8).width(Fill);
-        for control in &self.def.controls {
-            if control.id().is_some_and(|id| self.hidden_controls.contains(id)) {
-                continue;
+        // SCN-013 widget-surface mount hook (additive): when the host has a
+        // registered WidgetSurface for THIS panel id, the mounted body renders
+        // and the legacy control loop below never runs. NOTHING registers a
+        // widget surface yet (the integration task SCN-014 lands the registry
+        // wiring), so every panel today — and every existing test — falls to
+        // `None` and takes the legacy branch byte-identically.
+        // `WidgetMountMsg -> Message::Noop` is the DEFERRED one-line bridge:
+        // the mount's messages are not routed at app level until SCN-014 (the
+        // mount owns the vocabulary + routing into its state machines; tests
+        // assert message STRUCTURE, not Tasks).
+        let body = match crate::ui::window::plugin_widget_mount::MountRegistry::mounted_body(
+            self.def.id.as_str(),
+        ) {
+            Some(surface_view) => surface_view.map(|_mount_msg| Message::Noop),
+            None => {
+                let mut body_col = column![].spacing(8).width(Fill);
+                for control in &self.def.controls {
+                    if control.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+                        continue;
+                    }
+                    body_col = body_col.push(self.view_control_inner(control, false));
+                }
+                container(body_col).padding([8, 10]).width(Fill).into()
             }
-            body_col = body_col.push(self.view_control_inner(control, false));
-        }
+        };
 
-        let scroll_body = scrollable(container(body_col).padding([8, 10]).width(Fill))
+        let scroll_body = scrollable(body)
             .direction(scrollable::Direction::Vertical(
                 scrollable::Scrollbar::default(),
             ))

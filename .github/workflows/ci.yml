@@ -1,7 +1,8 @@
 name: Tests
 
 # Runs the workspace tests on every push to main and on every pull request,
-# on Linux, Windows and macOS. A separate lint job reports rustfmt and clippy
+# on Linux and Windows; macOS runs on pushes to main only, since its 7 GB
+# runner swaps through the main crate's test build (#3059). A separate lint job reports rustfmt and clippy
 # results without blocking merges until the existing tree has been cleaned up,
 # and a health job reports what each pull request does to the code-health
 # measures (docs/architecture/HEALTH.md) the same way.
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-15]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-22.04","windows-latest"]' || '["ubuntu-22.04","windows-latest","macos-15"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -51,6 +52,10 @@ jobs:
         env:
           LC_ALL: C
         run: cargo test --workspace --locked
+
+      - name: Runner memory (macOS)
+        if: always() && runner.os == 'macOS'
+        run: sysctl hw.memsize vm.swapusage
 
   lint:
     name: lint (informational)

@@ -27,14 +27,18 @@
 //! Host-local only: `Message` carries no serialization derives (no wire
 //! type), so the appended variant's only consumer is this arm.
 
-use iced::Task;
+use iced::keyboard::{Key, Modifiers, key as keyboard_key};
+use iced::{Point, Task};
 
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::plugin_widget_mount::{
     CollectingSink, MountRegistry, MountRouting, SurfaceMountHandle, WidgetMountMsg,
-    apply_mount_msg, msg_surface_id,
+    apply_mount_msg, key_route, mount_table_key_route, msg_surface_id,
 };
+use crate::ui::window::plugin_widgets::WindowSpec;
 use crate::ui::window::plugin_widgets_dispatch::DispatchKey;
+use crate::ui::window::plugin_widgets_tables::{CellFocus, TableUiState};
+use ocs_plugin_api::scene::StableId;
 use ocs_plugin_api::widgets::WidgetEvent;
 
 /// What ONE bridge route did with one mount message — the handler's total
@@ -68,7 +72,11 @@ fn settle_address_of(msg: &WidgetMountMsg) -> Option<DispatchKey> {
         | WidgetMountMsg::RowExpandedToggled { .. }
         | WidgetMountMsg::SelectionChanged { .. }
         | WidgetMountMsg::Scrolled { .. }
-        | WidgetMountMsg::FocusMoved { .. } => None,
+        | WidgetMountMsg::FocusMoved { .. }
+        // Pointer messages capture/never arm the dispatcher (§14).
+        | WidgetMountMsg::PointerPressed { .. }
+        | WidgetMountMsg::PointerMoved { .. }
+        | WidgetMountMsg::PointerReleased { .. } => None,
     }
 }
 
@@ -102,6 +110,12 @@ pub(crate) fn route_mount_msg(
     MountRegistry::record_message_routed();
     if matches!(routing, MountRouting::PromptRequested { .. }) {
         MountRegistry::record_prompt_surfaced();
+        // SCN-020: name the armed interaction for the keyboard layer's
+        // Escape cancel (the hint; the dispatcher's dismiss_prompt stays
+        // the cancel edge).
+        if let Some(key) = settle_address_of(msg) {
+            MountRegistry::mount_record_prompt_armed(msg_surface_id(msg), key);
+        }
     }
     let events = sink.take();
     MountBridgeOutcome {
@@ -109,6 +123,133 @@ pub(crate) fn route_mount_msg(
         events,
         settled,
     }
+}
+
+// ---------------------------------------------------------------------------
+// SCN-020 — the coalescing JOIN and the keyboard join (app-side routing)
+// ---------------------------------------------------------------------------
+
+/// What ONE coalesced mount-move entry did — the entry's total shape (the
+/// latest-wins contract's test surface).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MountMoveOutcome {
+    /// `false` = the surface is unregistered: a graceful no-op, nothing
+    /// stored, nothing counted (the unknown-surface through-line).
+    pub registered: bool,
+    /// `true` = the arriving move OVERWROTE an owed move still in flight
+    /// (the newest one wins; the older was counted superseded, never
+    /// queued, never answered).
+    pub superseded: bool,
+}
+
+/// The mount move's coalescing ENTRY (SCN-020) — the app-side arm of the
+/// registry's owed-slot JOIN, with the SAME latest-wins contract the
+/// viewport coalescer (`app::update::viewport::defer_pointer_move`) estab
+/// lished: while a mount move is in flight, a newer move OVERWRITES the
+/// owed slot; the tick/flush delivers ONLY the last (≤1 mount call per
+/// surface per tick — [`MountCounters::mount_move_calls`]); NO machine
+/// ever sees a raw move (§14 host-local: the flush updates the surface's
+/// [`HoverState`](crate::ui::window::plugin_widget_mount::HoverState) ONLY).
+///
+/// This arm is deliberately CHEAP per event (one slot write): the mount
+/// never runs a pass per move, so it defers unconditionally — there is no
+/// pass-cost gate to measure (the viewport's measured-gate discipline reduced
+/// to its invariant).
+pub(crate) fn route_mount_move(surface_id: StableId, position: Point) -> MountMoveOutcome {
+    match MountRegistry::mount_move_defer(surface_id, position) {
+        Some(superseded) => MountMoveOutcome {
+            registered: true,
+            superseded,
+        },
+        None => MountMoveOutcome {
+            registered: false,
+            superseded: false,
+        },
+    }
+}
+
+/// The press route: pointer capture ON for the surface
+/// ([`MountRegistry::mount_press`]); the press also makes the surface the
+/// keyboard's target (the desktop input model). `false` = unknown surface
+/// (graceful).
+pub(crate) fn route_mount_press(surface_id: StableId) -> bool {
+    MountRegistry::mount_press(surface_id)
+}
+
+/// The release route: capture completes (release ANYWHERE — the pure
+/// completion contract; this iced revision's `mouse_area` releases only
+/// inside the area, so the window-level catcher is the app-view seam, see
+/// [`OpenCADStudio::on_mount_key`]'s sibling note) and the surface's owed
+/// move — if the gesture left one — is delivered NOW (exactly ≤1). Returns
+/// the delivered count.
+pub(crate) fn route_mount_release(surface_id: StableId) -> usize {
+    MountRegistry::mount_pointer_released(surface_id)
+}
+
+/// The keyboard routing RESOLUTION (SCN-020, the pure layer): one key event
+/// against the mounted keyboard target → the mount messages to route, in
+/// order, through the ordinary bridge (`Message::WidgetMountMsg` →
+/// [`route_mount_msg`]). The resolution:
+///
+/// - the TARGET surface is [`MountRegistry::mount_key_surface`]'s (the
+///   press-captured surface, else the sole registered mount — the
+///   keyboard-only §16 path; `None` → no messages, graceful);
+/// - translation is [`key_route`]'s (the mount module's pure keyboard
+///   layer — arrows/Tab/Enter over the machines' ring; disabled skipped BY
+///   the state layer; chords own nothing);
+/// - ESCAPE is the machine-direct cancel (no message): the armed prompt
+///   dismissal runs HERE ([`MountRegistry::mount_escape_cancel`]); the
+///   drag cancel is deliberately NOT coupled in (SCN-021 adds its own arm).
+///
+/// The "app-ish state" the original brief sketched stays UNPARAMETERIZED
+/// in v1 on purpose: the mount's routes resolve entirely through the
+/// registry-side surfaces, so there is nothing of `OpenCADStudio` to read
+/// yet — the app-owned registry migration (SCN-015) is the crossing where
+/// this signature would grow the app state in.
+///
+/// The app-hook completion status (RECORDED, the SCN-015-style deferral):
+/// the pure layer is COMPLETE here (this fn + [`route_mount_msg`]);
+/// `OpenCADStudio::on_mount_key` below is the one-delegation call the real
+/// keyboard listener hands to — but the LISTENER lives in the app
+/// `view/mod.rs` event composition (`main_window_event`), which SCN-020
+/// does not own. Until that one-line hookup lands, no live key event
+/// reaches this layer; the headless tests drive the full path.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn handle_mount_key(key: Key, modifiers: Modifiers) -> Vec<WidgetMountMsg> {
+    let Some(surface_id) = MountRegistry::mount_key_surface() else {
+        return Vec::new();
+    };
+    // Escape: the mounted surface's cancel is machine-direct (the state
+    // layers' own hooks — the armed prompt's dismissal); no route message
+    // exists for it and no machine sees a KEY.
+    if key == Key::Named(keyboard_key::Named::Escape) {
+        MountRegistry::mount_escape_cancel(surface_id);
+        return Vec::new();
+    }
+    let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
+        return Vec::new();
+    };
+    let mut state = handle.state.borrow_mut();
+    key_route(surface_id, &handle.surface, &mut state, key, modifiers)
+}
+
+/// The typed-table keyboard route's REACH-THROUGH (SCN-020): the typed
+/// table machine is state-layer-complete and the mount's table placeholder
+/// is not interactive yet, so the table's keyboard layer is exposed as the
+/// PURE consumption [`mount_table_key_route`] (tested at the mount module;
+/// the typed-table MOUNT integration rides it). Reached only by tests
+/// today — surfaced here so the ONE route surface stays discoverable.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn handle_mount_table_key(
+    state: &mut TableUiState,
+    cell_cursor: &mut Option<CellFocus>,
+    key: Key,
+    modifiers: Modifiers,
+    spec: &WindowSpec,
+    column_order: &[StableId],
+) -> Option<crate::ui::window::plugin_widget_mount::MountTableKeyStep> {
+    mount_table_key_route(state, cell_cursor, key, modifiers, spec, column_order)
 }
 
 impl OpenCADStudio {
@@ -122,10 +263,30 @@ impl OpenCADStudio {
     /// event; a REGISTERED surface's stale content (a cross-surface or
     /// unknown-address message) refuses INSIDE the machines, and the app
     /// never sees a routed event either way.
+    ///
+    /// SCN-020: the mount's POINTER messages do NOT take the machine
+    /// route — they OWN the input layer ([`route_mount_press`]/[`route_mount_move`]
+    /// /[`route_mount_release`]: capture + the latest-wins coalescer, §14
+    /// host-local) and are resolved before the machine path.
     pub(in crate::app) fn on_widget_mount_msg(
         &mut self,
         msg: WidgetMountMsg,
     ) -> Task<Message> {
+        match &msg {
+            WidgetMountMsg::PointerPressed { surface_id, .. } => {
+                route_mount_press(*surface_id);
+                return Task::none();
+            }
+            WidgetMountMsg::PointerMoved { surface_id, position } => {
+                let _ = route_mount_move(*surface_id, *position);
+                return Task::none();
+            }
+            WidgetMountMsg::PointerReleased { surface_id, .. } => {
+                route_mount_release(*surface_id);
+                return Task::none();
+            }
+            _ => {}
+        }
         let Some(handle) = MountRegistry::handle_for_surface(msg_surface_id(&msg)) else {
             // Unregistered surface: the bridge refuses gracefully.
             return Task::none();
@@ -134,6 +295,42 @@ impl OpenCADStudio {
         // Pre-wire drain — see the module docs (the collecting sink's
         // contract; the publish hang-off is the ADR-004 crossing).
         let _ = outcome.events;
+        Task::none()
+    }
+
+    /// The mount keyboard route's app join (SCN-020): resolve the key
+    /// ([`handle_mount_key`]) and route EVERY produced message through the
+    /// ordinary `Message::WidgetMountMsg` bridge half.
+    ///
+    /// WIRING STATUS (recorded — the records repeat [`handle_mount_key`]'s):
+    /// the real key listener is app `view/mod.rs` territory (SCN-020 does
+    /// not own it); this method is the complete, tested route the
+    /// listener's one-line hookup will hand to.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::app) fn on_mount_key(&mut self, key: Key, modifiers: Modifiers) -> Task<Message> {
+        let msgs = handle_mount_key(key, modifiers);
+        if msgs.is_empty() {
+            return Task::none();
+        }
+        Task::batch(
+            msgs.into_iter()
+                .map(|msg| self.on_widget_mount_msg(msg))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// The mount side of the move-coalesce tick (SCN-020): answer every
+    /// surface's LAST owed move ([`MountRegistry::mount_flush_moves`] —
+    /// ≤1 mount call per surface per tick, host-local state only). Joined
+    /// onto the EXISTING `Message::MoveCoalesceTick` arm
+    /// (`app::update::mod.rs`) so both coalescers answer on the same
+    /// tick channel. NOTE (recorded): the tick subscription's PUMP
+    /// condition (`view/mod.rs`) still names only the viewport's owed
+    /// move — widening it is the same view-side seam as the keyboard
+    /// hookup; a mount move that stops while no other move arrives waits
+    /// for the next gesture (never a queue: the slot overwrites).
+    pub(in crate::app) fn on_mount_move_coalesce_tick(&mut self) -> Task<Message> {
+        let _ = MountRegistry::mount_flush_moves();
         Task::none()
     }
 }
@@ -154,8 +351,11 @@ mod tests {
     use crate::ui::window::plugin_widgets_dispatch::DispatchOutcome;
     use ocs_plugin_api::scene::{SceneRevision, StableId};
     use ocs_plugin_api::widgets::{
-        ConfirmPolicy, IconActionDef, IconRef, ItemDef, ItemListDef, WidgetNode, WidgetSurface,
+        CellKind, ConfirmPolicy, IconActionDef, IconRef, ItemDef, ItemListDef, PanelTableDef,
+        TableCell, TableColumnDef, TableRowDef, WidgetCellValue, WidgetNode, WidgetSurface,
     };
+    use crate::ui::window::plugin_widgets_tables::TableUiState;
+    use crate::ui::window::plugin_widget_mount::MountTableKeyStep;
 
     // -- fixtures ------------------------------------------------------------
 
@@ -507,4 +707,259 @@ mod tests {
         assert_eq!(handle.state.borrow().mutations().row_state_changes, 0);
         assert_eq!(handle.state.borrow().pending_children().len(), 0);
     }
+
+    // -- 5. SCN-020: Enter activates the focused row through the bridge -------
+
+    /// The full keyboard path (no pointer events anywhere): the key target
+    /// resolves, the route produces focus + selection messages, the bridge
+    /// applies them (the app-side routing works through the ordinary
+    /// `route_mount_msg`), and Enter on the focused row forwards the
+    /// ItemActivated activation event — the §16 keyboard-no-pointer
+    /// path, end-to-end.
+    #[test]
+    fn enter_activates_focused_row() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("scn020_enter");
+        let handle =
+            MountRegistry::handle_for_surface(sid(200)).expect("the registered surface");
+        // The keyboard grab (what the view listener hookup will hand to);
+        // the sole registered surface would resolve anyway.
+        MountRegistry::set_mount_key_target(Some(sid(200)));
+        let before = MountRegistry::counters();
+
+        let msgs = handle_mount_key(
+            iced::keyboard::Key::Named(keyboard_key::Named::ArrowDown),
+            iced::keyboard::Modifiers::NONE,
+        );
+        assert_eq!(msgs.len(), 2, "the arrows' pair: focus + selection");
+        for msg in &msgs {
+            let outcome = route_mount_msg(&handle, msg);
+            assert!(
+                matches!(outcome.routing, MountRouting::Applied { .. }),
+                "each route applies: {msg:?}"
+            );
+        }
+        {
+            let state = handle.state.borrow();
+            assert_eq!(state.focus(), Some(sid(7)));
+            assert_eq!(state.selection(), [sid(7)]);
+        }
+        assert_eq!(
+            MountRegistry::counters().keyboard_nav_steps - before.keyboard_nav_steps,
+            1
+        );
+
+        // Enter on the focused row: ONE activation route → ItemActivated.
+        let msgs = handle_mount_key(
+            iced::keyboard::Key::Named(keyboard_key::Named::Enter),
+            iced::keyboard::Modifiers::NONE,
+        );
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::RowActivated {
+                surface_id: sid(200),
+                widget_id: sid(200),
+                row_id: sid(7),
+            }]
+        );
+        let outcome = route_mount_msg(&handle, &msgs[0]);
+        assert_eq!(outcome.routing, MountRouting::Applied { forwarded: 1 });
+        assert!(!outcome.settled, "a row activation settles no dispatcher address");
+        assert_eq!(
+            outcome.events,
+            vec![WidgetEvent::ItemActivated {
+                surface_id: sid(200),
+                item_id: sid(7),
+            }],
+            "the activation event forwarded once"
+        );
+        assert_eq!(
+            MountRegistry::counters().keyboard_nav_steps - before.keyboard_nav_steps,
+            2,
+            "two resolved keys, two nav steps"
+        );
+    }
+
+    // -- 6. SCN-020: Escape cancels draft + pending (no drag coupling) ---------
+
+    /// Escape's mounted-surface half cancels the ARMED prompt through the
+    /// dispatcher's own hook (a re-click re-prompts — nothing lingering),
+    /// and the typed-table layer's Escape cancels an open cell draft FREE
+    /// (the state's hooks; drag cancel is SCN-021's own arm).
+    #[test]
+    fn escape_clears_draft_and_pending() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("scn020_escape");
+        let handle =
+            MountRegistry::handle_for_surface(sid(200)).expect("the registered surface");
+        MountRegistry::set_mount_key_target(Some(sid(200)));
+        let key = DispatchKey::Button(sid(1));
+        handle
+            .dispatcher
+            .borrow_mut()
+            .sync_button(&IconActionDef {
+                confirmation: Some(ConfirmPolicy::Prompt {
+                    message: "Really delete the selection?".to_string(),
+                }),
+                ..button_def(1, "Delete", "delete")
+            });
+
+        // Arm an interaction (the click path — the selection must exist so
+        // the dispatch resolves).
+        let selected = route_mount_msg(
+            &handle,
+            &WidgetMountMsg::SelectionChanged {
+                surface_id: sid(200),
+                widget_id: sid(200),
+                selected: vec![sid(7)],
+            },
+        );
+        assert_eq!(
+            selected.events,
+            vec![WidgetEvent::SelectionChanged {
+                surface_id: sid(200),
+                selected_ids: vec![sid(7)],
+            }]
+        );
+        let click = WidgetMountMsg::ButtonClicked {
+            surface_id: sid(200),
+            widget_id: sid(1),
+        };
+        let armed = route_mount_msg(&handle, &click);
+        assert_eq!(
+            armed.routing,
+            MountRouting::PromptRequested {
+                prompt: "Really delete the selection?".to_string(),
+            }
+        );
+        assert!(
+            handle
+                .dispatcher
+                .borrow()
+                .pending_prompt(&key)
+                .is_some(),
+            "the prompt is armed"
+        );
+
+        // ESCAPE: no message routes; the armed prompt CANCELS through the
+        // state layer's own hook.
+        let msgs = handle_mount_key(
+            iced::keyboard::Key::Named(keyboard_key::Named::Escape),
+            iced::keyboard::Modifiers::NONE,
+        );
+        assert!(msgs.is_empty(), "escape routes no navigation message");
+        assert_eq!(handle.dispatcher.borrow().pending_prompt(&key), None);
+        let counters = handle.dispatcher.borrow().counters().clone();
+
+        // Nothing lingers: the re-click RE-PROMPTS (the cancel re-arms the
+        // in-flight mark, exactly-once intact).
+        let re_armed = route_mount_msg(&handle, &click);
+        assert_eq!(
+            re_armed.routing,
+            MountRouting::PromptRequested {
+                prompt: "Really delete the selection?".to_string(),
+            }
+        );
+        assert_eq!(re_armed.events, Vec::new());
+        assert!(handle.dispatcher.borrow().pending_prompt(&key).is_some());
+        {
+            let now = handle.dispatcher.borrow().counters().clone();
+            assert!(
+                now.commands_emitted >= counters.commands_emitted,
+                "emit-count only ever grows"
+            );
+        }
+        // And the mount's own cancel hook takes the re-armed one down too.
+        assert!(MountRegistry::mount_escape_cancel(sid(200)));
+        assert_eq!(handle.dispatcher.borrow().pending_prompt(&key), None);
+
+        // The DRAFT half (pure table layer): the open draft cancels FREE.
+        let def = mount_table_fixture();
+        let mut table = state_for_table(&def);
+        table.begin_cell_edit(sid(1), sid(3)).expect("the Number column");
+        table
+            .draft_cell_value(WidgetCellValue::Number(9.0))
+            .expect("drafted");
+        assert!(table.draft().is_some());
+        let mutations_before = *table.mutations();
+        let mut cursor = None;
+        let outcome = handle_mount_table_key(
+            &mut table,
+            &mut cursor,
+            iced::keyboard::Key::Named(keyboard_key::Named::Escape),
+            iced::keyboard::Modifiers::NONE,
+            &WindowSpec {
+                viewport_height: 20.0,
+                row_height: 1.0,
+                margin_rows: 4,
+            },
+            &[sid(2), sid(3), sid(4)],
+        );
+        assert_eq!(
+            outcome,
+            Some(crate::ui::window::plugin_widget_mount::MountTableKeyStep::DraftCancelled)
+        );
+        assert!(table.draft().is_none(), "the draft is cleared");
+        assert_eq!(
+            *table.mutations(),
+            mutations_before,
+            "a cancelled draft touched nothing (no evidence it existed)"
+        );
+    }
+
+    // -- SCN-020 table fixtures (the typed-table keyboard layer's pure
+    // -- consumption; same shapes as the mount module's) ----------------------
+
+    fn mount_table_column(id: u64, kind: CellKind, label: &str) -> TableColumnDef {
+        TableColumnDef {
+            id: sid(id),
+            label: label.to_string(),
+            kind,
+            width_hint: None,
+            stretch: false,
+        }
+    }
+
+    fn mount_table_fixture() -> PanelTableDef {
+        PanelTableDef {
+            id_table: sid(700),
+            columns: vec![
+                mount_table_column(2, CellKind::Text, "note"),
+                mount_table_column(3, CellKind::Number, "length"),
+                mount_table_column(4, CellKind::Bool, "locked"),
+            ],
+            total_rows: None,
+            rows: vec![
+                TableRowDef {
+                    key: sid(1),
+                    cells: vec![
+                        TableCell::Text("note 1".to_string()),
+                        TableCell::Number(1.0),
+                        TableCell::Bool(false),
+                    ],
+                    domain_ref: None,
+                },
+                TableRowDef {
+                    key: sid(2),
+                    cells: vec![
+                        TableCell::Text("note 2".to_string()),
+                        TableCell::Number(2.0),
+                        TableCell::Bool(true),
+                    ],
+                    domain_ref: None,
+                },
+            ],
+        }
+    }
+
+    fn state_for_table(def: &PanelTableDef) -> TableUiState {
+        let mut state = TableUiState::new(sid(200), def.id_table);
+        state.sync(&WidgetSurface {
+            revision: SceneRevision(1),
+            roots: Vec::new(),
+            tables: std::collections::BTreeMap::from([(def.id_table, def.clone())]),
+        });
+        state
+    }
+
 }

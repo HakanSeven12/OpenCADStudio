@@ -41,6 +41,81 @@
 //! app's real confirm dialog, riding the existing modal patterns) and the
 //! app-OWNED registry migration are the SCN-015 follow-up.
 //!
+//! # The mount becomes INPUT-CAPABLE (SCN-020 — hover, capture, coalescing)
+//!
+//! SCN-020 adds the mount's pointer/input layer, host-local per §7/§14:
+//! - **[`HoverState`]** — the per-surface input slot (hover, capture,
+//!   capture origin, last delivered move, owed-move slot) living INSIDE the
+//!   [`MountRegistry`], so its lifetime is exactly its surface's (every
+//!   register/teardown path sweeps it). Hover is host-local by contract:
+//!   set through [`MountRegistry::mount_set_hover`] (the wiring's report —
+//!   the flush deliberately does NOT hit-test; the mount owns no per-row
+//!   geometry), read by SCN-021's drag previews through
+//!   [`MountRegistry::mount_hover_state`]. NO machine ever sees a hover or
+//!   a move (§14).
+//! - **Pointer capture** — the panel hook wraps the mounted body with
+//!   [`pointer_capture_body`] (this iced revision's `mouse_area` idiom):
+//!   press → [`WidgetMountMsg::PointerPressed`] → capture ON + the press
+//!   surface becomes the mount's keyboard target; move →
+//!   [`WidgetMountMsg::PointerMoved`] → the coalescer entry; release →
+//!   [`WidgetMountMsg::PointerReleased`] → capture OFF + the owed move
+//!   delivered NOW. Release ANYWHERE is the pure completion contract
+//!   ([`MountRegistry::mount_pointer_released`]) — the wrapper wires the
+//!   releases this iced revision delivers inside the area, and a
+//!   window-level release catcher is app-view wiring (recorded below).
+//! - **Latest-wins move coalescing** — the viewport coalescer's contract
+//!   (its `defer_pointer_move`/`on_move_coalesce_tick` precedent, measured
+//!   there) reduced to the mount: every move DEFERS into the surface's
+//!   owed slot (a page-queue is precisely what the viewport measured as
+//!   the 986-positions defect — the mount never grows one); a newer move
+//!   OVERWRITES the slot and counts [`MountCounters::coalesced_moves_superseded`];
+//!   the flush (the app's move-coalesce tick, joined onto the EXISTING
+//!   `Message::MoveCoalesceTick` arm; plus the release completion) delivers
+//!   ≤1 mount call per surface per tick ([`MountCounters::mount_move_calls`]).
+//!   A mount "call" is the registry's own [`HoverState`] write — there is
+//!   no plugin/event side to a move at all.
+//!
+//! # The mount becomes KEYBOARD-NAVIGABLE (SCN-020)
+//!
+//! [`key_route`] is the keyboard layer's pure translation: keys → the
+//! route messages the bridge already applies. The state layers decide
+//! EVERYTHING: the ring ([`nav_ring`]) only names what the builders
+//! rendered (trees' current flat rows, lists, visible icon buttons), and
+//! the roving (`focus_next`/`focus_prev`) SKIPS disabled by the machines'
+//! own refusal — the keyboard layer never re-implements enablement. The
+//! keys: Up/Down = one ring step + the selection following it
+//! (FocusMoved + SelectionChanged); Left/Right = a TREE row's expansion
+//! toggle; Enter/Space = the focused thing's activation; Tab/Shift+Tab =
+//! the ring advance with wrap; Escape = the machine-direct cancel of the
+//! surface's armed prompt ([`MountRegistry::mount_escape_cancel`]; drag
+//! cancel is SCN-021's). Chords (Ctrl/Alt/Logo) are the app's accelerator
+//! space and route nothing. The app-side resolution ([`handle_mount_key`]
+//! in `app::update::widget_mount`) resolves the TARGET surface (the
+//! press-captured one, else the sole registered mount — the keyboard-only
+//! §16 path), runs the translation, and routes every produced message
+//! through the ordinary bridge.
+//!
+//! TABLES: the typed-table machine ([`mount_table_key_route`], consuming
+//! the frozen SWG-004b state layer) is the table keyboard scope — Up/Down
+//! row roving within the materialized window, Left/Right the caller-held
+//! cell cursor, Escape the FREE draft cancel. The mount's TABLE placeholder
+//! is not interactive yet (the typed-table MOUNT integration is the later
+//! task), so the table keys are pure-layer complete and headless-tested.
+//!
+//! # Wiring status (recorded — the one-line seams outside this task)
+//!
+//! - The real keyboard LISTENER (`main_window_event`, app view/mod.rs) and
+//!   the move-coalesce tick's subscription PUMP condition (`move_owed.is_some()`,
+//!   view/mod.rs) are app-view territory. `OpenCADStudio::on_mount_key` +
+//!   `on_mount_move_coalesce_tick` are the complete, headless-tested routes
+//!   those one-line hookups hand to; until then no live key/tick reaches
+//!   the mount input layer (and NOTHING registers a surface in the live
+//!   app, so the currently-shipped behavior is unaffected either way — the
+//!   deferral is NOT a behavior risk today).
+//! - Headless tests set the keyboard target through
+//!   [`MountRegistry::set_mount_key_target`] (the same seam the app-owned
+//!   registry's roving-panel focus will own).
+//!
 //! # The panel hook is the registry side-map (the owned seam)
 //!
 //! `PluginPanelState` derives `Clone` + `PartialEq`; an
@@ -136,9 +211,10 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use iced::keyboard::{Key, Modifiers, key as keyboard_key};
 use iced::widget::tooltip::Position as TooltipPosition;
-use iced::widget::{Tooltip, button, column, container, row, text};
-use iced::{Element, Fill, Length, Theme};
+use iced::widget::{Tooltip, button, column, container, mouse_area, row, text};
+use iced::{Element, Fill, Length, Point, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
 use ocs_plugin_api::scene::{SceneRevision, StableId};
 use ocs_plugin_api::widgets::{
@@ -156,6 +232,7 @@ use crate::ui::window::plugin_widgets_dispatch::{
     ControlSemantics, DispatchKey, DispatchOutcome, ItemSemantics, WidgetDispatcher,
     project_button, project_menu,
 };
+use crate::ui::window::plugin_widgets_tables::{CellFocus, TableUiState};
 
 /// The mount's iced_aw menu element types with the crate's theme/renderer
 /// set (the vendored `Item`/`Menu` carry explicit generics).
@@ -192,7 +269,19 @@ pub(crate) const DEFAULT_WINDOW_SPEC: WindowSpec = WindowSpec {
 /// [`apply_mount_msg`] over the same
 /// `Rc<RefCell<WidgetUiState>>` / `Rc<RefCell<WidgetDispatcher>>` pair the
 /// registry handed the view.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// SCN-020 adds the mount's POINTER-capture vocabulary
+/// ([`WidgetMountMsg::PointerPressed`] / [`WidgetMountMsg::PointerMoved`] /
+/// [`WidgetMountMsg::PointerReleased`] — `Eq` therefore yields to
+/// `PartialEq`: this iced revision's `Point` is not an equality type). These
+/// three ride the SAME single-wagon rule (the one `Message::WidgetMountMsg`
+/// variant), but they do NOT route into the machines: pointering is the
+/// mount's own host-local input store (§7 "hover/drag/previews/pan-zoom
+/// stay HOST-LOCAL"; §14 "the machine layers never see raw moves") — the
+/// app arm hands them to the coalescer/capture routes
+/// (`app::update::widget_mount`), and a pointer message that still reached
+/// [`apply_mount_msg`] would be refused by name.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum WidgetMountMsg {
     /// A row's activation gesture (a press on an already-selected list item —
     /// the native "press again to open" form, see [`list_element`]).
@@ -238,15 +327,45 @@ pub(crate) enum WidgetMountMsg {
         widget_id: StableId,
         top_row: usize,
     },
-    /// Keyboard focus moved to row/item `to` (`None` = away; the v1 mount
-    /// keeps its current focus there — focus is a host-local slot and blur
-    /// has no machine method to call).
-    // Same as `Scrolled`: routed, not yet emitted by a v1 builder.
+    /// Keyboard focus moved to row/item `to` (`None` = away; a moved-away
+    /// focus keeps its slot — blur has no machine method to call).
+    // STILL never emitted by a BUILDER (focus arrives through the
+    // keyboard layer, [`key_route`], from SCN-020); its routing
+    // (`apply_mount_msg` → `focus_set`) is live all the same.
     #[allow(dead_code)]
     FocusMoved {
         surface_id: StableId,
         widget_id: StableId,
         to: Option<StableId>,
+    },
+    /// The pointer pressed over the mounted body (the surface-level capture
+    /// wrapper — [`pointer_capture_body`] — emits it on every press the
+    /// body's own widgets did not capture first: blank Surface presses).
+    /// Capture turns ON for the surface (host-local; also the keyboard
+    /// target: a press-keyed surface owns the mount's keys). The press
+    /// carries NO position — this iced revision's `mouse_area` reports
+    /// positions on MOVE only; the capture origin lands with the first
+    /// coalesced move (§7: SCN-021's drag previews consume it).
+    PointerPressed {
+        surface_id: StableId,
+    },
+    /// The pointer moved over the mounted body. NEVER routed per event:
+    /// the app arm hands it to the latest-wins coalescer
+    /// ([`MountRegistry::mount_move_defer`]) — the slot overwrites, the
+    /// tick/flush answers ONLY the last one (≤1 mount call per surface per
+    /// tick), and no machine ever sees a raw move (§14).
+    PointerMoved {
+        surface_id: StableId,
+        position: Point,
+    },
+    /// The pointer released completing whatever capture held it —
+    /// release ANYWHERE completes (the pure completion contract is
+    /// [`MountRegistry::mount_pointer_released`]; the wrapper wires the
+    /// releases this iced revision delivers inside the area and the
+    /// window-level release-anywhere catcher is the app-view seam — see
+    /// the module docs' wiring note).
+    PointerReleased {
+        surface_id: StableId,
     },
 }
 
@@ -422,6 +541,17 @@ pub(crate) fn apply_mount_msg<S: WidgetEventSink + ?Sized>(
             // it) — a documented no-op.
             None => MountRouting::Applied { forwarded: 0 },
         },
+        // Pointer messages are NOT machine vocabulary (§14: the machine
+        // layers never see raw moves) — the app arm routes them to the
+        // mount's coalescer/capture paths BEFORE any machine router runs;
+        // one that still reached here is refused by name (defensive total —
+        // nothing half-applies, nothing moves).
+        WidgetMountMsg::PointerPressed { .. }
+        | WidgetMountMsg::PointerMoved { .. }
+        | WidgetMountMsg::PointerReleased { .. } => MountRouting::Refused(
+            "pointer messages drive the mount's host-local input store, not the machines (§14)"
+                .to_string(),
+        ),
     }
 }
 
@@ -436,7 +566,10 @@ pub(crate) fn msg_surface_id(msg: &WidgetMountMsg) -> StableId {
         | WidgetMountMsg::ButtonClicked { surface_id, .. }
         | WidgetMountMsg::MenuItemClicked { surface_id, .. }
         | WidgetMountMsg::Scrolled { surface_id, .. }
-        | WidgetMountMsg::FocusMoved { surface_id, .. } => *surface_id,
+        | WidgetMountMsg::FocusMoved { surface_id, .. }
+        | WidgetMountMsg::PointerPressed { surface_id, .. }
+        | WidgetMountMsg::PointerMoved { surface_id, .. }
+        | WidgetMountMsg::PointerReleased { surface_id, .. } => *surface_id,
     }
 }
 
@@ -1200,8 +1333,18 @@ impl SurfaceMountHandle {
 #[derive(Default)]
 pub(crate) struct MountRegistry {
     by_panel: HashMap<String, SurfaceMountHandle>,
+    /// The mount's host-local INPUT store (SCN-020): per-surface
+    /// [`HoverState`] (hover + pointer capture + the owed-move slot), the
+    /// keyboard target resolution and the armed-prompt cancel hint.
+    /// Registry-adjacent ON PURPOSE: one borrow domain with the registry
+    /// makes the input entries' lifecycle EXACTLY the surfaces' (every
+    /// register/teardown path prunes them — no orphaned input state), and
+    /// §7/§14 keep this whole store host-local (never serialized, never
+    /// machine-visible).
+    input: MountInputState,
     /// The lifecycle instrumentation (§16 probes) — read via
-    /// [`MountRegistry::counters`].
+    /// [`MountRegistry::counters`]. SCN-020 added the interaction probes
+    /// ([`MountCounters::mount_move_calls`] and siblings).
     counters: MountCounters,
 }
 
@@ -1220,8 +1363,9 @@ impl MountRegistry {
             registry
                 .borrow_mut()
                 .by_panel
-                .insert(panel_id.to_string(), handle)
+                .insert(panel_id.to_string(), handle);
         });
+        MountRegistry::prune_input();
     }
 
     /// Remove a panel's mount (the RAW primitive — no machine release, the
@@ -1231,6 +1375,7 @@ impl MountRegistry {
         MOUNT_REGISTRY.with(|registry| {
             registry.borrow_mut().by_panel.remove(panel_id);
         });
+        MountRegistry::prune_input();
     }
 
     /// The gate read: is a widget-surface mount registered for `panel_id`?
@@ -1345,6 +1490,21 @@ pub(crate) struct MountCounters {
     /// the real dialog UI (SCN-015: the dialog rides the app's modal
     /// patterns; nothing prompt-sided runs yet).
     pub prompts_surfaced: usize,
+    //
+    // -- SCN-020 interaction probes (defect instruments, §16) --------------
+    /// Mount moves DELIVERED by the coalescer ([`MountRegistry::mount_flush_moves`]
+    /// / the release completion): ≤1 per surface per tick. A burst that
+    /// moves this per-event (or whose delivered position lags the cursor)
+    /// is the defect this probe names.
+    pub mount_move_calls: u64,
+    /// Owed moves overwritten UNANSWERED — the latest-wins discipline's
+    /// count: every position a newer move (or a superseding press) made
+    /// pointless to answer.
+    pub coalesced_moves_superseded: u64,
+    /// Keyboard navigation steps RESOLVED into ≥1 mount route message
+    /// ([`key_route`]). The a11y defect probe: a keyboard path that stops
+    /// moving the focus/selection is a step this counter never saw.
+    pub keyboard_nav_steps: u64,
 }
 
 /// The PRESERVE-ON-IDENTICAL comparison input: the surface's structural
@@ -1488,6 +1648,10 @@ impl MountRegistry {
                 registry.by_panel.insert(panel_id.to_string(), handle);
             }
         });
+        // The input store is the surfaces' mirror: sweep it after ANY
+        // registration path (a replaced surface's stale hover/capture/
+        // owed-move state has nothing to point at anymore).
+        MountRegistry::prune_input();
     }
 
     /// The explicit teardown (§16 "closing a tab cancels pending requests
@@ -1505,6 +1669,7 @@ impl MountRegistry {
                 registry.counters.torn_down += 1;
             }
         });
+        MountRegistry::prune_input();
     }
 
     /// The bridge's lookup: the registered mount whose state owns
@@ -1551,6 +1716,801 @@ impl MountRegistry {
             registry.borrow_mut().counters.messages_routed += 1;
         });
     }
+
+    /// The keyboard layer's nav-step probe tick ([`MountCounters::keyboard_nav_steps`]):
+    /// one resolved navigation step (a key whose route produced ≥1 mount
+    /// message). Called by [`key_route`]/[`mount_table_key_route`] — the
+    /// pure keyboard layers' single registry-side side effect.
+    /// (registry-side; test-consumed probes + the deferred keyboard hookups)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn record_key_nav_step() {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().counters.keyboard_nav_steps += 1;
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SCN-020 — the mount's INPUT layer: hover state, pointer capture, and the
+// latest-wins move coalescer (host-local, §7/§14)
+// ---------------------------------------------------------------------------
+
+/// ONE mounted surface's pointer/input state — the mount-machine slot §14
+/// demands ("the machine layers never see raw moves"). Host-local only,
+/// never serialized, never machine-visible; lives in [`MountRegistry`]'s
+/// input store so its lifetime is exactly the surface's (every register /
+/// teardown path sweeps it).
+///
+/// The name is [`HoverState`] because hover is its permanent resident; the
+/// pointer-capture fields and the owed-move slot live in the same per-
+/// surface entry because press→capture→move→release is ONE gesture whose
+/// state belongs together (SCN-021's drag previews consume exactly
+/// these fields — `hover`, `last_move`, `captured`, `capture_origin` — read
+/// through [`MountRegistry::mount_hover_state`]).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct HoverState {
+    /// The row/widget under the pointer, per what the wiring last
+    /// reported ([`MountRegistry::mount_set_hover`]; a coalesced move
+    /// flush does NOT hit-test — the mount has no per-row geometry of its
+    /// own, the flush's single mount call records the position only).
+    pub hover: Option<StableId>,
+    /// The last DELIVERED move's surface-local position (the flush answers
+    /// the newest owed move at the tick/release rate, never per event).
+    pub last_move: Option<Point>,
+    /// Pointer capture: press over the surface → ON; release ANYWHERE →
+    /// OFF (the completion contract is [`MountRegistry::mount_pointer_released`]
+    /// — the pure fn "release anywhere" asserts against).
+    pub captured: bool,
+    /// Where the capture's pointer stood when it first reported after a
+    /// press (the drag-origin slot; unnamed until the first delivered
+    /// move — this iced revision reports no press position).
+    pub capture_origin: Option<Point>,
+    /// The owed-move slot: the position the pointer last reported that the
+    /// tick/flush has not answered yet. LATEST-WINS (§7): a new move
+    /// OVERWRITES the slot (the superseded one is counted, never queued);
+    /// the tick answers only the last — so at most ONE position is in
+    /// flight per surface at any moment; moves never accumulate into a
+    /// queue (the queue-could-only-grow defect the viewport coalescer
+    /// measured) and nothing but the newest is ever processed.
+    move_owed: Option<Point>,
+}
+
+/// The registry's input store alongside its surfaces (SCN-020). Plus the
+/// two SURFACE-SCOPE slots the keyboard/cancel routes resolve:
+/// `key_target` and the armed-prompt cancel hint.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Default)]
+pub(crate) struct MountInputState {
+    /// Per-surface pointer/input state (`None` key = no entry — input
+    /// entries are created lazily by their first event and pruned with
+    /// their surface).
+    per_surface: HashMap<StableId, HoverState>,
+    /// The surface the mount's keys route to (the keyboard's target).
+    /// Set when a press captures a surface (a press-keyed panel owns the
+    /// keys until another gesture moves them); cleared by the profile
+    /// sweep when the surface unregisters. The keyboard-ONLY §16 path
+    /// (no click at all) resolves in [`MountRegistry::mount_key_surface`]:
+    /// with no explicit target but EXACTLY ONE registered surface, that
+    /// surface is the target (the sole mounted panel is the only thing
+    /// arrows can mean; the app-owned registry's real roving-panel focus
+    /// is the SCN-015 crossings concern).
+    key_target: Option<StableId>,
+    /// The armed command address the bridge last surfaced for a surface
+    /// ([`MountRegistry::mount_record_prompt_armed`]) — the hint Escape's
+    /// cancel reads ([`MountRegistry::mount_escape_cancel`]; the dispatcher
+    /// stays the semantic authority, the hint merely NAMES the armed
+    /// interaction without a key-enumeration read on the frozen
+    /// dispatcher).
+    escape_cancel: HashMap<StableId, DispatchKey>,
+}
+
+impl MountRegistry {
+    /// (SCN-020, the coalescing JOIN's entry) Record ONE pointer move for
+    /// `surface_id` into the surface's owed slot — the mount sibling of
+    /// the viewport coalescer's `defer_pointer_move`:
+    ///
+    /// - LATEST-WINS (§7): a pending slot is OVERWRITTEN — the newer move
+    ///   is, by definition, where the cursor is; the older one is dropped
+    ///   unanswered and counted ([`MountCounters::coalesced_moves_superseded`]).
+    ///   N moves per tick = ≤1 mount call per surface ([`MountRegistry::mount_flush_moves`]).
+    /// - NOTHING routes yet, and NO machine sees the move raw (§14): the
+    ///   whole effect is this slot write.
+    /// - Unregistered surface → `None` (graceful no-op — nothing stored,
+    ///   nothing counted; the through-line of test
+    ///   `unknown_surface_moves_are_graceful`), `Some(superseded)` otherwise.
+    ///
+    /// The app arm calls this per `PointerMoved` message; the app's
+    /// move-coalesce tick (the SAME `Message::MoveCoalesceTick` channel the
+    /// viewport coalescer drives) calls the flush. Contrary to the
+    /// viewport's adaptive gate there is NO pass-cost threshold: the
+    /// mount's move half must be CHEAP per event unconditionally (a slot
+    /// write only), so it defers every move.
+    pub(crate) fn mount_move_defer(surface_id: StableId, position: Point) -> Option<bool> {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let handle_registered = registry
+                .by_panel
+                .values()
+                .any(|handle| handle.surface_id() == surface_id);
+            if !handle_registered {
+                return None;
+            }
+            let entry = registry.input.per_surface.entry(surface_id).or_default();
+            let superseded = entry.move_owed.replace(position).is_some();
+            if superseded {
+                registry.counters.coalesced_moves_superseded += 1;
+            }
+            Some(superseded)
+        })
+    }
+
+    /// Answer every surface's LAST owed move — the coalescer's delivery
+    /// point (the tick, and the release completion). This IS the mount
+    /// call the counter ticks: per surface, at most one delivery per
+    /// flush, updating the surface's [`HoverState`] (host-local §14) and
+    /// NOTHING else — no machine route, no event, no counter wobble
+    /// beyond the probe. Returns how many surfaces were delivered.
+    pub(crate) fn mount_flush_moves() -> usize {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let mut delivered = 0usize;
+            for entry in registry.input.per_surface.values_mut() {
+                if let Some(position) = entry.move_owed.take() {
+                    entry.last_move = Some(position);
+                    // The capture's drag ORIGIN is the first delivered move
+                    // during capture (the press carries no position in this
+                    // iced revision); SCN-021's drag previews read it.
+                    if entry.captured && entry.capture_origin.is_none() {
+                        entry.capture_origin = Some(position);
+                    }
+                    delivered += 1;
+                }
+            }
+            // The probe counts AFTER the iteration borrow released (one
+            // number: the delivered calls).
+            registry.counters.mount_move_calls += delivered as u64;
+            delivered
+        })
+    }
+
+    /// Pointer capture ON for `surface_id` (the press route): capture arms
+    /// and the surface becomes the keyboard target (a pressed panel owns
+    /// the keys — the desktop input model). A still-owed move is
+    /// SUPERSEDED by the press (the viewport precedent:
+    /// `set_cursor_for_press` drops the withheld position rather than
+    /// answering it backwards order — the press is the later truth), so
+    /// the press does NOT deliver it and does NOT count it as an overwrite
+    /// (the probe counts latest-wins overwrites only). Unregistered →
+    /// `false`, registered → `true`.
+    pub(crate) fn mount_press(surface_id: StableId) -> bool {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let handle_registered = registry
+                .by_panel
+                .values()
+                .any(|handle| handle.surface_id() == surface_id);
+            if !handle_registered {
+                return false;
+            }
+            let entry = registry.input.per_surface.entry(surface_id).or_default();
+            entry.captured = true;
+            entry.capture_origin = None; // lands with the first delivered move
+            let _already_superseded = entry.move_owed.take();
+            registry.input.key_target = Some(surface_id);
+            true
+        })
+    }
+
+    /// Pointer capture completion — release ANYWHERE (pressed inside,
+    /// released wherever): capture OFF for `surface_id`, and the pending
+    /// owed move (if any) is DELIVERED NOW — the gesture's last position
+    /// must not outlive the gesture unanswered (the §16 shape of the
+    /// viewport's press-answers-the-owed-move rule). Returns the delivered
+    /// count (0 or 1: ≤1 in flight per surface — the contract the tests
+    /// pin). An unknown surface is a quiet 0.
+    pub(crate) fn mount_pointer_released(surface_id: StableId) -> usize {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let Some(entry) = registry.input.per_surface.get_mut(&surface_id) else {
+                return 0;
+            };
+            entry.captured = false;
+            entry.capture_origin = None;
+            let delivered = entry.move_owed.take().map(|position| {
+                entry.last_move = Some(position);
+                1
+            });
+            // (the entry borrow may end here; the probe counts outside it)
+            let delivered = delivered.unwrap_or(0);
+            registry.counters.mount_move_calls += delivered as u64;
+            delivered
+        })
+    }
+
+    /// Record the wired hover: `row_id` is what the pointer is over (the
+    /// per-row hover wiring's input; the move flush deliberately does NOT
+    /// hit-test — see [`HoverState::hover`]). Host-local ONLY: no machine
+    /// route, no event, no counter beyond nothing — the piece §14 pins
+    /// ("hover does not storm the machines"). Returns `false` when the
+    /// surface is unknown (a quiet no-op); `true` when recorded.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_set_hover(surface_id: StableId, row: StableId) -> bool {
+        MOUNT_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let handle_registered = registry
+                .by_panel
+                .values()
+                .any(|handle| handle.surface_id() == surface_id);
+            if !handle_registered {
+                return false;
+            }
+            registry.input.per_surface.entry(surface_id).or_default().hover = Some(row);
+            true
+        })
+    }
+
+    /// The hover read (SCN-021's drag previews + the tests' probe): what
+    /// surface `surface_id`'s pointer last hovered.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_hover(surface_id: StableId) -> Option<StableId> {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .input
+                .per_surface
+                .get(&surface_id)
+                .and_then(|entry| entry.hover)
+        })
+    }
+
+    /// The full per-surface input snapshot — SCN-021's drag previews read
+    /// hover + capture + origin + last position from ONE place (the
+    /// registry stays the single truth for all of them).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_hover_state(surface_id: StableId) -> Option<HoverState> {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .input
+                .per_surface
+                .get(&surface_id)
+                .copied()
+        })
+    }
+
+    /// The capture read (the press/release route's assertion surface).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_captured(surface_id: StableId) -> bool {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .input
+                .per_surface
+                .get(&surface_id)
+                .is_some_and(|entry| entry.captured)
+        })
+    }
+
+    /// The panel → surface-id read for the panel hook (the capture wrapper
+    /// needs the address its pointer messages carry).
+    pub(crate) fn panel_surface_id(panel_id: &str) -> Option<StableId> {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .by_panel
+                .get(panel_id)
+                .map(|handle| handle.surface_id())
+        })
+    }
+
+    /// The keyboard target resolution (SCN-020): the surface a mount key
+    /// routes to. Decision:
+    /// 1. an explicit target (the press-captured surface — clicks move
+    ///    keyboard focus like any desktop input stack);
+    /// 2. else the SOLE registered surface — the keyboard-only §16 path:
+    ///    with exactly one mounted panel and no pointer, arrows/Tab can
+    ///    only mean that panel;
+    /// 3. else `None` (no mount surface the keys could mean — graceful).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_key_surface() -> Option<StableId> {
+        MOUNT_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            registry.input.key_target.or_else(|| {
+                let sole: Option<StableId> =
+                    registry.by_panel.values().next().map(|handle| handle.surface_id());
+                (registry.by_panel.len() == 1).then_some(sole).flatten()
+            })
+        })
+    }
+
+    /// The point-free keyboard-grab seam (for tests + the future app-owned
+    /// registry's roving-panel focus, SCN-015): name `surface_id` as the
+    /// keys' target without a pointer press. `None` clears.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_mount_key_target(surface_id: Option<StableId>) {
+        MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().input.key_target = surface_id;
+        });
+    }
+
+    /// The bridge's hint-write (SCN-020): `key` armed a pending
+    /// confirmation for `surface_id` (a `PromptRequested` routing) — the
+    /// address Escape's cancel route will dismiss. The dispatcher stays
+    /// the semantic authority; this is the keyboard layer's naming of the
+    /// armed interaction (the frozen dispatcher exposes no key
+    /// enumeration).
+    pub(crate) fn mount_record_prompt_armed(surface_id: StableId, key: DispatchKey) {
+        MOUNT_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .input
+                .escape_cancel
+                .insert(surface_id, key);
+        });
+    }
+
+    /// Escape's mounted-surface cancel (the machine-direct half — Escape
+    /// produces NO route message: cancelling is a host control operation,
+    /// like blur, not a widget gesture). Dismisses the surface's ARMED
+    /// prompt through the dispatcher's own hook
+    /// (`WidgetDispatcher::dismiss_prompt` — the frozen state layer's
+    /// cancel edge) and consumes the hint. Returns `true` when an armed
+    /// interaction was cancelled. NO DRAG here: drag cancel is SCN-021's
+    /// (its hook slot will join this arm).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn mount_escape_cancel(surface_id: StableId) -> bool {
+        let Some(key) = MOUNT_REGISTRY.with(|registry| {
+            registry.borrow_mut().input.escape_cancel.remove(&surface_id)
+        }) else {
+            return false;
+        };
+        let Some(handle) = MountRegistry::handle_for_surface(surface_id) else {
+            return false;
+        };
+        let dismissed = handle.dispatcher.borrow_mut().dismiss_prompt(key);
+        dismissed
+    }
+
+    /// The static prune seam: one `MOUNT_REGISTRY` borrow running the
+    /// input sweep (the lifecycle paths call this AFTER their own borrow
+    /// used a different borrow cell scope — nesting the sweep inside the
+    /// same `with` would re-borrow the registry cell).
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn prune_input() {
+        MOUNT_REGISTRY.with(|registry| registry.borrow_mut().prune_input_entries());
+    }
+
+    /// Sweep every input entry whose SURFACE left the registry (the
+    /// lifecycle tail both removal paths run — no teardown can orphan a
+    /// [`HoverState`], a key target, or an escape hint). One O(input
+    /// entries) walk per registry mutation is trivial: a surface count is
+    /// human-scale, and mutations are gesture-rate.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn prune_input_entries(&mut self) {
+        let registered = |surface_id: StableId| {
+            self.by_panel
+                .values()
+                .any(|handle| handle.surface_id() == surface_id)
+        };
+        self.input
+            .per_surface
+            .retain(|surface_id, _| registered(*surface_id));
+        self.input.escape_cancel.retain(|surface_id, _| registered(*surface_id));
+        if self.input.key_target.is_some_and(|target| !registered(target)) {
+            self.input.key_target = None;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SCN-020 — the keyboard layer: the surface ring, key_route, and the
+// table sibling (state layers decide — the mount only translates)
+// ---------------------------------------------------------------------------
+
+/// The mounted surface's keyboard-nav ring: the (focusable id, OWNING
+/// widget id) pairs in PAINT order — trees contribute their current flat
+/// rows (the expansion state's visible rows), lists their items, visible
+/// icon buttons their own id. THE ring is the same discipline the widgets
+/// render in ([`build_node`]'s walk), and the DISABLED skip never lives
+/// here: the ring names everything rendered; the machines' roving
+/// ([`WidgetUiState::focus_next`]/[`WidgetUiState::focus_prev`]) skip the
+/// dead rows — the state layer stays the authority.
+///
+/// EXCLUDED on purpose (v1, each documented at its site): menus — the
+/// iced_aw menubar's root is its own native overlay and the mount's ring
+/// does not reach inside it; tables — the typed-table machine
+/// ([`mount_table_key_route`]) is the table rows' own keyboard scope until
+/// the typed-table mount integration lands; invisible nodes (the
+/// [`build_node`] skip — the ring must not name what is not rendered).
+pub(crate) fn nav_ring(
+    surface: &WidgetSurface,
+    state: &WidgetUiState,
+) -> Vec<(StableId, StableId)> {
+    let Some(synced) = state.synced() else {
+        return Vec::new();
+    };
+    let views = &synced.views;
+    let mut ring = Vec::new();
+    // Explicit-stack walk in PAINT order (no recursion; the `pop` discipline
+    // means every push is reversed — roots and group children alike).
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().rev().collect();
+    while let Some(node) = walker.pop() {
+        if !node_visible(node) {
+            continue;
+        }
+        if let WidgetNode::Group(def) = node {
+            walker.extend(def.children.iter().rev());
+        }
+        match node {
+            WidgetNode::Tree(def) => {
+                // The CURRENT expansion state's flat rows (collapsed
+                // branches contribute nothing — the ring is what renders).
+                for slot in state.flat_rows_of_tree(def, views) {
+                    ring.push((slot.id, def.id));
+                }
+            }
+            WidgetNode::List(def) => {
+                for slot in state.flat_rows_of_list(def) {
+                    ring.push((slot.id, def.id));
+                }
+            }
+            WidgetNode::IconButton(def) => ring.push((def.id, def.id)),
+            // Tables route through the table machine; menus stay the
+            // native menubar (see the doc); groups only carried the walk.
+            WidgetNode::Table(_) | WidgetNode::Menu(_) | WidgetNode::Group(_) => {}
+        }
+    }
+    ring
+}
+
+/// Translate ONE keyboard event into the mount's route messages — the
+/// keyboard layer's pure heart (SCN-020). The state layers decide
+/// everything (enablement, the ring skip, the focus slot); this fn only
+/// translates keys into the vocabulary the bridge already routes:
+///
+/// - ArrowDown / ArrowUp — one ring step through
+///   [`WidgetUiState::focus_next`] / [`WidgetUiState::focus_prev`] (the
+///   disabled rows are skipped BY the machine — a focus ring on a dead
+///   control is a defect the machine refuses). A step that lands produces
+///   THE PAIR a keyboard cursor implies: [`WidgetMountMsg::FocusMoved`]
+///   plus [`WidgetMountMsg::SelectionChanged`] on the landed row (the
+///   arrows are the LIST-cursor semantics: focus and selection move
+///   together, replacing the selection — a single id, always cap-sane).
+/// - ArrowRight / ArrowLeft — the TREE row's expansion toggle (Right
+///   opens a collapsed expandable row, Left closes an open one — the
+///   machine's `toggle_expand` validates unknown/not-expandable rows).
+///   A non-tree focus (or a leaf) routes nothing. Tables' cell arrows are
+///   the table machine's own scope ([`mount_table_key_route`]).
+/// - Enter / Space — the focused thing's activation:
+///   [`WidgetMountMsg::RowActivated`] for a row (the machine's
+///   `item_activate`), [`WidgetMountMsg::ButtonClicked`] for a button.
+///   The ENABLEMENT pre-read
+///   ([`WidgetUiState::is_enabled`]) is the keyboard layer's own
+///   refusal half: no message is produced for a disabled focus, so the
+///   keyboard "selection/activation refuses cleanly" contract holds
+///   before any route (and the machine re-gates regardless).
+/// - Tab / Shift+Tab — the ring advance WITH WRAP (the roving-tabindex
+///   model): at an edge the walk wraps to the first/last ENABLED row
+///   (plain [`WidgetMountMsg::FocusMoved`], no selection write — Tab
+///   moves focus, it does not re-litigate selection).
+/// - Escape — nothing here: cancel is the host control operation the app
+///   join runs machine-directly ([`MountRegistry::mount_escape_cancel`];
+///   drag cancel is SCN-021's).
+///
+/// A chord (Ctrl/Alt/Logo) routes nothing: chords are the app's
+/// accelerator space, not mount navigation (Shift is honored ONLY by Tab's
+/// direction — the roving-tabindex reverse). A key with no route → empty
+/// vec. UNREGISTERED inputs are the CALLER'S resolution (a surface-id
+/// mismatch refuses at [`apply_mount_msg`], the bridge's second gate).
+///
+/// The pure-layer note: deterministic over its inputs; the ONLY effect
+/// beyond the returned messages is the machines' own roving focus slot
+/// moving (through [`WidgetUiState::focus_next`]/[`focus_prev`] — the
+/// authority — and the applied messages re-assert the SAME row through
+/// [`apply_mount_msg`]'s `focus_set`, a no-op re-write), plus the
+/// registry-side nav-step probe.
+pub(crate) fn key_route(
+    surface_id: StableId,
+    surface: &WidgetSurface,
+    state: &mut WidgetUiState,
+    key: Key,
+    modifiers: Modifiers,
+) -> Vec<WidgetMountMsg> {
+    // Chords are the app's accelerator space; only bare navigation routes.
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return Vec::new();
+    }
+    let views = state.synced().map(|synced| synced.views.clone()).unwrap_or_default();
+    let ring = nav_ring(surface, state);
+    if ring.is_empty() {
+        return Vec::new();
+    }
+    let ring_ids: Vec<StableId> = ring.iter().map(|(id, _)| *id).collect();
+    let step_msgs = |step: Option<StableId>, select: bool| {
+        let Some(row_id) = step else {
+            return Vec::new();
+        };
+        let widget_id = owner_of(&ring, Some(row_id)).unwrap_or(StableId(0));
+        let mut msgs = vec![WidgetMountMsg::FocusMoved {
+            surface_id,
+            widget_id,
+            to: Some(row_id),
+        }];
+        if select {
+            // The arrows' list-cursor write: replace the selection with
+            // the landed row (the machine caps + capability-gates).
+            msgs.push(WidgetMountMsg::SelectionChanged {
+                surface_id,
+                widget_id,
+                selected: vec![row_id],
+            });
+        }
+        msgs
+    };
+    let msgs = match key {
+        Key::Named(keyboard_key::Named::ArrowDown) => {
+            let current = state.focus();
+            let target = state.focus_next(current, &ring_ids, &views);
+            step_msgs(target, true)
+        }
+        Key::Named(keyboard_key::Named::ArrowUp) => {
+            let current = state.focus();
+            let target = state.focus_prev(current, &ring_ids, &views);
+            step_msgs(target, true)
+        }
+        Key::Named(keyboard_key::Named::ArrowRight) => tree_expand_step(surface, state, true),
+        Key::Named(keyboard_key::Named::ArrowLeft) => tree_expand_step(surface, state, false),
+        Key::Named(keyboard_key::Named::Enter) | Key::Named(keyboard_key::Named::Space) => {
+            let Some(focused) = state.focus() else {
+                return Vec::new();
+            };
+            // Clean refusal FIRST (the keyboard layer's own gate): a dead
+            // focus never produces an activation route; the machine's
+            // gates stay the authority for anything that slips through.
+            if !state.is_enabled(focused, &views) {
+                return Vec::new();
+            }
+            match entry_owner_is_button(surface, focused) {
+                true => vec![WidgetMountMsg::ButtonClicked {
+                    surface_id,
+                    widget_id: focused,
+                }],
+                false => vec![WidgetMountMsg::RowActivated {
+                    surface_id,
+                    widget_id: owner_of(&ring, Some(focused)).unwrap_or(StableId(0)),
+                    row_id: focused,
+                }],
+            }
+        }
+        Key::Named(keyboard_key::Named::Tab) => {
+            let current = state.focus();
+            // The roving-tabindex WRAP: at an edge the walk starts again
+            // (focus_next with `None` = from the ring's top; focus_prev
+            // with `None` = from its bottom) — landing on the first/last
+            // ENABLED row (the machine skips the dead ones).
+            let target = if modifiers.shift() {
+                state.focus_prev(current, &ring_ids, &views)
+                    .or_else(|| state.focus_prev(None, &ring_ids, &views))
+            } else {
+                state.focus_next(current, &ring_ids, &views)
+                    .or_else(|| state.focus_next(None, &ring_ids, &views))
+            };
+            step_msgs(target, false)
+        }
+        // Escape (and every other key) does not route mount navigation.
+        _ => Vec::new(),
+    };
+    if !msgs.is_empty() {
+        MountRegistry::record_key_nav_step();
+    }
+    msgs
+}
+
+/// The landed row's owning widget from the ring pairs.
+fn owner_of(ring: &[(StableId, StableId)], target: Option<StableId>) -> Option<StableId> {
+    let id = target?;
+    ring.iter()
+        .find_map(|(row_id, widget_id)| (*row_id == id).then_some(*widget_id))
+}
+
+/// The Enter/Space owner's KIND read: is the focused id a visible synced
+/// icon button (→ activation is a command click) or a row (→ the item
+/// activation walk)?
+fn entry_owner_is_button(surface: &WidgetSurface, id: StableId) -> bool {
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        if !node_visible(node) {
+            continue;
+        }
+        if let WidgetNode::Group(def) = node {
+            walker.extend(def.children.iter());
+            continue;
+        }
+        if let WidgetNode::IconButton(def) = node {
+            if def.id == id {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// ArrowLeft/Right at a TREE row: the expand-toggle step (Right opens a
+/// collapsed expandable row; Left closes an open one; the mirrored edge —
+/// Right on an open row, Left on a closed one, a leaf, a disabled row, a
+/// non-tree focus — routes NOTHING). Pure translation: the machine's
+/// `toggle_expand` re-gates unknown/not-expandable/disabled rows inside
+/// [`apply_mount_msg`].
+fn tree_expand_step(
+    surface: &WidgetSurface,
+    state: &WidgetUiState,
+    forward: bool,
+) -> Vec<WidgetMountMsg> {
+    let Some(current) = state.focus() else {
+        return Vec::new();
+    };
+    let Some(synced) = state.synced() else {
+        return Vec::new();
+    };
+    // The focused row's owning TREE (the ring's pair names it).
+    let ring = nav_ring(surface, state);
+    let Some(tree_id) = owner_of(&ring, Some(current)) else {
+        return Vec::new();
+    };
+    if !state.is_enabled(current, &synced.views) {
+        // A dead row takes no expansion route (its messages are the §16
+        // "disabled items never emit" shape — absent, not refused).
+        return Vec::new();
+    }
+    let Some(tree_def) = tree_def_of(surface, tree_id) else {
+        return Vec::new();
+    };
+    if !tree_def.rows.iter().any(|row| row.id == current && row.expandable) {
+        // A LEAF's Left/Right is an expand-toggle on nothing.
+        return Vec::new();
+    }
+    let expanded_now = state.effective_expanded(current, false);
+    if expanded_now == forward {
+        // Right on an open row / Left on a closed one: the state is
+        // already there — nothing to imply.
+        return Vec::new();
+    }
+    let surface_id = state.surface_id();
+    vec![WidgetMountMsg::RowExpandedToggled {
+        surface_id,
+        widget_id: tree_id,
+        row_id: current,
+        expanded: forward,
+    }]
+}
+
+/// Find a VISIBLE node's tree def by widget id (the group walk — the same
+/// discipline as [`entry_owner_is_button`]).
+fn tree_def_of(surface: &WidgetSurface, widget_id: StableId) -> Option<&WidgetTreeDef> {
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        if !node_visible(node) {
+            continue;
+        }
+        match node {
+            WidgetNode::Group(def) => walker.extend(def.children.iter()),
+            WidgetNode::Tree(def) if def.id == widget_id => return Some(def),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The step a TABLE key resolved to (the pure keyboard layer's output —
+/// the typed-table mount integration consumes these).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MountTableKeyStep {
+    /// Row focus moved (Up/Down roving through the materialized window —
+    /// [`TableUiState::row_focus_next`]/[`TableUiState::row_focus_prev`]).
+    RowFocus(StableId),
+    /// The cell cursor moved (Left/Right on the FOCUSED row —
+    /// [`TableUiState::cell_focus_next`]/[`prev`]); the caller-held cursor
+    /// slot is updated to the landed cell.
+    CellFocus(CellFocus),
+    /// Escape cancelled the open draft ([`TableUiState::cancel_cell_draft`]
+    /// — the FREE path: no counters, no facts, nothing else moved).
+    DraftCancelled,
+}
+
+/// The typed-table keyboard layer (SCN-020): translate ONE key into the
+/// frozen [`TableUiState`] machine's steps — the state-layer consumption
+/// the typed-table MOUNT integration (the later task) will ride, exactly
+/// the way [`key_route`] consumes the SWG-002 machines:
+///
+/// - ArrowDown / ArrowUp — the materialized-window row roving (a
+///   disabled-SKIPPING roving is the state layer's own — the published
+///   rows window; the window edge stops the ring, the mount scrolls).
+/// - ArrowRight / ArrowLeft — the cell cursor within `column_order` on
+///   the FOCUSED row (`*cell_cursor` is the caller-held cursor slot;
+///   `None` lands on the first/last column; the row never changes here —
+///   the documented cell model).
+/// - Escape — cancel the open draft (the free cancel; `Some(DraftCancelled)`
+///   only when a draft existed).
+///
+/// Bare navigation keys only (chords route nothing). Returns `None` when
+/// the key has no route (or the state has no synced read model —
+/// graceful). NO counters, NO events: the state machine's own counters
+/// are its §16 probes; `keyboard_nav_steps` ticks once per non-empty
+/// route.
+pub(crate) fn mount_table_key_route(
+    state: &mut TableUiState,
+    cell_cursor: &mut Option<CellFocus>,
+    key: Key,
+    modifiers: Modifiers,
+    spec: &WindowSpec,
+    column_order: &[StableId],
+) -> Option<MountTableKeyStep> {
+    if modifiers.control() || modifiers.alt() || modifiers.logo() || modifiers.shift() {
+        return None;
+    }
+    let step = match key {
+        Key::Named(keyboard_key::Named::ArrowDown) => {
+            let id = state.row_focus_next(spec)?;
+            Some(MountTableKeyStep::RowFocus(id))
+        }
+        Key::Named(keyboard_key::Named::ArrowUp) => {
+            let id = state.row_focus_prev(spec)?;
+            Some(MountTableKeyStep::RowFocus(id))
+        }
+        Key::Named(keyboard_key::Named::ArrowRight) => {
+            let landed = state.cell_focus_next(cell_cursor.as_ref().copied(), column_order)?;
+            *cell_cursor = Some(landed); // the caller-held cursor moves with the landing
+            Some(MountTableKeyStep::CellFocus(landed))
+        }
+        Key::Named(keyboard_key::Named::ArrowLeft) => {
+            let landed = state.cell_focus_prev(cell_cursor.as_ref().copied(), column_order)?;
+            *cell_cursor = Some(landed); // the caller-held cursor moves with the landing
+            Some(MountTableKeyStep::CellFocus(landed))
+        }
+        Key::Named(keyboard_key::Named::Escape) => {
+            if state.draft().is_some() {
+                state.cancel_cell_draft();
+                Some(MountTableKeyStep::DraftCancelled)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if step.is_some() {
+        MountRegistry::record_key_nav_step();
+    }
+    step
+}
+
+/// The panel hook's pointer-capture wrapper (SCN-020, the FEW-LINE form) —
+/// wrap the mounted body so the surface-level gestures ride the SAME
+/// [`WidgetMountMsg`] wagon: press → [`WidgetMountMsg::PointerPressed`]
+/// (capture ON + the keyboard target), move → [`WidgetMountMsg::PointerMoved`]
+/// (the coalescer's entry — never per-event machine work), release →
+/// [`WidgetMountMsg::PointerReleased`] (the completion route). The
+/// wrapper never steals from the body's own widgets: iced gives the child
+/// widgets FIRST shot at every event (a row button's press captures it,
+/// and this wrapper's own `on_press` is skipped — the row routes stay
+/// exactly the gestures they were).
+///
+/// `surface_id` `None` (a body without a registry entry — cannot happen
+/// through [`MountRegistry::mounted_body`], but total by construction)
+/// passes the element through untouched.
+pub(crate) fn pointer_capture_body(
+    element: Element<'static, WidgetMountMsg>,
+    surface_id: Option<StableId>,
+) -> Element<'static, WidgetMountMsg> {
+    let Some(surface_id) = surface_id else {
+        return element;
+    };
+    mouse_area(element)
+        .on_press(WidgetMountMsg::PointerPressed { surface_id })
+        .on_release(WidgetMountMsg::PointerReleased { surface_id })
+        .on_move(move |position| WidgetMountMsg::PointerMoved { surface_id, position })
+        .into()
 }
 
 /// RAII registration: the guarded surface tears down on drop
@@ -1588,7 +2548,8 @@ mod tests {
     use ocs_plugin_api::dialog::PanelDef;
     use ocs_plugin_api::scene::SceneRevision;
     use ocs_plugin_api::widgets::{
-        ConfirmPolicy, IconRef, ItemDef, MenuItemDef, TreeCapabilities, TreeRowDef, WidgetRange,
+        CellKind, ConfirmPolicy, IconRef, ItemDef, MenuItemDef, PanelTableDef, TableCell,
+        TableColumnDef, TableRowDef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetRange,
     };
 
     // -- construction helpers --------------------------------------------------
@@ -2975,4 +3936,635 @@ mod tests {
         assert!(MountRegistry::handle_for_surface(sid(300)).is_some());
         assert!(MountRegistry::handle_for_surface(sid(200)).is_none());
     }
+
+    // -- 13. SCN-020 — the coalescing join: N moves, ≤1 mount call ------------
+
+    /// §7/§14: a 100-move burst defers into ONE owed slot per surface (99
+    /// counted superseded — the older positions are dropped, never queued),
+    /// and the flush answers exactly one call with the LATEST position.
+    /// No machine, event, or counter wobble beyond the probes: moves are
+    /// of the registry-side HoverState only.
+    #[test]
+    fn n_moves_coalesce_to_one_mount_call() {
+        let _probe = register_panel(
+            "scn020_coalesce",
+            900,
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "row")]))]),
+        );
+        let before = MountRegistry::counters();
+        for i in 0..100u64 {
+            let outcome = MountRegistry::mount_move_defer(sid(900), Point::new(i as f32, 0.0));
+            assert!(outcome.is_some(), "a registered surface defers its moves");
+        }
+        let mid = MountRegistry::counters();
+        assert_eq!(
+            mid.coalesced_moves_superseded - before.coalesced_moves_superseded,
+            99,
+            "every move but the last overwrote the owed slot"
+        );
+        assert_eq!(
+            mid.mount_move_calls - before.mount_move_calls,
+            0,
+            "nothing processed per event — the defer is one slot write"
+        );
+
+        // The flush (the tick's answer): exactly ONE mount call, the LAST
+        // position, delivered into the host-local HoverState ONLY.
+        assert_eq!(MountRegistry::mount_flush_moves(), 1);
+        let after = MountRegistry::counters();
+        assert_eq!(after.mount_move_calls - before.mount_move_calls, 1);
+        assert_eq!(
+            MountRegistry::mount_hover_state(sid(900)),
+            Some(HoverState {
+                hover: None,
+                last_move: Some(Point::new(99.0, 0.0)),
+                captured: false,
+                capture_origin: None,
+                move_owed: None,
+            }),
+            "the tick answered ONLY the latest position; the slot is empty again"
+        );
+    }
+
+    /// The newest move supersedes the owed one BEFORE the tick: the
+    /// overwritten slot keeps only the latest, the older position never
+    /// runs, and the superseded count names the discard.
+    #[test]
+    fn superseded_move_overwrites_owed_slot() {
+        let _probe = register_panel(
+            "scn020_supersede",
+            900,
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "row")]))]),
+        );
+        let before = MountRegistry::counters();
+        assert_eq!(
+            MountRegistry::mount_move_defer(sid(900), Point::new(1.0, 2.0)),
+            Some(false),
+            "the first arrival finds no owed move"
+        );
+        // "Mid-processing": the newer move arrives while one is still owed.
+        assert_eq!(
+            MountRegistry::mount_move_defer(sid(900), Point::new(3.0, 4.0)),
+            Some(true),
+            "arriving over an in-flight owed move supersedes it"
+        );
+        assert_eq!(
+            MountRegistry::counters().coalesced_moves_superseded - before.coalesced_moves_superseded,
+            1
+        );
+
+        // The tick answers ONLY the newest (the older one never ran):
+        assert_eq!(MountRegistry::mount_flush_moves(), 1);
+        let after = MountRegistry::counters();
+        assert_eq!(after.mount_move_calls - before.mount_move_calls, 1);
+        assert_eq!(
+            MountRegistry::mount_hover_state(sid(900)).and_then(|entry| entry.last_move),
+            Some(Point::new(3.0, 4.0)),
+            "the delivered position is the newest"
+        );
+        // An emptier flush delivers nothing (the slot is the ONLY thing).
+        assert_eq!(MountRegistry::mount_flush_moves(), 0);
+        assert_eq!(
+            MountRegistry::counters().mount_move_calls,
+            after.mount_move_calls
+        );
+    }
+
+    // -- 14. SCN-020 — the keyboard ring: Tab / Shift+Tab skip disabled -------
+
+    /// Tab×k walks the mounted surface's ring in PAINT order, skips the
+    /// disabled row (the machines' own roving decided — the keyboard layer
+    /// only translated), wraps at the edge, and Shift+Tab walks back.
+    #[test]
+    fn keyboard_ring_walks_and_skips_disabled() {
+        let dead = ItemDef {
+            enabled: false,
+            ..item(8, "dead row")
+        };
+        let _probe = register_panel(
+            "scn020_ring",
+            900,
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "one"), dead, item(9, "three")],
+            ))]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(900)).expect("registered");
+        let surface = handle.surface.clone();
+        let bare = Modifiers::NONE;
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+
+        // Tab: the FIRST ENABLED row (7).
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(sid(900), &surface, &mut state, tab(), bare)
+        };
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::FocusMoved {
+                surface_id: sid(900),
+                widget_id: sid(200),
+                to: Some(sid(7)),
+            }],
+            "Tab moves focus ONLY (no selection write)"
+        );
+        assert_eq!(handle.state.borrow().focus(), Some(sid(7)));
+
+        // Tab again: the disabled row 8 is SKIPPED (never focused, never
+        // named).
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(sid(900), &surface, &mut state, tab(), bare)
+        };
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::FocusMoved {
+                surface_id: sid(900),
+                widget_id: sid(200),
+                to: Some(sid(9)),
+            }],
+            "the ring walk skipped the disabled row"
+        );
+        assert_eq!(handle.state.borrow().focus(), Some(sid(9)));
+
+        // Tab at the END: the ring WRAPS to the first enabled row.
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(sid(900), &surface, &mut state, tab(), bare)
+        };
+        assert_eq!(msgs[0], WidgetMountMsg::FocusMoved {
+            surface_id: sid(900),
+            widget_id: sid(200),
+            to: Some(sid(7)),
+        });
+        assert_eq!(handle.state.borrow().focus(), Some(sid(7)));
+
+        // Shift+Tab from the top: wraps BACKWARD to the last enabled row.
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(
+                sid(900),
+                &surface,
+                &mut state,
+                tab(),
+                Modifiers::SHIFT,
+            )
+        };
+        assert_eq!(msgs[0], WidgetMountMsg::FocusMoved {
+            surface_id: sid(900),
+            widget_id: sid(200),
+            to: Some(sid(9)),
+        });
+        assert_eq!(handle.state.borrow().focus(), Some(sid(9)));
+    }
+
+    /// §16 keyboard a11y WITHOUT pointer: arrows drive focus AND selection
+    /// end-to-end over the mounted machines with ZERO pointer events (no
+    /// press, no capture — the sole registered surface IS the keyboard
+    /// target), and every landed step counts a nav step.
+    #[test]
+    fn arrow_keys_drive_focus_and_selection_no_pointer() {
+        MountRegistry::set_mount_key_target(None);
+        let _probe = register_panel(
+            "scn020_arrows",
+            900,
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "one"), item(8, "two"), item(9, "three")],
+            ))]),
+        );
+        // The sole registered surface is the keyboard target (no click).
+        assert_eq!(MountRegistry::mount_key_surface(), Some(sid(900)));
+        let handle = MountRegistry::handle_for_surface(sid(900)).expect("registered");
+        let surface = handle.surface.clone();
+        let before = MountRegistry::counters();
+        let down = || Key::Named(keyboard_key::Named::ArrowDown);
+        let up = || Key::Named(keyboard_key::Named::ArrowUp);
+        let apply = |msgs: &[WidgetMountMsg]| {
+            // The bridge's application (what `route_mount_msg` runs).
+            let mut events = Vec::new();
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            for msg in msgs {
+                let _ = apply_mount_msg(&mut state, &mut dispatcher, msg, &mut events);
+            }
+            events
+        };
+
+        // ArrowDown: focus + selection land on row 7 — NO pointer call
+        // happened (assert: no capture arm exists on the surface).
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(sid(900), &surface, &mut state, down(), Modifiers::NONE)
+        };
+        assert_eq!(
+            msgs,
+            vec![
+                WidgetMountMsg::FocusMoved {
+                    surface_id: sid(900),
+                    widget_id: sid(200),
+                    to: Some(sid(7)),
+                },
+                WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(900),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+            ]
+        );
+        assert_eq!(
+            apply(&msgs),
+            vec![WidgetEvent::SelectionChanged {
+                surface_id: sid(900),
+                selected_ids: vec![sid(7)],
+            }],
+            "the arrows' selection write forwards the selection event"
+        );
+        {
+            let state = handle.state.borrow();
+            assert_eq!(state.focus(), Some(sid(7)));
+            assert_eq!(state.selection(), [sid(7)]);
+        }
+        assert!(!MountRegistry::mount_captured(sid(900)));
+        let stepper = MountRegistry::counters();
+        assert_eq!(
+            stepper.keyboard_nav_steps - before.keyboard_nav_steps,
+            1,
+            "one resolved key = one nav step"
+        );
+
+        // ArrowDown twice more: the cursor walks the ring.
+        for expected in [sid(8), sid(9)] {
+            let msgs = {
+                let mut state = handle.state.borrow_mut();
+                key_route(sid(900), &surface, &mut state, down(), Modifiers::NONE)
+            };
+            assert_eq!(msgs.len(), 2);
+            let _ = apply(&msgs);
+            assert_eq!(handle.state.borrow().focus(), Some(expected));
+            assert_eq!(handle.state.borrow().selection(), [expected]);
+        }
+
+        // ArrowUp steps BACK (focus + selection together).
+        let msgs = {
+            let mut state = handle.state.borrow_mut();
+            key_route(sid(900), &surface, &mut state, up(), Modifiers::NONE)
+        };
+        assert_eq!(msgs.len(), 2);
+        let _ = apply(&msgs);
+        {
+            let state = handle.state.borrow();
+            assert_eq!(state.focus(), Some(sid(8)));
+            assert_eq!(state.selection(), [sid(8)]);
+        }
+        assert_eq!(
+            MountRegistry::counters().keyboard_nav_steps - before.keyboard_nav_steps,
+            4
+        );
+    }
+
+    // -- 15. SCN-020 — pointer capture across the coalescer -------------------
+
+    /// Press inside → capture ON; the captured moves flow the coalescer
+    /// (deferred); a release ANYWHERE completes: capture OFF and the
+    /// gesture's last move processed (exactly one).
+    #[test]
+    fn capture_completes_on_release_outside() {
+        let _probe = register_panel(
+            "scn020_capture",
+            900,
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "row")]))]),
+        );
+        let before = MountRegistry::counters();
+
+        assert!(MountRegistry::mount_press(sid(900)), "press inside arms capture");
+        assert!(MountRegistry::mount_captured(sid(900)));
+        assert_eq!(MountRegistry::mount_key_surface(), Some(sid(900)), "the pressed surface owns the keys");
+
+        // The captured move: coalesced (deferred per event).
+        assert_eq!(
+            MountRegistry::mount_move_defer(sid(900), Point::new(8_000.0, 9_000.0)),
+            Some(false)
+        );
+        assert_eq!(
+            MountRegistry::counters().mount_move_calls - before.mount_move_calls,
+            0,
+            "moves during capture stay deferred"
+        );
+
+        // Release OUTSIDE the area: the pure completion contract — capture
+        // OFF, the owed move processed (exactly one).
+        assert_eq!(MountRegistry::mount_pointer_released(sid(900)), 1);
+        assert!(!MountRegistry::mount_captured(sid(900)));
+        let after = MountRegistry::counters();
+        assert_eq!(after.mount_move_calls - before.mount_move_calls, 1);
+        assert_eq!(
+            MountRegistry::mount_hover_state(sid(900)).and_then(|entry| entry.last_move),
+            Some(Point::new(8_000.0, 9_000.0))
+        );
+
+        // A release with nothing held delivers nothing (idempotent shape).
+        assert_eq!(MountRegistry::mount_pointer_released(sid(900)), 0);
+        assert_eq!(
+            MountRegistry::counters().mount_move_calls,
+            after.mount_move_calls
+        );
+    }
+
+    /// §14 hover is host-local: setting hover / delivering coalesced moves
+    /// moves NOTHING on the machines (mutation counters, dispatch
+    /// counters, focus, selection all frozen) — the registry-side
+    /// HoverState is the only record a move ever leaves.
+    #[test]
+    fn hover_is_host_local_and_never_reaches_machines() {
+        let _probe = register_panel(
+            "scn020_hover",
+            900,
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "row")]))]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(900)).expect("registered");
+        let state_before = *handle.state.borrow().mutations();
+        let dispatcher_before = *handle.dispatcher.borrow().counters();
+        let focus_before = handle.state.borrow().focus();
+        let selection_before = handle.state.borrow().selection().to_vec();
+
+        assert!(MountRegistry::mount_set_hover(sid(900), sid(7)));
+        assert!(MountRegistry::mount_move_defer(sid(900), Point::new(5.0, 5.0)).is_some());
+        assert_eq!(MountRegistry::mount_flush_moves(), 1);
+        assert!(!MountRegistry::mount_set_hover(sid(424_242), sid(7)), "unknown refusals quietly");
+
+        assert_eq!(MountRegistry::mount_hover(sid(900)), Some(sid(7)));
+        assert_eq!(
+            MountRegistry::mount_hover_state(sid(900)).and_then(|entry| entry.last_move),
+            Some(Point::new(5.0, 5.0))
+        );
+        // The machines see NOTHING:
+        assert_eq!(*handle.state.borrow().mutations(), state_before);
+        assert_eq!(*handle.dispatcher.borrow().counters(), dispatcher_before);
+        assert_eq!(handle.state.borrow().focus(), focus_before);
+        assert_eq!(handle.state.borrow().selection(), selection_before);
+    }
+
+    /// Unregistered surfaces are graceful everywhere: moves/presses/
+    /// releases/hovers are quiet no-ops (nothing stored, nothing counted,
+    /// nothing delivered) and the registry stays clean.
+    #[test]
+    fn unknown_surface_moves_are_graceful() {
+        let before = MountRegistry::counters();
+        assert_eq!(
+            MountRegistry::mount_move_defer(sid(424_242), Point::new(1.0, 1.0)),
+            None
+        );
+        assert!(!MountRegistry::mount_press(sid(424_242)));
+        assert_eq!(MountRegistry::mount_pointer_released(sid(424_242)), 0);
+        assert!(!MountRegistry::mount_set_hover(sid(424_242), sid(1)));
+        assert_eq!(MountRegistry::mount_hover(sid(424_242)), None);
+        assert!(!MountRegistry::mount_captured(sid(424_242)));
+        // No keyboard target exists with nothing registered at all.
+        MountRegistry::set_mount_key_target(None);
+        assert_eq!(MountRegistry::mount_key_surface(), None);
+        // And nothing processed: the flush finds no owed moves atomically.
+        assert_eq!(MountRegistry::mount_flush_moves(), 0);
+        assert_eq!(MountRegistry::counters(), before, "no probe moved");
+    }
+
+    /// The ONE-call-per-tick clamp across many bursts: after every flush
+    /// the delivered count stays exactly the burst's surfaces-worth (1 per
+    /// surface; one registered surface here → exactly 1 per tick, never
+    /// more).
+    #[test]
+    fn mount_move_calls_never_exceed_one_per_tick() {
+        let _probe = register_panel(
+            "scn020_clamp",
+            900,
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "row")]))]),
+        );
+        let before = MountRegistry::counters();
+        for round in 0..5u64 {
+            for i in 0..37u64 {
+                let _ = MountRegistry::mount_move_defer(sid(900), Point::new(i as f32, round as f32));
+            }
+            assert_eq!(
+                MountRegistry::mount_flush_moves(),
+                1,
+                "tick {round}: exactly one call per surface"
+            );
+            assert_eq!(
+                MountRegistry::counters().mount_move_calls - before.mount_move_calls,
+                round + 1,
+                "the counter never steps past one per tick"
+            );
+        }
+    }
+
+    /// Disabled rows are un-navigable and un-selectable BY KEYBOARD: the
+    /// ring walk skips them (no message ever names the disabled id) and a
+    /// stale activation route aimed at one refuses at the machine with a
+    /// counterless, eventless, stateless surface.
+    #[test]
+    fn disabled_keyboard_selection_refuses_cleanly() {
+        let dead = ItemDef {
+            enabled: false,
+            ..item(8, "dead row")
+        };
+        let _probe = register_panel(
+            "scn020_refuse",
+            900,
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "one"), dead, item(9, "three")],
+            ))]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(900)).expect("registered");
+        let ring_surface = handle.surface.clone();
+        let state_before = *handle.state.borrow().mutations();
+        let dispatcher_before = *handle.dispatcher.borrow().counters();
+
+        // The whole ring walk: Tab from nothing to the end — the disabled
+        // row NEVER appears in any message (focused or selected).
+        let mut named: Vec<StableId> = Vec::new();
+        for _ in 0..4 {
+            let msgs = {
+                let mut state = handle.state.borrow_mut();
+                key_route(
+                    sid(900),
+                    &ring_surface,
+                    &mut state,
+                    Key::Named(keyboard_key::Named::Tab),
+                    Modifiers::NONE,
+                )
+            };
+            for msg in &msgs {
+                match msg {
+                    WidgetMountMsg::FocusMoved { to: Some(row), .. } => named.push(*row),
+                    WidgetMountMsg::SelectionChanged { selected, .. } => {
+                        named.extend(selected.iter().copied());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(!named.contains(&sid(8)), "the disabled row is never named: {named:?}");
+        assert_eq!(*handle.state.borrow().mutations(), state_before);
+        assert_eq!(*handle.dispatcher.borrow().counters(), dispatcher_before);
+
+        // The stale-route guard (a message aimed at the disabled row): the
+        // machine refuses — no event, no counter, nothing half-applied.
+        let fixture = surface(vec![WidgetNode::List(item_list(
+            200,
+            vec![item(7, "one"), ItemDef { enabled: false, ..item(8, "dead row") }, item(9, "three")],
+        ))]);
+        let (mut state, mut dispatcher) = mounted_machines(&fixture);
+        let (routing, events) = route(
+            &mut state,
+            &mut dispatcher,
+            &WidgetMountMsg::RowActivated {
+                surface_id: sid(900),
+                widget_id: sid(200),
+                row_id: sid(8),
+            },
+        );
+        assert_eq!(
+            routing,
+            MountRouting::Refused("row/widget 8 is disabled and cannot be invoked".to_string())
+        );
+        assert_eq!(events, Vec::new());
+        assert_eq!(state.mutations().row_state_changes, 0, "nothing half-applied");
+        assert_eq!(*dispatcher.counters(), dispatcher_before);
+    }
+
+    // -- 16. SCN-020 — the typed-table keyboard layer (pure consumption) ------
+
+    /// Up/Down is the materialized-window ROW roving, Left/Right the cell
+    /// cursor (caller-held), and Escape the FREE draft cancel: the
+    /// table machine's own counters are the only traces.
+    #[test]
+    fn table_keys_drive_row_and_cell_roving_and_escape_draft() {
+        let before = MountRegistry::counters();
+        let def = table_three_column(
+            700,
+            3,
+        );
+        let mut table = table_state_of(&def);
+        let mut cursor: Option<CellFocus> = None;
+        let spec = window_spec(20.0, 4);
+        let columns = [sid(2), sid(3), sid(4)];
+        let bare = Modifiers::NONE;
+        let down = || Key::Named(keyboard_key::Named::ArrowDown);
+        let right = || Key::Named(keyboard_key::Named::ArrowRight);
+        let left = || Key::Named(keyboard_key::Named::ArrowLeft);
+
+        // Down: row roving enters the window at its top.
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, down(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::RowFocus(sid(1))));
+        assert_eq!(table.focus(), Some(sid(1)));
+
+        // Right: the cell cursor lands on the FIRST column.
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, right(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::CellFocus(CellFocus { key: sid(1), column: sid(2) })));
+        assert_eq!(cursor, Some(CellFocus { key: sid(1), column: sid(2) }));
+
+        // Right, Right: the cursor walks the columns; Left walks back.
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, right(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::CellFocus(CellFocus { key: sid(1), column: sid(3) })));
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, right(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::CellFocus(CellFocus { key: sid(1), column: sid(4) })));
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, left(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::CellFocus(CellFocus { key: sid(1), column: sid(3) })));
+
+        // Down again: the row moves ON (the cell cursor stays caller-held;
+        // the column pair re-anchors to the row on the next roving).
+        let step =
+            mount_table_key_route(&mut table, &mut cursor, down(), bare, &spec, &columns);
+        assert_eq!(step, Some(MountTableKeyStep::RowFocus(sid(2))));
+
+        // The draft: armed, drafted — Escape cancels FREE (no counter).
+        table.begin_cell_edit(sid(2), sid(3)).expect("the Number column");
+        table.draft_cell_value(WidgetCellValue::Number(7.0)).expect("drafted");
+        let mutations_before = *table.mutations();
+        let step = mount_table_key_route(
+            &mut table,
+            &mut cursor,
+            Key::Named(keyboard_key::Named::Escape),
+            bare,
+            &spec,
+            &columns,
+        );
+        assert_eq!(step, Some(MountTableKeyStep::DraftCancelled));
+        assert!(table.draft().is_none(), "the draft is gone");
+        assert_eq!(*table.mutations(), mutations_before, "a cancelled draft touched nothing");
+
+        // Escape with no draft: no step, no effect.
+        let step = mount_table_key_route(
+            &mut table,
+            &mut cursor,
+            Key::Named(keyboard_key::Named::Escape),
+            bare,
+            &spec,
+            &columns,
+        );
+        assert_eq!(step, None);
+
+        // Nav steps counted: 2 rows + 4 cells + 1 escape = 7.
+        assert_eq!(
+            MountRegistry::counters().keyboard_nav_steps - before.keyboard_nav_steps,
+            7
+        );
+    }
+
+    // -- SCN-020 table fixtures ------------------------------------------------
+
+    fn table_column(id: u64, kind: CellKind, label: &str) -> TableColumnDef {
+        TableColumnDef {
+            id: sid(id),
+            label: label.to_string(),
+            kind,
+            width_hint: None,
+            stretch: false,
+        }
+    }
+
+    /// The three-column table fixture (text 2, number 3, bool 4), `rows`
+    /// rows keyed 1..=rows with typed cells matching the columns.
+    fn table_three_column(id: u64, rows: u64) -> PanelTableDef {
+        PanelTableDef {
+            id_table: sid(id),
+            columns: vec![
+                table_column(2, CellKind::Text, "note"),
+                table_column(3, CellKind::Number, "length"),
+                table_column(4, CellKind::Bool, "locked"),
+            ],
+            total_rows: None,
+            rows: (1..=rows)
+                .map(|i| TableRowDef {
+                    key: sid(i),
+                    cells: vec![
+                        TableCell::Text(format!("note {i}")),
+                        TableCell::Number(i as f64),
+                        TableCell::Bool(i % 2 == 0),
+                    ],
+                    domain_ref: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// A table state over the fixture def (surface id 900), synced against
+    /// a tables-only surface (the typed-table state layer's own contract).
+    fn table_state_of(def: &PanelTableDef) -> TableUiState {
+        let mut state = TableUiState::new(sid(900), def.id_table);
+        let surface = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: Vec::new(),
+            tables: std::collections::BTreeMap::from([(def.id_table, def.clone())]),
+        };
+        state.sync(&surface);
+        state
+    }
+
 }

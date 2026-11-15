@@ -6566,7 +6566,12 @@ impl OpenCADStudio {
             }
 
             Message::HoverDwellTick => self.on_hover_dwell_tick(),
-            Message::MoveCoalesceTick => self.on_move_coalesce_tick(),
+            Message::MoveCoalesceTick => Task::batch([
+                self.on_move_coalesce_tick(),
+                // SCN-020: the mount's latest-wins coalescer answers on the
+                // SAME tick channel (≤1 mount call per surface per tick).
+                self.on_mount_move_coalesce_tick(),
+            ]),
             Message::BoxPreviewTick => self.on_box_preview_tick(),
 
             Message::SnapDwellTick => self.on_snap_dwell_tick(),

@@ -1011,6 +1011,8 @@ pub struct UserSettings {
     pub options_tab: crate::ui::window::options::OptionsTab,
     /// Show the navigation cube (NAVVCUBE).
     pub show_viewcube: bool,
+    /// NAVVCUBEOPACITY: the cube's opacity in percent while inactive.
+    pub navvcube_opacity: u8,
     /// Show the UCS icon (UCSICON).
     pub show_ucs_icon: bool,
     /// Show the viewport controls in the drawing's corner (VPCONTROL).
@@ -1501,6 +1503,7 @@ impl Default for UserSettings {
             ribbon_layers_follow_filter: false,
             options_tab: crate::ui::window::options::OptionsTab::General,
             show_viewcube: true,
+            navvcube_opacity: 50,
             show_ucs_icon: true,
             show_viewport_controls: true,
             ucs_icon_at_origin: true,

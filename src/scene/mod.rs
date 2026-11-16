@@ -3264,6 +3264,9 @@ pub struct Scene {
     /// without depending on the shader widget's internal `Program::State`
     /// (which can miss events under overlapping overlays).
     pub viewcube_hover: std::cell::Cell<Option<usize>>,
+    /// The cube's opacity this frame: 1 while the cursor is over the
+    /// navigation corner, else NAVVCUBEOPACITY.
+    pub viewcube_opacity: std::cell::Cell<f32>,
     /// Pending REDRAW force set, keyed by viewport `instance_id`. Populated by
     /// `request_refresh` and drained per-id by `refresh_consume` from whichever
     /// builder owns that instance. Never touches geometry_epoch/block_epoch.
@@ -3780,6 +3783,8 @@ impl Scene {
             last_world_per_pixel: std::cell::Cell::new(0.0),
             last_view_aspect: std::cell::Cell::new(0.0),
             viewcube_hover: std::cell::Cell::new(None),
+            // NAVVCUBEOPACITY default until the first cursor move.
+            viewcube_opacity: std::cell::Cell::new(0.5),
             pending_refresh: std::cell::RefCell::new(rustc_hash::FxHashSet::default()),
             last_tess_ms: std::cell::Cell::new(0.0),
             last_tess_wires: std::cell::Cell::new(0),

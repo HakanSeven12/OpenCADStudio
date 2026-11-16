@@ -924,6 +924,7 @@ Type a name to read it and be prompted for a new value (`OSMODE <4133>`). A dash
 | `MENUBAR` | — | — | — |
 | `MIRRTEXT` | 0 (Off) | Boolean Read/Write | Controls how the MIRROR command reflects text: 0=retains text reading direction (left-to- right), 1=mirrors text backwards like a mirror image. Tip: Always keep MIRRTEXT=0 so mirrored floor plans or symmetrical parts do not produce backwards unreadable notes. |
 | `MSLTSCALE` | 1 (On) | Boolean Read/Write | Scales linetypes displayed on the model tab by the current annotation scale (CANNOSCALE). Tip: Set to 1 so dashed lines preview accurately in Model Space as you change annotation scale. |
+| `NAVVCUBEOPACITY` | 50 | Integer Read/Write | Opacity of the ViewCube in percent (0–100) while the cursor is away from it; it turns fully opaque when the cursor reaches its corner. |
 | `ORTHOMODE` | 0 (Off) | Boolean Read/Write | Constrains cursor movement strictly to horizontal and vertical axes (F8 toggle). Tip: Hold Shift temporarily while drawing to invert Ortho mode on the fly. |
 | `OSMODE` | 4133 | Bitmask Read/Write | Sets running Object Snap (Osnap) modes using bitcode sum (1=Endpoint, 2=Midpoint, 4=Center, 8=Node, 16=Quadrant, 32=Intersection, 64=Insertion, 128=Perpendicular, 256=Tangent, 512=Nearest, 1024=Apparent, 2048=Extension, 4096=Parallel). Tip: Add 16384 to suppress running osnaps without losing your configured bitmask. 0 turns all osnaps off. |
 | `OSNAPZ` | — | — | — |

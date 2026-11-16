@@ -186,6 +186,7 @@ pub struct ViewportData {
     /// N/E/S/W stay aligned to world even as the cube reorients with the UCS.
     pub(in crate::scene) compass_rotation: Mat4,
     pub(in crate::scene) hover_region: Option<usize>,
+    pub(in crate::scene) viewcube_opacity: f32,
     pub(in crate::scene) show_viewcube: bool,
     /// Set when REDRAW/REDRAWALL requested a forced re-rasterize of this
     /// viewport this frame — bypasses the scene-render cache even if the
@@ -527,6 +528,7 @@ impl shader::Primitive for Primitive {
                         vp.cam_rotation,
                         vp.compass_rotation,
                         vp.hover_region,
+                        vp.viewcube_opacity,
                         self.viewcube_text_color,
                     );
                 }
@@ -1436,6 +1438,7 @@ retained_contributors={}",
                     vp.cam_rotation,
                     vp.compass_rotation,
                     vp.hover_region,
+                    vp.viewcube_opacity,
                     self.viewcube_text_color,
                 );
             }
@@ -5572,6 +5575,7 @@ impl Scene {
             compass_rotation: inst.camera.view_rotation_mat(),
             // Only the active viewport gets the hovered-region highlight.
             hover_region: if inst.active { hover_region } else { None },
+            viewcube_opacity: self.viewcube_opacity.get(),
             // The cube shows only on the active viewport, and only while the
             // caller (the widget) says there is room for it beside the render
             // bar — so it hides adaptively when the viewport gets narrow.

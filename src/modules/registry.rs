@@ -893,6 +893,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "LOGFILEPATH",
     "SAVEFILEPATH",
     "MSOLESCALE",
+    "NAVVCUBEOPACITY",
     "OLEFRAME",
     "OLEHIDE",
     "OLEQUALITY",

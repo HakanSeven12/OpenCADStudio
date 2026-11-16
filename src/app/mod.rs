@@ -1572,6 +1572,9 @@ pub(super) struct OpenCADStudio {
     ucs_icon_at_origin: bool,
     /// Whether the ViewCube 3D gizmo is visible in model space (NAVVCUBE).
     show_viewcube: bool,
+    /// NAVVCUBEOPACITY: the cube's opacity in percent while the cursor is
+    /// away from it.
+    navvcube_opacity: u8,
     /// Measured natural width (px, as `f32` bits) of the active viewport's
     /// render-mode control bar, written each frame by its `DensitySwap` and read
     /// next frame to decide whether the ViewCube still has room beside it — so
@@ -6549,6 +6552,7 @@ impl OpenCADStudio {
             show_viewport_controls: true,
             ucs_icon_at_origin: true,
             show_viewcube: true,
+            navvcube_opacity: 50,
             render_bar_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             render_mode_menu_open: false,
             render_mode_preview: None,

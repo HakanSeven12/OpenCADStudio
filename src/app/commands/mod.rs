@@ -1390,6 +1390,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "CLIPROMPTLINES",
         "COMMANDLINEFADETIME",
         "COMMANDLINEOPACITY",
+        "NAVVCUBEOPACITY",
         "MENUBAR",
         "RIBBON",
         "RIBBONCLOSE",

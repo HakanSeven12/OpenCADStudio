@@ -991,6 +991,7 @@ impl OpenCADStudio {
                     | "HPASSOC"
                     | "HPGAPTOL"
                     | "COMMANDLINEOPACITY"
+                    | "NAVVCUBEOPACITY"
                     | "MENUBAR"
                     | "CURSORTYPE"
                     | "SNAPANG"
@@ -3154,6 +3155,22 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            "NAVVCUBEOPACITY" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(n) if n <= 100 => {
+                                        self.navvcube_opacity = n;
+                                        for tab in &self.tabs {
+                                            tab.scene.viewcube_opacity.set(f32::from(n) / 100.0);
+                                        }
+                                        Ok((format!("NAVVCUBEOPACITY = {n}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 100 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("NAVVCUBEOPACITY = {}", self.navvcube_opacity),
+                                    false,
+                                )),
+                            },
                             "COMMANDLINEFADETIME" => match &value {
                                 Some(v) => match v.parse::<i32>() {
                                     Ok(n) if (0..=60000).contains(&n) => {
@@ -3789,6 +3806,7 @@ impl OpenCADStudio {
                                         | "HPASSOC"
                                         | "HPGAPTOL"
                                         | "COMMANDLINEOPACITY"
+                                        | "NAVVCUBEOPACITY"
                                         | "MENUBAR"
                                         | "CURSORTYPE"
                                         | "SNAPANG"

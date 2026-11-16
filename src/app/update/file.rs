@@ -897,6 +897,7 @@ impl OpenCADStudio {
             ribbon_layers_follow_filter: self.ribbon_layers_follow_filter,
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
+            navvcube_opacity: self.navvcube_opacity,
             show_ucs_icon: self.show_ucs_icon,
             show_viewport_controls: self.show_viewport_controls,
             ucs_icon_at_origin: self.ucs_icon_at_origin,
@@ -1117,6 +1118,7 @@ impl OpenCADStudio {
         // but they lived only on the app struct: turning the ViewCube off and
         // restarting brought it straight back.
         self.show_viewcube = s.show_viewcube;
+        self.navvcube_opacity = s.navvcube_opacity.min(100);
         self.show_ucs_icon = s.show_ucs_icon;
         self.show_viewport_controls = s.show_viewport_controls;
         // The ribbon's toggles keep their own copy of both.

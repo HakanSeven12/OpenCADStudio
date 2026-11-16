@@ -1993,6 +1993,15 @@ impl OpenCADStudio {
             VIEWCUBE_PX,
         );
         self.tabs[i].scene.viewcube_hover.set(hover);
+        self.tabs[i]
+            .scene
+            .viewcube_opacity
+            .set(crate::scene::pipeline::viewcube::viewcube_opacity(
+                self.cursor_pos.x - tile.x,
+                self.cursor_pos.y - tile.y,
+                tile.width,
+                self.navvcube_opacity,
+            ));
         Task::none()
     }
 
@@ -2250,6 +2259,15 @@ impl OpenCADStudio {
             cam_rot,
             VIEWCUBE_PX,
         ));
+        self.tabs[i]
+            .scene
+            .viewcube_opacity
+            .set(crate::scene::pipeline::viewcube::viewcube_opacity(
+                p.x - cube_tile.x,
+                p.y - cube_tile.y,
+                cube_tile.width,
+                self.navvcube_opacity,
+            ));
 
         let grip_hover_started = perf_move.then(Instant::now);
         let navigating = self.tabs[i].scene.selection.borrow().input.middle_down;

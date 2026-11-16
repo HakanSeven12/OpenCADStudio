@@ -245,6 +245,8 @@ impl OpenCADStudio {
     }
 }
 
+inventory::submit!(crate::command::CommandRegistration { names: &["_MTED"] });
+
 /// The text a Symbol menu entry puts in: `%%d`, `%%p` and `%%c` as their
 /// characters, `\U+XXXX` as that character, NBSP as a non-breaking space.
 fn symbol_text(code: &str) -> String {

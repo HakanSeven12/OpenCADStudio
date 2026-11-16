@@ -166,9 +166,10 @@ fn the_font_field_shows_the_style_font_after_a_style_switch() {
     let mut app = mtext_editor("Text");
     shown(&mut window(&app, 1280.0), "lostfont.shx");
     let _ = app.update(Message::MTextStyle("Roman".into()));
-    let mut ui = window(&app, 1280.0);
-    shown(&mut ui, "RomanS");
-    assert!(ui.find("[Style default]").is_err());
+    // The Text Editor tab now shows the editor's fields: its font list
+    // names the style's font, not "[Style default]".
+    let state = app.text_editor_ribbon_state().expect("the editor is open");
+    assert_eq!(state.font, "RomanS");
 }
 
 /// B6: switching to a TrueType font says what it turned off.

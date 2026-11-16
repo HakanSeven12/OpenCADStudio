@@ -3300,7 +3300,13 @@ bg={bg_ms:.1}ms n={view_count}"
                     })();
                     if let Some(frame) = frame {
                         viewport_stack = viewport_stack
-                            .push(overlay::mtext_inplace_overlay(ed, styles, frame, canvas));
+                            .push(overlay::mtext_inplace_overlay(
+                                ed,
+                                styles,
+                                frame,
+                                canvas,
+                                self.mtext_toolbar_shown(),
+                            ));
                     } else {
                         viewport_stack = viewport_stack.push(mtext_editor_overlay(
                             ed,

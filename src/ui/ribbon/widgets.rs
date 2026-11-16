@@ -485,7 +485,7 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
         "SHEETSET" => state.show_sheet_set,
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
-        id => active_tool.as_deref() == Some(id),
+        id => active_tool.as_deref() == Some(id) || super::text_editor::lit(id),
     }
 }
 
@@ -1223,14 +1223,16 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
     let btns: Vec<Element<Message>> = tools
         .iter()
         .map(|t| {
-            let is_active = active_tool.as_deref() == Some(t.id);
+            let is_active =
+                active_tool.as_deref() == Some(t.id) || super::text_editor::lit(t.id);
             let tip = t!(t.label);
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, SMALL_ICON);
             let msg = module_event_to_message(event);
+            let usable = !super::text_editor::unavailable(t.id);
             let btn = crate::ui::kit::tooltip_gap(
                 button(icon_el)
-                    .on_press(msg)
+                    .on_press_maybe(usable.then_some(msg))
                     .style(move |theme: &Theme, status| tool_btn_style(theme, is_active, status))
                     .width(SMALL_W)
                     .height(ROW_H)

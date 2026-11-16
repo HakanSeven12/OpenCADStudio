@@ -25,6 +25,8 @@ mod raw_edit;
 mod raw_field;
 mod raw_geometry;
 mod raw_list;
+mod ribbon;
+mod dialogs;
 mod raw_operations;
 mod raw_span;
 mod raw_stack;
@@ -53,10 +55,14 @@ pub enum MTextFmt {
 /// Paragraph alignment written as `\pxq<l|c|r|j>;`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParaAlign {
+    /// Back to the attachment's alignment (`\pq*;`).
+    Default,
     Left,
     Center,
     Right,
     Justify,
+    /// Letters spread over the whole line, the last one too (`\pqd;`).
+    Distribute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,6 +269,10 @@ pub struct MTextEditorState {
     pub original: Option<MText>,
     /// Tab owning the existing MTEXT hidden while its draft is displayed.
     pub(super) hidden_source_tab: Option<u64>,
+    /// The ruler above the text shows (Text Editor > Options > Ruler).
+    pub ruler: bool,
+    /// Letters typed come in upper case (Text Editor > Tools > All CAPS).
+    pub auto_caps: bool,
 }
 
 impl MTextEditorState {
@@ -338,6 +348,8 @@ impl MTextEditorState {
             toolbar_offset: iced::Vector::ZERO,
             toolbar_drag_last: None,
             toolbar_dragging: false,
+            ruler: true,
+            auto_caps: false,
             original: None,
             hidden_source_tab: None,
         }
@@ -1104,6 +1116,11 @@ impl super::OpenCADStudio {
     pub(super) fn mtext_type(&mut self, s: &str) {
         // Enter in a list item continues the list or leaves it.
         if s == "\n" && self.mtext_list_enter() {
+            return;
+        }
+        // All CAPS: letters typed come in upper case.
+        if self.mtext_editor.as_ref().is_some_and(|ed| ed.auto_caps) {
+            self.raw_type(&s.to_uppercase(), true);
             return;
         }
         self.raw_type(s, true);

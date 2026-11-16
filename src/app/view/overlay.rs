@@ -715,6 +715,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
     styles: Vec<String>,
     cell: super::super::table_cell_edit::CellCanvas,
     size: (f32, f32),
+    show_toolbar: bool,
 ) -> Element<'a, Message> {
     let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
     let prog = MTextPreview {
@@ -727,7 +728,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         miny: 0.0,
         scale: 1.0,
         content_h: size.1,
-        ruler: Some({
+        ruler: ed.ruler.then(|| {
             let width = ed.rect_width as f32;
             let growth = ed.box_growth();
             let left = if growth == 2.0 {
@@ -756,6 +757,25 @@ pub(super) fn mtext_inplace_overlay<'a>(
     // Keep the commonly edited fields visible together on a normal viewport.
     // The first row still scrolls horizontally when the viewport is narrow.
     let toolbar_width = size.0.min(1000.0).max(1.0);
+    // With the ribbon's Text Editor tab on show (MTEXTTOOLBAR 2), the text
+    // has no toolbar of its own; a panel the tab opens shows by the text.
+    if !show_toolbar {
+        let x = cell.corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let bottom = cell
+            .corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mut layers = stack![surface];
+        if let Some(menu) = ed.menu {
+            let anchor = iced::Point::new(
+                x.clamp(0.0, (size.0 - 320.0).max(0.0)),
+                (bottom + 8.0).clamp(0.0, (size.1 - 200.0).max(0.0)),
+            );
+            layers = layers.push(position_canvas_overlay(anchor, mtext_menu::panel(ed, menu)));
+        }
+        return layers.into();
+    }
     let drag_handle = mouse_area(
         container(text("⋮⋮").size(15))
             .height(58)

@@ -943,6 +943,9 @@ pub struct UserSettings {
     pub ole_hide: i16,
     /// OLEQUALITY: the plot quality of new OLE objects (3 automatic).
     pub ole_quality: i16,
+    /// MTEXTTOOLBAR: the in-place text editor's floating toolbar (0 never,
+    /// 1 always, 2 while the ribbon's Text Editor tab is not on show).
+    pub mtext_toolbar: i16,
     /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
     /// grip (1) or a centre grip and a box (2).
     pub group_display_mode: i16,
@@ -1529,6 +1532,7 @@ impl Default for UserSettings {
             file_dia: true,
             ole_hide: 0,
             ole_quality: 3,
+            mtext_toolbar: 2,
             group_display_mode: 2,
             selection_anno_display: 1,
             anno_monitor: -2,

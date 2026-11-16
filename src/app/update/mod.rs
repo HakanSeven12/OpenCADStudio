@@ -417,6 +417,7 @@ impl OpenCADStudio {
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
             Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
+            Some(MTextDialog) => self.mtext_dialog = None,
             // Cancel drops the typed value; the cell keeps its value and type.
             Some(TableCellEntry) => self.table_cell_entry = None,
             Some(HatchBoundaryWarning) => self.close_hatch_boundary_warning(),
@@ -727,6 +728,10 @@ impl OpenCADStudio {
                 .get(self.active_tab)
                 .is_some_and(|tab| tab.scene.table_cells.is_some());
         self.ribbon.set_table_cell_context(cells_picked);
+        // The Text Editor tab follows the in-place text editor.
+        if !pointer_motion {
+            self.sync_text_editor_ribbon();
+        }
         // The ribbon light follows the pane that is actually rendered, so a
         // session ending, a clean screen or another tab closes the light with it.
         self.ribbon.show_parameters_manager =
@@ -3178,6 +3183,7 @@ impl OpenCADStudio {
             Message::DimInspect(message) => self.update_dim_inspect(message),
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
             Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
+            Message::MTextDialog(message) => self.on_mtext_dialog(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),

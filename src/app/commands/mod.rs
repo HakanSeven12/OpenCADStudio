@@ -62,6 +62,8 @@ mod layerprops;
 mod layers;
 mod model_import;
 mod ole;
+mod mtext_toolbar;
+pub(crate) use mtext_toolbar::{mtext_toolbar, set_mtext_toolbar};
 pub(crate) use ole::{ole_quality, set_ole_quality};
 mod pc_colormap;
 mod pc_extract;
@@ -158,6 +160,10 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
+        // A Text Editor tool works on the open editor, which stays open.
+        if let Some(task) = self.dispatch_text_editor_tool(cmd) {
+            return task;
+        }
         self.remember_selection_before_command(cmd);
         let task = self.dispatch_command_inner(cmd, false);
         self.ask_annotation_scale_if_first();
@@ -189,6 +195,9 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
+        if let Some(task) = self.dispatch_text_editor_tool(cmd) {
+            return task;
+        }
         if self.mtext_editor.is_some() {
             self.mtext_cancel();
         }
@@ -822,6 +831,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_ole(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_mtext_toolbar(cmd) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_sheet_set(cmd, i) {

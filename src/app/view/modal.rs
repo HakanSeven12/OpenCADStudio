@@ -73,6 +73,16 @@ impl OpenCADStudio {
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
             Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
+            Some(K::MTextDialog) => {
+                use crate::ui::window::mtext_dialogs::MTextDialog as D;
+                crate::t!(match self.mtext_dialog {
+                    Some(D::Paragraph(_)) => "Paragraph",
+                    Some(D::Columns(_)) => "Column Settings",
+                    Some(D::Mask(_)) => "Background Mask",
+                    _ => "Find and Replace",
+                })
+                .into_owned()
+            }
             Some(K::TableCellEntry) => crate::tr!("table-cells", "entry-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
@@ -617,6 +627,15 @@ impl OpenCADStudio {
                 sized_flow(ex, 470, 330, |flow| {
                     crate::ui::window::table_cell_dialog::view_block(state, flow)
                 })
+            }
+            super::super::ModalKind::MTextDialog => {
+                use crate::ui::window::mtext_dialogs::{self as w, MTextDialog as D};
+                match self.mtext_dialog.as_ref()? {
+                    D::Paragraph(d) => sized_flow(ex, 640, 560, |flow| w::view_paragraph(d, flow)),
+                    D::Columns(d) => sized_flow(ex, 520, 330, |flow| w::view_columns(d, flow)),
+                    D::Mask(d) => sized_flow(ex, 440, 300, |flow| w::view_mask(d, flow)),
+                    D::Find(d) => sized_flow(ex, 560, 360, |flow| w::view_find(d, flow)),
+                }
             }
             super::super::ModalKind::AnnotationScalePrompt => {
                 let state = self.anno_scale_prompt.as_ref()?;

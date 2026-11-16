@@ -6677,6 +6677,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "LENGTHEN  Select an object to change or [Undo]:" => Some(("common", "lengthen-select-an-object-to-change-or-undo")),
         "ADDVERTEX  Select a polyline segment or [Undo]:" => Some(("common", "addvertex-select-a-polyline-segment-or-undo")),
         "ADDVERTEX  Specify new vertex location:" => Some(("common", "addvertex-specify-new-vertex-location")),
+        "POPMENU  Add commands to the right-click menu with its Customize row first." => Some(("common", "popmenu-add-commands-to-the-right-click-menu-with-its-customize-row-first")),
         "DELVERTEX  Select a polyline vertex or [Undo]:" => Some(("common", "delvertex-select-a-polyline-vertex-or-undo")),
         "LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:" => Some(("common", "lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic")),
         "LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:" => Some(("common", "loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only")),

@@ -1362,6 +1362,24 @@ fn item_key(item: &MenuItem) -> String {
 /// The command a user's entry carries when it is a separator line.
 pub const MENU_SEPARATOR: &str = "--";
 
+/// The commands the user added, as rows: shown in the idle menu and alone
+/// by POPMENU.
+pub fn user_rows(custom: &MenuCustomization) -> Vec<MenuRow> {
+    custom
+        .custom
+        .iter()
+        .map(|(label, command)| {
+            if command == MENU_SEPARATOR {
+                return MenuRow::Separator;
+            }
+            MenuRow::Item(
+                MenuItem::new(label.clone(), MenuAction::Command(command.clone()))
+                    .command_icon(command.split_whitespace().next().unwrap_or("")),
+            )
+        })
+        .collect()
+}
+
 pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<MenuRow> {
     // The default row (Repeat) always stays.
     let hidden = |key: &str| custom.hidden.iter().any(|h| h == key);
@@ -1402,16 +1420,7 @@ pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<Men
         out.push(row);
         if separator && !inserted {
             inserted = true;
-            for (label, command) in &custom.custom {
-                if command == MENU_SEPARATOR {
-                    out.push(MenuRow::Separator);
-                    continue;
-                }
-                out.push(MenuRow::Item(
-                    MenuItem::new(label.clone(), MenuAction::Command(command.clone()))
-                        .command_icon(command.split_whitespace().next().unwrap_or("")),
-                ));
-            }
+            out.extend(user_rows(custom));
             out.push(MenuRow::Separator);
         }
     }

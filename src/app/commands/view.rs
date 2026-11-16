@@ -260,6 +260,28 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::AboutOpen));
             }
 
+            // The user's own commands from the right-click menu, at the
+            // cursor: bound to a key, a menu without leaving the drawing.
+            "POPMENU" => {
+                let i = self.active_tab;
+                let at = self.tabs[i].scene.selection.borrow().input.last_move_pos;
+                let Some(at) = at.filter(|_| !self.context_menu_custom.custom.is_empty()) else {
+                    self.command_line.push_info(
+                        crate::t!("POPMENU  Add commands to the right-click menu with its Customize row first.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                {
+                    let mut sel = self.tabs[i].scene.selection.borrow_mut();
+                    sel.menu.open(at);
+                    sel.menu.user = true;
+                }
+                self.menu_bar_popup = None;
+                self.context_menu_editing = None;
+                return Some(self.unfocus_widgets());
+            }
+
             // The check the program makes at start, on request: the notice
             // when a newer release is out, a line saying so when not.
             "CHECKFORUPDATES" => {

@@ -2467,6 +2467,7 @@ common =
     .lengthen-select-an-object-to-change-or-undo = LENGTHEN  Vyberte objekt ke změně nebo [Undo]:
     .addvertex-select-a-polyline-segment-or-undo = ADDVERTEX  Select a polyline segment or [Undo]:
     .addvertex-specify-new-vertex-location = ADDVERTEX  Specify new vertex location:
+    .popmenu-add-commands-to-the-right-click-menu-with-its-customize-row-first = POPMENU  Add commands to the right-click menu with its Customize row first.
     .delvertex-select-a-polyline-vertex-or-undo = DELVERTEX  Select a polyline vertex or [Undo]:
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Vyberte objekt k měření nebo [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Zadejte možnost [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:

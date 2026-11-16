@@ -2466,6 +2466,7 @@ common =
     .lengthen-select-an-object-to-change-or-undo = LENGTHEN Chọn một đối tượng để thay đổi hoặc [Hoàn tác]:
     .addvertex-select-a-polyline-segment-or-undo = ADDVERTEX  Select a polyline segment or [Undo]:
     .addvertex-specify-new-vertex-location = ADDVERTEX  Specify new vertex location:
+    .popmenu-add-commands-to-the-right-click-menu-with-its-customize-row-first = POPMENU  Add commands to the right-click menu with its Customize row first.
     .delvertex-select-a-polyline-vertex-or-undo = DELVERTEX  Select a polyline vertex or [Undo]:
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN Chọn một đối tượng để đo hoặc [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Nhập tùy chọn [Đường dẫn hướng/Đường dẫn/Chỉ mặt cắt ngang/Cài đặt/Liên tục/Độ phình] <Chỉ mặt cắt ngang>:

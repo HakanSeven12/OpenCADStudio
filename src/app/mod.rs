@@ -124,6 +124,8 @@ mod text_style_update_tests;
 pub(crate) mod text_style_users;
 mod tolerance_dialog;
 pub(crate) mod tool_windows;
+#[cfg(test)]
+mod undo_sweep_tests;
 mod update;
 pub(crate) use update::style_import::{style_exists as style_import_exists, StyleImportDraft};
 #[cfg(test)]

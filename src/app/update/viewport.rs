@@ -8023,10 +8023,14 @@ impl OpenCADStudio {
                         // PICKADD 0 (#226): a plain box REPLACES.
                         let hit_ms = timing.hit;
                         let t_apply = crate::perf::enabled().then(Instant::now);
-                        if self.shift_down || self.select_remove_mode {
+                        // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                        if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                             self.tabs[i].scene.deselect_entities(&handles);
                         } else {
-                            if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                            if !selection_pick_add
+                                && !self.shift_down
+                                && (!handles.is_empty() || marker_hit)
+                            {
                                 self.tabs[i].scene.deselect_all();
                             }
                             self.tabs[i].scene.select_entities(&handles);
@@ -8090,16 +8094,22 @@ properties={:.1}ms picked={}",
                     // leaves the current selection untouched so a stray
                     // drag never discards hard-won picks.
                     if is_gathering {
-                        self.last_pick =
-                            Some((handles.clone(), self.shift_down || self.select_remove_mode));
+                        self.last_pick = Some((
+                            handles.clone(),
+                            self.select_remove_mode || (self.shift_down && selection_pick_add),
+                        ));
                     }
-                    if self.shift_down || self.select_remove_mode {
+                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         // PICKADD 0 (#226): a plain marquee REPLACES
                         // the selection (empty results still leave it
                         // alone, matching the box rule).
-                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                        if !selection_pick_add
+                            && !self.shift_down
+                            && (!handles.is_empty() || marker_hit)
+                        {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);
@@ -8564,13 +8574,19 @@ was_selected={}",
                     // so an accidental empty drag never discards it.
                     // PICKADD 0 (#226): a plain box REPLACES instead.
                     if is_gathering {
-                        self.last_pick =
-                            Some((handles.clone(), self.shift_down || self.select_remove_mode));
+                        self.last_pick = Some((
+                            handles.clone(),
+                            self.select_remove_mode || (self.shift_down && selection_pick_add),
+                        ));
                     }
-                    if self.shift_down || self.select_remove_mode {
+                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
-                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                        if !selection_pick_add
+                            && !self.shift_down
+                            && (!handles.is_empty() || marker_hit)
+                        {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);

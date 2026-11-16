@@ -331,7 +331,7 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
 
     let built = sysfont::with_face_data(family, |data, index| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
-        let gid = face.glyph_index(ch)?;
+        let gid = glyph_id(&face, ch)?;
         let k = cap_scale(&face);
 
         let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
@@ -393,6 +393,21 @@ pub(crate) fn is_full_width(ch: char) -> bool {
 /// [`capital_units`]).
 fn cap_scale(face: &ttf_parser::Face) -> f32 {
     CAP_UNITS / capital_units(face)
+}
+
+/// The glyph of `ch`. A symbol font maps its characters at U+F000 + code
+/// (the Symbol font's bullet `·` is U+F0B7), so a character of the first 256
+/// codes it has not at its own code is looked up there.
+pub(crate) fn glyph_id(face: &ttf_parser::Face, ch: char) -> Option<ttf_parser::GlyphId> {
+    face.glyph_index(ch).or_else(|| {
+        let code = u32::from(ch);
+        (code <= 0xFF).then_some(())?;
+        face.tables()
+            .cmap?
+            .subtables
+            .into_iter()
+            .find_map(|table| table.glyph_index(0xF000 + code))
+    })
 }
 
 /// The font units a TrueType text height spans, as the reference measures
@@ -752,7 +767,7 @@ pub fn glyph_source(family: &str, ch: char) -> Option<GlyphSource> {
     }
     let built = sysfont::with_face_data(family, |data, index| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
-        let gid = face.glyph_index(ch)?;
+        let gid = glyph_id(&face, ch)?;
         source_for(data, index, &face, gid, cap_scale(&face))
     })
     .flatten();
@@ -1372,7 +1387,7 @@ fn outline_char(
     ch: char,
     with_source: bool,
 ) -> Option<(Glyph, Option<GlyphSource>)> {
-    let gid = face.glyph_index(ch)?;
+    let gid = glyph_id(face, ch)?;
     let k = if is_full_width(ch) {
         em_scale(face)
     } else {

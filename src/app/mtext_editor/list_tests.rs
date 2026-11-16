@@ -3,7 +3,8 @@
 use super::*;
 use crate::app::{Message, OpenCADStudio};
 
-const SET: &str = r"\pxi-1.5,l1.5,t1.5;";
+/// The bullet the menu writes: the Symbol font's `·` and the tab.
+const BULLET: &str = "{\\fSymbol|b0|i0|c2|p18;\u{b7}\t}";
 
 fn app(raw: &str) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
@@ -40,9 +41,14 @@ fn bullets_on_selected_paragraphs_and_none_restores_the_source_exactly() {
     let mut app = app(source);
     select(&mut app, 1, 6); // "one" .. "two"
     let _ = app.update(Message::MTextList(Some(ListKind::Bullet)));
-    assert_eq!(raw(&app), format!("•\tone{SET}\\P•\ttwo{SET}\\Pthree"));
+    // The hanging indent is written once where the list starts; the
+    // paragraph after the list sets it back.
+    assert_eq!(
+        raw(&app),
+        format!("\\pxi-3,l3,t3;{BULLET}one\\P{BULLET}two\\P\\pi0,l0,tz;three")
+    );
     assert_eq!(ed(&app).list_kind(), Some(ListKind::Bullet));
-    assert_eq!(texts(&app), ["•\tone", "•\ttwo", "three"]);
+    assert_eq!(texts(&app), ["·\tone", "·\ttwo", "three"]);
     // None removes marker and settings: the original source, byte for byte.
     select(&mut app, 0, 8);
     let _ = app.update(Message::MTextList(None));
@@ -63,7 +69,7 @@ fn numbering_a_selected_range_starts_at_one() {
     assert_eq!(ed(&app).list_kind(), Some(ListKind::Number));
     // Bullets over numbers changes the markers only.
     let _ = app.update(Message::MTextList(Some(ListKind::Bullet)));
-    assert_eq!(texts(&app), ["intro", "•\ta", "•\tb", "end"]);
+    assert_eq!(texts(&app), ["intro", "·\ta", "·\tb", "end"]);
 }
 
 #[test]
@@ -97,15 +103,15 @@ fn enter_on_an_empty_item_leaves_the_list() {
     let end = doc_to_cells(&ed(&app).doc).len();
     select(&mut app, end, end);
     app.mtext_type("\n");
-    assert_eq!(texts(&app), ["•\ta", "•\tb", "•\t"]);
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "·\t"]);
     app.mtext_type("\n");
-    assert_eq!(texts(&app), ["•\ta", "•\tb", ""]);
+    assert_eq!(texts(&app), ["·\ta", "·\tb", ""]);
     assert_eq!(ed(&app).list_kind(), None);
     let source = raw(&app);
-    assert!(source.ends_with(r"\P"), "{source}");
+    assert!(source.ends_with(r"\P\pi0,l0,tz;"), "{source}");
     // Typing goes on in a plain paragraph.
     app.mtext_type("z");
-    assert_eq!(texts(&app), ["•\ta", "•\tb", "z"]);
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "z"]);
 }
 
 #[test]
@@ -118,7 +124,7 @@ fn marker_text_without_a_hanging_indent_is_not_a_list() {
 }
 
 #[test]
-fn an_imported_list_is_continued_but_its_foreign_indent_is_not_removed() {
+fn an_imported_list_is_continued_and_turned_off_whole() {
     let source = "\\pxi-2,l2,t2;1.\ta";
     let mut app = app(source);
     assert_eq!(ed(&app).list_kind(), Some(ListKind::Number));
@@ -126,20 +132,20 @@ fn an_imported_list_is_continued_but_its_foreign_indent_is_not_removed() {
     select(&mut app, end, end);
     app.mtext_type("\n");
     assert_eq!(texts(&app), ["1.\ta", "2.\t"]);
+    // Off takes the marker and the hanging indent away.
     let mut app = self::app(source);
     let _ = app.update(Message::MTextList(None));
-    assert_eq!(raw(&app), source);
-    assert!(ed(&app).undo.is_empty());
+    assert_eq!(raw(&app), "a");
 }
 
 #[test]
 fn a_list_item_body_starts_at_the_hanging_indent() {
     let mut app = app("ab");
     let _ = app.update(Message::MTextList(Some(ListKind::Bullet)));
-    // Marker at the margin, text at 1.5 text heights (2.5 × 1.5).
+    // Marker at the margin, text at 3 text heights (2.5 × 3).
     let boxes = &ed(&app).glyph_boxes;
     let body = boxes.iter().find(|b| b.vis == 2).unwrap();
-    assert!((body.xmin - 3.75).abs() < 0.05, "{}", body.xmin);
+    assert!((body.xmin - 7.5).abs() < 0.05, "{}", body.xmin);
     let marker = boxes.iter().find(|b| b.vis == 0).unwrap();
     assert!(marker.xmin < 0.5, "{}", marker.xmin);
 }

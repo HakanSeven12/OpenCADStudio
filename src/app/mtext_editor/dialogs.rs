@@ -28,6 +28,16 @@ impl OpenCADStudio {
     /// Replace window (`PARAGRAPH`, `COLUMNSETTINGS`, `MASK`, `FIND`) on the
     /// open editor.
     pub(in crate::app) fn open_mtext_dialog(&mut self, which: &str) {
+        if matches!(
+            which,
+            "CHARSET" | "DICTIONARIES" | "SPELLSETTINGS" | "HIGHLIGHT" | "STACKPROPS" | "AUTOSTACK"
+        ) {
+            if let Some(dialog) = self.mtext_tool_dialog(which) {
+                self.mtext_dialog = Some(dialog);
+                self.active_modal = Some(ModalKind::MTextDialog);
+            }
+            return;
+        }
         let Some(ed) = self.mtext_editor.as_ref() else {
             return;
         };
@@ -238,6 +248,7 @@ impl OpenCADStudio {
                 }
                 _ => {}
             },
+            (_, message) => return self.on_mtext_tool_dialog(message),
         }
         Task::none()
     }
@@ -336,6 +347,11 @@ impl OpenCADStudio {
                     ed.find_text = d.find;
                     ed.replace_text = d.replace;
                 }
+            }
+            other => {
+                let task = self.apply_mtext_tool_dialog(other);
+                self.rebuild_mtext_preview();
+                return task;
             }
         }
         self.rebuild_mtext_preview();

@@ -2460,7 +2460,13 @@ fn dropdown_list<'a>(
     for (cmd, label, item_icon) in items {
         let is_current = *cmd == last_cmd;
         let disabled = widgets::is_disabled_item(cmd);
-        let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
+        // A setting the item switches shows a check mark while it is on.
+        let item_icon = if text_editor::lit(cmd) {
+            IconKind::Glyph("✓")
+        } else {
+            *item_icon
+        };
+        let icon_el: Element<Message> = container(make_icon(item_icon, LARGE_ICON))
             .width(Length::Fixed(LARGE_ICON))
             .into();
         let translated = t!(*label).into_owned();

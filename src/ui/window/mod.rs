@@ -3,6 +3,7 @@ pub mod alias_editor;
 pub mod annotation_data;
 pub mod anno_scale_prompt;
 pub mod mtext_dialogs;
+pub mod mtext_tool_dialogs;
 pub mod assistant;
 pub mod attdef_dialog;
 pub mod attman_dialog;

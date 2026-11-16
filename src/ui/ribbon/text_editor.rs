@@ -19,6 +19,10 @@ use crate::ui::style::text as ui_text;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextEditorRibbon {
     pub styles: Vec<String>,
+    /// Each style's TrueType family (None: a stroke font) and whether it is
+    /// annotative, for the style gallery's samples.
+    pub style_faces: Vec<Option<String>>,
+    pub style_annotative: Vec<bool>,
     pub style: String,
     pub height: String,
     /// The font the selection (or the text) is drawn with, as the font list
@@ -129,28 +133,78 @@ pub(super) fn trail<'a>(key: &str) -> Option<Element<'a, Message>> {
     }
 }
 
-fn style_controls<'a>(state: &TextEditorRibbon) -> Element<'a, Message> {
-    let mut styles = state.styles.clone();
-    if !styles.contains(&state.style) {
-        styles.push(state.style.clone());
+/// The style gallery: a sample of each style in its own font, the style's
+/// name under it (an annotative style marked), the current one lit.
+fn style_gallery<'a>(state: &TextEditorRibbon) -> Element<'a, Message> {
+    let mut items = iced::widget::Row::new().spacing(4);
+    for (n, name) in state.styles.iter().enumerate() {
+        let face = state.style_faces.get(n).cloned().flatten();
+        let annotative = state.style_annotative.get(n).copied().unwrap_or(false);
+        let mut sample = text("AaBb123").size(15).color(iced::Color::BLACK);
+        if let Some(face) = face {
+            sample = sample.font(iced::Font::with_family(iced::font::Family::name(&face)));
+        }
+        let swatch = container(sample)
+            .center_x(Length::Fixed(84.0))
+            .center_y(Length::Fixed(30.0))
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::WHITE)),
+                border: iced::Border {
+                    width: 1.0,
+                    color: iced::Color::from_rgb8(160, 160, 160),
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        let label = if annotative {
+            format!("\u{25b2} {name}")
+        } else {
+            name.clone()
+        };
+        let current = *name == state.style;
+        items = items.push(
+            iced::widget::button(
+                column![swatch, text(label).size(ui_text::UI_SMALL)]
+                    .spacing(2)
+                    .align_x(iced::Center),
+            )
+            .on_press(Message::MTextStyle(name.clone()))
+            .style(move |theme: &Theme, status| {
+                crate::ui::kit::dropdown_row_style(
+                    theme,
+                    if current {
+                        iced::widget::button::Status::Hovered
+                    } else {
+                        status
+                    },
+                )
+            })
+            .padding(2),
+        );
     }
-    let list = crate::ui::dropdown_list::pick_list(Some(state.style.clone()), styles, |value| {
-        value.to_string()
-    })
-    .on_select(Message::MTextStyle)
-    .text_size(ui_text::UI)
-    .width(LIST_W);
-    let list = crate::ui::kit::tooltip(
-        list,
+    let gallery = iced::widget::scrollable(items)
+        .direction(iced::widget::scrollable::Direction::Horizontal(
+            iced::widget::scrollable::Scrollbar::new()
+                .width(3)
+                .scroller_width(3),
+        ))
+        .width(Length::Fixed(276.0));
+    crate::ui::kit::tooltip(
+        gallery,
         t!("Text Style").into_owned(),
         iced::widget::tooltip::Position::Bottom,
-    );
+    )
+    .into()
+}
+
+fn style_controls<'a>(state: &TextEditorRibbon) -> Element<'a, Message> {
+    let list = style_gallery(state);
     let height = crate::ui::kit::tooltip(
         number_box(t!("Height").into_owned(), &state.height, Message::MTextHeight, BOX_W),
         t!("Text Height").into_owned(),
         iced::widget::tooltip::Position::Bottom,
     );
-    container(column![list, height].spacing(6))
+    container(row![list, height].spacing(6).align_y(iced::Center))
         .padding([2, 4])
         .height(Fill)
         .into()

@@ -20,7 +20,7 @@ fn template(code: &str) -> SpanProperties {
 /// Put the code `code_for` gives each selected character in front of it.
 /// `copy` moves the one value the code sets from a template; each character
 /// must come out as it was with only that value changed.
-fn patch_span(
+pub(super) fn patch_span(
     raw: &str,
     range: Range<usize>,
     code_for: impl Fn(&SpanProperties) -> Result<String, EditError>,
@@ -319,7 +319,7 @@ impl crate::app::OpenCADStudio {
     }
 
     /// One selection patch as one undo step; the selection stays.
-    fn raw_selection_patch(
+    pub(super) fn raw_selection_patch(
         &mut self,
         range: Range<usize>,
         patch: impl FnOnce(&str, Range<usize>) -> Result<String, EditError>,

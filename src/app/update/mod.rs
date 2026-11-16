@@ -417,7 +417,12 @@ impl OpenCADStudio {
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
             Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
-            Some(MTextDialog) => self.mtext_dialog = None,
+            // Esc or ✕ on the text style question changes the style, as Yes.
+            Some(MTextDialog) => {
+                if let Some(dialog) = self.mtext_dialog.take() {
+                    self.mtext_style_question_closed(dialog);
+                }
+            }
             // Cancel drops the typed value; the cell keeps its value and type.
             Some(TableCellEntry) => self.table_cell_entry = None,
             Some(HatchBoundaryWarning) => self.close_hatch_boundary_warning(),
@@ -9204,7 +9209,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextStyle(s) => {
-                self.mtext_object_style(s);
+                self.mtext_pick_style(s);
+                Task::none()
+            }
+            Message::MTextImport(path) => {
+                self.mtext_import(&path);
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
@@ -9565,6 +9574,10 @@ impl OpenCADStudio {
                     ed.caret = off;
                     ed.caret_blink_on = true;
                 }
+                Task::none()
+            }
+            Message::MTextSelEnd => {
+                self.mtext_match_apply();
                 Task::none()
             }
             Message::MTextCaretMove(d) => {

@@ -26,6 +26,11 @@ mod raw_field;
 mod raw_geometry;
 mod raw_list;
 mod raw_paragraph_codes;
+pub(crate) mod prefs;
+mod raw_tools;
+mod import_text;
+mod tool_dialogs;
+pub(in crate::app) use raw_tools::ClearMode;
 mod ribbon;
 mod dialogs;
 mod raw_operations;
@@ -274,6 +279,12 @@ pub struct MTextEditorState {
     pub ruler: bool,
     /// Letters typed come in upper case (Text Editor > Tools > All CAPS).
     pub auto_caps: bool,
+    /// Match is on: the formatting each pointer selection takes.
+    pub matching: Option<SpanProperties>,
+    /// The visible ranges of the misspelled words, and the text and
+    /// dictionary they were found for.
+    pub spell_marks: Vec<(usize, usize)>,
+    pub(super) spell_key: String,
 }
 
 impl MTextEditorState {
@@ -351,6 +362,9 @@ impl MTextEditorState {
             toolbar_dragging: false,
             ruler: true,
             auto_caps: false,
+            matching: None,
+            spell_marks: Vec::new(),
+            spell_key: String::new(),
             original: None,
             hidden_source_tab: None,
         }
@@ -1120,12 +1134,20 @@ impl super::OpenCADStudio {
         if s == "\n" && self.mtext_list_enter() {
             return;
         }
+        // A tab after a marker that opens a paragraph makes a list item.
+        if s == "\t" && self.mtext_list_auto() {
+            return;
+        }
         // All CAPS: letters typed come in upper case.
         if self.mtext_editor.as_ref().is_some_and(|ed| ed.auto_caps) {
             self.raw_type(&s.to_uppercase(), true);
-            return;
+        } else {
+            self.raw_type(s, true);
         }
-        self.raw_type(s, true);
+        // AutoStack: a space after `1/2` stacks it.
+        if s == " " {
+            self.mtext_autostack();
+        }
     }
 
     /// Delete the selection, or the visible character before the caret.

@@ -77,6 +77,7 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
+pub(crate) use spell::{custom_words, dictionary_languages, misspelled, read_word_file, write_word_file};
 mod styleprops;
 pub(in crate::app) mod table_cells;
 mod table_style_var;

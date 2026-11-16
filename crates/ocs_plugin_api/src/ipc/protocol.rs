@@ -134,6 +134,13 @@ pub enum HostRequest {
         command_id: u64,
         event: crate::dialog::DialogEvent,
     },
+    /// V24 (additive): mid-command Ctrl+Z. The runner answers with
+    /// [`HostResponse::UndoStep`] carrying the command's `on_undo_step`
+    /// result. A v23 runner cannot decode this request: the host sends it
+    /// only to plugins whose manifest declares v24 or newer.
+    UndoStep {
+        command_id: u64,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -153,6 +160,9 @@ pub enum HostResponse {
     ModalDialog(Option<crate::dialog::DialogDef>),
     /// V19 (additive): answer to [`HostRequest::DialogAction`].
     DialogAction(crate::dialog::DialogActionResponse),
+    /// V24 (additive): answer to [`HostRequest::UndoStep`]; `None` when the
+    /// command leaves Ctrl+Z to the document undo.
+    UndoStep(Option<Box<CommandStep>>),
 }
 
 /// Requests the plugin runner sends to the host.

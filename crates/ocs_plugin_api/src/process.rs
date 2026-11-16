@@ -381,11 +381,18 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
 fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
     match kind {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
-        "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "IsSelectionGathering"
-        | "AcceptsDragSelection" | "SelectionRejectsLockedLayers" | "DropInteractive"
-        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" | "DialogAction" => {
-            Some(Duration::from_secs(10))
-        }
+        "InteractiveEvent"
+        | "GetPrompt"
+        | "NeedsEntityPick"
+        | "IsSelectionGathering"
+        | "AcceptsDragSelection"
+        | "SelectionRejectsLockedLayers"
+        | "DropInteractive"
+        | "CustomGripBegin"
+        | "CustomGripCancel"
+        | "GetModalDialog"
+        | "DialogAction"
+        | "UndoStep" => Some(Duration::from_secs(10)),
         _ => None,
     }
 }
@@ -412,6 +419,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         },
         HostRequest::GetModalDialog { .. } => "GetModalDialog",
         HostRequest::DialogAction { .. } => "DialogAction",
+        HostRequest::UndoStep { .. } => "UndoStep",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -1155,6 +1163,38 @@ impl PluginProcess {
                 "dialog_action",
                 |resp| match resp {
                     HostResponse::DialogAction(answer) => Ok(answer),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
+    /// Mid-command Ctrl+Z (API v24): ask the interactive command to step
+    /// back one input and return its next step. `Ok(None)` means the command
+    /// leaves Ctrl+Z to the document undo. A runner built against an older
+    /// API cannot decode the request, so a plugin whose manifest declares
+    /// less than v24 is never sent it and answers `None` here.
+    pub fn undo_step(&self, command_id: u64) -> Result<Option<CommandStep>, PluginError> {
+        if self.manifest.api_version < 24 {
+            return Ok(None);
+        }
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call(
+                &mut NullHost::default(),
+                HostRequest::UndoStep { command_id },
+                &mut |_| {},
+            )?;
+            match resp {
+                HostResponse::UndoStep(step) => Ok(step.map(|s| *s)),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::UndoStep { command_id },
+                "UndoStep",
+                "undo_step",
+                |resp| match resp {
+                    HostResponse::UndoStep(step) => Ok(step.map(|s| *s)),
                     other => Err(Box::new(other)),
                 },
             )
@@ -2275,7 +2315,10 @@ mod timeout_tests {
             let mut peer = runner_stream;
             let req = recv::<HostToPlugin>(&mut peer).expect("read first request");
             assert!(
-                matches!(req, HostToPlugin::Request(HostRequest::GetPrompt { command_id: 5 })),
+                matches!(
+                    req,
+                    HostToPlugin::Request(HostRequest::GetPrompt { command_id: 5 })
+                ),
                 "the first frame must be the prompt query, got {req:?}"
             );
             send(

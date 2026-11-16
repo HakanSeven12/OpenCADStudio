@@ -379,6 +379,37 @@ fn run_dialog_action(
         .unwrap_or(crate::dialog::DialogActionResponse::None)
 }
 
+/// `on_undo_step` of the interactive command `command_id` (API v24): `None`
+/// when the plugin predates the slot, the command is gone, declines, or
+/// panics. A step that ends the command releases it, as for an input event.
+fn run_undo_step(
+    interactive: &InteractiveRegistry,
+    command_id: u64,
+    api_version: u32,
+) -> Option<Box<CommandStep>> {
+    // A cdylib built against API v23 or older has no slot for this method.
+    if api_version < 24 {
+        return None;
+    }
+    let step = {
+        let mut registry = interactive.borrow_mut();
+        let cmd = registry.get_mut(&command_id)?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.on_undo_step()))
+            .ok()
+            .flatten()?
+    };
+    if matches!(
+        step,
+        CommandStep::Done
+            | CommandStep::Cancel
+            | CommandStep::CommitAndEnd(_)
+            | CommandStep::CommitManyAndEnd(_)
+    ) {
+        interactive.borrow_mut().remove(&command_id);
+    }
+    Some(Box::new(step))
+}
+
 fn handle_host_request(
     plugin: &dyn BuiltinPlugin,
     interactive: &InteractiveRegistry,
@@ -575,6 +606,8 @@ fn handle_host_request(
         HostRequest::DialogAction { command_id, event } => {
             HostResponse::DialogAction(run_dialog_action(interactive, command_id, event))
         }
+        // The V3 path serves plugins far older than v24.
+        HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -827,6 +860,11 @@ fn handle_host_request_v4(
         HostRequest::DialogAction { command_id, event } => Some(HostResponse::DialogAction(
             run_dialog_action(interactive, command_id, event),
         )),
+        HostRequest::UndoStep { command_id } => Some(HostResponse::UndoStep(run_undo_step(
+            interactive,
+            command_id,
+            api_version,
+        ))),
         HostRequest::ExecuteCode {
             command_id,
             source,
@@ -1222,10 +1260,16 @@ mod tests {
             Some(HostResponse::UndoStep(Some(_)))
         ));
         // Nothing left to drop: the command declines and stays registered.
-        assert!(matches!(undo(&mut plugin, 7), Some(HostResponse::UndoStep(None))));
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(None))
+        ));
         assert!(interactive.borrow().contains_key(&7));
         // An unknown command answers None instead of failing.
-        assert!(matches!(undo(&mut plugin, 8), Some(HostResponse::UndoStep(None))));
+        assert!(matches!(
+            undo(&mut plugin, 8),
+            Some(HostResponse::UndoStep(None))
+        ));
         assert_eq!(undo_calls.load(Ordering::SeqCst), 3);
         drop(host_stream);
     }

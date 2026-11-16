@@ -181,7 +181,11 @@
 /// Also additive on `PanelDef`: `PanelDef::style` (`PanelStyle::Palette`
 /// default, `PanelStyle::Form` for dialog-like form rendering); older payloads
 /// decode as `PanelStyle::Palette` via `deserialize_panel_style`.
-pub const API_VERSION: u32 = 23;
+/// v24 appends `InteractiveCommand::on_undo_step`, the mid-command Ctrl+Z
+/// hook, with the `HostRequest::UndoStep` / `HostResponse::UndoStep` pair. A
+/// v23 runner cannot decode the request, so the host sends it only to plugins
+/// whose manifest declares v24; older plugins keep the document undo.
+pub const API_VERSION: u32 = 24;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

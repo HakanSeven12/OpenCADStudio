@@ -5572,6 +5572,13 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel)
     }
+    fn on_undo_step(&mut self) -> Option<crate::command::CmdResult> {
+        crate::plugin::guard("InteractiveCommand::on_undo_step", || {
+            self.inner.on_undo_step()
+        })
+        .flatten()
+        .map(plugin_step_to_result)
+    }
     fn needs_entity_pick(&self) -> bool {
         crate::plugin::guard("InteractiveCommand::needs_object_pick", || {
             self.inner.needs_object_pick()
@@ -5785,6 +5792,28 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             self.refresh();
         }
         result
+    }
+    fn on_undo_step(&mut self) -> Option<crate::command::CmdResult> {
+        if self.is_done {
+            return None;
+        }
+        // `None` (the command declines, the plugin predates API v24, or the
+        // call failed) leaves Ctrl+Z to the document undo.
+        let step = self.process.undo_step(self.command_id).ok().flatten()?;
+        let result = plugin_step_to_result(step);
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Done
+                | crate::command::CmdResult::Script(_)
+                | crate::command::CmdResult::Cancel
+        ) {
+            self.is_done = true;
+        } else {
+            self.refresh();
+        }
+        Some(result)
     }
     fn on_escape(&mut self) -> crate::command::CmdResult {
         self.cancel();

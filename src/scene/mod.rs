@@ -7192,15 +7192,47 @@ impl Scene {
         // (plot_paper_units == 0) is 25.4 mm, a millimetre page is 1 mm.
         let page_unit_mm = if l.plot_paper_units == 0 { 25.4 } else { 1.0 };
         let (num, den) = (l.plot_scale_numerator, l.plot_scale_denominator);
-        if num > 1e-12 && den > 1e-12 {
+        // Scale type 0 is "scaled to fit" only with the standard-scale flag; a
+        // custom scale leaves it 0 too. A fitted plot's stored ratio is not the
+        // unit paper space is laid out in: trusting it scaled the layout's
+        // lineweights by that ratio after a fitted window plot (#3103).
+        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
+        let (wx0, wy0, wx1, wy1) = (
+            l.plot_window_min_x,
+            l.plot_window_min_y,
+            l.plot_window_max_x,
+            l.plot_window_max_y,
+        );
+        if fitted && l.plot_type == 4 && wx1 > wx0 && wy1 > wy0 {
+            // The plot scales the window onto the sheet, so the sheet spans
+            // the window at that scale.
+            let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
+                (l.paper_height, l.paper_width)
+            } else {
+                (l.paper_width, l.paper_height)
+            };
+            if pw > 1e-6 && ph > 1e-6 {
+                let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                    (wx1 - wx0, wy1 - wy0),
+                    (pw, ph),
+                    crate::io::paper_catalog::PlotScale::Fit,
+                );
+                return 1.0 / mm_per_unit.max(1e-9);
+            }
+        }
+        if !fitted && num > 1e-12 && den > 1e-12 {
             // One paper-space unit spans this many millimetres on the page.
             let mm_per_unit = (num / den) * page_unit_mm;
             if mm_per_unit > 1e-9 {
                 return 1.0 / mm_per_unit;
             }
         }
-        // No usable plot scale — assume the paper space is already millimetres.
-        1.0
+        // No usable plot scale — assume one unit per page unit (mm or inch).
+        if fitted {
+            1.0 / page_unit_mm
+        } else {
+            1.0
+        }
     }
 
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
@@ -7245,22 +7277,7 @@ impl Scene {
                             l.plot_window_max_y,
                         );
                         let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
-                        // Scale type 0 is "scaled to fit" only with the
-                        // standard-scale flag; a custom scale leaves it 0 too.
-                        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
-                        let f = if window_plot && fitted {
-                            // Fitted to the paper: the plot scales the window
-                            // to the sheet, so the sheet spans the window at
-                            // that scale, not at the layout's stored one.
-                            let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
-                                (wx1 - wx0, wy1 - wy0),
-                                (pw, ph),
-                                crate::io::paper_catalog::PlotScale::Fit,
-                            );
-                            1.0 / mm_per_unit.max(1e-9)
-                        } else {
-                            Self::layout_unit_factor(l)
-                        };
+                        let f = Self::layout_unit_factor(l);
                         let (pw, ph) = (pw * f, ph * f);
                         // A window plot maps that window onto the sheet, so the
                         // sheet sits around it rather than at the origin.

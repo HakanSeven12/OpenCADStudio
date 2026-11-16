@@ -1043,6 +1043,22 @@ pub trait InteractiveCommand: Send {
     ) -> crate::dialog::DialogActionResponse {
         crate::dialog::DialogActionResponse::None
     }
+
+    /// Mid-command Ctrl+Z (API v24). A command that collects several inputs
+    /// can take the undo itself — drop its last point and return the next
+    /// step, usually [`CommandStep::NeedPoint`], with `prompt` and
+    /// `on_cursor_move` following the shortened state — the way the host's
+    /// own multi-point commands pop their last vertex. `None` (the default)
+    /// leaves Ctrl+Z to the document undo.
+    ///
+    /// Only plugins whose manifest declares API v24 or newer are asked, and
+    /// the runner calls this slot only for plugins built against v24 or
+    /// newer, so older plugins keep the document undo. Out of process the
+    /// call carries no `HostApi`: it changes the command's own state and
+    /// answers with a step.
+    fn on_undo_step(&mut self) -> Option<CommandStep> {
+        None
+    }
 }
 
 /// A preview wire rendered in real-time during interactive commands.

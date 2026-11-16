@@ -379,6 +379,37 @@ fn run_dialog_action(
         .unwrap_or(crate::dialog::DialogActionResponse::None)
 }
 
+/// `on_undo_step` of the interactive command `command_id` (API v24): `None`
+/// when the plugin predates the slot, the command is gone, declines, or
+/// panics. A step that ends the command releases it, as for an input event.
+fn run_undo_step(
+    interactive: &InteractiveRegistry,
+    command_id: u64,
+    api_version: u32,
+) -> Option<Box<CommandStep>> {
+    // A cdylib built against API v23 or older has no slot for this method.
+    if api_version < 24 {
+        return None;
+    }
+    let step = {
+        let mut registry = interactive.borrow_mut();
+        let cmd = registry.get_mut(&command_id)?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.on_undo_step()))
+            .ok()
+            .flatten()?
+    };
+    if matches!(
+        step,
+        CommandStep::Done
+            | CommandStep::Cancel
+            | CommandStep::CommitAndEnd(_)
+            | CommandStep::CommitManyAndEnd(_)
+    ) {
+        interactive.borrow_mut().remove(&command_id);
+    }
+    Some(Box::new(step))
+}
+
 fn handle_host_request(
     plugin: &dyn BuiltinPlugin,
     interactive: &InteractiveRegistry,
@@ -575,6 +606,8 @@ fn handle_host_request(
         HostRequest::DialogAction { command_id, event } => {
             HostResponse::DialogAction(run_dialog_action(interactive, command_id, event))
         }
+        // The V3 path serves plugins far older than v24.
+        HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -827,6 +860,11 @@ fn handle_host_request_v4(
         HostRequest::DialogAction { command_id, event } => Some(HostResponse::DialogAction(
             run_dialog_action(interactive, command_id, event),
         )),
+        HostRequest::UndoStep { command_id } => Some(HostResponse::UndoStep(run_undo_step(
+            interactive,
+            command_id,
+            api_version,
+        ))),
         HostRequest::ExecuteCode {
             command_id,
             source,
@@ -1127,6 +1165,160 @@ mod tests {
             ))
         ));
         assert_eq!(*seen.lock().expect("seen"), ["next"]);
+        drop(host_stream);
+    }
+
+    /// A command that collects points and drops the last one on Ctrl+Z.
+    struct CollectPoints {
+        points: Vec<[f64; 3]>,
+        undo_calls: std::sync::Arc<AtomicU64>,
+    }
+
+    impl InteractiveCommand for CollectPoints {
+        fn prompt(&self) -> String {
+            format!("Point {}", self.points.len() + 1)
+        }
+        fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+            self.points.push(pt);
+            CommandStep::NeedPoint
+        }
+        fn on_undo_step(&mut self) -> Option<CommandStep> {
+            self.undo_calls.fetch_add(1, Ordering::SeqCst);
+            self.points.pop().map(|_| CommandStep::NeedPoint)
+        }
+    }
+
+    /// A command whose step back ends it.
+    struct UndoEnds;
+
+    impl InteractiveCommand for UndoEnds {
+        fn prompt(&self) -> String {
+            String::new()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+            CommandStep::NeedPoint
+        }
+        fn on_undo_step(&mut self) -> Option<CommandStep> {
+            Some(CommandStep::Cancel)
+        }
+    }
+
+    fn registry_with_two_points(undo_calls: &std::sync::Arc<AtomicU64>) -> InteractiveRegistry {
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        interactive.borrow_mut().insert(
+            7,
+            Box::new(CollectPoints {
+                points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                undo_calls: undo_calls.clone(),
+            }) as Box<dyn InteractiveCommand>,
+        );
+        interactive
+    }
+
+    fn prompt_of(
+        plugin: &mut dyn BuiltinPlugin,
+        interactive: &InteractiveRegistry,
+        client: &V4Client,
+    ) -> String {
+        match handle_host_request_v4(
+            plugin,
+            interactive,
+            client,
+            50,
+            24,
+            HostRequest::GetPrompt { command_id: 7 },
+        ) {
+            Some(HostResponse::Text(prompt)) => prompt,
+            other => panic!("expected the prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_step_reaches_a_v24_command_and_returns_its_step() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let undo_calls = std::sync::Arc::new(AtomicU64::new(0));
+        let interactive = registry_with_two_points(&undo_calls);
+        let mut plugin = UnsupportedReplPlugin;
+        let undo = |plugin: &mut UnsupportedReplPlugin, command_id: u64| {
+            handle_host_request_v4(
+                plugin,
+                &interactive,
+                &client,
+                1,
+                24,
+                HostRequest::UndoStep { command_id },
+            )
+        };
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(Some(ref step))) if matches!(**step, CommandStep::NeedPoint)
+        ));
+        assert_eq!(prompt_of(&mut plugin, &interactive, &client), "Point 2");
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(Some(_)))
+        ));
+        // Nothing left to drop: the command declines and stays registered.
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(None))
+        ));
+        assert!(interactive.borrow().contains_key(&7));
+        // An unknown command answers None instead of failing.
+        assert!(matches!(
+            undo(&mut plugin, 8),
+            Some(HostResponse::UndoStep(None))
+        ));
+        assert_eq!(undo_calls.load(Ordering::SeqCst), 3);
+        drop(host_stream);
+    }
+
+    #[test]
+    fn undo_step_that_ends_the_command_releases_it() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        interactive
+            .borrow_mut()
+            .insert(3, Box::new(UndoEnds) as Box<dyn InteractiveCommand>);
+        let mut plugin = UnsupportedReplPlugin;
+        let resp = handle_host_request_v4(
+            &mut plugin,
+            &interactive,
+            &client,
+            1,
+            24,
+            HostRequest::UndoStep { command_id: 3 },
+        );
+        assert!(matches!(
+            resp,
+            Some(HostResponse::UndoStep(Some(ref step))) if matches!(**step, CommandStep::Cancel)
+        ));
+        assert!(!interactive.borrow().contains_key(&3));
+        drop(host_stream);
+    }
+
+    /// A plugin built against API v23 has no `on_undo_step` slot: the runner
+    /// never calls it and answers that the command declines.
+    #[test]
+    fn undo_step_is_never_asked_of_a_pre_v24_command() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let undo_calls = std::sync::Arc::new(AtomicU64::new(0));
+        let interactive = registry_with_two_points(&undo_calls);
+        let mut plugin = UnsupportedReplPlugin;
+        let resp = handle_host_request_v4(
+            &mut plugin,
+            &interactive,
+            &client,
+            1,
+            23,
+            HostRequest::UndoStep { command_id: 7 },
+        );
+        assert!(matches!(resp, Some(HostResponse::UndoStep(None))));
+        assert_eq!(undo_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(prompt_of(&mut plugin, &interactive, &client), "Point 3");
         drop(host_stream);
     }
 

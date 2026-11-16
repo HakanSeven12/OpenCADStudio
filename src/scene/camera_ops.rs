@@ -1666,7 +1666,11 @@ impl Scene {
     }
 
     /// Size the camera's near/far from the drawing's own recorded extent,
-    /// leaving its pose alone.
+    /// leaving its pose alone. The recorded extent is that of the space the
+    /// camera shows: model space's `$EXTMIN`/`$EXTMAX`, or the current
+    /// layout's own extents. A sheet holds objects far off its plane (a
+    /// legend or a block placed at Z = -6040) that the model's extent knows
+    /// nothing about, and sizing a layout by the model clipped them away.
     ///
     /// `$EXTMIN`/`$EXTMAX` is untrustworthy for *positioning* — stale after an
     /// edit, or the 1e20 sentinel when the writer never computed it (see the
@@ -1679,20 +1683,34 @@ impl Scene {
         // Same bound `model_space_extents`'s header fallback uses; rejects the
         // sentinel and any garbage that would blow the range up.
         const SANE_EXTENT: f64 = 1.0e16;
+        let sane = |lo: document::types::Vector3, hi: document::types::Vector3| {
+            (lo.x <= hi.x
+                && lo.y <= hi.y
+                && lo.z <= hi.z
+                && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
+                    .iter()
+                    .all(|v| v.is_finite() && v.abs() < SANE_EXTENT))
+            .then(|| {
+                (
+                    glam::DVec3::new(lo.x, lo.y, lo.z),
+                    glam::DVec3::new(hi.x, hi.y, hi.z),
+                )
+            })
+        };
         let h = &self.document.header;
-        let (lo, hi) = (h.model_space_extents_min, h.model_space_extents_max);
-        let ok = lo.x <= hi.x
-            && lo.y <= hi.y
-            && lo.z <= hi.z
-            && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
-                .iter()
-                .all(|v| v.is_finite() && v.abs() < SANE_EXTENT);
-        if !ok {
-            return;
+        let model = sane(h.model_space_extents_min, h.model_space_extents_max);
+        // A layout that never recorded its extents (the sentinel, or an
+        // empty box at the origin) keeps the model's as before.
+        let extents = if self.current_layout == "Model" {
+            model
+        } else {
+            sane(h.paper_space_extents_min, h.paper_space_extents_max)
+                .filter(|(min, max)| min.x < max.x || min.y < max.y)
+                .or(model)
+        };
+        if let Some((min, max)) = extents {
+            self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
         }
-        let min = glam::DVec3::new(lo.x, lo.y, lo.z);
-        let max = glam::DVec3::new(hi.x, hi.y, hi.z);
-        self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
     }
 
     fn fit_paper_space_extents(&mut self) {

@@ -8376,14 +8376,15 @@ fn text_on_dim_line(
                 _ => text_w > span,
             };
         if text_outside {
-            // Past the two-arrow stub the dimension line grows outside the
-            // extension line, then the gap that `text_w` already carries.
-            along = hi + 2.0 * arrow + text_w * 0.5;
+            // Past the second extension line (the side picked last), the
+            // two-arrow stub the dimension line grows outside it, then the
+            // gap that `text_w` already carries.
+            along = t2 + inward * (2.0 * arrow + text_w * 0.5);
             if horizontal_outside && ay.abs() > 1e-3 {
                 // Horizontal text beside a hook: the line runs out two arrow
                 // lengths, the hook turns one arrow toward the text-up side
                 // and the text sits against it, centred on the hook.
-                let elbow_along = hi + 2.0 * arrow;
+                let elbow_along = t2 + inward * 2.0 * arrow;
                 let side = if px >= 0.0 { 1.0 } else { -1.0 };
                 let elbow_x = defpt.x + ax * elbow_along;
                 let elbow_y = defpt.y + ay * elbow_along;
@@ -8451,7 +8452,8 @@ fn text_on_single_arrow_dim_line(
             _ => text_width > available,
         };
     let along = if text_outside {
-        high + 2.0 * arrow + text_width * 0.5
+        let outward = if second_along >= first_along { 1.0 } else { -1.0 };
+        second_along + outward * (2.0 * arrow + text_width * 0.5)
     } else {
         (first_along + second_along) * 0.5
     };

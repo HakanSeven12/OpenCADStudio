@@ -570,7 +570,9 @@ impl OpenCADStudio {
             // one below it.
             let split = index.replace(range.clone(), "\n")?;
             if empty {
-                let raw = renumber(clear_item(&split.raw, n)?)?;
+                // The new paragraph takes the cleared item's values too.
+                let raw = set_indent(&clear_item(&split.raw, n)?, &[n + 1], 0.0)?;
+                let raw = renumber(raw)?;
                 let caret = paragraphs(&raw)[n + 1].range.start;
                 return Ok(TextEdit { raw, caret });
             }

@@ -314,7 +314,7 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
             ]
             .spacing(6)
             .align_y(iced::Center),
-            container(scrollable(words).height(Length::Fixed(150.0)))
+            container(scrollable(words).height(Length::Fixed(if d.manage { 90.0 } else { 150.0 })))
                 .padding(2)
                 .width(Fill),
             row![

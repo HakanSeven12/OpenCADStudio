@@ -76,6 +76,8 @@ mod model_ops;
 mod mtext_editor;
 pub(crate) use mtext_editor::prefs as mtext_prefs;
 #[cfg(test)]
+mod import_command_tests;
+#[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
 mod mtext_style_from_selection_tests;

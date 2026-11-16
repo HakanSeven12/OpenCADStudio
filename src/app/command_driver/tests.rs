@@ -9951,3 +9951,97 @@ mod array_surface_tests {
         assert!(inserts >= 1, "the array item entity exists");
     }
 }
+
+#[cfg(test)]
+mod scale_rotate_copy_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn fresh_line(app: &mut OpenCADStudio, x: f64) -> document::Handle {
+        app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 10.0, 0.0, 0.0),
+            )),
+        )
+    }
+
+    /// SCALE's Copy option scales a duplicate about the base point and
+    /// leaves the source untouched; the factor prompt stays on offer so
+    /// the value follows the keyword.
+    #[test]
+    fn scale_copy_keeps_the_source_and_places_the_scaled_duplicate() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let source = fresh_line(&mut app, 0.0);
+        app.tabs[i].scene.select_entities(&[source]);
+
+        let _ = app.run_command_line("SCALE");
+        let _ = app.feed_script_line("0,0");
+        let _ = app.feed_script_line("C");
+        let _ = app.feed_script_line("2");
+
+        let lengths: Vec<f64> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => {
+                    Some((line.end - line.start).length())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lengths.len(), 2, "the source and its copy: {lengths:?}");
+        assert!(
+            lengths.iter().any(|l| (*l - 10.0).abs() < 1e-9),
+            "the source keeps its length: {lengths:?}"
+        );
+        assert!(
+            lengths.iter().any(|l| (*l - 20.0).abs() < 1e-9),
+            "the copy is scaled: {lengths:?}"
+        );
+    }
+
+    /// ROTATE's Copy option rotates a duplicate about the base point and
+    /// leaves the source at its original angle.
+    #[test]
+    fn rotate_copy_keeps_the_source_and_places_the_rotated_duplicate() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let source = fresh_line(&mut app, 0.0);
+        app.tabs[i].scene.select_entities(&[source]);
+
+        let _ = app.run_command_line("ROTATE");
+        let _ = app.feed_script_line("0,0");
+        let _ = app.feed_script_line("C");
+        let _ = app.feed_script_line("90");
+
+        let horizontal = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .filter(|line| (line.end.y - line.start.y).abs() < 1e-9)
+            .count();
+        let vertical = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .filter(|line| (line.end.x - line.start.x).abs() < 1e-9)
+            .count();
+        assert_eq!(horizontal, 1, "the source keeps its angle");
+        assert_eq!(vertical, 1, "the duplicate is rotated 90 degrees");
+    }
+}

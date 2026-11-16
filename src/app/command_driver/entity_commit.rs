@@ -303,11 +303,12 @@ impl OpenCADStudio {
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
         self.restore_pre_cmd_tangent();
-        if let Some(name) = insert_block_name {
-            self.record_block_insert(&name);
-        }
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
+        }
+        if let Some(name) = insert_block_name {
+            self.record_block_insert(&name);
+            self.ask_annotation_scale_after_insert(&name);
         }
         None
     }

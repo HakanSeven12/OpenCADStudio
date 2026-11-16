@@ -397,61 +397,30 @@ pub fn handle_plugin_request(
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))
         }
         RemoveGeoLocation => PluginResponse::GeoLocationRemoved(host.remove_geo_location()),
-        // V23 scene/widget wire tails — TRANSPORT-ONLY in this package.
-        // The wire layer validates what the transport can verify (decode
-        // budgets ran at frame deserialize; the structural `validate()` of
-        // the carried surface is re-run here so a structurally broken
-        // publish refuses with the typed rejection even before any
-        // publisher exists) and answers with the typed acks/rejections.
-        // The host-UI/mount publisher attach — the per-panel store that
-        // holds a mounted `PanelScene`/`WidgetSurface`, applies patches and
-        // pages requests against it — is the recorded follow-up. Until it
-        // lands: mutating frames answer `PublisherUnattached` (honest, no
-        // silent Ok), reads answer empty/bounded.
-        PanelScenePublish { surface, .. } => {
-            let structural = match &surface {
-                crate::ipc::protocol::SceneOrWidgetSurface::Scene(scene) => scene
-                    .validate()
-                    .map_err(|error| error.to_string()),
-                crate::ipc::protocol::SceneOrWidgetSurface::Widgets(surface) => surface
-                    .validate()
-                    .map_err(|error| error.to_string()),
-            };
-            PluginResponse::PatchRejected {
-                code: if structural.is_err() {
-                    crate::ipc::protocol::PatchRejectCode::InvalidOp
-                } else {
-                    crate::ipc::protocol::PatchRejectCode::PublisherUnattached
-                },
-                report: crate::ipc::protocol::PatchRejectReport {
-                    current_revision: None,
-                    failed_op: None,
-                },
-            }
-        }
-        PanelScenePatch { .. } => PluginResponse::PatchRejected {
-            // The op budget and per-op staging are the publisher's phases
-            // (nothing is attached in this package, so nothing can stage);
-            // the wire decode already held the op budget.
-            code: crate::ipc::protocol::PatchRejectCode::PublisherUnattached,
-            report: crate::ipc::protocol::PatchRejectReport {
-                current_revision: None,
-                failed_op: None,
-            },
-        },
-        PanelStoreRead { .. } => PluginResponse::StorePage {
-            rows: Vec::new(),
-            total_hint: 0,
-        },
-        PanelSceneSnapshot2 { .. } => PluginResponse::StorePage {
-            rows: vec![crate::ipc::protocol::StoreRow::State(
-                crate::ipc::protocol::StoreStateDigest {
-                    scene: None,
-                    widgets: None,
-                },
-            )],
-            total_hint: 0,
-        },
+        // V23 scene/widget wire tails — the publish-or-patch contract's
+        // HOST side. The wire layer validates what the transport can verify
+        // (decode budgets ran at frame deserialize) and routes the tail to
+        // the [`HostApi`] panel-surface methods (the trait's DEFAULTS carry
+        // the transport-era honest stubs, so a host without the attach
+        // answers exactly as before this delegation: mutating frames
+        // `PublisherUnattached` — no silent Ok; reads empty/bounded). A
+        // capable host OVERRIDES the four (the OpenCADStudio attach, the
+        // mount/publisher side of the recorded follow-up): publishes
+        // validate + store, patches apply atomically, reads page with
+        // checked arithmetic, and a widget-surface publish GoLIVE mounts.
+        PanelScenePublish {
+            panel_id,
+            surface,
+            events,
+        } => host.panel_scene_publish(plugin_id, &panel_id, surface, events),
+        PanelScenePatch { panel_id, patch } => host.panel_scene_patch(plugin_id, &panel_id, patch),
+        PanelStoreRead {
+            panel_id,
+            kind,
+            parent_id,
+            range,
+        } => host.panel_store_read(plugin_id, &panel_id, kind, parent_id, range),
+        PanelSceneSnapshot2 { panel_id } => host.panel_scene_snapshot2(plugin_id, &panel_id),
     }
 }
 
@@ -902,5 +871,134 @@ mod tests {
         );
         assert_eq!(state.document_reads, 0);
         assert_eq!(state.document_writes, 0);
+    }
+
+    #[test]
+    fn v23_panel_surface_arms_delegate_to_the_trait_defaults() {
+        // A host that OVERRIDES NONE of the four panel-surface methods (the
+        // out-of-crate implementor shape) must answer the v23 tails exactly
+        // as the transport-era stubs did: structurally invalid → InvalidOp,
+        // valid but unpublished → PublisherUnattached, reads → empty/bounded
+        // pages. The delegation must not change the semantics for any
+        // non-overriding host (the attach's defaults stay in the trait).
+        let mut host = LegacyHost::default();
+
+        // A structurally VALID widget publish: honest PublisherUnattached.
+        let surface = crate::widgets::WidgetSurface {
+            revision: crate::scene::SceneRevision(1),
+            roots: vec![crate::widgets::WidgetNode::List(crate::widgets::ItemListDef {
+                id: crate::scene::StableId(1),
+                name: None,
+                enabled: true,
+                visible: true,
+                label: None,
+                items: vec![],
+            })],
+            tables: Default::default(),
+        };
+        assert!(surface.validate().is_ok());
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::PanelScenePublish {
+                    panel_id: "align_tools".to_owned(),
+                    surface: crate::ipc::protocol::SceneOrWidgetSurface::Widgets(surface),
+                    events: vec![],
+                }
+            ),
+            PluginResponse::PatchRejected {
+                code: crate::ipc::protocol::PatchRejectCode::PublisherUnattached,
+                ..
+            }
+        ));
+
+        // A structurally INVALID publish refuses InvalidOp at the same arm
+        // (the keep-the-typed-rejection gate that predates the attach).
+        let broken = crate::widgets::WidgetSurface {
+            revision: crate::scene::SceneRevision(1),
+            roots: vec![crate::widgets::WidgetNode::IconButton(
+                crate::widgets::IconActionDef {
+                    id: crate::scene::StableId(1),
+                    accessible_name: String::new(), // required non-empty → refuses
+                    tooltip: None,
+                    icon: crate::widgets::IconRef {
+                        uri: "host://icons/test.svg".to_owned(),
+                        size: 16.0,
+                    },
+                    enabled: true,
+                    visible: true,
+                    active: false,
+                    command: "x".to_owned(),
+                    confirmation: None,
+                },
+            )],
+            tables: Default::default(),
+        };
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::PanelScenePublish {
+                    panel_id: "align_tools".to_owned(),
+                    surface: crate::ipc::protocol::SceneOrWidgetSurface::Widgets(broken),
+                    events: vec![],
+                }
+            ),
+            PluginResponse::PatchRejected {
+                code: crate::ipc::protocol::PatchRejectCode::InvalidOp,
+                ..
+            }
+        ));
+
+        // Patch / read / snapshot2: the default (unattached) answers exactly.
+        let patch = crate::widgets::WidgetSurfacePatch {
+            base_revision: crate::scene::SceneRevision(1),
+            revision: crate::scene::SceneRevision(2),
+            ops: vec![],
+        };
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::PanelScenePatch {
+                    panel_id: "align_tools".to_owned(),
+                    patch: crate::ipc::protocol::SceneOrWidgetPatch::Widgets(patch),
+                }
+            ),
+            PluginResponse::PatchRejected {
+                code: crate::ipc::protocol::PatchRejectCode::PublisherUnattached,
+                ..
+            }
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::PanelStoreRead {
+                    panel_id: "align_tools".to_owned(),
+                    kind: crate::ipc::protocol::PanelStoreKind::ListItems,
+                    parent_id: None,
+                    range: crate::widgets::WidgetRange { start: 0, len: 8 },
+                }
+            ),
+            PluginResponse::StorePage { rows, total_hint }
+                if rows.is_empty() && total_hint == 0
+        ));
+        assert!(matches!(
+            request(
+                &mut host,
+                CALLER,
+                PluginRequest::PanelSceneSnapshot2 {
+                    panel_id: "align_tools".to_owned(),
+                }
+            ),
+            PluginResponse::StorePage { rows, total_hint }
+                if matches!(
+                    rows.as_slice(),
+                    [crate::ipc::protocol::StoreRow::State(digest)]
+                        if digest.scene.is_none() && digest.widgets.is_none()
+                ) && total_hint == 0
+        ));
     }
 }

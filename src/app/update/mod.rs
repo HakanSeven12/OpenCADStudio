@@ -1072,6 +1072,15 @@ impl OpenCADStudio {
             self.graphic_attributes.retain_selection(&selected);
         }
         self.show_next_startup_modal();
+        // SCN-025 (the ADR-009 follow-up): the WIDGET prompt modal queue
+        // reveals at EVERY message boundary too — the one-line neighbor of
+        // the startup modals' reveal (the NO-PREEMPT rule is inside the
+        // check: a queue never replaces an active modal; the front's desc
+        // must still stand). This closes the recorded gap where a prompt
+        // queued behind a THIRD-party modal only revealed at an OWNED
+        // boundary (the prompt machinery's own close chain); the generic
+        // boundary now carries the reveal.
+        self.show_next_widget_prompt_modal();
         // A Restore-all batch finished settling on this message: now that
         // the last restored open has inserted its tab, focus the tab the
         // remembered session had active (web session memory).

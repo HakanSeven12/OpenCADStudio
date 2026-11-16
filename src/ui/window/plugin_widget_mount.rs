@@ -28,14 +28,17 @@
 //! > command's originating address — **bridge-forwards-then-settle**, so
 //! > the in-flight exactly-once guard re-arms after the handler completes.
 //!
-//! Two boundaries stay open by DESIGN, both recorded for the ADR-004
-//! (API-23) crossing / SCN-015:
-//! - the events the bridge drains are NOT yet published to the plugin
-//!   (`v4_support::publish_*`) — the COLLECTING sink ([`CollectingSink`])
-//!   is the pipeline seam the future publisher hangs off;
-//! - teardown drops a surface's `pending_children` (state `reset_all`),
-//!   which cancels the mount's VIEW of pending lazy page fetches — the
-//!   genuine in-flight IPC fetch cancellations still need the request-id
+//! ADR-004 (API-23) crossing / SCN-015 boundaries, and where they stand
+//! after SCN-025 (the wire attach):
+//! - the events the bridge drains: the COLLECTING sink ([`CollectingSink`])
+//!   was the pipeline seam the future publisher hangs off — that publisher
+//!   LANDED with SCN-025 (the drained batches forward through the v23
+//!   notify router from the arms via `app::update::widget_mount`'s one
+//!   forwarding helper; the sink itself keeps exactly its collecting
+//!   contract);
+//! - teardown dropping a surface's `pending_children` (state `reset_all`)
+//!   cancels the mount's VIEW of pending lazy page fetches — the genuine
+//!   in-flight IPC fetch cancellations still need the request-id
 //!   vocabulary the wire era brings (RECORDED, not silently claimed).
 //! Additionally the prompt dialog's SEMANTIC half shipped here (SCN-015 —
 //! see "The armed prompt's dialog lifecycle" below); SCN-016 landed its
@@ -265,10 +268,22 @@ use iced::widget::tooltip::Position as TooltipPosition;
 use iced::widget::{Tooltip, button, column, container, mouse_area, row, text};
 use iced::{Element, Fill, Length, Point, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
-use ocs_plugin_api::scene::{SceneRevision, StableId};
+// The v23 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
+// types only (codes, reports, bounded envelopes); no frames built here — the
+// PluginResponse mapping happens in `app::plugin_host`. The `ipc` module is
+// host-feature-only: desktop-only machinery, which the plugin-host attach is.
+#[cfg(not(target_arch = "wasm32"))]
+use ocs_plugin_api::ipc::protocol::{
+    PanelStoreKind, PatchRejectCode, PatchRejectReport, SceneOrWidgetPatch, SceneOrWidgetSurface,
+    StoreRow, StoreStateDigest,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use ocs_plugin_api::widgets::WidgetRange;
+use ocs_plugin_api::scene::{PanelScene, SceneElement, SceneKindCounts, SceneRevision, StableId};
 use ocs_plugin_api::widgets::{
-    Axis, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN, MenuDef, TableRef,
-    TreeRowDef, WidgetEvent, WidgetGroup, WidgetNode, WidgetSurface, WidgetTreeDef,
+    Axis, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN,
+    MAX_WIDGET_ROWS_INITIAL, MenuDef, TableRef, TreeRowDef, WidgetEvent, WidgetGroup, WidgetNode,
+    WidgetSurface, WidgetTreeDef,
 };
 
 use crate::ui::style::form::button_style;
@@ -1471,6 +1486,22 @@ pub struct MountRegistry {
     /// decision and Escape's machine-direct cancel) and swept with the
     /// surfaces. Host-local only, never serialized (§3 transient class).
     prompts: HashMap<StableId, MountPromptDesc>,
+    /// (SCN-025) The app-owned PANEL SURFACE STORE — the v23
+    /// publish-or-patch contract's host-side truth (keyed by panel id,
+    /// recording the owning plugin's transport id), the store the wire
+    /// attach publishes into, patches over, and pages. Extension of THIS
+    /// registry (vs a sibling app-`Rc` field) is the recorded decision: the
+    /// registry is already the app-`Rc` domain
+    /// (`OpenCADStudio::mount_registry`), `HostSession` reaches it exactly
+    /// the way the update arms do (`self.app.mount_registry`), and its
+    /// lifecycle has nothing that outlives the app session. NOT a
+    /// thread-local — the pre-SCN-016 world stays buried; every write rides
+    /// the same one-borrow discipline as the mounts. `by_panel` entries are
+    /// created ONLY by the attach (a legacy session stays zero-entry, so
+    /// every legacy panel keeps the byte-identical legacy path — the
+    /// legacy-behavior guarantee now holds for this store BY CONSTRUCTION).
+    #[cfg(not(target_arch = "wasm32"))]
+    panel_surfaces: PanelSurfaceStore,
 }
 
 impl MountRegistry {
@@ -1640,6 +1671,19 @@ pub struct MountCounters {
     /// ([`key_route`]). The a11y defect probe: a keyboard path that stops
     /// moving the focus/selection is a step this counter never saw.
     pub keyboard_nav_steps: u64,
+    //
+    // -- SCN-025 wire-attach probes ---------------------------------------
+    /// Widget events FORWARDed through the v23 notify router
+    /// (`broadcast_panel_scene_events`) from the bridge arms' sink drains —
+    /// one tick per forwarded EVENT row. Exactly-once discipline: the drain
+    /// (`CollectingSink::take`) empties the buffer, so a re-drain can never
+    /// re-forward; this probe is the count a double-forward defect breaks.
+    pub mount_event_forwards: u64,
+    /// Store DEMANDS forwarded through the v23 demand router
+    /// (`broadcast_panel_store_demand`) from the store reads' page misses —
+    /// one tick per demand raised (a read-driven fact; a re-read legitimately
+    /// re-demands, but never as a replay of a queued ledger).
+    pub mount_demand_forwards: u64,
 }
 
 /// The PRESERVE-ON-IDENTICAL comparison input: the surface's structural
@@ -1866,6 +1910,45 @@ impl MountRegistry {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn record_key_nav_step_owned(&mut self) {
         self.counters.keyboard_nav_steps += 1;
+    }
+
+    // -- SCN-025: the panel surface store (the wire attach) -----------------
+
+    /// The store read (the attach's page/snapshot reads + the tests).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn panel_surface_store(&self) -> &PanelSurfaceStore {
+        &self.panel_surfaces
+    }
+
+    /// The store write (the attach's publish/patch; one-borrow discipline).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn panel_surface_store_mut(&mut self) -> &mut PanelSurfaceStore {
+        &mut self.panel_surfaces
+    }
+
+    /// The event-forward probe tick ([`MountCounters::mount_event_forwards`])
+    /// — one per forwarded EVENT row (the bridge arms' sink drains).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn record_panel_events_forwarded_owned(&mut self, count: usize) {
+        self.counters.mount_event_forwards += count as u64;
+    }
+
+    /// The demand-forward probe tick ([`MountCounters::mount_demand_forwards`])
+    /// — one per demand raised (the store reads' page misses).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn record_store_demand_forwarded_owned(&mut self) {
+        self.counters.mount_demand_forwards += 1;
+    }
+
+    /// The reverse lookup (SCN-025): the panel a registered `surface_id`
+    /// names — the event forward's `panel_id` half (the drained events
+    /// carry the surface id; the manager's routers carry both). The mirror
+    /// of [`Self::handle_for_surface_owned`]; `None` for an unregistered id.
+    pub(crate) fn panel_for_surface_owned(&self, surface_id: StableId) -> Option<String> {
+        self.by_panel
+            .iter()
+            .find(|(_, handle)| handle.surface_id() == surface_id)
+            .map(|(panel_id, _)| panel_id.clone())
     }
 }
 
@@ -2533,19 +2616,19 @@ pub(crate) fn key_route_owned(
     msgs
 }
 
-/// The BENCH seam (SCN-024; ADR-007 item 3; NEVER WIRE — inspect/drive-only,
-/// not part of the host's documentary API, no logic of its own): the app's
-/// `on_mount_key` route body —
-/// `crate::app::update::widget_mount::handle_mount_key_owned` — restated
-/// here PIECE-FOR-PIECE out of THE SAME pre-existing pieces
-/// ([`Self::mount_key_surface_owned`] target resolution, Escape's
-/// machine-direct cancel, [`Self::handle_for_surface_owned`],
-/// [`key_route_owned`]), because that app fn's module chain
-/// (`crate::app::update`) is PRIVATE and cannot be reached from a bench
-/// crate. The bench drives the production route's EXACT body through this
-/// seam (the app fn stays the routing authority; the tests on both sides
-/// pin them to the same shape; a divergence is a defect either file's
-/// reviewer must refuse).
+/// The route-body seam (SCN-024; ADR-007 item 3) — SCN-025's D1 fold-back
+/// promoted it to THE CANONICAL `on_mount_key` route body: the app's
+/// `handle_mount_key_owned` (`crate::app::update::widget_mount`) now
+/// DELEGATES here instead of restating the body — ONE body, one direction
+/// (app → mount file; the app module chain stays unreachable from a bench
+/// crate, so the bench drives the same canonical body the app runs). This
+/// is the drift-kill: a route change edits THIS body only; the app fn is
+/// the delegation shim (zero logic of its own).
+///
+/// Semantics unchanged (the state layers own the decisions): the target
+/// resolution ([`Self::mount_key_surface_owned`]), Escape's machine-direct
+/// cancel, the surface lookup ([`Self::handle_for_surface_owned`]), and the
+/// pure translation ([`key_route_owned`]) — exactly the pre-fold pieces.
 #[doc(hidden)]
 pub fn bench_handle_mount_key_owned(
     registry: &mut MountRegistry,
@@ -2840,6 +2923,959 @@ impl Drop for RegisteredGuard {
 #[cfg(not(test))]
 impl Drop for RegisteredGuard {
     fn drop(&mut self) {}
+}
+
+// ---------------------------------------------------------------------------
+// SCN-025 — the app-owned PANEL SURFACE STORE (the v23 wire attach)
+// ---------------------------------------------------------------------------
+//
+// The living truth the v23 wire attach publishes into, patches over, and
+// pages: one entry per attached panel, keyed by the panel id the plugin's
+// `RegisterPanel` registration used, recording the transport-authenticated
+// OWNING plugin id and the two surface legs (a publish frame carries exactly
+// one leg; a panel owns one of each — the wire contract). The attach
+// (`app::plugin_host`) writes through this store and maps its semantic
+// outcomes onto the wire acks; this module builds no frames.
+//
+// PLACEMENT DECISION (recorded, SCN-025): the store rides IN this registry
+// (a `MountRegistry` field), not as a sibling app-`Rc`: the registry is
+// already the app-`Rc` domain (`OpenCADStudio::mount_registry`), `HostSession`
+// reaches it exactly the way the update arms do (`self.app.mount_registry`
+// — inspected: that is how `HostSession` reaches ALL app state), and no
+// lifecycle here diverges from the app's. A thread-local was the pre-SCN-016
+// shape and stays buried.
+//
+// LEGACY GUARANTEE (pinned in the tests): entries appear ONLY through the
+// attach. Zero publishes ⇒ zero entries ⇒ every legacy panel takes the
+// byte-identical legacy view path; the store cannot add others.
+//
+// RECORDED BOUNDARY (SCN-025, not claimed): the SCENE MOUNT rendering seam
+// (a `PanelScene` render onto host UI state) is NOT this package — the
+// scene leg is STORED here (patch truth + snapshot2/pages) and stays
+// invisible to the mounts until the scene-mount seam package lands.
+
+/// One panel's stored surface truth (SCN-025).
+///
+/// `surface_id` is the frozen widget-surface identity
+/// ([`PanelSurfaceStore::assign_surface_id`]); `None` while only the scene
+/// leg is stored — so it is `Some` EXACTLY when the widget leg is, which is
+/// also when a store read may raise a demand (the demand's `surface_id`
+/// names the `WidgetSurface` the store addresses).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub(crate) struct PanelSurfaceEntry {
+    /// The transport-authenticated publisher (the attach's owner law).
+    pub(crate) owner_plugin_id: String,
+    /// The frozen surface id the widget leg registers and streams under.
+    pub(crate) surface_id: Option<StableId>,
+    /// The stored scene leg (+ [`PanelScene::scene_summary`] — the digest
+    /// row's scene half).
+    pub(crate) scene: Option<PanelScene>,
+    /// The stored widget-surface leg (the mount's registered copy mirrors
+    /// this; the store is the truth, the handle the projection).
+    pub(crate) widgets: Option<WidgetSurface>,
+}
+
+/// The app-owned per-panel surface store (see the section docs).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default)]
+pub(crate) struct PanelSurfaceStore {
+    by_panel: HashMap<String, PanelSurfaceEntry>,
+}
+
+/// A successful publish/patch's semantic outcome — the attach maps it onto
+/// `PluginResponse::PatchApplied`; widget legs also yield the frozen
+/// `(surface id, surface)` to (re)register into the mount.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub(crate) struct PanelSurfaceOutcome {
+    /// The bounded ack report: the SCENE leg's REAL planner output
+    /// ([`PanelScene::apply_patch_report`]); the widget leg's capped derived
+    /// facts ([`widget_patch_report`]) and a publish leg's root-level caps
+    /// ([`publish_leg_report`]).
+    pub(crate) report: ocs_plugin_api::scene::AppliedPatchReport,
+    /// The widget surface to (re)mount, with its stored frozen identity.
+    pub(crate) widget_mount: Option<(StableId, WidgetSurface)>,
+}
+
+/// A store read's answer plus the demand the read raises (the attach maps
+/// onto `PluginResponse::StorePage`; non-`None` `surface_id` naming the
+/// attached widget store is also the demand's permission — nothing attached
+/// names nothing, so nothing demands).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default)]
+pub(crate) struct StoreReadOutcome {
+    pub(crate) surface_id: Option<StableId>,
+    pub(crate) rows: Vec<StoreRow>,
+    /// The host's belief of the addressed store's total (the held count; a
+    /// table's self-declared total when the def names one) — a hint, never a
+    /// contract, `0` unattached.
+    pub(crate) total_hint: u64,
+    /// The lazy-children/page miss the read raises:
+    /// `(parent_id, the missing span)` — answered by the owning plugin's
+    /// own publish/patch (decoupled; this read's answer stays the checked
+    /// page). Scene regions never demand: the host store IS the whole
+    /// scene truth.
+    pub(crate) demand: Option<(Option<StableId>, WidgetRange)>,
+}
+
+/// The structured refusal's semantic shape (code + bounded recovery report).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type StoreReject = (PatchRejectCode, PatchRejectReport);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reject(code: PatchRejectCode, current_revision: Option<SceneRevision>) -> StoreReject {
+    (
+        code,
+        PatchRejectReport {
+            current_revision,
+            failed_op: None,
+        },
+    )
+}
+
+/// Capped push with an exact truncation count (the scene report's own
+/// discipline; [`ocs_plugin_api::scene::MAX_REPORT_TOUCHED`] /
+/// [`MAX_REPORT_RETIRED`]).
+#[cfg(not(target_arch = "wasm32"))]
+fn capped_push(list: &mut Vec<StableId>, truncated: &mut usize, cap: usize, id: StableId) {
+    if list.len() < cap {
+        list.push(id);
+    } else {
+        *truncated += 1;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_REPORT_TOUCHED: usize = ocs_plugin_api::scene::MAX_REPORT_TOUCHED;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_REPORT_RETIRED: usize = ocs_plugin_api::scene::MAX_REPORT_RETIRED;
+
+/// The ACK report's summary slot for a panel that stores NO scene leg: the
+/// zero tree at the touched revision. The report type is scene-shaped by
+/// wire contract (`AppliedPatchReport`); the recovery truth stays the
+/// [`StoreRow::State`] digest row, never this hint.
+#[cfg(not(target_arch = "wasm32"))]
+fn absent_scene_summary(revision: SceneRevision) -> ocs_plugin_api::scene::SceneSummary {
+    ocs_plugin_api::scene::SceneSummary {
+        revision,
+        nodes: 0,
+        by_kind: SceneKindCounts::default(),
+        root_ids: Vec::new(),
+        root_ids_truncated: 0,
+        overflow_roots: false,
+    }
+}
+
+/// The widget leg's capped ACK report: the crate's widget `apply_patch`
+/// reports no per-op facts, so the attach derives the bounded ones from the
+/// applied patch's own payload addresses — touched = each op's addressed id
+/// (an Add's inserted root, an Update/Remove's target, a table cell's row
+/// key), retired = Remove ops' removed ids — under the scene report's caps
+/// with exact truncation counts. NOT a planner-grade plan (the retire lists
+/// do not chase Update-swap payload ids): the recovery truth is the
+/// snapshot2 digest + windows; the report is the bounded hint.
+//
+// `ops` borrows the patch pre-application (the report's revision is the
+// patch's declared successor — identical to the post-apply head on success;
+// a failed apply discards the report).
+#[cfg(not(target_arch = "wasm32"))]
+fn widget_patch_report(
+    revision: SceneRevision,
+    ops: &[ocs_plugin_api::widgets::WidgetOp],
+    scene_summary: Option<ocs_plugin_api::scene::SceneSummary>,
+) -> ocs_plugin_api::scene::AppliedPatchReport {
+    use ocs_plugin_api::widgets::WidgetOp;
+    let mut touched = Vec::new();
+    let mut touched_truncated = 0usize;
+    let mut retired = Vec::new();
+    let mut retired_truncated = 0usize;
+    for op in ops {
+        let address = match op {
+            WidgetOp::Add { widget, .. } => widget.widget_id(),
+            WidgetOp::Update { id, .. } | WidgetOp::Remove { id } => *id,
+            WidgetOp::TableCell { key, .. } => *key,
+        };
+        capped_push(&mut touched, &mut touched_truncated, MAX_REPORT_TOUCHED, address);
+        if let WidgetOp::Remove { id } = op {
+            capped_push(&mut retired, &mut retired_truncated, MAX_REPORT_RETIRED, *id);
+        }
+    }
+    ocs_plugin_api::scene::AppliedPatchReport {
+        revision,
+        touched_subtree_ids: touched,
+        touched_truncated,
+        retired_ids: retired,
+        retired_truncated,
+        summary: scene_summary.unwrap_or_else(|| absent_scene_summary(revision)),
+    }
+}
+
+/// A publish leg's report (the whole bounded surface arrives; the root ids
+/// are the touched set, the replaced leg's roots the retired set — capped).
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_leg_report(
+    revision: SceneRevision,
+    arriving_root_ids: Vec<StableId>,
+    retired_root_ids: Vec<StableId>,
+    summary: Option<ocs_plugin_api::scene::SceneSummary>,
+) -> ocs_plugin_api::scene::AppliedPatchReport {
+    let mut touched = Vec::new();
+    let mut touched_truncated = 0usize;
+    for id in arriving_root_ids {
+        capped_push(&mut touched, &mut touched_truncated, MAX_REPORT_TOUCHED, id);
+    }
+    let mut retired = Vec::new();
+    let mut retired_truncated = 0usize;
+    for id in retired_root_ids {
+        capped_push(&mut retired, &mut retired_truncated, MAX_REPORT_RETIRED, id);
+    }
+    ocs_plugin_api::scene::AppliedPatchReport {
+        revision,
+        touched_subtree_ids: touched,
+        touched_truncated,
+        retired_ids: retired,
+        retired_truncated,
+        summary: summary.unwrap_or_else(|| absent_scene_summary(revision)),
+    }
+}
+
+/// Widget tree defs in document order (one stack walk, the crate's
+/// iterative-with-`.rev()` discipline).
+#[cfg(not(target_arch = "wasm32"))]
+fn widget_tree_defs(surface: &WidgetSurface) -> Vec<&ocs_plugin_api::widgets::WidgetTreeDef> {
+    let mut defs = Vec::new();
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        match node {
+            WidgetNode::Tree(def) => defs.push(def),
+            WidgetNode::Group(group) => walker.extend(group.children.iter().rev()),
+            _ => {}
+        }
+    }
+    defs
+}
+
+/// Item lists in document order.
+#[cfg(not(target_arch = "wasm32"))]
+fn widget_list_defs(surface: &WidgetSurface) -> Vec<&ItemListDef> {
+    let mut defs = Vec::new();
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().collect();
+    while let Some(node) = walker.pop() {
+        match node {
+            WidgetNode::List(def) => defs.push(def),
+            WidgetNode::Group(group) => walker.extend(group.children.iter().rev()),
+            _ => {}
+        }
+    }
+    defs
+}
+
+/// The widget ROW a `parent_id` names (surface-wide row namespace; validated
+/// unique — the same contract the events and the store pages ride).
+#[cfg(not(target_arch = "wasm32"))]
+fn find_tree_row<'a>(
+    surface: &'a WidgetSurface,
+    id: StableId,
+) -> Option<&'a TreeRowDef> {
+    widget_tree_defs(surface)
+        .into_iter()
+        .flat_map(|def| def.rows.iter())
+        .find(|row| row.id == id)
+}
+
+/// The tree rows of a `parent_id` window: `None` → every tree's root rows
+/// (document order); `Some(pid)` → the rows declaring `pid` (rows-vec order
+/// per tree, trees in document order).
+#[cfg(not(target_arch = "wasm32"))]
+fn tree_children_of<'a>(surface: &'a WidgetSurface, parent_id: Option<StableId>) -> Vec<&'a TreeRowDef> {
+    let mut rows = Vec::new();
+    for def in widget_tree_defs(surface) {
+        for row in &def.rows {
+            if row.parent == parent_id {
+                rows.push(row);
+            }
+        }
+    }
+    rows
+}
+
+/// CHECKED page-window bounds: an empty/past-the-end window is `(0, 0)`
+/// (never a panic; the store size bounds every subtraction); a served width
+/// never exceeds the requested width NOR [`MAX_WIDGET_ROWS_INITIAL`] — the
+/// page wire budget — so the attach answers never a bigger page.
+#[cfg(not(target_arch = "wasm32"))]
+fn page_window_bounds(start: usize, requested_len: usize, held_len: usize) -> (usize, usize) {
+    if held_len == 0 || start >= held_len {
+        return (0, 0);
+    }
+    let width = requested_len.min(held_len - start).min(MAX_WIDGET_ROWS_INITIAL);
+    (start, width)
+}
+
+/// The page-miss DEMAND rule (the store's lazy-children / page misses):
+/// only an ATTACHED widget store demands (the demand names `surface_id`);
+/// an address the store cannot RESOLVE (a lazy branch's row, a row/list
+/// beyond the held row window, an unpublished table) is asked verbatim; a
+/// resolved address whose window extends past the held rows asks for the
+/// exact holding gap. Scene regions (the scene leg) and fully-materialized
+/// tables (def-declared totals) never demand: the host store is their
+/// whole truth or the def says so.
+#[cfg(not(target_arch = "wasm32"))]
+fn widgets_demand(
+    parent_id: Option<StableId>,
+    requested: WidgetRange,
+    held_len: usize,
+    surface_id: Option<StableId>,
+    parent_known: bool,
+    demandable: bool,
+) -> Option<(Option<StableId>, WidgetRange)> {
+    if surface_id.is_none() || !demandable {
+        return None;
+    }
+    if !parent_known {
+        // The store does not NAME the address: the plugin owns rows the host
+        // has not seen (lazy children, beyond-the-held rows, unpublished
+        // stores) — ask for exactly the requested window.
+        return Some((parent_id, requested));
+    }
+    let end = requested.start.saturating_add(requested.len);
+    if end > held_len {
+        // The span past the held rows: ask for exactly the holding gap.
+        return Some((parent_id, WidgetRange { start: held_len, len: end - held_len }));
+    }
+    None
+}
+
+/// The scene subtree resolution for a region read: `None` → the whole
+/// scene, pre-order, document order (the snapshot2 window and the
+/// continuation [`PanelStoreKind::SceneRegion`] windows share THE one
+/// flatten); `Some(root)` → that element's subtree, inclusive, pre-order
+/// (an unresolvable root is an empty window — not an error).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_region_flatten<'a>(
+    elements: &'a [SceneElement],
+    root: Option<StableId>,
+) -> Vec<&'a SceneElement> {
+    if let Some(root_id) = root {
+        // The resolved subtree (the region).
+        let mut subtree: Vec<&'a SceneElement> = Vec::new();
+        let mut walker: Vec<&SceneElement> = Vec::new();
+        for element in elements.iter().rev() {
+            walker.push(element);
+        }
+        while let Some(element) = walker.pop() {
+            if element.stable_id() == root_id {
+                scene_subtree_preorder(element, &mut subtree);
+                return subtree;
+            }
+            if let SceneElement::Group { children, .. } = element {
+                walker.extend(children.iter().rev());
+            }
+        }
+        return subtree;
+    }
+    // The whole scene: pre-order, document order.
+    let mut flat: Vec<&'a SceneElement> = Vec::new();
+    let mut walker: Vec<&SceneElement> = Vec::new();
+    for element in elements.iter().rev() {
+        walker.push(element);
+    }
+    while let Some(element) = walker.pop() {
+        flat.push(element);
+        if let SceneElement::Group { children, .. } = element {
+            walker.extend(children.iter().rev());
+        }
+    }
+    flat
+}
+
+/// Inclusive pre-order of one validated element's subtree (the store only
+/// holds `validate()`-passed scenes: depth ≤ [`MAX_SCENE_DEPTH`], so the
+/// recursion is bounded by the crate's own cap).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_subtree_preorder<'a>(element: &'a SceneElement, out: &mut Vec<&'a SceneElement>) {
+    out.push(element);
+    if let SceneElement::Group { children, .. } = element {
+        for child in children {
+            scene_subtree_preorder(child, out);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PanelSurfaceStore {
+    /// The frozen surface id for `panel_id`'s widget leg: the FIRST ROOT's
+    /// widget id — the registration convention the mount's test/log seam
+    /// already pins (`register_test_surface`: "the mount state opens under
+    /// the surface's FIRST root's id"; the plugin can name it: it built the
+    /// surface) — falling back to a bounded FNV probe of the panel id when
+    /// that id is ALREADY another panel's stored identity (cross-surface
+    /// uniqueness is the bridge's surface-id lookups' registration
+    /// contract). The ENTRY FREEZES the assignment once; re-registrations
+    /// (a patch, a re-publish) KEEP it, so the panel's event stream names
+    /// one stable identity per surface.
+    pub(crate) fn assign_surface_id(&self, panel_id: &str, surface: &WidgetSurface) -> StableId {
+        let taken = |id: StableId| self.by_panel.values().any(|entry| entry.surface_id == Some(id));
+        let candidate = surface
+            .roots
+            .first()
+            .map(|node| node.widget_id())
+            .unwrap_or(StableId(0));
+        if !taken(candidate) {
+            return candidate;
+        }
+        // The bounded fallback: salted FNV-1a over the panel id (deterministic,
+        // content-derived, off the first-root id space in 256 probes).
+        for salt in 1u64..=256u64 {
+            let mut hash: u64 = 0xcbf29ce484222325 ^ salt;
+            for byte in panel_id.as_bytes() {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            hash |= 1; // off the StableId(0)-shaped empty-surface identity
+            let candidate = StableId(hash);
+            if !taken(candidate) {
+                return candidate;
+            }
+        }
+        // Unreachable totality: 256 collisions are not a reachable state;
+        // the store never panics from a naming question.
+        StableId(u64::MAX)
+    }
+
+    /// Is the panel attached (a stored entry)?
+    pub(crate) fn attached(&self, panel_id: &str) -> bool {
+        self.by_panel.contains_key(panel_id)
+    }
+
+    /// The entry read (the tests' and the digest recons' handle).
+    pub(crate) fn entry(&self, panel_id: &str) -> Option<&PanelSurfaceEntry> {
+        self.by_panel.get(panel_id)
+    }
+
+    /// The entry handle (inserting on first attach with the owner bound).
+    fn entry_or_insert(&mut self, owner_plugin_id: &str, panel_id: &str) -> &mut PanelSurfaceEntry {
+        self.by_panel
+            .entry(panel_id.to_owned())
+            .or_insert_with(|| PanelSurfaceEntry {
+                owner_plugin_id: owner_plugin_id.to_owned(),
+                surface_id: None,
+                scene: None,
+                widgets: None,
+            })
+    }
+
+    /// THE attach's publish (the snapshot leg): the store's OWN structural
+    /// gate (the same crate `validate()` the transport runs — an in-process
+    /// path bypassing the wire gets the identical gate), the owner law, then
+    /// the leg's revision law, then the store.
+    ///
+    /// Rejection shapes (all structured, zero mutation):
+    /// - structurally invalid payload → `InvalidOp`;
+    /// - another plugin's panel → `PublisherOwnedByOther` (the SCN-025
+    ///   appended code; the first publisher owns the panel's store; publish
+    ///   never transfers it — never a takeover);
+    /// - a same-owner publish that REWINDS the leg's stored head (a full
+    ///   publish must be a greater revision; an equal revision must carry
+    ///   identical content — the refresh shape) → `NonMonotonicRevision`
+    ///   with the stored head reported.
+    ///
+    /// The `events` leg (the plugin's merge acknowledgment of host-observed
+    /// events) is ABSORBED, not re-forwarded: rebroadcasting would double
+    /// the event stream (the exactly-once law) — the attach's doc records
+    /// the shape. The published surface's per-leg re-registration of the
+    /// MOUNT is the attach's next step (`register_surface_owned`), driven
+    /// by this outcome's `widget_mount`.
+    pub(crate) fn publish(
+        &mut self,
+        owner_plugin_id: &str,
+        panel_id: &str,
+        surface: SceneOrWidgetSurface,
+    ) -> Result<PanelSurfaceOutcome, StoreReject> {
+        let structural = match &surface {
+            SceneOrWidgetSurface::Scene(scene) => scene.validate().is_ok(),
+            SceneOrWidgetSurface::Widgets(widgets) => widgets.validate().is_ok(),
+        };
+        if !structural {
+            return Err(reject(PatchRejectCode::InvalidOp, None));
+        }
+        if let Some(entry) = self.by_panel.get(panel_id) {
+            if entry.owner_plugin_id != owner_plugin_id {
+                return Err(reject(PatchRejectCode::PublisherOwnedByOther, None));
+            }
+        }
+        match surface {
+            SceneOrWidgetSurface::Scene(scene) => {
+                if let Some(stored) =
+                    self.by_panel.get(panel_id).and_then(|entry| entry.scene.as_ref())
+                {
+                    let head = stored.revision;
+                    if scene.revision == head {
+                        if scene == *stored {
+                            // Identical snapshot at the head: the refresh
+                            // shape (idempotent; the store keeps the stored
+                            // leg — equal content either way).
+                            let touched: Vec<StableId> =
+                                scene.elements.iter().map(|element| element.stable_id()).collect();
+                            return Ok(PanelSurfaceOutcome {
+                                report: publish_leg_report(
+                                    head,
+                                    touched,
+                                    Vec::new(),
+                                    Some(scene.scene_summary()),
+                                ),
+                                widget_mount: None,
+                            });
+                        }
+                        return Err(reject(PatchRejectCode::NonMonotonicRevision, Some(head)));
+                    }
+                    if scene.revision < head {
+                        return Err(reject(PatchRejectCode::NonMonotonicRevision, Some(head)));
+                    }
+                }
+                // The FULL root-id lists ride the report builder (it caps
+                // and counts the truncation exactly — a pre-capped list
+                // would lose the count).
+                let touch_ids: Vec<StableId> =
+                    scene.elements.iter().map(|element| element.stable_id()).collect();
+                let retired_root_ids: Vec<StableId> = match self
+                    .by_panel
+                    .get_mut(panel_id)
+                    .and_then(|entry| entry.scene.replace(scene.clone()))
+                {
+                    Some(replaced) => {
+                        replaced.elements.iter().map(|element| element.stable_id()).collect()
+                    }
+                    None => Vec::new(),
+                };
+                let summary = scene.scene_summary();
+                let report =
+                    publish_leg_report(scene.revision, touch_ids, retired_root_ids, Some(summary));
+                let entry = self.entry_or_insert(owner_plugin_id, panel_id);
+                entry.scene = Some(scene);
+                Ok(PanelSurfaceOutcome {
+                    report,
+                    widget_mount: None,
+                })
+            }
+            SceneOrWidgetSurface::Widgets(widgets) => {
+                // The frozen identity: assigned ONCE per entry, BEFORE the
+                // map write, so the probe sees the other entries only.
+                let frozen = match self.by_panel.get(panel_id) {
+                    Some(entry) => {
+                        entry.surface_id.unwrap_or_else(|| self.assign_surface_id(panel_id, &widgets))
+                    }
+                    None => self.assign_surface_id(panel_id, &widgets),
+                };
+                let summary = self
+                    .by_panel
+                    .get(panel_id)
+                    .and_then(|entry| entry.scene.as_ref().map(PanelScene::scene_summary));
+                if let Some(stored) =
+                    self.by_panel.get(panel_id).and_then(|entry| entry.widgets.as_ref())
+                {
+                    let head = stored.revision;
+                    if widgets.revision == head {
+                        if widgets == *stored {
+                            // Identical resurface at the head: PRESERVE —
+                            // the mount rule's own shape (the re-register
+                            // below preserves the running machines).
+                            let touch_ids: Vec<StableId> =
+                                widgets.roots.iter().map(|node| node.widget_id()).collect();
+                            return Ok(PanelSurfaceOutcome {
+                                report: publish_leg_report(head, touch_ids, Vec::new(), summary),
+                                widget_mount: Some((frozen, widgets.clone())),
+                            });
+                        }
+                        return Err(reject(PatchRejectCode::NonMonotonicRevision, Some(head)));
+                    }
+                    if widgets.revision < head {
+                        return Err(reject(PatchRejectCode::NonMonotonicRevision, Some(head)));
+                    }
+                }
+                let retired_root_ids: Vec<StableId> = match self
+                    .by_panel
+                    .get_mut(panel_id)
+                    .and_then(|entry| entry.widgets.replace(widgets.clone()))
+                {
+                    Some(replaced) => {
+                        replaced.roots.iter().map(|node| node.widget_id()).collect()
+                    }
+                    None => Vec::new(),
+                };
+                let touch_ids: Vec<StableId> =
+                    widgets.roots.iter().map(|node| node.widget_id()).collect();
+                let report =
+                    publish_leg_report(widgets.revision, touch_ids, retired_root_ids, summary);
+                let entry = self.entry_or_insert(owner_plugin_id, panel_id);
+                entry.surface_id = Some(frozen);
+                entry.widgets = Some(widgets.clone());
+                Ok(PanelSurfaceOutcome {
+                    report,
+                    widget_mount: Some((frozen, widgets)),
+                })
+            }
+        }
+    }
+
+    /// THE attach's patch (the incremental leg): the crate's ATOMIC
+    /// two-phase `apply_patch(_report)` over the stored leg — a rejection
+    /// leaves everything exactly as it was (the crate's own contract); a
+    /// success adopts the successor revision; a WIDGET leg's outcome carries
+    /// the surface for the attach's re-registration (a patch necessarily
+    /// moves the revision, so the mount's PRESERVE-ON-IDENTICAL resolves it
+    /// as the REPLACE flow — the documented re-register rule). SCENE-ONLY
+    /// patches never re-mount (the recorded boundary above).
+    pub(crate) fn patch(
+        &mut self,
+        owner_plugin_id: &str,
+        panel_id: &str,
+        patch: SceneOrWidgetPatch,
+    ) -> Result<PanelSurfaceOutcome, StoreReject> {
+        if !self.attached(panel_id) {
+            return Err(reject(PatchRejectCode::PublisherUnattached, None));
+        }
+        // The owner law runs both ways (the register_quad_panels precedent):
+        // a patch addresses the transport identity the publish attached.
+        if self
+            .by_panel
+            .get(panel_id)
+            .is_some_and(|entry| entry.owner_plugin_id != owner_plugin_id)
+        {
+            return Err(reject(PatchRejectCode::PublisherOwnedByOther, None));
+        }
+        let Some(entry) = self.by_panel.get_mut(panel_id) else {
+            // Not reachable (checked above); stay total without panics.
+            return Err(reject(PatchRejectCode::PublisherUnattached, None));
+        };
+        match patch {
+            SceneOrWidgetPatch::Scene(scene_patch) => {
+                let Some(scene) = entry.scene.as_mut() else {
+                    return Err(reject(PatchRejectCode::PublisherUnattached, None));
+                };
+                match scene.apply_patch_report(scene_patch) {
+                    Ok(report) => Ok(PanelSurfaceOutcome {
+                        report,
+                        widget_mount: None,
+                    }),
+                    Err(error) => Err(scene_reject(&error, scene.revision)),
+                }
+            }
+            SceneOrWidgetPatch::Widgets(widget_patch) => {
+                let Some(widgets) = entry.widgets.as_mut() else {
+                    return Err(reject(PatchRejectCode::PublisherUnattached, None));
+                };
+                // The patch's facts derive from the ops themselves
+                // (pre-application); the head revision is the
+                // stale-refusal's recovery fact.
+                let planned_report = widget_patch_report(
+                    widget_patch.revision,
+                    &widget_patch.ops,
+                    entry.scene.as_ref().map(PanelScene::scene_summary),
+                );
+                let head = widgets.revision;
+                match widgets.apply_patch(widget_patch) {
+                    Ok(()) => {
+                        let surface_id =
+                            entry.surface_id.expect("frozen by the widget publish");
+                        Ok(PanelSurfaceOutcome {
+                            report: planned_report,
+                            widget_mount: Some((surface_id, widgets.clone())),
+                        })
+                    }
+                    Err(error) => Err(widget_reject(&error, head)),
+                }
+            }
+        }
+    }
+
+    /// THE attach's page server: the requested window resolved with CHECKED
+    /// arithmetic against the host-held rows (in-range portions serve,
+    /// past-end windows answer EMPTY — never a panic; a width never exceeds
+    /// the requested width NOR the page wire budget). `total_hint` = the
+    /// held count (a table's self-declared total when its def names one).
+    /// The DEMAND leg rides the page misses (see [`widgets_demand`]) and
+    /// leaves from the ATTACH (a `broadcast_panel_store_demand`), never
+    /// synchronously answered.
+    pub(crate) fn store_page(
+        &self,
+        panel_id: &str,
+        kind: PanelStoreKind,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> StoreReadOutcome {
+        let Some(entry) = self.entry(panel_id) else {
+            // Nothing attached: the honest empty page, never a demand.
+            return StoreReadOutcome::default();
+        };
+        match kind {
+            PanelStoreKind::TreeChildren => self.page_tree_children(entry, parent_id, range),
+            PanelStoreKind::ListItems => self.page_list_items(entry, parent_id, range),
+            PanelStoreKind::TableRows => self.page_table_rows(entry, parent_id, range),
+            PanelStoreKind::SceneRegion => self.page_scene_region(entry, parent_id, range),
+        }
+    }
+
+    /// THE attach's recovery read: the digest row plus the leading scene
+    /// window — a page whose FIRST row is the [`StoreRow::State`] digest
+    /// (`None` halves for absent legs) followed by at most the page budget
+    /// of scene elements (the leading window of the same flatten the
+    /// [`PanelStoreKind::SceneRegion`] continuation pages over, parent
+    /// `None`). Never a full dump: the window is bounded, and the digest
+    /// is the bounded summary. Unattached → the empty digest only
+    /// (the transport-era default shape).
+    pub(crate) fn snapshot_page(&self, panel_id: &str) -> (Vec<StoreRow>, u64) {
+        let Some(entry) = self.entry(panel_id) else {
+            return (
+                vec![StoreRow::State(StoreStateDigest {
+                    scene: None,
+                    widgets: None,
+                })],
+                0,
+            );
+        };
+        let digest = StoreRow::State(StoreStateDigest {
+            scene: entry.scene.as_ref().map(PanelScene::scene_summary),
+            widgets: entry.widgets.as_ref().map(WidgetSurface::widget_summary),
+        });
+        let leading: Vec<&SceneElement> =
+            match entry.scene.as_ref() {
+                Some(scene) => scene_region_flatten(&scene.elements, None),
+                None => Vec::new(),
+            };
+        // The digest row shares the page's budget: the window reserves its
+        // one row.
+        let (start, width) =
+            page_window_bounds(0, MAX_WIDGET_ROWS_INITIAL.saturating_sub(1), leading.len());
+        let mut rows: Vec<StoreRow> = Vec::with_capacity(width + 1);
+        rows.push(digest);
+        for element in &leading[start..start + width] {
+            rows.push(StoreRow::Scene((*element).clone()));
+        }
+        (rows, leading.len() as u64)
+    }
+
+    // -- the per-kind pages (each pins its own demand rule) -----------------
+
+    fn page_tree_children(
+        &self,
+        entry: &PanelSurfaceEntry,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> StoreReadOutcome {
+        let Some(widgets) = entry.widgets.as_ref() else {
+            return StoreReadOutcome {
+                surface_id: entry.surface_id,
+                ..StoreReadOutcome::default()
+            };
+        };
+        let surface_id = entry.surface_id;
+        // A resolved row's children (rows declaring the parent) or the
+        // surface's root rows (parent `None`).
+        let parent_known = match parent_id {
+            Some(pid) => find_tree_row(widgets, pid).is_some(),
+            None => true,
+        };
+        let held = tree_children_of(widgets, parent_id);
+        let (start, width) = page_window_bounds(range.start, range.len, held.len());
+        let rows: Vec<StoreRow> =
+            held[start..start + width].iter().map(|row| StoreRow::Tree((*row).clone())).collect();
+        let demand = widgets_demand(parent_id, range, held.len(), surface_id, parent_known, true);
+        StoreReadOutcome {
+            surface_id,
+            rows,
+            total_hint: held.len() as u64,
+            demand,
+        }
+    }
+
+    fn page_list_items(
+        &self,
+        entry: &PanelSurfaceEntry,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> StoreReadOutcome {
+        let Some(widgets) = entry.widgets.as_ref() else {
+            return StoreReadOutcome {
+                surface_id: entry.surface_id,
+                ..StoreReadOutcome::default()
+            };
+        };
+        let surface_id = entry.surface_id;
+        let lists = widget_list_defs(widgets);
+        let parent_known = match parent_id {
+            Some(pid) => lists.iter().any(|def| def.id == pid),
+            None => true,
+        };
+        let held: Vec<&ocs_plugin_api::widgets::ItemDef> = match parent_id {
+            Some(pid) => lists
+                .iter()
+                .filter(|def| def.id == pid)
+                .flat_map(|def| def.items.iter())
+                .collect(),
+            None => lists.iter().flat_map(|def| def.items.iter()).collect(),
+        };
+        let (start, width) = page_window_bounds(range.start, range.len, held.len());
+        let rows: Vec<StoreRow> =
+            held[start..start + width].iter().map(|item| StoreRow::Item((*item).clone())).collect();
+        let demand = widgets_demand(parent_id, range, held.len(), surface_id, parent_known, true);
+        StoreReadOutcome {
+            surface_id,
+            rows,
+            total_hint: held.len() as u64,
+            demand,
+        }
+    }
+
+    fn page_table_rows(
+        &self,
+        entry: &PanelSurfaceEntry,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> StoreReadOutcome {
+        let Some(widgets) = entry.widgets.as_ref() else {
+            return StoreReadOutcome {
+                surface_id: entry.surface_id,
+                ..StoreReadOutcome::default()
+            };
+        };
+        let surface_id = entry.surface_id;
+        // parent_id names the registry table (None = every registry entry,
+        // BTreeMap order — deterministic).
+        match parent_id {
+            Some(table_id) => {
+                let Some(def) = widgets.tables.get(&table_id) else {
+                    // The store does not name the table: the plugin may own
+                    // it (unpublished) — empty page + the verbatim ask.
+                    return StoreReadOutcome {
+                        surface_id,
+                        rows: Vec::new(),
+                        total_hint: 0,
+                        demand: widgets_demand(parent_id, range, 0, surface_id, false, true),
+                    };
+                };
+                let held = def.rows.iter().collect::<Vec<_>>();
+                let (start, width) = page_window_bounds(range.start, range.len, held.len());
+                let rows: Vec<StoreRow> = held[start..start + width]
+                    .iter()
+                    .map(|row| StoreRow::Table((*row).clone()))
+                    .collect();
+                // The def's OWN total declares the windowed table: a read
+                // past the published row window against a windowing table
+                // demands; a fully-materialized table's past end is past
+                // the end (no demand).
+                let demandable =
+                    def.total_rows.is_some_and(|total| total as usize > def.rows.len());
+                let total_hint = def.total_rows.unwrap_or(def.rows.len() as u64);
+                let demand = widgets_demand(
+                    parent_id,
+                    range,
+                    held.len(),
+                    surface_id,
+                    true,
+                    demandable,
+                );
+                StoreReadOutcome {
+                    surface_id,
+                    rows,
+                    total_hint,
+                    demand,
+                }
+            }
+            None => {
+                let held: Vec<&ocs_plugin_api::widgets::TableRowDef> = widgets
+                    .tables
+                    .values()
+                    .flat_map(|def| def.rows.iter())
+                    .collect();
+                let (start, width) = page_window_bounds(range.start, range.len, held.len());
+                let rows: Vec<StoreRow> = held[start..start + width]
+                    .iter()
+                    .map(|row| StoreRow::Table((*row).clone()))
+                    .collect();
+                let held_len = held.len();
+                let demand = widgets_demand(None, range, held_len, surface_id, true, true);
+                StoreReadOutcome {
+                    surface_id,
+                    rows,
+                    total_hint: held_len as u64,
+                    demand,
+                }
+            }
+        }
+    }
+
+    fn page_scene_region(
+        &self,
+        entry: &PanelSurfaceEntry,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> StoreReadOutcome {
+        // The SCENE leg resolves; a scene region read is never a demand
+        // (the host store is the whole scene truth; a past-end window is
+        // past-the-end — empty, never a panic).
+        let Some(scene) = entry.scene.as_ref() else {
+            return StoreReadOutcome {
+                surface_id: entry.surface_id,
+                ..StoreReadOutcome::default()
+            };
+        };
+        let held = scene_region_flatten(&scene.elements, parent_id);
+        let (start, width) = page_window_bounds(range.start, range.len, held.len());
+        let rows: Vec<StoreRow> = held[start..start + width]
+            .iter()
+            .map(|element| StoreRow::Scene((*element).clone()))
+            .collect();
+        StoreReadOutcome {
+            surface_id: entry.surface_id,
+            rows,
+            total_hint: held.len() as u64,
+            demand: None,
+        }
+    }
+}
+
+/// The attach's SCENE-leg rejection mapping: the crate's own error
+/// vocabulary to the code (bounded report; the head revision reported as
+/// the recovery fact where the code left it out).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_reject(error: &ocs_plugin_api::scene::SceneError, head: SceneRevision) -> StoreReject {
+    use ocs_plugin_api::scene::SceneError;
+    match error {
+        SceneError::StaleBase { current, .. } => {
+            reject(PatchRejectCode::StaleBase, Some(*current))
+        }
+        SceneError::NonMonotonicRevision { current, .. } => {
+            reject(PatchRejectCode::NonMonotonicRevision, Some(*current))
+        }
+        SceneError::PatchOpBudgetExceeded { .. } => {
+            reject(PatchRejectCode::OpBudgetExceeded, Some(head))
+        }
+        // Every structural crossing (duplicate ids, parents, depths, texts,
+        // point counts, floats) is the InvalidOp bucket.
+        _ => reject(PatchRejectCode::InvalidOp, Some(head)),
+    }
+}
+
+/// The widget-leg rejection mapping: `BudgetExceeded` fights twice — the op
+/// cap IS the op budget ([`MAX_PATCH_OPS`]; the crate's documented
+/// coincidence) — anything else is the structural bucket.
+#[cfg(not(target_arch = "wasm32"))]
+fn widget_reject(error: &ocs_plugin_api::widgets::WidgetError, head: SceneRevision) -> StoreReject {
+    use ocs_plugin_api::widgets::WidgetError;
+    match error {
+        WidgetError::StaleBase { current, .. } => {
+            reject(PatchRejectCode::StaleBase, Some(*current))
+        }
+        WidgetError::NonMonotonicRevision { current, .. } => {
+            reject(PatchRejectCode::NonMonotonicRevision, Some(*current))
+        }
+        WidgetError::BudgetExceeded { max, .. } if *max == ocs_plugin_api::scene::MAX_PATCH_OPS => {
+            reject(PatchRejectCode::OpBudgetExceeded, Some(head))
+        }
+        _ => reject(PatchRejectCode::InvalidOp, Some(head)),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3301,6 +4337,7 @@ impl MountRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::OpenCADStudio;
     use ocs_plugin_api::dialog::PanelDef;
     use ocs_plugin_api::scene::SceneRevision;
     use ocs_plugin_api::widgets::{
@@ -5321,6 +6358,761 @@ mod tests {
         };
         state.sync(&surface);
         state
+    }
+
+
+
+    // -- SCN-025: the app-owned PANEL SURFACE STORE (the wire attach) --------
+
+    use ocs_plugin_api::ipc::protocol::{
+        PatchRejectCode, PatchRejectReport, PanelStoreKind, SceneOrWidgetPatch,
+        SceneOrWidgetSurface, StoreRow,
+    };
+    use ocs_plugin_api::scene::{Rect2D, Vec2};
+    use ocs_plugin_api::widgets::{WidgetSurfacePatch, WidgetTreeDef};
+
+    /// The attach's two steps, exactly as `app::plugin_host` runs them:
+    /// store through [`MountRegistry::panel_surface_store_mut`], then the
+    /// widget leg's registry registration. Returns the store's outcome.
+    /// (The WIRE mapping is pinned in the plugin_host tests; these tests
+    /// pin the store + mount machinery directly.)
+    fn attach_publish(
+        registry: &mut MountRegistry,
+        owner: &str,
+        panel_id: &str,
+        surface: SceneOrWidgetSurface,
+    ) -> Result<PanelSurfaceOutcome, StoreReject> {
+        let outcome = registry
+            .panel_surface_store_mut()
+            .publish(owner, panel_id, surface)?;
+        if let Some((surface_id, attach_surface)) = outcome.widget_mount.as_ref() {
+            let surface_id = *surface_id;
+            let attach_surface = attach_surface.clone();
+            registry.register_surface_owned(
+                panel_id,
+                SurfaceMountHandle::from_surface(surface_id, attach_surface),
+            );
+        }
+        Ok(outcome)
+    }
+
+    fn publish_of(revision: SceneRevision, roots: Vec<WidgetNode>) -> SceneOrWidgetSurface {
+        SceneOrWidgetSurface::Widgets(WidgetSurface {
+            revision,
+            roots,
+            tables: std::collections::BTreeMap::new(),
+        })
+    }
+
+    /// One list-root surface (the minimal valid widget shape) — the list
+    /// widget ids at `sid(200)`.
+    fn simple_list_surface(revision: SceneRevision, items: Vec<ItemDef>) -> SceneOrWidgetSurface {
+        publish_of(
+            revision,
+            vec![WidgetNode::List(ItemListDef {
+                id: sid(200),
+                name: None,
+                enabled: true,
+                visible: true,
+                label: None,
+                items,
+            })],
+        )
+    }
+
+    fn plain_table_row(key: u64) -> TableRowDef {
+        TableRowDef {
+            key: sid(key),
+            cells: vec![TableCell::Text(format!("r{key}"))],
+            domain_ref: None,
+        }
+    }
+
+    /// THE LEGACY GUARANTEE pin: zero publishes ⇒ zero store entries ⇒ the
+    /// mount stays unregistered — the BYTE-IDENTICAL legacy path holds BY
+    /// CONSTRUCTION now that the store can create entries too.
+    #[test]
+    fn legacy_zero_publishes_leaves_the_store_and_mount_empty() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry(|r| {
+            assert!(!r.panel_surface_store().attached("align_tools"));
+            assert!(!r.mount_registered_owned("align_tools"));
+            assert!(r.panel_surface_store().entry("align_tools").is_none());
+            let counters = r.counters_owned();
+            assert_eq!(counters.mount_event_forwards, 0);
+            assert_eq!(counters.mount_demand_forwards, 0);
+        });
+        // And an unattached read answers the honest empty page (never a
+        // demand — nothing attached names nothing).
+        let page = with_test_registry(|r| {
+            r.panel_surface_store().store_page(
+                "align_tools",
+                PanelStoreKind::ListItems,
+                None,
+                WidgetRange { start: 0, len: 8 },
+            )
+        });
+        assert!(page.rows.is_empty());
+        assert_eq!(page.total_hint, 0);
+        assert!(page.demand.is_none());
+        assert_eq!(page.surface_id, None);
+        // The snapshot2 stub shape (the trait default's bytes).
+        let (rows, total) =
+            with_test_registry(|r| r.panel_surface_store().snapshot_page("align_tools"));
+        assert!(matches!(
+            rows.as_slice(),
+            [StoreRow::State(digest)] if digest.scene.is_none() && digest.widgets.is_none()
+        ));
+        assert_eq!(total, 0);
+    }
+
+    /// Publish → store → MOUNT-LIVE: a widget publish stores (the owner
+    /// recorded) AND the mount registers; the frozen surface id is the
+    /// FIRST ROOT's id (the registration convention); the bridge's two
+    /// panel reads (the gate + the identity) and the body build answer.
+    #[test]
+    fn widget_publish_stores_and_mounts_go_live() {
+        let _app = OpenCADStudio::new_for_test();
+        let publish = simple_list_surface(SceneRevision(3), vec![item(7, "first"), item(8, "second")]);
+        with_test_registry_mut(|registry| {
+            let outcome = attach_publish(registry, "PLUGIN", "align_tools", publish)
+                .expect("the first publish attaches");
+            assert!(outcome.widget_mount.is_some());
+            assert_eq!(outcome.report.revision, SceneRevision(3));
+            let entry = registry
+                .panel_surface_store()
+                .entry("align_tools")
+                .expect("the first publish created the entry");
+            assert_eq!(entry.owner_plugin_id, "PLUGIN");
+            assert_eq!(
+                entry.widgets.as_ref().expect("stored").revision,
+                SceneRevision(3)
+            );
+            assert_eq!(entry.surface_id, Some(sid(200)), "the first root's id convention");
+        });
+        // THE MOUNT GATE GOES LIVE: the panel hooks' reads answer, the
+        // body element builds (the first end-to-end registration pin).
+        assert!(with_test_registry(|r| r.mount_registered_owned("align_tools")));
+        assert_eq!(
+            with_test_registry(|r| r.panel_surface_id_owned("align_tools")),
+            Some(sid(200))
+        );
+        assert!(
+            with_test_registry(|r| r.mounted_body_owned("align_tools")).is_some()
+        );
+    }
+
+    /// The second-plugin capture refuses STRUCTURED
+    /// (`PublisherOwnedByOther` — the appended code 5) with ZERO mutation:
+    /// the first publisher's store and mount stay exactly as they were.
+    #[test]
+    fn second_plugin_publishing_same_panel_refuses_structured() {
+        let _app = OpenCADStudio::new_for_test();
+        let first = simple_list_surface(SceneRevision(2), vec![item(7, "a")]);
+        let intruder = simple_list_surface(SceneRevision(9), vec![item(99, "b")]);
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN_A", "align_tools", first)
+                .expect("the first publisher attaches");
+            let before = registry.counters_owned();
+
+            let (code, report) = attach_publish(registry, "PLUGIN_B", "align_tools", intruder)
+                .expect_err("never a takeover");
+            assert_eq!(code, PatchRejectCode::PublisherOwnedByOther);
+            assert_eq!(
+                report,
+                PatchRejectReport {
+                    current_revision: None,
+                    failed_op: None,
+                }
+            );
+            // The store: UNTOUCHED by the refusal, still PLUGIN_A's.
+            let entry = registry.panel_surface_store().entry("align_tools").unwrap();
+            assert_eq!(entry.owner_plugin_id, "PLUGIN_A");
+            assert_eq!(entry.widgets.as_ref().unwrap().revision, SceneRevision(2));
+            assert_eq!(entry.widgets.as_ref().unwrap().roots[0].widget_id(), sid(200));
+            // The mount: the FIRST publisher's registration stands; the
+            // refusal registered nothing.
+            assert_eq!(registry.counters_owned(), before);
+        });
+    }
+
+    /// The patch leg: a stale base refuses structured (the head revision
+    /// reported — the recovery fact) with zero mutation; an applied patch
+    /// advances the revision and RE-REGISTERS the mount (a revision move is
+    /// never shape-identical: the REPLACE flow — machines released, the
+    /// report's capped facts matching the ops), with the FROZEN surface
+    /// id surviving the replacement.
+    #[test]
+    fn patch_leg_stale_refuses_applied_advances_and_reregisters() {
+        let _app = OpenCADStudio::new_for_test();
+        let publish = simple_list_surface(SceneRevision(5), vec![item(7, "a"), item(8, "b")]);
+        let stale = SceneOrWidgetPatch::Widgets(WidgetSurfacePatch {
+            base_revision: SceneRevision(3),
+            revision: SceneRevision(6),
+            ops: vec![],
+        });
+        let drift = SceneOrWidgetPatch::Widgets(WidgetSurfacePatch {
+            base_revision: SceneRevision(5),
+            revision: SceneRevision(6),
+            ops: vec![ocs_plugin_api::widgets::WidgetOp::Add {
+                parent: None,
+                widget: WidgetNode::List(ItemListDef {
+                    id: sid(300),
+                    name: None,
+                    enabled: true,
+                    visible: true,
+                    label: None,
+                    items: vec![item(11, "c")],
+                }),
+            }],
+        });
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN", "align_tools", publish).expect("attach");
+            let before = registry.counters_owned();
+
+            // (1) Stale: refuses with the head reported; NOTHING moves.
+            let (code, report) = registry
+                .panel_surface_store_mut()
+                .patch("PLUGIN", "align_tools", stale)
+                .expect_err("stale refuses");
+            assert_eq!(code, PatchRejectCode::StaleBase);
+            assert_eq!(report.current_revision, Some(SceneRevision(5)));
+            let entry = registry.panel_surface_store().entry("align_tools").unwrap();
+            assert_eq!(entry.widgets.as_ref().unwrap().revision, SceneRevision(5));
+            assert_eq!(registry.counters_owned(), before, "no re-registration");
+
+            // (2) Applied: the revision advances; the attach's registry
+            // step (the R5 part of the store outcome) re-registers the
+            // mount — REPLACE (a revision move is never shape-identical).
+            let outcome = registry
+                .panel_surface_store_mut()
+                .patch("PLUGIN", "align_tools", drift)
+                .expect("applies");
+            assert_eq!(outcome.report.revision, SceneRevision(6));
+            assert_eq!(outcome.report.touched_subtree_ids.as_slice(), &[sid(300)]);
+            if let Some((surface_id, surface)) = outcome.widget_mount.as_ref() {
+                let surface_id = *surface_id;
+                let surface = surface.clone();
+                registry.register_surface_owned(
+                    "align_tools",
+                    SurfaceMountHandle::from_surface(surface_id, surface),
+                );
+            }
+            let entry = registry.panel_surface_store().entry("align_tools").unwrap();
+            assert_eq!(entry.widgets.as_ref().unwrap().revision, SceneRevision(6));
+            let after = registry.counters_owned();
+            assert_eq!(after.registers_replaced - before.registers_replaced, 1);
+            assert_eq!(after.torn_down - before.torn_down, 1);
+            assert_eq!(
+                registry.panel_surface_id_owned("align_tools"),
+                Some(sid(200)),
+                "the frozen surface id survives the replacement"
+            );
+        });
+    }
+
+    /// Re-publishes: a rewind refuses (`NonMonotonicRevision`, the head
+    /// reported); an identical snapshot at the head is the refresh shape
+    /// (PRESERVE — the machines stay); a greater revision re-stores and
+    /// re-registers (replace).
+    #[test]
+    fn publish_leg_revision_law_monotone_with_identical_refresh() {
+        let _app = OpenCADStudio::new_for_test();
+        let attach = simple_list_surface(SceneRevision(5), vec![item(7, "a")]);
+        let refresh = simple_list_surface(SceneRevision(5), vec![item(7, "a")]);
+        let rewind = simple_list_surface(SceneRevision(4), vec![item(7, "a")]);
+        let forward = simple_list_surface(SceneRevision(9), vec![item(7, "a"), item(8, "b")]);
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN", "align_tools", attach).expect("attach");
+            let before = registry.counters_owned();
+
+            // (1) Rewind: refused.
+            let (code, report) = attach_publish(registry, "PLUGIN", "align_tools", rewind)
+                .expect_err("rewind");
+            assert_eq!(code, PatchRejectCode::NonMonotonicRevision);
+            assert_eq!(report.current_revision, Some(SceneRevision(5)));
+
+            // (2) Identical at the head: PRESERVE.
+            attach_publish(registry, "PLUGIN", "align_tools", refresh)
+                .expect("the refresh shape");
+            assert_eq!(
+                registry.counters_owned().registers_preserved - before.registers_preserved,
+                1
+            );
+
+            // (3) A greater revision (a resync snapshot): re-store + replace.
+            attach_publish(registry, "PLUGIN", "align_tools", forward)
+                .expect("forward");
+            assert_eq!(
+                registry.counters_owned().registers_replaced - before.registers_replaced,
+                1
+            );
+        });
+    }
+
+    /// The list pages: an in-range window serves (total = the held count);
+    /// a past-end window answers EMPTY and ASKS (the exact holding gap);
+    /// a usize::MAX window is checked arithmetic (never a panic); a
+    /// width-clamped ask never answers a bigger page.
+    #[test]
+    fn list_pages_checked_arithmetic_past_end_and_cap() {
+        let _app = OpenCADStudio::new_for_test();
+        let publish = simple_list_surface(
+            SceneRevision(1),
+            (0..5)
+                .map(|i| item(10 + i as u64, &format!("row {i}")))
+                .collect(),
+        );
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN", "list_panel", publish).expect("attach");
+
+            // In-range: rows 1..=3.
+            let page = registry.panel_surface_store().store_page(
+                "list_panel",
+                PanelStoreKind::ListItems,
+                Some(sid(200)),
+                WidgetRange { start: 1, len: 3 },
+            );
+            assert_eq!(page.rows.len(), 3);
+            assert_eq!(page.total_hint, 5);
+            assert!(page.demand.is_none(), "a fully-served window demands nothing");
+            assert_eq!(page.surface_id, Some(sid(200)));
+            match &page.rows[0] {
+                StoreRow::Item(def) => assert_eq!(def.id, sid(11)),
+                other => panic!("list pages carry items: {other:?}"),
+            }
+
+            // Past-end: empty + the exact-gap demand.
+            let past = registry.panel_surface_store().store_page(
+                "list_panel",
+                PanelStoreKind::ListItems,
+                Some(sid(200)),
+                WidgetRange { start: 999, len: 4 },
+            );
+            assert!(past.rows.is_empty());
+            assert_eq!(
+                past.demand,
+                Some((Some(sid(200)), WidgetRange { start: 5, len: 999 + 4 - 5 }))
+            );
+            // The checked extreme.
+            let extreme = registry.panel_surface_store().store_page(
+                "list_panel",
+                PanelStoreKind::ListItems,
+                Some(sid(200)),
+                WidgetRange { start: usize::MAX, len: usize::MAX },
+            );
+            assert!(extreme.rows.is_empty(), "checked arithmetic, never a panic");
+            assert!(extreme.demand.is_some());
+
+            // The cap: a full-width ask clamps to the held rows (the
+            // server never answers a bigger page than the wire budget).
+            let clamped = registry.panel_surface_store().store_page(
+                "list_panel",
+                PanelStoreKind::ListItems,
+                Some(sid(200)),
+                WidgetRange { start: 0, len: ocs_plugin_api::widgets::MAX_WIDGET_RANGE_LEN },
+            );
+            assert_eq!(clamped.rows.len(), 5);
+            assert!(
+                clamped.rows.len() <= ocs_plugin_api::widgets::MAX_WIDGET_ROWS_INITIAL
+            );
+
+            // An UNKNOWN parent: empty page + the verbatim ask.
+            let unknown = registry.panel_surface_store().store_page(
+                "list_panel",
+                PanelStoreKind::ListItems,
+                Some(sid(777)),
+                WidgetRange { start: 0, len: 2 },
+            );
+            assert!(unknown.rows.is_empty());
+            assert_eq!(
+                unknown.demand,
+                Some((Some(sid(777)), WidgetRange { start: 0, len: 2 }))
+            );
+        });
+    }
+
+    /// TreeChildren pages resolve against the surface's trees: the parent
+    /// ROW's declared children page in rows order; a LAZY branch (declared
+    /// expandable+lazy with no held children) is the demand case (the
+    /// ChildrenRequested analog); the root rows page under parent `None`.
+    #[test]
+    fn tree_children_pages_and_lazy_branch_demands() {
+        let _app = OpenCADStudio::new_for_test();
+        let publish = publish_of(
+            SceneRevision(1),
+            vec![WidgetNode::Tree(WidgetTreeDef {
+                id: sid(1),
+                name: None,
+                enabled: true,
+                visible: true,
+                label: None,
+                capabilities: ocs_plugin_api::widgets::TreeCapabilities {
+                    multi_select: false,
+                    filterable: false,
+                    lazy_children: false,
+                },
+                rows: vec![
+                    expandable_row(10, None, "root"),
+                    tree_row(11, Some(10), "child a"),
+                    tree_row(12, Some(10), "child b"),
+                    expandable_row(20, Some(10), "lazy branch"),
+                ],
+            })],
+        );
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN", "tree_panel", publish).expect("attach");
+
+            // Root rows (parent None): only the declared root; served
+            // fully (the window asks exactly the held count).
+            let page = registry.panel_surface_store().store_page(
+                "tree_panel",
+                PanelStoreKind::TreeChildren,
+                None,
+                WidgetRange { start: 0, len: 1 },
+            );
+            assert_eq!(page.rows.len(), 1);
+            assert!(page.demand.is_none(), "served fully — no page miss");
+            // ...and a WIDER root-window is the page miss shape (rows may
+            // sit beyond the published window plugin-side).
+            let wider = registry.panel_surface_store().store_page(
+                "tree_panel",
+                PanelStoreKind::TreeChildren,
+                None,
+                WidgetRange { start: 0, len: 10 },
+            );
+            assert_eq!(wider.rows.len(), 1);
+            assert!(wider.demand.is_some(), "a wider root window asks");
+
+            // The children of a HELD row, in row order (the lazy branch's
+            // row is 10's declared child too; its CHILDREN are the lazy
+            // leg checked below) — served fully (window == held count).
+            let page = registry.panel_surface_store().store_page(
+                "tree_panel",
+                PanelStoreKind::TreeChildren,
+                Some(sid(10)),
+                WidgetRange { start: 0, len: 3 },
+            );
+            let ids: Vec<_> = page
+                .rows
+                .iter()
+                .map(|row| match row {
+                    StoreRow::Tree(def) => def.id,
+                    other => panic!("tree pages carry rows: {other:?}"),
+                })
+                .collect();
+            assert_eq!(ids.as_slice(), &[sid(11), sid(12), sid(20)]);
+            assert!(page.demand.is_none(), "served fully — no page miss");
+
+            // A LAZY branch: nothing held → the demand (parent + window).
+            let page = registry.panel_surface_store().store_page(
+                "tree_panel",
+                PanelStoreKind::TreeChildren,
+                Some(sid(20)),
+                WidgetRange { start: 0, len: 8 },
+            );
+            assert!(page.rows.is_empty());
+            assert_eq!(
+                page.demand,
+                Some((Some(sid(20)), WidgetRange { start: 0, len: 8 }))
+            );
+        });
+    }
+
+    /// TableRows pages the typed-table registry: a keyed table pages its
+    /// published rows with the def's OWN total as the hint; a WINDOWING
+    /// table (declared total greater than the published window) demands
+    /// past its rows; a fully-MATERIALIZED table never demands; an unknown
+    /// table id asks verbatim.
+    #[test]
+    fn table_rows_pages_declared_totals_and_unpublished_tables() {
+        let _app = OpenCADStudio::new_for_test();
+        let column = table_column(501, CellKind::Text, "name");
+        let windowed = PanelTableDef {
+            id_table: sid(500),
+            columns: vec![column.clone()],
+            total_rows: Some(40),
+            rows: (0..4).map(|i| plain_table_row(i as u64 + 1)).collect(),
+        };
+        let materialized = PanelTableDef {
+            id_table: sid(600),
+            columns: vec![table_column(601, CellKind::Text, "name")],
+            total_rows: None,
+            rows: (0..3).map(|i| plain_table_row(i as u64 + 100)).collect(),
+        };
+        let publish = publish_of(
+            SceneRevision(1),
+            vec![WidgetNode::Table(table_ref(2, 500))],
+        );
+        let publish = match publish {
+            SceneOrWidgetSurface::Widgets(mut surface) => {
+                surface.tables.insert(sid(500), windowed);
+                surface.tables.insert(sid(600), materialized);
+                SceneOrWidgetSurface::Widgets(surface)
+            }
+            _ => unreachable!("the fixture builds a widget publish"),
+        };
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN", "table_panel", publish).expect("attach");
+
+            // The held window pages; the hint is the def's declared total.
+            let page = registry.panel_surface_store().store_page(
+                "table_panel",
+                PanelStoreKind::TableRows,
+                Some(sid(500)),
+                WidgetRange { start: 2, len: 2 },
+            );
+            assert_eq!(page.rows.len(), 2);
+            assert_eq!(page.total_hint, 40);
+            assert!(page.demand.is_none(), "fully in the held window");
+
+            // Past the held window against the DECLARED total → demand the
+            // gap (the typed-table page miss).
+            let page = registry.panel_surface_store().store_page(
+                "table_panel",
+                PanelStoreKind::TableRows,
+                Some(sid(500)),
+                WidgetRange { start: 8, len: 4 },
+            );
+            assert!(page.rows.is_empty());
+            assert_eq!(
+                page.demand,
+                Some((Some(sid(500)), WidgetRange { start: 4, len: 12 - 4 }))
+            );
+
+            // Fully materialized: past-end is past-the-end — empty, NO
+            // demand (the def declared nothing beyond).
+            let page = registry.panel_surface_store().store_page(
+                "table_panel",
+                PanelStoreKind::TableRows,
+                Some(sid(600)),
+                WidgetRange { start: 10, len: 4 },
+            );
+            assert!(page.rows.is_empty());
+            assert!(page.demand.is_none());
+            assert_eq!(page.total_hint, 3);
+
+            // Unknown table: the ask out verbatim, hint 0.
+            let page = registry.panel_surface_store().store_page(
+                "table_panel",
+                PanelStoreKind::TableRows,
+                Some(sid(999)),
+                WidgetRange { start: 0, len: 4 },
+            );
+            assert!(page.rows.is_empty());
+            assert!(page.demand.is_some());
+        });
+    }
+
+    /// Scene regions: a scene leg STORES (the scene MOUNT rendering seam is
+    /// NOT this package — nothing registers into the mount) with no frozen
+    /// surface id yet; region pages resolve the pre-order subtree; a scene
+    /// read NEVER demands (the host store is the whole scene truth) and a
+    /// past-end window is the empty page.
+    #[test]
+    fn scene_leg_stores_but_mounts_nothing_and_regions_never_demand() {
+        let _app = OpenCADStudio::new_for_test();
+        let scene = ocs_plugin_api::scene::PanelScene {
+            revision: SceneRevision(4),
+            elements: vec![ocs_plugin_api::scene::SceneElement::Group {
+                id: sid(1),
+                name: None,
+                actions: vec![],
+                drag: None,
+                children: vec![
+                    ocs_plugin_api::scene::SceneElement::Rect {
+                        id: sid(2),
+                        name: None,
+                        actions: vec![],
+                        drag: None,
+                        pos: Vec2([0.0, 0.0]),
+                        size: Vec2([10.0, 10.0]),
+                        fill: None,
+                        stroke: None,
+                    },
+                    ocs_plugin_api::scene::SceneElement::Text {
+                        id: sid(3),
+                        name: None,
+                        actions: vec![],
+                        drag: None,
+                        content: "annotation".to_owned(),
+                        pos: Vec2([1.0, 2.0]),
+                        size: 10.0,
+                        color: ocs_plugin_api::scene::SceneColor::default(),
+                    },
+                ],
+                clip: None,
+            }],
+        };
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scene_panel", SceneOrWidgetSurface::Scene(scene))
+                .expect("the scene leg stores");
+            assert!(outcome.widget_mount.is_none(), "the recorded boundary");
+            assert!(!registry.mount_registered_owned("scene_panel"));
+            assert!(
+                registry.panel_surface_store().entry("scene_panel").unwrap().surface_id.is_none(),
+                "no widget leg — no frozen surface identity yet"
+            );
+
+            // The whole-scene read (parent None): group, rect, text.
+            let page = registry.panel_surface_store().store_page(
+                "scene_panel",
+                PanelStoreKind::SceneRegion,
+                None,
+                WidgetRange { start: 0, len: 10 },
+            );
+            assert_eq!(page.rows.len(), 3);
+            assert_eq!(page.total_hint, 3);
+            assert!(page.demand.is_none());
+
+            // A subtree read (the group's id): the same subtree.
+            let page = registry.panel_surface_store().store_page(
+                "scene_panel",
+                PanelStoreKind::SceneRegion,
+                Some(sid(1)),
+                WidgetRange { start: 0, len: 10 },
+            );
+            assert_eq!(page.rows.len(), 3);
+
+            // Continuation windows: the same flatten; past-end = empty.
+            let tail = registry.panel_surface_store().store_page(
+                "scene_panel",
+                PanelStoreKind::SceneRegion,
+                None,
+                WidgetRange { start: 2, len: 10 },
+            );
+            assert_eq!(tail.rows.len(), 1);
+            let past = registry.panel_surface_store().store_page(
+                "scene_panel",
+                PanelStoreKind::SceneRegion,
+                None,
+                WidgetRange { start: 8, len: 10 },
+            );
+            assert!(past.rows.is_empty());
+            assert!(past.demand.is_none());
+        });
+    }
+
+    /// snapshot2: the digest row (BOTH legs' bounded summaries) + the
+    /// leading window — bounded regardless of scene size, the continuation
+    /// floor at the page budget (the digest row shares it), never a full
+    /// dump.
+    #[test]
+    fn snapshot2_leads_with_digest_and_bounded_window() {
+        let _app = OpenCADStudio::new_for_test();
+        // A scene whose pre-order flatten exceeds the page budget.
+        let elements: Vec<ocs_plugin_api::scene::SceneElement> = (1..=5_000)
+            .map(|i| ocs_plugin_api::scene::SceneElement::Rect {
+                id: sid(i as u64),
+                name: None,
+                actions: vec![],
+                drag: None,
+                pos: Vec2([0.0, 0.0]),
+                size: Vec2([4.0, 4.0]),
+                fill: None,
+                stroke: None,
+            })
+            .collect();
+        let scene = ocs_plugin_api::scene::PanelScene {
+            revision: SceneRevision(7),
+            elements,
+        };
+        let widgets = simple_list_surface(SceneRevision(7), vec![item(8001, "x")]);
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scene_panel", SceneOrWidgetSurface::Scene(scene))
+                .expect("the scene leg stores");
+            attach_publish(registry, "PLUGIN", "scene_panel", widgets)
+                .expect("the widget leg stores");
+
+            let (rows, total) = registry.panel_surface_store().snapshot_page("scene_panel");
+            assert!(
+                rows.len() <= ocs_plugin_api::widgets::MAX_WIDGET_ROWS_INITIAL,
+                "the page stays within the wire budget"
+            );
+            match &rows[0] {
+                StoreRow::State(digest) => {
+                    let scene_summary =
+                        digest.scene.as_ref().expect("the digest names the scene");
+                    assert_eq!(scene_summary.revision, SceneRevision(7));
+                    assert_eq!(scene_summary.nodes, 5_000);
+                    assert!(digest.widgets.is_some(), "the digest names the widget leg");
+                }
+                other => panic!("snapshot2 leads with the digest: {other:?}"),
+            }
+            assert_eq!(total, 5_000, "the page continues through the region reads");
+            match &rows[1] {
+                StoreRow::Scene(element) => assert_eq!(element.stable_id(), sid(1)),
+                other => panic!("the leading window carries elements: {other:?}"),
+            }
+        });
+    }
+
+    /// The publish report's caps carry EXACT truncation counts: a leg with
+    /// more roots than the touched cap reports the first N plus the count
+    /// of everything dropped (the scene report's own discipline).
+    #[test]
+    fn publish_report_truncation_counts_are_exact() {
+        let _app = OpenCADStudio::new_for_test();
+        let elements: Vec<ocs_plugin_api::scene::SceneElement> = (1..=70)
+            .map(|i| ocs_plugin_api::scene::SceneElement::Rect {
+                id: sid(i as u64),
+                name: None,
+                actions: vec![],
+                drag: None,
+                pos: Vec2([0.0, 0.0]),
+                size: Vec2([4.0, 4.0]),
+                fill: None,
+                stroke: None,
+            })
+            .collect();
+        let scene = ocs_plugin_api::scene::PanelScene {
+            revision: SceneRevision(1),
+            elements,
+        };
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "wide_panel", SceneOrWidgetSurface::Scene(scene))
+                .expect("the scene leg stores");
+            let report = outcome.report;
+            assert_eq!(
+                report.touched_subtree_ids.len(),
+                ocs_plugin_api::scene::MAX_REPORT_TOUCHED
+            );
+            assert_eq!(
+                report.touched_truncated,
+                70 - ocs_plugin_api::scene::MAX_REPORT_TOUCHED
+            );
+            // First-come order preserved.
+            assert_eq!(report.touched_subtree_ids[0], sid(1));
+        });
+    }
+
+    /// The surface-id convention's collision fallback: a second panel whose
+    /// FIRST ROOT duplicates another panel's frozen identity is re-keyed by
+    /// the hashed fallback — cross-surface uniqueness stays the contract,
+    /// and each panel's identity freezes individually.
+    #[test]
+    fn surface_id_first_root_convention_with_hashed_collision_fallback() {
+        let _app = OpenCADStudio::new_for_test();
+        let a = simple_list_surface(SceneRevision(1), vec![item(201, "a")]);
+        let b = simple_list_surface(SceneRevision(1), vec![item(202, "b")]);
+        with_test_registry_mut(|registry| {
+            attach_publish(registry, "PLUGIN_A", "panel_a", a).expect("attach");
+            attach_publish(registry, "PLUGIN_B", "panel_b", b).expect("attach");
+            let b_id = registry
+                .panel_surface_id_owned("panel_b")
+                .expect("frozen");
+            assert_ne!(b_id, sid(200), "the collision fell back");
+            // And the fallback is stable: re-registrations keep it.
+            let forward = simple_list_surface(SceneRevision(2), vec![item(203, "b2")]);
+            attach_publish(registry, "PLUGIN_B", "panel_b", forward).expect("forward");
+            assert_eq!(registry.panel_surface_id_owned("panel_b"), Some(b_id));
+        });
     }
 
 }

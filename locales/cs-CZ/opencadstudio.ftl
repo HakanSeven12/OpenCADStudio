@@ -341,6 +341,7 @@ modal =
     .find-replace = Najít a nahradit
     .plugin-manager = Správce zásuvných modulů
     .update-available = Je dostupná aktualizace
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Správce hladin
     .layer-state-manager = Správce stavů hladin
     .edit-layer-state = Upravit stav hladiny

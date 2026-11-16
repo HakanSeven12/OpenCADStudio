@@ -339,6 +339,7 @@ modal =
     .find-replace = Trova e sostituisci
     .plugin-manager = Gestore dei plugin
     .update-available = Aggiornamento disponibile
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Gestore dei layer
     .layer-state-manager = Gestore degli stati dei layer
     .edit-layer-state = Modifica stato del layer

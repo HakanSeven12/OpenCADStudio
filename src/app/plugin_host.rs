@@ -7,7 +7,13 @@ use document::xdata::ExtendedDataRecord;
 use ocs_plugin_api::host::{
     Document, EntityType, Handle, HostApi, HostSettingValue, PluginClassParameterRow,
 };
+use crate::ui::window::plugin_widget_mount::StoreReadOutcome;
+use ocs_plugin_api::ipc::protocol::{
+    PanelStoreKind, PluginResponse, SceneOrWidgetPatch, SceneOrWidgetSurface,
+};
+use ocs_plugin_api::scene::StableId;
 use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewData};
+use ocs_plugin_api::widgets::{WidgetEvent, WidgetRange};
 
 use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]
@@ -5390,6 +5396,176 @@ impl HostApi for HostSession<'_> {
         tolerance: f64,
     ) -> Result<(), String> {
         self.validate_parametric_chain(chain, tolerance)
+    }
+
+    // ── V23 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
+    //
+    // The real attach. ACCESS PATH (inspected + recorded): `HostSession`
+    // reaches ALL app state through `self.app` (private-field access, this
+    // file); the surface store lives IN the app's mount registry
+    // (`OpenCADStudio::mount_registry` — the same app-`Rc` domain; see the
+    // `PanelSurfaceStore` docs for the placement decision), so the attach
+    // needs NO new plumbing into other files. The demand leg rides the
+    // reentrant `with_manager` (the established pattern: update/mod.rs's
+    // drains and v4_support both nest it during inline plugin-request
+    // serving). The wire acks/rejections are the store's semantic outcomes
+    // mapped 1:1 — zero logic of their own.
+    //
+    // The out-of-crate contract is untouched: a host without these
+    // overrides keeps the trait's DEFAULT stub semantics (the trait's own
+    // doc pins the shapes); the unattachable-identity early exits below
+    // answer the SAME stub shapes (the small local shims mirror the default
+    // bodies — the server's delegation test pins those defaults verbatim).
+
+    fn panel_scene_publish(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: SceneOrWidgetSurface,
+        events: Vec<WidgetEvent>,
+    ) -> PluginResponse {
+        // An unowned transport (the legacy dialog-only caller shape) or a
+        // whitespace panel id cannot attach: the trait default's honest
+        // stub answers (validate → InvalidOp, else PublisherUnattached).
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return default_publish_response(&surface);
+        }
+        // The events leg is the plugin's merge ACKNOWLEDGMENT of events the
+        // host itself observed and forwarded — absorbed here, NEVER
+        // re-forwarded (rebroadcasting would double the event stream; the
+        // exactly-once law). `events`' arrival is the publish's piggyback.
+        let _ = events;
+
+        // Store (the store re-runs the same structural gate itself, so the
+        // wire/attach paths cannot drift), then the mount leg.
+        let outcome = {
+            let mut registry = self.app.mount_registry.borrow_mut();
+            registry.panel_surface_store_mut().publish(plugin_id, panel_id, surface)
+        };
+        match outcome {
+            Ok(record) => {
+                // The mount gate goes LIVE (the first production
+                // registrations): preserve-on-identical owns the outcome
+                // (an identical resurface preserves the running machines;
+                // anything else replaces them).
+                if let Some((surface_id, surface)) = record.widget_mount {
+                    self.app
+                        .mount_registry
+                        .borrow_mut()
+                        .register_surface_owned(
+                            panel_id,
+                            crate::ui::window::plugin_widget_mount::SurfaceMountHandle::from_surface(
+                                surface_id, surface,
+                            ),
+                        );
+                }
+                PluginResponse::PatchApplied(record.report)
+            }
+            Err((code, report)) => PluginResponse::PatchRejected { code, report },
+        }
+    }
+
+    fn panel_scene_patch(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: SceneOrWidgetPatch,
+    ) -> PluginResponse {
+        let outcome = {
+            let mut registry = self.app.mount_registry.borrow_mut();
+            registry.panel_surface_store_mut().patch(plugin_id, panel_id, patch)
+        };
+        match outcome {
+            Ok(record) => {
+                // The mount follows the revision: the changed widget leg
+                // re-registers (the preserve-on-identical rule owns the
+                // preserve/replace outcome; a patch necessarily moves the
+                // revision, so it resolves as the REPLACE flow — the
+                // document rule for patch plumbing).
+                if let Some((surface_id, surface)) = record.widget_mount {
+                    self.app
+                        .mount_registry
+                        .borrow_mut()
+                        .register_surface_owned(
+                            panel_id,
+                            crate::ui::window::plugin_widget_mount::SurfaceMountHandle::from_surface(
+                                surface_id, surface,
+                            ),
+                        );
+                }
+                PluginResponse::PatchApplied(record.report)
+            }
+            Err((code, report)) => PluginResponse::PatchRejected { code, report },
+        }
+    }
+
+    fn panel_store_read(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        kind: PanelStoreKind,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> PluginResponse {
+        // Checked page resolution against the store; a page miss (a lazy
+        // branch's children, a beyond-the-held window, an unpublished
+        // store) raises ONE demand to the owning plugin (decoupled — this
+        // frame's answer stays the checked page).
+        let StoreReadOutcome {
+            surface_id,
+            rows,
+            total_hint,
+            demand,
+        } = {
+            let registry = self.app.mount_registry.borrow();
+            registry.panel_surface_store().store_page(panel_id, kind, parent_id, range)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((parent_id, demand_range)) = demand {
+            self.app
+                .mount_registry
+                .borrow_mut()
+                .record_store_demand_forwarded_owned();
+            let surface_id = surface_id.expect("a demand names an attached widget store");
+            crate::plugin::external::with_manager(|manager| {
+                manager.broadcast_panel_store_demand(panel_id, surface_id, parent_id, demand_range);
+            });
+        }
+        PluginResponse::StorePage { rows, total_hint }
+    }
+
+    fn panel_scene_snapshot2(&mut self, _plugin_id: &str, panel_id: &str) -> PluginResponse {
+        let (rows, total_hint) = {
+            let registry = self.app.mount_registry.borrow();
+            registry.panel_surface_store().snapshot_page(panel_id)
+        };
+        PluginResponse::StorePage { rows, total_hint }
+    }
+}
+
+/// The unattachable-identity publish's shape — the trait DEFAULT's exact
+/// body (the honest stub: structural garbage refuses `InvalidOp`, valid
+/// publish refuses `PublisherUnattached` with zero mutation). The attach's
+/// early exits answer this (a Rust trait cannot call its own default from
+/// an override), and the server's delegation test pins the default bodies
+/// verbatim — the two cannot drift silently.
+fn default_publish_response(surface: &SceneOrWidgetSurface) -> PluginResponse {
+    let structural = match surface {
+        SceneOrWidgetSurface::Scene(scene) => scene.validate().is_ok(),
+        SceneOrWidgetSurface::Widgets(widgets) => widgets.validate().is_ok(),
+    };
+    PluginResponse::PatchRejected {
+        code: if structural {
+            use ocs_plugin_api::ipc::protocol::PatchRejectCode::PublisherUnattached;
+            PublisherUnattached
+        } else {
+            use ocs_plugin_api::ipc::protocol::PatchRejectCode::InvalidOp;
+            InvalidOp
+        },
+        report: ocs_plugin_api::ipc::protocol::PatchRejectReport {
+            current_revision: None,
+            failed_op: None,
+        },
     }
 }
 
@@ -18531,4 +18707,680 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         ));
         assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
+
+    // ── SCN-025: the v23 wire attach (the mount/publisher goes LIVE) ────────
+    //
+    // The full attach is exercised through THE wire entry the plugin
+    // transport uses: `handle_plugin_request` (the ipc arms delegate to the
+    // trait; the trait's overrides are the attach). The mount registration,
+    // the store reads, the demand leg and the events-leg absorption are all
+    // pinned here; the store's own mechanics are pinned at the mount module
+    // (`plugin_widget_mount` tests).
+
+    use ocs_plugin_api::ipc::protocol::{
+        PatchRejectCode as WireRejectCode,
+        PluginRequest as WireRequest, PluginResponse as WireResponse,
+        PanelStoreKind as WireStoreKind, SceneOrWidgetPatch as WirePatch,
+        SceneOrWidgetSurface as WireSurface, StoreRow as WireStoreRow,
+    };
+    use ocs_plugin_api::ipc::server::handle_plugin_request;
+    use ocs_plugin_api::scene::{SceneRevision as WireRevision, StableId as WireId};
+
+    /// A minimal VALID widget surface: one list root (id 200) with two
+    /// items — the surface the attach tests publish and patch.
+    fn attach_surface(revision: u64) -> ocs_plugin_api::widgets::WidgetSurface {
+        let item = |id: u64, label: &str| ocs_plugin_api::widgets::ItemDef {
+            id: WireId(id),
+            label: label.to_owned(),
+            icon: None,
+            enabled: true,
+            visible: true,
+            command: None,
+            domain_ref: None,
+        };
+        ocs_plugin_api::widgets::WidgetSurface {
+            revision: WireRevision(revision),
+            roots: vec![ocs_plugin_api::widgets::WidgetNode::List(
+                ocs_plugin_api::widgets::ItemListDef {
+                    id: WireId(200),
+                    name: None,
+                    enabled: true,
+                    visible: true,
+                    label: None,
+                    items: vec![item(7, "load"), item(8, "save")],
+                },
+            )],
+            tables: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn attach_publish_request(panel_id: &str, revision: u64) -> WireRequest {
+        WireRequest::PanelScenePublish {
+            panel_id: panel_id.to_owned(),
+            surface: WireSurface::Widgets(attach_surface(revision)),
+            events: vec![],
+        }
+    }
+
+    fn attach_patch_request(
+        panel_id: &str,
+        base: u64,
+        revision: u64,
+        ops: Vec<ocs_plugin_api::widgets::WidgetOp>,
+    ) -> WireRequest {
+        WireRequest::PanelScenePatch {
+            panel_id: panel_id.to_owned(),
+            patch: WirePatch::Widgets(ocs_plugin_api::widgets::WidgetSurfacePatch {
+                base_revision: WireRevision(base),
+                revision: WireRevision(revision),
+                ops,
+            }),
+        }
+    }
+
+    /// The registry counters through the app-owned store (the headless
+    /// statics bind to the SAME registry — `new_for_test`'s binder).
+    fn attach_counters(app: &OpenCADStudio) -> crate::ui::window::plugin_widget_mount::MountCounters {
+        app.mount_registry.borrow().counters_owned()
+    }
+
+    /// Publishing a widget surface through the WIRE arm acks the typed
+    /// report, stores the leg with the owner recorded, and REGISTERS the
+    /// mount — the first end-to-end mount-live pin. The piggybacked events
+    /// leg is ABSORBED (a publish never re-forwards its merge ack — the
+    /// forward probe stays put).
+    #[test]
+    fn wire_publish_attaches_store_and_mount() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let before = attach_counters(&app);
+
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PUBLISH_PLUGIN",
+            attach_publish_request("align_tools", 11),
+            &mut |_| {},
+            true,
+        );
+        let report = match response {
+            WireResponse::PatchApplied(report) => report,
+            other => panic!("a valid first publish acks PatchApplied: {other:?}"),
+        };
+        assert_eq!(report.revision, WireRevision(11));
+        assert!(
+            !report.touched_subtree_ids.is_empty(),
+            "the publish's report names the arriving surface's roots"
+        );
+        // The store: owner + frozen identity recorded.
+        {
+            let registry = app.mount_registry.borrow();
+            let entry = registry
+                .panel_surface_store()
+                .entry("align_tools")
+                .expect("the attach created the entry");
+            assert_eq!(entry.owner_plugin_id, "PUBLISH_PLUGIN");
+            assert_eq!(entry.surface_id, Some(WireId(200)), "the first root's id convention");
+            assert!(entry.widgets.is_some(), "the widget leg stored");
+            assert!(entry.scene.is_none(), "one leg per frame");
+        }
+        // THE MOUNT IS LIVE: registered under the panel id, the frozen id
+        // round-trips, the mounted body builds.
+        assert!(app.mount_registry.borrow().mount_registered_owned("align_tools"));
+        assert_eq!(
+            app.mount_registry.borrow().panel_surface_id_owned("align_tools"),
+            Some(WireId(200))
+        );
+        assert!(app.mount_registry.borrow().mounted_body_owned("align_tools").is_some());
+        // Registration counters: exactly one fresh register; no forwards.
+        assert_eq!(attach_counters(&app).registers - before.registers, 1);
+        assert_eq!(attach_counters(&app).mount_event_forwards, before.mount_event_forwards);
+
+        // A RE-publish WITH an events leg: the identical resurface acks
+        // (the preserve rule) and the leg is absorbed as ever — those
+        // events are the plugin's merge acknowledgment, never a broadcast
+        // to re-forward.
+        let events = vec![ocs_plugin_api::widgets::WidgetEvent::TreeExpanded {
+            surface_id: WireId(200),
+            node_id: WireId(10),
+            expanded: true,
+        }];
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PUBLISH_PLUGIN",
+            WireRequest::PanelScenePublish {
+                panel_id: "align_tools".to_owned(),
+                surface: WireSurface::Widgets(attach_surface(11)),
+                events,
+            },
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(response, WireResponse::PatchApplied(_)));
+        assert_eq!(
+            attach_counters(&app).mount_event_forwards,
+            before.mount_event_forwards,
+            "the absorbed merge leg never re-forwards"
+        );
+    }
+
+    /// Structurally broken publish: the typed InvalidOp rejection through
+    /// the WIRE arm attaches NOTHING (no store entry, no mount) — the
+    /// honest-refusal through-line the transport held before the attach.
+    #[test]
+    fn wire_publish_invalid_surface_refuses_and_attaches_nothing() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let broken = ocs_plugin_api::widgets::WidgetSurface {
+            revision: WireRevision(1),
+            roots: vec![ocs_plugin_api::widgets::WidgetNode::IconButton(
+                ocs_plugin_api::widgets::IconActionDef {
+                    id: WireId(1),
+                    accessible_name: String::new(), // required non-empty → refuses
+                    tooltip: None,
+                    icon: ocs_plugin_api::widgets::IconRef {
+                        uri: "host://icons/test.svg".to_owned(),
+                        size: 16.0,
+                    },
+                    enabled: true,
+                    visible: true,
+                    active: false,
+                    command: "x".to_owned(),
+                    confirmation: None,
+                },
+            )],
+            tables: std::collections::BTreeMap::new(),
+        };
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "BROKEN_PLUGIN",
+            WireRequest::PanelScenePublish {
+                panel_id: "panel".to_owned(),
+                surface: WireSurface::Widgets(broken),
+                events: vec![],
+            },
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(
+            response,
+            WireResponse::PatchRejected { code: WireRejectCode::InvalidOp, .. }
+        ));
+        assert!(!app.mount_registry.borrow().panel_surface_store().attached("panel"));
+        assert!(!app.mount_registry.borrow().mount_registered_owned("panel"));
+    }
+
+    /// The second-plugin capture refusal rides the WIRE arm with the
+    /// appended structured code; the first publisher's store and mount
+    /// survive untouched (zero mutation — the owner law).
+    #[test]
+    fn wire_publish_second_plugin_same_panel_refuses() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PLUGIN_A",
+            attach_publish_request("owned_panel", 2),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(response, WireResponse::PatchApplied(_)));
+        let before = attach_counters(&app);
+
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PLUGIN_B",
+            attach_publish_request("owned_panel", 9),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(
+            response,
+            WireResponse::PatchRejected { code: WireRejectCode::PublisherOwnedByOther, .. }
+        ));
+        // The owner law's zero-mutation: the FIRST publisher intact.
+        {
+            let registry = app.mount_registry.borrow();
+            let entry = registry
+                .panel_surface_store()
+                .entry("owned_panel")
+                .expect("the owner's entry stands");
+            assert_eq!(entry.owner_plugin_id, "PLUGIN_A");
+            assert_eq!(entry.widgets.as_ref().expect("stored").revision, WireRevision(2));
+            assert!(registry.mount_registered_owned("owned_panel"));
+        }
+        assert_eq!(attach_counters(&app), before, "the refusal registered nothing");
+    }
+
+    /// The patch leg through the WIRE arm: an unattached panel's patch →
+    /// the honest refusal (the trait default's shape); applied → the patch
+    /// report + the mount re-registration (a revision move is never
+    /// shape-identical: the REPLACE flow); stale → the structured refusal
+    /// carrying the head revision with nothing mutated.
+    #[test]
+    fn wire_patch_leg_stale_refuses_applies_reregisters() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let before = attach_counters(&app);
+
+        // Unattached: the honest refusal (zero mutation, no entry).
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PATCHER",
+            attach_patch_request("never_published", 1, 2, vec![]),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(
+            response,
+            WireResponse::PatchRejected { code: WireRejectCode::PublisherUnattached, .. }
+        ));
+        assert!(!app.mount_registry.borrow().panel_surface_store().attached("never_published"));
+
+        // Attach at head 12, then the two patch shapes.
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PATCHER",
+            attach_publish_request("align_tools", 12),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(response, WireResponse::PatchApplied(_)));
+
+        // Stale: the head reported; the store's revision stands.
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PATCHER",
+            attach_patch_request("align_tools", 9, 13, vec![]),
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::PatchRejected { code, report } => {
+                assert_eq!(code, WireRejectCode::StaleBase);
+                assert_eq!(report.current_revision, Some(WireRevision(12)));
+            }
+            other => panic!("a stale patch must refuse: {other:?}"),
+        }
+        let revision_now = app
+            .mount_registry
+            .borrow()
+            .panel_surface_store()
+            .entry("align_tools")
+            .unwrap()
+            .widgets
+            .as_ref()
+            .unwrap()
+            .revision;
+        assert_eq!(revision_now, WireRevision(12), "stale leaves the head standing");
+
+        // Applied: the revision advances + the mount RE-REGISTERS (the
+        // REPLACE flow) — frozen identity intact, machines released once.
+        let ops = vec![ocs_plugin_api::widgets::WidgetOp::Add {
+            parent: None,
+            widget: ocs_plugin_api::widgets::WidgetNode::List(
+                ocs_plugin_api::widgets::ItemListDef {
+                    id: WireId(300),
+                    name: None,
+                    enabled: true,
+                    visible: true,
+                    label: None,
+                    items: vec![],
+                },
+            ),
+        }];
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PATCHER",
+            attach_patch_request("align_tools", 12, 13, ops),
+            &mut |_| {},
+            true,
+        );
+        let report = match response {
+            WireResponse::PatchApplied(report) => report,
+            other => panic!("an applied patch acks: {other:?}"),
+        };
+        assert_eq!(report.revision, WireRevision(13));
+        assert_eq!(
+            report.touched_subtree_ids.as_slice(),
+            &[WireId(300)],
+            "the added root's address (the capped derived facts)"
+        );
+        let revision_now = app
+            .mount_registry
+            .borrow()
+            .panel_surface_store()
+            .entry("align_tools")
+            .unwrap()
+            .widgets
+            .as_ref()
+            .unwrap()
+            .revision;
+        assert_eq!(revision_now, WireRevision(13));
+        let after = attach_counters(&app);
+        assert_eq!(after.registers_replaced - before.registers_replaced, 1);
+        assert_eq!(after.torn_down - before.torn_down, 1, "the replaced machines released");
+        assert_eq!(
+            app.mount_registry.borrow().panel_surface_id_owned("align_tools"),
+            Some(WireId(200)),
+            "the frozen identity survives the re-registration"
+        );
+        assert!(app.mount_registry.borrow().mounted_body_owned("align_tools").is_some());
+    }
+
+    /// The store reads through the WIRE arm: in-range pages with the held
+    /// counts; past-end = the empty page (+ the demand leg — the probe
+    /// ticks once per read; the manager-missing runtime is the documented
+    /// benign no-op); a wider window serves the in-range part and demands
+    /// the gap; an unattached panel's read is the honest empty page with
+    /// NO demand (nothing attached names nothing).
+    #[test]
+    fn wire_store_reads_page_checked_and_demand_misses() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "READER",
+            attach_publish_request("list_panel", 1),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(response, WireResponse::PatchApplied(_)));
+
+        // In-range (the held count is exactly 2).
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "READER",
+            WireRequest::PanelStoreRead {
+                panel_id: "list_panel".to_owned(),
+                kind: WireStoreKind::ListItems,
+                parent_id: Some(WireId(200)),
+                range: ocs_plugin_api::widgets::WidgetRange { start: 0, len: 2 },
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::StorePage { rows, total_hint } => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(total_hint, 2);
+                assert!(
+                    matches!(&rows[0], WireStoreRow::Item(item) if item.id == WireId(7))
+                );
+            }
+            other => panic!("an in-range read pages: {other:?}"),
+        }
+
+        // Past-end: empty page + ONE demand raised.
+        let demands_before = attach_counters(&app).mount_demand_forwards;
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "READER",
+            WireRequest::PanelStoreRead {
+                panel_id: "list_panel".to_owned(),
+                kind: WireStoreKind::ListItems,
+                parent_id: Some(WireId(200)),
+                range: ocs_plugin_api::widgets::WidgetRange { start: 42, len: 4 },
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::StorePage { rows, total_hint } => {
+                assert!(rows.is_empty(), "past-the-end is the empty page");
+                assert_eq!(total_hint, 2);
+            }
+            other => panic!("a past-end read answers a page: {other:?}"),
+        }
+        assert_eq!(
+            attach_counters(&app).mount_demand_forwards - demands_before,
+            1,
+            "the demand leg forwarded once for this read"
+        );
+
+        // A wider window than held: the in-range part serves; ONE demand
+        // names the missing span.
+        let demands_before = attach_counters(&app).mount_demand_forwards;
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "READER",
+            WireRequest::PanelStoreRead {
+                panel_id: "list_panel".to_owned(),
+                kind: WireStoreKind::ListItems,
+                parent_id: Some(WireId(200)),
+                range: ocs_plugin_api::widgets::WidgetRange { start: 0, len: 6 },
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::StorePage { rows, .. } => {
+                assert_eq!(rows.len(), 2, "the held in-range part serves")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(attach_counters(&app).mount_demand_forwards - demands_before, 1);
+
+        // Unattached panel: the honest empty page, no demand.
+        let demands_before = attach_counters(&app).mount_demand_forwards;
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "READER",
+            WireRequest::PanelStoreRead {
+                panel_id: "no_such_panel".to_owned(),
+                kind: WireStoreKind::ListItems,
+                parent_id: None,
+                range: ocs_plugin_api::widgets::WidgetRange { start: 0, len: 4 },
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::StorePage { rows, total_hint } => {
+                assert!(rows.is_empty());
+                assert_eq!(total_hint, 0);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            attach_counters(&app).mount_demand_forwards - demands_before,
+            0,
+            "nothing attached names nothing"
+        );
+    }
+
+    /// The scene leg through the WIRE arm: stores (the digest names it —
+    /// the recovery snapshot2) and mounts NOTHING (the recorded boundary);
+    /// a scene patch acks the REAL planner report; a stale scene patch
+    /// refuses with the recovery fact.
+    #[test]
+    fn wire_scene_leg_stores_and_patches_report() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let registers_before = attach_counters(&app).registers;
+
+        let rect_scene = |revision: u64| ocs_plugin_api::scene::PanelScene {
+            revision: WireRevision(revision),
+            elements: vec![ocs_plugin_api::scene::SceneElement::Rect {
+                id: WireId(5),
+                name: None,
+                actions: vec![],
+                drag: None,
+                pos: ocs_plugin_api::scene::Vec2([0.0, 0.0]),
+                size: ocs_plugin_api::scene::Vec2([8.0, 8.0]),
+                fill: None,
+                stroke: None,
+            }],
+        };
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "SCENER",
+            WireRequest::PanelScenePublish {
+                panel_id: "scene_panel".to_owned(),
+                surface: WireSurface::Scene(rect_scene(2)),
+                events: vec![],
+            },
+            &mut |_| {},
+            true,
+        );
+        let report = match response {
+            WireResponse::PatchApplied(report) => report,
+            other => panic!("the scene publish acks: {other:?}"),
+        };
+        assert_eq!(report.summary.nodes, 1, "the REAL post summary");
+        // The recorded boundary: nothing mounts for a scene leg.
+        assert!(!app.mount_registry.borrow().mount_registered_owned("scene_panel"));
+        assert_eq!(attach_counters(&app).registers - registers_before, 0);
+
+        // snapshot2: the digest row names the scene; no widget leg, so the
+        // widgets half is None; the leading window carries the one rect.
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "SCENER",
+            WireRequest::PanelSceneSnapshot2 {
+                panel_id: "scene_panel".to_owned(),
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::StorePage { rows: page_rows, total_hint } => {
+                assert_eq!(total_hint, 1);
+                assert!(matches!(&page_rows[0],
+                    WireStoreRow::State(digest)
+                        if digest.scene.as_ref().expect("the scene summary").nodes == 1
+                            && digest.widgets.is_none()
+                ));
+                assert!(matches!(&page_rows[1], WireStoreRow::Scene(_)));
+            }
+            other => panic!("the recovery read pages: {other:?}"),
+        }
+
+        // A scene patch: the crate's atomic apply (the REAL report).
+        let ops = vec![ocs_plugin_api::scene::SceneOp::Add {
+            parent: None,
+            element: ocs_plugin_api::scene::SceneElement::Text {
+                id: WireId(6),
+                name: None,
+                actions: vec![],
+                drag: None,
+                content: "hello".to_owned(),
+                pos: ocs_plugin_api::scene::Vec2([1.0, 1.0]),
+                size: 13.0,
+                color: ocs_plugin_api::scene::SceneColor::default(),
+            },
+        }];
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "SCENER",
+            WireRequest::PanelScenePatch {
+                panel_id: "scene_panel".to_owned(),
+                patch: WirePatch::Scene(ocs_plugin_api::scene::PanelScenePatch {
+                    base_revision: WireRevision(2),
+                    revision: WireRevision(3),
+                    ops,
+                }),
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::PatchApplied(report) => {
+                assert_eq!(report.revision, WireRevision(3));
+                assert_eq!(
+                    report.touched_subtree_ids.as_slice(),
+                    &[WireId(6)],
+                    "the planner's real touched set"
+                );
+            }
+            other => panic!("the scene patch acks: {other:?}"),
+        }
+
+        // A stale scene patch: the structured refusal + the recovery fact.
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "SCENER",
+            WireRequest::PanelScenePatch {
+                panel_id: "scene_panel".to_owned(),
+                patch: WirePatch::Scene(ocs_plugin_api::scene::PanelScenePatch {
+                    base_revision: WireRevision(2),
+                    revision: WireRevision(4),
+                    ops: vec![],
+                }),
+            },
+            &mut |_| {},
+            true,
+        );
+        match response {
+            WireResponse::PatchRejected { code, report } => {
+                assert_eq!(code, WireRejectCode::StaleBase);
+                assert_eq!(report.current_revision, Some(WireRevision(3)));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The unattachable identities: an EMPTY plugin id (the unowned
+    /// transport form) and a whitespace panel id answer the trait default's
+    /// stub shapes through the attach — zero store writes.
+    #[test]
+    fn unowned_transport_and_blank_panel_cannot_attach() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "",
+            attach_publish_request("panel", 1),
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(
+            response,
+            WireResponse::PatchRejected { code: WireRejectCode::PublisherUnattached, .. }
+        ));
+        let response = handle_plugin_request(
+            &mut HostSession::new(&mut app, 0),
+            "PLUGIN",
+            WireRequest::PanelScenePublish {
+                panel_id: "   ".to_owned(),
+                surface: WireSurface::Widgets(attach_surface(1)),
+                events: vec![],
+            },
+            &mut |_| {},
+            true,
+        );
+        assert!(matches!(
+            response,
+            WireResponse::PatchRejected { code: WireRejectCode::PublisherUnattached, .. }
+        ));
+        assert!(!app.mount_registry.borrow().panel_surface_store().attached("   "));
+        assert!(!app.mount_registry.borrow().panel_surface_store().attached("panel"));
+    }
+
+    /// THE LEGACY-GUARANTEE pin at the wire attach's front door: a legacy
+    /// panel REGISTERED through the ordinary path attaches NOTHING to the
+    /// store; the panel stays zero-entry — the legacy view path is
+    /// byte-identical by construction (the mount-module pin's dual, pinned
+    /// at the serving side the attach actually lives in).
+    #[test]
+    fn legacy_registration_attaches_nothing_to_the_store() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        assert!({
+            let mut host = HostSession::new(&mut app, 0);
+            host.register_panel_for_plugin(
+                "LEGACY_PLUGIN",
+                ocs_plugin_api::dialog::PanelDef::new("legacy_panel", "Legacy Panel")
+            )
+        });
+        assert!(!app.mount_registry.borrow().panel_surface_store().attached("legacy_panel"));
+        assert!(!app.mount_registry.borrow().mount_registered_owned("legacy_panel"));
+        let counters = attach_counters(&app);
+        assert_eq!(counters.registers, 0, "a legacy registration mounts nothing");
+        assert_eq!(counters.mount_event_forwards, 0);
+        assert_eq!(counters.mount_demand_forwards, 0);
+    }
+
 }

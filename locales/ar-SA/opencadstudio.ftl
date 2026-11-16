@@ -339,6 +339,7 @@ modal =
     .find-replace = بحث واستبدال
     .plugin-manager = مدير الإضافات
     .update-available = يتوفر تحديث
+    .widget-confirmation = Widget Confirmation
     .layer-manager = مدير الطبقات
     .layer-state-manager = مدير حالات الطبقات
     .edit-layer-state = تحرير حالة الطبقة

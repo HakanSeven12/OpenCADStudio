@@ -280,9 +280,11 @@ impl OpenCADStudio {
             &key,
             confirming,
         );
-        // Pre-wire drain — the collecting sink's contract (see the module
-        // docs); the publish hang-off is the ADR-004 crossing.
-        let _ = outcome.events;
+        // SCN-025 — the sink goes LIVE: the confirmed command's event
+        // forwards through the ONE v23 notify route (the same helper the
+        // mount bridge's arm uses — bounded batches, exactly-once by the
+        // drain; a dismissal carries no events and forwards nothing).
+        self.forward_mount_events(surface_id, outcome.events);
         // SCN-016: the decision completes the interaction the modal stands
         // for — the modal closes through the SAME edge (exactly-once: any
         // refused/mismatched decision names the armed surface and closes
@@ -310,14 +312,16 @@ impl OpenCADStudio {
     /// a modal-free arm reveals NOW; an armed prompt behind another modal
     /// waits at a boundary. THE LANDED DRIVERS (all owned): the prompt
     /// modal's own close chain (its ✕-composed Dismissed decision, the
-    /// body's Cancel/OK, the Escape tail), and every later arm's check —
-    /// each of them calls this. The generic third-party close path
-    /// (update/mod.rs's post-message hook — not this task's files) does
-    /// NOT run this check; a prompt queued behind a foreign modal reveals
-    /// at the next owned boundary rather than that hook (RECORDED — the
-    /// one-line neighbor of `show_next_startup_modal()` remains the
-    /// coordinator's option; the queue is inert-safe until then). The
-    /// front's desc must still stand (a surface whose interaction was
+    /// body's Cancel/OK, the Escape tail), every later arm's check — each
+    /// of them calls this — and, since SCN-025 (the ADR-009 follow-up),
+    /// THE GENERIC MESSAGE BOUNDARY too: the one-line neighbor of
+    /// `show_next_startup_modal()` in update/mod.rs's post-message tail
+    /// runs this check at every boundary, so a prompt queued behind a
+    /// THIRD-party modal reveals at the next message boundary (any
+    /// boundary) once that modal closes through ITS unowned path — no
+    /// longer only at an owned boundary. The NO-PREEMPT rule is inside the
+    /// check: a queued prompt never replaces an ACTIVE modal. The front's
+    /// desc must still stand (a surface whose interaction was
     /// consumed/removed in the meantime is skipped quietly — the machine
     /// layers stay total).
     pub(in crate::app) fn show_next_widget_prompt_modal(&mut self) {
@@ -1203,9 +1207,11 @@ mod tests {
     }
 
     /// No preemption: an arm while ANOTHER modal owns the slot queues and
-    /// leaves that modal standing. The boundary reveal (the check the
-    /// prompt-modal's own close chain and every later boundary runs) pops
-    /// the queue at the next slot-free moment.
+    /// leaves that modal standing. The reveal happens at the NEXT MESSAGE
+    /// BOUNDARY once the blocker closed (SCN-025's reveal hook — the
+    /// generic post-message tail runs the same check the prompt-modal's
+    /// own close chain and every arm run; the pre-SCN-025 truth "owned
+    /// boundaries only" is updated here).
     #[test]
     fn arm_behind_modal_queues_then_reveals_at_boundary() {
         let mut app = OpenCADStudio::new_for_test();
@@ -1221,18 +1227,45 @@ mod tests {
         assert!(app.widget_prompt_modal.is_none(), "nothing showing");
         assert_eq!(app.widget_prompt_modal_pending.back(), Some(&sid(200)), "queued");
 
-        // The other modal leaves (its own close path — no prompt mixin).
+        // The other modal leaves (its own close path — no prompt mixin):
+        // the SAME message boundary already carries the reveal (the hook
+        // runs after every update) — no explicit check call, no owned
+        // driver needed.
         let _ = app.update(Message::CloseModal);
-        assert_eq!(app.active_modal, None, "the blocker left");
-        // The boundary reveal: the CHECK runs — the prompt modal's own close
-        // chain (`close_widget_prompt_modal_for` / the Escape tail) and the
-        // next arm's check call this at every boundary they own; the check
-        // itself is the boundary semantics this test pins (see the wiring
-        // note below for the drivers' landed truth).
-        app.show_next_widget_prompt_modal();
-        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt));
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt), "revealed at the boundary");
         assert_eq!(app.widget_prompt_modal, Some(sid(200)));
         assert!(app.widget_prompt_modal_pending.is_empty(), "the queue drained");
+    }
+
+    /// The third-party close route (SCN-025's triage test): the prompt
+    /// queues behind a THIRD-party modal; the blocker closes through its
+    /// UNOWNED path (a generic close message, no prompt machinery in the
+    /// chain); the NEXT message boundary reveals the queued prompt — the
+    /// exact gap the reveal hook closes (the pre-SCN-025 behavior waited
+    /// for an OWNED boundary and the queue sat inert).
+    #[test]
+    fn prompt_behind_third_party_modal_reveals_at_the_next_boundary() {
+        let mut app = OpenCADStudio::new_for_test();
+        let (_guard, handle) = register_isolated("scn025_thirdparty");
+        sync_button(&handle, &prompt_button(1, "delete", PROMPT_A));
+        select_row_7(&handle);
+        // The third-party modal owns the slot.
+        app.active_modal = Some(ModalKind::About);
+
+        // The arm queues (the no-preempt rule).
+        let _ = app.update(Message::WidgetMountMsg(click_button(200, 1)));
+        assert_eq!(app.active_modal, Some(ModalKind::About), "no preemption");
+        assert_eq!(app.widget_prompt_modal_pending.back(), Some(&sid(200)), "queued");
+
+        // The blocker closes through the UNOWNED path (the generic close
+        // message — its own modal's machinery, nothing prompt-aware).
+        let _ = app.update(Message::CloseModal);
+
+        // THE NEXT MESSAGE BOUNDARY (this close, and any later one) reveals
+        // the queued prompt — no explicit check call.
+        assert_eq!(app.active_modal, Some(ModalKind::WidgetPrompt));
+        assert_eq!(app.widget_prompt_modal, Some(sid(200)));
+        assert!(app.widget_prompt_modal_pending.is_empty());
     }
 
     /// The ✕ is the modal's CANCEL decision: `modal_close_msg` composes the

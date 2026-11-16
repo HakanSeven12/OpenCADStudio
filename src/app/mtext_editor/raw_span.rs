@@ -97,7 +97,8 @@ fn patch_paragraphs(raw: &str, range: Range<usize>, code: &str) -> Result<String
 /// A number as a code writes it.
 pub(super) fn number(value: f64) -> String {
     let text = format!("{value:.6}");
-    text.trim_end_matches('0').trim_end_matches('.').to_string()
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    crate::entities::common::without_negative_zero(text.to_string())
 }
 
 impl crate::app::OpenCADStudio {

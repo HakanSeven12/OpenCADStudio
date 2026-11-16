@@ -72,6 +72,7 @@ fn text_and_dim_reach_pdf_export() {
         offset_x: 0.0,
         offset_y: 0.0,
         rotation_deg: 0,
+        content_rotation: 0.0,
         scale: 1.0,
         clip: None,
         options: PdfPlotOptions::default(),

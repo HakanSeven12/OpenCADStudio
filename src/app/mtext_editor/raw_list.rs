@@ -251,10 +251,12 @@ fn remove_marker(raw: &str, n: usize, item: Item) -> Result<String, EditError> {
     let index = SourceIndex::new(&out);
     let count = index.validate(false)?;
     let byte = index.insertion_byte(at)?;
-    let found = out[..byte]
-        .rfind(EMPTY_BULLET_GROUP)
-        .filter(|start| start + EMPTY_BULLET_GROUP.len() == byte)
-        .or_else(|| out[byte..].starts_with(EMPTY_BULLET_GROUP).then_some(byte));
+    // The paragraph's insertion point may sit before, inside or after the
+    // group.
+    let found = out
+        .match_indices(EMPTY_BULLET_GROUP)
+        .map(|(start, _)| start)
+        .find(|start| (*start..=start + EMPTY_BULLET_GROUP.len()).contains(&byte));
     let Some(start) = found else {
         return Ok(out);
     };

@@ -10127,3 +10127,44 @@ mod count_mode_tests {
         assert_eq!(mode.count(&app.tabs[i].scene.document), 3, "the mode counts the picked blocks");
     }
 }
+
+#[cfg(test)]
+mod select_by_handle_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+
+    /// Selecting by explicit handles (hex, as `query` returns them) takes
+    /// what was named: a line and a block reference named together both end
+    /// up selected, and the selection survives the op, so a following
+    /// command acts on both.
+    #[test]
+    fn select_by_handles_selects_every_named_entity() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        let insert = app.tabs[i].scene.add_entity(document::EntityType::Insert(
+            Insert::new("VALVE", Vector3::new(30.0, 0.0, 0.0)),
+        ));
+
+        let r = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{:X}","{:X}"]}}"#,
+            line.value(),
+            insert.value()
+        ));
+
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["selected"], 2, "both named entities are selected: {r}");
+        let selected: Vec<document::Handle> = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        assert!(selected.contains(&line) && selected.contains(&insert), "{selected:?}");
+    }
+}

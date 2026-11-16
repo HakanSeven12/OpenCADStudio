@@ -132,10 +132,19 @@ pub async fn load_from_dialog() -> Result<ColorBook, String> {
     Ok(book)
 }
 
+/// How deeply a colour book's elements may nest; real books nest four
+/// levels.
+const MAX_XML_DEPTH: usize = 256;
+
 /// Read an `.acb` file's text.
 pub fn parse(text: &str) -> Result<ColorBook, String> {
-    let doc = roxmltree::Document::parse(text.trim_start_matches('\u{feff}'))
-        .map_err(|e| e.to_string())?;
+    let text = text.trim_start_matches('\u{feff}');
+    if !crate::xml_depth::within(text, MAX_XML_DEPTH) {
+        return Err(format!(
+            "The color book nests deeper than {MAX_XML_DEPTH} levels."
+        ));
+    }
+    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     if !root.has_tag_name("colorBook") {
         return Err(crate::t!("Not a color book").into_owned());
@@ -247,5 +256,27 @@ mod tests {
                          <colorName>X</colorName><RGB8Encrypt>AbC</RGB8Encrypt></colorEntry>\
                          </colorPage></colorBook>";
         assert!(parse(encrypted).is_err());
+    }
+
+    #[test]
+    fn a_book_nested_too_deeply_is_refused_before_parsing() {
+        // A colour, and an element of no meaning to the book nested
+        // `levels` deep inside the book: 256 levels at most, the book and 255.
+        let nested = |levels: usize| {
+            format!(
+                "<colorBook><bookName>B</bookName>{}{}{}</colorBook>",
+                entry("C", (1, 2, 3)),
+                "<a>".repeat(levels),
+                "</a>".repeat(levels)
+            )
+        };
+        let colours = |levels: usize| parse(&nested(levels)).map(|b| b.colors.len());
+        assert_eq!(colours(255), Ok(1));
+        assert_eq!(
+            colours(256),
+            Err("The color book nests deeper than 256 levels.".to_string())
+        );
+        // 3,000 levels overflowed a test thread's stack inside the parser.
+        assert!(parse(&nested(100_000)).is_err());
     }
 }

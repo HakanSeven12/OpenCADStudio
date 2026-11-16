@@ -755,3 +755,277 @@ mod geo_attach_tests {
         .is_none());
     }
 }
+
+#[cfg(test)]
+mod pdfimport_tests {
+    use super::*;
+    use crate::command::StepInput;
+    use crate::modules::insert::pdf_import::PdfFileImport;
+    use document::entities::{Underlay, UnderlayType};
+    use document::EntityType;
+    use glam::DVec3;
+    use std::sync::Arc;
+
+    /// The Inkscape fixture of the PDF reader's tests, registered as a
+    /// file picked this session.
+    fn inkscape() -> String {
+        let path = format!(
+            "{}/tests/fixtures/pdf/inkscape.pdf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            Arc::new(std::fs::read(&path).expect("the fixture")),
+        );
+        path
+    }
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// The fixture's page 1 attached at the origin, full size: the
+    /// underlay's handle.
+    fn attached(app: &mut OpenCADStudio) -> document::Handle {
+        let i = app.active_tab;
+        let path = inkscape();
+        let pages = crate::modules::insert::pdf_attach::underlays_for_pages(
+            UnderlayType::Pdf,
+            &["1".to_string()],
+            DVec3::ZERO,
+            1.0,
+            0.0,
+        );
+        app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            &path,
+            pages,
+            false,
+        );
+        app.finish_all_pending_history();
+        underlays(app)[0].0
+    }
+
+    fn underlays(app: &OpenCADStudio) -> Vec<(document::Handle, Underlay)> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::Underlay(u) => Some((u.common.handle, u.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The texts of the drawing, and its other objects by kind (underlays
+    /// left out).
+    fn content(app: &OpenCADStudio) -> (Vec<String>, Vec<String>) {
+        let mut texts = Vec::new();
+        let mut others = Vec::new();
+        for e in app.tabs[app.active_tab].scene.document.entities() {
+            match e {
+                EntityType::MText(m) => texts.push(m.value.clone()),
+                EntityType::Underlay(_) => {}
+                other => others.push(
+                    format!("{other:?}")
+                        .split('(')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+            }
+        }
+        (texts, others)
+    }
+
+    fn import(app: &mut OpenCADStudio, source: PdfImportSource) -> usize {
+        let i = app.active_tab;
+        let before = app.tabs[i].history.undo_stack.len();
+        app.run_pdf_import(i, source);
+        app.finish_all_pending_history();
+        app.tabs[i].history.undo_stack.len() - before
+    }
+
+    fn whole(underlay: document::Handle, mode: UnderlayMode) -> PdfImportSource {
+        PdfImportSource::Underlay(PdfImportRequest {
+            underlay,
+            area: ImportArea::All,
+            mode,
+        })
+    }
+
+    fn history(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text()
+    }
+
+    /// The layers whose names follow the import's `PDF<n>_` prefix (the
+    /// number counts the session's imports), without it.
+    fn import_layers(app: &OpenCADStudio) -> Vec<String> {
+        let mut names: Vec<String> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .iter()
+            .filter_map(|l| {
+                let rest = l.name.strip_prefix("PDF")?;
+                let (number, kind) = rest.split_once('_')?;
+                number
+                    .chars()
+                    .all(|c| c.is_ascii_digit())
+                    .then(|| kind.to_string())
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn an_underlay_is_imported_in_one_undo_step_with_its_layers_and_styles() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Keep)), 1);
+        assert!(history(&app).contains("Binding PDF file "));
+        assert!(history(&app).contains(", page 1 ..."));
+        let (mut texts, others) = content(&app);
+        texts.sort();
+        assert_eq!(texts, ["Hello PDF", "Tilted"]);
+        // The polyline, the circle, the rectangle filled and stroked.
+        assert!(others.contains(&"Circle".to_string()), "{others:?}");
+        assert!(others.contains(&"LwPolyline".to_string()), "{others:?}");
+        assert!(others.contains(&"Solid".to_string()), "{others:?}");
+        assert_eq!(import_layers(&app), ["Geometry", "Solid Fills", "Text"]);
+        // Each layer in the colour most of its objects have, the first on a
+        // tie: the polyline's, among the polyline, circle and rectangle.
+        let geometry = app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .iter()
+            .find(|l| l.name.ends_with("_Geometry"))
+            .map(|l| l.color);
+        assert_eq!(
+            geometry,
+            Some(document::types::Color::Rgb { r: 204, g: 0, b: 0 })
+        );
+        let styles: Vec<String> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .text_styles
+            .iter()
+            .map(|s| s.name.clone())
+            .filter(|n| n.starts_with("PDF "))
+            .collect();
+        assert_eq!(styles, ["PDF ArialMT", "PDF TimesNewRomanPSMT"]);
+        // Keep leaves the underlay as it was.
+        assert_eq!(underlays(&app).len(), 1);
+        let document = &app.tabs[app.active_tab].scene.document;
+        let definition = crate::entities::underlay::definition(&underlays(&app)[0].1, document);
+        assert!(definition.is_some_and(|d| !d.unloaded));
+        // UNDO takes it all back.
+        app.undo_steps(1);
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn unload_and_detach_do_what_they_say() {
+        // Unload: the underlay stays, unloaded; it cannot be imported again.
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Unload)), 1);
+        let (_, underlay) = underlays(&app).remove(0);
+        let document = &app.tabs[app.active_tab].scene.document;
+        assert!(
+            crate::entities::underlay::definition(&underlay, document).is_some_and(|d| d.unloaded)
+        );
+        let objects = content(&app);
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Keep)), 0);
+        assert!(history(&app).contains("Cannot bind a PDF underlay that is unloaded."));
+        assert_eq!(content(&app), objects);
+
+        // Detach: the underlay is erased, and its definition with it.
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let definition = underlays(&app)[0].1.definition_handle;
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Detach)), 1);
+        assert!(underlays(&app).is_empty());
+        assert!(!app.tabs[app.active_tab]
+            .scene
+            .document
+            .objects
+            .contains_key(&definition));
+        assert_eq!(content(&app).0.len(), 2);
+    }
+
+    #[test]
+    fn a_file_is_imported_at_its_insertion_point_scale_and_rotation() {
+        let mut app = new_app();
+        let import_file = PdfFileImport {
+            path: inkscape(),
+            page: "1".to_string(),
+            scale: 2.0,
+            rotation: 0.0,
+            insertion: DVec3::new(10.0, 20.0, 0.0),
+        };
+        assert_eq!(import(&mut app, PdfImportSource::File(import_file)), 1);
+        assert!(history(&app).contains("Importing page 1 of PDF file: "));
+        // The circle of radius 0.5 round (5, 4.5) in, twice the size.
+        let circle = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Circle(c) => Some(c.clone()),
+                _ => None,
+            })
+            .expect("a circle");
+        assert!((circle.center.x - 20.0).abs() < 1e-6, "{:?}", circle.center);
+        assert!((circle.center.y - 29.0).abs() < 1e-6, "{:?}", circle.center);
+        assert!((circle.radius - 1.0).abs() < 1e-6);
+        // No underlay is attached for it.
+        assert!(underlays(&app).is_empty());
+
+        // A file that is not there.
+        let mut app = new_app();
+        let missing = PdfFileImport {
+            path: "pdfimport-test-missing.pdf".to_string(),
+            page: "1".to_string(),
+            scale: 1.0,
+            rotation: 0.0,
+            insertion: DVec3::ZERO,
+        };
+        assert_eq!(import(&mut app, PdfImportSource::File(missing)), 0);
+        assert!(history(&app).contains("pdfimport-test-missing.pdf not found."));
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+    }
+
+    /// -PDFIMPORT answered step by step (the point as the command line
+    /// hands it on, already a point).
+    #[test]
+    fn pdfimport_typed_on_the_command_line_imports_the_file() {
+        let mut app = new_app();
+        let path = inkscape();
+        let i = app.active_tab;
+        let _ = app.update(Message::Command("-PDFIMPORT".to_string()));
+        for input in [
+            StepInput::Text("F".to_string()),
+            StepInput::Text(path),
+            StepInput::Enter,
+            StepInput::Point(DVec3::new(5.0, 5.0, 0.0)),
+            StepInput::Text("3".to_string()),
+            StepInput::Enter,
+        ] {
+            let _ = app.feed_command(input);
+        }
+        app.finish_all_pending_history();
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
+        let (mut texts, _) = content(&app);
+        texts.sort();
+        assert_eq!(texts, ["Hello PDF", "Tilted"]);
+    }
+}

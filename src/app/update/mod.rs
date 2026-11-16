@@ -2424,6 +2424,15 @@ impl OpenCADStudio {
                 }
                 self.missing_fonts_path = None;
                 self.close_active_modal();
+                // Later drawings list their missing fonts on the command line.
+                if std::mem::take(&mut self.missing_fonts_silence) {
+                    self.check_missing_fonts = false;
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+            Message::MissingFontsSilence(on) => {
+                self.missing_fonts_silence = on;
                 Task::none()
             }
             Message::MissingFontsResult(result) => {
@@ -12405,6 +12414,11 @@ impl OpenCADStudio {
             }
             Message::BackupOnSaveChanged(enabled) => {
                 self.backup_on_save = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::CheckMissingFontsChanged(enabled) => {
+                self.check_missing_fonts = enabled;
                 self.persist_settings_if_changed();
                 Task::none()
             }

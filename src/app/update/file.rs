@@ -2828,8 +2828,9 @@ impl OpenCADStudio {
                 // Read-only/MCP evaluation sessions must remain non-blocking:
                 // report missing fonts through control state, but never offer
                 // a network/download mutation from a read-only launch.
-                // A running script reports them instead of stopping at a dialog.
-                if !missing.is_empty() && self.script_running {
+                // A running script, or a user who turned the window off, gets
+                // them on the command line instead of a dialog.
+                if !missing.is_empty() && (self.script_running || !self.check_missing_fonts) {
                     let list = format!("{}: {}", crate::t!("Missing fonts"), missing.join(", "));
                     self.command_line.push_warning(&list);
                 } else if !missing.is_empty() && self.check_missing_fonts && !self.read_only {

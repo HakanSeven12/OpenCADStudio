@@ -2321,6 +2321,8 @@ pub(super) struct OpenCADStudio {
     /// Prevent duplicate download tasks and keep modal contents visible while
     /// the background request is running.
     missing_fonts_downloading: bool,
+    /// Missing fonts window: Skip turns the window off for good.
+    missing_fonts_silence: bool,
     /// Fonts skipped or unavailable during this process lifetime. Reopening a
     /// drawing must not repeatedly nag for the same unresolved file.
     suppressed_missing_fonts: rustc_hash::FxHashSet<String>,
@@ -3799,6 +3801,7 @@ pub enum Message {
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
     BackupOnSaveChanged(bool),
+    CheckMissingFontsChanged(bool),
     /// A drawing was picked to import page setups from (`PSETUPIN`).
     PageSetupImportFile(std::path::PathBuf),
     /// Options: open the Plot / Page Setup dialog for every new layout.
@@ -5985,6 +5988,7 @@ pub enum Message {
     MissingFontsSourceChanged(String),
     /// Close the missing-fonts prompt without downloading.
     MissingFontsDismiss,
+    MissingFontsSilence(bool),
     /// Fonts fetched (or failed); payload lists (name, saved-path) pairs.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     MissingFontsResult(Result<Vec<(String, std::path::PathBuf)>, String>),
@@ -6756,6 +6760,7 @@ impl OpenCADStudio {
             missing_fonts: None,
             missing_fonts_path: None,
             missing_fonts_downloading: false,
+            missing_fonts_silence: false,
             suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
             pending_startup_script_lines: Vec::new(),

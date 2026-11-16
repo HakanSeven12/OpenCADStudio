@@ -1113,6 +1113,11 @@ pub fn run_scale(state: &RunState, entity_h: f32, base_wf: f32) -> f32 {
 
 /// The font a run draws with: its `\f` override (else `base`), in the bold
 /// / italic face the run asks for when the family has one.
+/// A font that takes no letter tracking: no letter spacing (TrueType).
+fn tracking_free(font_name: &str) -> bool {
+    Face::resolve(font_name).letter_spacing().abs() <= 1e-6
+}
+
 pub fn resolve_font<'a>(state: &'a RunState, base: &'a str) -> std::borrow::Cow<'a, str> {
     let font = run_font(state, base);
     match styled_font(&font, state.bold, state.italic) {
@@ -2640,7 +2645,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         // only the word gaps and leaves the paragraph's last line ragged; `qd`
         // spreads every glyph gap (letters and words) on every line. The slack
         // is shared as one gap `δ`: added to each space, and — for distribute —
-        // to each glyph via letter tracking, so `δ·(chars+spaces) = slack`.
+        // after each glyph but the last, which ends on the content edge, so
+        // `δ·(chars+spaces−1) = slack`.
         let is_last_in_para = sub_lines
             .get(i + 1)
             .is_none_or(|n| n.is_first_in_paragraph || n.column != sub.column);
@@ -2663,7 +2669,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             _ => None,
                         })
                         .sum();
-                    let n = chars + spaces;
+                    let n = (chars + spaces).saturating_sub(1);
                     (true, if n > 0 { slack / n as f32 } else { 0.0 })
                 } else if spaces > 0 {
                     (false, slack / spaces as f32)
@@ -2680,7 +2686,32 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         } else {
             cursor_start - lead
         };
-        for (ai, atom) in sub.atoms.iter().enumerate() {
+        // A font without letter spacing (TrueType) takes no letter tracking:
+        // its distributed words are laid out one character at a time, each
+        // followed by the gap.
+        let letter_atoms: Option<Vec<LayoutAtom>> =
+            (spread_letters && !opts.vertical_text).then(|| {
+                sub.atoms
+                    .iter()
+                    .flat_map(|atom| match &atom.kind {
+                        AtomKind::Word(text)
+                            if tracking_free(&resolve_font(&atom.state, &base_font_name)) =>
+                        {
+                            text.chars()
+                                .enumerate()
+                                .map(|(index, ch)| LayoutAtom {
+                                    kind: AtomKind::Word(ch.to_string()),
+                                    state: atom.state.clone(),
+                                    char_offset: atom.char_offset + index,
+                                })
+                                .collect::<Vec<_>>()
+                        }
+                        _ => vec![atom.clone()],
+                    })
+                    .collect()
+            });
+        let atoms: &[LayoutAtom] = letter_atoms.as_deref().unwrap_or(&sub.atoms);
+        for (ai, atom) in atoms.iter().enumerate() {
             match &atom.kind {
                 AtomKind::Word(text) => {
                     let run_h = atom.state.height_mul * entity_h;
@@ -2981,6 +3012,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     } else {
                         cursor_x +=
                             measure_word(text, &atom.state, entity_h, base_wf, &base_font_name);
+                        // A character laid out on its own (above) is followed
+                        // by the distributed gap.
+                        if letter_atoms.is_some() && tracking_free(&font_name) {
+                            cursor_x += gap;
+                        }
                     }
                     local_bounds[0] = local_bounds[0].min(word_x0);
                     local_bounds[1] = local_bounds[1].min(line_ly + ly);
@@ -3294,7 +3330,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             let sx = tab_base + stop.unwrap().position;
                             let mut field_w = 0.0_f32;
                             let mut before_dot: Option<f32> = None;
-                            for next in &sub.atoms[ai + 1..] {
+                            for next in &atoms[ai + 1..] {
                                 match &next.kind {
                                     AtomKind::Word(t) => {
                                         if before_dot.is_none() {

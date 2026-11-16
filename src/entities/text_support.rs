@@ -704,12 +704,14 @@ pub fn adapt_mtext_paragraphs(
 
     let entity_height = entity_height.max(1e-6);
     let doc = parse_mtext(s, true);
-    // Paragraph indents and tab stops: the extended `\px…;` form measures
-    // them in text heights, the bare `\p…;` form (older editors and
-    // text-to-MTEXT converters, which centre each line with it) in drawing
-    // units (#1918). A block sets them when one of its comma-separated codes
-    // starts with i, l, r or t; alignment (`ql`, `qc`, …) and spacing codes
-    // don't.
+    // Paragraph indents and tab stops: a text whose `\px…;` code sets them
+    // measures them in text heights, the later bare `\p…;` codes of the same
+    // text included (one `\px` code opens the text, the paragraphs after it
+    // write `\p`). A text with bare codes only (older editors and
+    // text-to-MTEXT converters, which centre each line with it) measures
+    // them in drawing units (#1918). A block sets them when one of its
+    // comma-separated codes starts with i, l, r or t; alignment (`ql`, `qc`,
+    // …) and spacing codes don't.
     let sets_indent = |props: &str| {
         props
             .split(';')
@@ -718,14 +720,10 @@ pub fn adapt_mtext_paragraphs(
             .split(',')
             .any(|code| code.starts_with(['i', 'l', 'r', 't']))
     };
-    let (mut has_px_indent, mut has_bare_p_indent) = (false, false);
-    for (i, _) in s.match_indices("\\p") {
-        match s[i + 2..].strip_prefix('x') {
-            Some(extended) => has_px_indent |= sets_indent(extended),
-            None => has_bare_p_indent |= sets_indent(&s[i + 2..]),
-        }
-    }
-    let para_unit = if has_bare_p_indent || !has_px_indent {
+    let has_px_indent = s
+        .match_indices("\\px")
+        .any(|(i, _)| sets_indent(&s[i + 3..]));
+    let para_unit = if !has_px_indent {
         1.0
     } else {
         entity_height
@@ -4299,6 +4297,14 @@ mod v_anchor_tests {
             (doc4[0].indent_left - 500.0).abs() < 1e-3,
             "got {}",
             doc4[0].indent_left
+        );
+
+        // Case 5: the bare codes after an extended one are in text heights.
+        let doc5 = adapt_mtext_paragraphs("\\pxl2;A\\P\\pl4;B", 250.0, true);
+        assert!(
+            (doc5[1].indent_left - 1000.0).abs() < 1e-3,
+            "got {}",
+            doc5[1].indent_left
         );
     }
 

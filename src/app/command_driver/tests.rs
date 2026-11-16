@@ -9898,3 +9898,56 @@ mod join_command_tests {
         assert_eq!(xs.iter().cloned().reduce(f64::max), Some(18.0), "{line:?}");
     }
 }
+
+#[cfg(test)]
+mod array_surface_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
+    /// ARRAYRECT on the pickfirst selection runs to its associative
+    /// array from the command line: typed row and column counts and
+    /// spacings produce the array entity, and the source geometry is
+    /// consumed by it.
+    #[test]
+    fn arrayrect_builds_the_associative_array_from_the_preselection() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+        );
+        app.tabs[i].scene.select_entities(&[line]);
+
+        let _ = app.run_command_line("ARRAYRECT");
+        let _ = app.feed_script_line("3");
+        let _ = app.feed_script_line("2");
+        let _ = app.feed_script_line("10");
+        let _ = app.feed_script_line("5");
+
+        assert!(
+            out(&app).contains("associative array created"),
+            "the command reports the array: {}",
+            out(&app)
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "the source line is consumed by the array"
+        );
+        let inserts = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Insert(_)))
+            .count();
+        assert!(inserts >= 1, "the array item entity exists");
+    }
+}

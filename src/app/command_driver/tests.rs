@@ -10088,3 +10088,42 @@ mod attedit_editor_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod count_mode_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Insert;
+    use document::types::Vector3;
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
+    /// COUNT C (Count Selection) takes the preselection as its target:
+    /// the count is announced, count mode is on with the picked blocks
+    /// as its target, and the number answers COUNTNUMBER afterwards.
+    #[test]
+    fn count_selection_counts_the_preselected_inserts() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![document::EntityType::Circle(document::entities::Circle::new())],
+        );
+        let mut handles = Vec::new();
+        for n in 0..3 {
+            let insert = Insert::new("VALVE", Vector3::new(n as f64 * 30.0, 0.0, 0.0));
+            handles.push(app.tabs[i].scene.add_entity(document::EntityType::Insert(insert)));
+        }
+        app.tabs[i].scene.select_entities(&handles);
+
+        let _ = app.run_command_line("COUNT C");
+
+        assert!(out(&app).contains("3 found"), "the count announced: {}", out(&app));
+        let mode = app.tabs[i].count.as_ref().expect("count mode is on");
+        assert_eq!(mode.count(&app.tabs[i].scene.document), 3, "the mode counts the picked blocks");
+    }
+}

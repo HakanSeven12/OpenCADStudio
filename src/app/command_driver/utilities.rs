@@ -1357,6 +1357,9 @@ impl OpenCADStudio {
             // ATTSYNC <block> names its block on the line; a bare ATTSYNC
             // still asks its [?/Name/Select] question.
             || (tokens[0].eq_ignore_ascii_case("ATTSYNC") && tokens.len() > 1)
+            // COUNT C counts the preselection; probing the verb alone would
+            // install the area-asking command and swallow the answer.
+            || tokens[0].eq_ignore_ascii_case("COUNT")
         {
             return self.dispatch_command(cmd);
         }

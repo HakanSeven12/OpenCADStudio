@@ -10,7 +10,7 @@ use std::io::Read;
 use super::model::{
     arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
     DgnColor, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport, DgnReference, Path,
-    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS,
+    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
 };
 
 // ── Compound file ───────────────────────────────────────────────────────────
@@ -1445,7 +1445,8 @@ fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
 }
 
 /// Places plan geometry through the sheet mapping `m`, and the shared cells
-/// it instances (each definition read through its own placement).
+/// it instances (each definition read through its own placement); the
+/// instances spend `budget` (see [`DGN_PLACEMENT_BUDGET`]).
 fn place(
     raw: &Raw,
     m: &Affine,
@@ -1453,6 +1454,7 @@ fn place(
     styles: &Styles,
     depth: usize,
     out: &mut Sheet,
+    budget: &mut usize,
 ) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
@@ -1495,6 +1497,11 @@ fn place(
         let Some(def) = defs.get(&inst.name) else {
             continue;
         };
+        // Each instance reads its definition's elements again.
+        let Some(left) = budget.checked_sub(1 + def.len()) else {
+            return;
+        };
+        *budget = left;
         place(
             &read_run(def, styles, &inst.xf),
             m,
@@ -1502,6 +1509,7 @@ fn place(
             styles,
             depth + 1,
             out,
+            budget,
         );
     }
 }
@@ -1744,7 +1752,8 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         table_colors,
         ..Default::default()
     };
-    place(&raw, &m, &defs, &styles, 0, &mut sheet);
+    let mut budget = DGN_PLACEMENT_BUDGET;
+    place(&raw, &m, &defs, &styles, 0, &mut sheet, &mut budget);
     // The model's extent is its elements' stored ranges (text by its full
     // box), as the reference sizes a model.
     sheet.rect = match stored_range(&graphics) {
@@ -2318,4 +2327,91 @@ mod mesh_tests {
         assert!(super::element_stream(&[]).is_empty());
     }
 
+}
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+
+    /// An element of `kind` and `len` bytes, a component when `part`.
+    fn element(kind: u8, len: usize, part: bool) -> Vec<u8> {
+        let mut e = vec![0u8; len];
+        e[0] = kind;
+        e[2..4].copy_from_slice(&(if part { 0x4000u16 } else { 0 }).to_le_bytes());
+        e[4..8].copy_from_slice(&(((len - 4) / 2) as u32).to_le_bytes());
+        e
+    }
+
+    fn put_f64(e: &mut [u8], at: usize, v: f64) {
+        e[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// A 2D line component from 0,0 to 10,10.
+    fn line() -> Vec<u8> {
+        let mut e = element(3, 136, true);
+        put_f64(&mut e, 120, 10.0);
+        put_f64(&mut e, 128, 10.0);
+        e
+    }
+
+    /// An instance of the shared cell `name`, unscaled, `dx` along x.
+    fn instance(part: bool, name: &str, dx: f64) -> Vec<u8> {
+        let mut e = element(35, 264, part);
+        for k in [0, 4, 8] {
+            put_f64(&mut e, 160 + k * 8, 1.0);
+        }
+        put_f64(&mut e, 232, dx);
+        e[248..252].copy_from_slice(&[0xff, 0xfe, 0x01, 0x00]);
+        e[252..252 + name.len()].copy_from_slice(name.as_bytes());
+        e
+    }
+
+    /// The paths placing one instance of the shared cell `A` gives, when `A`
+    /// holds a line (when `line`) and `n` instances of `A` itself.
+    fn self_placing(n: usize, line_too: bool) -> usize {
+        let parts: Vec<Vec<u8>> = line_too
+            .then(line)
+            .into_iter()
+            .chain((0..n).map(|k| instance(true, "A", k as f64 * 20.0)))
+            .collect();
+        let defs = HashMap::from([(
+            "A".to_string(),
+            parts.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+        )]);
+        let styles = Styles {
+            colors: DGN_DEFAULT_COLORS.to_vec(),
+            levels: HashMap::new(),
+            hidden: Default::default(),
+            extended: Vec::new(),
+            cells: HashMap::new(),
+        };
+        let top = instance(false, "A", 0.0);
+        let raw = read_run(&[&top], &styles, &IDENTITY);
+        let (mut sheet, mut budget) = (Sheet::default(), DGN_PLACEMENT_BUDGET);
+        let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        place(&raw, &identity, &defs, &styles, 0, &mut sheet, &mut budget);
+        sheet.paths.len()
+    }
+
+    /// `f`'s result, run on its own thread, so that a placement that never
+    /// ends fails the test instead of stopping the run.
+    fn within_ten_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(f()));
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the placement did not end")
+    }
+
+    #[test]
+    fn a_cell_that_places_itself_stops_when_the_budget_is_spent() {
+        let paths = |n: usize, line: bool| within_ten_seconds(move || self_placing(n, line));
+        // One copy of the line at each of the eight levels nesting reads.
+        assert_eq!(paths(1, true), 8);
+        assert_eq!(paths(2, true), 255);
+        // 11,111,111 copies before; each instance costs 12 (itself and the
+        // eleven elements of the definition it reads again).
+        assert_eq!(paths(10, true), DGN_PLACEMENT_BUDGET / 12);
+        // A cell that draws nothing still spends: 100⁷ placements before.
+        assert_eq!(paths(100, false), 0);
+    }
 }

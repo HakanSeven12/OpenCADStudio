@@ -1699,6 +1699,16 @@ pub(crate) fn resolved_dimension_style(
             style.dimtxsty = record.name.clone();
         }
     }
+    // A text style with a fixed height sizes the dimension text instead of
+    // DIMTXT (#3116).
+    if let Some(record) = document
+        .text_styles
+        .iter()
+        .find(|record| record.name.eq_ignore_ascii_case(&style.dimtxsty))
+        .filter(|record| record.has_fixed_height())
+    {
+        style.dimtxt = record.height;
+    }
 
     // The dimension's own annotation context decides whether it scales with
     // the annotation scale; the style only seeds new dimensions. A dimension

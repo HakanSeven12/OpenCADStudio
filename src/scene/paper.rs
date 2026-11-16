@@ -200,7 +200,13 @@ impl Scene {
             let Some(EntityType::Viewport(vp)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if !vp.is_on() || self.entity_temporarily_hidden(handle) {
+            // A grip drag hides only the frame (the overlay redraws it); the
+            // document viewport already follows the drag, so keep its model
+            // contents live instead of blanking them until release (#3100).
+            if !vp.is_on()
+                || (self.entity_temporarily_hidden(handle)
+                    && !self.preview_hidden.contains(&handle))
+            {
                 continue;
             }
             let h = vp.common.handle;

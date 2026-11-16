@@ -904,7 +904,8 @@ impl OpenCADStudio {
 
             "PLOTWINDOW" => {
                 use crate::modules::view::plot_window::PlotWindowCommand;
-                let cmd = PlotWindowCommand::new();
+                let mut cmd = PlotWindowCommand::new();
+                cmd.twist = self.model_plot_twist();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

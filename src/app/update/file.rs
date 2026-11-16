@@ -6831,6 +6831,7 @@ impl OpenCADStudio {
                 offset_x,
                 offset_y,
                 rotation_deg: rotation,
+                content_rotation: 0.0,
                 scale: scale as f32,
                 clip,
                 options: Self::pdf_plot_options(&self.plot_dialog),
@@ -6887,6 +6888,7 @@ impl OpenCADStudio {
             offset_x,
             offset_y,
             rotation_deg: 0,
+            content_rotation: 0.0,
             scale: 1.0,
             clip: None,
             options: Self::pdf_plot_options(&self.plot_dialog),
@@ -7010,12 +7012,12 @@ impl OpenCADStudio {
         // built its page before returning, so restoring here is final.
         let previous_area = self.plot_dialog.area.clone();
         self.plot_dialog.area = "Window".into();
-        self.plot_window = Some((
+        self.plot_window = Some(self.view_frame_box((
             (x0 - mx) as f64,
             (y0 - my) as f64,
             (x1 + mx) as f64,
             (y1 + my) as f64,
-        ));
+        )));
         let path = self.quick_print_path();
         let task = self.on_plot_window_export_path_some(path);
         self.plot_dialog.area = previous_area;
@@ -8576,7 +8578,7 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn limits_plot_job(&self) -> Option<PdfPageInput> {
         let (min, max) = self.tabs[self.active_tab].scene.current_drawing_limits()?;
-        self.area_plot_job((min.x, min.y, max.x, max.y))
+        self.area_plot_job(self.view_frame_box((min.x, min.y, max.x, max.y)))
     }
 
     fn named_view_plot_job(&self, name: &str) -> Option<PdfPageInput> {
@@ -8595,17 +8597,22 @@ impl OpenCADStudio {
         (half_w > 1e-9 && half_h > 1e-9).then_some(())?;
         let center = crate::scene::named_view_center(view);
         let (cx, cy) = (center.x, center.y);
-        self.area_plot_job((cx - half_w, cy - half_h, cx + half_w, cy + half_h))
+        self.area_plot_job(self.view_frame_box((cx - half_w, cy - half_h, cx + half_w, cy + half_h)))
     }
 
     pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout == "Model" {
             if let Some((min, max)) = scene.visible_block_bounds(scene.model_space_block_handle()) {
-                return self.area_plot_job((min.x, min.y, max.x, max.y));
+                return self.area_plot_job(self.view_frame_box((min.x, min.y, max.x, max.y)));
             }
             let (min, max) = scene.model_space_extents()?;
-            return self.area_plot_job((min.x as f64, min.y as f64, max.x as f64, max.y as f64));
+            return self.area_plot_job(self.view_frame_box((
+                min.x as f64,
+                min.y as f64,
+                max.x as f64,
+                max.y as f64,
+            )));
         }
         let content = plot_scene_content(
             scene,
@@ -8614,6 +8621,41 @@ impl OpenCADStudio {
         );
         let extents = plot_content_extents(&content)?;
         self.area_plot_job(extents)
+    }
+
+    /// In-plane turn (radians) of a top-down orthographic model view. Model
+    /// plot windows are framed in the view's own axes, so a twisted view
+    /// plots the way it is seen.
+    pub(in crate::app) fn model_plot_twist(&self) -> f64 {
+        let scene = &self.tabs[self.active_tab].scene;
+        if scene.current_layout != "Model" {
+            return 0.0;
+        }
+        let camera = scene.camera.borrow();
+        if camera.projection != crate::scene::view::camera::Projection::Orthographic {
+            return 0.0;
+        }
+        let eye = camera.rotation * glam::Vec3::Z;
+        if eye.x.abs() > 1e-5 || eye.y.abs() > 1e-5 || eye.z <= 0.0 {
+            return 0.0;
+        }
+        let x = camera.rotation * glam::Vec3::X;
+        let twist = (x.y as f64).atan2(x.x as f64);
+        if twist.abs() < 1e-6 {
+            0.0
+        } else {
+            twist
+        }
+    }
+
+    /// A world-space box as a window in the view's own axes.
+    pub(in crate::app) fn view_frame_box(
+        &self,
+        (x0, y0, x1, y1): (f64, f64, f64, f64),
+    ) -> (f64, f64, f64, f64) {
+        let [x0, y0, x1, y1] =
+            crate::io::plot::turned_bounds(-self.model_plot_twist(), [x0, y0, x1, y1]);
+        (x0, y0, x1, y1)
     }
 
     /// Current visible rectangle in the active space. The result is deliberately
@@ -8641,6 +8683,7 @@ impl OpenCADStudio {
             width: viewport.width,
             height: viewport.height,
         };
+        let (sin, cos) = (-self.model_plot_twist()).sin_cos();
         let camera = scene.camera.borrow();
         let mut x0 = f64::INFINITY;
         let mut y0 = f64::INFINITY;
@@ -8653,6 +8696,10 @@ impl OpenCADStudio {
             iced::Point::new(0.0, bounds.height),
         ] {
             let world = camera.unproject_on_plane(point, bounds, glam::Vec3::Z, glam::DVec3::ZERO);
+            let world = glam::DVec2::new(
+                cos * world.x - sin * world.y,
+                sin * world.x + cos * world.y,
+            );
             x0 = x0.min(world.x);
             y0 = y0.min(world.y);
             x1 = x1.max(world.x);
@@ -8785,7 +8832,11 @@ impl OpenCADStudio {
             origin_y
         };
         let scene = &self.tabs[i].scene;
-        let (wx0, wy0, wx1, wy1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+        // The window is in the view's own axes; keep what its turned outline
+        // touches in world space.
+        let twist = self.model_plot_twist();
+        let [wx0, wy0, wx1, wy1] =
+            crate::io::plot::turned_bounds(twist, [x0, y0, x1, y1]).map(|v| v as f32);
         let mut content = plot_scene_content(
             scene,
             self.plot_dialog.paperspace_last,
@@ -8804,8 +8855,10 @@ impl OpenCADStudio {
             .filter(|wire| in_window(wire))
             .count();
         std::sync::Arc::make_mut(&mut content.wires).retain(in_window);
-        let offset_x = (target_x / scale) - x0;
-        let offset_y = (target_y / scale) - y0;
+        let (sin, cos) = twist.sin_cos();
+        let (frame_x, frame_y) = ((target_x / scale) - x0, (target_y / scale) - y0);
+        let offset_x = cos * frame_x - sin * frame_y;
+        let offset_y = sin * frame_x + cos * frame_y;
         let clip = Some((
             (target_x / scale) as f32,
             (target_y / scale) as f32,
@@ -8824,11 +8877,14 @@ impl OpenCADStudio {
             offset_x,
             offset_y,
             rotation_deg: rotation,
+            content_rotation: -twist,
             scale: scale as f32,
             clip,
             options: Self::pdf_plot_options(&self.plot_dialog),
             plot_style: self.dialog_plot_style(&self.plot_dialog),
-            geopdf: self.geopdf_frame_for_window(window).ok().flatten(),
+            geopdf: (twist == 0.0)
+                .then(|| self.geopdf_frame_for_window(window).ok().flatten())
+                .flatten(),
         })
     }
 

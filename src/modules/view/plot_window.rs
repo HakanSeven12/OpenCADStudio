@@ -10,6 +10,8 @@ use glam::DVec3;
 
 pub struct PlotWindowCommand {
     p1: Option<DVec3>,
+    /// View twist (radians): the window's sides follow the screen.
+    pub twist: f64,
 }
 
 impl Default for PlotWindowCommand {
@@ -20,7 +22,7 @@ impl Default for PlotWindowCommand {
 
 impl PlotWindowCommand {
     pub fn new() -> Self {
-        Self { p1: None }
+        Self { p1: None, twist: 0.0 }
     }
 }
 
@@ -57,8 +59,14 @@ impl CadCommand for PlotWindowCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let p1 = self.p1?;
+        // The other two corners lie along the view's axes from these two.
+        let axis = glam::DVec3::new(self.twist.cos(), self.twist.sin(), 0.0);
+        let along = (pt - p1).dot(axis);
+        let c1 = (p1 + axis * along).as_vec3();
+        let c2 = (pt - axis * along).as_vec3();
         let pt = pt.as_vec3();
-        let p1 = self.p1?.as_vec3();
+        let p1 = p1.as_vec3();
         // Draw the selection rectangle.
         Some(WireModel {
             bg_adapt: None,
@@ -81,12 +89,12 @@ impl CadCommand for PlotWindowCommand {
             name: "plotwindow_preview".into(),
             points: vec![
                 [p1.x, p1.y, p1.z],
-                [pt.x, p1.y, p1.z],
-                [pt.x, p1.y, p1.z],
+                [c1.x, c1.y, p1.z],
+                [c1.x, c1.y, p1.z],
                 [pt.x, pt.y, pt.z],
                 [pt.x, pt.y, pt.z],
-                [p1.x, pt.y, pt.z],
-                [p1.x, pt.y, pt.z],
+                [c2.x, c2.y, pt.z],
+                [c2.x, c2.y, pt.z],
                 [p1.x, p1.y, p1.z],
             ],
             points_low: Vec::new(),

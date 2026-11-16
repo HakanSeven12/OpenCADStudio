@@ -666,7 +666,13 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let layout_name = self.tabs[i].scene.current_layout.clone();
         if layout_name == "Model" {
-            // Model space: remember the window (world X/Y) for the plot dialog.
+            // Model space: remember the window, in the view's own axes, for
+            // the plot dialog.
+            let (sin, cos) = (-self.model_plot_twist()).sin_cos();
+            let turn = |p: glam::DVec3| {
+                glam::DVec2::new(cos * p.x - sin * p.y, sin * p.x + cos * p.y)
+            };
+            let (p1, p2) = (turn(p1), turn(p2));
             let x0 = p1.x.min(p2.x);
             let y0 = p1.y.min(p2.y);
             let x1 = p1.x.max(p2.x);

@@ -181,6 +181,10 @@ pub struct PlotPage {
     pub offset_x: f64,
     pub offset_y: f64,
     pub rotation_deg: i32,
+    /// Counter-clockwise turn (radians) of the offset content before scale
+    /// and page rotation: a model plot of a twisted view comes out as seen on
+    /// screen. `clip` is in the turned space.
+    pub content_rotation: f64,
     pub scale: f32,
     pub clip: Option<(f32, f32, f32, f32)>,
     pub options: PlotOptions,
@@ -188,6 +192,21 @@ pub struct PlotPage {
     /// Explicit model-space GeoPDF registration. Plot-file export may consume
     /// this; preview and ordinary printing always ignore it.
     pub geopdf: Option<crate::io::geopdf_export::GeoPdfFrame>,
+}
+
+/// Bounds of the rectangle `[x0, y0, x1, y1]` turned counter-clockwise by
+/// `angle` radians about the origin.
+pub fn turned_bounds(angle: f64, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+    if angle == 0.0 {
+        return [x0, y0, x1, y1];
+    }
+    let (sin, cos) = angle.sin_cos();
+    let mut out = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+        let (tx, ty) = (cos * x - sin * y, sin * x + cos * y);
+        out = [out[0].min(tx), out[1].min(ty), out[2].max(tx), out[3].max(ty)];
+    }
+    out
 }
 
 impl Default for PlotOptions {

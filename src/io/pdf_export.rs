@@ -609,7 +609,9 @@ fn append_pdf_page(
     // Apply rotation/scale/clip transform if needed.
     // PDF uses mm-based coordinate system with origin at bottom-left.
     // We save state, apply a CTM (+ optional clip path), then restore after drawing.
-    let needs_state = rotation_deg != 0 || (scale - 1.0).abs() > 1e-6 || clip.is_some();
+    let turn = page.content_rotation;
+    let needs_state =
+        rotation_deg != 0 || (scale - 1.0).abs() > 1e-6 || clip.is_some() || turn != 0.0;
     if needs_state {
         let (cos_a, sin_a, tx, ty) = match rotation_deg {
             // `paper_w`/`paper_h` are already the effective, rotation-swapped
@@ -679,6 +681,20 @@ fn append_pdf_page(
             });
         }
     }
+    // The clip is in the turned space, so the turn follows it.
+    if turn != 0.0 {
+        let (sin, cos) = turn.sin_cos();
+        ops.push(Op::SetTransformationMatrix {
+            matrix: printpdf::CurTransMat::Raw([
+                cos as f32,
+                sin as f32,
+                -sin as f32,
+                cos as f32,
+                0.0,
+                0.0,
+            ]),
+        });
+    }
 
     let (first_wires, second_wires) = wires.split_at(group_splits.wires.min(wires.len()));
     let (first_hatches, second_hatches) = hatches.split_at(group_splits.hatches.min(hatches.len()));
@@ -730,7 +746,10 @@ fn append_pdf_page(
         // blank page of several megabytes. Drop items whose ink misses the window.
         if let Some((cx, cy, cw, ch)) = clip {
             let marker_h = paper_h as f64 / scale.max(1e-6) as f64;
-            let window = [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64];
+            let window = crate::io::plot::turned_bounds(
+                -turn,
+                [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64],
+            );
             draw_items.retain(|(_, _, _, item)| {
                 let bounds = match item {
                     DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
@@ -3050,6 +3069,7 @@ mod tests {
             offset_x: 0.0,
             offset_y: 0.0,
             rotation_deg: 0,
+            content_rotation: 0.0,
             scale: 1.0,
             clip: None,
             options: PdfPlotOptions::default(),

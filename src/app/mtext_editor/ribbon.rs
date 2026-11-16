@@ -103,7 +103,12 @@ impl OpenCADStudio {
     /// Run a Text Editor tool (`_MTED <action>`) on the open editor. None
     /// for any other command; with no editor open the tool does nothing.
     pub(in crate::app) fn dispatch_text_editor_tool(&mut self, cmd: &str) -> Option<Task<Message>> {
-        let rest = cmd.trim().strip_prefix("_MTED")?.trim().to_string();
+        let rest = cmd.trim().strip_prefix("_MTED")?;
+        // A whole word only: `_MTEDIT` is another command.
+        if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+            return None;
+        }
+        let rest = rest.trim().to_string();
         if self.mtext_editor.is_none() {
             return Some(Task::none());
         }

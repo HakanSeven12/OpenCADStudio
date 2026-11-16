@@ -517,7 +517,13 @@ fn value_class_name(value: &WidgetCellValue) -> &'static str {
 /// `true` when the kind is a scalar (skeleton-)patch-writable WRITE kind —
 /// the crate's rule ("only the scalar kinds are patch-writable through the
 /// skeleton") as an enumeration, shared by the begin + draft gates.
-fn is_patch_writable(kind: CellKind) -> bool {
+///
+/// (SCN-028: `pub(crate)` — the ONE visibility-only widening of this frozen
+/// layer, zero logic moved. The typed-table MOUNT's builder classifies
+/// display-only columns through THIS predicate instead of re-declaring the
+/// rule mount-side — two truths for the writability law would be the drift
+/// the one-path discipline exists to kill.)
+pub(crate) fn is_patch_writable(kind: CellKind) -> bool {
     matches!(kind, CellKind::Text | CellKind::Number | CellKind::Bool)
 }
 

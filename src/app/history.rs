@@ -1,3 +1,5 @@
+mod memory;
+
 use super::{
     tab_document::{
         DeltaSnapshot, HistoryLabel, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
@@ -124,31 +126,7 @@ impl OpenCADStudio {
 
     fn trim_history(&mut self, i: usize) {
         let (max_entries, max_bytes) = history_limits();
-        let history = &mut self.tabs[i].history;
-        let mut entries = history
-            .undo_stack
-            .len()
-            .saturating_add(history.redo_stack.len());
-        let mut bytes = history
-            .undo_stack
-            .iter()
-            .chain(history.redo_stack.iter())
-            .fold(0usize, |sum, item| {
-                sum.saturating_add(item.estimated_bytes())
-            });
-        let mut discarded = Vec::new();
-        while entries > max_entries || bytes > max_bytes {
-            let item = if !history.undo_stack.is_empty() {
-                history.undo_stack.remove(0)
-            } else if !history.redo_stack.is_empty() {
-                history.redo_stack.remove(0)
-            } else {
-                break;
-            };
-            entries -= 1;
-            bytes = bytes.saturating_sub(item.estimated_bytes());
-            discarded.push(item);
-        }
+        let discarded = memory::trim(&mut self.tabs[i].history, max_entries, max_bytes);
         defer_history_drop(discarded);
     }
 

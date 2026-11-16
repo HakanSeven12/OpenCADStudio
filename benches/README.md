@@ -153,6 +153,28 @@ retention ceiling per scenario. Reports are saved before these checks so a
 failure can be inspected. Timings are diagnostic and do not gate comparisons.
 Old reports must be regenerated because their peaks included fixture setup.
 
+Undo history uses capacity estimates for common large geometry, text, ACIS,
+graphic-byte and raw-DWG payloads. Shared entity images and raw records are
+charged once across undo and redo; structural/style and uncommon entity
+payloads remain approximate. This is an eviction budget, not a process-memory
+ceiling, and deferred destruction can temporarily keep evicted entries live.
+Run its regression cases and optional dense-history accounting latency probe:
+
+```sh
+cargo test --locked --lib undo_budget -- --test-threads=1
+cargo test --locked --release --lib undo_budget_dense_history_probe -- --ignored --nocapture
+cargo test --locked --lib undo_budget_before_after_retention_probe -- --ignored --nocapture --test-threads=1
+```
+
+The latency probe scans 256 entries with 1,000 shared entity images each, without
+changing the workload between checks. Debug timings are not release baselines.
+The retention probe compares the pre-change 512-byte entity allowance with the
+current policy at the default 512 MiB / 256-entry limits. Each sequential arm
+creates 160 undo entries holding populated 100,000-vertex polylines (about 733 MiB
+of vertex buffers), then reports retained entry count, budget estimate, and
+unique vertex-buffer capacity after dropping evicted entries. Capacity results
+are valid in debug builds; these are not RSS or deferred-drop backlog readings.
+
 ## Text shaping and geometry
 
 This benchmark generates a deterministic synthetic text workload; it does not

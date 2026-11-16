@@ -1093,22 +1093,36 @@ impl HistorySnapshot {
         }
     }
 
-    /// Approximate retained history memory. Entity images are shared through
-    /// `Arc`; the estimate conservatively budgets their payloads and optional
-    /// structure state to keep pathological histories bounded.
-    pub(super) fn estimated_bytes(&self) -> usize {
-        match self {
+    /// Snapshot-owned bookkeeping and structural estimates. Shared entity
+    /// images and raw records are charged separately across both history stacks.
+    pub(super) fn estimated_overhead_bytes(&self) -> usize {
+        let bytes = match self {
             HistorySnapshot::Delta(d) => d
                 .entities
-                .len()
-                .saturating_mul(512)
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(
+                    Handle,
+                    Option<Arc<EntityType>>,
+                    Option<Arc<EntityType>>,
+                )>())
+                .saturating_add(std::mem::size_of::<DeltaSnapshot>())
+                .saturating_add(d.current_layout_before.capacity())
+                .saturating_add(d.current_layout_after.capacity())
                 .saturating_add(
                     d.structure
                         .as_ref()
                         .map_or(0, StructureSnapshot::estimated_bytes),
                 )
-                .saturating_add(d.selected_before.len().saturating_mul(16))
-                .saturating_add(d.selected_after.len().saturating_mul(16))
+                .saturating_add(
+                    d.selected_before
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Handle>()),
+                )
+                .saturating_add(
+                    d.selected_after
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Handle>()),
+                )
                 .saturating_add(d.active_layer.as_ref().map_or(0, |(before, after)| {
                     before.len().saturating_add(after.len())
                 }))
@@ -1149,7 +1163,8 @@ impl HistorySnapshot {
                 .saturating_add(v.selected_after.len())
                 .saturating_mul(16)
                 .saturating_add(v.label.estimated_bytes()),
-        }
+        };
+        bytes.saturating_add(std::mem::size_of::<Self>())
     }
 }
 

@@ -1146,7 +1146,7 @@ impl OpenCADStudio {
             .active_plot_style
             .as_ref()
             .map(|table| table.name.clone());
-        let save_document = self.tabs[i].scene.document_for_save();
+        let save_document = self.tabs[i].document_for_save();
         let (package, drawing) = match crate::io::transmit::collect_web(
             &save_document,
             &filename,

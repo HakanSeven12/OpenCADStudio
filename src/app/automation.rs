@@ -1009,6 +1009,10 @@ impl OpenCADStudio {
                         let i = self.active_tab;
                         self.tabs[i].scene.clear();
                         self.tabs[i].scene.document = doc;
+                        self.tabs[i].xref_unloaded =
+                            crate::io::xref_model::UnloadSet::from_document(
+                                &self.tabs[i].scene.document,
+                            );
                         self.tabs[i].scene.sync_annotation_scale_from_header();
                         self.tabs[i].scene.bump_layout_epoch();
                         self.tabs[i].scene.bump_scale_epoch();
@@ -1335,7 +1339,7 @@ impl OpenCADStudio {
                         path.file_name().unwrap().to_string_lossy()
                     ));
                     self.tabs[i].scene.update_fields(2, None);
-                    let document = self.tabs[i].scene.document_for_save();
+                    let document = self.tabs[i].document_for_save();
                     if let Err(e) = crate::io::save(&document, &scratch) {
                         return err(format!("save: {e}"));
                     }
@@ -1984,7 +1988,7 @@ impl OpenCADStudio {
         self.prepare_native_save(i);
         // The same snapshot a normal save writes: display-only overrides and
         // resolved xref content stay out of the file.
-        let snapshot = self.tabs[i].scene.document_for_save();
+        let snapshot = self.tabs[i].document_for_save();
         // Bake simulation: save_as_version mints *D geometry blocks on its
         // private clone, so the reopened manifest always contains baked
         // sub-entities. Compare against the same baked view or every new

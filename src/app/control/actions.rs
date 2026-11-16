@@ -502,7 +502,7 @@ impl OpenCADStudio {
         let path = string(req, "path")?;
         // The export is built from the document as a save writes it: the
         // header's save stamps and the current display form of the geometry.
-        let document = self.tabs[self.active_tab].scene.document_for_save();
+        let document = self.tabs[self.active_tab].document_for_save();
         // A template base keeps its tables/styles in the exported file
         // (Catalog §2.1: clone from a .dwt/.dwg template).
         let template_base = match req["template"].as_str().filter(|t| !t.is_empty()) {

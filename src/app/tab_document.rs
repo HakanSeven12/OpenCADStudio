@@ -803,6 +803,13 @@ impl DocumentTab {
         (origin, xf.rotation_mat())
     }
 
+    /// The document as a save writes it, with this session's xref load state.
+    pub(super) fn document_for_save(&self) -> document::Document {
+        let mut document = self.scene.document_for_save();
+        self.xref_unloaded.write_flags(&mut document);
+        document
+    }
+
     pub(super) fn new_drawing(n: usize) -> Self {
         let mut scene = Scene::new();
         scene.populate_new_drawing_defaults();

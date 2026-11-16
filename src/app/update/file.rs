@@ -2282,7 +2282,7 @@ impl OpenCADStudio {
             Self::native_save_verification(&path, lease, expected_fingerprint)?;
 
         self.prepare_native_save(i);
-        let mut snapshot = self.tabs[i].scene.document_for_save();
+        let mut snapshot = self.tabs[i].document_for_save();
         // A Save As renames the drawing, but the save event above evaluated
         // the name-reporting fields against the path it was opened from. Stamp
         // the destination into the snapshot and re-evaluate there, so the
@@ -2598,6 +2598,8 @@ impl OpenCADStudio {
         self.install_native_edit_guard(i, &path, opened_fingerprint);
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
+        self.tabs[i].xref_unloaded =
+            crate::io::xref_model::UnloadSet::from_document(&self.tabs[i].scene.document);
         self.tabs[i].ifccad_alpha_acknowledged = false;
         if let Some(session) = ifccad_session.as_ref().filter(|s| s.has_blocked_entities()) {
             for (id, reason) in session.blocked_entities() {
@@ -2894,7 +2896,7 @@ impl OpenCADStudio {
                 return Task::done(Message::WblockWriteFinished("*".into(), path, Err(error)));
             }
         }
-        let document = self.tabs[i].scene.document_for_save();
+        let document = self.tabs[i].document_for_save();
         if let crate::modules::insert::block_cmdline::WblockSource::Objects {
             handles,
             base,
@@ -3013,7 +3015,7 @@ impl OpenCADStudio {
         path: std::path::PathBuf,
     ) -> Task<Message> {
         let i = self.active_tab;
-        let document = self.tabs[i].scene.document_for_save();
+        let document = self.tabs[i].document_for_save();
         let handles: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
         // Native: extraction and the file write both run on a background
         // thread, unchanged.
@@ -3163,7 +3165,7 @@ impl OpenCADStudio {
             };
             pending.push((
                 entry,
-                crate::io::prepare_document_for_save(tab.scene.document_for_save(), version),
+                crate::io::prepare_document_for_save(tab.document_for_save(), version),
                 tab.ifccad_session.clone(),
             ));
         }
@@ -3516,7 +3518,7 @@ impl OpenCADStudio {
         // drawings. Completion (download + bookkeeping) continues in
         // `on_web_save_serialized`.
         let prepared =
-            crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+            crate::io::prepare_document_for_save(self.tabs[i].document_for_save(), version);
         let allow_loss = std::mem::take(&mut self.conversion_loss_allowed);
         let ifccad_session = self.tabs[i].ifccad_session.clone();
         Task::perform(
@@ -4021,7 +4023,7 @@ impl OpenCADStudio {
             crate::ui::wrap_bar::dropdown_bounds(crate::app::view::VIEWPORT_CAPTURE_BOUNDS_ID)
         });
         let clone_started = iced::time::Instant::now();
-        let mut snapshot = self.tabs[i].scene.document_for_save();
+        let mut snapshot = self.tabs[i].document_for_save();
         // First save: references attached with a relative path type while
         // the drawing had no file become relative to it.
         if self.tabs[i].current_path.is_none() && purpose != crate::app::SavePurpose::Autosave {
@@ -5108,7 +5110,7 @@ impl OpenCADStudio {
             return (!losses.is_empty()).then_some(losses);
         };
         let prepared =
-            crate::io::prepare_document_for_save(self.tabs[i].scene.document_for_save(), version);
+            crate::io::prepare_document_for_save(self.tabs[i].document_for_save(), version);
         // A write that fails outright is reported by the save itself.
         let losses = ocs_save::external_losses_for_edit(
             &prepared,

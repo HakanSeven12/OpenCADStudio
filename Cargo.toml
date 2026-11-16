@@ -440,6 +440,10 @@ harness = false
 name = "wire_view_culling"
 harness = false
 
+[[bench]]
+name = "save_batch_memory"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

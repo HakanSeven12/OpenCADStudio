@@ -3106,9 +3106,9 @@ impl OpenCADStudio {
 
     /// Web SAVEALL: every dirty tab that already has a name-only path is
     /// serialized and downloaded in one pass — the worker-routed counterpart
-    /// of a single web Save. Each tab is prepared (state sync + clone +
-    /// style/dimension bake) once up front on the main thread, then the
-    /// DWG/DXF writer passes run serially on the serializer worker — the
+    /// of a single web Save. State sync and snapshot capture happen up front;
+    /// style/dimension preparation happens one document at a time immediately
+    /// before its serial DWG/DXF writer pass on the serializer worker — the
     /// same single-future structure the autosave round uses. The browser may
     /// ask once for permission to download several files, which is the
     /// platform's price. Clean tabs are skipped (re-downloading identical
@@ -3179,9 +3179,9 @@ impl OpenCADStudio {
                 result: Ok(Vec::new()),
             };
             pending.push((
-                entry,
-                crate::io::prepare_document_for_save(tab.document_for_save(), version),
-                tab.ifccad_session.clone(),
+                (entry, tab.ifccad_session.clone()),
+                tab.document_for_save(),
+                version,
             ));
         }
         if pending.is_empty() {
@@ -3191,7 +3191,7 @@ impl OpenCADStudio {
         Task::perform(
             async move {
                 let mut results = Vec::with_capacity(pending.len());
-                for (mut entry, prepared, session) in pending {
+                for ((mut entry, session), prepared) in crate::io::prepare_save_batch(pending) {
                     entry.result = crate::io::serialize_prepared_document(
                         &prepared,
                         &entry.ext,
@@ -5488,10 +5488,10 @@ impl OpenCADStudio {
     /// native `.sv$` copy — best-effort and non-destructive: no download, no
     /// recents update, dirty flag untouched. Snapshots run serially in one
     /// round; while it lasts (or a web save's thumbnail capture is pending)
-    /// further ticks are dropped, not queued. Each tab is prepared (clone +
-    /// style sync + dimension bake) once up front, then the DWG/DXF writer
-    /// pass runs on the serializer worker — the UI thread only awaits the
-    /// result between OPFS writes.
+    /// further ticks are dropped, not queued. Each tab's snapshot is captured
+    /// up front. Style sync and dimension baking run one snapshot at a time,
+    /// just before its worker writer pass and OPFS write, so pending tabs do
+    /// not retain every drawing's baked geometry simultaneously.
     #[cfg(target_arch = "wasm32")]
     pub(super) fn on_autosave(&mut self) -> Task<Message> {
         if self.web_autosave_in_flight || self.pending_web_thumbnail_save.is_some() {
@@ -5524,11 +5524,7 @@ impl OpenCADStudio {
             let is_dxf = crate::io::source_is_dxf(tab.current_path.as_deref(), &tab.scene.document);
             let ext = if is_dxf { "dxf" } else { "dwg" }.to_string();
             let version = tab.scene.document.version;
-            pending.push((
-                name,
-                ext,
-                crate::io::prepare_document_for_save(tab.scene.document.clone(), version),
-            ));
+            pending.push(((name, ext), tab.scene.document.clone(), version));
         }
         if pending.is_empty() {
             return Task::none();
@@ -5537,7 +5533,7 @@ impl OpenCADStudio {
         Task::perform(
             async move {
                 let mut failure = None;
-                for (name, ext, prepared) in pending {
+                for ((name, ext), prepared) in crate::io::prepare_save_batch(pending) {
                     // Autosave exists to recover geometry, not pretty recents:
                     // no thumbnail capture, just bytes into OPFS.
                     match crate::io::serialize_prepared_document(&prepared, &ext, false, None).await

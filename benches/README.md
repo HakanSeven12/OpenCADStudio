@@ -175,6 +175,39 @@ of vertex buffers), then reports retained entry count, budget estimate, and
 unique vertex-buffer capacity after dropping evicted entries. Capacity results
 are valid in debug builds; these are not RSS or deferred-drop backlog readings.
 
+## Multi-document save preparation
+
+```sh
+cargo bench --locked --bench save_batch_memory -- --output target/save-batch.json
+cargo bench --locked --bench save_batch_memory -- --flow autosave
+cargo bench --locked --bench save_batch_memory -- --self-test
+cargo test --locked --lib prepare_save_tests -- --test-threads=1
+```
+
+Six synthetic drawings each contain 250 linear dimensions without baked blocks.
+The probe keeps the live documents and captures their snapshots before its
+baseline, then compares eager preparation with the production lazy save-batch
+iterator. Each strategy/flow uses a fresh process, with font/serialization warmup
+before measurement. AUTOSAVE drops each written byte buffer; SAVEALL retains
+them until the batch finishes, matching their different completion paths.
+Both drop each prepared document after its writer finishes.
+
+Reports include fixture hashes, per-document entity/block counts, output byte
+counts and SHA-256 hashes. Eager/lazy outputs must match, and lazy preparation
+must reduce the measured peak on this fixture. `--output` writes a new JSON
+array file before checking peak reduction; `--strategy eager|lazy` runs one arm
+and accepts `--flow autosave|saveall` (default autosave).
+
+The peak delta counts requested Rust System allocation bytes above the captured
+snapshot baseline for preparation and serial DXF writing. It excludes fixture
+setup, allocator overhead, GUI/GPU, browser/JS memory and worker transfers. This
+native probe exercises shared preparation/writer code; it does not measure
+browser residency or desktop concurrent saves. `--profile dev` can validate
+allocation metrics without a release build; no timing metrics are collected.
+Compare on the same machine with the same profile and matching fixture/output
+hashes. The unit cases also check captured contents after a tab edit/close,
+pending-snapshot lifetimes, versions, and identical DWG/DXF writer output.
+
 ## Text shaping and geometry
 
 This benchmark generates a deterministic synthetic text workload; it does not

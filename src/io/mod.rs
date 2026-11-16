@@ -3031,6 +3031,19 @@ fn sync_justified_text_insertion(doc: &mut Document) {
     }
 }
 
+/// Prepare captured save snapshots on demand. Keep the original capture point
+/// (including documents whose tabs are later edited or closed), but only bake
+/// the next document's styles/dimension blocks when its writer is ready.
+/// Callers should finish writing and drop each prepared document before asking
+/// for the next one; collecting this iterator would retain all baked copies.
+pub fn prepare_save_batch<T>(
+    snapshots: impl IntoIterator<Item = (T, Document, document::DxfVersion)>,
+) -> impl Iterator<Item = (T, Document)> {
+    snapshots
+        .into_iter()
+        .map(|(context, document, version)| (context, prepare_document_for_save(document, version)))
+}
+
 /// Web SAVE/AUTOSAVE: offload the DWG/DXF writer pass to the browser worker.
 /// `prepared` comes from [`prepare_document_for_save`] — the serialization
 /// itself (the expensive half) runs off the UI thread and the encoded bytes
@@ -3933,6 +3946,76 @@ mod prepare_save_tests {
     use document::entities::{Dimension, DimensionLinear};
     use document::tables::TextStyle;
     use document::types::Vector3;
+
+    fn batch_dimension_document(x: f64) -> (Document, document::Handle) {
+        let mut doc = Document::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        let mut dim =
+            DimensionLinear::new(Vector3::new(x, 0.0, 0.0), Vector3::new(x + 10.0, 0.0, 0.0));
+        dim.definition_point = Vector3::new(x + 5.0, 7.0, 0.0);
+        dim.base.common.handle = doc.allocate_handle();
+        let handle = dim.base.common.handle;
+        doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dim))))
+            .unwrap();
+        (doc, handle)
+    }
+
+    #[test]
+    fn save_batch_prepares_only_the_next_snapshot_and_releases_pending_ones_on_drop() {
+        let (first, first_handle) = batch_dimension_document(0.0);
+        let (second, second_handle) = batch_dimension_document(20.0);
+        let first_image = std::sync::Arc::downgrade(&first.get_entity_arc(first_handle).unwrap());
+        let second_image =
+            std::sync::Arc::downgrade(&second.get_entity_arc(second_handle).unwrap());
+        let mut pending = prepare_save_batch(vec![
+            ("first", first, document::DxfVersion::AC1027),
+            ("second", second, document::DxfVersion::AC1032),
+        ]);
+        assert_eq!(first_image.strong_count(), 1);
+        assert_eq!(second_image.strong_count(), 1);
+        let (name, prepared) = pending.next().unwrap();
+        assert_eq!(name, "first");
+        assert_eq!(prepared.version, document::DxfVersion::AC1027);
+        assert!(
+            prepared.entities().count() > 1,
+            "dimension geometry was baked"
+        );
+        assert_eq!(
+            first_image.strong_count(),
+            0,
+            "the first dimension image was replaced"
+        );
+        assert_eq!(
+            second_image.strong_count(),
+            1,
+            "the queued snapshot is still unprepared"
+        );
+        drop(prepared);
+        drop(pending);
+        assert_eq!(second_image.strong_count(), 0);
+    }
+
+    #[test]
+    fn save_batch_preserves_captured_contents_and_matches_eager_writer_output() {
+        let (mut live, handle) = batch_dimension_document(0.0);
+        let captured = live.clone();
+        let expected = prepare_document_for_save(captured.clone(), document::DxfVersion::AC1027);
+        live.remove_entity(handle);
+        drop(live); // Closing or editing the tab cannot alter the captured copy.
+        let (context, actual) =
+            prepare_save_batch(vec![(7, captured, document::DxfVersion::AC1027)])
+                .next()
+                .unwrap();
+        assert_eq!(context, 7);
+        assert!(actual.get_entity(handle).is_some());
+        for ext in ["dxf", "dwg"] {
+            assert_eq!(
+                ocs_save::serialize_document(&actual, ext).unwrap(),
+                ocs_save::serialize_document(&expected, ext).unwrap(),
+                "{ext} output changed"
+            );
+        }
+    }
 
     // The live document must never observe the save preparation: version
     // stamp, style sync and dimension baking all happen on the clone only.

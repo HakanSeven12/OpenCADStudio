@@ -2233,7 +2233,10 @@ pub struct MountCounters {
     /// Re-registers that PRESERVED the running machines (the
     /// PRESERVE-ON-IDENTICAL rule — see [`MountRegistry::register_surface_owned`]).
     pub registers_preserved: usize,
-    /// Re-registers that REPLACED the machines (the surface shape moved).
+    /// Re-registers that REPLACED the registry entry (the surface shape
+    /// moved) — the SAME-SURFACE EVOLUTION re-registrations included
+    /// (SCN-033: the machines themselves are CARRIED through those;
+    /// [`Self::torn_down`] is the witness of whether a release ran).
     pub registers_replaced: usize,
     /// Completed machine releases — `teardown_surface` AND the release
     /// half of a replacement (every removal flows through the one
@@ -2342,8 +2345,10 @@ fn surface_shape(surface: &WidgetSurface) -> MountSurfaceShape {
     shape
 }
 
-/// THE machine-release path: every surface removal flows through here
-/// (teardown AND replacement) — the state's `pending_children` drop (§16
+/// THE machine-release path: every machine disposal flows through here
+/// (teardown AND the teardown-class replacement — a same-surface-id
+/// evolution REPLACES the registry entry but KEEPS the machines, SCN-033).
+/// The state's `pending_children` drop (§16
 /// "closing a tab cancels pending requests and releases state"), the
 /// dispatcher's read model + armed prompts + in-flight marks drop. One
 /// path, one counter ([`MountCounters::torn_down`]).
@@ -2400,10 +2405,27 @@ impl MountRegistry {
     ///   and their counters survive (an identical-resurface claim is a
     ///   refresh, not a reset — the caller's fresh-but-identical handle is
     ///   dropped unused).
-    /// - Anything else (different revision or shape) → REPLACE: the
-    ///   outgoing machines release through [`release_mount`] (pending
-    ///   children, armed prompts, in-flight marks — the §16 contract),
-    ///   then the new handle takes the slot with its own fresh machines.
+    /// - A moved surface whose surface_id is UNCHANGED → SAME-SURFACE
+    ///   EVOLUTION (SCN-033): the incoming handle takes the slot but
+    ///   ADOPTS the running machines (the previous `state` + `dispatcher`
+    ///   `Rc`s overwrite its fresh `from_surface` ones) and the state's
+    ///   own `sync` reconciles against the new surface — pruning what the
+    ///   patch removed, preserving what it didn't. Within one panel id the
+    ///   owner law already blocks cross-plugin publishers, so a same-panel
+    ///   replace is always that surface's next revision; the SWG-002
+    ///   contract ("selection/focus/expansion survive patches that don't
+    ///   touch their keys") therefore finally holds in the WIRE path (the
+    ///   live-firetest finding: every applied patch rebuilt fresh
+    ///   machines — the demo's expanded lazy tree branch collapsed back
+    ///   and tree/list selection died with it; tables were immune only
+    ///   because SCN-028 deliberately put their slots registry-side). The
+    ///   armed-prompt desc stays armed (same surface, same interaction).
+    /// - A moved surface whose surface_id ALSO moved → the teardown-class
+    ///   REPLACE: the outgoing machines release through [`release_mount`]
+    ///   (pending children, armed prompts, in-flight marks — the §16
+    ///   contract), the armed desc dies with its surface, and the new
+    ///   handle takes the slot with its own fresh machines (a genuinely
+    ///   new logical surface starts clean).
     ///
     /// Idempotent per panel id by construction (at most one entry per id;
     /// re-registers move a counter, never duplicate state).
@@ -2430,17 +2452,57 @@ impl MountRegistry {
             // the unused surface clone dies with the handle).
             self.counters.registers_preserved += 1;
         } else {
-            if let Some(previous) = self.by_panel.remove(panel_id) {
-                release_mount(&previous);
-                // The replaced surface's armed desc dies with the
-                // surface (the §16 lifecycle: a replacement releases
-                // the machines; the desc is registry-side of the same
-                // interaction).
-                self.prompts.remove(&previous.surface_id());
-                self.counters.registers_replaced += 1;
-                self.counters.torn_down += 1;
+            // Ownership first: the previous handle leaves the map OWNED,
+            // so the machine `Rc`s travel with it — every branch below
+            // works on owned values and no registry borrow crosses a
+            // machine borrow. (The evolution arm moves those `Rc`s INTO
+            // the incoming handle; `release_mount` never runs on them —
+            // that is the entire point of the carry.)
+            let previous = self.by_panel.remove(panel_id);
+            match previous {
+                // SAME-SURFACE EVOLUTION (SCN-033 — the live-firetest
+                // fixup): the incoming surface_id equals the registered
+                // one, i.e. the wire era's re-register is the PATCH
+                // EVOLUTION of the same logical surface. Carry the
+                // machines: the previous `state` + `dispatcher` `Rc`s
+                // overwrite the incoming handle's fresh (unused) ones,
+                // then the machine's own `sync` reconciles against the
+                // new surface — its documented contract prunes what the
+                // patch removed and preserves selection/focus/expansion
+                // it didn't touch. No `release_mount` (the carried
+                // machines' pending children, armed marks and read model
+                // live on), no `prompts.remove` (same surface, same
+                // interaction — the armed desc stays armed), no
+                // `torn_down`. The dispatcher/table sync block below
+                // re-captures changed defs on the carried machines.
+                Some(previous) if previous.surface_id() == handle.surface_id() => {
+                    let mut carried = handle;
+                    carried.state = Rc::clone(&previous.state);
+                    carried.dispatcher = Rc::clone(&previous.dispatcher);
+                    carried.state.borrow_mut().sync(&carried.surface);
+                    self.by_panel.insert(panel_id.to_string(), carried);
+                    self.counters.registers_replaced += 1;
+                }
+                // TEARDOWN-CLASS REPLACE: a different surface_id is a
+                // genuinely new logical surface — it starts clean, exactly
+                // as every replacement always has (§16: the outgoing
+                // machines release through the ONE dispose path; the
+                // armed desc is registry-side of the same interaction and
+                // dies with its surface).
+                Some(previous) => {
+                    release_mount(&previous);
+                    self.prompts.remove(&previous.surface_id());
+                    self.counters.registers_replaced += 1;
+                    self.counters.torn_down += 1;
+                    self.by_panel.insert(panel_id.to_string(), handle);
+                }
+                // A FRESH registration: no outgoing machines exist — no
+                // replace accounting, the handle just takes the (empty)
+                // slot.
+                None => {
+                    self.by_panel.insert(panel_id.to_string(), handle);
+                }
             }
-            self.by_panel.insert(panel_id.to_string(), handle);
         }
         // (SCN-028) The typed-table machines ride EVERY successful surface
         // swap (the same sync points `WidgetUiState` re-syncs — snapshots
@@ -2454,10 +2516,17 @@ impl MountRegistry {
         //
         // (SCN-030 safety) PRESERVE-ON-IDENTICAL keeps the ALREADY-synced
         // dispatcher, and the upserts re-write identical views (the sync_*
-        // are idempotent by address); a non-identical surface REPLACES the
-        // whole handle with a FRESH empty dispatcher (release_mount reset
-        // the outgoing one), so no stale address survives; and the §16
-        // teardown still resets everything via `release_mount`.
+        // are idempotent by address). (SCN-033) The SAME-SURFACE EVOLUTION
+        // arm keeps the CARRIED dispatcher, and the upserts RE-CAPTURE the
+        // changed defs against the registered surface (an unchanged def is
+        // an idempotent re-write; a changed def re-upserts in place). A
+        // def the patch REMOVED keeps its read-model row until a
+        // teardown-class replace (the upserts feed, they never prune —
+        // RECORDED: the machines' semantics are untouched by the carry).
+        // The teardown-class arm REPLACES the whole handle with a FRESH
+        // empty dispatcher (release_mount reset the outgoing one), so no
+        // stale address survives there; and the §16 teardown still resets
+        // everything via `release_mount`.
         if let Some(stored) = self.by_panel.get(panel_id) {
             let (surface_id, surface) = (stored.surface_id(), stored.surface.clone());
             self.table_sync_surface_owned(surface_id, &surface);
@@ -6936,11 +7005,14 @@ mod tests {
         );
     }
 
-    /// A re-register whose surface MOVED (different revision) REPLACES: the
-    /// outgoing machines release through the one dispose path (pending
-    /// children, armed marks), the counter says "replaced" + one
-    /// torn_down, and the slot's machines are fresh (no state carried
-    /// over).
+    /// A re-register whose surface MOVED to a DIFFERENT surface_id (the
+    /// teardown-class branch, SCN-033: a genuinely new logical surface)
+    /// REPLACES: the outgoing machines release through the one dispose
+    /// path (pending children, armed marks), the counters say "replaced" +
+    /// one torn_down, and the slot's machines are fresh (no state carried
+    /// over). (The SAME-surface-id moved re-register is the EVOLUTION arm
+    /// instead — the machines CARRY; see
+    /// [`register_same_surface_evolution_carries_the_machines`].)
     #[test]
     fn register_replaces_and_resets_on_changed_surface() {
         let _guard = register_test_surface(
@@ -6968,12 +7040,13 @@ mod tests {
         }
         assert_eq!(old_handle.state.borrow().selection(), [sid(7)]);
 
-        // The CHANGED surface: a raised revision (+ a grown list to make
-        // the shape move too).
+        // The CHANGED surface: a raised revision AND a moved root (the
+        // list's widget id changes 200 → 210 — a different surface_id, the
+        // teardown-class branch).
         let changed = WidgetSurface {
             revision: SceneRevision(2),
             ..surface(vec![WidgetNode::List(item_list(
-                200,
+                210,
                 vec![item(7, "row"), item(8, "other"), item(9, "new")],
             ))])
         };
@@ -6993,11 +7066,11 @@ mod tests {
         assert_eq!(
             after.torn_down - before.torn_down,
             1,
-            "the outgoing machine release flows through the ONE dispose path"
+            "the teardown-class branch released the outgoing machines through the ONE dispose path"
         );
 
         // The slot's machines are FRESH: a new Rc pair, no carried state.
-        let new_handle = MountRegistry::handle_for_surface(sid(200)).expect("still registered");
+        let new_handle = MountRegistry::handle_for_surface(sid(210)).expect("still registered");
         assert!(
             !Rc::ptr_eq(&new_handle.state, &old_handle.state),
             "a new machine pair took the slot"
@@ -7018,6 +7091,307 @@ mod tests {
             old_handle.state.borrow().mutations().whole_state_resets,
             1,
             "the outgoing release reset them exactly once"
+        );
+    }
+
+    /// THE REGRESSION PIN (SCN-033 — the live-firetest defect): the demo's
+    /// lazy tree branch. Row 1 is expanded THROUGH the machine (the
+    /// `RowExpandedToggled` apply path — the toggle the GUI and the MCP
+    /// ask both ride), the lazy child-page request parks, and then a
+    /// CHANGED surface re-registers with the SAME surface_id (the patch
+    /// that delivers the children) with NO state replay: the CARRIED
+    /// machine still reports the row EXPANDED, the new children appear in
+    /// the flat views (the branch STAYS open), and the lazy dedup window
+    /// closes on the patch's arrival. Before the fix the wire era's
+    /// replace built fresh `from_surface` machines on every changed
+    /// surface and the branch collapsed back on every applied patch.
+    #[test]
+    fn register_same_surface_evolution_carries_the_machines() {
+        let lazy_root = || TreeRowDef {
+            lazy_children: true,
+            ..expandable_row(1, None, "Root A")
+        };
+        let _guard = register_test_surface(
+            "scn033_evolve",
+            surface(vec![tree(
+                100,
+                vec![lazy_root(), tree_row(11, Some(1), "A.1")],
+                false,
+            )]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(100)).expect("registered");
+
+        // Expand THROUGH the machine: the toggle emits the expanded
+        // notification AND the lazy child-page request (the demo's ask).
+        let routing = {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::RowExpandedToggled {
+                    surface_id: sid(100),
+                    widget_id: sid(100),
+                    row_id: sid(1),
+                    expanded: true,
+                },
+                &mut sink,
+            )
+        };
+        assert_eq!(routing, MountRouting::Applied { forwarded: 2 });
+        assert_eq!(
+            handle.state.borrow().explicit_expansion(sid(1)),
+            Some(true),
+            "the machine holds the expansion"
+        );
+        assert_eq!(
+            handle.state.borrow().pending_children().len(),
+            1,
+            "the lazy page request parked"
+        );
+
+        // The patch: children arrive under row 1 (the WidgetOp::Add
+        // shape) — the SAME surface_id, a raised revision, NO state
+        // replay.
+        let patched = WidgetSurface {
+            revision: SceneRevision(2),
+            ..surface(vec![tree(
+                100,
+                vec![
+                    lazy_root(),
+                    tree_row(11, Some(1), "A.1"),
+                    tree_row(12, Some(1), "A.2"),
+                    tree_row(13, Some(1), "A.3"),
+                ],
+                false,
+            )])
+        };
+        let before = MountRegistry::counters();
+        let _evolved = register_test_surface("scn033_evolve", patched);
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.registers_replaced - before.registers_replaced,
+            1,
+            "the moved shape re-registered as a replacement ENTRY"
+        );
+        assert_eq!(
+            after.torn_down - before.torn_down,
+            0,
+            "the EVOLUTION arm carried the machines — no release ran"
+        );
+
+        // The SAME machines hold the slot.
+        let carried = MountRegistry::handle_for_surface(sid(100)).expect("still registered");
+        assert!(
+            Rc::ptr_eq(&carried.state, &handle.state),
+            "the state machine was CARRIED, not rebuilt"
+        );
+        assert!(
+            Rc::ptr_eq(&carried.dispatcher, &handle.dispatcher),
+            "the dispatcher was CARRIED, not rebuilt"
+        );
+
+        // The expansion SURVIVED, the patch's children are REVEALED under
+        // the still-expanded row, no release ran, and the lazy dedup
+        // window closed on the patch's arrival (the ask's answer landed).
+        let state = carried.state.borrow();
+        assert_eq!(
+            state.explicit_expansion(sid(1)),
+            Some(true),
+            "the expansion survived the same-surface patch"
+        );
+        assert_eq!(
+            state.mutations().whole_state_resets,
+            0,
+            "the carry is not a release"
+        );
+        let views = state.synced().expect("re-synced").views.clone();
+        let WidgetNode::Tree(tree_def) = &carried.surface.roots[0] else {
+            panic!("the fixture's tree root");
+        };
+        let flat: Vec<StableId> = state
+            .flat_rows_of_tree(tree_def, &views)
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            flat,
+            vec![sid(1), sid(11), sid(12), sid(13)],
+            "the patch's children revealed under the STILL-expanded row"
+        );
+        assert!(
+            state.pending_children().is_empty(),
+            "the dedup window closed: the patch arrived under the requested parent"
+        );
+    }
+
+    /// Selection survives the same-surface evolution exactly as the
+    /// machine's own contract states: a row the patch kept stays
+    /// selected, a row the patch REMOVED is pruned (by the carried
+    /// machine's sync — never a release), and `whole_state_resets` never
+    /// moves.
+    #[test]
+    fn register_same_surface_evolution_keeps_selection_and_prunes_gone_rows() {
+        let _guard = register_test_surface(
+            "scn033_select",
+            surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "row"), item(8, "keep"), item(9, "gone")],
+            ))]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(8), sid(9)],
+                },
+                &mut sink,
+            );
+        }
+        assert_eq!(handle.state.borrow().selection(), [sid(8), sid(9)]);
+
+        // The patch: row 9 removed, row 10 added — the SAME surface_id.
+        let patched = WidgetSurface {
+            revision: SceneRevision(2),
+            ..surface(vec![WidgetNode::List(item_list(
+                200,
+                vec![item(7, "row"), item(8, "keep"), item(10, "new")],
+            ))])
+        };
+        let before = MountRegistry::counters();
+        let _evolved = register_test_surface("scn033_select", patched);
+        assert_eq!(
+            MountRegistry::counters().torn_down - before.torn_down,
+            0,
+            "the evolution carried the machines"
+        );
+
+        let carried = MountRegistry::handle_for_surface(sid(200)).expect("still registered");
+        assert!(
+            Rc::ptr_eq(&carried.state, &handle.state),
+            "the SAME machine holds the slot"
+        );
+        let state = carried.state.borrow();
+        assert_eq!(
+            state.selection(),
+            [sid(8)],
+            "the untouched row stayed selected; the removed row was PRUNED (the machine's own contract)"
+        );
+        assert_eq!(
+            state.mutations().whole_state_resets,
+            0,
+            "a prune is not a release"
+        );
+    }
+
+    /// Armed-prompt continuity across the two swap classes (SCN-033): the
+    /// same-surface EVOLUTION keeps the armed desc (same surface, same
+    /// interaction — the armed stage even completes on the carried
+    /// dispatcher); a teardown-class replace (a DIFFERENT surface_id)
+    /// removes the desc with the released machines.
+    #[test]
+    fn register_armed_prompt_continuity_across_the_swap_classes() {
+        let prompt_button = || {
+            WidgetNode::IconButton(IconActionDef {
+                confirmation: Some(ConfirmPolicy::Prompt {
+                    message: "Really delete the selection?".to_string(),
+                }),
+                ..button_def(110, "Delete", "delete")
+            })
+        };
+        let _guard = register_test_surface(
+            "scn033_prompt",
+            surface(vec![
+                WidgetNode::List(item_list(200, vec![item(7, "row")])),
+                prompt_button(),
+            ]),
+        );
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+
+        // Select (the command's targets), then arm THROUGH the dispatcher
+        // (the click's PromptRequested edge); record the desc the way the
+        // app's update arm does.
+        {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            let mut sink = Vec::new();
+            let routing = apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+                &mut sink,
+            );
+            assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+            let routing =
+                apply_mount_msg(&mut state, &mut dispatcher, &click_msg(200, 110), &mut sink);
+            assert_eq!(
+                routing,
+                MountRouting::PromptRequested {
+                    prompt: "Really delete the selection?".to_string(),
+                }
+            );
+        }
+        MountRegistry::mount_record_prompt_armed(sid(200), DispatchKey::Button(sid(110)));
+        assert!(
+            MountRegistry::prompt_dialog(sid(200)).is_some(),
+            "the armed desc is registered"
+        );
+
+        // (a) Same-surface evolution (children added to the list): the
+        // desc STAYS armed, and the armed stage completes on the CARRIED
+        // dispatcher.
+        let evolved = WidgetSurface {
+            revision: SceneRevision(2),
+            ..surface(vec![
+                WidgetNode::List(item_list(200, vec![item(7, "row"), item(8, "b")])),
+                prompt_button(),
+            ])
+        };
+        let _evolved_guard = register_test_surface("scn033_prompt", evolved);
+        let carried = MountRegistry::handle_for_surface(sid(200)).expect("still registered");
+        assert!(
+            Rc::ptr_eq(&carried.dispatcher, &handle.dispatcher),
+            "the dispatcher (armed stage included) carried"
+        );
+        assert!(
+            MountRegistry::prompt_dialog(sid(200)).is_some(),
+            "same surface, same interaction: the armed desc stays"
+        );
+        let outcome = carried
+            .dispatcher
+            .borrow_mut()
+            .confirm(DispatchKey::Button(sid(110)))
+            .expect("the armed stage survived the evolution");
+        assert!(
+            matches!(outcome, DispatchOutcome::ConfirmedEmitted(WidgetEvent::CommandInvoked { .. })),
+            "the carried armed stage completes: exactly ONE CommandInvoked"
+        );
+
+        // (b) Teardown-class replace (the list re-ids 200 → 210): the
+        // desc dies with the released surface.
+        let replaced = WidgetSurface {
+            revision: SceneRevision(3),
+            ..surface(vec![
+                WidgetNode::List(item_list(210, vec![item(7, "row")])),
+                prompt_button(),
+            ])
+        };
+        let _replaced_guard = register_test_surface("scn033_prompt", replaced);
+        assert!(
+            MountRegistry::prompt_dialog(sid(200)).is_none(),
+            "a different surface_id releases: the armed desc left with its surface"
         );
     }
 
@@ -9307,10 +9681,11 @@ mod tests {
         );
     }
 
-    /// The REPLACE path: surface B moves button 110's command AND policy —
-    /// the whole handle (dispatcher included) swaps, and the read model
-    /// reflects B (the fresh machine's own upserts), no stale A view; the
-    /// outgoing dispatcher released with its surface.
+    /// The teardown-class REPLACE path (a DIFFERENT surface_id, SCN-033):
+    /// surface B moves button 110's command AND policy — the whole handle
+    /// (dispatcher included) swaps, and the read model reflects B (the
+    /// fresh machine's own upserts), no stale A view; the outgoing
+    /// dispatcher released with its surface.
     #[test]
     fn registration_replace_reflects_surface_b_no_stale_a_view() {
         let _guard = register_test_surface(
@@ -9327,12 +9702,13 @@ mod tests {
         );
         let old = MountRegistry::handle_for_surface(sid(200)).expect("registered");
 
-        // The moved surface: a raised revision (→ a REPLACE, never a
-        // preserve) where 110 is a plain, prompt-free "purge".
+        // The moved surface: a raised revision AND a moved root (the list
+        // re-ids 200 → 210 — a different surface_id, the teardown-class
+        // branch) where 110 is a plain, prompt-free "purge".
         let changed = WidgetSurface {
             revision: SceneRevision(2),
             ..surface(vec![
-                WidgetNode::List(item_list(200, vec![item(7, "row")])),
+                WidgetNode::List(item_list(210, vec![item(7, "row")])),
                 WidgetNode::IconButton(button_def(110, "Purge", "purge")),
             ])
         };
@@ -9344,9 +9720,14 @@ mod tests {
             1,
             "the moved surface replaced"
         );
+        assert_eq!(
+            after.torn_down - before.torn_down,
+            1,
+            "the teardown-class branch released the outgoing machines"
+        );
 
         // The fresh dispatcher took the slot; the outgoing one released.
-        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        let handle = MountRegistry::handle_for_surface(sid(210)).expect("registered");
         assert!(
             !Rc::ptr_eq(&handle.dispatcher, &old.dispatcher),
             "a FRESH dispatcher took the slot"
@@ -9370,12 +9751,12 @@ mod tests {
             (routing, sink)
         };
         let (routing, _) = route(WidgetMountMsg::SelectionChanged {
-            surface_id: sid(200),
-            widget_id: sid(200),
+            surface_id: sid(210),
+            widget_id: sid(210),
             selected: vec![sid(7)],
         });
         assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
-        let (routing, events) = route(click_msg(200, 110));
+        let (routing, events) = route(click_msg(210, 110));
         assert_eq!(
             routing,
             MountRouting::Applied { forwarded: 1 },
@@ -9384,7 +9765,7 @@ mod tests {
         assert_eq!(
             events,
             vec![WidgetEvent::CommandInvoked {
-                surface_id: sid(200),
+                surface_id: sid(210),
                 command_id: "purge".to_string(),
                 target_ids: vec![sid(7)],
             }],
@@ -9707,10 +10088,12 @@ mod tests {
 
     /// The patch leg: a stale base refuses structured (the head revision
     /// reported — the recovery fact) with zero mutation; an applied patch
-    /// advances the revision and RE-REGISTERS the mount (a revision move is
-    /// never shape-identical: the REPLACE flow — machines released, the
-    /// report's capped facts matching the ops), with the FROZEN surface
-    /// id surviving the replacement.
+    /// advances the revision and RE-REGISTERS the mount (a revision move
+    /// is never shape-identical) — and because the FROZEN surface id
+    /// survives, the re-register resolves as the SAME-SURFACE EVOLUTION
+    /// (SCN-033: the machines CARRY, no release runs; a release would only
+    /// run for a different surface id), with the report's capped facts
+    /// matching the ops.
     #[test]
     fn patch_leg_stale_refuses_applied_advances_and_reregisters() {
         let _app = OpenCADStudio::new_for_test();
@@ -9752,7 +10135,9 @@ mod tests {
 
             // (2) Applied: the revision advances; the attach's registry
             // step (the R5 part of the store outcome) re-registers the
-            // mount — REPLACE (a revision move is never shape-identical).
+            // mount — the frozen surface id makes it the EVOLUTION arm
+            // (the machines carry; a revision move is never
+            // shape-identical).
             let outcome = registry
                 .panel_surface_store_mut()
                 .patch("PLUGIN", "align_tools", drift)
@@ -9771,7 +10156,11 @@ mod tests {
             assert_eq!(entry.widgets.as_ref().unwrap().revision, SceneRevision(6));
             let after = registry.counters_owned();
             assert_eq!(after.registers_replaced - before.registers_replaced, 1);
-            assert_eq!(after.torn_down - before.torn_down, 1);
+            assert_eq!(
+                after.torn_down - before.torn_down,
+                0,
+                "the frozen surface id makes the re-register an EVOLUTION: the machines carried, no release ran"
+            );
             assert_eq!(
                 registry.panel_surface_id_owned("align_tools"),
                 Some(sid(200)),
@@ -9783,7 +10172,8 @@ mod tests {
     /// Re-publishes: a rewind refuses (`NonMonotonicRevision`, the head
     /// reported); an identical snapshot at the head is the refresh shape
     /// (PRESERVE — the machines stay); a greater revision re-stores and
-    /// re-registers (replace).
+    /// re-registers (the evolution carry — same frozen id, the machines
+    /// survive, SCN-033).
     #[test]
     fn publish_leg_revision_law_monotone_with_identical_refresh() {
         let _app = OpenCADStudio::new_for_test();
@@ -9809,7 +10199,9 @@ mod tests {
                 1
             );
 
-            // (3) A greater revision (a resync snapshot): re-store + replace.
+            // (3) A greater revision (a resync snapshot): re-store +
+            // re-register — the stable frozen id makes it the EVOLUTION
+            // carry (the machines survive, SCN-033).
             attach_publish(registry, "PLUGIN", "align_tools", forward)
                 .expect("forward");
             assert_eq!(

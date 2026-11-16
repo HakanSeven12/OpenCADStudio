@@ -262,6 +262,25 @@ impl MTextEditorState {
         at(range.start)..at(end.max(range.start)) + 1
     }
 
+    /// The paragraph settings of the caret's paragraph.
+    pub(in crate::app) fn caret_paragraph_props(&self) -> ParagraphProperties {
+        let n = self.selected_paragraphs().start;
+        paragraphs(&self.content.text())
+            .get(n)
+            .map(|p| p.props.clone())
+            .unwrap_or_default()
+    }
+
+    /// The alignment code of the caret's paragraph (None: none written).
+    pub(in crate::app) fn caret_alignment(
+        &self,
+    ) -> Option<document::entities::mtext_format::MTextParagraphAlignment> {
+        let n = self.selected_paragraphs().start;
+        paragraphs(&self.content.text())
+            .get(n)
+            .and_then(|p| p.props.alignment)
+    }
+
     /// The list kind of the caret's paragraph: the menus' check marks.
     pub(in crate::app) fn list_kind(&self) -> Option<ListKind> {
         let n = self.selected_paragraphs().start;

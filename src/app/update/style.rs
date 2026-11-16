@@ -1114,7 +1114,15 @@ impl OpenCADStudio {
             }
             Some(crate::app::ColorPickTarget::MText) => Some(Message::MTextColorChanged(color)),
             Some(crate::app::ColorPickTarget::MTextMask) => {
-                Some(Message::MTextMaskColor(Some(color)))
+                // Picked from the Background Mask window: its draft takes it.
+                if let Some(crate::ui::window::mtext_dialogs::MTextDialog::Mask(draft)) =
+                    self.mtext_dialog.as_mut()
+                {
+                    draft.color = color;
+                    None
+                } else {
+                    Some(Message::MTextMaskColor(Some(color)))
+                }
             }
             Some(crate::app::ColorPickTarget::Ribbon) => {
                 let task = self.update(Message::RibbonColorChanged(color));

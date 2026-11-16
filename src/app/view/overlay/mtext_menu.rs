@@ -245,7 +245,7 @@ fn title(menu: EditorMenu) -> String {
 }
 
 /// The open panel's content.
-fn panel(ed: &MTextEditorState, menu: EditorMenu) -> Element<'static, Message> {
+pub(super) fn panel(ed: &MTextEditorState, menu: EditorMenu) -> Element<'static, Message> {
     match menu {
         EditorMenu::Fraction => fraction_panel(ed),
         EditorMenu::More => more_panel(ed),

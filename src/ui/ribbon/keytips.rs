@@ -107,6 +107,9 @@ pub(super) const XREF_LAUNCHER: &str = "XREF_LAUNCHER";
 pub(super) const XREF_FADE: &str = "XREF_FADE";
 /// The Text panel's corner arrow (Text Style).
 pub(super) const TEXT_LAUNCHER: &str = "TEXT_LAUNCHER";
+/// The Text Editor's Paragraph and Spell Check launchers.
+pub(super) const MTED_PARAGRAPH_LAUNCHER: &str = "MTED_PARAGRAPH_LAUNCHER";
+pub(super) const MTED_SPELL_LAUNCHER: &str = "MTED_SPELL_LAUNCHER";
 /// The Text panel's text height box.
 pub(super) const TEXT_HEIGHT: &str = "TEXT_HEIGHT";
 /// The Dimensions panel's corner arrow (Dimension Style).
@@ -288,6 +291,7 @@ fn tab_code(module: &str) -> Option<&'static str> {
         "view" => "VI",
         "manage" => "MA",
         "block_editor" => "BE",
+        "text_editor" => "TE",
         _ => return None,
     })
 }
@@ -633,6 +637,41 @@ const CODES: &[(&str, &str, &str)] = &[
     ("manage", "OVERKILL", "OK"),
     ("manage", "AUDIT", "AU"),
     // Block editor.
+    // Text Editor (contextual, while a multiline text is edited).
+    ("text_editor", "_MTED ANNOTATIVE", "AN"),
+    ("text_editor", "_MTED MASK", "BM"),
+    ("text_editor", "_MTED MATCH", "MP"),
+    ("text_editor", "_MTED BOLD", "BO"),
+    ("text_editor", "_MTED ITALIC", "IT"),
+    ("text_editor", "_MTED STRIKE", "ST"),
+    ("text_editor", "_MTED CLEAR", "CL"),
+    ("text_editor", "_MTED UNDERLINE", "UL"),
+    ("text_editor", "_MTED OVERLINE", "OL"),
+    ("text_editor", "_MTED STACK", "SK"),
+    ("text_editor", "_MTED SUPERSCRIPT", "PS"),
+    ("text_editor", "_MTED SUBSCRIPT", "BS"),
+    ("text_editor", "MTED_CASE", "MC"),
+    ("text_editor", "Formatting", "FM"),
+    ("text_editor", "MTED_JUSTIFY", "JU"),
+    ("text_editor", "MTED_BULLETS", "BU"),
+    ("text_editor", "MTED_LINESPACING", "LS"),
+    ("text_editor", "Paragraph", "PG"),
+    ("text_editor", MTED_PARAGRAPH_LAUNCHER, "PH"),
+    ("text_editor", "_MTED COMBINE", "CP"),
+    ("text_editor", "MTED_COLUMNS", "CL"),
+    ("text_editor", "MTED_SYMBOL", "SY"),
+    ("text_editor", "_MTED FIELD", "FI"),
+    ("text_editor", "_MTED SPELL", "CS"),
+    ("text_editor", "_MTED DICTIONARIES", "ED"),
+    ("text_editor", "_MTED FIND", "FR"),
+    ("text_editor", "Tools", "TO"),
+    ("text_editor", "_MTED IMPORT", "IE"),
+    ("text_editor", "_MTED AUTOCAPS", "AC"),
+    ("text_editor", "MTED_MORE", "MO"),
+    ("text_editor", "_MTED RULER", "RU"),
+    ("text_editor", "_MTED UNDO", "UN"),
+    ("text_editor", "_MTED REDO", "RE"),
+    ("text_editor", "_MTED CLOSE", "MX"),
     ("block_editor", "Open and Save", "BO"),
     ("block_editor", "BEDIT", "BE"),
     ("block_editor", "BSAVE", "BS"),

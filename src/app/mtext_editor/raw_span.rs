@@ -219,10 +219,12 @@ impl crate::app::OpenCADStudio {
     /// Alignment of every paragraph the selection (or caret) touches.
     pub(in crate::app) fn raw_align(&mut self, align: ParaAlign) {
         let code = match align {
+            ParaAlign::Default => "\\pq*;",
             ParaAlign::Left => "\\pql;",
             ParaAlign::Center => "\\pqc;",
             ParaAlign::Right => "\\pqr;",
             ParaAlign::Justify => "\\pqj;",
+            ParaAlign::Distribute => "\\pqd;",
         };
         self.raw_paragraph(code, |p, s| p.alignment = s.alignment);
     }
@@ -238,6 +240,63 @@ impl crate::app::OpenCADStudio {
             ParaNumber::SpaceAfter => ('a', |p, s| p.spacing_after = s.spacing_after),
         };
         self.raw_paragraph(&format!("\\px{key}{};", number(value)), copy);
+    }
+
+    /// The line spacing of every paragraph the selection (or caret) touches:
+    /// `\pxse<n>;` (exactly) or `\pxsm<n>;` (a multiple).
+    pub(in crate::app) fn raw_paragraph_line_spacing(
+        &mut self,
+        spacing: document::entities::mtext_format::MTextLineSpacing,
+    ) {
+        use document::entities::mtext_format::MTextLineSpacing as L;
+        let code = match spacing {
+            L::Exact(v) => format!("\\pxse{};", number(v)),
+            L::Multiple(v) => format!("\\pxsm{};", number(v)),
+            _ => return,
+        };
+        self.raw_paragraph(&code, |p, s| p.line_spacing = s.line_spacing);
+    }
+
+    /// The tab stops of every paragraph the selection (or caret) touches:
+    /// `\pxt<n>,c<n>,r<n>,D<n>;`, or none.
+    pub(in crate::app) fn raw_paragraph_tabs(
+        &mut self,
+        tabs: &[document::entities::mtext_format::TabStop],
+    ) {
+        let list: Vec<String> = tabs.iter().map(|tab| tab.to_string()).collect();
+        let code = if list.is_empty() {
+            "\\pxt;".to_string()
+        } else {
+            format!("\\pxt{};", list.join(","))
+        };
+        self.raw_paragraph(&code, |p, s| p.tab_stops = s.tab_stops.clone());
+    }
+
+    /// Replace each of `ranges` (visible-character offsets, left to right)
+    /// with `replacement`, as one undo step.
+    pub(in crate::app) fn raw_replace_ranges(&mut self, ranges: &[(usize, usize)], replacement: &str) {
+        if ranges.is_empty() {
+            return;
+        }
+        let ranges = ranges.to_vec();
+        let replacement = replacement.to_string();
+        self.edit_raw(|_, index| {
+            let mut raw = index.raw.to_string();
+            let mut caret = 0;
+            for (n, (start, end)) in ranges.iter().rev().enumerate() {
+                let edit = SourceIndex::new(&raw).replace(*start..*end, &replacement)?;
+                if n == 0 {
+                    caret = edit.caret;
+                }
+                raw = edit.raw;
+            }
+            let removed: usize = ranges[..ranges.len() - 1].iter().map(|(s, e)| e - s).sum();
+            let added = (ranges.len() - 1) * replacement.chars().count();
+            Ok(TextEdit {
+                raw,
+                caret: caret + added - removed.min(caret + added),
+            })
+        });
     }
 
     fn raw_paragraph(

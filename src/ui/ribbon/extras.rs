@@ -21,6 +21,9 @@ pub(super) enum Layout {
     Reference,
     /// The icon buttons, then the list of layers new text goes on.
     TextLayer,
+    /// No buttons: the Text Editor's oblique angle, tracking and width
+    /// factor boxes.
+    TextEditorFormat,
     /// No buttons: the list of the layer new centre marks and lines go on.
     CenterLayer,
 }
@@ -85,7 +88,8 @@ impl PanelExtras {
 
     /// Whether the panel has a slide-out: tools, or a list of its own.
     pub fn has_slide_out(&self) -> bool {
-        self.tools().next().is_some() || self.layout == Layout::CenterLayer
+        self.tools().next().is_some()
+            || matches!(self.layout, Layout::CenterLayer | Layout::TextEditorFormat)
     }
 }
 
@@ -464,6 +468,48 @@ fn build() -> Vec<(&'static str, PanelExtras)> {
             launcher_only(
                 "tables_extension",
                 ("TABLESTYLE", "Table Style", super::keytips::TABLE_LAUNCHER),
+            ),
+        ),
+        // Text Editor: oblique, tracking and width under Formatting; Combine
+        // Paragraphs and the Paragraph window under Paragraph; the spelling
+        // settings under Spell Check.
+        (
+            "text_editor/Formatting",
+            extras(
+                "Formatting",
+                "mted_format_extension",
+                Layout::TextEditorFormat,
+                None,
+                Vec::new(),
+            ),
+        ),
+        (
+            "text_editor/Paragraph",
+            extras(
+                "Paragraph",
+                "mted_paragraph_extension",
+                Layout::Grid,
+                Some((
+                    "_MTED PARAGRAPH",
+                    "Paragraph",
+                    super::keytips::MTED_PARAGRAPH_LAUNCHER,
+                )),
+                vec![tool(
+                    "_MTED COMBINE",
+                    "Combine Paragraphs",
+                    include_bytes!("../../../assets/icons/mt_align_justify.svg"),
+                )],
+            ),
+        ),
+        (
+            "text_editor/Spell Check",
+            launcher_only(
+                "mted_spell_extension",
+                (
+                    "_MTED SPELLSETTINGS",
+                    "Check Spelling Settings",
+                    super::keytips::MTED_SPELL_LAUNCHER,
+                ),
             ),
         ),
     ]

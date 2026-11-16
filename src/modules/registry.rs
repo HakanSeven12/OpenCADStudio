@@ -25,6 +25,7 @@ pub fn all_modules() -> Vec<Box<dyn CadModule>> {
         Box::new(super::layout::LayoutModule),
         Box::new(super::block_editor::BlockEditorModule),
         Box::new(super::table_cell::TableCellModule),
+        Box::new(super::text_editor::TextEditorModule),
     ]
 }
 

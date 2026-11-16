@@ -175,6 +175,7 @@ pub(super) const NAMES: &[&str] = &[
     "mleader_style_dialog",
     "dimstyle_dialog",
     "anno_scale_prompt",
+    "mtext_dialog",
     "text_style_dialog",
     "scale_list_dialog",
     "spell_dialog",
@@ -3327,6 +3328,107 @@ impl OpenCADStudio {
                     "ok" => A::Ok,
                     _ => return Err(failure("invalid_value", spec)),
                 })
+            }
+            // A window of the Text Editor tab, one step per call:
+            // "first=<n>", "hanging=<n>", "right=<n>", "tab=<kind>:<n>"
+            // (left, center, right, decimal), "align=<l|c|r|j|d>",
+            // "before=<n>", "after=<n>", "line=<exactly|atleast|multiple>:<n>",
+            // "columns=<auto|manual|static|none>", "number=<n>",
+            // "height=<n>", "width=<n>", "gutter=<n>", "mask=0|1",
+            // "factor=<n>", "background=0|1", "color=<1..7>", "find=<text>",
+            // "replace=<text>", "match_case=0|1", "whole=0|1", "wild=0|1",
+            // "next", "replace_one", "replace_all", "ok", "cancel".
+            "mtext_dialog" => {
+                use crate::ui::window::mtext_dialogs::{
+                    Align, ColumnKind, LineMode, MTextDialogMsg as D, TabKind,
+                };
+                if !self.focus_dialog(crate::app::ModalKind::MTextDialog) {
+                    return Err(failure("no_dialog", "No Text Editor window is open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let on = value == "1";
+                let invalid = || failure("invalid_value", spec);
+                let step = |app: &mut Self, message: D| {
+                    let _ = app.update(Message::MTextDialog(message));
+                };
+                match key {
+                    "first" => Message::MTextDialog(D::FirstLine(value.into())),
+                    "hanging" => Message::MTextDialog(D::Hanging(value.into())),
+                    "right" => Message::MTextDialog(D::Right(value.into())),
+                    "tab" => {
+                        let (kind, position) = value.split_once(':').ok_or_else(invalid)?;
+                        step(
+                            self,
+                            D::TabKind(match kind {
+                                "center" => TabKind::Center,
+                                "right" => TabKind::Right,
+                                "decimal" => TabKind::Decimal,
+                                _ => TabKind::Left,
+                            }),
+                        );
+                        step(self, D::TabPosition(position.into()));
+                        Message::MTextDialog(D::TabAdd)
+                    }
+                    "align" => {
+                        step(self, D::AlignOn(true));
+                        Message::MTextDialog(D::Align(match value {
+                            "c" => Align::Center,
+                            "r" => Align::Right,
+                            "j" => Align::Justified,
+                            "d" => Align::Distributed,
+                            _ => Align::Left,
+                        }))
+                    }
+                    "before" | "after" => {
+                        step(self, D::SpacingOn(true));
+                        Message::MTextDialog(if key == "before" {
+                            D::Before(value.into())
+                        } else {
+                            D::After(value.into())
+                        })
+                    }
+                    "line" => {
+                        let (mode, at) = value.split_once(':').ok_or_else(invalid)?;
+                        step(self, D::LineOn(true));
+                        step(
+                            self,
+                            D::LineMode(match mode {
+                                "exactly" => LineMode::Exactly,
+                                "atleast" => LineMode::AtLeast,
+                                _ => LineMode::Multiple,
+                            }),
+                        );
+                        Message::MTextDialog(D::LineAt(at.into()))
+                    }
+                    "columns" => Message::MTextDialog(D::ColumnKind(match value {
+                        "auto" => ColumnKind::DynamicAuto,
+                        "manual" => ColumnKind::DynamicManual,
+                        "static" => ColumnKind::Static,
+                        _ => ColumnKind::None,
+                    })),
+                    "number" => Message::MTextDialog(D::ColumnNumber(value.into())),
+                    "height" => Message::MTextDialog(D::ColumnHeight(value.into())),
+                    "width" => Message::MTextDialog(D::ColumnWidth(value.into())),
+                    "gutter" => Message::MTextDialog(D::ColumnGutter(value.into())),
+                    "mask" => Message::MTextDialog(D::MaskOn(on)),
+                    "factor" => Message::MTextDialog(D::MaskFactor(value.into())),
+                    "background" => Message::MTextDialog(D::MaskBackground(on)),
+                    "color" => Message::MTextDialog(D::MaskColor(document::types::Color::Index(
+                        value.parse().map_err(|_| invalid())?,
+                    ))),
+                    "find" => Message::MTextDialog(D::Find(value.into())),
+                    "replace" => Message::MTextDialog(D::Replace(value.into())),
+                    "match_case" => Message::MTextDialog(D::MatchCase(on)),
+                    "whole" => Message::MTextDialog(D::WholeWords(on)),
+                    "wild" => Message::MTextDialog(D::Wildcards(on)),
+                    "next" => Message::MTextDialog(D::FindNext),
+                    "replace_one" => Message::MTextDialog(D::ReplaceOne),
+                    "replace_all" => Message::MTextDialog(D::ReplaceAll),
+                    "ok" => Message::MTextDialog(D::Ok),
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(invalid()),
+                }
             }
             // The Text Style window, one step per call: "select=<name>",
             // "context=<name>" (right click),

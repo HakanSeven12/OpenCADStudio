@@ -110,6 +110,40 @@ process and records whether resident memoization is enabled. Keep the input
 hash, external references, fonts, memoization setting, build profile and
 machine constant when comparing reports.
 
+## Raster and point-cloud cache retention
+
+```sh
+cargo bench --locked --bench cache_memory_budget -- --output target/cache-before.json
+cargo bench --locked --bench cache_memory_budget -- --baseline target/cache-before.json --output target/cache-after.json
+cargo bench --locked --bench cache_memory_budget -- --scenario image_decode_retention --max-retained-mib 130
+cargo bench --locked --bench cache_memory_budget -- --self-test
+```
+
+Every scenario runs in a fresh process. The fixed PDF, image, material, and
+point-cloud workloads include a sequential load/revisit sweep and three passes
+over a small, recently used subset. A revisit is not guaranteed to hit: the
+sequential working set exceeds the default budgets. Per-operation times expose
+the cost of redecoding; they include counting-allocator instrumentation.
+
+Schema 2 records revision, platform, profile, CPU count, effective cache budgets,
+and a SHA-256 of fixture content and access order. PDF fingerprints use page
+operations rather than generated timestamps/IDs. Fixture generation, source
+registration, file writes, hashing, labels, and sample storage precede the
+baseline. Setup time/peak are separate; `peak_live_bytes` is reset at that
+baseline, and `retained_bytes` is final live bytes minus baseline live bytes.
+Live totals include fixture/process overhead; these are requested System
+allocator bytes, not RSS, private commit, GPU bytes, or production mimalloc
+residency. Keep the same machine and build settings when comparing runs.
+
+`--output` writes a new JSON array file (also for one scenario). `--json` emits
+only that array to stdout; `--scenario` emits one JSON object. Baselines must
+match workload, labels, platform, profile, CPU count and cache budgets. A memory
+regression over 10% plus 64 KiB fails the run; override the percentage with
+`--max-regression-percent`. `--max-retained-mib` optionally sets an absolute
+retention ceiling per scenario. Reports are saved before these checks so a
+failure can be inspected. Timings are diagnostic and do not gate comparisons.
+Old reports must be regenerated because their peaks included fixture setup.
+
 ## Text shaping and geometry
 
 This benchmark generates a deterministic synthetic text workload; it does not

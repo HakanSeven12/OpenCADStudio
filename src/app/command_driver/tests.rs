@@ -9701,3 +9701,47 @@ mod dimension_query_tests {
         assert_eq!(entity["style"], "ISO-25", "the drawing's current style");
     }
 }
+
+#[cfg(test)]
+mod dim_baseline_chain_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// DIMBASELINE takes the last dimension as its base and grows the
+    /// series from the first extension line origin: a typed origin
+    /// produces one more dimension of the same style, measured from the
+    /// base's first origin, spaced by DIMDLI.
+    #[test]
+    fn dimbaseline_continues_the_series_from_the_last_dimension() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let _ = app.run_command_line("DIMBASELINE");
+        let _ = app.feed_script_line("15,3");
+        let _ = app.feed_script_line("");
+
+        let dims: Vec<_> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims.len(), 2, "one base dimension and one baseline dimension");
+        let measured: Vec<f64> = dims.iter().map(|d| d.measurement()).collect();
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 10.0).abs() < 1e-6),
+            "the base measures 10: {measured:?}"
+        );
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 15.0).abs() < 1e-6),
+            "the baseline dimension measures from the shared first origin to the typed one: {measured:?}"
+        );
+    }
+}

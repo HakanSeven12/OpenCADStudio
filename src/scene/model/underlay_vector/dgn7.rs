@@ -1241,3 +1241,86 @@ mod text_code_page_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+
+    /// An element of `kind` and `len` bytes on level 1, a component when
+    /// `part`.
+    fn element(kind: u8, part: bool, len: usize) -> Vec<u8> {
+        let mut e = vec![0u8; len];
+        e[0] = 1 | if part { 0x80 } else { 0 };
+        e[1] = kind;
+        e[2..4].copy_from_slice(&(((len - 4) / 2) as u16).to_le_bytes());
+        e
+    }
+
+    fn put_int32(e: &mut [u8], at: usize, v: i32) {
+        let b = v.to_le_bytes();
+        e[at..at + 4].copy_from_slice(&[b[2], b[3], b[0], b[1]]);
+    }
+
+    /// An instance of the shared cell `name`, unscaled, `dx` UORs along x.
+    fn instance(part: bool, name: &str, dx: i32) -> Vec<u8> {
+        // 1.0 as a VAX D-floating value.
+        const ONE: [u8; 8] = [0x80, 0x40, 0, 0, 0, 0, 0, 0];
+        let mut e = element(35, part, 184);
+        e[76..84].copy_from_slice(&ONE);
+        e[100..108].copy_from_slice(&ONE);
+        e[148..152].copy_from_slice(&dx.to_le_bytes());
+        e[164..164 + name.len()].copy_from_slice(name.as_bytes());
+        e
+    }
+
+    /// A 2D design file whose shared cell `A` holds a line (when `line`)
+    /// and `n` instances of `A` itself, and whose model places `A` once.
+    fn self_placing(n: usize, line: bool) -> Vec<u8> {
+        let mut f = vec![0u8; 1264];
+        f[0] = 8;
+        f[1] = 9;
+        f[2..4].copy_from_slice(&(((1264 - 4) / 2) as u16).to_le_bytes());
+        put_int32(&mut f, 1112, 1);
+        put_int32(&mut f, 1116, 1);
+        let mut def = element(34, false, 184);
+        def[164] = b'A';
+        f.extend(def);
+        if line {
+            let mut l = element(3, true, 52);
+            put_int32(&mut l, 44, 10);
+            put_int32(&mut l, 48, 10);
+            f.extend(l);
+        }
+        for k in 0..n {
+            f.extend(instance(true, "A", k as i32 * 20));
+        }
+        f.extend(instance(false, "A", 0));
+        f.extend([0xff, 0xff]);
+        f
+    }
+
+    /// `f`'s result, run on its own thread, so that a placement that never
+    /// ends fails the test instead of stopping the run.
+    fn within_ten_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(f()));
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the placement did not end")
+    }
+
+    #[test]
+    fn a_cell_that_places_itself_stops_when_the_budget_is_spent() {
+        let paths = |n: usize, line: bool| {
+            let file = self_placing(n, line);
+            within_ten_seconds(move || model(&file, &[], None).map(|s| s.paths.len()))
+        };
+        // One copy of the line at each of the eight levels nesting reads.
+        assert_eq!(paths(1, true), Some(8));
+        assert_eq!(paths(2, true), Some(255));
+        // 11,111,111 copies before; each instance costs 12 (itself, the line
+        // and its ten instances).
+        assert_eq!(paths(10, true), Some(DGN_PLACEMENT_BUDGET / 12));
+        // A cell that draws nothing still spends: 100⁷ placements before.
+        assert_eq!(paths(100, false), None);
+    }
+}

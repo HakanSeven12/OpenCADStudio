@@ -1118,6 +1118,31 @@ fn tessellate_wires(
         annotation_scale_handle,
     );
 
+    // An annotative MTEXT shown at another scale than its default one carries
+    // that scale's frame (width, columns, extents) in model units, but it is
+    // laid out at its stored (default) height and then scaled by `anno_scale`.
+    // Bring the frame back to the stored height first, or it is scaled twice
+    // and a 1:20 representation of a 1:50 text wraps at 0.4 × its width.
+    let rescaled;
+    let entity = match entity {
+        EntityType::MText(m) if anno_scale > 1e-9 && (anno_scale - 1.0).abs() > 1e-6 => {
+            let k = 1.0 / anno_scale as f64;
+            let mut m = m.clone();
+            m.rectangle_width *= k;
+            m.rectangle_height = m.rectangle_height.map(|h| h * k);
+            m.extents_width *= k;
+            m.extents_height *= k;
+            m.column_data.width *= k;
+            m.column_data.gutter *= k;
+            for h in &mut m.column_data.heights {
+                *h *= k;
+            }
+            rescaled = EntityType::MText(m);
+            &rescaled
+        }
+        _ => entity,
+    };
+
     // A HATCH is drawn as a fill by the hatch pipeline and highlighted via a
     // fill tint when selected (issue #71), so it carries no boundary outline in
     // the wire set. Skipping it here drops the dense boundary polyline — the

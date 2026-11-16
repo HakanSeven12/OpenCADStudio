@@ -386,4 +386,43 @@ mod tests {
         let empty = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>"#;
         assert_eq!(read(empty, [1.0, 1.0]).err(), Some(Error::Empty));
     }
+
+    /// A path inside `groups` nested groups.
+    fn nested(groups: usize) -> String {
+        format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">{}\
+             <path d=\"M0 0L5 5\" stroke=\"black\"/>{}</svg>",
+            "<g>".repeat(groups),
+            "</g>".repeat(groups)
+        )
+    }
+
+    #[test]
+    fn a_document_nested_deeper_than_usvg_reads_is_refused_before_parsing() {
+        // As deep as usvg reads (the <svg> and 1,023 groups), and one more.
+        assert_eq!(
+            read(nested(1023).as_bytes(), [10.0, 10.0]).map(|p| p.entities.len()),
+            Ok(1)
+        );
+        assert_eq!(
+            read(nested(1024).as_bytes(), [10.0, 10.0]).err(),
+            Some(Error::NotSvg)
+        );
+        // 3,000 levels overflowed a test thread's stack inside the XML
+        // parser, before usvg's own limit.
+        let deep = nested(100_000);
+        assert_eq!(
+            read(deep.as_bytes(), [10.0, 10.0]).err(),
+            Some(Error::NotSvg)
+        );
+        // Compressed (SVGZ), it is checked once unpacked.
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(deep.as_bytes()).unwrap();
+        let svgz = gz.finish().unwrap();
+        assert_eq!(read(&svgz, [10.0, 10.0]).err(), Some(Error::NotSvg));
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(SQUARE.as_bytes()).unwrap();
+        assert!(read(&gz.finish().unwrap(), [100.0, 50.0]).is_ok());
+    }
 }

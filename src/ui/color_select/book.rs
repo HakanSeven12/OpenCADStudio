@@ -257,4 +257,26 @@ mod tests {
                          </colorPage></colorBook>";
         assert!(parse(encrypted).is_err());
     }
+
+    #[test]
+    fn a_book_nested_too_deeply_is_refused_before_parsing() {
+        // A colour, and an element of no meaning to the book nested
+        // `levels` deep inside the book: 256 levels at most, the book and 255.
+        let nested = |levels: usize| {
+            format!(
+                "<colorBook><bookName>B</bookName>{}{}{}</colorBook>",
+                entry("C", (1, 2, 3)),
+                "<a>".repeat(levels),
+                "</a>".repeat(levels)
+            )
+        };
+        let colours = |levels: usize| parse(&nested(levels)).map(|b| b.colors.len());
+        assert_eq!(colours(255), Ok(1));
+        assert_eq!(
+            colours(256),
+            Err("The color book nests deeper than 256 levels.".to_string())
+        );
+        // 3,000 levels overflowed a test thread's stack inside the parser.
+        assert!(parse(&nested(100_000)).is_err());
+    }
 }

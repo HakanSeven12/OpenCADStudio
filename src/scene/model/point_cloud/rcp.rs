@@ -110,3 +110,52 @@ fn entry(node: roxmltree::Node, folder: &Path) -> Option<ScanEntry> {
         scale: xyz(node, "Scale", 1.0),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A project archive holding `xml` as its project file.
+    fn project(xml: &str) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("project.xml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(xml.as_bytes()).unwrap();
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// A project whose one scan, a file that exists, sits inside `levels`
+    /// extra elements.
+    fn nested(levels: usize) -> Vec<u8> {
+        let scan = format!(
+            "<VoxelTreeRunTime Id=\"s1\"><Path Value=\"{}\"/>\
+             <Translation x=\"1\" y=\"2\" z=\"3\"/></VoxelTreeRunTime>",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")
+        );
+        project(&format!(
+            "<Project>{}{scan}{}</Project>",
+            "<a>".repeat(levels),
+            "</a>".repeat(levels)
+        ))
+    }
+
+    #[test]
+    fn a_project_nested_too_deeply_is_not_read() {
+        let ids = |bytes: &[u8]| {
+            scans(bytes, Path::new("p.rcp")).map(|s| {
+                s.iter()
+                    .map(|e| (e.id.clone(), e.translation))
+                    .collect::<Vec<_>>()
+            })
+        };
+        // 256 levels at most: the project, the scan (its entries close
+        // themselves) and 254 more.
+        let read = Some(vec![("s1".to_string(), [1.0, 2.0, 3.0])]);
+        assert_eq!(ids(&nested(0)), read);
+        assert_eq!(ids(&nested(254)), read);
+        assert_eq!(ids(&nested(255)), None);
+        // 3,000 levels overflowed a test thread's stack inside the parser.
+        assert_eq!(ids(&nested(100_000)), None);
+    }
+}

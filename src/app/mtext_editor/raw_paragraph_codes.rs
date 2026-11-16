@@ -40,7 +40,8 @@ impl Default for InForce {
     }
 }
 
-/// A tab list of one stop at 0 is no tab stop: `t0` clears the stops.
+/// A tab list of one stop at 0 is no tab stop: `tz` (and `t0`) clear the
+/// stops.
 fn tabs_in_force(tabs: &[TabStop]) -> Vec<TabStop> {
     match tabs {
         [TabStop::Left(p)] if *p == 0.0 => Vec::new(),
@@ -114,12 +115,12 @@ impl InForce {
             );
         }
         if self.tabs != previous.tabs {
-            let list: Vec<String> = if self.tabs.is_empty() {
-                vec!["0".to_string()]
+            if self.tabs.is_empty() {
+                out.push("tz".to_string());
             } else {
-                self.tabs.iter().map(|tab| tab.to_string()).collect()
-            };
-            out.push(format!("t{}", list.join(",")));
+                let list: Vec<String> = self.tabs.iter().map(|tab| tab.to_string()).collect();
+                out.push(format!("t{}", list.join(",")));
+            }
         }
         out
     }

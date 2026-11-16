@@ -236,7 +236,17 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
     if !points.iter().all(|point| point.is_finite()) {
         return None;
     }
+    circle_beziers(&points)
+}
+
+/// The one circle through `points`, turning one way at most once round it:
+/// `(centre, radius, start angle, signed sweep)`.
+fn fit_circle(points: &[glam::DVec2]) -> Option<(glam::DVec2, f64, f64, f64)> {
+    use glam::DVec2;
     let n = points.len();
+    if n < 3 {
+        return None;
+    }
     let (a, b, c) = (points[0], points[n / 3], points[2 * n / 3]);
     let (ab, ac) = (b - a, c - a);
     let det = 2.0 * ab.perp_dot(ac);
@@ -266,7 +276,13 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
     if sweep == 0.0 || sweep.abs() > std::f64::consts::TAU + 1.0e-6 {
         return None;
     }
-    let start = (a - center).to_angle();
+    Some((center, radius, (a - center).to_angle(), sweep))
+}
+
+/// Points on one circle as cubic Bézier spans of at most a quarter turn.
+fn circle_beziers(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
+    use glam::DVec2;
+    let (center, radius, start, sweep) = fit_circle(points)?;
     // A full turn sums to a hair over 2π; that is still four quarters.
     let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9).ceil().max(1.0) as usize;
     let step = sweep / pieces as f64;
@@ -286,6 +302,94 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
             })
             .collect(),
     )
+}
+
+/// Index ranges `start..=end` of a fill ring whose points walk one circle —
+/// the arcs of a hatch boundary, sampled into chords when it was built
+/// (#3076). A run is at least four points turning under 20° a step, so the
+/// corners of a rectangle or hexagon on a common circle stay corners.
+// ponytail: a regular polygon of 18+ sides plots round; carry the boundary
+// edges through the viewport projection if that ever matters.
+fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
+    const MAX_STEP: f64 = 20.0 * std::f64::consts::PI / 180.0;
+    let mut runs = Vec::new();
+    let mut start = 0;
+    while start + 3 < ring.len() {
+        let Some((center, radius, _, sweep)) = fit_circle(&ring[start..start + 3]) else {
+            start += 1;
+            continue;
+        };
+        let mut end = start;
+        while end + 1 < ring.len() {
+            let next = ring[end + 1];
+            let turn = (ring[end] - center).angle_to(next - center);
+            if (next.distance(center) - radius).abs() > radius * 1.0e-3
+                || turn * sweep <= 0.0
+                || turn.abs() > MAX_STEP
+            {
+                break;
+            }
+            end += 1;
+        }
+        if end - start >= 3 && fit_circle(&ring[start..=end]).is_some() {
+            runs.push((start, end));
+            start = end;
+        } else {
+            start += 1;
+        }
+    }
+    runs
+}
+
+/// A fill ring as a path of `(point, is_control_point)`: the chords it holds,
+/// with every arc run among them replaced by its Bézier spans.
+pub(crate) fn curved_ring(ring: &[glam::DVec2]) -> Vec<(glam::DVec2, bool)> {
+    let mut path = Vec::with_capacity(ring.len());
+    let mut next = 0;
+    for (start, end) in ring_arc_runs(ring) {
+        path.extend(ring[next..=start].iter().map(|&point| (point, false)));
+        for [_, c1, c2, point] in circle_beziers(&ring[start..=end]).unwrap_or_default() {
+            path.extend([(c1, true), (c2, true), (point, false)]);
+        }
+        next = end + 1;
+    }
+    path.extend(ring.get(next..).unwrap_or_default().iter().map(|&point| (point, false)));
+    path
+}
+
+/// The hatch with each arc run of its boundary resampled at one degree, so
+/// plotted pattern lines end on the curve rather than on its chords.
+pub(crate) fn hatch_with_fine_arcs(hatch: &HatchModel) -> Option<HatchModel> {
+    use glam::DVec2;
+    let origin = DVec2::from(hatch.world_origin);
+    let mut boundary = Vec::with_capacity(hatch.boundary.len());
+    let mut changed = false;
+    for ring in hatch.boundary.split(|p| p[0].is_nan() || p[1].is_nan()) {
+        if !boundary.is_empty() {
+            boundary.push([f32::NAN, f32::NAN]);
+        }
+        let points: Vec<DVec2> =
+            ring.iter().map(|&[x, y]| DVec2::new(x as f64, y as f64) + origin).collect();
+        let mut next = 0;
+        for (start, end) in ring_arc_runs(&points) {
+            let (center, radius, from, sweep) = fit_circle(&points[start..=end])?;
+            boundary.extend_from_slice(&ring[next..start]);
+            let steps = (sweep.abs().to_degrees().ceil() as usize).max(1);
+            boundary.extend((0..steps).map(|step| {
+                let point = center
+                    + radius * DVec2::from_angle(from + sweep * step as f64 / steps as f64)
+                    - origin;
+                [point.x as f32, point.y as f32]
+            }));
+            next = end;
+            changed = true;
+        }
+        boundary.extend_from_slice(&ring[next..]);
+    }
+    changed.then(|| HatchModel {
+        boundary: std::sync::Arc::new(boundary),
+        ..hatch.clone()
+    })
 }
 
 #[cfg(test)]
@@ -344,5 +448,22 @@ mod tests {
         let mut polygon = arc_wire(std::f64::consts::TAU, 6);
         polygon.tangent_geoms.clear();
         assert!(super::wire_arc_beziers(&polygon, 1.0).is_none());
+    }
+
+    #[test]
+    fn hatch_ring_arcs_plot_as_curves() {
+        use glam::DVec2;
+        // A half disc: the diameter, then the arc back sampled at 7.5°.
+        let mut ring: Vec<DVec2> = (0..=24)
+            .map(|i| 10.0 * DVec2::from_angle(std::f64::consts::PI * i as f64 / 24.0))
+            .collect();
+        ring.insert(0, DVec2::new(-10.0, 0.0));
+        let path = super::curved_ring(&ring);
+        assert_eq!(path.iter().filter(|(_, control)| *control).count(), 4);
+        assert!(path.last().unwrap().0.distance(ring[25]) < 1.0e-9);
+        // A rectangle keeps its corners.
+        let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
+            .map(DVec2::from);
+        assert!(super::curved_ring(&square).iter().all(|(_, control)| !control));
     }
 }

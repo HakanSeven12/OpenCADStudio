@@ -698,7 +698,8 @@ fn emit_hatch(
         } else {
             physical
         };
-        let segments = hatch.pattern_segments_for_plot();
+        let fine = crate::io::plot::hatch_with_fine_arcs(hatch);
+        let segments = fine.as_ref().unwrap_or(hatch).pattern_segments_for_plot();
         if segments.is_empty() {
             return;
         }
@@ -751,32 +752,44 @@ fn emit_hatch(
         ];
     }
 
+    // Arcs among the chords are written as curves (#3076).
     let mut d = String::new();
-    let mut current_empty = true;
     let mut any = false;
-    for &[bx, by] in hatch.boundary.iter() {
-        if bx.is_nan() || by.is_nan() {
-            if !current_empty {
-                d.push_str("Z ");
+    for ring in hatch.boundary.split(|p| p[0].is_nan() || p[1].is_nan()) {
+        let points: Vec<glam::DVec2> = ring
+            .iter()
+            .map(|&[bx, by]| map.apply(bx as f64 + wox + ox, by as f64 + woy + oy))
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
+            .map(|(x, y)| glam::DVec2::new(x, y))
+            .collect();
+        let path = crate::io::plot::curved_ring(&points);
+        let mut index = 0;
+        while index < path.len() {
+            let (point, _) = path[index];
+            if index == 0 {
+                d.push_str(&format!("M {} {} ", fmt(point.x), fmt(point.y)));
+                index += 1;
+            } else if path[index].1 && index + 2 < path.len() {
+                let (c2, end) = (path[index + 1].0, path[index + 2].0);
+                d.push_str(&format!(
+                    "C {} {} {} {} {} {} ",
+                    fmt(point.x),
+                    fmt(point.y),
+                    fmt(c2.x),
+                    fmt(c2.y),
+                    fmt(end.x),
+                    fmt(end.y)
+                ));
+                index += 3;
+            } else {
+                d.push_str(&format!("L {} {} ", fmt(point.x), fmt(point.y)));
+                index += 1;
             }
-            current_empty = true;
-            continue;
         }
-        let (sx, sy) = map.apply(bx as f64 + wox + ox, by as f64 + woy + oy);
-        if !sx.is_finite() || !sy.is_finite() {
-            continue;
+        if !path.is_empty() {
+            d.push_str("Z ");
+            any = true;
         }
-        d.push_str(&format!(
-            "{} {} {} ",
-            if current_empty { 'M' } else { 'L' },
-            fmt(sx),
-            fmt(sy)
-        ));
-        current_empty = false;
-        any = true;
-    }
-    if !current_empty {
-        d.push_str("Z ");
     }
     if !any {
         return;

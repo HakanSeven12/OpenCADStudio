@@ -1114,6 +1114,63 @@ impl HistorySnapshot {
         }
     }
 
+    #[cfg(all(test, feature = "performance-audit"))]
+    pub(super) fn performance_audit_legacy_bytes(&self) -> usize {
+        match self {
+            HistorySnapshot::Delta(d) => d
+                .entities
+                .len()
+                .saturating_mul(512)
+                .saturating_add(
+                    d.structure
+                        .as_ref()
+                        .map_or(0, StructureSnapshot::estimated_bytes),
+                )
+                .saturating_add(d.selected_before.len().saturating_mul(16))
+                .saturating_add(d.selected_after.len().saturating_mul(16))
+                .saturating_add(d.active_layer.as_ref().map_or(0, |(before, after)| {
+                    before.len().saturating_add(after.len())
+                }))
+                .saturating_add(
+                    d.parametric_constraints
+                        .iter()
+                        .map(|entry| {
+                            entry
+                                .before
+                                .constraints
+                                .len()
+                                .saturating_add(entry.after.constraints.len())
+                        })
+                        .sum::<usize>()
+                        .saturating_mul(96),
+                )
+                .saturating_add(d.named_parameters.as_ref().map_or(0, |(before, after)| {
+                    before.len().saturating_add(after.len()).saturating_mul(128)
+                }))
+                .saturating_add(d.visibility_states.as_ref().map_or(0, |(before, after)| {
+                    (before.len() + after.len()).saturating_mul(32)
+                }))
+                .saturating_add(d.reference_designations.len().saturating_mul(16))
+                .saturating_add(d.reference_session.as_ref().map_or(0, |(before, after)| {
+                    before
+                        .estimated_bytes()
+                        .saturating_add(after.estimated_bytes())
+                }))
+                .saturating_add(d.label.estimated_bytes()),
+            HistorySnapshot::ObjectVisibility(v) => v
+                .before
+                .hidden
+                .len()
+                .saturating_add(v.before.keep.as_ref().map_or(0, rustc_hash::FxHashSet::len))
+                .saturating_add(v.after.hidden.len())
+                .saturating_add(v.after.keep.as_ref().map_or(0, rustc_hash::FxHashSet::len))
+                .saturating_add(v.selected_before.len())
+                .saturating_add(v.selected_after.len())
+                .saturating_mul(16)
+                .saturating_add(v.label.estimated_bytes()),
+        }
+    }
+
     /// Snapshot-owned bookkeeping and structural estimates. Shared entity
     /// images and raw records are charged separately across both history stacks.
     pub(super) fn estimated_overhead_bytes(&self) -> usize {

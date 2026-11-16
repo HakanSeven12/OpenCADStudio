@@ -1,5 +1,8 @@
 //! Shared performance trace for terminal output and the in-app `PERF` panel.
 
+#[cfg(all(test, feature = "performance-audit"))]
+pub(crate) mod audit;
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};

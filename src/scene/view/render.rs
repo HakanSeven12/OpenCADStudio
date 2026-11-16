@@ -2417,6 +2417,11 @@ fn solar_direction(
 /// numbers move a handful of times. RSS is deliberately not used — the
 /// allocator and the driver both retain high-water memory that RSS cannot tell
 /// apart from live resources.
+#[cfg(all(test, feature = "performance-audit"))]
+pub(crate) fn performance_audit_report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
+    report_gpu_live(pipeline);
+}
+
 fn report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
     use std::cell::Cell;
     if !crate::perf::enabled() {

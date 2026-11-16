@@ -2,6 +2,12 @@
 
 A standardized, statistical performance benchmarking suite measuring throughput, latency, and memory metrics across core CAD subsystems and the user interface.
 
+The [release audit of the memory changes](../docs/performance-memory-audit.md)
+records before/after latency, p95 and bookkeeping costs for save preparation,
+history accounting and GPU telemetry. It found measurable overheads; passing
+correctness tests does not establish zero performance impact. Reproduction
+commands and raw samples are linked in that report.
+
 ## Quick Start
 
 Run the full benchmark suite with native `--release` optimizations:

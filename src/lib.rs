@@ -1,6 +1,11 @@
 #![allow(non_snake_case)]
 #![recursion_limit = "512"]
 
+// Match the Windows application allocator in opt-in release audit tests.
+#[cfg(all(test, feature = "performance-audit", target_os = "windows"))]
+#[global_allocator]
+static AUDIT_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod app;
 
 /// The Quad display-option message, re-exported at the crate root so every

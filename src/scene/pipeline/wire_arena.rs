@@ -1793,6 +1793,15 @@ impl PersistentWireArena {
     /// Device bytes this arena holds. The instance buffer is reserved with
     /// headroom, so this is the allocation, not the occupied prefix — which is
     /// what a memory budget has to answer for.
+    #[cfg(all(test, feature = "performance-audit"))]
+    pub(crate) fn performance_audit_legacy_gpu_bytes(&self) -> u64 {
+        match &self.inner {
+            PersistentWireArenaKind::Indexed(arenas) => arenas.iter()
+                .map(|arena| arena.inst_buf.size() + arena.const_buf.size()).sum(),
+            PersistentWireArenaKind::Packed(arena) => arena.inst_buf.size(),
+        }
+    }
+
     pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
         match &self.inner {
             PersistentWireArenaKind::Indexed(arenas) => arenas

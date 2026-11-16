@@ -70,6 +70,10 @@ pub mod windows_media;
 pub mod xref;
 pub mod xref_model;
 
+#[cfg(all(test, feature = "performance-audit"))]
+#[path = "save_audit.rs"]
+mod performance_audit;
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::plot_style::PlotStyleTableExt as _;
 use crate::scene::DerivedCaches;

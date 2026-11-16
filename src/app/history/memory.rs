@@ -383,7 +383,7 @@ mod tests {
         Handle,
     };
 
-    fn snapshot(entity: Arc<EntityType>) -> HistorySnapshot {
+    pub(super) fn snapshot(entity: Arc<EntityType>) -> HistorySnapshot {
         HistorySnapshot::Delta(Box::new(DeltaSnapshot {
             visibility_states: None,
             entities: vec![(Handle::new(1), Some(entity.clone()), Some(entity))],
@@ -685,3 +685,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "performance-audit"))]
+#[path = "memory_audit.rs"]
+mod performance_audit;

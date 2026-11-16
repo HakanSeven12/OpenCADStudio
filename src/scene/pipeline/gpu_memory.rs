@@ -241,3 +241,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, feature = "performance-audit"))]
+#[path = "gpu_memory_audit.rs"]
+mod performance_audit;

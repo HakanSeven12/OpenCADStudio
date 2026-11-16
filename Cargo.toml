@@ -6,6 +6,10 @@ build = "build.rs"
 default-run = "OpenCADStudio"
 autotests = false
 
+[features]
+# Opt-in release audit helpers; has no effect in the application executable.
+performance-audit = []
+
 [workspace]
 members = [
     "crates/ocs_acis",

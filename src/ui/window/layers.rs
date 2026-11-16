@@ -440,8 +440,8 @@ pub struct LayerPanel {
     /// they were counted for, so they are counted again only after a change.
     pub counts: std::collections::HashMap<String, (usize, usize)>,
     pub counts_key: Option<(u64, u64)>,
-    /// What the filter tree was last worked out from: the selection, the
-    /// layer table and the filters.
+    /// What the filter tree was last worked out from: the selection's layers,
+    /// the layer table, the filters the drawing keeps and the ribbon setting.
     pub tree_key: Option<u64>,
     /// The last click was in the table, so ↑/↓, Ctrl+A, Del, F2 and Esc act
     /// on its rows. A click in the drawing or typing a command ends it.

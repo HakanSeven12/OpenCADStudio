@@ -113,6 +113,76 @@ pub(crate) fn stored_layer_filters(document: &Document) -> Vec<StoredLayerFilter
     records(document).into_iter().map(|(_, f)| f).collect()
 }
 
+/// A fingerprint of the layer filters the drawing keeps, by their records'
+/// content and nesting, for callers that only need to know whether the table
+/// changed. Record handles will not do: undo rewinds the handle allocator, so a
+/// later write can hand out an old handle with a new expression, and a record
+/// edited in place keeps its handle too.
+pub(crate) fn filter_table_fingerprint(document: &Document) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn hash_value(value: &XRecordValue, hasher: &mut DefaultHasher) {
+        match value {
+            XRecordValue::String(v) => (0u8, v).hash(hasher),
+            XRecordValue::Double(v) => (1u8, v.to_bits()).hash(hasher),
+            XRecordValue::Int16(v) => (2u8, v).hash(hasher),
+            XRecordValue::Int32(v) => (3u8, v).hash(hasher),
+            XRecordValue::Int64(v) => (4u8, v).hash(hasher),
+            XRecordValue::Byte(v) => (5u8, v).hash(hasher),
+            XRecordValue::Bool(v) => (6u8, v).hash(hasher),
+            XRecordValue::Handle(v) => (7u8, v.value()).hash(hasher),
+            XRecordValue::Point3D(x, y, z) => {
+                (8u8, x.to_bits(), y.to_bits(), z.to_bits()).hash(hasher)
+            }
+            XRecordValue::Chunk(v) => (9u8, v).hash(hasher),
+        }
+    }
+
+    fn walk(document: &Document, dictionary: Handle, depth: usize, hasher: &mut DefaultHasher) {
+        let Some(ObjectType::Dictionary(entries)) = document.objects.get(&dictionary) else {
+            return;
+        };
+        if depth > MAX_DEPTH {
+            return;
+        }
+        for (_, handle) in &entries.entries {
+            let Some(ObjectType::XRecord(xrecord)) = document.objects.get(handle) else {
+                continue;
+            };
+            // Layer groups sit in the same dictionary; only filter records
+            // feed the filter tree, so a group edit is not a filter change.
+            // Records `parse` would reject are hashed too: that only ever adds
+            // sensitivity, and never hides a change the tree would show.
+            let is_filter = matches!(xrecord.entries.first(),
+                Some(entry) if entry.code == 1 && entry.value.as_string() == Some(KIND));
+            if !is_filter {
+                continue;
+            }
+            // Depth in walk order says who the parent is: a record at depth d
+            // sits under the nearest one before it at depth d - 1. Without it,
+            // a filter moved to the top level would hash like a child.
+            depth.hash(hasher);
+            xrecord.entries.len().hash(hasher);
+            for entry in &xrecord.entries {
+                entry.code.hash(hasher);
+                hash_value(&entry.value, hasher);
+            }
+            if let Some(nested) = nested_dictionary(document, xrecord) {
+                walk(document, nested, depth + 1, hasher);
+            }
+        }
+    }
+
+    let mut hasher = DefaultHasher::new();
+    // A missing dictionary walks to nothing, which is also what an empty one
+    // gives: both render no filters.
+    if let Some(root) = super::layer_groups::filter_dictionary(document) {
+        walk(document, root, 0, &mut hasher);
+    }
+    hasher.finish()
+}
+
 /// Take a filter record out of its dictionary, with the extension
 /// dictionary that held its nested filters.
 fn remove_record(document: &mut Document, handle: Handle) {
@@ -464,6 +534,81 @@ mod tests {
         let back = crate::io::load_file(&path).expect("load");
         let _ = std::fs::remove_file(&path);
         assert_eq!(stored_layer_filters(&back), filters[..1]);
+    }
+
+    #[test]
+    fn a_fingerprint_follows_the_record_content_not_its_handle() {
+        let mut document = Document::new();
+        write_layer_filters(
+            &mut document,
+            &[StoredLayerFilter {
+                name: "Red".into(),
+                parent: None,
+                filter: Filter {
+                    root: Match::All,
+                    items: vec![row("color", "5")],
+                },
+            }],
+        );
+        let before = filter_table_fingerprint(&document);
+        // The same record, rewritten in place: its handle does not change.
+        let handle = records(&document)[0].0;
+        let Some(ObjectType::XRecord(xrecord)) = document.objects.get_mut(&handle) else {
+            panic!("the filter record must still be there");
+        };
+        for entry in &mut xrecord.entries {
+            if entry.code == 301 {
+                entry.value = XRecordValue::String("( COLOR== \"7\" )".into());
+                break;
+            }
+        }
+        assert_ne!(
+            filter_table_fingerprint(&document),
+            before,
+            "a changed expression under an unchanged handle must show",
+        );
+        assert_eq!(
+            stored_layer_filters(&document)[0].filter,
+            from_expression("( COLOR== \"7\" )").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_fingerprint_follows_nesting_not_only_record_content() {
+        let layer_filter = |name: &str| StoredLayerFilter {
+            name: name.into(),
+            parent: None,
+            filter: Filter {
+                root: Match::All,
+                items: vec![row("name", &format!("{name}*"))],
+            },
+        };
+        let (a, b) = (layer_filter("A"), layer_filter("B"));
+        let mut flat = Document::new();
+        write_layer_filters(&mut flat, &[a.clone(), b.clone()]);
+        let mut nested = Document::new();
+        write_layer_filters(
+            &mut nested,
+            &[
+                a,
+                StoredLayerFilter {
+                    parent: Some("A".into()),
+                    ..b
+                },
+            ],
+        );
+        assert_eq!(
+            stored_layer_filters(&nested)[1].parent.as_deref(),
+            Some("A")
+        );
+        assert!(stored_layer_filters(&flat)
+            .iter()
+            .all(|filter| filter.parent.is_none()));
+        assert_ne!(
+            filter_table_fingerprint(&nested),
+            filter_table_fingerprint(&flat),
+            "a filter moved under a parent must show, though its content is unchanged",
+        );
     }
 
     #[test]

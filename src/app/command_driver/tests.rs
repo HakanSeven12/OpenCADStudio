@@ -9852,3 +9852,49 @@ mod dim_inspect_window_tests {
         assert!(state.any_inspected, "the dimension reports as inspected");
     }
 }
+
+#[cfg(test)]
+mod join_command_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn fresh_line(app: &mut OpenCADStudio, x1: f64, x2: f64) -> document::Handle {
+        app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(x1, 0.0, 0.0),
+                Vector3::new(x2, 0.0, 0.0),
+            )),
+        )
+    }
+
+    /// Pickfirst JOIN: two collinear lines selected together merge into
+    /// the one line that spans both, and the consumed piece is erased.
+    #[test]
+    fn join_merges_collinear_lines_selected_together() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first = fresh_line(&mut app, 0.0, 10.0);
+        let second = fresh_line(&mut app, 10.0, 18.0);
+        app.tabs[i].scene.select_entities(&[first, second]);
+
+        let _ = app.run_command_line("JOIN");
+
+        let lines: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 1, "two collinear lines joined into one: {lines:?}");
+        let line = &lines[0];
+        let xs = [line.start.x, line.end.x];
+        assert_eq!(xs.iter().cloned().reduce(f64::min), Some(0.0), "{line:?}");
+        assert_eq!(xs.iter().cloned().reduce(f64::max), Some(18.0), "{line:?}");
+    }
+}

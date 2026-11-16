@@ -60,8 +60,18 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Atomic entity common-property writes and direct DGN import joined execute.
 /// Fresh xref reads joined the read facade; six direct-reference lifecycle
 /// writes joined execute with operation-local unknown-field rejection.
+/// SWG-005 (the sanctioned digest repin): semantic plugin-panel reads joined
+/// the read facade (`panel_semantics` — bounded summaries, targeted
+/// enablement/visibility, selection, pending prompt; `panel_page` — the same
+/// store windows the GUI mount renders, explicit offset+limit), and the ONE
+/// mutation path joined execute (`panel_widget_invoke` — a semantic command
+/// through the GUI mount's own machine dispatch; disabled/hidden refuses,
+/// a confirm policy arms the host prompt). Repinned deliberately per
+/// docs/automation/DEVELOPING.md:
+/// 7e2b74104179b37b1b64b557983aa3a65fc56495916b8a6e6a2346e6aee885e5 →
+/// 23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "7e2b74104179b37b1b64b557983aa3a65fc56495916b8a6e6a2346e6aee885e5";
+const TOOL_SCHEMA_DIGEST: &str = "23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -103,6 +113,8 @@ const READ_OPS: &[&str] = &[
     "text_audit",
     "keytips",
     "capture",
+    "panel_semantics",
+    "panel_page",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -124,6 +136,7 @@ const EXECUTE_OPS: &[&str] = &[
     "panel_input",
     "panel_button",
     "panel_action",
+    "panel_widget_invoke",
     "action",
     "embed_image",
     "dgn_import",
@@ -2555,14 +2568,14 @@ pub(crate) fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_read",
-            "description":"Use entity_schema with parameters.type for creation fields/examples; omit type to list. Use validate with parameters.request to check an execute request without running it (no live document checks). Use guide with parameters.name to read workflow, architecture, capture or batch-bindings guidance (omit name to list). Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, blocks (semantic block instances with attributes, definition tags and dynamic properties), properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session. Use batch_result with parameters.request_id to retrieve retained batch details without executing steps; available only in the originating MCP connection, for up to 64 retained batches per session.",
-            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"layout":{"type":"string","minLength":1,"description":"Layout name for op: page_setup_get."},"request":{"type":"object","description":"Execute request to preflight without dispatch. request_id may be omitted. Batch bindings are checked structurally; result-dependent values require execution."},"name":{"type":"string","description":"Command name, block name/glob, or record name."},"names":{"type":"array","items":{"type":"string"},"description":"Block name or wildcard glob filters (e.g. ['*'], ['DOOR*']) for op: blocks."},"extract_attributes":{"type":"boolean","default":true,"description":"Extract ATTRIB values, ATTDEF defaults, and visible definition text tags (e.g. TAG, DIMS) for op: blocks."},"extract_dynamic_properties":{"type":"boolean","default":true,"description":"Extract dynamic block parameters, visibility states, and lookup values for op: blocks."},"include_anonymous":{"type":"boolean","default":false,"description":"Include unlinked internal anonymous blocks (*U..., *D..., *T...) in op: blocks."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query; * and ? are wildcards."},"xdata_app":{"type":"string","description":"Only entities carrying XDATA of this application (query)."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000}},"additionalProperties":false}},"anyOf":[{"required":["ocs_session_id"]},{"required":["op"],"properties":{"op":{"enum":["guide","entity_schema","validate"]}}}],"additionalProperties":false},
+            "description":"Use entity_schema with parameters.type for creation fields/examples; omit type to list. Use validate with parameters.request to check an execute request without running it (no live document checks). Use guide with parameters.name to read workflow, architecture, capture or batch-bindings guidance (omit name to list). Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, blocks (semantic block instances with attributes, definition tags and dynamic properties), properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session. Use batch_result with parameters.request_id to retrieve retained batch details without executing steps; available only in the originating MCP connection, for up to 64 retained batches per session. Use panel_semantics for an attached plugin panel's bounded surface truth (summaries, selection, targeted enablement/visibility, pending prompt) and panel_page for the same paged tree/list/table windows the GUI mount renders.",
+            "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"layout":{"type":"string","minLength":1,"description":"Layout name for op: page_setup_get."},"request":{"type":"object","description":"Execute request to preflight without dispatch. request_id may be omitted. Batch bindings are checked structurally; result-dependent values require execution."},"name":{"type":"string","description":"Command name, block name/glob, or record name."},"names":{"type":"array","items":{"type":"string"},"description":"Block name or wildcard glob filters (e.g. ['*'], ['DOOR*']) for op: blocks."},"extract_attributes":{"type":"boolean","default":true,"description":"Extract ATTRIB values, ATTDEF defaults, and visible definition text tags (e.g. TAG, DIMS) for op: blocks."},"extract_dynamic_properties":{"type":"boolean","default":true,"description":"Extract dynamic block parameters, visibility states, and lookup values for op: blocks."},"include_anonymous":{"type":"boolean","default":false,"description":"Include unlinked internal anonymous blocks (*U..., *D..., *T...) in op: blocks."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query; * and ? are wildcards."},"xdata_app":{"type":"string","description":"Only entities carrying XDATA of this application (query)."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"panel_id":{"type":"string","minLength":1,"description":"Registered plugin panel id for op: panel_semantics / panel_page."},"kind":{"type":"string","enum":["tree_children","list_items","table_rows"],"default":"tree_children","description":"Store page kind for op: panel_page — the same paged windows the GUI mount renders."},"parent_id":{"type":"integer","minimum":0,"description":"Parent row/list/table id for op: panel_page; omit for the roots of every widget of that kind."},"button_id":{"type":"integer","minimum":0,"description":"Icon button widget id: targeted effective enablement/visibility read for op: panel_semantics."},"menu_id":{"type":"integer","minimum":0,"description":"Owning menu widget id of a menu-item address, with command_id, for op: panel_semantics targeted reads."},"command_id":{"type":"string","minLength":1,"description":"Menu item command id, with menu_id, for op: panel_semantics targeted reads."},"row_id":{"type":"integer","minimum":0,"description":"Row/item id for op: panel_semantics targeted reads (enablement, expansion, lazy-children flag)."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000,"description":"Page width for op: panel_page (the store's own page budget caps the served window)."}},"additionalProperties":false}},"anyOf":[{"required":["ocs_session_id"]},{"required":["op"],"properties":{"op":{"enum":["guide","entity_schema","validate"]}}}],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "title":"Read OCS state","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
         {
             "name":"ocs_execute",
-            "description":"Execute semantic OCS actions, batch drafting, and mutations. Supports batch creation (entities_create), reference image underlays (embed_image), block definitions (block_define), and block reference insertions (INSERT). Read the architecture guide before floorplan vectorization.",
+            "description":"Execute semantic OCS actions, batch drafting, and mutations. Supports batch creation (entities_create), reference image underlays (embed_image), block definitions (block_define), block reference insertions (INSERT), and semantic plugin-panel commands (panel_widget_invoke — the GUI mount's own machine dispatch). Read the architecture guide before floorplan vectorization.",
             "inputSchema":execute_input_schema(),
             "outputSchema":execute_output_schema(),
             "title":"Execute OCS action","annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}
@@ -3294,9 +3307,34 @@ mod tests {
         for op in ["guide", "entity_schema", "validate"] {
             crate::schema_validation::validate_shape(read_schema, &json!({"op":op}), "").unwrap();
         }
+        // SWG-005: the semantic panel reads ride the same envelope shape
+        // (they need a live session, so they are not free-ops — the
+        // ocs_session_id arm of the anyOf carries them).
+        for op in ["panel_semantics", "panel_page"] {
+            crate::schema_validation::validate_shape(
+                read_schema,
+                &json!({"op":op,"ocs_session_id":"s"}),
+                "",
+            )
+            .unwrap();
+        }
         assert!(
             crate::schema_validation::validate_shape(read_schema, &json!({"op":"state"}), "")
                 .is_err()
+        );
+        // The semantic panel read ops are honest members of the read facade.
+        assert!(READ_OPS.contains(&"panel_semantics"));
+        assert!(READ_OPS.contains(&"panel_page"));
+        // ...and the ONE semantic mutation path names its address fields
+        // with the event vocabulary's own target cap.
+        assert!(EXECUTE_OPS.contains(&"panel_widget_invoke"));
+        let targets = tools[2]["inputSchema"]["$defs"]["op_panel_widget_invoke"]["properties"]
+            ["targets"]
+            .clone();
+        assert_eq!(targets["maxItems"], 16);
+        assert_eq!(
+            tools[2]["inputSchema"]["$defs"]["op_panel_widget_invoke"]["required"],
+            json!(["op", "panel_id"])
         );
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["request"]["required"],
@@ -4651,6 +4689,91 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn panel_widget_invoke_describes_the_machine_contract_honestly() {
+        // The ONE semantic mutation path's descriptor (mcp_ops): the address
+        // is exactly-one (a button id, or a menu item by owning menu +
+        // command id), targets ride the event vocabulary's own 16-id cap,
+        // and the panel must be named.
+        let op = crate::mcp_ops::find_op("panel_widget_invoke")
+            .expect("the descriptor is registered");
+        assert!(
+            op.rules
+                .iter()
+                .any(|rule| matches!(rule, crate::mcp_ops::Rule::ExactlyOneOf(_))),
+            "the exactly-one-address rule is declared"
+        );
+        let schema = crate::mcp_ops::op_schema(op);
+        crate::schema_validation::validate_shape(
+            &schema,
+            &json!({"op":"panel_widget_invoke","panel_id":"p","button_id":1}),
+            "",
+        )
+        .expect("a button address validates");
+        crate::schema_validation::validate_shape(
+            &schema,
+            &json!({"op":"panel_widget_invoke","panel_id":"p","menu_id":5,"command_id":"apply"}),
+            "",
+        )
+        .expect("a menu-item address validates");
+        let both = crate::schema_validation::validate_shape(
+            &schema,
+            &json!({"op":"panel_widget_invoke","panel_id":"p","button_id":1,"menu_id":5,"command_id":"apply"}),
+            "",
+        );
+        assert!(both.is_err(), "both addresses at once is invalid");
+        let too_many = crate::schema_validation::validate_shape(
+            &schema,
+            &json!({"op":"panel_widget_invoke","panel_id":"p","button_id":1,"targets":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]}),
+            "",
+        );
+        assert!(too_many.is_err(), "targets beyond the 16-id cap are invalid");
+        let bare = crate::schema_validation::validate_shape(
+            &schema,
+            &json!({"op":"panel_widget_invoke","button_id":1}),
+            "",
+        );
+        assert!(bare.is_err(), "the panel must be named");
+    }
+
+    #[test]
+    fn panel_semantics_read_params_are_honestly_described() {
+        // The targeted-read vocabulary the tool advertises: the address
+        // fields, the page window fields, and the bounded page kinds.
+        let tools = tool_definitions();
+        let read = &tools
+            .as_array()
+            .expect("tool definitions are an array")
+            .iter()
+            .find(|t| t["name"] == "ocs_read")
+            .expect("ocs_read")["inputSchema"];
+        let params = &read["properties"]["parameters"]["properties"];
+        for key in [
+            "panel_id",
+            "kind",
+            "parent_id",
+            "button_id",
+            "menu_id",
+            "command_id",
+            "row_id",
+        ] {
+            assert!(
+                params.get(key).is_some_and(|p| p.is_object()),
+                "read schema describes {key}"
+            );
+        }
+        assert_eq!(
+            params["kind"]["enum"],
+            json!(["tree_children", "list_items", "table_rows"])
+        );
+        crate::schema_validation::validate_shape(
+            read,
+            &json!({"op":"panel_page","ocs_session_id":"s","panel_id":"p","kind":"bogus"}),
+            "",
+        )
+        .expect_err("an unknown page kind is invalid");
     }
 
     #[test]

@@ -183,7 +183,10 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
-mod widget_mount;
+// SWG-005 (the ONE-path rule): the control-side semantic invoke reaches the
+// bridge core (`route_mount_msg_owned`) through this module — the same core
+// the `Message::WidgetMountMsg` arm calls, no second routing body.
+pub(in crate::app) mod widget_mount;
 mod widget_prompt;
 pub(crate) mod widget_drag;
 

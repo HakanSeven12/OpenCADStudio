@@ -198,7 +198,7 @@
 /// app-owned surface store and the drained event/demand batches forward
 /// through the notify routers; a panel without an attached publisher still
 /// gets the honest structured answers (`PublisherUnattached` /
-/// `StoreAttachedElsewhere`). A v23 host cannot decode any of these requests,
+/// `PublisherOwnedByOther`). A v23 host cannot decode any of these requests,
 /// so a plugin that sends them declares v24; v23 and older plugins remain
 /// supported unchanged (`API_VERSION_MIN_SUPPORTED` untouched).
 pub const API_VERSION: u32 = 24;

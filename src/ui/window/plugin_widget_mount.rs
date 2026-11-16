@@ -28,11 +28,12 @@
 //! > command's originating address — **bridge-forwards-then-settle**, so
 //! > the in-flight exactly-once guard re-arms after the handler completes.
 //!
-//! ADR-004 (API-23) crossing / SCN-015 boundaries, and where they stand
+//! ADR-004 (API-24; the crossing's pre-merge label was API-23) crossing /
+//! SCN-015 boundaries, and where they stand
 //! after SCN-025 (the wire attach):
 //! - the events the bridge drains: the COLLECTING sink ([`CollectingSink`])
 //!   was the pipeline seam the future publisher hangs off — that publisher
-//!   LANDED with SCN-025 (the drained batches forward through the v23
+//!   LANDED with SCN-025 (the drained batches forward through the v24
 //!   notify router from the arms via `app::update::widget_mount`'s one
 //!   forwarding helper; the sink itself keeps exactly its collecting
 //!   contract);
@@ -268,7 +269,7 @@ use iced::widget::tooltip::Position as TooltipPosition;
 use iced::widget::{Tooltip, button, column, container, mouse_area, row, text};
 use iced::{Element, Fill, Length, Point, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
-// The v23 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
+// The v24 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
 // types only (codes, reports, bounded envelopes); no frames built here — the
 // PluginResponse mapping happens in `app::plugin_host`. The `ipc` module is
 // host-feature-only: desktop-only machinery, which the plugin-host attach is.
@@ -1486,7 +1487,7 @@ pub struct MountRegistry {
     /// decision and Escape's machine-direct cancel) and swept with the
     /// surfaces. Host-local only, never serialized (§3 transient class).
     prompts: HashMap<StableId, MountPromptDesc>,
-    /// (SCN-025) The app-owned PANEL SURFACE STORE — the v23
+    /// (SCN-025) The app-owned PANEL SURFACE STORE — the v24
     /// publish-or-patch contract's host-side truth (keyed by panel id,
     /// recording the owning plugin's transport id), the store the wire
     /// attach publishes into, patches over, and pages. Extension of THIS
@@ -1524,8 +1525,9 @@ impl MountRegistry {
     }
 
     /// The gate read: is a widget-surface mount registered for `panel_id`?
-    // (the tests' gate probe ([`mounts_surface`]) consumes this; no
-    // production caller until the wire-era registration path lands.)
+    // (the tests' gate probe ([`mounts_surface`]) still consumes this; the
+    // wire-era registration path HAS landed (SCN-025), but this probe
+    // remains a test-side read — production paths own their registration.)
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn mount_registered_owned(&self, panel_id: &str) -> bool {
         self.by_panel.contains_key(panel_id)
@@ -1570,12 +1572,13 @@ pub(crate) fn app_message(msg: WidgetMountMsg) -> crate::app::Message {
 }
 
 /// The sink the bridge forwards events through — the REAL
-/// [`WidgetEventSink`] stand-in until the wire era: emitted
+/// [`WidgetEventSink`]: emitted
 /// [`WidgetEvent`]s gather in a shared `Vec` and the bridge drains them
-/// (`take`). The plugin-pipeline publishing (`v4_support::publish_*`) is
-/// explicitly OUT OF SCOPE until the API-23 crossing (ADR-004): this
-/// collecting buffer is the seam the future publisher hangs off (it needs
-/// no type change — the drain call becomes the publish call), and the
+/// (`take`). The wire era HAS landed (the API-24 scene/widget crossing,
+/// live since SCN-025): the drain call IS the forwarding call now —
+/// drained batches forward through the v24 notify router
+/// (`broadcast_panel_scene_events`, the exact seam this buffer's shape
+/// was designed for; no type change was needed) — and the
 /// tests pin the contract "the sink receives exactly the forwarded events,
 /// in emission order, drained once".
 ///
@@ -1673,13 +1676,13 @@ pub struct MountCounters {
     pub keyboard_nav_steps: u64,
     //
     // -- SCN-025 wire-attach probes ---------------------------------------
-    /// Widget events FORWARDed through the v23 notify router
+    /// Widget events FORWARDed through the v24 notify router
     /// (`broadcast_panel_scene_events`) from the bridge arms' sink drains —
     /// one tick per forwarded EVENT row. Exactly-once discipline: the drain
     /// (`CollectingSink::take`) empties the buffer, so a re-drain can never
     /// re-forward; this probe is the count a double-forward defect breaks.
     pub mount_event_forwards: u64,
-    /// Store DEMANDS forwarded through the v23 demand router
+    /// Store DEMANDS forwarded through the v24 demand router
     /// (`broadcast_panel_store_demand`) from the store reads' page misses —
     /// one tick per demand raised (a read-driven fact; a re-read legitimately
     /// re-demands, but never as a replay of a queued ledger).
@@ -1803,7 +1806,8 @@ impl MountRegistry {
     /// THE test/bench entry is [`register_test_surface`]; the app-owned
     /// registration path (SCN-016) calls
     /// [`Self::register_surface_owned`] over the app's own registry — the
-    /// production registration CALLS still arrive with the wire era.
+    /// production registration CALLS HAVE LANDED (SCN-025's wire attach:
+    /// `app/plugin_host.rs` drives them when a panel publishes).
     // Bench seam, SCN-024; ADR-007 item 3; never wire — the bench's registration drive.
     #[doc(hidden)]
     #[cfg_attr(not(test), allow(dead_code))]
@@ -2926,10 +2930,10 @@ impl Drop for RegisteredGuard {
 }
 
 // ---------------------------------------------------------------------------
-// SCN-025 — the app-owned PANEL SURFACE STORE (the v23 wire attach)
+// SCN-025 — the app-owned PANEL SURFACE STORE (the v24 wire attach)
 // ---------------------------------------------------------------------------
 //
-// The living truth the v23 wire attach publishes into, patches over, and
+// The living truth the v24 wire attach publishes into, patches over, and
 // pages: one entry per attached panel, keyed by the panel id the plugin's
 // `RegisterPanel` registration used, recording the transport-authenticated
 // OWNING plugin id and the two surface legs (a publish frame carries exactly

@@ -351,11 +351,14 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
-        // V23 scene/widget wire tails: the mount/publisher attach is a
-        // recorded follow-up, but the runner conversational gate must be in
-        // place BEFORE any publisher can exist (a pre-23 cdylib has no
-        // such variants and must never see the frames).
-        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 23,
+        // V24 scene/widget wire tails (the crossing re-versioned from 23 to
+        // 24 at the SCN-026 upstream merge: upstream's v23 = the
+        // `TableOperation::LayoutSetTabOrder` append, so our scene/widget
+        // crossing claims 24 — see `manifest::API_VERSION`): the
+        // mount/publisher attach is LIVE (SCN-025), and the runner
+        // conversational gate was in place BEFORE the publisher existed (a
+        // pre-24 cdylib has no such variants and must never see the frames).
+        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 24,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
@@ -1256,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn notification_gate_rows_hold_the_v23_tails_back_from_pre_v23_plugins() {
+    fn notification_gate_rows_hold_the_v24_tails_back_from_pre_v24_plugins() {
         use crate::host::HostNotification as N;
 
         let events = || N::PanelSceneEvents {
@@ -1270,12 +1273,14 @@ mod tests {
             parent_id: None,
             range: crate::widgets::WidgetRange { start: 0, len: 4 },
         };
-        // The v23 wire tails gate at 23: a runner serving an api_version < 23
-        // plugin must DROP both frames (the cdylib has no such variants).
-        assert_eq!(notification_api_version(&events()), 23);
-        assert_eq!(notification_api_version(&demand()), 23);
-        assert!(notification_api_version(&events()) > 22);
-        assert!(notification_api_version(&demand()) > 22);
+        // The v24 wire tails gate at 24 (SCN-026 re-version: 23 stays
+        // upstream's LayoutSetTabOrder era): a runner serving an
+        // api_version < 24 plugin must DROP both frames (the cdylib has no
+        // such variants — upstream's v23 plugins included).
+        assert_eq!(notification_api_version(&events()), 24);
+        assert_eq!(notification_api_version(&demand()), 24);
+        assert!(notification_api_version(&events()) > 23);
+        assert!(notification_api_version(&demand()) > 23);
 
         // The v22 row is UNTOUCHED by the crossing: the digest still gates
         // at 22 (this is the exact row the v22 selection router relies on).

@@ -5430,7 +5430,7 @@ impl HostApi for HostSession<'_> {
         self.validate_parametric_chain(chain, tolerance)
     }
 
-    // ── V23 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
+    // ── V24 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
     //
     // The real attach. ACCESS PATH (inspected + recorded): `HostSession`
     // reaches ALL app state through `self.app` (private-field access, this
@@ -18804,7 +18804,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 
-    // ── SCN-025: the v23 wire attach (the mount/publisher goes LIVE) ────────
+    // ── SCN-025: the v24 wire attach (the mount/publisher goes LIVE) ────────
     //
     // The full attach is exercised through THE wire entry the plugin
     // transport uses: `handle_plugin_request` (the ipc arms delegate to the

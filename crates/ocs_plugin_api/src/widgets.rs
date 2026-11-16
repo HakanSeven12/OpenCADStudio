@@ -131,9 +131,12 @@
 //! `WidgetSurface` was created by `SWG-001` inside this same unreleased
 //! series — no frozen wire ever carried the 2-field shape, so no old
 //! payload exists to decode; the literal old-frame TLV decode test becomes
-//! MANDATORY at the ADR-004 wire freeze (API-23), when a shipped shape
-//! exists to snapshot. Until then the JSON-absence + bincode/JSON roundtrip
-//! tests gate the trailing field, and this comment is the WARN record.
+//! MANDATORY at the ADR-004 wire freeze (API-24; the crossing originally
+//! froze as API-23 and was re-versioned 24 at the SCN-026 upstream merge
+//! — upstream's own v23 = `TableOperation::LayoutSetTabOrder`), when a
+//! shipped shape exists to snapshot. Until then the JSON-absence +
+//! bincode/JSON roundtrip tests gate the trailing field, and this comment
+//! is the WARN record.
 //!
 //! ## Deferred mirror (SCN-012 open question)
 //!
@@ -1006,7 +1009,8 @@ pub struct WidgetSurface {
     /// clearance: no frozen release wire ever carried the 2-field surface
     /// (this type is the project's own, created unreleased), so the
     /// literal old-frame decode TEST is N/A until the ADR-004 wire freeze
-    /// (API-23) ships a pinned shape to snapshot — at that freeze the
+    /// (API-24 — the crossing, re-versioned from the API-23 label at
+    /// SCN-026) ships a pinned shape to snapshot — at that freeze the
     /// test becomes mandatory, mirroring the host's
     /// `deserialize_selectable_custom` old-payload tolerance story.
     /// Registry values are decode-bounded ([`budgeted_table_registry`]).

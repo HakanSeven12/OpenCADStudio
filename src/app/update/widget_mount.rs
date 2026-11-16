@@ -11,9 +11,10 @@
 //!    is a graceful no-op (no panic, nothing routed, no event exists);
 //! 2. FORWARD: `apply_mount_msg` runs and every emitted [`WidgetEvent`]
 //!    leaves through the COLLECTING sink ([`CollectingSink`]) — the
-//!    pipeline seam whose drain this handler owns. SCN-025 (the API-23
-//!    attach) makes the drain LIVE: the drained events forward to the
-//!    owning plugin's v23 notify router
+//!    pipeline seam whose drain this handler owns. SCN-025 (the API-24
+//!    crossing's attach — the label was API-23 pre-merge, re-versioned at
+//!    SCN-026) makes the drain LIVE: the drained events forward to the
+//!    owning plugin's v24 notify router
 //!    (`broadcast_panel_scene_events`, bounded batches — [`Self::forward_mount_events`]),
 //!    the exactly-once law riding the drain itself (a re-drain cannot
 //!    re-produce a forwarded event);
@@ -37,7 +38,7 @@ use iced::keyboard::{Key, Modifiers};
 use iced::keyboard::key as keyboard_key; // the keyboard suites' Named-alias
 use iced::{Point, Task};
 
-// The v23 notify leg's fresh-frame cap (SCN-025): a forwarded batch never
+// The v24 notify leg's fresh-frame cap (SCN-025): a forwarded batch never
 // exceeds it. Desktop-only (the plugin manager is desktop machinery).
 #[cfg(not(target_arch = "wasm32"))]
 use ocs_plugin_api::ipc::protocol::MAX_WIDGET_EVENT_ROWS;
@@ -401,7 +402,7 @@ impl OpenCADStudio {
         let outcome =
             route_mount_msg_owned(&mut self.mount_registry.borrow_mut(), &handle, &msg);
         // SCN-025 — the sink goes LIVE: the drained events forward to the
-        // v23 panel-scene-events router (bounded batches ≤
+        // v24 panel-scene-events router (bounded batches ≤
         // [`MAX_WIDGET_EVENT_ROWS`]; exactly-once — the drain empties the
         // buffer; the ONE helper both draining arms share).
         self.forward_mount_events(msg_surface_id(&msg), outcome.events);
@@ -456,7 +457,7 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// THE one v23 event-forwarding route (SCN-025 — the sink goes LIVE):
+    /// THE one v24 event-forwarding route (SCN-025 — the sink goes LIVE):
     /// the bridge arms' drained events forward to the panel-scene-events
     /// router ([`ocs_plugin_api::process::PluginManager::broadcast_panel_scene_events`]),
     /// in bounded batches (≤ [`MAX_WIDGET_EVENT_ROWS`] — the notify leg's
@@ -505,7 +506,7 @@ impl OpenCADStudio {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            // No plugin manager on the web runtime: the v23 notify leg has
+            // No plugin manager on the web runtime: the v24 notify leg has
             // no transport there; the drained events drop (the same bound).
             let _ = (panel_id, events, surface_id);
         }
@@ -1268,7 +1269,7 @@ mod tests {
 
     // -- 6. SCN-025 — the sink goes LIVE: the drain forwards ------------------
 
-    /// The drained events forward through the ONE v23 notify route, from
+    /// The drained events forward through the ONE v24 notify route, from
     /// the arm: a routed machine emission maps 1:1 to the §16 forward
     /// probe ([`MountCounters::mount_event_forwards`]) — no extra forwards
     /// of previously-forwarded rows materialize (the take-drain empties

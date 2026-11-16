@@ -281,7 +281,7 @@ impl OpenCADStudio {
             confirming,
         );
         // SCN-025 — the sink goes LIVE: the confirmed command's event
-        // forwards through the ONE v23 notify route (the same helper the
+        // forwards through the ONE v24 notify route (the same helper the
         // mount bridge's arm uses — bounded batches, exactly-once by the
         // drain; a dismissal carries no events and forwards nothing).
         self.forward_mount_events(surface_id, outcome.events);

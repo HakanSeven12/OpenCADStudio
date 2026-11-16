@@ -6033,6 +6033,21 @@ impl OpenCADStudio {
         };
         ps.rotation = plot_dialog_rotation(d, natural);
         let layout_area = d.area == "Layout";
+        // Millimetres one paper-space unit spans in a stored layout plot: a
+        // layout drawn in inches stays in inches when the sheet changes. Any
+        // other plot's scale says nothing about paper space (millimetres).
+        let layout_unit_mm = {
+            let ratio = ps.scale_numerator / ps.scale_denominator;
+            if ps.plot_type == PlotType::Layout
+                && !ps.flags.use_standard_scale
+                && ratio.is_finite()
+                && ratio > 1e-12
+            {
+                ratio * plot_paper_unit_mm(ps.paper_units)
+            } else {
+                1.0
+            }
+        };
         ps.plot_type = match d.area.as_str() {
             "Window" => PlotType::Window,
             "Layout" => PlotType::Layout,
@@ -6067,17 +6082,21 @@ impl OpenCADStudio {
         };
         if layout_area {
             // Paper layouts use physical paper-space coordinates, independently
-            // of INSUNITS and the model's scale family. One unit in a metric
-            // paper layout is 1 mm; on an inch plotter, 1 inch is 25.4 such
-            // units. Using dialog_plot_scale_ratio() here incorrectly brings
-            // the model unit conversion (1000 for metres) into the paper
-            // sheet: A3 then appears as 0.420 x 0.297 instead of 420 x 297.
+            // of INSUNITS and the model's scale family, and keep the unit the
+            // layout is drawn in: a metric layout counts 1 mm per unit (on an
+            // inch plotter, 1 inch is 25.4 such units), an inch layout 1 inch
+            // per unit. Using dialog_plot_scale_ratio() here incorrectly
+            // brings the model unit conversion (1000 for metres) into the
+            // paper sheet: A3 then appears as 0.420 x 0.297 instead of 420 x
+            // 297. Resetting an inch layout to millimetres drew ARCH D 914
+            // units wide (#3131).
             let page_unit_mm = plot_paper_unit_mm(ps.paper_units);
+            let denominator = page_unit_mm / layout_unit_mm;
             ps.scale_type = ScaledType::OneToOne;
             ps.flags.use_standard_scale = false;
             ps.scale_numerator = 1.0;
-            ps.scale_denominator = page_unit_mm;
-            ps.standard_scale_factor = stored_scale_factor(1.0 / page_unit_mm, ps.paper_units);
+            ps.scale_denominator = denominator;
+            ps.standard_scale_factor = stored_scale_factor(1.0 / denominator, ps.paper_units);
         } else if d.fit_to_paper {
             ps.set_scale_to_fit();
             // The commercial application marks fitted plots with the

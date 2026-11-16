@@ -31,6 +31,9 @@ pub fn preview(bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// How deeply a project's XML may nest; real projects nest a few levels.
+const MAX_XML_DEPTH: usize = 256;
+
 pub fn scans(bytes: &[u8], project: &Path) -> Option<Vec<ScanEntry>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
     let folder = project.parent().unwrap_or(Path::new(""));
@@ -44,7 +47,11 @@ pub fn scans(bytes: &[u8], project: &Path) -> Option<Vec<ScanEntry>> {
         if file.take(64 << 20).read_to_string(&mut text).is_err() {
             continue;
         }
-        let Ok(doc) = roxmltree::Document::parse(text.trim_start_matches('\u{feff}')) else {
+        let text = text.trim_start_matches('\u{feff}');
+        if !crate::xml_depth::within(text, MAX_XML_DEPTH) {
+            continue;
+        }
+        let Ok(doc) = roxmltree::Document::parse(text) else {
             continue;
         };
         let nodes: Vec<_> = doc

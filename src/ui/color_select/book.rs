@@ -132,10 +132,19 @@ pub async fn load_from_dialog() -> Result<ColorBook, String> {
     Ok(book)
 }
 
+/// How deeply a colour book's elements may nest; real books nest four
+/// levels.
+const MAX_XML_DEPTH: usize = 256;
+
 /// Read an `.acb` file's text.
 pub fn parse(text: &str) -> Result<ColorBook, String> {
-    let doc = roxmltree::Document::parse(text.trim_start_matches('\u{feff}'))
-        .map_err(|e| e.to_string())?;
+    let text = text.trim_start_matches('\u{feff}');
+    if !crate::xml_depth::within(text, MAX_XML_DEPTH) {
+        return Err(format!(
+            "The color book nests deeper than {MAX_XML_DEPTH} levels."
+        ));
+    }
+    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     if !root.has_tag_name("colorBook") {
         return Err(crate::t!("Not a color book").into_owned());

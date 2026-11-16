@@ -32,7 +32,7 @@ from pathlib import Path
 LAYERS = {
     # 0 foundations: no knowledge of CAD or the app
     "par": 0, "perf": 0, "sys": 0, "sysinfo": 0, "i18n": 0, "config": 0,
-    "network": 0, "schema_validation": 0,
+    "network": 0, "schema_validation": 0, "xml_depth": 0,
     # 1 drawing model and geometry behaviour
     "entities": 1, "snap": 1, "parametric": 1, "entity_creation": 1,
     "filter": 1,

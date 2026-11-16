@@ -9788,3 +9788,67 @@ mod dim_continue_chain_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod dim_inspect_window_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use crate::ui::window::dim_inspect_dialog::DimInspectMsg;
+    use crate::app::Message;
+
+    /// The inspection window stamps the dimensions it opened on: the
+    /// shape, label and rate ride the dimension's extension data, in one
+    /// undo step, and the same read answers the window when it opens
+    /// again on an already inspected dimension.
+    #[test]
+    fn the_inspection_window_stamps_the_selected_dimension() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let i = app.active_tab;
+        let dim = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Dimension(_) => Some(entity.common().handle),
+                _ => None,
+            })
+            .expect("the dimension was placed");
+        app.tabs[i].scene.select_entities(&[dim]);
+
+        let _ = app.run_command_line("DIMINSPECT");
+
+        assert!(
+            app.dim_inspect_dialog.is_some(),
+            "the window opened on the selected dimension"
+        );
+
+        let _ = app.update(Message::DimInspect(DimInspectMsg::LabelOn(true)));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Label("QCS".into())));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::RateOn(true)));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Rate("100%".into())));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Ok));
+
+        let entity = app.tabs[i]
+            .scene
+            .document
+            .get_entity(dim)
+            .expect("the dimension survived");
+        let inspection = crate::entities::dim_inspect::read(&entity.common().extended_data)
+            .expect("the inspection was written");
+        assert_eq!(inspection.label.as_deref(), Some("QCS"));
+        assert_eq!(inspection.rate.as_deref(), Some("100%"));
+        assert!(app.dim_inspect_dialog.is_none(), "the window closed on Ok");
+
+        // The window reads its current values back from the dimension.
+        app.tabs[i].scene.select_entities(&[dim]);
+        let _ = app.run_command_line("DIMINSPECT");
+        let state = app
+            .dim_inspect_dialog
+            .as_ref()
+            .expect("the window reopened");
+        assert_eq!(state.label, "QCS", "the stored label is shown");
+        assert!(state.any_inspected, "the dimension reports as inspected");
+    }
+}

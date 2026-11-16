@@ -101,12 +101,30 @@
 //! §16 path), runs the translation, and routes every produced message
 //! through the ordinary bridge.
 //!
-//! TABLES: the typed-table machine ([`mount_table_key_route`], consuming
-//! the frozen SWG-004b state layer) is the table keyboard scope — Up/Down
-//! row roving within the materialized window, Left/Right the caller-held
-//! cell cursor, Escape the FREE draft cancel. The mount's TABLE placeholder
-//! is not interactive yet (the typed-table MOUNT integration is the later
-//! task), so the table keys are pure-layer complete and headless-tested.
+//! TABLES: the typed-table machine ([`mount_table_key_route_owned`],
+//! consuming the frozen SWG-004b state layer) is the table keyboard scope —
+//! Up/Down row roving within the materialized window, Left/Right the
+//! caller-held cell cursor, Escape the FREE draft cancel. SCN-028 made the
+//! scope LIVE: a def-present table renders as the REAL interactive typed
+//! table ([`table_element`] — headers in def order, the machine's
+//! materialized window, selection/focus/cursor/draft visible; a def-ABSENT
+//! `TableRef` keeps the muted placeholder), the per-(surface, table)
+//! [`TableUiState`] slots ride the APP-OWNED registry (created on surface
+//! registration, `sync`ed on every surface swap, `reset_all` on teardown —
+//! the §16 lifecycle), and production keys route THROUGH the pure table
+//! route (`table_scope_key_owned` → [`mount_table_key_route_owned`]).
+//! The SCOPE law (documented at [`key_route_owned`]): Tab at the widget
+//! ring's edge DIVES IN (the table is the wrap target — a table-level ring
+//! entry that dives, no widget-ring bytes move for non-table surfaces);
+//! Tab inside RETURNS to the ring; Up/Down rove rows (a window edge
+//! advances the scroll anchor; the PUBLISHED tail asks for the next page);
+//! Left/Right rove the cell cursor; Enter arms/commits the edit (the
+//! committed fact forwards as `WidgetEvent::TableCellChanged` through the
+//! ONE drained-events path); Escape cancels an open draft FREE and falls
+//! through to the armed-prompt law otherwise. Pointer presses ride the
+//! bridge's typed-table route ([`route_mount_table_msg_owned`]): press
+//! selects + moves the cell cursor, a press on the already-focused cursor
+//! cell is the activation gesture.
 //!
 //! # The armed prompt's dialog lifecycle (SCN-015 — the semantic half)
 //!
@@ -282,9 +300,9 @@ use ocs_plugin_api::ipc::protocol::{
 use ocs_plugin_api::widgets::WidgetRange;
 use ocs_plugin_api::scene::{PanelScene, SceneElement, SceneKindCounts, SceneRevision, StableId};
 use ocs_plugin_api::widgets::{
-    Axis, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN,
-    MAX_WIDGET_ROWS_INITIAL, MenuDef, TableRef, TreeRowDef, WidgetEvent, WidgetGroup, WidgetNode,
-    WidgetSurface, WidgetTreeDef,
+    Axis, CellKind, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN,
+    MAX_WIDGET_ROWS_INITIAL, MenuDef, PanelTableDef, TableRef, TableCell, TableRowDef, TreeRowDef,
+    WidgetCellValue, WidgetEvent, WidgetGroup, WidgetNode, WidgetOp, WidgetSurface, WidgetTreeDef,
 };
 
 use crate::ui::style::form::button_style;
@@ -298,7 +316,9 @@ use crate::ui::window::plugin_widgets_dispatch::{
     ControlSemantics, DispatchKey, DispatchOutcome, ItemSemantics, WidgetDispatcher,
     project_button, project_menu,
 };
-use crate::ui::window::plugin_widgets_tables::{CellFocus, TableUiState};
+use crate::ui::window::plugin_widgets_tables::{
+    is_patch_writable, CellFocus, TableUiState,
+};
 
 
 /// The mount's iced_aw menu element types with the crate's theme/renderer
@@ -461,6 +481,61 @@ pub enum WidgetMountMsg {
     /// resolved for the releases that land outside any panel's mouse area
     /// (no surface id: the captured surfaces are the store's own list).
     PointerReleasedAnywhere,
+    // -- SCN-028: the typed-table route vocabulary (host-local, NOT wire) --
+    //
+    // Three variants, each documented; ALL route through
+    // [`route_mount_table_msg_owned`] (the typed-table bridge, whose body
+    // lives in THIS file). Reaching [`apply_mount_msg`] instead is a bypass
+    // defect and is refused by name there (the one-path discipline: the
+    // drained-events forward + settle tail run exactly once per route).
+    /// A pointer press on ONE materialized table cell (row key + column).
+    /// The documented TWO-PHASE pointer policy: the first press SELECTS the
+    /// row (the machine's `set_selection` — the host-multi-select law +
+    /// `MAX_SELECTION_IDS` cap live THERE) and moves the cell cursor onto
+    /// the cell; a press on the ALREADY-FOCUSED row's cursor cell is the
+    /// ACTIVATION gesture (the edit begins when the column is
+    /// patch-writable — the machine's gate; non-writable kinds render
+    /// display-only and never emit this from the builder).
+    TableRowPressed {
+        /// The surface the mounted table renders on.
+        surface_id: StableId,
+        /// The registry table the pressed cell belongs to.
+        table_id: StableId,
+        /// The pressed row's stable key.
+        key: StableId,
+        /// The pressed column's stable id.
+        column: StableId,
+    },
+    /// The keyboard commit's forward leg: `commit_cell_draft` produced ONE
+    /// `WidgetOp::TableCell` fact; this variant carries the fact's notify
+    /// shape through the ordinary bridge — the route builds
+    /// `WidgetEvent::TableCellChanged`, the drained batch forwards through
+    /// the ONE path (`forward_mount_events`), and the (key, column) address
+    /// settles exactly-once AFTER the forward.
+    TableCellCommitted {
+        /// The surface the mounted table renders on.
+        surface_id: StableId,
+        /// The registry table the committed cell belongs to.
+        table_id: StableId,
+        /// The committed row key.
+        key: StableId,
+        /// The committed column id.
+        column: StableId,
+        /// The committed skeleton value (the machine's pending at commit).
+        value: WidgetCellValue,
+    },
+    /// The published-tail landing ask: a gesture (keyboard roving at the
+    /// materialized window's end, a press on the tail row) reached the LAST
+    /// PUBLISHED row of a table that windows. The route calls the machine's
+    /// `page_request_if_needed` exactly ONCE per gesture (the dedup rides
+    /// the machine) and the `TablePageRequested` event forwards through the
+    /// same drained path as every other table event.
+    TableTailReached {
+        /// The surface the mounted table renders on.
+        surface_id: StableId,
+        /// The registry table whose published tail was reached.
+        table_id: StableId,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -648,10 +723,16 @@ pub(crate) fn apply_mount_msg<S: WidgetEventSink + ?Sized>(
         ),
         // The keyboard events ride their OWN route (the app's
         // `on_mount_key` never calls this apply; the arm pre-routes
-        // `KeyPressed`), and the window-level release has no surface —
-        // reaching here means the message BYPASSED its route (a defect);
-        // refuse by name, exactly the pointer discipline.
-        WidgetMountMsg::KeyPressed { .. } | WidgetMountMsg::PointerReleasedAnywhere => {
+        // `KeyPressed`), the window-level release has no surface, and the
+        // SCN-028 typed-table vocabulary owns the typed-table bridge route
+        // ([`route_mount_table_msg_owned`]) — reaching here means the
+        // message BYPASSED its route (a defect); refuse by name, exactly
+        // the pointer discipline.
+        WidgetMountMsg::KeyPressed { .. }
+        | WidgetMountMsg::PointerReleasedAnywhere
+        | WidgetMountMsg::TableRowPressed { .. }
+        | WidgetMountMsg::TableCellCommitted { .. }
+        | WidgetMountMsg::TableTailReached { .. } => {
             MountRouting::Refused(
                 "this variant owns a route of its own; it is not a machine message (§14)"
                     .to_string(),
@@ -674,7 +755,10 @@ pub(crate) fn msg_surface_id(msg: &WidgetMountMsg) -> StableId {
         | WidgetMountMsg::FocusMoved { surface_id, .. }
         | WidgetMountMsg::PointerPressed { surface_id, .. }
         | WidgetMountMsg::PointerMoved { surface_id, .. }
-        | WidgetMountMsg::PointerReleased { surface_id, .. } => *surface_id,
+        | WidgetMountMsg::PointerReleased { surface_id, .. }
+        | WidgetMountMsg::TableRowPressed { surface_id, .. }
+        | WidgetMountMsg::TableCellCommitted { surface_id, .. }
+        | WidgetMountMsg::TableTailReached { surface_id, .. } => *surface_id,
         // The keyboard route resolves its own target (no surface in the
         // variant — see `WidgetMountMsg::KeyPressed`); the arm pre-routes
         // it, so a direct apply never reaches this arm. `StableId(0)` keeps
@@ -723,6 +807,194 @@ fn route_command<S: WidgetEventSink + ?Sized>(
         }
         Err(refusal) => MountRouting::Refused(refusal.to_string()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// SCN-028 — the typed-table bridge route (the table vocabulary's ONE path)
+// ---------------------------------------------------------------------------
+
+/// What ONE typed-table bridge route did — the table sibling of the app
+/// module's `MountBridgeOutcome` (the fields the app arm consumes; the
+/// settle bookkeeping stays inside [`route_mount_table_msg_owned`], so the
+/// app shim needs only the events).
+pub(crate) struct MountTableRouteOutcome {
+    /// The typed-table route's verdict (the assertion surface; the app arm
+    /// consumes only the events).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub routing: MountRouting,
+    /// The events the collecting sink drained, in emission order — the
+    /// forward half (`forward_mount_events` is the app arm's next call).
+    pub events: Vec<WidgetEvent>,
+}
+
+/// Route ONE typed-table message into the registry-owned [`TableUiState`]
+/// machine — the table vocabulary's bridge core. The app arm delegates the
+/// same way `handle_mount_key_owned` delegates to
+/// [`bench_handle_mount_key_owned`]: the canonical body lives HERE (the
+/// SCN-025 D1 fold-back discipline; the app file gains no table logic).
+///
+/// Forward-then-settle, bridge-identical: the sink drains after the machine
+/// returned, the settle runs after the drain — the committed fact's
+/// (key, column) address clears exactly-once AFTER its
+/// [`WidgetEvent::TableCellChanged`] left through the sink (the drained
+/// batch forwards through the ONE path, [`MAX_WIDGET_EVENT_ROWS`]-style
+/// batching included app-side). An unknown/unregistered table machine is a
+/// graceful refusal — nothing half-applies, nothing forwards.
+pub(crate) fn route_mount_table_msg_owned(
+    registry: &mut MountRegistry,
+    msg: &WidgetMountMsg,
+) -> MountTableRouteOutcome {
+    let surface_id = msg_surface_id(msg);
+    let mut sink = CollectingSink::default();
+    let routing = apply_mount_table_msg_owned(registry, surface_id, msg, &mut sink);
+    // (1) the sink drains, THEN (2) the settle tail (the value is the
+    // machine's "a fact was parked" answer — the bridge consumes nothing
+    // from it; the machine's counters are the probe).
+    let events = sink.take();
+    if let WidgetMountMsg::TableCellCommitted {
+        table_id,
+        key,
+        column,
+        ..
+    } = msg
+    {
+        registry.table_settle_owned(surface_id, *table_id, *key, *column);
+    }
+    registry.record_message_routed_owned();
+    MountTableRouteOutcome { routing, events }
+}
+
+/// The typed-table route's apply half (pure routing over the registry-owned
+/// machines; see [`route_mount_table_msg_owned`]).
+fn apply_mount_table_msg_owned<S: WidgetEventSink + ?Sized>(
+    registry: &mut MountRegistry,
+    surface_id: StableId,
+    msg: &WidgetMountMsg,
+    sink: &mut S,
+) -> MountRouting {
+    let (table_id, key, column) = match msg {
+        WidgetMountMsg::TableRowPressed {
+            table_id,
+            key,
+            column,
+            ..
+        } => (*table_id, Some(*key), Some(*column)),
+        WidgetMountMsg::TableCellCommitted {
+            table_id,
+            key,
+            column,
+            ..
+        } => (*table_id, Some(*key), Some(*column)),
+        WidgetMountMsg::TableTailReached { table_id, .. } => (*table_id, None, None),
+        _ => {
+            return MountRouting::Refused(
+                "not a typed-table message; the table bridge refuses".to_string(),
+            )
+        }
+    };
+    // The cursor read lands BEFORE the machine borrow (the scope and the
+    // machines are disjoint registry fields, but the two-phase policy needs
+    // the pre-press cursor anyway).
+    let cursor_before = registry.table_scope_cursor_of(surface_id, table_id);
+    let Some(machine) = registry.table_machine_mut_owned(surface_id, table_id) else {
+        return MountRouting::Refused(format!(
+            "no typed-table machine for surface {} table {} (registration/sync defect)",
+            surface_id.0, table_id.0
+        ));
+    };
+    match msg {
+        WidgetMountMsg::TableRowPressed { key, column, .. } => {
+            // The documented TWO-PHASE pointer policy: press = select +
+            // cursor; press on the ALREADY-focused row's cursor cell =
+            // activation (the edit begins — the machine's gate decides;
+            // non-writable kinds refuse QUIETLY, its counter the probe).
+            let already_here = machine.focus() == Some(*key)
+                && cursor_before == Some(CellFocus {
+                    key: *key,
+                    column: *column,
+                });
+            let mut forwarded = 0usize;
+            // 1. Selection — the machine's host-multi-select law + cap.
+            match machine.set_selection(vec![*key]) {
+                Ok(Some(event)) => {
+                    sink.emit(event);
+                    forwarded += 1;
+                }
+                Ok(None) => {}
+                Err(reason) => return MountRouting::Refused(reason.to_string()),
+            }
+            // 2. The click hand-off focus (the machine's window-bound gate).
+            if let Err(reason) = machine.row_focus_set(*key, &DEFAULT_WINDOW_SPEC) {
+                return MountRouting::Refused(reason.to_string());
+            }
+            // 3. The SECOND phase on an already-cursor cell: the edit arms.
+            if already_here {
+                let _ = machine.begin_cell_edit(*key, *column);
+            }
+            // 4. A press landing on the PUBLISHED TAIL of a windowing table
+            //    asks for the next page (the machine dedups).
+            if machine_at_published_tail(machine, *key) {
+                if let Some(event) = table_tail_page_ask(machine) {
+                    sink.emit(event);
+                    forwarded += 1;
+                }
+            }
+            // The cursor moves with the press (after the machine borrow ends).
+            let pressed_cell = CellFocus {
+                key: *key,
+                column: *column,
+            };
+            registry.table_scope_set_cursor_owned(surface_id, table_id, Some(pressed_cell));
+            MountRouting::Applied { forwarded }
+        }
+        WidgetMountMsg::TableCellCommitted { value, .. } => {
+            let event = WidgetEvent::TableCellChanged {
+                surface_id,
+                row_key: key.expect("the commit variant carries its key"),
+                column_id: column.expect("the commit variant carries its column"),
+                value: value.clone(),
+            };
+            // Construct-level validity (§15's ONE validity path).
+            if let Err(reason) = event.validate() {
+                return MountRouting::Refused(format!(
+                    "the committed cell fact failed the crate's validation: {reason}"
+                ));
+            }
+            sink.emit(event);
+            MountRouting::Applied { forwarded: 1 }
+        }
+        WidgetMountMsg::TableTailReached { .. } => match table_tail_page_ask(machine) {
+            Some(event) => {
+                sink.emit(event);
+                MountRouting::Applied { forwarded: 1 }
+            }
+            // Not the turn (not the tail, nothing left, already in flight —
+            // the machine's dedup counted): a benign no-op.
+            None => MountRouting::Applied { forwarded: 0 },
+        },
+        _ => unreachable!("the (table_id, key, column, value) match above totalizes"),
+    }
+}
+
+/// `true` when `key` is the machine's LAST PUBLISHED row (the tail a page
+/// request extends — the machine's keyed-window rule).
+fn machine_at_published_tail(machine: &TableUiState, key: StableId) -> bool {
+    machine
+        .synced()
+        .and_then(|synced| synced.rows.last())
+        .copied()
+        == Some(key)
+}
+
+/// The machine's next-page ask for the CURRENT published tail (`None` when
+/// the table does not window, has nothing left, or the request is in
+/// flight — the machine's own rules; the dedup counters are its probes).
+fn table_tail_page_ask(machine: &mut TableUiState) -> Option<WidgetEvent> {
+    let tail = machine
+        .synced()
+        .and_then(|synced| synced.rows.last())
+        .copied()?;
+    machine.page_request_if_needed(tail, MAX_WIDGET_RANGE_LEN)
 }
 
 // ---------------------------------------------------------------------------
@@ -1152,13 +1424,11 @@ fn menu_items<'a>(
     native_items
 }
 
-/// Build the TABLE placeholder for one [`TableRef`]: a labeled, disabled
-/// container noting that the typed-table registry (SWG-004) — which runs in
-/// PARALLEL to this task — is not mounted yet. The placeholder is total and
-/// never interactive; the labeled note is the documented stand-in until
-/// SWG-004's registry lands (`TableRef::table_id` names the backing table
-/// in the SWG-004 contract, foreign to the surface id namespace). The mount
-/// deliberately does NOT need SWG-004's registry to build anything.
+/// Build the TABLE placeholder for one [`TableRef`] — the def-ABSENT
+/// regime (SCN-028): the ref names a table id with NO registry def (or the
+/// surface's machine has no synced read model yet), so there is nothing to
+/// render interactively. A labeled, muted, never-interactive note; the
+/// def-PRESENT regime renders the REAL typed table ([`table_element`]).
 pub(crate) fn table_placeholder_element(
     table: &TableRef,
 ) -> (Element<'static, WidgetMountMsg>, MountFacts) {
@@ -1186,6 +1456,287 @@ pub(crate) fn table_placeholder_element(
         MountFacts {
             widget_id: table.id,
             clickable: false,
+            a11y: name,
+            command: None,
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------
+// SCN-028 — the REAL typed-table element (the def-present regime)
+// ---------------------------------------------------------------------------
+
+/// The builder context the typed-table element reads: the surface being
+/// built (the table defs' registry), the registry-owned per-(surface,
+/// table) machine slots, and the table scope's caller-held cell cursor.
+/// Threading is view-pass only — the builder NEVER mutates a machine (the
+/// machines decide; the routes apply).
+pub(crate) struct TableMountCtx<'a> {
+    /// The surface being built (its `tables` registry is the def source).
+    pub surface: &'a WidgetSurface,
+    /// The per-table machines of the surface being built.
+    pub tables: &'a HashMap<StableId, TableUiState>,
+    /// The cell cursor when the table keyboard scope is active.
+    pub cell_cursor: Option<CellFocus>,
+}
+
+/// The headless VIEW MODEL of one typed table — what the builder paints
+/// and the tests assert (the builder consumes exactly this; nothing is
+/// computed twice).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TableViewModel {
+    /// Header labels in `def.columns` order (the validated registry order).
+    pub headers: Vec<String>,
+    /// The columns in the same order (the cell-cursor roving order).
+    pub column_ids: Vec<StableId>,
+    /// Per column: is it a scalar patch-writable kind (an editable cell) —
+    /// the machine's OWN predicate; non-writable kinds render display-only.
+    pub writable: Vec<bool>,
+    /// The MATERIALIZED window's row keys in paint order (the machine's
+    /// `materialize_rows` — the §16 structural windowing, never beyond the
+    /// published payload).
+    pub row_keys: Vec<StableId>,
+    /// The machine's selected row keys.
+    pub selected: Vec<StableId>,
+    /// The machine's focused row.
+    pub focused: Option<StableId>,
+    /// The open draft's address + pending value's display text.
+    pub draft: Option<(StableId, StableId, String)>,
+    /// Per materialized row, per column: the cell's display text (cells
+    /// shadow the columns 1:1 by position — the crate's validated contract).
+    pub cells: Vec<Vec<String>>,
+    /// The caller-held cell cursor when the table keyboard scope is active.
+    pub cursor: Option<CellFocus>,
+    /// The def's backing total when it windows (the footer's metadata —
+    /// NEVER a materialization bound).
+    pub total_rows: Option<u64>,
+    /// The published row count (the scrollbar/footer's real bound).
+    pub published_rows: usize,
+}
+
+/// Project one def-present table's view model (pure; the machine supplies
+/// every state fact — selection, focus, draft, windowing; the def supplies
+/// the ordered columns + typed cells).
+fn table_view_model(
+    def: &PanelTableDef,
+    machine: &TableUiState,
+    cell_cursor: Option<CellFocus>,
+    spec: &WindowSpec,
+) -> TableViewModel {
+    let synced = machine
+        .synced()
+        .expect("the def-present guard checked the synced read model");
+    let materialized = machine.materialize_rows(spec);
+    let by_key: HashMap<StableId, &TableRowDef> =
+        def.rows.iter().map(|row| (row.key, row)).collect();
+    let headers: Vec<String> = def.columns.iter().map(|column| column.label.clone()).collect();
+    let column_ids: Vec<StableId> = def.columns.iter().map(|column| column.id).collect();
+    let writable: Vec<bool> = def
+        .columns
+        .iter()
+        .map(|column| is_patch_writable(column.kind))
+        .collect();
+    let mut cells = Vec::with_capacity(materialized.keys.len());
+    for key in &materialized.keys {
+        let mut row_cells = Vec::with_capacity(def.columns.len());
+        if let Some(row) = by_key.get(key) {
+            // Cells shadow the columns 1:1 BY POSITION (the crate's own
+            // validated contract; the machine already gated the shape).
+            for position in 0..def.columns.len() {
+                row_cells.push(
+                    row.cells
+                        .get(position)
+                        .map(cell_display_text)
+                        .unwrap_or_default(),
+                );
+            }
+        }
+        cells.push(row_cells);
+    }
+    let draft = machine
+        .draft()
+        .map(|draft| (draft.key, draft.column, pending_display(&draft.pending)));
+    TableViewModel {
+        headers,
+        column_ids,
+        writable,
+        row_keys: materialized.keys,
+        selected: machine.selection().to_vec(),
+        focused: machine.focus(),
+        draft,
+        cells,
+        cursor: cell_cursor,
+        total_rows: synced.total_rows,
+        published_rows: materialized.published_rows,
+    }
+}
+
+/// The display text of one typed cell (the machine's skeleton for scalar
+/// kinds, the def's presentation payload otherwise — all bounded def data).
+fn cell_display_text(cell: &TableCell) -> String {
+    match cell {
+        TableCell::Text(text) => text.clone(),
+        TableCell::Number(number) => format!("{number}"),
+        TableCell::Bool(value) => value.to_string(),
+        TableCell::Badge { label, .. } => label.clone(),
+        TableCell::Link { label, .. } => label.clone(),
+        TableCell::Icon(_) => "icon".to_string(),
+        TableCell::Progress { fraction, label } => label
+            .clone()
+            .unwrap_or_else(|| format!("{:.0}%", fraction * 100.0)),
+        TableCell::Date { y, m, d } => format!("{y:04}-{m:02}-{d:02}"),
+    }
+}
+
+/// Build the REAL interactive typed table for one [`TableRef`] (SCN-028 —
+/// the def-PRESENT regime; the def-ABSENT regime keeps
+/// [`table_placeholder_element`], decided HERE so both regimes are
+/// documented at one site):
+///
+/// - **def present** (`TableRef::table_id` resolves in the surface's
+///   registry AND the registry-owned machine holds a synced read model):
+///   semantic iced widgets only — the column headers in `def.columns`
+///   order, the machine's MATERIALIZED window rows (the §16 structural
+///   windowing: never beyond the published payload), row selection/focus
+///   and the cell cursor visible, and an open draft visibly editing (the
+///   pending value with the `✎ …▏` editor marker). Scalar
+///   patch-writable cells (the machine's own `is_patch_writable` rule)
+///   carry the press route ([`WidgetMountMsg::TableRowPressed`] — the
+///   two-phase pointer policy); Badge and the other non-writable kinds
+///   render display-only (muted text, NO press route — the machine would
+///   refuse the edit anyway).
+/// - **def absent**: the muted, never-interactive placeholder (a `TableRef`
+///   naming an id with no registry def renders exactly the pre-SCN-028
+///   bytes).
+pub(crate) fn table_element(
+    table: &TableRef,
+    surface: &WidgetSurface,
+    ctx: &TableMountCtx<'_>,
+    spec: &WindowSpec,
+) -> (Element<'static, WidgetMountMsg>, MountFacts) {
+    let name = table.name.clone().unwrap_or_else(|| "table".to_string());
+    let def_present = surface.tables.contains_key(&table.table_id)
+        && ctx
+            .tables
+            .get(&table.table_id)
+            .is_some_and(|machine| machine.synced().is_some());
+    if !def_present {
+        return table_placeholder_element(table);
+    }
+    let machine = ctx
+        .tables
+        .get(&table.table_id)
+        .expect("the def-present guard checked the machine slot");
+    let def = surface
+        .tables
+        .get(&table.table_id)
+        .expect("the def-present guard checked the registry");
+    let view = table_view_model(def, machine, ctx.cell_cursor, spec);
+    let surface_id = machine.surface_id();
+    let table_id = table.table_id;
+
+    let mut col = column![].spacing(MOUNT_ROW_SPACING).width(Fill);
+    // Header row: the def's labels in registry order (muted — the rows
+    // carry the content).
+    let mut header = row![].spacing(6);
+    for label in &view.headers {
+        header = header.push(
+            text(label.clone())
+                .size(MOUNT_HINT_TEXT_SIZE)
+                .style(muted_text_style),
+        );
+    }
+    col = col.push(header);
+    // Materialized rows: one native row of cells per window key.
+    for (row_index, key) in view.row_keys.iter().enumerate() {
+        let selected = view.selected.contains(key);
+        let focused = view.focused == Some(*key);
+        let mut row_el = row![].spacing(6).align_y(iced::Alignment::Center);
+        for (column_index, column_id) in view.column_ids.iter().enumerate() {
+            let mut label = view
+                .cells
+                .get(row_index)
+                .and_then(|cells| cells.get(column_index))
+                .cloned()
+                .unwrap_or_default();
+            if focused && column_index == 0 {
+                label = format!("> {label}");
+            }
+            if view.cursor == Some(CellFocus {
+                key: *key,
+                column: *column_id,
+            }) {
+                label = format!("[{label}]");
+            }
+            // The open draft IS the editor (per-kind pending, visibly
+            // editing — the commit/cancel keys live in the keyboard route).
+            if view
+                .draft
+                .as_ref()
+                .is_some_and(|(draft_key, draft_column, _)| {
+                    *draft_key == *key && *draft_column == *column_id
+                })
+            {
+                let pending = view
+                    .draft
+                    .as_ref()
+                    .map(|(_, _, text)| text.clone())
+                    .unwrap_or_default();
+                row_el = row_el.push(text(format!("✎ {pending}▏")).size(MOUNT_TEXT_SIZE));
+                continue;
+            }
+            if view.writable[column_index] {
+                let press = button(text(label).size(MOUNT_TEXT_SIZE))
+                    .padding([2, 6])
+                    .style(button_style(selected))
+                    .on_press(WidgetMountMsg::TableRowPressed {
+                        surface_id,
+                        table_id,
+                        key: *key,
+                        column: *column_id,
+                    });
+                row_el = row_el.push(press);
+            } else {
+                // Display-only kinds (badge/icon/link/progress/date):
+                // plugin-PUBLISHED, never patch-writable — muted text, no
+                // press route.
+                row_el = row_el.push(
+                    text(label)
+                        .size(MOUNT_TEXT_SIZE)
+                        .style(muted_text_style),
+                );
+            }
+        }
+        col = col.push(row_el);
+    }
+    // The windowing footer: what is materialized vs published vs backing —
+    // the §16 window discipline made visible (metadata only).
+    let window_note = match view.total_rows {
+        Some(total) => format!(
+            "rows {}–{} of {} published ({} backing)",
+            view.row_keys.first().map(|key| key.0).unwrap_or(0),
+            view.row_keys.last().map(|key| key.0).unwrap_or(0),
+            view.published_rows,
+            total,
+        ),
+        None => format!(
+            "rows {}–{} of {}",
+            view.row_keys.first().map(|key| key.0).unwrap_or(0),
+            view.row_keys.last().map(|key| key.0).unwrap_or(0),
+            view.published_rows,
+        ),
+    };
+    col = col.push(
+        text(window_note)
+            .size(MOUNT_HINT_TEXT_SIZE)
+            .style(muted_text_style),
+    );
+
+    (
+        col.into(),
+        MountFacts {
+            widget_id: table.id,
+            clickable: true,
             a11y: name,
             command: None,
         },
@@ -1293,6 +1844,7 @@ pub(crate) fn build_node<'a>(
     state: &WidgetUiState,
     dispatcher: &WidgetDispatcher,
     spec: &WindowSpec,
+    table_ctx: &TableMountCtx<'_>,
 ) -> Option<Element<'a, WidgetMountMsg>> {
     if !node_visible(node) {
         return None;
@@ -1302,9 +1854,9 @@ pub(crate) fn build_node<'a>(
         WidgetNode::List(def) => list_element(def, state, spec).0,
         WidgetNode::IconButton(def) => icon_button_element(def, dispatcher).0,
         WidgetNode::Menu(def) => menu_element(def, dispatcher).0,
-        WidgetNode::Table(def) => table_placeholder_element(def).0,
+        WidgetNode::Table(def) => table_element(def, table_ctx.surface, table_ctx, spec).0,
         WidgetNode::Group(def) => {
-            let children = visible_children(def, state, dispatcher, spec);
+            let children = visible_children(def, state, dispatcher, spec, table_ctx);
             group_element(def, children)
         }
     })
@@ -1316,10 +1868,11 @@ pub(crate) fn visible_children<'a>(
     state: &WidgetUiState,
     dispatcher: &WidgetDispatcher,
     spec: &WindowSpec,
+    table_ctx: &TableMountCtx<'_>,
 ) -> Vec<Element<'a, WidgetMountMsg>> {
     def.children
         .iter()
-        .filter_map(|child| build_node(child, state, dispatcher, spec))
+        .filter_map(|child| build_node(child, state, dispatcher, spec, table_ctx))
         .collect()
 }
 
@@ -1428,12 +1981,24 @@ impl SurfaceMountHandle {
     /// the legacy body uses. `Element<'static>` on purpose: everything the
     /// builders copy (labels, ids, flags) is owned by the element, so the
     /// panel's `view()` borrows nothing that outlives the registry read.
-    fn body(&self) -> Element<'static, WidgetMountMsg> {
+    /// (SCN-028) The typed-table context rides in: the surface itself, the
+    /// registry-owned per-table machines, and the scope's cell cursor —
+    /// view-pass reads only.
+    fn body(
+        &self,
+        tables: &HashMap<StableId, TableUiState>,
+        cell_cursor: Option<CellFocus>,
+    ) -> Element<'static, WidgetMountMsg> {
         let state = self.state.borrow();
         let dispatcher = self.dispatcher.borrow();
+        let table_ctx = TableMountCtx {
+            surface: &self.surface,
+            tables,
+            cell_cursor,
+        };
         let mut col = column![].spacing(MOUNT_GROUP_SPACING).width(Fill);
         for node in &self.surface.roots {
-            if let Some(element) = build_node(node, &state, &dispatcher, &DEFAULT_WINDOW_SPEC) {
+            if let Some(element) = build_node(node, &state, &dispatcher, &DEFAULT_WINDOW_SPEC, &table_ctx) {
                 col = col.push(element);
             }
         }
@@ -1487,6 +2052,23 @@ pub struct MountRegistry {
     /// decision and Escape's machine-direct cancel) and swept with the
     /// surfaces. Host-local only, never serialized (§3 transient class).
     prompts: HashMap<StableId, MountPromptDesc>,
+    /// (SCN-028) The per-surface TYPED-TABLE store: one [`TableUiState`]
+    /// slot per (surface, table) — the machine map keyed by the registry
+    /// table id — plus that surface's table KEYBOARD scope (which table
+    /// holds the roving position, the caller-held cell cursor, and the
+    /// editing compose buffer; see [`SurfaceTableState`]).
+    ///
+    /// Registry-owned ON PURPOSE (the SCN-025 store precedent: the store
+    /// rides inside the registry — one app-`Rc` domain, one borrow
+    /// discipline, one lifecycle): the slots are created on surface
+    /// registration, `sync`ed on EVERY successful surface swap (the same
+    /// sync points `WidgetUiState` re-syncs — snapshots and applied
+    /// patches; selection/focus/draft survive patches that do not touch
+    /// their keys, the machine's documented contract), and `reset_all` +
+    /// dropped on teardown ([`MountRegistry::prune_input_entries`] — the
+    /// §16 "closing a tab/plugin cancels pending requests and releases
+    /// state" rule, tables edition). Host-local only, never serialized.
+    tables: HashMap<StableId, SurfaceTableState>,
     /// (SCN-025) The app-owned PANEL SURFACE STORE — the v24
     /// publish-or-patch contract's host-side truth (keyed by panel id,
     /// recording the owning plugin's transport id), the store the wire
@@ -1535,11 +2117,22 @@ impl MountRegistry {
 
     /// The mounted body for `panel_id` (see [`SurfaceMountHandle::body`]);
     /// `None` = no registered mount → the caller renders its legacy view.
+    /// (SCN-028) The typed-table context resolves HERE — the registry owns
+    /// the machine slots + the scope's cursor, and the body builder is a
+    /// pure function over them.
     pub(crate) fn mounted_body_owned(
         &self,
         panel_id: &str,
     ) -> Option<Element<'static, WidgetMountMsg>> {
-        self.by_panel.get(panel_id).map(|handle| handle.body())
+        let handle = self.by_panel.get(panel_id)?;
+        let surface_id = handle.surface_id();
+        let empty = HashMap::new();
+        let entry = self.tables.get(&surface_id);
+        let machines = entry.map(|entry| &entry.machines).unwrap_or(&empty);
+        let cell_cursor = entry
+            .and_then(|entry| entry.scope.as_ref())
+            .and_then(|scope| scope.cursor);
+        Some(handle.body(machines, cell_cursor))
     }
 }
 
@@ -1837,6 +2430,17 @@ impl MountRegistry {
             }
             self.by_panel.insert(panel_id.to_string(), handle);
         }
+        // (SCN-028) The typed-table machines ride EVERY successful surface
+        // swap (the same sync points `WidgetUiState` re-syncs — snapshots
+        // and applied patches): missing slots are created, existing slots
+        // re-sync against the REGISTERED surface (selection/focus/draft
+        // survive patches that do not touch their keys — the machine's
+        // documented sync contract). Attach/patch-rate cost, never
+        // keystroke-rate.
+        if let Some(stored) = self.by_panel.get(panel_id) {
+            let (surface_id, surface) = (stored.surface_id(), stored.surface.clone());
+            self.table_sync_surface_owned(surface_id, &surface);
+        }
         // The input store is the surfaces' mirror: sweep it after ANY
         // registration path (a replaced surface's stale hover/capture/
         // owed-move state has nothing to point at anymore).
@@ -2009,6 +2613,45 @@ pub struct HoverState {
 /// The registry's input store alongside its surfaces (SCN-020). Plus the
 /// two SURFACE-SCOPE slots the keyboard/cancel routes resolve:
 /// `key_target` and the armed-prompt cancel hint.
+///
+/// (SCN-028) One surface's typed-table store rides beside them: the
+/// per-table [`TableUiState`] machines plus that surface's table keyboard
+/// scope. One map entry per surface ⇒ the lifecycle is EXACTLY the
+/// surface's (every register/teardown path prunes it — no orphaned
+/// machine), and the whole store stays host-local (§3 transient class,
+/// never serialized, never wire).
+#[derive(Debug, Default)]
+struct SurfaceTableState {
+    /// The per-table machines, keyed by the registry table id (the
+    /// per-table namespace owner; several `TableRef`s may name one table,
+    /// the machine is per TABLE id).
+    machines: HashMap<StableId, TableUiState>,
+    /// The table KEYBOARD scope (`None` = the widget ring holds the keys):
+    /// which table holds the roving position, the caller-held cell cursor
+    /// (the machine's cell-focus contract keeps the cursor CALLER-held),
+    /// and the editing compose buffer (the host-local text the typed
+    /// characters compose into before the machine's value gate accepts
+    /// them — the buffer advances ONLY on acceptance, mirroring the
+    /// machine's atomicity).
+    scope: Option<TableKeyScope>,
+}
+
+/// The table keyboard scope's host-local slots (SCN-028). The ROW focus
+/// itself lives in the machine (`TableUiState::focus`); the cell cursor is
+/// CALLER-held by the machine's contract — the caller here is the scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TableKeyScope {
+    /// The table whose rows/cells hold the roving position.
+    table: StableId,
+    /// The cell cursor (row key + column) — `None` until the first
+    /// Left/Right or pointer press lands it.
+    cursor: Option<CellFocus>,
+    /// The editing compose buffer (`None` = compose from the machine's
+    /// seeded pending). Advances ONLY when the machine accepted the
+    /// composed value.
+    edit: Option<String>,
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
 pub(crate) struct MountInputState {
@@ -2409,9 +3052,240 @@ impl MountRegistry {
         // register/unregister path (no release runs there) still cannot
         // leave an orphaned desc behind.
         self.prompts.retain(|surface_id, _| registered(*surface_id));
+        // (SCN-028) The typed-table machines + scopes are the surfaces'
+        // mirror too: a surface leaving the registry RESETS (§16 — the
+        // ONLY path that moves the machines' `whole_state_resets` in the
+        // mount integration) and drops its table slots — no orphaned
+        // machine outlives its surface.
+        self.tables.retain(|surface_id, entry| {
+            let registered = registered(*surface_id);
+            if !registered {
+                for machine in entry.machines.values_mut() {
+                    machine.reset_all();
+                }
+                entry.scope = None;
+            }
+            registered
+        });
         if self.input.key_target.is_some_and(|target| !registered(target)) {
             self.input.key_target = None;
         }
+    }
+
+    // -- SCN-028: the typed-table store (machines + keyboard scope) ---------
+
+    /// Create/sync the per-table machines for one surface swap (the
+    /// registration path's sync point; see
+    /// [`MountRegistry::register_surface_owned`]). The scope dies with a
+    /// table that left the registry — it can hold nothing anymore.
+    fn table_sync_surface_owned(&mut self, surface_id: StableId, surface: &WidgetSurface) {
+        let entry = self.tables.entry(surface_id).or_default();
+        for table_id in surface.tables.keys() {
+            let machine = entry
+                .machines
+                .entry(*table_id)
+                .or_insert_with(|| TableUiState::new(surface_id, *table_id));
+            machine.sync(surface);
+        }
+        let scope_dangling = entry
+            .scope
+            .as_ref()
+            .is_some_and(|scope| !surface.tables.contains_key(&scope.table));
+        if scope_dangling {
+            entry.scope = None;
+        }
+    }
+
+    /// The scoped machine read (`&mut`): the (surface, table)-addressed
+    /// [`TableUiState`] slot.
+    fn table_machine_mut_owned(
+        &mut self,
+        surface_id: StableId,
+        table_id: StableId,
+    ) -> Option<&mut TableUiState> {
+        self.tables
+            .get_mut(&surface_id)
+            .and_then(|entry| entry.machines.get_mut(&table_id))
+    }
+
+    /// The test-side read of one machine slot (lifecycle assertions).
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn table_state_owned(
+        &self,
+        surface_id: StableId,
+        table_id: StableId,
+    ) -> Option<&TableUiState> {
+        self.tables
+            .get(&surface_id)
+            .and_then(|entry| entry.machines.get(&table_id))
+    }
+
+    /// The scope's table id read (`None` = the widget ring holds the keys).
+    fn table_scope_table_of(&self, surface_id: StableId) -> Option<StableId> {
+        self.tables
+            .get(&surface_id)
+            .and_then(|entry| entry.scope.as_ref())
+            .map(|scope| scope.table)
+    }
+
+    /// Is the table keyboard scope active on this surface?
+    fn table_scope_active(&self, surface_id: StableId) -> bool {
+        self.table_scope_table_of(surface_id).is_some()
+    }
+
+    /// The caller-held cell cursor read (the two-phase pointer policy's
+    /// pre-press comparison).
+    fn table_scope_cursor_of(
+        &self,
+        surface_id: StableId,
+        table_id: StableId,
+    ) -> Option<CellFocus> {
+        self.tables
+            .get(&surface_id)
+            .and_then(|entry| entry.scope.as_ref())
+            .filter(|scope| scope.table == table_id)
+            .and_then(|scope| scope.cursor)
+    }
+
+    /// The caller-held cell cursor write. A cursor landing CREATES the
+    /// surface's table scope when none exists — a pointer press inside a
+    /// table moves the keyboard scope there (the desktop input model: the
+    /// clicked control owns the keys), exactly like the mount press's key
+    /// target. The machine's cell-cursor contract keeps the cursor
+    /// CALLER-held; the scope IS the caller.
+    fn table_scope_set_cursor_owned(
+        &mut self,
+        surface_id: StableId,
+        table_id: StableId,
+        cursor: Option<CellFocus>,
+    ) {
+        let Some(entry) = self.tables.get_mut(&surface_id) else {
+            return;
+        };
+        if !entry.machines.contains_key(&table_id) {
+            return;
+        }
+        match entry.scope.as_mut() {
+            Some(scope) if scope.table == table_id => scope.cursor = cursor,
+            _ => {
+                entry.scope = Some(TableKeyScope {
+                    table: table_id,
+                    cursor,
+                    edit: None,
+                });
+            }
+        }
+    }
+
+    /// Does this surface render a def-present (synced-machine) table? The
+    /// Tab law's gate — `false` keeps every pre-existing ring byte.
+    fn table_scope_ready(&self, surface_id: StableId, surface: &WidgetSurface) -> bool {
+        first_table_ref_of(surface)
+            .is_some_and(|table_id| self.table_state_owned(surface_id, table_id).is_some_and(|machine| machine.synced().is_some()))
+    }
+
+    /// Dive INTO the table keyboard scope: name the surface's first
+    /// def-present table (paint order — the surface walk) as the scope's
+    /// owner and land the machine's row focus on the materialized window's
+    /// FIRST (forward) or LAST (backward) row. `false` when no def-present
+    /// synced table renders or the window is empty — graceful, nothing
+    /// half-applies.
+    fn table_scope_enter_owned(
+        &mut self,
+        surface_id: StableId,
+        surface: &WidgetSurface,
+        forward: bool,
+    ) -> bool {
+        let Some(table_id) = first_table_ref_of(surface) else {
+            return false;
+        };
+        let Some(entry) = self.tables.get_mut(&surface_id) else {
+            return false;
+        };
+        let Some(machine) = entry.machines.get_mut(&table_id) else {
+            return false;
+        };
+        if machine.synced().is_none() {
+            return false;
+        }
+        let landed = if forward {
+            machine.row_focus_next(&DEFAULT_WINDOW_SPEC)
+        } else {
+            machine.row_focus_prev(&DEFAULT_WINDOW_SPEC)
+        };
+        if landed.is_none() {
+            return false; // an empty window has nothing to hold the scope
+        }
+        entry.scope = Some(TableKeyScope {
+            table: table_id,
+            cursor: None,
+            edit: None,
+        });
+        true
+    }
+
+    /// LEAVE the table keyboard scope (the machine's row focus stays parked
+    /// — re-entering resumes there).
+    fn table_scope_leave_owned(&mut self, surface_id: StableId) -> bool {
+        self.tables
+            .get_mut(&surface_id)
+            .and_then(|entry| entry.scope.take())
+            .is_some()
+    }
+
+    /// Escape's table half: cancel the scoped machine's open draft through
+    /// the PURE route's own Escape arm (ONE code path — the exact step the
+    /// headless route tests pin, nav-step probe included). `false` when no
+    /// scope is active or no draft is open — the caller falls through to
+    /// the existing surface-escape law (the armed-prompt dismissal
+    /// ordering is unchanged).
+    fn table_scope_cancel_draft_owned(&mut self, surface_id: StableId) -> bool {
+        let Some(entry) = self.tables.get_mut(&surface_id) else {
+            return false;
+        };
+        let Some(scope) = entry.scope.as_mut() else {
+            return false;
+        };
+        let table_id = scope.table;
+        let Some(machine) = entry.machines.get_mut(&table_id) else {
+            return false;
+        };
+        if machine.draft().is_none() {
+            return false;
+        }
+        let column_order: Vec<StableId> = machine
+            .synced()
+            .map(|synced| synced.column_order.clone())
+            .unwrap_or_default();
+        let mut cursor = scope.cursor;
+        // Disjoint registry fields: the machines ride `tables`, the nav-step
+        // probe rides `counters`.
+        let counters = &mut self.counters;
+        mount_table_key_route_owned(
+            counters,
+            machine,
+            &mut cursor,
+            Key::Named(keyboard_key::Named::Escape),
+            Modifiers::NONE,
+            &DEFAULT_WINDOW_SPEC,
+            &column_order,
+        );
+        scope.cursor = cursor;
+        true
+    }
+
+    /// Settle one committed cell fact (the typed-table bridge's
+    /// post-forward signal — the machine's in-flight mark clears so the
+    /// next edit of the same address can arm). Idempotent.
+    fn table_settle_owned(
+        &mut self,
+        surface_id: StableId,
+        table_id: StableId,
+        key: StableId,
+        column: StableId,
+    ) -> bool {
+        self.table_machine_mut_owned(surface_id, table_id)
+            .is_some_and(|machine| machine.settle(key, column))
     }
 }
 
@@ -2429,12 +3303,14 @@ impl MountRegistry {
 /// ([`WidgetUiState::focus_next`]/[`WidgetUiState::focus_prev`]) skip the
 /// dead rows — the state layer stays the authority.
 ///
-/// EXCLUDED on purpose (v1, each documented at its site): menus — the
+/// EXCLUDED on purpose (each documented at its site): menus — the
 /// iced_aw menubar's root is its own native overlay and the mount's ring
-/// does not reach inside it; tables — the typed-table machine
-/// ([`mount_table_key_route`]) is the table rows' own keyboard scope until
-/// the typed-table mount integration lands; invisible nodes (the
-/// [`build_node`] skip — the ring must not name what is not rendered).
+/// does not reach inside it; tables — the table rows' roving lives in the
+/// typed-table KEYBOARD SCOPE (SCN-028: the scope dives in at the ring's
+/// edges — Tab is the enter/leave key; the ring itself still names no
+/// table rows, whose keys are the per-table namespace, not widget ids);
+/// invisible nodes (the [`build_node`] skip — the ring must not name what
+/// is not rendered).
 pub(crate) fn nav_ring(
     surface: &WidgetSurface,
     state: &WidgetUiState,
@@ -2536,7 +3412,28 @@ pub(crate) fn key_route_owned(
     }
     let views = state.synced().map(|synced| synced.views.clone()).unwrap_or_default();
     let ring = nav_ring(surface, state);
+
+    // (SCN-028) THE TABLE KEYBOARD SCOPE: when a table row/cell holds the
+    // roving position, the keys route through the table machine — Up/Down
+    // row roving within the materialized window, Left/Right the caller-held
+    // cell cursor, Enter the edit arm/commit, characters the draft's value
+    // keys, Tab the LEAVE edge (back to the widget ring). One production
+    // body ([`table_scope_key_owned`]); the navigation keys route THROUGH
+    // the pure [`mount_table_key_route_owned`].
+    if registry.table_scope_active(surface_id) {
+        return table_scope_key_owned(registry, surface_id, state, key, modifiers, &ring);
+    }
+
     if ring.is_empty() {
+        // (SCN-028) A table-ONLY surface (no widget ring at all) is still
+        // reachable: Tab dives straight into the table scope (the same law
+        // as the ring-edge dive below). Every other key routes nothing —
+        // the pre-existing bytes.
+        if matches!(key, Key::Named(keyboard_key::Named::Tab))
+            && registry.table_scope_enter_owned(surface_id, surface, !modifiers.shift())
+        {
+            registry.record_key_nav_step_owned();
+        }
         return Vec::new();
     }
     let ring_ids: Vec<StableId> = ring.iter().map(|(id, _)| *id).collect();
@@ -2598,6 +3495,31 @@ pub(crate) fn key_route_owned(
         }
         Key::Named(keyboard_key::Named::Tab) => {
             let current = state.focus();
+            // (SCN-028) When the surface renders a def-present table, the
+            // ring EDGES dive into the table scope — the documented ring
+            // law: the table contributes a TABLE-LEVEL ring entry that
+            // DIVES IN, realized as the wrap target of the edge walk (the
+            // walk runs WITHOUT the wrap there; Shift+Tab's backward edge
+            // dives at the window's last row; Tab INSIDE the scope returns
+            // to the ring's top). Surfaces WITHOUT a def-present table
+            // keep the pre-existing wrap bytes exactly.
+            if registry.table_scope_ready(surface_id, surface) {
+                let target = if modifiers.shift() {
+                    state.focus_prev(current, &ring_ids, &views)
+                } else {
+                    state.focus_next(current, &ring_ids, &views)
+                };
+                match target {
+                    Some(row_id) => step_msgs(Some(row_id), false),
+                    None => {
+                        if registry.table_scope_enter_owned(surface_id, surface, !modifiers.shift())
+                        {
+                            registry.record_key_nav_step_owned();
+                        }
+                        Vec::new()
+                    }
+                }
+            } else {
             // The roving-tabindex WRAP: at an edge the walk starts again
             // (focus_next with `None` = from the ring's top; focus_prev
             // with `None` = from its bottom) — landing on the first/last
@@ -2610,6 +3532,7 @@ pub(crate) fn key_route_owned(
                     .or_else(|| state.focus_next(None, &ring_ids, &views))
             };
             step_msgs(target, false)
+            }
         }
         // Escape (and every other key) does not route mount navigation.
         _ => Vec::new(),
@@ -2645,7 +3568,14 @@ pub fn bench_handle_mount_key_owned(
     // Escape: the mounted surface's cancel is machine-direct (the state
     // layers' own hooks — the armed prompt's dismissal); no route message
     // exists for it and no machine sees a KEY. (Same shape as the app fn.)
+    // SCN-028: the table scope's OPEN DRAFT cancels FIRST (the FREE cancel
+    // through the pure route's own Escape arm); with no draft the key
+    // falls through to the surface-escape law — the armed-prompt dismissal
+    // ordering is unchanged.
     if key == Key::Named(keyboard_key::Named::Escape) {
+        if registry.table_scope_cancel_draft_owned(surface_id) {
+            return Vec::new();
+        }
         registry.mount_escape_cancel_owned(surface_id);
         return Vec::new();
     }
@@ -2767,9 +3697,31 @@ fn tree_def_of(surface: &WidgetSurface, widget_id: StableId) -> Option<&WidgetTr
     None
 }
 
+/// The surface's FIRST visible [`TableRef`]'s registry table id (paint
+/// order — the same explicit-stack walk discipline as [`nav_ring`]). The
+/// table scope dive's target pick: a surface with several tables scopes
+/// the first rendered one (documented at
+/// [`MountRegistry::table_scope_enter_owned`]).
+fn first_table_ref_of(surface: &WidgetSurface) -> Option<StableId> {
+    let mut walker: Vec<&WidgetNode> = surface.roots.iter().rev().collect();
+    while let Some(node) = walker.pop() {
+        if !node_visible(node) {
+            continue;
+        }
+        if let WidgetNode::Group(def) = node {
+            walker.extend(def.children.iter().rev());
+            continue;
+        }
+        if let WidgetNode::Table(def) = node {
+            return Some(def.table_id);
+        }
+    }
+    None
+}
+
 /// The step a TABLE key resolved to (the pure keyboard layer's output —
-/// the typed-table mount integration consumes these).
-#[cfg_attr(not(test), allow(dead_code))]
+/// SCN-028's production scope route consumes these; the headless route
+/// tests pin them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MountTableKeyStep {
     /// Row focus moved (Up/Down roving through the materialized window —
@@ -2805,11 +3757,14 @@ pub(crate) enum MountTableKeyStep {
 /// are its §16 probes; `keyboard_nav_steps` ticks once per non-empty
 /// route.
 ///
-// (the typed-table MOUNT integration (the later task) is the production
-// caller; the tests' facade consumes it today.)
-#[cfg_attr(not(test), allow(dead_code))]
+// SCN-028: the first parameter is the registry's COUNTERS (not the whole
+// registry) — the production scope route holds the machine borrow while
+// ticking the probe (disjoint fields), and the probe was this fn's only
+// registry use. Zero behavior; the cfg(test) facade + the app reach-through
+// signatures are unchanged. The typed-table production route
+// ([`table_scope_key_owned`]) is this fn's caller — the allowance is gone.
 pub(crate) fn mount_table_key_route_owned(
-    registry: &mut MountRegistry,
+    counters: &mut MountCounters,
     state: &mut TableUiState,
     cell_cursor: &mut Option<CellFocus>,
     key: Key,
@@ -2850,7 +3805,7 @@ pub(crate) fn mount_table_key_route_owned(
         _ => None,
     };
     if step.is_some() {
-        registry.record_key_nav_step_owned();
+        counters.keyboard_nav_steps += 1;
     }
     step
 }
@@ -2868,9 +3823,388 @@ pub(crate) fn mount_table_key_route(
 ) -> Option<MountTableKeyStep> {
     with_test_registry_mut(|registry| {
         mount_table_key_route_owned(
-            registry, state, cell_cursor, key, modifiers, spec, column_order,
+            &mut registry.counters, state, cell_cursor, key, modifiers, spec, column_order,
         )
     })
+}
+
+// ---------------------------------------------------------------------------
+// SCN-028 — the production TABLE keyboard route (the scope-active half)
+// ---------------------------------------------------------------------------
+
+/// The typed-table keyboard route's PRODUCTION body — the scope-active half
+/// of [`key_route_owned`] (the app's `handle_mount_key_owned` reaches it
+/// through [`bench_handle_mount_key_owned`]; no app file touched).
+///
+/// Key map (the module docs' scope law, in code):
+/// - **Tab** LEAVES the scope: it clears and the widget-ring walk resumes —
+///   forward to the ring's TOP (Shift: its bottom), the roving-tabindex
+///   wrap model. The machine's row focus stays parked (re-entering
+///   resumes there) — a navigation step, counted.
+/// - **Up/Down/Left/Right + Escape** route THROUGH the pure
+///   [`mount_table_key_route_owned`] (ONE translation body). At the
+///   Up/Down WINDOW edges the roving stops; the v1 SCROLL law advances the
+///   scroll anchor one row and re-anchors the focus inside the
+///   re-materialized window (the machine's window-bound `row_focus_set`),
+///   and a forward landing on the PUBLISHED TAIL emits
+///   [`WidgetMountMsg::TableTailReached`] — the ROUTE (not this fn) runs
+///   the machine's `page_request_if_needed` exactly once (dedup rides the
+///   machine).
+/// - **Enter** on a focused writable cell ARMS the edit (the machine's
+///   gate: a non-writable kind refuses QUIETLY — its counter the probe;
+///   the cursor's column, else the row's first column); **Enter with a
+///   draft open** COMMITS: exactly ONE `WidgetOp::TableCell` fact leaves as
+///   [`WidgetMountMsg::TableCellCommitted`] (the bridge forwards the
+///   `TableCellChanged` notify and settles the address). **Space** on a
+///   Bool draft toggles it.
+/// - **Characters/Backspace with a draft open** compose the editing
+///   buffer and offer each candidate to the machine's `draft_cell_value`
+///   (Text: append/pop; Number: the buffer must parse; Bool drafts take
+///   only Space). The buffer advances ONLY on acceptance — the machine's
+///   gates (kind class + delegated crate validation) are the authority and
+///   their refusals leave the pending EXACTLY as-was. Without a draft the
+///   typing keys route nothing (v1 edits live in the draft only).
+fn table_scope_key_owned(
+    registry: &mut MountRegistry,
+    surface_id: StableId,
+    state: &mut WidgetUiState,
+    key: Key,
+    modifiers: Modifiers,
+    ring: &[(StableId, StableId)],
+) -> Vec<WidgetMountMsg> {
+    // Chords are the app's accelerator space here too (the pure route
+    // guards its own keys; this covers the edit keys).
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return Vec::new();
+    }
+    // Tab LEAVES (needs the widget ring + the WidgetUiState roving — both
+    // resolved before the machine borrow).
+    if key == Key::Named(keyboard_key::Named::Tab) {
+        registry.table_scope_leave_owned(surface_id);
+        registry.record_key_nav_step_owned();
+        let views = state.synced().map(|synced| synced.views.clone()).unwrap_or_default();
+        let ring_ids: Vec<StableId> = ring.iter().map(|(id, _)| *id).collect();
+        let target = if modifiers.shift() {
+            state.focus_prev(None, &ring_ids, &views)
+        } else {
+            state.focus_next(None, &ring_ids, &views)
+        };
+        let Some(row_id) = target else {
+            return Vec::new();
+        };
+        let widget_id = owner_of(ring, Some(row_id)).unwrap_or(StableId(0));
+        return vec![WidgetMountMsg::FocusMoved {
+            surface_id,
+            widget_id,
+            to: Some(row_id),
+        }];
+    }
+
+    let Some(scope_table) = registry.table_scope_table_of(surface_id) else {
+        return Vec::new();
+    };
+    let Some(entry) = registry.tables.get_mut(&surface_id) else {
+        return Vec::new();
+    };
+    let Some(scope) = entry.scope.as_mut() else {
+        return Vec::new();
+    };
+    let Some(machine) = entry.machines.get_mut(&scope_table) else {
+        return Vec::new();
+    };
+    let column_order: Vec<StableId> = machine
+        .synced()
+        .map(|synced| synced.column_order.clone())
+        .unwrap_or_default();
+
+    // Disjoint registry fields: the machines/scope ride `tables`, the
+    // nav-step probe rides `counters`.
+    let counters = &mut registry.counters;
+
+    match &key {
+        Key::Named(keyboard_key::Named::ArrowDown)
+        | Key::Named(keyboard_key::Named::ArrowUp)
+        | Key::Named(keyboard_key::Named::ArrowRight)
+        | Key::Named(keyboard_key::Named::ArrowLeft)
+        | Key::Named(keyboard_key::Named::Escape) => {
+            let mut cursor = scope.cursor;
+            let step = mount_table_key_route_owned(
+                counters,
+                machine,
+                &mut cursor,
+                key.clone(),
+                modifiers,
+                &DEFAULT_WINDOW_SPEC,
+                &column_order,
+            );
+            scope.cursor = cursor;
+            match step {
+                Some(MountTableKeyStep::RowFocus(landed)) => {
+                    // Down landing on the PUBLISHED TAIL of a windowing
+                    // table asks for the next page — as the tail-reach
+                    // MESSAGE (the bridge route runs the machine's ask).
+                    if key == Key::Named(keyboard_key::Named::ArrowDown)
+                        && machine_at_published_tail(machine, landed)
+                    {
+                        vec![WidgetMountMsg::TableTailReached {
+                            surface_id,
+                            table_id: scope_table,
+                        }]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                Some(MountTableKeyStep::CellFocus(_)) | Some(MountTableKeyStep::DraftCancelled) => {
+                    Vec::new()
+                }
+                None => match &key {
+                    // The window edges: the v1 scroll law (see the fn docs).
+                    Key::Named(keyboard_key::Named::ArrowDown) => table_scroll_step_owned(
+                        counters,
+                        machine,
+                        scope,
+                        surface_id,
+                        scope_table,
+                        true,
+                    ),
+                    Key::Named(keyboard_key::Named::ArrowUp) => table_scroll_step_owned(
+                        counters,
+                        machine,
+                        scope,
+                        surface_id,
+                        scope_table,
+                        false,
+                    ),
+                    // Escape with no draft: already fallen through at the
+                    // route head (the armed-prompt law); Left/Right at a
+                    // column edge stay put (the documented edge law).
+                    _ => Vec::new(),
+                },
+            }
+        }
+        Key::Named(keyboard_key::Named::Enter) | Key::Named(keyboard_key::Named::Space) => {
+            let draft_info = machine
+                .draft()
+                .map(|draft| (draft.key, draft.column, draft.pending.clone()));
+            match draft_info {
+                Some((_, draft_column, pending)) => {
+                    let kind = machine
+                        .synced()
+                        .and_then(|synced| synced.columns.get(&draft_column))
+                        .copied();
+                    // Space on a Bool draft: the toggle (the Bool value key).
+                    if key == Key::Named(keyboard_key::Named::Space) {
+                        if kind == Some(CellKind::Bool) {
+                            if let WidgetCellValue::Bool(value) = pending {
+                                let _ = machine.draft_cell_value(WidgetCellValue::Bool(!value));
+                            }
+                        }
+                        return Vec::new();
+                    }
+                    // Enter COMMITS: exactly ONE fact, exactly once.
+                    match machine.commit_cell_draft() {
+                        Ok(Some(WidgetOp::TableCell {
+                            key: op_key,
+                            column: op_column,
+                            value,
+                            ..
+                        })) => {
+                            scope.edit = None;
+                            vec![WidgetMountMsg::TableCellCommitted {
+                                surface_id,
+                                table_id: scope_table,
+                                key: op_key,
+                                column: op_column,
+                                value,
+                            }]
+                        }
+                        // `NoDraft` cannot fire (the draft was just read);
+                        // the reserved None shape is future elision.
+                        _ => Vec::new(),
+                    }
+                }
+                None => {
+                    // Space activates nothing outside a draft (Enter is the
+                    // table's activation key).
+                    if key != Key::Named(keyboard_key::Named::Enter) {
+                        return Vec::new();
+                    }
+                    let Some(focused) = machine.focus() else {
+                        return Vec::new();
+                    };
+                    let column = match scope.cursor {
+                        Some(cell) if cell.key == focused => Some(cell.column),
+                        _ => column_order.first().copied(),
+                    };
+                    let Some(column) = column else {
+                        return Vec::new();
+                    };
+                    // The machine's gate is the authority: a non-writable
+                    // kind (or an in-flight address) refuses QUIETLY — its
+                    // counter is the probe; the view stays as-was.
+                    if machine.begin_cell_edit(focused, column).is_ok() {
+                        scope.edit = None;
+                    }
+                    Vec::new()
+                }
+            }
+        }
+        Key::Character(typed) => {
+            table_scope_edit_keys_owned(machine, scope, typed, false)
+        }
+        Key::Named(keyboard_key::Named::Backspace) => {
+            table_scope_edit_keys_owned(machine, scope, "", true)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The draft's VALUE keys (characters / Backspace): compose the candidate
+/// from the scope buffer (or the machine's seeded pending) and offer it to
+/// the machine's `draft_cell_value` — the buffer advances ONLY on
+/// acceptance (the machine's gates are the authority; a refusal leaves the
+/// pending and the buffer EXACTLY as-was). Without a draft, or on a Bool
+/// draft (Space toggles), the keys route nothing.
+fn table_scope_edit_keys_owned(
+    machine: &mut TableUiState,
+    scope: &mut TableKeyScope,
+    typed: &str,
+    backspace: bool,
+) -> Vec<WidgetMountMsg> {
+    let Some((_, draft_column, _)) = machine
+        .draft()
+        .map(|draft| (draft.key, draft.column, draft.pending.clone()))
+    else {
+        return Vec::new();
+    };
+    let Some(kind) = machine
+        .synced()
+        .and_then(|synced| synced.columns.get(&draft_column))
+        .copied()
+    else {
+        return Vec::new();
+    };
+    // One composed edit: `Some(ch)` appends the character; `None` is the
+    // Backspace pop.
+    let edit_once = |machine: &mut TableUiState, scope: &mut TableKeyScope, ch: Option<char>| {
+        let seed = scope
+            .edit
+            .clone()
+            .unwrap_or_else(|| pending_display(&machine.draft().map(|draft| draft.pending.clone()).unwrap_or(WidgetCellValue::Bool(false))));
+        let mut candidate = seed;
+        match ch {
+            Some(ch) => candidate.push(ch),
+            None => {
+                if candidate.pop().is_none() || candidate.is_empty() {
+                    // Nothing left to delete: the buffer (and the pending)
+                    // stay.
+                    return;
+                }
+            }
+        }
+        let accepted = match kind {
+            CellKind::Text => machine
+                .draft_cell_value(WidgetCellValue::Text(candidate.clone()))
+                .is_ok(),
+            CellKind::Number => match candidate.parse::<f64>() {
+                // The machine re-runs its own finiteness + cap gates on the
+                // parsed value; a parse failure never reaches it.
+                Ok(number) => machine
+                    .draft_cell_value(WidgetCellValue::Number(number))
+                    .is_ok(),
+                Err(_) => false,
+            },
+            // Bool drafts take only the Space toggle.
+            _ => false,
+        };
+        if accepted {
+            scope.edit = Some(candidate);
+        }
+    };
+    if backspace {
+        edit_once(machine, scope, None);
+    } else {
+        for ch in typed.chars() {
+            edit_once(machine, scope, Some(ch));
+        }
+    }
+    Vec::new()
+}
+
+/// The v1 SCROLL law at the Up/Down window edges: advance the scroll
+/// anchor one row and re-anchor the focus inside the re-materialized
+/// window (its bottom row forward, its top row backward — the machine's
+/// window-bound `row_focus_set` refuses anything else). A FORWARD landing
+/// on the PUBLISHED TAIL is the page ask ([`WidgetMountMsg::TableTailReached`]
+/// — the bridge route runs the machine's ask once). Already at an absolute
+/// end: the tail ask when the focus rests there, else nothing.
+fn table_scroll_step_owned(
+    counters: &mut MountCounters,
+    machine: &mut TableUiState,
+    scope: &mut TableKeyScope,
+    surface_id: StableId,
+    table_id: StableId,
+    forward: bool,
+) -> Vec<WidgetMountMsg> {
+    let published = machine.synced().map(|synced| synced.rows.len()).unwrap_or(0);
+    if published == 0 {
+        return Vec::new();
+    }
+    if forward {
+        let anchor = machine.scroll_index();
+        if anchor + 1 >= published {
+            // Anchored at the published end: the tail ask (when the focus
+            // rests there) — or nothing.
+            if machine
+                .synced()
+                .and_then(|synced| synced.rows.last())
+                .copied()
+                .is_some_and(|tail| machine.focus() == Some(tail))
+            {
+                return vec![WidgetMountMsg::TableTailReached {
+                    surface_id,
+                    table_id,
+                }];
+            }
+            return Vec::new();
+        }
+        machine.set_scroll_index(anchor + 1);
+    } else {
+        machine.set_scroll_index(machine.scroll_index().saturating_sub(1));
+    }
+    // Re-anchor INSIDE the re-materialized window.
+    let materialized = machine.materialize_rows(&DEFAULT_WINDOW_SPEC);
+    let target = if forward {
+        materialized.keys.last().copied()
+    } else {
+        materialized.keys.first().copied()
+    };
+    let Some(target) = target else {
+        return Vec::new();
+    };
+    if machine.row_focus_set(target, &DEFAULT_WINDOW_SPEC).is_err() {
+        return Vec::new();
+    }
+    scope.cursor = None; // the column cursor re-anchors with the next Left/Right
+    if forward && machine_at_published_tail(machine, target) {
+        counters.keyboard_nav_steps += 1;
+        return vec![WidgetMountMsg::TableTailReached {
+            surface_id,
+            table_id,
+        }];
+    }
+    counters.keyboard_nav_steps += 1;
+    Vec::new()
+}
+
+/// The display form of a skeleton value (the editing seed / the draft
+/// editor's text — the same vocabulary the builder paints).
+fn pending_display(value: &WidgetCellValue) -> String {
+    match value {
+        WidgetCellValue::Text(text) => text.clone(),
+        WidgetCellValue::Number(number) => format!("{number}"),
+        WidgetCellValue::Bool(value) => value.to_string(),
+    }
 }
 
 /// The panel hook's pointer-capture wrapper (SCN-020, the FEW-LINE form) —
@@ -5007,6 +6341,19 @@ mod tests {
         let surface = surface(vec![WidgetNode::List(item_list(200, vec![item(7, "x")]))]);
         let state = synced_state(&surface);
         let dispatcher = WidgetDispatcher::new(sid(900));
+        // The typed-table context: an empty registry map + an empty surface
+        // (this fixture registers no table machines).
+        let empty_surface = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: Vec::new(),
+            tables: std::collections::BTreeMap::new(),
+        };
+        let no_machines = HashMap::new();
+        let table_ctx = TableMountCtx {
+            surface: &empty_surface,
+            tables: &no_machines,
+            cell_cursor: None,
+        };
 
         let nodes = vec![
             tree(100, vec![tree_row(1, None, "A")], false),
@@ -5021,7 +6368,8 @@ mod tests {
                     &invisible(node.clone()),
                     &state,
                     &dispatcher,
-                    &DEFAULT_WINDOW_SPEC
+                    &DEFAULT_WINDOW_SPEC,
+                    &table_ctx
                 )
                 .is_none(),
                 "{node:?} must skip when visible == false"
@@ -5031,7 +6379,8 @@ mod tests {
                     &visible(node.clone()),
                     &state,
                     &dispatcher,
-                    &DEFAULT_WINDOW_SPEC
+                    &DEFAULT_WINDOW_SPEC,
+                    &table_ctx
                 )
                 .is_some(),
                 "{node:?} renders when visible == true"
@@ -5048,7 +6397,13 @@ mod tests {
                 invisible(tree(100, vec![tree_row(1, None, "hidden")], false)),
             ],
         );
-        let children = visible_children(&group_d, &state, &dispatcher, &DEFAULT_WINDOW_SPEC);
+        let children = visible_children(
+            &group_d,
+            &state,
+            &dispatcher,
+            &DEFAULT_WINDOW_SPEC,
+            &table_ctx,
+        );
         assert_eq!(
             children.len(),
             1,
@@ -5309,7 +6664,10 @@ mod tests {
         // construct without a renderer; only DRAWING needs one). The state
         // facts stay the assertion surface:
         assert_eq!(handle.state.borrow().explicit_expansion(sid(1)), Some(true));
-        let _body = handle.body();
+        // (SCN-028) The typed-table context: an empty machine map + no
+        // cursor (this fixture carries no tables).
+        let no_machines = HashMap::new();
+        let _body = handle.body(&no_machines, None);
     }
 
     // -- 12. the SCN-014 registration lifecycle (headless seam) ---------------
@@ -6362,6 +7720,1106 @@ mod tests {
         };
         state.sync(&surface);
         state
+    }
+
+    // -- 17. SCN-028 — the typed-table MOUNT integration ---------------------
+
+    use ocs_plugin_api::widgets::BadgeTone;
+    use ocs_plugin_api::scene::MAX_TEXT_BYTES;
+
+    /// The LIVE demo's shape (the task's gold standard): table 200, columns
+    /// 201..=204 (text/number/bool/badge — the badge is the display-only
+    /// probe), row keys `300..` with typed cells; `total` windows the
+    /// backing set (`None` = fully materialized).
+    fn demo_table_def(published: u64, total: Option<u64>) -> PanelTableDef {
+        PanelTableDef {
+            id_table: sid(200),
+            columns: vec![
+                table_column(201, CellKind::Text, "item"),
+                table_column(202, CellKind::Number, "length"),
+                table_column(203, CellKind::Bool, "locked"),
+                table_column(204, CellKind::Badge, "state"),
+            ],
+            total_rows: total,
+            rows: (0..published)
+                .map(|index| TableRowDef {
+                    key: sid(300 + index),
+                    cells: vec![
+                        TableCell::Text(format!("material {index:03}")),
+                        TableCell::Number(index as f64),
+                        TableCell::Bool(index % 2 == 0),
+                        TableCell::Badge {
+                            label: if index % 2 == 0 {
+                                "locked".to_string()
+                            } else {
+                                "draft".to_string()
+                            },
+                            tone: BadgeTone::Info,
+                        },
+                    ],
+                    domain_ref: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// The demo surface: ONE root — the `TableRef` (widget id 120) naming
+    /// table 200 — so the registered surface id IS `sid(120)`.
+    fn demo_surface(def: PanelTableDef) -> WidgetSurface {
+        WidgetSurface {
+            revision: SceneRevision(1),
+            roots: vec![WidgetNode::Table(TableRef {
+                id: sid(120),
+                name: Some("materials".to_string()),
+                enabled: true,
+                visible: true,
+                table_id: sid(200),
+            })],
+            tables: std::collections::BTreeMap::from([(sid(200), def)]),
+        }
+    }
+
+    /// A LOCAL machine map for the pure builder (the builder never needs
+    /// the registry — the view pass reads only).
+    fn local_machines(surface: &WidgetSurface) -> HashMap<StableId, TableUiState> {
+        let mut machines = HashMap::new();
+        for table_id in surface.tables.keys() {
+            let mut machine = TableUiState::new(sid(120), *table_id);
+            machine.sync(surface);
+            machines.insert(*table_id, machine);
+        }
+        machines
+    }
+
+    /// The demo def's roots' TableRef (the builder call's argument).
+    fn demo_table_ref(surface: &WidgetSurface) -> TableRef {
+        match &surface.roots[0] {
+            WidgetNode::Table(def) => def.clone(),
+            other => panic!("expected a table ref, got {other:?}"),
+        }
+    }
+
+    /// Read one registered machine through the cfg(test) registry cell.
+    fn table_read<R>(
+        surface: u64,
+        table: u64,
+        read: impl FnOnce(&TableUiState) -> R,
+    ) -> Option<R> {
+        with_test_registry(|registry| {
+            registry
+                .table_state_owned(sid(surface), sid(table))
+                .map(read)
+        })
+    }
+
+    /// The registered surface's table-scope cursor read.
+    fn scope_cursor_of(surface: u64, table: u64) -> Option<CellFocus> {
+        with_test_registry(|registry| registry.table_scope_cursor_of(sid(surface), sid(table)))
+    }
+
+    /// The scope-active read.
+    fn scope_active(surface: u64) -> bool {
+        with_test_registry(|registry| registry.table_scope_active(sid(surface)))
+    }
+
+    // -- 17a. the def-present regime renders the REAL table -------------------
+
+    /// A def-present table renders interactively (headers in DEF order, the
+    /// machine's materialized window, machine-owned selection/focus/draft
+    /// facts, display-only kinds marked); a def-ABSENT `TableRef` keeps the
+    /// muted placeholder bytes (clickable: false).
+    #[test]
+    fn table_def_present_renders_real_table_and_def_absent_keeps_placeholder() {
+        let def = demo_table_def(4, None);
+        let surface = demo_surface(def.clone());
+        let machines = local_machines(&surface);
+        let table_ref = demo_table_ref(&surface);
+        let ctx = TableMountCtx {
+            surface: &surface,
+            tables: &machines,
+            cell_cursor: None,
+        };
+
+        // Def present: interactive facts + the def-ordered view model.
+        let (element, facts) = table_element(&table_ref, &surface, &ctx, &DEFAULT_WINDOW_SPEC);
+        assert!(facts.clickable, "the real table is interactive");
+        assert_eq!(facts.widget_id, sid(120));
+        assert_eq!(facts.a11y, "materials");
+        let _ = element; // built headless
+
+        let view = table_view_model(&def, &machines[&sid(200)], None, &DEFAULT_WINDOW_SPEC);
+        assert_eq!(
+            view.headers,
+            vec!["item", "length", "locked", "state"],
+            "headers in def.columns order"
+        );
+        assert_eq!(
+            view.column_ids,
+            vec![sid(201), sid(202), sid(203), sid(204)]
+        );
+        assert_eq!(
+            view.writable,
+            vec![true, true, true, false],
+            "text/number/bool writable; badge display-only"
+        );
+        assert_eq!(
+            view.row_keys,
+            vec![sid(300), sid(301), sid(302), sid(303)],
+            "the materialized window, not a full dump"
+        );
+        assert_eq!(view.published_rows, 4);
+        assert_eq!(view.total_rows, None);
+        assert!(view.selected.is_empty() && view.focused.is_none() && view.draft.is_none());
+        assert_eq!(view.cells[0][3], "locked", "the badge cell renders its label");
+
+        // Def absent: the placeholder (never interactive).
+        let orphan = WidgetSurface {
+            revision: SceneRevision(1),
+            roots: vec![WidgetNode::Table(TableRef {
+                id: sid(121),
+                name: Some("ghost".to_string()),
+                enabled: true,
+                visible: true,
+                table_id: sid(999),
+            })],
+            tables: std::collections::BTreeMap::new(),
+        };
+        let no_machines = HashMap::new();
+        let orphan_ctx = TableMountCtx {
+            surface: &orphan,
+            tables: &no_machines,
+            cell_cursor: None,
+        };
+        let WidgetNode::Table(orphan_ref) = &orphan.roots[0] else {
+            unreachable!()
+        };
+        let (_, orphan_facts) =
+            table_element(orphan_ref, &orphan, &orphan_ctx, &DEFAULT_WINDOW_SPEC);
+        assert!(!orphan_facts.clickable, "def-absent keeps the placeholder");
+        assert_eq!(orphan_facts.a11y, "ghost");
+    }
+
+    // -- 17b. the pointer routes (the two-phase policy + the tail ask) -------
+
+    /// Press = select (the machine's law; the SelectionChanged event
+    /// forwards through the typed-table bridge) + the cell cursor moves; a
+    /// press on the ALREADY-focused cursor cell is the activation gesture
+    /// (the edit arms); a display-only column refuses the edit QUIETLY (the
+    /// machine's counter is the probe).
+    #[test]
+    fn table_pointer_press_selects_then_edits_on_second_press() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_pointer",
+            demo_surface(demo_table_def(4, None)),
+        );
+        let press = |key: u64, column: u64| {
+            WidgetMountMsg::TableRowPressed {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(key),
+                column: sid(column),
+            }
+        };
+
+        // Phase one: select + cursor.
+        let first = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300, 201))
+        });
+        assert_eq!(first.routing, MountRouting::Applied { forwarded: 1 });
+        assert_eq!(
+            first.events,
+            vec![WidgetEvent::SelectionChanged {
+                surface_id: sid(120),
+                selected_ids: vec![sid(300)],
+            }],
+            "the selection event forwards through the table bridge"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.selection().to_vec()),
+            Some(vec![sid(300)])
+        );
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(201)
+            })
+        );
+
+        // Phase two (same cell): the edit arms. (An identical selection
+        // rewrite still EMITS the event — the machine's diff counter is
+        // what stays 0; the forwarded row is the notify.)
+        let second = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300, 201))
+        });
+        assert_eq!(
+            second.routing,
+            MountRouting::Applied { forwarded: 1 },
+            "the selection notify re-emits; the machine's diff write is 0"
+        );
+        assert!(matches!(
+            table_read(120, 200, |machine| machine.draft().map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text(text))) if text == "material 000"
+        ));
+
+        // The cap enforcement lives in the machine (the host-multi-select
+        // law): a past-cap offer refuses state-side and moves nothing.
+        let cap_delta = table_read(120, 200, |machine| machine.mutations().row_state_changes);
+        let too_many: Vec<StableId> = (0..(ocs_plugin_api::widgets::MAX_SELECTION_IDS as u64 + 1))
+            .map(|i| sid(10_000 + i))
+            .collect();
+        with_test_registry_mut(|registry| {
+            let machine = registry
+                .table_machine_mut_owned(sid(120), sid(200))
+                .expect("the machine");
+            assert!(machine.set_selection(too_many).is_err());
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().row_state_changes),
+            cap_delta,
+            "a refused selection writes nothing"
+        );
+
+        // Escape through the production route cancels the draft FREE.
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+            assert!(bench_handle_mount_key_owned(
+                registry,
+                Key::Named(keyboard_key::Named::Escape),
+                Modifiers::NONE
+            )
+            .is_empty());
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false)
+        );
+
+        // The badge column: the cursor moves onto it too, but the edit
+        // refuses QUIETLY (the kind gate's counter; no draft).
+        let badge_cursor = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300, 204))
+        });
+        assert_eq!(badge_cursor.routing, MountRouting::Applied { forwarded: 1 });
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(204)
+            })
+        );
+        let refusals_before =
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals);
+        let _ = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300, 204))
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            refusals_before.map(|count| count + 1),
+            "the kind gate counted ONE quiet refusal"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "a display-only column never arms a draft"
+        );
+    }
+
+    /// The published-tail press asks for the next page ONCE (the machine's
+    /// dedup suppresses the repeat); a mid-table press asks nothing.
+    #[test]
+    fn table_tail_press_requests_page_once_and_duplicate_suppressed() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_tail",
+            demo_surface(demo_table_def(8, Some(40))),
+        );
+        let press = |key: u64| WidgetMountMsg::TableRowPressed {
+            surface_id: sid(120),
+            table_id: sid(200),
+            key: sid(key),
+            column: sid(202),
+        };
+
+        // A mid-table press: selection only, no page ask.
+        let mid = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(303))
+        });
+        assert_eq!(mid.routing, MountRouting::Applied { forwarded: 1 });
+        assert_eq!(mid.events.len(), 1, "selection only");
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().page_requests_emitted),
+            Some(0)
+        );
+
+        // The tail press: selection + ONE TablePageRequested, forwarded
+        // through the table bridge.
+        let tail = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(307))
+        });
+        assert_eq!(
+            tail.events,
+            vec![
+                WidgetEvent::SelectionChanged {
+                    surface_id: sid(120),
+                    selected_ids: vec![sid(307)],
+                },
+                WidgetEvent::TablePageRequested {
+                    surface_id: sid(120),
+                    table: sid(200),
+                    first_key: sid(307),
+                    len: MAX_WIDGET_RANGE_LEN,
+                },
+            ]
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().page_requests_emitted),
+            Some(1)
+        );
+
+        // The duplicate press: the selection notify re-emits (the machine's
+        // diff write is 0) but the PAGE ASK is suppressed BY THE MACHINE.
+        let repeat = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(307))
+        });
+        assert_eq!(
+            repeat.events,
+            vec![WidgetEvent::SelectionChanged {
+                surface_id: sid(120),
+                selected_ids: vec![sid(307)],
+            }],
+            "the page ask was suppressed; only the selection notify re-emitted"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().duplicate_pages_suppressed),
+            Some(1)
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().page_requests_emitted),
+            Some(1)
+        );
+    }
+
+    // -- 17c. the keyboard scope (Tab dive/leave, roving, edges) --------------
+
+    /// The ring law: Tab walks the WIDGET ring (byte-identical), the edge
+    /// DIVES into the table (the machine's row focus lands on the window's
+    /// first row), Tab inside RETURNS to the ring (focus stays parked —
+    /// re-entering resumes forward).
+    #[test]
+    fn table_keyboard_tab_dives_in_and_returns() {
+        let _app = OpenCADStudio::new_for_test();
+        // A MIXED surface: list rows 7/8 + the demo table.
+        let mut surface = demo_surface(demo_table_def(4, None));
+        surface.roots.insert(
+            0,
+            WidgetNode::List(item_list(200, vec![item(7, "one"), item(8, "two")])),
+        );
+        let _guard = register_test_surface("scn028_tab", surface);
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(200)));
+        });
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+        let key = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        assert!(!scope_active(200));
+
+        // The widget ring first (unchanged bytes).
+        let msgs = key(tab());
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::FocusMoved {
+                surface_id: sid(200),
+                widget_id: sid(200),
+                to: Some(sid(7)),
+            }]
+        );
+        assert_eq!(handle.state.borrow().focus(), Some(sid(7)));
+        let _ = key(tab());
+        assert_eq!(handle.state.borrow().focus(), Some(sid(8)));
+
+        // The EDGE: no wrap — the DIVE. Row focus lands on the window's
+        // first row; the machine's row focus is the table's own namespace.
+        let msgs = key(tab());
+        assert!(msgs.is_empty(), "the dive routes no ring message");
+        assert!(scope_active(200));
+        assert_eq!(
+            table_read(200, 200, |machine| machine.focus()),
+            Some(Some(sid(300)))
+        );
+
+        // Tab INSIDE: back to the ring (its top — the wrap model); the
+        // table's row focus stays parked.
+        let msgs = key(tab());
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::FocusMoved {
+                surface_id: sid(200),
+                widget_id: sid(200),
+                to: Some(sid(7)),
+            }]
+        );
+        assert!(!scope_active(200));
+        assert_eq!(
+            table_read(200, 200, |machine| machine.focus()),
+            Some(Some(sid(300))),
+            "the row focus parks across the leave"
+        );
+
+        // Re-enter: the roving RESUMES from the parked row (301).
+        let _ = key(tab()); // 7
+        let _ = key(tab()); // 8
+        let _ = key(tab()); // dive
+        assert_eq!(
+            table_read(200, 200, |machine| machine.focus()),
+            Some(Some(sid(301))),
+            "the roving resumed, not restarted"
+        );
+    }
+
+    /// Inside the scope: Up/Down rove rows through the machine, the
+    /// window-edge Down advances the scroll anchor (re-anchoring focus
+    /// inside the re-materialized window), and the PUBLISHED-tail edge is
+    /// the page ask — emitted once, dedup'd by the machine on the repeat.
+    #[test]
+    fn table_keyboard_arrows_rove_and_scroll_edges_page() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_arrows",
+            demo_surface(demo_table_def(4, Some(40))),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+        });
+        let key = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+        let down = || Key::Named(keyboard_key::Named::ArrowDown);
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+
+        // Dive (the table-only surface's ring is empty — Tab dives at once;
+        // the dive lands the window's FIRST row).
+        assert!(key(down()).is_empty(), "arrows do nothing before the scope");
+        assert!(key(tab()).is_empty(), "the dive");
+        assert!(scope_active(120));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.focus()),
+            Some(Some(sid(300))),
+            "the dive landed the window's first row"
+        );
+
+        // Down: the row roving (the machine's own focus slot).
+        for expected in [301, 302, 303] {
+            let _ = key(down());
+            assert_eq!(
+                table_read(120, 200, |machine| machine.focus()),
+                Some(Some(sid(expected)))
+            );
+        }
+
+        // The window edge (the whole published window materializes): the
+        // scroll law advances the anchor and re-anchors the focus at the
+        // window's bottom (still 303 — the published window IS four rows).
+        let mut tail_msgs = Vec::new();
+        for _ in 0..3 {
+            tail_msgs = key(down());
+            assert_eq!(
+                table_read(120, 200, |machine| machine.focus()),
+                Some(Some(sid(303))),
+                "the re-anchor stays inside the window"
+            );
+        }
+        assert_eq!(
+            table_read(120, 200, |machine| machine.scroll_index()),
+            Some(3),
+            "the anchor advanced to the published end"
+        );
+        // The FINAL edge (anchored at the published end, focus on the tail):
+        // the page ask rides out as the tail-reach message.
+        assert_eq!(
+            tail_msgs,
+            vec![WidgetMountMsg::TableTailReached {
+                surface_id: sid(120),
+                table_id: sid(200),
+            }]
+        );
+
+        // The route runs the machine's ask EXACTLY once:
+        let outcome = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(
+                registry,
+                &WidgetMountMsg::TableTailReached {
+                    surface_id: sid(120),
+                    table_id: sid(200),
+                },
+            )
+        });
+        assert_eq!(
+            outcome.events,
+            vec![WidgetEvent::TablePageRequested {
+                surface_id: sid(120),
+                table: sid(200),
+                first_key: sid(303),
+                len: MAX_WIDGET_RANGE_LEN,
+            }]
+        );
+
+        // The repeat: the machine's dedup suppresses (nothing forwards).
+        let _ = key(down());
+        let repeat = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(
+                registry,
+                &WidgetMountMsg::TableTailReached {
+                    surface_id: sid(120),
+                    table_id: sid(200),
+                },
+            )
+        });
+        assert_eq!(repeat.events, Vec::new());
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().duplicate_pages_suppressed),
+            Some(1)
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().page_requests_emitted),
+            Some(1)
+        );
+
+        // Up walks backward (the same machine law).
+        let _ = key(Key::Named(keyboard_key::Named::ArrowUp));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.focus()),
+            Some(Some(sid(302))),
+            "Up roves backward through the window"
+        );
+    }
+
+    // -- 17d. the edit lifecycle through the keyboard -------------------------
+
+    /// Enter arms the edit at the CURSOR cell (the machine seeds the
+    /// pending from the current cell); with no cursor the row's FIRST
+    /// column arms; a display-only column's Enter refuses QUIETLY (the
+    /// kind gate's counter, no draft).
+    #[test]
+    fn table_keyboard_enter_arms_and_kind_gate_refuses() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_enter",
+            demo_surface(demo_table_def(4, None)),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+        });
+        let key = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+        let enter = || Key::Named(keyboard_key::Named::Enter);
+        let right = || Key::Named(keyboard_key::Named::ArrowRight);
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+
+        assert!(key(tab()).is_empty(), "the dive");
+        // No cursor yet: Enter arms the ROW'S FIRST column.
+        assert!(key(enter()).is_empty(), "arming routes no message");
+        assert!(matches!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| (draft.key, draft.column, draft.pending.clone()))),
+            Some(Some((key, column, WidgetCellValue::Text(_))))
+                if key == sid(300) && column == sid(201)
+        ));
+
+        // Walk the cursor to the badge column (201 → 202 → 203 → 204);
+        // Enter while the draft is open refuses in-flight (uncounted dedup).
+        let _ = key(right());
+        let _ = key(right());
+        let _ = key(right());
+        let _ = key(right());
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(204)
+            })
+        );
+        let _ = key(enter());
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            Some(0),
+            "an in-flight refusal is dedup, not a defect count"
+        );
+
+        // Cancel (free), then Enter on the display-only column: the KIND
+        // gate refuses — ONE counted refusal, NO draft.
+        assert!(key(Key::Named(keyboard_key::Named::Escape)).is_empty());
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false)
+        );
+        let _ = key(enter());
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            Some(1),
+            "the kind gate counted the refusal"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "no draft, no event, nothing half-applied"
+        );
+    }
+
+    /// The draft's value keys: characters compose through the machine's
+    /// OWN gates (Number: parse-then-`draft_cell_value`; the buffer
+    /// advances ONLY on acceptance), a past-cap text refuses with the
+    /// machine's OWN counter, and Enter commits EXACTLY ONE fact — the
+    /// bridge forwards ONE `TableCellChanged` and settles the address.
+    #[test]
+    fn table_draft_typing_gates_and_commit_forwards_once() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_typing",
+            demo_surface(demo_table_def(4, None)),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+        });
+        let key = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+        let char_key = |text: &str| Key::Character(text.to_string().into());
+        let enter = || Key::Named(keyboard_key::Named::Enter);
+        let right = || Key::Named(keyboard_key::Named::ArrowRight);
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+
+        assert!(key(tab()).is_empty());
+        let _ = key(right()); // cursor → (300, 201) text
+        let _ = key(enter()); // the text draft (seed "material 000")
+        let _ = key(char_key("X"));
+        assert!(matches!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text(text))) if text == "material 000X"
+        ));
+        // The text cap: fill to the crate's cap (accepted), one more char
+        // refuses with the machine's OWN counter and the draft stays.
+        let fill = MAX_TEXT_BYTES - "material 000X".len();
+        let _ = key(char_key(&"a".repeat(fill)));
+        let accepted_len = table_read(120, 200, |machine| {
+            machine.draft().map(|draft| match &draft.pending {
+                WidgetCellValue::Text(text) => text.len(),
+                _ => 0,
+            })
+        });
+        assert_eq!(accepted_len, Some(Some(MAX_TEXT_BYTES)));
+        let refusals_before =
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals);
+        let _ = key(char_key("a"));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            refusals_before.map(|count| count + 1),
+            "the machine's delegated value gate counted ONE refusal"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| {
+                machine.draft().map(|draft| match &draft.pending {
+                    WidgetCellValue::Text(text) => text.len(),
+                    _ => 0,
+                })
+            }),
+            accepted_len,
+            "a refused keystroke left the draft EXACTLY as-was"
+        );
+        // Cancel free, then the NUMBER cell.
+        let _ = key(Key::Named(keyboard_key::Named::Escape));
+        let _ = key(right()); // cursor → (300, 202) number
+        let _ = key(enter()); // seeded Number(0.0)
+        let _ = key(char_key("4"));
+        let _ = key(char_key("2"));
+        assert!(matches!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Number(value))) if value == 42.0
+        ));
+        // A non-numeric character composes to an unparseable candidate:
+        // refused BEFORE the machine (the mount's class-aware compose), the
+        // pending stays exactly 42.0.
+        let _ = key(char_key("x"));
+        assert!(matches!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Number(value))) if value == 42.0
+        ));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            refusals_before.map(|count| count + 1),
+            "the unparseable candidate never reached the machine"
+        );
+        // Backspace: pop → the pending follows the buffer.
+        let _ = key(Key::Named(keyboard_key::Named::Backspace));
+        assert!(matches!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Number(value))) if value == 4.0
+        ));
+        let _ = key(char_key("2")); // back to 42
+
+        // Enter COMMITS: exactly ONE fact leaves as the commit message...
+        let commits = key(enter());
+        assert_eq!(
+            commits,
+            vec![WidgetMountMsg::TableCellCommitted {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(300),
+                column: sid(202),
+                value: WidgetCellValue::Number(42.0),
+            }]
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().cell_writes),
+            Some(1),
+            "the machine counted exactly ONE cell write"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().row_state_changes),
+            Some(1),
+            "ONE row touched (no selection writes happened in the scope)"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.in_flight().len()),
+            Some(1),
+            "the fact is parked in flight"
+        );
+
+        // ...and the bridge route forwards exactly ONE TableCellChanged,
+        // then settles the address (the in-flight mark clears).
+        let outcome = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &commits[0])
+        });
+        assert_eq!(
+            outcome.events,
+            vec![WidgetEvent::TableCellChanged {
+                surface_id: sid(120),
+                row_key: sid(300),
+                column_id: sid(202),
+                value: WidgetCellValue::Number(42.0),
+            }]
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.in_flight().len()),
+            Some(0),
+            "the bridge settled the committed address"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the draft cleared on commit"
+        );
+    }
+
+    // -- 17e. the one-path discipline + the live arm --------------------------
+
+    /// The typed-table vocabulary REFUSES at `apply_mount_msg` by name (the
+    /// bridge's own route is `route_mount_table_msg_owned` — reaching the
+    /// machine router is a bypass defect).
+    #[test]
+    fn table_vocabulary_refuses_at_the_machine_apply() {
+        let surface = demo_surface(demo_table_def(2, None));
+        let mut state = WidgetUiState::new(sid(120));
+        state.sync(&surface);
+        let mut dispatcher = WidgetDispatcher::new(sid(120));
+        let mut sink = Vec::new();
+        let routing = apply_mount_msg(
+            &mut state,
+            &mut dispatcher,
+            &WidgetMountMsg::TableRowPressed {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(300),
+                column: sid(201),
+            },
+            &mut sink,
+        );
+        assert!(
+            matches!(&routing, MountRouting::Refused(reason) if reason.contains("route of its own")),
+            "the bypass is refused by name: {routing:?}"
+        );
+        assert!(sink.is_empty(), "no event exists on a bypass refusal");
+    }
+
+    /// The END-TO-END keyboard commit through the LIVE arm: dive → cursor →
+    /// arm → type → Enter; the commit message routes through
+    /// `Message::WidgetMountMsg`, the drained `TableCellChanged` forwards
+    /// through the ONE notify path exactly once, and the machine's fact
+    /// settles.
+    #[test]
+    fn table_commit_forwards_once_through_the_live_arm() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn028_live",
+            demo_surface(demo_table_def(4, None)),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+        });
+        let forwards_before = app
+            .mount_registry
+            .borrow()
+            .counters_owned()
+            .mount_event_forwards;
+        let press = |app: &mut OpenCADStudio, key: Key| {
+            let _ = app.update(crate::app::Message::WidgetMountMsg(
+                WidgetMountMsg::KeyPressed {
+                    key,
+                    modifiers: Modifiers::NONE,
+                },
+            ));
+        };
+
+        let _ = press(&mut app, Key::Named(keyboard_key::Named::Tab)); // dive
+        let _ = press(&mut app, Key::Named(keyboard_key::Named::ArrowRight)); // cursor (300, 201)
+        let _ = press(&mut app, Key::Named(keyboard_key::Named::Enter)); // arm the text draft
+        let _ = press(&mut app, Key::Character("Z".to_string().into())); // "material 000Z"
+        let _ = press(&mut app, Key::Named(keyboard_key::Named::Enter)); // commit
+
+        let forwards = app
+            .mount_registry
+            .borrow()
+            .counters_owned()
+            .mount_event_forwards
+            - forwards_before;
+        assert_eq!(forwards, 1, "exactly ONE forwarded event row");
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().cell_writes),
+            Some(1)
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.in_flight().len()),
+            Some(0),
+            "the live arm settled the committed fact"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false)
+        );
+    }
+
+    // -- 17f. Escape's law + the machine lifecycle ----------------------------
+
+    /// Escape with a table draft cancels it FREE (no counter moves, no
+    /// event) and does NOT touch the armed prompt; the NEXT Escape (no
+    /// draft) falls through to the existing surface-escape law and
+    /// dismisses the prompt 1:1.
+    #[test]
+    fn table_escape_cancels_draft_free_then_prompt_law_holds() {
+        let mut app = OpenCADStudio::new_for_test();
+        let mut surface = demo_surface(demo_table_def(4, None));
+        surface.roots.insert(
+            0,
+            WidgetNode::List(item_list(200, vec![item(7, "one")])),
+        );
+        let _guard = register_test_surface("scn028_escape", surface);
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(200)));
+        });
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        let prompt_key = DispatchKey::Button(sid(1));
+        handle
+            .dispatcher
+            .borrow_mut()
+            .sync_button(&IconActionDef {
+                confirmation: Some(ConfirmPolicy::Prompt {
+                    message: "Really delete the selection?".to_string(),
+                }),
+                ..button_def(1, "Delete", "delete")
+            });
+
+        // Arm a prompt through the LIVE arm (selection + click — the
+        // ordinary Message::WidgetMountMsg bridge).
+        let _ = app.update(crate::app::Message::WidgetMountMsg(
+            WidgetMountMsg::SelectionChanged {
+                surface_id: sid(200),
+                widget_id: sid(200),
+                selected: vec![sid(7)],
+            },
+        ));
+        let _ = app.update(crate::app::Message::WidgetMountMsg(
+            WidgetMountMsg::ButtonClicked {
+                surface_id: sid(200),
+                widget_id: sid(1),
+            },
+        ));
+        assert!(
+            handle
+                .dispatcher
+                .borrow()
+                .pending_prompt(&prompt_key)
+                .is_some()
+        );
+
+        // Dive + arm a table draft.
+        let key_fn = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+        let _ = key_fn(Key::Named(keyboard_key::Named::Tab)); // 7 (the ring's only row)
+        let _ = key_fn(Key::Named(keyboard_key::Named::Tab)); // the edge → the dive
+        assert!(scope_active(200));
+        let _ = key_fn(Key::Named(keyboard_key::Named::Enter)); // the first-column draft
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(true)
+        );
+        let mutations_before = table_read(200, 200, |machine| *machine.mutations());
+
+        // ESCAPE #1: the DRAFT cancels (free); the armed prompt SURVIVES.
+        assert!(key_fn(Key::Named(keyboard_key::Named::Escape)).is_empty());
+        assert_eq!(
+            table_read(200, 200, |machine| *machine.mutations()),
+            mutations_before,
+            "a cancelled draft touched NOTHING (no evidence it existed)"
+        );
+        assert!(
+            handle
+                .dispatcher
+                .borrow()
+                .pending_prompt(&prompt_key)
+                .is_some(),
+            "the armed prompt was not the draft's Escape's target"
+        );
+
+        // ESCAPE #2 (no draft): the existing surface-escape law — the armed
+        // prompt dismisses 1:1.
+        assert!(key_fn(Key::Named(keyboard_key::Named::Escape)).is_empty());
+        assert_eq!(
+            handle.dispatcher.borrow().pending_prompt(&prompt_key),
+            None
+        );
+    }
+
+    /// The machine lifecycle at the MOUNT level: selection/focus/draft
+    /// survive a patch swap that does not touch their keys (the registry's
+    /// sync point), a column-kind change discards the draft on the machine's
+    /// dedicated counter, and the teardown RESETS + drops every slot (§16).
+    #[test]
+    fn table_state_survives_swap_schema_discard_and_teardown_resets() {
+        let _app = OpenCADStudio::new_for_test();
+        let guard = register_test_surface(
+            "scn028_lifecycle",
+            demo_surface(demo_table_def(4, None)),
+        );
+        let press = |key: u64| WidgetMountMsg::TableRowPressed {
+            surface_id: sid(120),
+            table_id: sid(200),
+            key: sid(key),
+            column: sid(201),
+        };
+        let _ = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300))
+        });
+        let _ = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(registry, &press(300)) // activation: the draft
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| (
+                machine.selection().to_vec(),
+                machine.draft().is_some(),
+                machine.mutations().whole_state_resets,
+            )),
+            Some((vec![sid(300)], true, 0))
+        );
+
+        // The patch swap: same keys, a changed VALUE on row 301 — the
+        // machine state SURVIVES (the registry's sync point), no reset.
+        let mut def2 = demo_table_def(4, None);
+        if let TableCell::Text(text) = &mut def2.rows[1].cells[0] {
+            *text = "changed".to_string();
+        }
+        let mut surface2 = demo_surface(def2);
+        surface2.revision = SceneRevision(2);
+        with_test_registry_mut(|registry| {
+            registry.register_surface_owned(
+                "scn028_lifecycle",
+                SurfaceMountHandle::from_surface(sid(120), surface2),
+            );
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| (
+                machine.selection().to_vec(),
+                machine.draft().is_some(),
+                machine.mutations().whole_state_resets,
+            )),
+            Some((vec![sid(300)], true, 0)),
+            "selection/focus/draft survive a patch that does not touch their keys"
+        );
+
+        // The schema change: column 202's kind moves under a fresh draft —
+        // the draft is discarded on the machine's DEDICATED counter.
+        let _ = with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)))
+        });
+        let _ = with_test_registry_mut(|registry| {
+            bench_handle_mount_key_owned(
+                registry,
+                Key::Named(keyboard_key::Named::Escape),
+                Modifiers::NONE,
+            )
+        });
+        with_test_registry_mut(|registry| {
+            let machine = registry
+                .table_machine_mut_owned(sid(120), sid(200))
+                .expect("the machine");
+            machine
+                .begin_cell_edit(sid(300), sid(202))
+                .expect("the number column arms");
+        });
+        let mut def3 = demo_table_def(4, None);
+        def3.columns[1].kind = CellKind::Text;
+        let mut surface3 = demo_surface(def3);
+        surface3.revision = SceneRevision(3);
+        with_test_registry_mut(|registry| {
+            registry.register_surface_owned(
+                "scn028_lifecycle",
+                SurfaceMountHandle::from_surface(sid(120), surface3),
+            );
+        });
+        assert_eq!(
+            table_read(120, 200, |machine| (
+                machine.draft().is_some(),
+                machine.mutations().drafts_discarded_on_schema_change,
+            )),
+            Some((false, 1)),
+            "the kind-changed draft was discarded on the DEDICATED counter"
+        );
+
+        // THE teardown (§16): the guard's drop resets + drops every slot —
+        // nothing outlives its surface.
+        drop(guard);
+        assert!(table_read(120, 200, |machine| machine.selection().is_empty()).is_none());
+        assert!(!scope_active(120));
+        with_test_registry(|registry| {
+            assert!(
+                registry.table_state_owned(sid(120), sid(200)).is_none(),
+                "the machine slot left with its surface"
+            );
+        });
     }
 
 

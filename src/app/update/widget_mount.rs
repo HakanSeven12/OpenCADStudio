@@ -46,7 +46,7 @@ use ocs_plugin_api::ipc::protocol::MAX_WIDGET_EVENT_ROWS;
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::plugin_widget_mount::{
     CollectingSink, MountRegistry, MountRouting, SurfaceMountHandle, WidgetMountMsg,
-    apply_mount_msg, msg_surface_id,
+    apply_mount_msg, msg_surface_id, route_mount_table_msg_owned,
 };
 #[cfg(test)]
 use crate::ui::window::plugin_widgets::WindowSpec;
@@ -90,7 +90,12 @@ fn settle_address_of(msg: &WidgetMountMsg) -> Option<DispatchKey> {
         | WidgetMountMsg::FocusMoved { .. }
         // Pointer messages capture/never arm the dispatcher (§14); the
         // keyboard route's own tail variants never reach this bridge core
-        // either (their arms pre-route them).
+        // either (their arms pre-route them); the SCN-028 typed-table
+        // vocabulary settles through the TABLE machine's own in-flight
+        // marks (route_mount_table_msg_owned), never the dispatcher.
+        | WidgetMountMsg::TableRowPressed { .. }
+        | WidgetMountMsg::TableCellCommitted { .. }
+        | WidgetMountMsg::TableTailReached { .. }
         | WidgetMountMsg::PointerPressed { .. }
         | WidgetMountMsg::PointerMoved { .. }
         | WidgetMountMsg::PointerReleased { .. }
@@ -388,6 +393,22 @@ impl OpenCADStudio {
             // [`Self::on_mount_key`].
             WidgetMountMsg::KeyPressed { key, modifiers } => {
                 return self.on_mount_key(key.clone(), *modifiers);
+            }
+            // SCN-028's typed-table join: the table vocabulary owns the
+            // typed-table bridge route (`route_mount_table_msg_owned` —
+            // the canonical body lives in the mount file, the D1
+            // fold-back discipline), and the drained batch forwards
+            // through the SAME ONE notify path as every other bridge
+            // emission ([`Self::forward_mount_events`]).
+            WidgetMountMsg::TableRowPressed { .. }
+            | WidgetMountMsg::TableCellCommitted { .. }
+            | WidgetMountMsg::TableTailReached { .. } => {
+                let outcome = route_mount_table_msg_owned(
+                    &mut self.mount_registry.borrow_mut(),
+                    &msg,
+                );
+                self.forward_mount_events(msg_surface_id(&msg), outcome.events);
+                return Task::none();
             }
             _ => {}
         }

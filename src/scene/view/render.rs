@@ -5585,12 +5585,14 @@ impl Scene {
             show_2d_solid_fills: flags.show_2d_solid_fills,
             mesh_fill: flags.mesh_fill,
             show_3d_edges: flags.show_3d_edges,
+            // The wireframe styles show silhouettes by DISPSILH alone; the
+            // style's silhouette edges apply to the shaded and hidden ones.
             display_silhouette: flags.hidden_line
-                || display
-                    .visual_style
-                    .as_ref()
-                    .is_some_and(|style| style.silhouette_width > 0 && style.edges_visible())
-                || self.document.header.display_silhouette,
+                || self.document.header.display_silhouette
+                || (!view_wireframe
+                    && display.visual_style.as_ref().is_some_and(|style| {
+                        style.silhouette_width > 0 && style.edges_visible()
+                    })),
             hidden_line: flags.hidden_line,
             // Interaction LOD: suppress the costly hatch pass while the view is
             // actively moving; the scene-render cache holds the full-quality

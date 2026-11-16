@@ -405,6 +405,10 @@ name = "block_incremental_perf"
 harness = false
 
 [[bench]]
+name = "layer_refresh_idle"
+harness = false
+
+[[bench]]
 name = "wires_build_visible"
 harness = false
 

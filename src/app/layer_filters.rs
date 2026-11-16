@@ -590,3 +590,113 @@ pub(in crate::app) fn expand_layer_list<'a>(
         .map(|layer| layer.name.clone())
         .collect()
 }
+
+/// Bench bridge for the per-message Layer manager refresh
+/// (`benches/layer_refresh_idle.rs`). Builds a hermetic app with the Layers
+/// panel open over a drawing of `layers` layers, `entities` entities spread
+/// across them, `filters` property filters and a small selection, then exposes
+/// the refresh entry production calls after every message.
+#[doc(hidden)]
+pub struct LayerRefreshBenchHarness(OpenCADStudio);
+
+impl LayerRefreshBenchHarness {
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new();
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
+    }
+
+    pub fn setup(layers: usize, entities: usize, filters: usize, selected: usize) -> Self {
+        use document::entities::Line;
+        use document::types::{Color, Vector3};
+        use document::EntityType;
+        let mut app = Self::new_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut names = Vec::with_capacity(layers);
+        for k in 0..layers {
+            let name = format!("LAYER_{k:04}");
+            let mut layer = document::tables::Layer::new(&name);
+            layer.handle = app.tabs[i].scene.document.allocate_handle();
+            layer.color = Color::Index((k % 7 + 1) as u8);
+            layer.line_type = if k % 2 == 0 { "Continuous" } else { "Dashed" }.to_string();
+            layer.description = format!("bench layer {k} description text");
+            layer.is_plottable = k % 3 != 0;
+            let _ = app.tabs[i].scene.document.layers.add(layer);
+            names.push(name);
+        }
+        let mut handles = Vec::with_capacity(entities);
+        for e in 0..entities {
+            let mut line = Line::new();
+            let x = e as f64;
+            line.start = Vector3::new(x, 0.0, 0.0);
+            line.end = Vector3::new(x + 1.0, 1.0, 0.0);
+            line.common.layer = names[e % names.len()].clone();
+            handles.push(app.tabs[i].scene.add_entity(EntityType::Line(line)));
+        }
+        for h in handles.iter().take(selected) {
+            app.tabs[i].scene.selected.insert(*h);
+        }
+        let mut built = Vec::with_capacity(filters);
+        for f in 0..filters {
+            built.push(LayerFilter {
+                name: format!("FILTER_{f:02}"),
+                pattern: format!("LAYER_*{}", f % 10),
+                predicates: vec![LayerPredicate::Color((f % 7 + 1) as u16)],
+                ..Default::default()
+            });
+        }
+        app.layer_filters = built;
+        app.persist_layer_filters(i, "BENCH FILTERS");
+        app.show_layers = true;
+        app.dock.float(crate::ui::dock::FloatPanel::new(
+            crate::ui::dock::PanelId::Layers,
+            50.0,
+            50.0,
+            1300.0,
+            700.0,
+        ));
+        app.refresh_layer_counts();
+        Self(app)
+    }
+
+    fn sink(&self) -> usize {
+        let panel = &self.0.tabs[self.0.active_tab].layers;
+        let counts: usize = panel.counts.values().map(|(t, b)| t + b).sum();
+        let members: usize = panel.filters.iter().map(|(_, m)| m.len()).sum();
+        counts
+            + members
+            + panel.selected_object_layers.len()
+            + panel.filter_depths.len()
+            + panel.highlighted
+    }
+
+    /// The steady-state per-message path: nothing changed since the last call,
+    /// exactly as on a hover / timer / redraw message while the panel shows.
+    pub fn refresh_idle(&mut self) -> usize {
+        self.0.refresh_layer_counts();
+        self.sink()
+    }
+
+    /// The changed path: a real layer-property edit through `edit_layers`,
+    /// then the refresh that must rebuild the tree for it.
+    pub fn refresh_after_color_edit(&mut self, step: usize) -> usize {
+        let i = self.0.active_tab;
+        let name = format!("LAYER_{:04}", step % self.layer_count());
+        let color = document::types::Color::Index((step % 7 + 1) as u8);
+        self.0
+            .edit_layers(i, "BENCH COLOR", &[name], |layer| layer.color = color);
+        self.0.refresh_layer_counts();
+        self.sink()
+    }
+
+    fn layer_count(&self) -> usize {
+        self.0.tabs[self.0.active_tab]
+            .scene
+            .document
+            .layers
+            .iter()
+            .count()
+    }
+}

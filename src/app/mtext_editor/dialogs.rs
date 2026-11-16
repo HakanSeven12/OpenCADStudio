@@ -14,6 +14,11 @@ fn number(value: f64) -> String {
     raw_span::number(value)
 }
 
+/// A value as the text writes it: six decimals at most.
+fn round(value: f64) -> f64 {
+    (value * 1e6).round() / 1e6
+}
+
 fn parse(value: &str) -> Option<f64> {
     value.trim().parse::<f64>().ok().filter(|v| v.is_finite())
 }
@@ -28,9 +33,20 @@ impl OpenCADStudio {
         };
         let dialog = match which {
             "PARAGRAPH" => {
+                // The text stores indents, spacing and tab stops in text
+                // heights; the window shows drawing units.
                 let props = ed.caret_paragraph_props();
-                let left = props.left_margin.unwrap_or(0.0);
-                let first = left + props.first_line_indent.unwrap_or(0.0);
+                let h = ed.height_value().max(f64::EPSILON);
+                let left = props.left_margin.unwrap_or(0.0) * h;
+                let first = left + props.first_line_indent.unwrap_or(0.0) * h;
+                let decimal = props
+                    .tab_stops
+                    .iter()
+                    .find_map(|tab| match tab {
+                        TabStop::DecimalWithCharacter { character, .. } => Some(*character),
+                        _ => None,
+                    })
+                    .unwrap_or('.');
                 let tabs = props
                     .tab_stops
                     .iter()
@@ -43,11 +59,11 @@ impl OpenCADStudio {
                             }
                             TabStop::Left(_) => TabKind::Left,
                         };
-                        (kind, tab.position())
+                        (kind, tab.position() * h)
                     })
                     .collect();
                 let (line_on, line_mode, line_at) = match props.line_spacing {
-                    Some(MTextLineSpacing::Exact(v)) => (true, LineMode::Exactly, v),
+                    Some(MTextLineSpacing::Exact(v)) => (true, LineMode::Exactly, v * h),
                     Some(MTextLineSpacing::Multiple(v)) => (true, LineMode::Multiple, v),
                     _ => (false, LineMode::Multiple, 1.0),
                 };
@@ -56,10 +72,10 @@ impl OpenCADStudio {
                     tab_position: "0".to_string(),
                     tabs,
                     selected_tab: None,
-                    decimal: '.',
+                    decimal,
                     first_line: number(first),
                     hanging: number(left),
-                    right: number(props.right_margin.unwrap_or(0.0)),
+                    right: number(props.right_margin.unwrap_or(0.0) * h),
                     align_on: props.alignment.is_some(),
                     align: match props.alignment {
                         Some(MTextParagraphAlignment::Center) => Align::Center,
@@ -69,11 +85,15 @@ impl OpenCADStudio {
                         _ => Align::Left,
                     },
                     spacing_on: props.spacing_before.is_some() || props.spacing_after.is_some(),
-                    before: number(props.spacing_before.unwrap_or(0.0)),
-                    after: number(props.spacing_after.unwrap_or(0.0)),
+                    before: number(props.spacing_before.unwrap_or(0.0) * h),
+                    after: number(props.spacing_after.unwrap_or(0.0) * h),
                     line_on,
                     line_mode,
-                    line_at: format!("{}x", number(line_at)),
+                    line_at: if line_mode == LineMode::Multiple {
+                        format!("{}x", number(line_at))
+                    } else {
+                        number(line_at)
+                    },
                 })
             }
             "COLUMNSETTINGS" => MTextDialog::Columns(ColumnsDraft {
@@ -223,14 +243,21 @@ impl OpenCADStudio {
         self.close_active_modal();
         match dialog {
             MTextDialog::Paragraph(d) => {
+                // Drawing units in the window, text heights in the text.
+                let h = self
+                    .mtext_editor
+                    .as_ref()
+                    .map_or(1.0, |ed| ed.height_value())
+                    .max(f64::EPSILON);
+                let units = |value: &str| number(parse(value).unwrap_or(0.0) / h);
                 let hanging = parse(&d.hanging).unwrap_or(0.0);
                 let first = parse(&d.first_line).unwrap_or(0.0);
-                self.mtext_apply_paragraph_number(ParaNumber::LeftIndent, number(hanging));
-                self.mtext_apply_paragraph_number(ParaNumber::FirstIndent, number(first - hanging));
+                self.mtext_apply_paragraph_number(ParaNumber::LeftIndent, units(&d.hanging));
                 self.mtext_apply_paragraph_number(
-                    ParaNumber::RightIndent,
-                    number(parse(&d.right).unwrap_or(0.0)),
+                    ParaNumber::FirstIndent,
+                    number((first - hanging) / h),
                 );
+                self.mtext_apply_paragraph_number(ParaNumber::RightIndent, units(&d.right));
                 if d.align_on {
                     self.mtext_apply_align(match d.align {
                         Align::Left => ParaAlign::Left,
@@ -241,30 +268,31 @@ impl OpenCADStudio {
                     });
                 }
                 if d.spacing_on {
-                    self.mtext_apply_paragraph_number(
-                        ParaNumber::SpaceBefore,
-                        number(parse(&d.before).unwrap_or(0.0)),
-                    );
-                    self.mtext_apply_paragraph_number(
-                        ParaNumber::SpaceAfter,
-                        number(parse(&d.after).unwrap_or(0.0)),
-                    );
+                    self.mtext_apply_paragraph_number(ParaNumber::SpaceBefore, units(&d.before));
+                    self.mtext_apply_paragraph_number(ParaNumber::SpaceAfter, units(&d.after));
                 }
                 if d.line_on {
                     let at = parse(d.line_at.trim().trim_end_matches(['x', 'X'])).unwrap_or(1.0);
+                    // Exactly is a distance; a multiple is a factor.
                     self.raw_paragraph_line_spacing(match d.line_mode {
-                        LineMode::Exactly => MTextLineSpacing::Exact(at),
+                        LineMode::Exactly => MTextLineSpacing::Exact(round(at / h)),
                         LineMode::AtLeast | LineMode::Multiple => MTextLineSpacing::Multiple(at),
                     });
                 }
                 let tabs: Vec<TabStop> = d
                     .tabs
                     .iter()
-                    .map(|(kind, position)| match kind {
-                        TabKind::Left => TabStop::Left(*position),
-                        TabKind::Center => TabStop::Center(*position),
-                        TabKind::Right => TabStop::Right(*position),
-                        TabKind::Decimal => TabStop::Decimal(*position),
+                    .map(|(kind, position)| {
+                        let position = round(position / h);
+                        match kind {
+                            TabKind::Left => TabStop::Left(position),
+                            TabKind::Center => TabStop::Center(position),
+                            TabKind::Right => TabStop::Right(position),
+                            TabKind::Decimal => TabStop::DecimalWithCharacter {
+                                position,
+                                character: d.decimal,
+                            },
+                        }
                     })
                     .collect();
                 self.raw_paragraph_tabs(&tabs);

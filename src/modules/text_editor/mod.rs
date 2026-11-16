@@ -227,7 +227,7 @@ impl CadModule for TextEditorModule {
                         RibbonItem::LargeDropdown {
                             id: "MTED_COLUMNS",
                             label: "Columns",
-                            icon: glyph("▥"),
+                            icon: svg(include_bytes!("../../../assets/icons/table_col_right.svg")),
                             items: vec![
                                 ("_MTED COLUMNS NONE", "No Columns", glyph("")),
                                 ("_MTED COLUMNS DYNAMIC AUTO", "Dynamic Columns: Auto height", glyph("")),
@@ -249,7 +249,7 @@ impl CadModule for TextEditorModule {
                         RibbonItem::LargeDropdown {
                             id: "MTED_SYMBOL",
                             label: "Symbol",
-                            icon: glyph("@"),
+                            icon: glyph("Ω"),
                             items: symbols(),
                             default: "_MTED SYMBOL %%d",
                         },

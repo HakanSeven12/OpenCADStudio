@@ -60,8 +60,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Atomic entity common-property writes and direct DGN import joined execute.
 /// Fresh xref reads joined the read facade; six direct-reference lifecycle
 /// writes joined execute with operation-local unknown-field rejection.
+/// The Text Editor tab's windows are driveable from a script: `mtext_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "7e2b74104179b37b1b64b557983aa3a65fc56495916b8a6e6a2346e6aee885e5";
+const TOOL_SCHEMA_DIGEST: &str = "0da42ece4101c12a9924985337bf946bb6b3e8fd2dfddd33606ee9dd8174372e";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

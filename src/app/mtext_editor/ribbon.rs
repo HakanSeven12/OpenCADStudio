@@ -151,6 +151,8 @@ impl OpenCADStudio {
                 "OFF" => Message::MTextList(None),
                 "NUMBER" => Message::MTextList(Some(ListKind::Number)),
                 "BULLET" => Message::MTextList(Some(ListKind::Bullet)),
+                "LOWER" => Message::MTextList(Some(ListKind::LowerLetter)),
+                "UPPER" => Message::MTextList(Some(ListKind::UpperLetter)),
                 _ => return Some(self.text_editor_tool_unavailable(cmd)),
             },
             "SPACING" => match arg.parse::<f64>() {
@@ -196,6 +198,10 @@ impl OpenCADStudio {
                 self.save_config();
                 return Some(Task::none());
             }
+            "COMBINE" => {
+                self.mtext_combine_paragraphs();
+                return Some(Task::none());
+            }
             "UNDO" => Message::MTextUndo,
             "REDO" => Message::MTextRedo,
             "CLOSE" => Message::MTextOk,
@@ -206,6 +212,24 @@ impl OpenCADStudio {
             _ => return Some(self.text_editor_tool_unavailable(cmd)),
         };
         Some(self.update(message))
+    }
+
+    /// Combine Paragraphs: the paragraph breaks inside the selection become
+    /// spaces, as one undo step.
+    fn mtext_combine_paragraphs(&mut self) {
+        let Some(ed) = self.mtext_editor.as_ref() else {
+            return;
+        };
+        let range = ed.selected_range();
+        let breaks: Vec<(usize, usize)> = doc_to_cells(&ed.doc)
+            .iter()
+            .enumerate()
+            .filter(|(at, cell)| {
+                range.contains(at) && *at + 1 < range.end && matches!(cell, Cell::Break(..))
+            })
+            .map(|(at, _)| (at, at + 1))
+            .collect();
+        self.raw_replace_ranges(&breaks, " ");
     }
 
     /// A Text Editor tool this build does not carry out yet.

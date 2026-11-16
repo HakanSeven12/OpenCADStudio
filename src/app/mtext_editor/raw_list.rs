@@ -18,6 +18,43 @@ const BULLET: char = '•';
 pub enum ListKind {
     Bullet,
     Number,
+    /// a. b. c. …
+    LowerLetter,
+    /// A. B. C. …
+    UpperLetter,
+}
+
+impl ListKind {
+    /// Items of the kind count up (1., a., A.).
+    fn counted(self) -> bool {
+        self != ListKind::Bullet
+    }
+}
+
+/// The letters of item `number` (1 = a), past z as aa, ab, ….
+fn letters(number: usize, upper: bool) -> String {
+    let mut n = number.max(1);
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push((b'a' + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    let text: String = out.into_iter().rev().collect();
+    if upper {
+        text.to_uppercase()
+    } else {
+        text
+    }
+}
+
+/// The number of a letter marker (a = 1, aa = 27).
+fn letter_number(text: &str) -> Option<usize> {
+    text.chars().try_fold(0usize, |n, c| {
+        let c = c.to_ascii_lowercase();
+        c.is_ascii_lowercase()
+            .then(|| n * 26 + (c as usize - 'a' as usize + 1))
+    })
 }
 
 fn settings() -> String {
@@ -28,6 +65,8 @@ fn marker_text(kind: ListKind, number: usize) -> String {
     match kind {
         ListKind::Bullet => format!("{BULLET}\t"),
         ListKind::Number => format!("{number}.\t"),
+        ListKind::LowerLetter => format!("{}.\t", letters(number, false)),
+        ListKind::UpperLetter => format!("{}.\t", letters(number, true)),
     }
 }
 
@@ -64,6 +103,19 @@ impl Paragraph {
             });
         }
         let digits = head.strip_suffix('.')?;
+        let upper = digits.chars().all(|c| c.is_ascii_uppercase());
+        let lower = digits.chars().all(|c| c.is_ascii_lowercase());
+        if !digits.is_empty() && (upper || lower) {
+            return Some(Item {
+                kind: if upper {
+                    ListKind::UpperLetter
+                } else {
+                    ListKind::LowerLetter
+                },
+                number: letter_number(digits)?,
+                marker: tab + 1,
+            });
+        }
         let number = digits
             .parse()
             .ok()
@@ -197,16 +249,19 @@ fn clear_item(raw: &str, n: usize) -> Result<String, EditError> {
 /// Number every run of consecutive numbered items from its first number.
 fn renumber(mut raw: String) -> Result<String, EditError> {
     let count = paragraphs(&raw).len();
-    let mut next: Option<usize> = None;
+    let mut next: Option<(ListKind, usize)> = None;
     for n in 0..count {
         let paragraph = &paragraphs(&raw)[n];
-        match paragraph.item().filter(|i| i.kind == ListKind::Number) {
+        match paragraph.item().filter(|i| i.kind.counted()) {
             Some(item) => {
-                let want = next.unwrap_or(item.number);
+                let want = match next {
+                    Some((kind, number)) if kind == item.kind => number,
+                    _ => item.number,
+                };
                 if item.number != want {
-                    raw = make_item(&raw, n, ListKind::Number, want)?;
+                    raw = make_item(&raw, n, item.kind, want)?;
                 }
-                next = Some(want + 1);
+                next = Some((item.kind, want + 1));
             }
             None => next = None,
         }

@@ -614,7 +614,7 @@ pub enum StoreRow {
 /// patch/publish refused. Codes only (no payload): the recovery facts ride
 /// [`PatchRejectReport`], bounded.
 ///
-/// Compatibility rule: appended at the END (`0..=4`; pinned from creation).
+/// Compatibility rule: appended at the END (`0..=5`; pinned from creation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PatchRejectCode {
     /// The patch's `base_revision` is no longer the panel's head.
@@ -633,6 +633,13 @@ pub enum PatchRejectCode {
     /// the recorded follow-up). Transport-honest answer, never a silent
     /// success.
     PublisherUnattached,
+    /// The panel's v23 surface store is already attached to a DIFFERENT
+    /// transport-authenticated plugin. The FIRST publisher owns the panel's
+    /// surface store; publishing never transfers it (the owning plugin keeps
+    /// the patch/publish contract; a second plugin's publish refuses
+    /// structurally instead of taking the panel over). Appended with the
+    /// mount/publisher attach (SCN-025); bincode discriminant 5.
+    PublisherOwnedByOther,
 }
 
 /// The bounded rejection report of [`PluginResponse::PatchRejected`]:
@@ -1640,12 +1647,13 @@ mod tests {
             })),
             4
         );
-        // PatchRejectCode ..=4:
+        // PatchRejectCode ..=5:
         assert_eq!(discriminant(&PatchRejectCode::StaleBase), 0);
         assert_eq!(discriminant(&PatchRejectCode::NonMonotonicRevision), 1);
         assert_eq!(discriminant(&PatchRejectCode::OpBudgetExceeded), 2);
         assert_eq!(discriminant(&PatchRejectCode::InvalidOp), 3);
         assert_eq!(discriminant(&PatchRejectCode::PublisherUnattached), 4);
+        assert_eq!(discriminant(&PatchRejectCode::PublisherOwnedByOther), 5);
     }
 
     #[test]

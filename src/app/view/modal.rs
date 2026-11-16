@@ -169,12 +169,12 @@ impl OpenCADStudio {
                 .as_ref()
                 .map(|s| s.title())
                 .unwrap_or_else(|| "Plugin Dialog".to_string()),
-            // SCN-016: the armed widget-surface prompt. No locale key on
-            // purpose — plugin-command confirmations are plugin-specific
-            // content (the desc's prompt is the message body); this is the
-            // fixed frame title, the same plain-string form the plugin
-            // dialog's fallback uses.
-            Some(K::WidgetPrompt) => "Widget Confirmation".to_string(),
+            // SCN-016: the armed widget-surface prompt. The desc's prompt
+            // stays plugin content (the message body); the fixed frame
+            // title moved to the locale table with SCN-025 (the `modal`
+            // message block, the `tr!` family — see the "no locale key on
+            // purpose" note it replaces).
+            Some(K::WidgetPrompt) => crate::tr!("modal", "widget-confirmation"),
             None => String::new(),
         }
     }

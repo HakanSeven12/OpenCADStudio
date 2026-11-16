@@ -339,6 +339,7 @@ modal =
     .find-replace = Εύρεση και αντικατάσταση
     .plugin-manager = Διαχείριση προσθέτων
     .update-available = Διαθέσιμη ενημέρωση
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Διαχείριση επιπέδων
     .layer-state-manager = Διαχείριση καταστάσεων επιπέδων
     .edit-layer-state = Επεξεργασία κατάστασης επιπέδων

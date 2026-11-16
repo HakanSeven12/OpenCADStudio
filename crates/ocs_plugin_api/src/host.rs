@@ -33,7 +33,12 @@ pub use document::objects::{
 pub use document::xdata::{ExtendedDataRecord, XDataValue};
 pub use document::{Document, EntityType, Handle};
 
-use crate::ipc::protocol::{PluginRequest, PluginResponse};
+use crate::ipc::protocol::{
+    PanelStoreKind, PatchRejectCode, PatchRejectReport, PluginRequest, PluginResponse,
+    SceneOrWidgetPatch, SceneOrWidgetSurface, StoreRow, StoreStateDigest,
+};
+use crate::scene::StableId;
+use crate::widgets::{WidgetEvent, WidgetRange};
 
 /// Thread-safe handle that can issue host requests from plugin worker threads.
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
@@ -1509,6 +1514,21 @@ macro_rules! export_plugin {
     };
 }
 
+/// The transport's structural gate for one v23 publish frame: `false` when
+/// the carried surface passes the crate's own `validate()` (structural
+/// validity only — budgets ran at frame decode). The trait's DEFAULT
+/// publish body runs it (the honest stub kept here so an out-of-crate
+/// implementor keeps today's behavior verbatim); a capable host override
+/// answers with this SAME gate — the attach's shim mirrors this helper
+/// body because the helper is crate-internal and the store re-checks
+/// anyway, so an in-process caller's frames never skip it.
+pub(crate) fn surface_structural_reject(surface: &SceneOrWidgetSurface) -> bool {
+    match surface {
+        SceneOrWidgetSurface::Scene(scene) => scene.validate().is_err(),
+        SceneOrWidgetSurface::Widgets(surface) => surface.validate().is_err(),
+    }
+}
+
 /// The plugin-facing runtime surface for one active document tab.
 pub trait HostApi {
     /// Index of the tab this session targets.
@@ -2310,6 +2330,104 @@ pub trait HostApi {
     /// `false` when the drawing had none (no undo step is recorded then).
     fn remove_geo_location(&mut self) -> Result<bool, String> {
         Err("Geographic location writes are not supported by this host".to_owned())
+    }
+
+    // ── Panel surface attach (API v23, additive defaults; appended at the
+    //    ABI tail) ─────────────────────────────────────────────────────────
+    //
+    // The v23 publish-or-patch contract's HOST side. The wire layer decodes
+    // and budget-gates the four tails and routes them here; `plugin_id` is
+    // the transport-authenticated caller (the same identity law as
+    // `register_panel_for_plugin`).
+    //
+    // The DEFAULTS BELOW ARE THE TRANSPORT-ERA STUBS, kept verbatim so an
+    // out-of-crate implementor (or a host without the attach support)
+    // compiles AND behaves exactly as at the wire crossing: mutating frames
+    // answer `PublisherUnattached` (honest, no silent Ok — the honest
+    // recognition that nothing needs to support yet), reads answer
+    // empty/bounded pages. A capable host OVERRIDES all four — the
+    // OpenCADStudio host's overrides are the mount/publisher attach
+    // (`src/app/plugin_host.rs`): publishes store, patches apply, reads
+    // page, and the widget-surface mount goes live.
+
+    /// V23 publish (the snapshot leg of the publish-or-patch contract):
+    /// `surface` stores host-side for `panel_id` and a `WidgetSurface`
+    /// registers into the host's mount. The default is the transport-era
+    /// stub: structurally invalid payloads refuse `InvalidOp`, everything
+    /// else `PublisherUnattached` — no state anywhere changes. The
+    /// `events` leg is the plugin's merge acknowledgment for host-observed
+    /// widget events (the events-vs-patches split); the default ignores it.
+    fn panel_scene_publish(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        surface: SceneOrWidgetSurface,
+        _events: Vec<WidgetEvent>,
+    ) -> PluginResponse {
+        PluginResponse::PatchRejected {
+            code: if surface_structural_reject(&surface) {
+                PatchRejectCode::InvalidOp
+            } else {
+                PatchRejectCode::PublisherUnattached
+            },
+            report: PatchRejectReport {
+                current_revision: None,
+                failed_op: None,
+            },
+        }
+    }
+
+    /// V23 patch (the incremental leg): `patch` applies ATOMICALLY via the
+    /// crate's `apply_patch(_report)` over the stored surface for
+    /// `panel_id`. The default is the transport-era stub: no publisher is
+    /// attached, so the frame refuses `PublisherUnattached` with zero
+    /// mutation, no matter the payload.
+    fn panel_scene_patch(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        _patch: SceneOrWidgetPatch,
+    ) -> PluginResponse {
+        PluginResponse::PatchRejected {
+            code: PatchRejectCode::PublisherUnattached,
+            report: PatchRejectReport {
+                current_revision: None,
+                failed_op: None,
+            },
+        }
+    }
+
+    /// V23 bounded store read: one window of the addressed store kind
+    /// ([`PanelStoreKind`]) for `panel_id`, resolved with checked
+    /// arithmetic (a past-the-end window is an empty page, never a panic;
+    /// the width already rides its decode cap — a host never answers a
+    /// bigger page). The default is the transport-era stub: an empty page.
+    fn panel_store_read(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        _kind: PanelStoreKind,
+        _parent_id: Option<StableId>,
+        _range: WidgetRange,
+    ) -> PluginResponse {
+        PluginResponse::StorePage {
+            rows: Vec::new(),
+            total_hint: 0,
+        }
+    }
+
+    /// V23 bounded recovery read: the current state of `panel_id`'s
+    /// surfaces as [`StoreRow::State`] digest plus the LEADING window of
+    /// the scene — never a full dump. The default is the transport-era
+    /// stub: the empty digest only.
+    fn panel_scene_snapshot2(&mut self, _plugin_id: &str, _panel_id: &str) -> PluginResponse {
+        PluginResponse::StorePage {
+            rows: vec![StoreRow::State(StoreStateDigest {
+                scene: None,
+                widgets: None,
+            })],
+            total_hint: 0,
+        }
     }
 }
 

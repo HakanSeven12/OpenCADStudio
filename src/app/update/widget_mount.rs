@@ -11,10 +11,12 @@
 //!    is a graceful no-op (no panic, nothing routed, no event exists);
 //! 2. FORWARD: `apply_mount_msg` runs and every emitted [`WidgetEvent`]
 //!    leaves through the COLLECTING sink ([`CollectingSink`]) — the
-//!    pipeline seam whose drain this handler owns. The plugin publish
-//!    (`v4_support::publish_*`) is EXPLICITLY out of scope until the
-//!    API-23 crossing (ADR-004): the collecting sink is what the bridge
-//!    drains until then;
+//!    pipeline seam whose drain this handler owns. SCN-025 (the API-23
+//!    attach) makes the drain LIVE: the drained events forward to the
+//!    owning plugin's v23 notify router
+//!    (`broadcast_panel_scene_events`, bounded batches — [`Self::forward_mount_events`]),
+//!    the exactly-once law riding the drain itself (a re-drain cannot
+//!    re-produce a forwarded event);
 //! 3. SETTLE (the bridge-forwards-then-settle policy): a command message's
 //!    originating address clears its exactly-once mark AFTER the forward —
 //!    the in-flight guard re-arms once the handler completes, so the next
@@ -30,13 +32,20 @@
 //! serialization derives (no wire type), so the appended variants' only
 //! consumers are these arms.
 
-use iced::keyboard::{Key, Modifiers, key as keyboard_key};
+use iced::keyboard::{Key, Modifiers};
+#[cfg(test)]
+use iced::keyboard::key as keyboard_key; // the keyboard suites' Named-alias
 use iced::{Point, Task};
+
+// The v23 notify leg's fresh-frame cap (SCN-025): a forwarded batch never
+// exceeds it. Desktop-only (the plugin manager is desktop machinery).
+#[cfg(not(target_arch = "wasm32"))]
+use ocs_plugin_api::ipc::protocol::MAX_WIDGET_EVENT_ROWS;
 
 use crate::app::{Message, OpenCADStudio};
 use crate::ui::window::plugin_widget_mount::{
     CollectingSink, MountRegistry, MountRouting, SurfaceMountHandle, WidgetMountMsg,
-    apply_mount_msg, key_route_owned, msg_surface_id,
+    apply_mount_msg, msg_surface_id,
 };
 #[cfg(test)]
 use crate::ui::window::plugin_widgets::WindowSpec;
@@ -262,26 +271,20 @@ pub(crate) fn route_mount_release(surface_id: StableId) -> usize {
 /// app-owned registry (`self.mount_registry` since SCN-016) — the store
 /// rides as this core's FIRST parameter, and there is still nothing of
 /// `OpenCADStudio` beyond it to read.
+///
+/// SCN-025's D1 fold-back (the drift-killer): this app fn DELEGATES to the
+/// mount-file seam ([`crate::ui::window::plugin_widget_mount::bench_handle_mount_key_owned`])
+/// instead of restating its body — the seam is THE canonical route body
+/// (its own doc carries the rationale; the one-direction dependency means a
+/// route change edits ONE file, and the bench drives the same code the app
+/// runs). Zero behavior: the delegation is byte-identical to the restated
+/// body it replaces, and the keyboard suites pin that.
 pub(crate) fn handle_mount_key_owned(
     registry: &mut MountRegistry,
     key: Key,
     modifiers: Modifiers,
 ) -> Vec<WidgetMountMsg> {
-    let Some(surface_id) = registry.mount_key_surface_owned() else {
-        return Vec::new();
-    };
-    // Escape: the mounted surface's cancel is machine-direct (the state
-    // layers' own hooks — the armed prompt's dismissal); no route message
-    // exists for it and no machine sees a KEY.
-    if key == Key::Named(keyboard_key::Named::Escape) {
-        registry.mount_escape_cancel_owned(surface_id);
-        return Vec::new();
-    }
-    let Some(handle) = registry.handle_for_surface_owned(surface_id) else {
-        return Vec::new();
-    };
-    let mut state = handle.state.borrow_mut();
-    key_route_owned(registry, surface_id, &handle.surface, &mut state, key, modifiers)
+    crate::ui::window::plugin_widget_mount::bench_handle_mount_key_owned(registry, key, modifiers)
 }
 
 /// The headless tests' facade: the SAME [`handle_mount_key_owned`] core
@@ -397,9 +400,11 @@ impl OpenCADStudio {
         };
         let outcome =
             route_mount_msg_owned(&mut self.mount_registry.borrow_mut(), &handle, &msg);
-        // Pre-wire drain — see the module docs (the collecting sink's
-        // contract; the publish hang-off is the ADR-004 crossing).
-        let _ = outcome.events;
+        // SCN-025 — the sink goes LIVE: the drained events forward to the
+        // v23 panel-scene-events router (bounded batches ≤
+        // [`MAX_WIDGET_EVENT_ROWS`]; exactly-once — the drain empties the
+        // buffer; the ONE helper both draining arms share).
+        self.forward_mount_events(msg_surface_id(&msg), outcome.events);
         // SCN-016: the arm's prompt-modal seam — the machine surfaced an
         // armed confirmation, so the app's modal flow picks it up (open
         // NOW when no other modal holds the slot; queued behind it
@@ -449,6 +454,61 @@ impl OpenCADStudio {
     pub(in crate::app) fn on_mount_move_coalesce_tick(&mut self) -> Task<Message> {
         let _ = self.mount_registry.borrow_mut().mount_flush_moves_owned();
         Task::none()
+    }
+
+    /// THE one v23 event-forwarding route (SCN-025 — the sink goes LIVE):
+    /// the bridge arms' drained events forward to the panel-scene-events
+    /// router ([`ocs_plugin_api::process::PluginManager::broadcast_panel_scene_events`]),
+    /// in bounded batches (≤ [`MAX_WIDGET_EVENT_ROWS`] — the notify leg's
+    /// fresh-frame cap; a producer splits, never grows a batch). BOTH
+    /// draining arms funnel here — the mount bridge's arm (above) and the
+    /// prompt-decision arm (`app::update::widget_prompt`) — so there is no
+    /// second forwarding code path to drift.
+    ///
+    /// Exactly-once: the drain (`CollectingSink::take`) EMPTIES the buffer,
+    /// so a re-drain can never produce an already-forwarded event; and the
+    /// helper consumes the drained vec (one move onwards). The §16 probe
+    /// ([`MountCounters::mount_event_forwards`]) ticks once per forwarded
+    /// ROW — a double-forward defect is the kit that breaks this count.
+    ///
+    /// No routable endpoint = benign no-op (the manager's own test
+    /// discipline: an empty manager answers nothing, sends nothing). An
+    /// unregistered surface's forward never reaches here — the arm's
+    /// surface lookup already refused — and a registered surface whose
+    /// panel id unresolves is equally silenced (mirror the bridge's
+    /// unknown-surface grace).
+    pub(in crate::app) fn forward_mount_events(
+        &mut self,
+        surface_id: StableId,
+        events: Vec<WidgetEvent>,
+    ) {
+        if events.is_empty() {
+            return;
+        }
+        let Some(panel_id) = self
+            .mount_registry
+            .borrow()
+            .panel_for_surface_owned(surface_id)
+        else {
+            return;
+        };
+        self.mount_registry
+            .borrow_mut()
+            .record_panel_events_forwarded_owned(events.len());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            for batch in events.chunks(MAX_WIDGET_EVENT_ROWS) {
+                crate::plugin::external::with_manager(|manager| {
+                    manager.broadcast_panel_scene_events(&panel_id, surface_id, batch);
+                });
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // No plugin manager on the web runtime: the v23 notify leg has
+            // no transport there; the drained events drop (the same bound).
+            let _ = (panel_id, events, surface_id);
+        }
     }
 }
 
@@ -1203,6 +1263,102 @@ mod tests {
             tables: std::collections::BTreeMap::from([(def.id_table, def.clone())]),
         });
         state
+    }
+
+
+    // -- 6. SCN-025 — the sink goes LIVE: the drain forwards ------------------
+
+    /// The drained events forward through the ONE v23 notify route, from
+    /// the arm: a routed machine emission maps 1:1 to the §16 forward
+    /// probe ([`MountCounters::mount_event_forwards`]) — no extra forwards
+    /// of previously-forwarded rows materialize (the take-drain empties
+    /// the buffer, so a re-drain cannot replay), and an empty batch is a
+    /// no-op. The manager-missing runtime is the benign no-op (the
+    /// manager's own test discipline).
+    #[test]
+    fn drained_events_forward_once_through_the_arm() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("fwd_live");
+        let before = app
+            .mount_registry
+            .borrow()
+            .counters_owned()
+            .mount_event_forwards;
+
+        // (1) One routed selection → exactly one forwarded row.
+        app.on_widget_mount_msg(WidgetMountMsg::SelectionChanged {
+            surface_id: sid(200),
+            widget_id: sid(200),
+            selected: vec![sid(7)],
+        });
+        let after_one = app.mount_registry.borrow().counters_owned().mount_event_forwards;
+        assert_eq!(after_one - before, 1, "one emission, one forward");
+
+        // (2) A second routed selection → exactly one MORE forward (the
+        // first event is not replayed; the drain ran empty).
+        app.on_widget_mount_msg(WidgetMountMsg::SelectionChanged {
+            surface_id: sid(200),
+            widget_id: sid(200),
+            selected: vec![sid(7)],
+        });
+        let after_two = app.mount_registry.borrow().counters_owned().mount_event_forwards;
+        assert_eq!(after_two - after_one, 1, "the next emission forwards once — no re-drain replay");
+
+        // (3) A refusal (unknown address) forwards nothing.
+        app.on_widget_mount_msg(WidgetMountMsg::ButtonClicked {
+            surface_id: sid(200),
+            widget_id: sid(404),
+        });
+        let after_refusal = app.mount_registry.borrow().counters_owned().mount_event_forwards;
+        assert_eq!(after_refusal, after_two, "refusals emit no events, forward none");
+
+        // (4) The unregistered surface's arm never forwards (the bridge's
+        // surface lookup refuses first).
+        app.on_widget_mount_msg(WidgetMountMsg::SelectionChanged {
+            surface_id: sid(424242),
+            widget_id: sid(1),
+            selected: vec![sid(7)],
+        });
+        assert_eq!(
+            app.mount_registry.borrow().counters_owned().mount_event_forwards,
+            after_refusal,
+            "the unregistered-surface grace"
+        );
+    }
+
+    /// The bounded-batch rule: a forward SPLIT at the notify-leg cap
+    /// still forwards EVERY row exactly once (the helper's chunks loop —
+    /// a producer splits, never grows a batch).
+    #[test]
+    fn oversized_forward_splits_at_the_notify_cap() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _guard = register_list_panel("fwd_batch");
+        let events: Vec<WidgetEvent> = (0..(4096 + 7))
+            .map(|i| {
+                WidgetEvent::TreeExpanded {
+                    surface_id: sid(200),
+                    node_id: sid(i as u64 % 20_000 + 1),
+                    expanded: true,
+                }
+            })
+            .collect();
+        let before = app.mount_registry.borrow().counters_owned().mount_event_forwards;
+        app.forward_mount_events(sid(200), events);
+        let after = app.mount_registry.borrow().counters_owned().mount_event_forwards;
+        assert_eq!(after - before, 4096 + 7, "every row forwarded exactly once");
+    }
+
+    /// The exactly-once RETURN HALF pinned at the mechanism: a re-drain of
+    /// a drained sink produces nothing (the forward consumes the take).
+    #[test]
+    fn the_collecting_sink_drains_exactly_once() {
+        let mut sink = CollectingSink::default();
+        sink.emit(WidgetEvent::SelectionChanged {
+            surface_id: sid(200),
+            selected_ids: vec![sid(7)],
+        });
+        assert_eq!(sink.take().len(), 1);
+        assert!(sink.take().is_empty(), "a re-drain is empty — no re-forward material");
     }
 
 }

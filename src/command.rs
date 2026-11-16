@@ -3029,6 +3029,11 @@ pub trait CadCommand: Send {
     fn nested_copy_bind_setting(&self) -> Option<bool> {
         None
     }
+    /// The command has taken its first point: MLEADER asks for the
+    /// annotation scale then, not when it starts.
+    fn has_first_point(&self) -> bool {
+        false
+    }
     /// Symbol localization is committed together with the extracted entities.
     fn nested_copy_symbol_names(&self) -> Option<&document::nested_copy::NestedCopySymbolNames> {
         None

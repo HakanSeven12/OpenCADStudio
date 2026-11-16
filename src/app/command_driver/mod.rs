@@ -113,7 +113,15 @@ impl OpenCADStudio {
     /// pick-first selector relaunching MOVE on the picked set works this way).
     /// Pure-selection commands (SELECTALL, QSELECT, …) run without an active
     /// command, so `was_active` is false and their selection is preserved.
-    pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
+    pub(super) fn apply_cmd_result(&mut self, result: CmdResult) -> Task<Message> {
+        let task = self.apply_cmd_result_outer(result);
+        if self.result_depth == 0 {
+            self.ask_annotation_scale_after_first_point();
+        }
+        task
+    }
+
+    fn apply_cmd_result_outer(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         // A constraint addition records the geometry its solve moved outside
         // the command's own list. Only the outermost result owns the record:

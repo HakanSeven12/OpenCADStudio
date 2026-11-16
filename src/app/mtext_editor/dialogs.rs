@@ -109,12 +109,18 @@ impl OpenCADStudio {
                 gutter: ed.column_gutter.clone(),
             }),
             "MASK" => {
+                // A text without a mask starts from red, not the drawing's
+                // background colour.
                 let mask = ed.mask();
                 MTextDialog::Mask(MaskDraft {
                     on: mask.on,
                     factor: mask.scale.clone(),
-                    background: mask.window,
-                    color: mask.color,
+                    background: mask.on && mask.window,
+                    color: if mask.on {
+                        mask.color
+                    } else {
+                        document::types::Color::Index(1)
+                    },
                 })
             }
             _ => MTextDialog::Find(FindDraft {

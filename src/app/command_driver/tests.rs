@@ -9745,3 +9745,46 @@ mod dim_baseline_chain_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod dim_continue_chain_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// DIMCONTINUE chains from the last dimension: each typed origin
+    /// starts where the previous dimension ended, so a series of
+    /// endpoints measures as a running chain.
+    #[test]
+    fn dimcontinue_chains_from_the_last_dimension_end() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let _ = app.run_command_line("DIMCONTINUE");
+        let _ = app.feed_script_line("18,0");
+        let _ = app.feed_script_line("");
+
+        let dims: Vec<_> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims.len(), 2, "one base dimension and one continued dimension");
+        let measured: Vec<f64> = dims.iter().map(|d| d.measurement()).collect();
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 10.0).abs() < 1e-6),
+            "the base measures 10: {measured:?}"
+        );
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 8.0).abs() < 1e-6),
+            "the continued dimension runs from the base's end to the typed origin: {measured:?}"
+        );
+    }
+}

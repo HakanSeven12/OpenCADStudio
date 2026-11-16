@@ -183,3 +183,12 @@ fn line_spacing_mode_and_a_typed_factor_are_saved_with_the_text() {
     app.mtext_undo();
     assert_eq!(ed(&app).build_mtext().line_spacing_style, S::AtLeast);
 }
+
+#[test]
+fn a_typed_marker_and_tab_make_an_item_that_two_enters_leave() {
+    let mut app = app("");
+    for s in ["1", ".", "\t", "a", "\n", "\n", "b"] {
+        app.mtext_type(s);
+    }
+    assert_eq!(raw(&app), r"\pxi-3,l4,t4;1.	a\P\pi0,l0,tz;\Pb");
+}

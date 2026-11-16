@@ -33,6 +33,8 @@ pub mod gpu_budget;
 mod gpu_tests;
 pub mod gpu_upload;
 pub mod hatch_gpu;
+#[cfg(test)]
+mod hatch_tone_tests;
 pub mod image_gpu;
 pub mod mesh_gpu;
 pub mod point_cloud_gpu;

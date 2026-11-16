@@ -487,10 +487,12 @@ pub fn view_mask<'a>(
         ]
         .spacing(6),
     );
+    // A fixed width: the window is measured from it.
+    let _ = sizing;
     column![mask, fill, footer(true)]
         .spacing(10)
         .padding([10, 12])
-        .width(sizing.width)
+        .width(Length::Fixed(430.0))
         .into()
 }
 

@@ -483,6 +483,8 @@ pub(crate) fn transmittal_face(
     bold: bool,
     italic: bool,
 ) -> Option<(String, Vec<u8>)> {
+    // `@Family` names the vertical-writing use of the same face.
+    let reference = reference.strip_prefix('@').unwrap_or(reference);
     let explicit = file_face(reference);
     #[cfg(target_arch = "wasm32")]
     if explicit.is_none() {

@@ -1047,6 +1047,9 @@ impl OpenCADStudio {
             self.command_line.push_error(message.as_ref());
             return;
         }
+        // Missing references are reported first: the last line says where
+        // the package went, so a warning never reads as a failed export.
+        report_package_issues(self, cmd, &package);
         let copied = package.entries.len();
         self.command_line.push_output(
             crate::tf!(
@@ -1055,7 +1058,6 @@ impl OpenCADStudio {
             )
             .as_ref(),
         );
-        report_package_issues(self, cmd, &package);
     }
 }
 
@@ -1554,14 +1556,12 @@ ZOOM EXTENTS
         assert!(output.is_file(), "missing dependencies must not block the ZIP");
         assert_eq!(app.command_line.error_revision, error_revision);
         assert_eq!(app.command_line.last_error, last_error);
-        let notice = app.command_line.history.last().unwrap();
-        assert_eq!(
-            notice.kind,
-            crate::ui::command_line::EntryKind::Warning,
-            "{}",
-            notice.text
-        );
-        assert!(notice.text.contains("missing-ocs-etransmit-font.shx"));
+        let history = &app.command_line.history;
+        assert!(history.iter().any(|notice| {
+            notice.kind == crate::ui::command_line::EntryKind::Warning
+                && notice.text.contains("missing-ocs-etransmit-font.shx")
+        }));
+        assert!(history.last().unwrap().text.contains("root_transmit.zip"));
         let mut archive =
             zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(output).unwrap())).unwrap();
         let mut report = String::new();

@@ -1,6 +1,6 @@
-//! Apply carries a text style's new height, width and oblique angle over to
-//! the texts that follow the style; values set on a text stay, texts in
-//! external references stay, and one Undo brings everything back (#2413).
+//! Apply writes a text style's new height, width and oblique angle into the
+//! style only: every text keeps the values it stores, an MTEXT without its
+//! own `\W` draws with the new width, and one Undo brings the style back.
 
 use super::*;
 use document::entities::{AttributeEntity, EntityType, Insert, MText, Text};
@@ -68,7 +68,7 @@ fn edit(app: &mut OpenCADStudio, field: &'static str, value: &str) {
 }
 
 #[test]
-fn a_new_height_reaches_the_texts_that_follow_it_and_one_undo_takes_it_back() {
+fn a_new_height_leaves_the_texts_and_one_undo_takes_the_style_back() {
     let mut app = app_with_notes();
     let block = add_block(&mut app, "Tag", false);
     let plain = add_text(&mut app, 2.5, 1.0, None);
@@ -93,10 +93,10 @@ fn a_new_height_reaches_the_texts_that_follow_it_and_one_undo_takes_it_back() {
     let _ = app.update(Message::TextStyleApply);
     app.close_active_modal();
 
-    assert_eq!(text(&app, plain).0, 3.5);
-    assert_eq!(text(&app, mtext).0, 3.5);
-    assert_eq!(text(&app, in_block).0, 3.5);
-    assert_eq!(attribute_height(&app), 3.5);
+    for handle in [plain, mtext, in_block] {
+        assert_eq!(text(&app, handle).0, 2.5);
+    }
+    assert_eq!(attribute_height(&app), 2.5);
     assert_eq!(text(&app, own).0, 5.0);
 
     let _ = app.update(Message::Undo);
@@ -109,7 +109,7 @@ fn a_new_height_reaches_the_texts_that_follow_it_and_one_undo_takes_it_back() {
 }
 
 #[test]
-fn a_new_width_reaches_text_at_the_old_width_and_mtext_without_its_own() {
+fn a_new_width_reaches_only_mtext_without_its_own() {
     let mut app = app_with_notes();
     let plain = add_text(&mut app, 2.5, 1.0, None);
     let own = add_text(&mut app, 2.5, 0.7, None);
@@ -123,11 +123,11 @@ fn a_new_width_reaches_text_at_the_old_width_and_mtext_without_its_own() {
         .unwrap()
         .clone();
     let changes = text_style_users::value_changes(users, &old, &app.textstyle_draft.resolved());
-    // The plain TEXT and the MTEXT without a code follow; 0.7 and \W keep theirs.
-    assert_eq!((changes[0].updated, changes[0].kept), (2, 2));
+    // Only the MTEXT without a code draws with the style's width.
+    assert_eq!((changes[0].updated, changes[0].kept), (1, 3));
 
     let _ = app.update(Message::TextStyleApply);
-    assert_eq!(text(&app, plain).1, 0.8);
+    assert_eq!(text(&app, plain).1, 1.0);
     assert_eq!(text(&app, own).1, 0.7);
     match app.tabs[app.active_tab]
         .scene
@@ -175,7 +175,7 @@ fn a_first_fixed_height_leaves_the_existing_texts_alone() {
 }
 
 #[test]
-fn an_mtext_with_its_own_whole_text_height_keeps_it() {
+fn an_mtext_keeps_its_height() {
     let mut app = app_with_notes();
     let own = add_mtext(&mut app, r"\H5;B", 2.5);
     let follows = add_mtext(&mut app, "B", 2.5);
@@ -184,7 +184,7 @@ fn an_mtext_with_its_own_whole_text_height_keeps_it() {
     let _ = app.update(Message::TextStyleApply);
 
     assert_eq!(text(&app, own).0, 2.5);
-    assert_eq!(text(&app, follows).0, 3.5);
+    assert_eq!(text(&app, follows).0, 2.5);
 }
 
 #[test]
@@ -223,6 +223,6 @@ fn the_window_says_how_many_texts_apply_updates() {
         iced::Size::new(1280.0, 800.0),
         app.view_main(),
     );
-    let shown = "Height: 2.5 → 3.5. 2 texts that follow the style are updated. 1 text with its own value keeps it.";
+    let shown = "Height: 2.5 → 3.5. 3 texts with their own value keep them.";
     assert!(simulator.find(shown).is_ok(), "{shown:?} is not shown");
 }

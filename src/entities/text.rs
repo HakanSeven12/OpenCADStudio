@@ -221,11 +221,9 @@ pub fn text_run_placement_at_scale(
     let eff_backward = resolved_style.is_backward ^ (t.generation_flags & 0x2 != 0);
     let eff_upside = resolved_style.is_upside_down ^ (t.generation_flags & 0x4 != 0);
     let mut width_factor = if eff_backward { -base_wf } else { base_wf };
-    let oblique_angle = if t.oblique_angle.abs() > 1e-9 {
-        t.oblique_angle as f32
-    } else {
-        resolved_style.oblique_angle
-    };
+    // An oblique angle of 0 is the text's own (an upright text of a slanted
+    // style stays upright); only the width factor, never 0, falls back.
+    let oblique_angle = t.oblique_angle as f32;
     let value_for_bounds = resolve_dxf_special_chars(&t.value);
     let mut height = t.height.max(1.0e-9) as f32;
     let mut base_rotation = t.rotation as f32;

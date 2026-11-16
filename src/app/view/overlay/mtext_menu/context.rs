@@ -51,7 +51,7 @@ fn line(
     .into()
 }
 
-fn group_header(name: String, group: G, open: bool) -> Element<'static, Message> {
+fn group_header(name: String, group: G, open: bool, enabled: bool) -> Element<'static, Message> {
     button(
         row![
             mark_cell(Mark::Text("")),
@@ -61,7 +61,7 @@ fn group_header(name: String, group: G, open: bool) -> Element<'static, Message>
         .align_y(iced::Alignment::Center)
         .height(Fill),
     )
-    .on_press(Message::MTextContextGroup(Some(group)))
+    .on_press_maybe(enabled.then_some(Message::MTextContextGroup(Some(group))))
     .padding(iced::Padding::ZERO.right(km::MENU_PAD_X))
     .width(Fill)
     .height(ROW_H)
@@ -73,12 +73,13 @@ fn group_header(name: String, group: G, open: bool) -> Element<'static, Message>
 fn group(
     panel: Panel,
     open: Option<G>,
+    enabled: bool,
     name: String,
     group: G,
     rows: impl FnOnce() -> Vec<Element<'static, Message>>,
 ) -> Panel {
-    let is_open = open == Some(group);
-    let mut panel = panel.push(group_header(name, group, is_open));
+    let is_open = enabled && open == Some(group);
+    let mut panel = panel.push(group_header(name, group, is_open, enabled));
     if is_open {
         for row in rows() {
             panel = panel.push(row);
@@ -110,7 +111,7 @@ pub(in crate::app::view::overlay) fn context_menu(
         }
         if menu.suggestions.len() > 3 {
             let more: Vec<String> = menu.suggestions.iter().skip(3).take(10).cloned().collect();
-            panel = group(panel, open, m!("more-suggestions"), G::Suggestions, || {
+            panel = group(panel, open, true, m!("more-suggestions"), G::Suggestions, || {
                 more.iter()
                     .map(|w| line("", w.clone(), "", Some(&format!("_MTED SPELLREPLACE {w}")), true))
                     .collect()
@@ -127,7 +128,7 @@ pub(in crate::app::view::overlay) fn context_menu(
         .push(line("", m!("cut"), "Ctrl+X", has_selection.then_some("_MTED CUT"), false))
         .push(line("", m!("copy"), "Ctrl+C", has_selection.then_some("_MTED COPY"), false))
         .push(line("", m!("paste"), "Ctrl+V", Some("_MTED PASTE"), false));
-    panel = group(panel, open, m!("paste-special"), G::PasteSpecial, || {
+    panel = group(panel, open, true, m!("paste-special"), G::PasteSpecial, || {
         vec![
             line("", m!("paste-no-character"), "", Some("_MTED PASTE NOCHAR"), true),
             line("", m!("paste-no-paragraph"), "", Some("_MTED PASTE NOPARA"), true),
@@ -136,7 +137,7 @@ pub(in crate::app::view::overlay) fn context_menu(
     })
     .separator()
     .push(line("", m!("insert-field"), "Ctrl+F", Some("_MTED FIELD"), false));
-    panel = group(panel, open, m!("symbol"), G::Symbol, || {
+    panel = group(panel, open, true, m!("symbol"), G::Symbol, || {
         let mut rows: Vec<Element<'static, Message>> = symbols()
             .into_iter()
             .map(|(symbol, name)| {
@@ -150,7 +151,7 @@ pub(in crate::app::view::overlay) fn context_menu(
     })
     .push(line("", m!("import-text"), "", Some("_MTED IMPORT"), false))
     .separator();
-    panel = group(panel, open, m!("paragraph-alignment"), G::Alignment, || {
+    panel = group(panel, open, true, m!("paragraph-alignment"), G::Alignment, || {
         [
             (m!("align-left"), "LEFT"),
             (m!("align-center"), "CENTER"),
@@ -164,7 +165,7 @@ pub(in crate::app::view::overlay) fn context_menu(
     })
     .push(line("", m!("paragraph"), "", Some("_MTED PARAGRAPH"), false));
     let kind = ed.list_kind();
-    panel = group(panel, open, m!("bullets-and-lists"), G::Lists, || {
+    panel = group(panel, open, true, m!("bullets-and-lists"), G::Lists, || {
         let item = |on: bool, key: String, arg: &str| {
             line(check(on), key, "", lists.then(|| format!("_MTED LIST {arg}")).as_deref(), true)
         };
@@ -189,7 +190,7 @@ pub(in crate::app::view::overlay) fn context_menu(
         ]
     })
     .separator();
-    panel = group(panel, open, m!("columns"), G::Columns, || {
+    panel = group(panel, open, true, m!("columns"), G::Columns, || {
         let mut rows = vec![
             line("", m!("no-columns"), "", Some("_MTED COLUMNS NONE"), true),
             line("", m!("dynamic-auto"), "", Some("_MTED COLUMNS DYNAMIC AUTO"), true),
@@ -211,14 +212,14 @@ pub(in crate::app::view::overlay) fn context_menu(
     })
     .separator()
     .push(line("", m!("find-and-replace"), "Ctrl+R", Some("_MTED FIND"), false));
-    panel = group(panel, open, m!("change-case"), G::Case, || {
+    panel = group(panel, open, true, m!("change-case"), G::Case, || {
         vec![
             line("", m!("uppercase"), "Ctrl+Shift+U", has_selection.then_some("_MTED CASE UPPER"), true),
             line("", m!("lowercase"), "Ctrl+Shift+L", has_selection.then_some("_MTED CASE LOWER"), true),
         ]
     })
     .push(line(check(ed.auto_caps), m!("all-caps"), "", Some("_MTED AUTOCAPS"), false));
-    panel = group(panel, open, m!("character-set"), G::Charset, || {
+    panel = group(panel, open, true, m!("character-set"), G::Charset, || {
         crate::ui::window::mtext_tool_dialogs::CHARSETS
             .iter()
             .map(|(code, name)| {
@@ -228,7 +229,7 @@ pub(in crate::app::view::overlay) fn context_menu(
     })
     .separator()
     .push(line("", m!("combine-paragraphs"), "", has_selection.then_some("_MTED COMBINE"), false));
-    panel = group(panel, open, m!("remove-formatting"), G::RemoveFormatting, || {
+    panel = group(panel, open, has_selection, m!("remove-formatting"), G::RemoveFormatting, || {
         vec![
             line("", m!("remove-character"), "Ctrl+Space", Some("_MTED CLEAR"), true),
             line("", m!("remove-paragraph"), "", Some("_MTED CLEAR PARA"), true),
@@ -238,7 +239,7 @@ pub(in crate::app::view::overlay) fn context_menu(
     .push(line("", m!("background-mask"), "", Some("_MTED MASK"), false))
     .separator();
     let toolbar = crate::app::commands::mtext_toolbar() == 1;
-    panel = group(panel, open, m!("editor-settings"), G::Settings, || {
+    panel = group(panel, open, true, m!("editor-settings"), G::Settings, || {
         vec![
             line(check(p.wysiwyg), m!("wysiwyg"), "", Some("_MTED WYSIWYG"), true),
             line(check(toolbar), m!("show-toolbar"), "", Some("_MTED TOOLBAR"), true),
@@ -269,7 +270,14 @@ pub(in crate::app::view::overlay) fn smart_tag(
         SmartTag::Stack(at) | SmartTag::List(at) => at,
     };
     let glyph = ed.glyph_boxes.iter().find(|b| b.vis == at)?;
-    let anchor = place(glyph.local[0], glyph.local[1]);
+    // Under a stack; left of a list marker, level with its line.
+    let anchor = match tag {
+        SmartTag::Stack(_) => place(glyph.local[0], glyph.local[1]),
+        SmartTag::List(_) => {
+            let p = place(glyph.local[0], glyph.local[3]);
+            iced::Point::new(p.x - 24.0, p.y)
+        }
+    };
     let base = button(crate::ui::icons::semantic(BOLT, 14.0))
         .on_press(Message::MTextSmartTag(!ed.smart_tag_open))
         .padding(3)

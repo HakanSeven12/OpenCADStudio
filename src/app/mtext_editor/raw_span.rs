@@ -3,7 +3,7 @@
 //! patch is kept only when exactly that value changed and nothing else.
 use super::raw_adapter::{EditError, SourceIndex};
 use super::raw_edit::editor_document;
-use super::raw_operations::{apply_patches, TextEdit};
+use super::raw_operations::TextEdit;
 use super::*;
 use std::ops::Range;
 
@@ -76,63 +76,22 @@ fn touched_paragraphs(index: &SourceIndex, range: &Range<usize>) -> Range<usize>
     paragraph_at(range.start)..paragraph_at(last) + 1
 }
 
-/// Add the paragraph setting `code` at the end of every paragraph `range`
-/// touches. `copy` moves the one value it sets; each touched paragraph must
-/// come out with only that value changed, the others and the text as they
+/// Set the values of the paragraph code `code` in every paragraph `range`
+/// touches; the paragraphs after them keep the values they had. All the
+/// paragraph settings are then written as the format writes them (see
+/// `raw_paragraph_codes`); the text and every other value come out as they
 /// were.
-fn patch_paragraphs(
-    raw: &str,
-    range: Range<usize>,
-    code: &str,
-    copy: fn(&mut ParagraphProperties, &ParagraphProperties),
-) -> Result<String, EditError> {
+fn patch_paragraphs(raw: &str, range: Range<usize>, code: &str) -> Result<String, EditError> {
     let index = SourceIndex::new(raw);
-    let count = index.validate(false)?;
+    index.validate(false)?;
     index.validate_range(&range)?;
     let touched = touched_paragraphs(&index, &range);
-    let mut ends: Vec<usize> = index
-        .tokens
-        .iter()
-        .filter(|t| {
-            matches!(
-                t.kind,
-                super::raw_adapter::Kind::Break | super::raw_adapter::Kind::Column
-            )
-        })
-        .map(|t| t.raw.start)
-        .collect();
-    ends.push(index.tail_boundary());
-    let patches = ends
-        .into_iter()
-        .enumerate()
-        .filter(|(n, _)| touched.contains(n))
-        .map(|(_, end)| (end..end, code.to_string()))
-        .collect();
-    let out = apply_patches(raw, patches)?;
-    index.certify(&out, count)?;
-    let setting = parse_mtext(&format!("{code}x"), true)
-        .paragraphs
-        .first()
-        .map(|p| p.properties.clone())
-        .unwrap_or_default();
-    let before = editor_document(raw).paragraphs;
-    let after = editor_document(&out).paragraphs;
-    let certified = before.len() == after.len()
-        && before
-            .iter()
-            .zip(&after)
-            .enumerate()
-            .all(|(n, (old, new))| {
-                let mut want = old.properties.clone();
-                if touched.contains(&n) {
-                    copy(&mut want, &setting);
-                }
-                old.spans == new.spans && want == new.properties
-            });
-    if !certified {
-        return Err(EditError::ParagraphBoundary);
-    }
-    Ok(out)
+    let setting = super::raw_paragraph_codes::code_setting(code);
+    super::raw_paragraph_codes::rewrite(raw, |n, state| {
+        if touched.contains(&n) {
+            *state = state.after(&setting);
+        }
+    })
 }
 
 /// A number as a code writes it.
@@ -226,24 +185,25 @@ impl crate::app::OpenCADStudio {
             ParaAlign::Justify => "\\pqj;",
             ParaAlign::Distribute => "\\pqd;",
         };
-        self.raw_paragraph(code, |p, s| p.alignment = s.alignment);
+        self.raw_paragraph(code);
     }
 
     /// An indent or paragraph spacing of every paragraph the selection (or
     /// caret) touches.
     pub(in crate::app) fn raw_paragraph_number(&mut self, field: ParaNumber, value: f64) {
-        let (key, copy): (char, fn(&mut ParagraphProperties, &ParagraphProperties)) = match field {
-            ParaNumber::FirstIndent => ('i', |p, s| p.first_line_indent = s.first_line_indent),
-            ParaNumber::LeftIndent => ('l', |p, s| p.left_margin = s.left_margin),
-            ParaNumber::RightIndent => ('r', |p, s| p.right_margin = s.right_margin),
-            ParaNumber::SpaceBefore => ('b', |p, s| p.spacing_before = s.spacing_before),
-            ParaNumber::SpaceAfter => ('a', |p, s| p.spacing_after = s.spacing_after),
+        let key = match field {
+            ParaNumber::FirstIndent => 'i',
+            ParaNumber::LeftIndent => 'l',
+            ParaNumber::RightIndent => 'r',
+            ParaNumber::SpaceBefore => 'b',
+            ParaNumber::SpaceAfter => 'a',
         };
-        self.raw_paragraph(&format!("\\px{key}{};", number(value)), copy);
+        self.raw_paragraph(&format!("\\px{key}{};", number(value)));
     }
 
     /// The line spacing of every paragraph the selection (or caret) touches:
-    /// `\pxse<n>;` (exactly) or `\pxsm<n>;` (a multiple).
+    /// `se<n>` (exactly), `sa<n>` (at least), `sm<n>` (a multiple) or `s*`
+    /// (the text's own).
     pub(in crate::app) fn raw_paragraph_line_spacing(
         &mut self,
         spacing: document::entities::mtext_format::MTextLineSpacing,
@@ -251,25 +211,26 @@ impl crate::app::OpenCADStudio {
         use document::entities::mtext_format::MTextLineSpacing as L;
         let code = match spacing {
             L::Exact(v) => format!("\\pxse{};", number(v)),
+            L::AtLeast(v) => format!("\\pxsa{};", number(v)),
             L::Multiple(v) => format!("\\pxsm{};", number(v)),
-            _ => return,
+            L::Default => "\\pxs*;".to_string(),
         };
-        self.raw_paragraph(&code, |p, s| p.line_spacing = s.line_spacing);
+        self.raw_paragraph(&code);
     }
 
     /// The tab stops of every paragraph the selection (or caret) touches:
-    /// `\pxt<n>,c<n>,r<n>,D<n>;`, or none.
+    /// `\pxt<n>,c<n>,r<n>,D<n>;`, or none (`t0`).
     pub(in crate::app) fn raw_paragraph_tabs(
         &mut self,
         tabs: &[document::entities::mtext_format::TabStop],
     ) {
         let list: Vec<String> = tabs.iter().map(|tab| tab.to_string()).collect();
         let code = if list.is_empty() {
-            "\\pxt;".to_string()
+            "\\pxt0;".to_string()
         } else {
             format!("\\pxt{};", list.join(","))
         };
-        self.raw_paragraph(&code, |p, s| p.tab_stops = s.tab_stops.clone());
+        self.raw_paragraph(&code);
     }
 
     /// Replace each of `ranges` (visible-character offsets, left to right)
@@ -299,16 +260,12 @@ impl crate::app::OpenCADStudio {
         });
     }
 
-    fn raw_paragraph(
-        &mut self,
-        code: &str,
-        copy: fn(&mut ParagraphProperties, &ParagraphProperties),
-    ) {
+    fn raw_paragraph(&mut self, code: &str) {
         let range = match self.mtext_editor.as_ref() {
             Some(ed) => ed.selected_range(),
             None => return,
         };
-        self.raw_selection_patch(range, |raw, range| patch_paragraphs(raw, range, code, copy));
+        self.raw_selection_patch(range, |raw, range| patch_paragraphs(raw, range, code));
     }
 
     /// Replace every occurrence of the find text, as one undo step. Each
@@ -474,9 +431,11 @@ mod tests {
         assert_eq!(props[1].alignment, Some(MTextParagraphAlignment::Center));
         assert_eq!(props[1].first_line_indent, Some(2.0));
         assert_eq!(props[0].alignment, None);
-        assert_eq!(props[2].first_line_indent, None);
+        // The paragraph after keeps its values: they are written back.
+        assert_eq!(props[2].first_line_indent, Some(0.0));
+        assert_eq!(props[2].alignment, Some(MTextParagraphAlignment::Default));
         assert_eq!(doc.to_plain_text(), "ab\ncd\nef");
-        assert!(raw(&app).starts_with(r"\pxt4;ab\P"));
+        assert_eq!(raw(&app), r"\pxt4;ab\P\pi2,qc;cd\P\pi0,q*;ef");
     }
 
     #[test]
@@ -503,13 +462,14 @@ mod tests {
     }
 
     #[test]
-    fn alignment_appends_only_alignment_and_observes_the_selection_end() {
+    fn alignment_is_written_at_the_paragraph_start_and_observes_the_selection_end() {
         // The selection ends on the break: only the first paragraph changes,
-        // and its tab stops and the second one's alignment stay.
+        // and its tab stops and the second one's alignment stay. One code at
+        // the paragraph start, the values in the order i l r b a s q t.
         let mut app = app(r"\pxqc,i-1,l2,t4;ab\P\pqr;cd");
         select(&mut app, 0, 3);
         app.mtext_apply_align(ParaAlign::Left);
-        assert_eq!(raw(&app), r"\pxqc,i-1,l2,t4;ab\pql;\P\pqr;cd");
+        assert_eq!(raw(&app), r"\pxi-1,l2,ql,t4;ab\P\pqr;cd");
         let doc = &app.mtext_editor.as_ref().unwrap().doc;
         assert_eq!(doc.paragraphs[0].properties.tab_stops.len(), 1);
         assert_eq!(

@@ -337,6 +337,22 @@ fn clear_item(raw: &str, n: usize) -> Result<String, EditError> {
     set_indent(&raw, &[n], 0.0)
 }
 
+/// Bullets and Lists > Off: the marker goes, and the paragraph's first
+/// line stays where it started, with no left indent or tab stops left.
+fn turn_off_item(raw: &str, n: usize) -> Result<String, EditError> {
+    let Some(item) = paragraphs(raw)[n].item() else {
+        return Ok(raw.to_owned());
+    };
+    let raw = remove_marker(raw, n, item)?;
+    rewrite(&raw, |m, state| {
+        if m == n {
+            state.first += state.left;
+            state.left = 0.0;
+            state.tabs.clear();
+        }
+    })
+}
+
 /// Number every run of consecutive items of a kind: the run's first item
 /// keeps its number, an item numbered 1 starts again, the others follow on.
 fn renumber(mut raw: String) -> Result<String, EditError> {
@@ -470,7 +486,7 @@ impl OpenCADStudio {
                     Some(kind) => {
                         make_item(&raw, n, kind, n - targets.start + 1, Style::default())?
                     }
-                    None => clear_item(&raw, n)?,
+                    None => turn_off_item(&raw, n)?,
                 };
             }
             let raw = renumber(raw)?;
@@ -499,6 +515,15 @@ impl OpenCADStudio {
             ed.sel_anchor = a;
             ed.caret = b;
         }
+    }
+
+    /// The list tag's Remove: paragraph `n` keeps its typed marker as text
+    /// and loses the hanging indent that made it an item. One undo step.
+    pub(in crate::app) fn mtext_list_plain(&mut self, n: usize) {
+        self.edit_raw(|ed, index| {
+            let raw = set_indent(index.raw, &[n], 0.0)?;
+            Ok(TextEdit { raw, caret: ed.caret })
+        });
     }
 
     /// Start: the caret's item numbers from 1 (a, A), the items after it
@@ -623,6 +648,9 @@ impl OpenCADStudio {
             let raw = set_indent(&raw, &[n], AUTO_INDENT)?;
             Ok(TextEdit { raw, caret })
         });
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.smart_tag = Some(super::context_menu::SmartTag::List(paragraph.range.start));
+        }
         true
     }
 }

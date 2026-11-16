@@ -121,6 +121,7 @@ pub enum MTextDialog {
     Highlight(super::mtext_tool_dialogs::HighlightDraft),
     Stack(super::mtext_tool_dialogs::StackDraft),
     AutoStack(super::mtext_tool_dialogs::AutoStackDraft),
+    ListsToggle(super::mtext_tool_dialogs::ListsToggleDraft),
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +168,8 @@ pub enum MTextDialogMsg {
     StyleAlways(bool),
     StyleYes,
     StyleNo,
+    ListsAlways(bool),
+    ListsContinue,
     DictLanguage(String),
     DictSource(Option<usize>),
     DictWord(String),

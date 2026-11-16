@@ -354,6 +354,49 @@ impl OpenCADStudio {
         self.select_after_edit(before, range.start)
     }
 
+    /// The AutoStack tag: the stack it stands under made diagonal or
+    /// horizontal, unstacked back to its typed text, or its properties.
+    pub(in crate::app) fn mtext_stack_tag(&mut self, pick: &str) {
+        let Some(at) = self.mtext_editor.as_ref().and_then(|ed| match ed.smart_tag {
+            Some(super::context_menu::SmartTag::Stack(at)) => Some(at),
+            _ => None,
+        }) else {
+            return;
+        };
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.sel = Some((at, at + 1));
+            ed.sel_anchor = at;
+            ed.caret = at + 1;
+        }
+        let Some(mut data) = self.mtext_editor.as_ref().and_then(|ed| ed.selected_stack()) else {
+            return;
+        };
+        match pick {
+            "DIAGONAL" | "HORIZONTAL" => {
+                data.stacking_type = if pick == "DIAGONAL" {
+                    StackingType::Diagonal
+                } else {
+                    StackingType::Horizontal
+                };
+                self.raw_stack(at..at + 1, data);
+            }
+            "UNSTACK" => {
+                let separator = match data.stacking_type {
+                    StackingType::Diagonal => "#",
+                    StackingType::Limit => "^",
+                    _ => "/",
+                };
+                let text = data.numerator + separator + &data.denominator;
+                self.raw_unstack(at..at + 1, text);
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.smart_tag = None;
+                }
+            }
+            "PROPERTIES" => self.open_mtext_dialog("STACKPROPS"),
+            _ => {}
+        }
+    }
+
     /// Turn the selected one-sided stack back into its plain text.
     fn raw_unstack(&mut self, range: Range<usize>, text: String) {
         let before = self.mtext_editor.as_ref().map(|ed| ed.content.text());

@@ -137,6 +137,13 @@ fn an_imported_list_is_continued_and_turned_off_whole() {
     let mut app = self::app(source);
     let _ = app.update(Message::MTextList(None));
     assert_eq!(raw(&app), "a");
+    // A typed list's first lines stay one text height in, as the
+    // reference's menu Off leaves them.
+    let mut app = self::app("\\pxi-3,l4,t4;1.\tAlpha\\P2.\tBeta");
+    let end = ed(&app).visible_character_count();
+    select(&mut app, 0, end);
+    let _ = app.update(Message::MTextList(None));
+    assert_eq!(raw(&app), "\\pxi1;Alpha\\PBeta");
 }
 
 #[test]

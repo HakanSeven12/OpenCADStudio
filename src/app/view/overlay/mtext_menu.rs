@@ -10,6 +10,7 @@ use crate::app::mtext_editor::{
 use document::entities::mtext_format::StackingType;
 use iced::widget::column;
 pub(super) mod popup;
+pub(super) mod context;
 
 macro_rules! label {
     ($id:literal) => {

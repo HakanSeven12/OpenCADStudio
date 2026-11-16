@@ -94,15 +94,65 @@ fn span_code(p: &SpanProperties) -> Result<String, EditError> {
 }
 
 /// The pitch and family byte of a TrueType family as its font code names it
-/// (`|p34` Arial, `|p18` Times New Roman): variable pitch, with the roman
-/// family for serif faces and the swiss family otherwise.
+/// (`|p34` Arial, `|p18` Times New Roman, `|p49` Consolas), read from the
+/// installed face. A family that is not installed falls back to the swiss
+/// family, roman for a serif name.
 pub(super) fn pitch_of(family: &str) -> u8 {
-    let serif = ["times", "roman", "georgia", "garamond", "cambria", "book", "serif"];
-    let lower = family.to_lowercase();
-    if serif.iter().any(|s| lower.contains(s)) && !lower.contains("sans") {
-        18
-    } else {
-        34
+    crate::scene::text::sysfont::with_face_data(family, |data, index| {
+        let face = ttf_parser::Face::parse(data, index).ok()?;
+        let os2 = face
+            .raw_face()
+            .table(ttf_parser::Tag::from_bytes(b"OS/2"))?;
+        Some(pitch_family(os2.get(32..42)?, face.is_monospaced()))
+    })
+    .flatten()
+    .unwrap_or_else(|| {
+        let lower = family.to_lowercase();
+        let serif = ["times", "roman", "georgia", "garamond", "cambria", "book", "serif"];
+        if serif.iter().any(|s| lower.contains(s)) && !lower.contains("sans") {
+            18
+        } else {
+            34
+        }
+    })
+}
+
+/// The system's pitch and family byte for a face's PANOSE bytes: script
+/// and decorative faces by family kind, monospaced faces modern, and the
+/// rest by serif style — none given, swiss for the sans styles, else roman.
+/// Pitch is fixed (1) or variable (2).
+fn pitch_family(panose: &[u8], fixed: bool) -> u8 {
+    let pitch = if fixed { 1 } else { 2 };
+    let family = match (panose[0], panose[1], panose[3]) {
+        (3, ..) => 0x40,
+        (4, ..) => 0x50,
+        (_, _, 9) => 0x30,
+        _ if fixed => 0x30,
+        (_, 0 | 1, _) => 0,
+        (_, 11.., _) => 0x20,
+        _ => 0x10,
+    };
+    family | pitch
+}
+
+#[cfg(test)]
+#[test]
+fn pitch_family_follows_the_panose_bytes() {
+    // Arial, Times New Roman, Calibri (rounded sans), Courier New, Comic
+    // Sans MS, Gabriola, Wingdings, Symbol, OCR A Extended (monospaced).
+    let cases: [([u8; 4], bool, u8); 9] = [
+        ([2, 11, 6, 4], false, 34),
+        ([2, 2, 6, 3], false, 18),
+        ([2, 15, 5, 2], false, 34),
+        ([2, 7, 3, 9], true, 49),
+        ([3, 15, 7, 2], false, 66),
+        ([4, 4, 6, 5], false, 82),
+        ([5, 0, 0, 0], false, 2),
+        ([5, 5, 1, 2], false, 18),
+        ([2, 1, 5, 9], false, 50),
+    ];
+    for (panose, fixed, code) in cases {
+        assert_eq!(pitch_family(&panose, fixed), code, "{panose:?}");
     }
 }
 
@@ -446,6 +496,12 @@ impl OpenCADStudio {
                 caret: from + width + 1,
             })
         });
+        // The stack it made gets the AutoStack tag.
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            if matches!(doc_to_cells(&ed.doc).get(from), Some(Cell::Stack { .. })) {
+                ed.smart_tag = Some(super::context_menu::SmartTag::Stack(from));
+            }
+        }
     }
 
     /// Write the Stack Properties window's stack over the one at `range`.

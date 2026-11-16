@@ -5522,6 +5522,19 @@ pub enum Message {
     MTextMenu(Option<mtext_editor::EditorMenu>),
     /// A menu action: the menu closes, then the message runs.
     MTextMenuPick(Box<Message>),
+    /// Right-click on the in-place editor's text at a visible offset.
+    MTextContextOpen(iced::Point, usize),
+    /// Open (or close) a submenu of the editor's right-click menu.
+    MTextContextGroup(Option<mtext_editor::context_menu::ContextGroup>),
+    /// Close the editor's right-click menu and the tag menu.
+    MTextContextClose,
+    /// A row of the right-click menu or of a tag: a `_MTED` tool.
+    MTextContextRun(String),
+    /// Open or close the menu of the tag under the text.
+    MTextSmartTag(bool),
+    /// Paste Special: the clipboard text, pasted `PLAIN`, `NOCHAR` or
+    /// `NOPARA`.
+    MTextPasteAs(String, Option<String>),
     /// Bullets, numbering, or (`None`) plain paragraphs again.
     MTextList(Option<mtext_editor::ListKind>),
     /// Insert a tab at the caret.

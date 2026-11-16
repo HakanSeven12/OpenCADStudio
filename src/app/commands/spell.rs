@@ -56,6 +56,11 @@ fn with_speller<T>(language: &str, f: impl FnOnce(&SystemSpeller) -> T) -> T {
     })
 }
 
+/// The main dictionary's suggestions for `word`, best first.
+pub(crate) fn spelling_suggestions(language: &str, word: &str) -> Vec<String> {
+    with_speller(language, |sp| sp.check_word(word, true).1)
+}
+
 /// The words of a custom dictionary file: one per line, UTF-16 or UTF-8
 /// with a byte order mark, else the system's code page.
 pub(crate) fn read_word_file(path: &str) -> Vec<String> {

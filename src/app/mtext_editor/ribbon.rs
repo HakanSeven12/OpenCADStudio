@@ -245,8 +245,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 "ALLOW" => {
-                    super::prefs::update_prefs(|p| p.allow_lists = !p.allow_lists);
-                    self.save_config();
+                    self.mtext_lists_toggle();
                     return Some(Task::none());
                 }
                 _ => return Some(self.text_editor_tool_unavailable(cmd)),
@@ -282,7 +281,7 @@ impl OpenCADStudio {
             }
             "IMPORT" => return Some(self.mtext_import_pick()),
             "HELP" => return Some(self.dispatch_command("HELP MTEXT")),
-            "DICTIONARIES" | "SPELLSETTINGS" | "CHARSET" | "HIGHLIGHT" | "STACKPROPS"
+            "DICTIONARIES" | "SPELLSETTINGS" | "HIGHLIGHT" | "STACKPROPS"
             | "AUTOSTACK" => {
                 self.open_mtext_dialog(action);
                 return Some(Task::none());
@@ -333,6 +332,54 @@ impl OpenCADStudio {
             "UNDO" => Message::MTextUndo,
             "REDO" => Message::MTextRedo,
             "CLOSE" => Message::MTextOk,
+            "CANCEL" => Message::MTextCancel,
+            "SELECTALL" => {
+                self.mtext_select_all();
+                return Some(Task::none());
+            }
+            "COPY" | "CUT" => {
+                let Some(text) = self.mtext_selected_text() else {
+                    return Some(Task::none());
+                };
+                if action == "CUT" {
+                    self.raw_delete(false);
+                }
+                return Some(iced::clipboard::write(text).discard());
+            }
+            // Paste, or Paste Special: as plain text, or without the
+            // character or the paragraph formatting it was copied with.
+            "PASTE" if arg.is_empty() => return Some(self.on_paste_shortcut()),
+            "PASTE" => {
+                let mode = arg.to_string();
+                return Some(
+                    iced::clipboard::read_text()
+                        .map(move |text| Message::MTextPasteAs(mode.clone(), text.ok().map(|t| (*t).clone()))),
+                );
+            }
+            // A code page puts it in force; none opens the window.
+            "CHARSET" => {
+                match arg.parse::<u8>() {
+                    Ok(code) => self.mtext_charset(code),
+                    Err(_) => self.open_mtext_dialog(action),
+                }
+                return Some(Task::none());
+            }
+            "STACKTAG" => {
+                self.mtext_stack_tag(arg);
+                return Some(Task::none());
+            }
+            "LISTTAG" => {
+                self.mtext_list_tag(arg);
+                return Some(Task::none());
+            }
+            "SPELLREPLACE" => {
+                self.mtext_spell_replace(arg);
+                return Some(Task::none());
+            }
+            "SPELLADD" | "SPELLIGNORE" => {
+                self.mtext_spell_keep(action == "SPELLADD");
+                return Some(Task::none());
+            }
             "MASK" | "PARAGRAPH" | "COLUMNSETTINGS" | "FIND" => {
                 self.open_mtext_dialog(action);
                 return Some(Task::none());

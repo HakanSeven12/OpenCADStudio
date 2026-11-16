@@ -59,6 +59,9 @@ pub struct MTextEditorPrefs {
     pub stack_position: StackPosition,
     /// "Always change the text style" of the Text Style Change question.
     pub always_change_style: bool,
+    /// "Always turn Bullets and Lists on or off" of the Bullets and Lists
+    /// question.
+    pub always_toggle_lists: bool,
 }
 
 impl Default for MTextEditorPrefs {
@@ -77,6 +80,7 @@ impl Default for MTextEditorPrefs {
             stack_style: StackStyle::Horizontal,
             stack_position: StackPosition::Center,
             always_change_style: false,
+            always_toggle_lists: false,
         }
     }
 }

@@ -3259,12 +3259,12 @@ bg={bg_ms:.1}ms n={view_count}"
                         // Not WYSIWYG (MTEXTFIXED 2): a text too small to read
                         // is shown at a readable size, and level.
                         if !crate::app::mtext_prefs::prefs().wysiwyg {
-                            let unit = x.x.hypot(x.y);
-                            let readable = overlay::MTEXT_PREVIEW_EM_PX
-                                / (ed.height_value() as f32).max(1e-6);
-                            let k = (readable / unit.max(1e-9)).max(1.0);
-                            x = x * k;
-                            y = y * k;
+                            let shown = x.x.hypot(x.y) * ed.height_value() as f32;
+                            if shown < overlay::MTEXT_READABLE_BELOW_PX {
+                                let k = overlay::MTEXT_READABLE_PX / shown.max(1e-9);
+                                x = x * k;
+                                y = y * k;
+                            }
                         }
                         let angle = overlay::editor_angle(ed);
                         let (sin, cos) = angle.sin_cos();

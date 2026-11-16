@@ -465,6 +465,8 @@ impl OpenCADStudio {
             "REDO" if self.mtext_editor.is_some() => Message::MTextRedo,
             // In the text editor Ctrl+F inserts a field instead of finding.
             "FIND" if self.mtext_editor.is_some() => Message::MTextInsertField,
+            // Ctrl+X cuts the editor's selected text, not drawing objects.
+            "CUTCLIP" if self.mtext_editor.is_some() => Message::Command("_MTED CUT".into()),
 
             "UNDO" => {
                 let i = self.active_tab;

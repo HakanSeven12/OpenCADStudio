@@ -9399,6 +9399,35 @@ impl OpenCADStudio {
                 self.mtext_box_drag(width);
                 Task::none()
             }
+            Message::MTextContextOpen(at, offset) => {
+                self.mtext_context_open(at, offset);
+                Task::none()
+            }
+            Message::MTextContextGroup(group) => {
+                if let Some(menu) = self.mtext_editor.as_mut().and_then(|ed| ed.context_menu.as_mut()) {
+                    menu.open = if menu.open == group { None } else { group };
+                }
+                Task::none()
+            }
+            Message::MTextContextClose => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.context_menu = None;
+                    ed.smart_tag_open = false;
+                }
+                Task::none()
+            }
+            Message::MTextContextRun(command) => self.mtext_context_run(&command),
+            Message::MTextSmartTag(open) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.smart_tag_open = open;
+                    ed.context_menu = None;
+                }
+                Task::none()
+            }
+            Message::MTextPasteAs(mode, text) => {
+                self.mtext_paste_as(&mode, text);
+                Task::none()
+            }
             Message::MTextMenuPick(message) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.menu = None;

@@ -45,6 +45,12 @@ pub struct StyleChangeDraft {
     pub always: bool,
 }
 
+/// The question asked before Allow Bullets and Lists is turned on or off.
+#[derive(Debug, Clone, Default)]
+pub struct ListsToggleDraft {
+    pub always: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DictionariesDraft {
     /// (tag, name) of each main dictionary offered, and the current tag.
@@ -242,6 +248,38 @@ pub fn view_style_change<'a>(d: &'a StyleChangeDraft) -> Element<'a, Message> {
     .into()
 }
 
+/// Allow Bullets and Lists acts on the whole text: asked about first
+/// unless "Always turn Bullets and Lists on or off".
+pub fn view_lists_toggle<'a>(d: &'a ListsToggleDraft) -> Element<'a, Message> {
+    column![
+        card(
+            t("Bullets and Lists"),
+            column![
+                text(t(
+                    "Turning Bullets and Lists on or off changes the whole text object, not only the selection. Continue?"
+                ))
+                .size(12),
+                chip(
+                    t("Always turn Bullets and Lists on or off"),
+                    d.always,
+                    msg(M::ListsAlways(!d.always))
+                ),
+            ]
+            .spacing(8),
+        ),
+        row![
+            Space::new().width(Fill),
+            dialog_button_styled_opt(crate::t!("Cancel"), Some(Message::CloseModal), button::secondary),
+            dialog_button_styled_opt(t("Continue"), Some(msg(M::ListsContinue)), button::primary),
+        ]
+        .spacing(6),
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(Length::Fixed(460.0))
+    .into()
+}
+
 fn file_name(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -354,7 +392,7 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
                     .width(Fill),
                 text(path).size(10).style(muted_style),
                 row![
-                    small_button(t("New..."), Some(msg(M::DictNewFile))),
+                    small_button(crate::tr!("text-editor-menu", "new-dictionary"), Some(msg(M::DictNewFile))),
                     small_button(t("Add..."), Some(msg(M::DictAddFile))),
                     small_button(
                         t("Remove"),

@@ -45,7 +45,7 @@ fn bullets_on_selected_paragraphs_and_none_restores_the_source_exactly() {
     // paragraph after the list sets it back.
     assert_eq!(
         raw(&app),
-        format!("\\pxi-3,l3,t3;{BULLET}one\\P{BULLET}two\\P\\pi0,l0,t0;three")
+        format!("\\pxi-3,l3,t3;{BULLET}one\\P{BULLET}two\\P\\pi0,l0,tz;three")
     );
     assert_eq!(ed(&app).list_kind(), Some(ListKind::Bullet));
     assert_eq!(texts(&app), ["·\tone", "·\ttwo", "three"]);
@@ -108,7 +108,7 @@ fn enter_on_an_empty_item_leaves_the_list() {
     assert_eq!(texts(&app), ["·\ta", "·\tb", ""]);
     assert_eq!(ed(&app).list_kind(), None);
     let source = raw(&app);
-    assert!(source.ends_with(r"\P\pi0,l0,t0;"), "{source}");
+    assert!(source.ends_with(r"\P\pi0,l0,tz;"), "{source}");
     // Typing goes on in a plain paragraph.
     app.mtext_type("z");
     assert_eq!(texts(&app), ["·\ta", "·\tb", "z"]);

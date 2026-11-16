@@ -19155,7 +19155,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert_eq!(revision_now, WireRevision(13));
         let after = attach_counters(&app);
         assert_eq!(after.registers_replaced - before.registers_replaced, 1);
-        assert_eq!(after.torn_down - before.torn_down, 1, "the replaced machines released");
+        // (SCN-033) The patch re-registration of the SAME frozen surface id
+        // (200) is the same-surface EVOLUTION: the machines are CARRIED
+        // (the live-firetest fixup — expansion/selection survive patches),
+        // so nothing releases. The teardown-class release law is pinned by
+        // the different-surface-id tests in the mount suite.
+        assert_eq!(after.torn_down - before.torn_down, 0, "the same-id patch evolution carries the machines (SCN-033) — nothing releases");
         assert_eq!(
             app.mount_registry.borrow().panel_surface_id_owned("align_tools"),
             Some(WireId(200)),

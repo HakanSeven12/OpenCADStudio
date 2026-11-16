@@ -1675,6 +1675,7 @@ impl OpenCADStudio {
             },
             plot: self.plot_dialog.clone(),
             context_menu: self.context_menu_custom.clone(),
+            mcp_enabled: self.control.start_enabled,
             shortcuts: crate::app::config::ShortcutConfig {
                 bindings: self
                     .shortcut_bindings
@@ -1747,6 +1748,7 @@ impl OpenCADStudio {
         // The pallets and tabs come back as they were left (#2616).
         self.show_layers = cfg.show_layers && self.dock.is_placed(crate::ui::dock::PanelId::Layers);
         self.show_file_tabs = cfg.show_file_tabs;
+        self.control.start_enabled = cfg.mcp_enabled;
         self.file_tabs_above_docks = cfg.file_tabs_above_docks;
         self.ribbon.set_file_tabs(self.show_file_tabs);
         self.show_layout_tabs = cfg.show_layout_tabs;

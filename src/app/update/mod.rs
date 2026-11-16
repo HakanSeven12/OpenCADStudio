@@ -1507,6 +1507,8 @@ impl OpenCADStudio {
 
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
+                self.control.start_enabled = self.control.enabled;
+                self.persist_settings_if_changed();
                 Task::none()
             }
             Message::ControlCopySetup => {

@@ -61,6 +61,8 @@ pub struct AppConfig {
     pub model_space: ModelSpaceThemeConfig,
     /// The user's changes to the right-click menu.
     pub context_menu: crate::ui::popup::context_menu::MenuCustomization,
+    /// MCP control is on at start (the MCP button's last state).
+    pub mcp_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -86,6 +88,7 @@ impl Default for AppConfig {
             shortcuts: ShortcutConfig::default(),
             model_space: ModelSpaceThemeConfig::default(),
             context_menu: Default::default(),
+            mcp_enabled: true,
         }
     }
 }

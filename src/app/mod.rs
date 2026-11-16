@@ -6952,6 +6952,12 @@ impl OpenCADStudio {
         // options survive across sessions (issue #68). `last_saved_config` is
         // seeded below so the first change — not the boot — triggers a write.
         app.apply_config(config);
+        // MCP control starts as the button was left (#3126); `--http` needs it.
+        #[cfg(not(target_arch = "wasm32"))]
+        let forced = crate::app::control::http_bridge::gui_http_requested();
+        #[cfg(target_arch = "wasm32")]
+        let forced = false;
+        app.control.enabled = app.control.start_enabled || forced;
         crate::sys::startup_times::mark("App::new: apply_config done");
         // Load command aliases from ocad.pgp (writes the shipped default file
         // on first launch). The hide-set keeps aliases out of autocomplete while

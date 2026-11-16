@@ -106,6 +106,9 @@ pub(super) struct State {
     completed: VecDeque<(String, Value, Value)>,
     owner: Option<(u64, String)>,
     pub enabled: bool,
+    /// The MCP button's last state, restored at the next start (#3126). Only
+    /// the button writes it: a client's `stop` must not outlive the session.
+    pub start_enabled: bool,
     /// Set by the first control request of the session (or by a web host's
     /// boot-time opt-in): while control is enabled, startup prompts that
     /// would block automation — the donation prompt — are suppressed (#1349).
@@ -171,6 +174,7 @@ impl State {
     pub(super) fn new() -> Self {
         Self {
             enabled: true,
+            start_enabled: true,
             ..Self::default()
         }
     }

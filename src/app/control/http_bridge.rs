@@ -34,6 +34,11 @@ pub fn set_gui_http_port(port: u16) {
     GUI_HTTP_PORT.store(port, Ordering::SeqCst);
 }
 
+/// Whether this GUI run hosts the `--http` channel, which needs control on.
+pub(in crate::app) fn gui_http_requested() -> bool {
+    GUI_HTTP_PORT.load(Ordering::SeqCst) != 0
+}
+
 pub(in crate::app) fn subscribe() -> iced::Subscription<Envelope> {
     iced::Subscription::run(worker)
 }

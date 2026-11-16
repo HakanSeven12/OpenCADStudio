@@ -128,9 +128,12 @@ fn main() {
 /// drawing (`assets/icons/<p>`) in `$OUT_DIR/icon_pairs.rs`, so the UI can
 /// find the large art from the small art's bytes.
 fn write_icon_pairs() {
-    println!("cargo:rerun-if-changed=assets/icons");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let icons = manifest.join("assets").join("icons");
+    // A missing watched path makes Cargo rerun the script on every build.
+    if icons.is_dir() {
+        println!("cargo:rerun-if-changed=assets/icons");
+    }
     let large_root = icons.join("32");
     let mut relative = Vec::new();
     collect_svgs(&large_root, &large_root, &mut relative);
@@ -181,10 +184,10 @@ fn collect_svgs(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
 fn write_command_summaries() {
     let mut entries: Vec<(String, String)> = Vec::new();
     for dir in ["docs/wiki/commands", "docs/wiki/sysvars"] {
-        println!("cargo:rerun-if-changed={dir}");
         let Ok(files) = std::fs::read_dir(dir) else {
             continue;
         };
+        println!("cargo:rerun-if-changed={dir}");
         for file in files.flatten() {
             let path = file.path();
             if path.extension().is_none_or(|ext| ext != "md") {

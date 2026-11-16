@@ -349,18 +349,21 @@ impl PluginManager {
         }
     }
 
-    /// Router for the v23 scene/widget event tail: the bounded semantic
-    /// event batch goes to endpoints reporting API v23+ only (pre-v23
-    /// cdylibs have no such variant; the runner's
-    /// `notification_api_version` rows gate it too — this per-endpoint
-    /// choice keeps a legacy plugin's stream byte-exact). O(panels): the
-    /// notification is built ONCE (one event-batch copy at entry) and each
-    /// endpoint's writer clone is the loop's own per-plugin copy; nothing
-    /// here re-serializes or rebuilds per event.
+    /// Router for the v24 scene/widget event tail: the bounded semantic
+    /// event batch goes to endpoints reporting API v24+ only (pre-v24
+    /// cdylibs have no such variant — upstream's v23 plugins included; the
+    /// runner's `notification_api_version` rows gate it too — this
+    /// per-endpoint choice keeps a legacy plugin's stream byte-exact).
+    /// O(panels): the notification is built ONCE (one event-batch copy at
+    /// entry) and each endpoint's writer clone is the loop's own
+    /// per-plugin copy; nothing here re-serializes or rebuilds per event.
     ///
     /// Callers (the mount publisher that attaches widget events to live
-    /// panels) are the recorded follow-up; the routing is in place first so
-    /// no attach can ever fan out unwrapped events to an unprepared plugin.
+    /// panels) are LIVE since SCN-025: forwarded batches from the app-owned
+    /// surface store fan out HERE (SCN-026 re-versioned the gate row from
+    /// 23 to 24 alongside the manifest crossing; the routing predates the
+    /// attach, so no attach ever fanned out unwrapped events to an
+    /// unprepared plugin).
     pub fn broadcast_panel_scene_events(
         &self,
         panel_id: &str,
@@ -372,14 +375,15 @@ impl PluginManager {
             surface_id,
             events: Vec::from(events),
         };
-        self.broadcast_for_api(None, &|api: u32| (api >= 23).then(|| notification.clone()));
+        self.broadcast_for_api(None, &|api: u32| (api >= 24).then(|| notification.clone()));
     }
 
-    /// Router for the v23 store-demand tail: the bounded lazy-fetch demand
+    /// Router for the v24 store-demand tail: the bounded lazy-fetch demand
     /// (`parent_id` + windowed `range`) goes to endpoints reporting API
-    /// v23+ only — the same per-endpoint gate as the event tail. O(panels):
-    /// one notification build at entry, per-plugin writer clones only,
-    /// nothing rebuilt per demand.
+    /// v24+ only — the same per-endpoint gate as the event tail (SCN-026
+    /// re-version: both crossing tails claim 24; 23 stays upstream's
+    /// `LayoutSetTabOrder` era). O(panels): one notification build at
+    /// entry, per-plugin writer clones only, nothing rebuilt per demand.
     pub fn broadcast_panel_store_demand(
         &self,
         panel_id: &str,
@@ -393,7 +397,7 @@ impl PluginManager {
             parent_id,
             range,
         };
-        self.broadcast_for_api(None, &|api: u32| (api >= 23).then(|| notification.clone()));
+        self.broadcast_for_api(None, &|api: u32| (api >= 24).then(|| notification.clone()));
     }
 
     /// Mark a plugin's notification channel verifiably live and flush every
@@ -927,10 +931,10 @@ mod tests {
     }
 
     #[test]
-    fn v23_scene_notification_routers_are_benign_without_routable_endpoints() {
-        // The v23 routers fan out O(panels) through `broadcast_for_api`:
+    fn v24_scene_notification_routers_are_benign_without_routable_endpoints() {
+        // The v24 routers fan out O(panels) through `broadcast_for_api`:
         // endpoints that are not alive V4 processes are skipped outright,
-        // and the api gate (`api >= 23`) is the per-endpoint decision the
+        // and the api gate (`api >= 24`) is the per-endpoint decision the
         // runner's `notification_api_version` rows redouble. Without a live
         // v4 endpoint (the unit-test depth every other router here has)
         // both routers must be a bounded no-op: no panic, no send.

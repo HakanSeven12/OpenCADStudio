@@ -43,11 +43,12 @@ mod insert_attributes_tests;
 pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };
+mod assistant;
 pub(crate) mod commands;
 #[cfg(test)]
 mod dim_constraint_value_tests;
-pub(crate) mod dim_viewport;
 mod dim_variables;
+pub(crate) mod dim_viewport;
 #[cfg(test)]
 mod dimension_convert_tests;
 #[cfg(test)]
@@ -55,9 +56,9 @@ mod dimension_preview_tests;
 mod dock;
 mod drafting_settings;
 mod drawing_properties;
-mod geographic_location;
 pub(crate) mod filter_dialog;
 mod find_replace;
+mod geographic_location;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -68,6 +69,8 @@ mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
 mod layers;
+#[cfg(test)]
+mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
@@ -90,7 +93,6 @@ mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
 mod quick_calc;
-mod assistant;
 mod recent;
 mod record_api;
 mod rename_dialog;
@@ -112,8 +114,6 @@ mod text_style_font_picker_tests;
 #[cfg(test)]
 mod text_style_layout_tests;
 #[cfg(test)]
-mod linetype_manager_tests;
-#[cfg(test)]
 mod text_style_manager_tests;
 #[cfg(test)]
 mod text_style_pending_tests;
@@ -124,6 +124,8 @@ mod text_style_update_tests;
 pub(crate) mod text_style_users;
 mod tolerance_dialog;
 pub(crate) mod tool_windows;
+#[cfg(test)]
+mod undo_sweep_tests;
 mod update;
 pub(crate) use update::style_import::{style_exists as style_import_exists, StyleImportDraft};
 #[cfg(test)]
@@ -799,6 +801,12 @@ pub(super) struct OpenCADStudio {
     tabs: Vec<DocumentTab>,
     active_tab: usize,
     hovered_doc_tab: Option<usize>,
+    /// The drawing-tab bar's ☰ menu is open.
+    doc_tab_menu: bool,
+    /// The tab whose layouts list is open.
+    doc_tab_layouts: Option<usize>,
+    /// Bumped on every tab hover change, so a stale rest is ignored.
+    doc_tab_hover_gen: u64,
     tab_counter: usize,
     ribbon: Ribbon,
     /// Recently opened files, newest first — backs the Start page panel.
@@ -1664,6 +1672,10 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_float_menu_at: iced::Point,
     /// Group whose edge band (group grip) the pointer is over.
     pub(crate) dock_grip_hover: Option<(crate::app::config::DockSide, usize)>,
+    /// The group grip that has been hovered long enough to light.
+    pub(crate) dock_grip_lit: Option<(crate::app::config::DockSide, usize)>,
+    /// Counts grip hovers, so only the latest hover's timer lights a grip.
+    pub(crate) dock_grip_gen: u32,
     /// Reference-table column currently being width-resized (column index),
     /// with the last pointer position. Mirrors the Layers Name-column drag.
     pub(crate) xref_col_drag: Option<usize>,
@@ -1676,6 +1688,9 @@ pub(super) struct OpenCADStudio {
     pub(crate) xref_manager: crate::ui::window::xref_manager::XrefManagerPanel,
     /// Whether the document file tabs are shown at the top (FILETAB).
     show_file_tabs: bool,
+    /// The drawing tabs run across the window above the palettes instead
+    /// of between them.
+    file_tabs_above_docks: bool,
     /// Whether the layout/paper-space tabs are shown at the bottom (LAYOUTTAB).
     show_layout_tabs: bool,
     /// Last point committed by a drawing command — used as ortho/polar base.
@@ -1844,6 +1859,11 @@ pub(super) struct OpenCADStudio {
     modal_dragging: bool,
     /// Layer Manager Name column width in px, adjusted by the divider drag.
     layer_name_col_w: f32,
+    /// Widths of the Layer Manager columns the user sized (the rest keep
+    /// their default).
+    layer_col_w: std::collections::HashMap<crate::ui::window::layers::LayerSortCol, f32>,
+    /// Widths of Layer Walk's name and object-count columns.
+    layer_walk_col_w: [f32; 2],
     /// How far the user has dragged the modal's corner resize grip from the
     /// dialog's natural size (added to its measured width/height). Reset
     /// with `modal_offset` so every dialog opens at its own size.
@@ -2163,6 +2183,10 @@ pub(super) struct OpenCADStudio {
     /// Working copy of the selected style; written into the document before
     /// any list operation and on Apply.
     textstyle_draft: text_style_draft::TextStyleDraft,
+    /// A question or notice over the text style window.
+    textstyle_card: Option<crate::ui::style::textstyle::Card>,
+    /// The text style whose actions (right click) show under it.
+    textstyle_context: Option<String>,
     textstyle_font_picker: crate::ui::font_picker::FontPickerState,
     textstyle_bigfont_picker: crate::ui::font_picker::FontPickerState,
     /// The texts of every text style (ASCII-lowercase name), for "Where
@@ -4042,6 +4066,19 @@ pub enum Message {
     TabSwitch(usize),
     /// Drawing tab currently under the pointer; controls integrated close affordance.
     DocTabHover(Option<usize>),
+    /// Open or close the tab bar's ☰ menu; with a tab index, also switch to
+    /// that tab (a pick from the menu).
+    DocTabMenu(bool, Option<usize>),
+    /// The pointer has rested on tab `usize` (hover generation `u64`): list
+    /// its layouts if it is still there.
+    DocTabLayoutsSettled(usize, u64),
+    /// Close a tab's layouts list.
+    DocTabLayoutsClose,
+    /// Switch to drawing tab `usize` and its layout `String`.
+    DocTabLayout(usize, String),
+    /// Run the drawing tabs across the window above the palettes (`true`)
+    /// or between the palettes, over the drawing.
+    DocTabsAboveDocks(bool),
     /// Move a drawing tab before/after another drawing tab.
     TabReorder {
         from: usize,
@@ -4331,6 +4368,8 @@ pub enum Message {
     CommandHistoryHeightReset,
     /// Start dragging the Layer Manager's Name-column divider.
     LayerNameColGrab,
+    /// Start dragging the divider after a Layer Manager column.
+    LayerColGrab(crate::ui::window::layers::LayerSortCol),
     /// Open or close the Layer Manager's column chooser.
     LayerColumnsMenu(bool),
     /// Show or hide a Layer Manager column.
@@ -5082,6 +5121,8 @@ pub enum Message {
     PropGroupToggle(String),
     /// Toggle an entire Properties-panel section, keyed by its title.
     PropSectionToggle(String),
+    /// Select a Properties row by pressing its name, keyed `section/name`.
+    PropRowSelect(String),
     /// Toggle an editable-dropdown row's option list open/closed, by field.
     PropEditChoiceToggle(&'static str),
     /// User is typing in a block-attribute value field (live buffer update),
@@ -5821,6 +5862,11 @@ pub enum Message {
     },
     /// Commit edits to the selected text style.
     TextStyleApply,
+    /// The text style window's cards: New, a refused name, Delete, a style
+    /// in use, unsaved changes.
+    TextStyleCard(crate::ui::style::textstyle::CardMsg),
+    /// A right click on a text style: select it and show its actions.
+    TextStyleContext(String),
     /// The font picker: open, search or pick a stroke or TrueType font.
     TextStyleFont(crate::ui::font_picker::FontPickerEvent),
     /// The big font picker: open, search or pick a double-byte SHX font.
@@ -6201,6 +6247,9 @@ impl OpenCADStudio {
             tabs: vec![start_tab],
             active_tab: 0,
             hovered_doc_tab: None,
+            doc_tab_menu: false,
+            doc_tab_layouts: None,
+            doc_tab_hover_gen: 0,
             tab_counter: 0,
             ribbon: Ribbon::new(),
             // Populated from the consolidated config after construction
@@ -6589,11 +6638,14 @@ impl OpenCADStudio {
             dock_edge_menu_y: None,
             dock_strip_pointer_y: 0.0,
             dock_grip_hover: None,
+            dock_grip_lit: None,
+            dock_grip_gen: 0,
             dock_icon_hover: None,
             xref_col_drag: None,
             xref_col_last: None,
             xref_split_drag: false,
             show_file_tabs: true,
+            file_tabs_above_docks: false,
             show_layout_tabs: true,
             last_point: None,
             vp_snap_frame: None,
@@ -6661,6 +6713,8 @@ impl OpenCADStudio {
             modal_drag_last: None,
             modal_dragging: false,
             layer_name_col_w: 130.0,
+            layer_col_w: std::collections::HashMap::new(),
+            layer_walk_col_w: crate::ui::window::layer_walk::DEFAULT_COL_W,
             modal_resize: iced::Vector::ZERO,
             modal_content_size: None,
             modal_resizing: false,
@@ -6871,6 +6925,8 @@ impl OpenCADStudio {
             textstyle_sample: String::new(),
             textstyle_compare: String::new(),
             textstyle_draft: Default::default(),
+            textstyle_card: None,
+            textstyle_context: None,
             textstyle_font_picker: Default::default(),
             textstyle_bigfont_picker: Default::default(),
             textstyle_users: Default::default(),
@@ -6997,7 +7053,7 @@ impl OpenCADStudio {
         id
     }
 
-/// Open a declarative plugin modal dialog on the currently active tab.
+    /// Open a declarative plugin modal dialog on the currently active tab.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open_plugin_dialog(&mut self, def: ocs_plugin_api::dialog::DialogDef) {
         let tab = self.active_tab;
@@ -7117,13 +7173,23 @@ impl OpenCADStudio {
                     (
                         Some(resp),
                         updates,
-                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                        Some((
+                            dialog_title,
+                            owner_plugin_id,
+                            owner_command_id,
+                            current_values,
+                        )),
                     )
                 } else {
                     (
                         None,
                         Vec::new(),
-                        Some((dialog_title, owner_plugin_id, owner_command_id, current_values)),
+                        Some((
+                            dialog_title,
+                            owner_plugin_id,
+                            owner_command_id,
+                            current_values,
+                        )),
                     )
                 }
             } else {
@@ -7154,7 +7220,9 @@ impl OpenCADStudio {
                 return self.on_plugin_dialog_cancel();
             }
             Some(ocs_plugin_api::dialog::DialogActionResponse::None) | None => {
-                if let Some((dialog_title, owner_plugin_id, owner_command_id, mut current_vals)) = fallback_notify {
+                if let Some((dialog_title, owner_plugin_id, owner_command_id, mut current_vals)) =
+                    fallback_notify
+                {
                     if let Some(v) = value {
                         current_vals.insert("__event_value__".to_string(), v);
                     }

@@ -123,6 +123,8 @@ pub struct SelectionMenu {
     /// belongs to the selection boundary, and [`SelectionMenu::open`] /
     /// [`SelectionMenu::close`] reset it exactly like the context-menu state.
     pub quad: Option<crate::ui::popup::quad_menu::QuadUi>,
+    /// The open menu is POPMENU's: only the user's own commands.
+    pub user: bool,
 }
 
 impl SelectionMenu {
@@ -133,6 +135,7 @@ impl SelectionMenu {
         self.open_at = Some(at);
         self.ui = ContextMenuUi::default();
         self.quad = None;
+        self.user = false;
     }
 
     /// Close the context menu (no-op when it is not open). A disruptive
@@ -142,6 +145,7 @@ impl SelectionMenu {
         self.open_at = None;
         self.ui = ContextMenuUi::default();
         self.quad = None;
+        self.user = false;
     }
 }
 

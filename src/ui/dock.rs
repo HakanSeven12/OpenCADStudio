@@ -60,15 +60,18 @@ pub enum DockMsg {
     /// Pallet menu pick: hide `panel` when it shows, else open it docked on
     /// the edge (as a new group unless it already has a group there).
     EdgeMenuToggle(DockSide, PanelId),
-    /// Show each pallet's name beside its icon in the strips (`true`), or
-    /// icons only.
-    StripLabels(bool),
+    /// What the strips show per pallet: icons, icons and names, or names.
+    StripNames(StripNames),
     /// Begin dragging a whole group by its edge band in the icon strip.
     GroupGrab(DockSide, usize),
     /// The pointer entered a group's edge band (side, group).
     GripHover(DockSide, usize),
     /// The pointer left that edge band.
     GripHoverEnd(DockSide, usize),
+    /// The pointer has rested on that band for [`GRIP_LIT_DELAY`]; the
+    /// number is the hover it was armed for, so a timer from an earlier
+    /// visit cannot light it early.
+    GripLit(DockSide, usize, u32),
     /// Double-click on a docked title bar: float the panel.
     FloatOut(PanelId),
     /// Double-click on a floating title bar (or its menu's Dock left /
@@ -548,9 +551,54 @@ pub struct DockState {
     /// Desktop: where each dialog's window of its own last was, by dialog
     /// name.
     pub tool_windows: BTreeMap<String, crate::app::tool_windows::WindowPlacement>,
-    /// The icon strips label each pallet, sharing the edge's height between
-    /// them, instead of showing icons only.
-    pub strip_labels: bool,
+    /// What the icon strips show per pallet: its icon, its icon and name,
+    /// or its name. Older configs stored `strip_labels: bool` (`true` reads
+    /// as icons and names).
+    #[serde(alias = "strip_labels", deserialize_with = "strip_names_compat")]
+    pub strip_names: StripNames,
+}
+
+/// What a palette strip shows for each pallet. Names read upward on both
+/// edges.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StripNames {
+    /// The icon alone.
+    #[default]
+    Icons,
+    /// The icon, with the name above it.
+    IconsAndNames,
+    /// The name alone.
+    NamesOnly,
+}
+
+impl StripNames {
+    /// The strip shows the pallet's icon.
+    pub fn icons(self) -> bool {
+        !matches!(self, StripNames::NamesOnly)
+    }
+
+    /// The strip shows the pallet's name.
+    pub fn names(self) -> bool {
+        !matches!(self, StripNames::Icons)
+    }
+}
+
+/// Read [`StripNames`], or the old `strip_labels: bool`.
+fn strip_names_compat<'de, D>(de: D) -> Result<StripNames, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Old(bool),
+        New(StripNames),
+    }
+    Ok(match Repr::deserialize(de)? {
+        Repr::Old(true) => StripNames::IconsAndNames,
+        Repr::Old(false) => StripNames::Icons,
+        Repr::New(names) => names,
+    })
 }
 
 impl Default for DockState {
@@ -564,7 +612,7 @@ impl Default for DockState {
             panels: BTreeMap::new(),
             detached: BTreeMap::new(),
             tool_windows: BTreeMap::new(),
-            strip_labels: false,
+            strip_names: StripNames::Icons,
         }
     }
 }
@@ -1045,8 +1093,10 @@ pub enum DockDrag {
         start: (f32, f32, f32, f32),
         origin: Option<iced::Point>,
     },
-    /// Sizing the Layer Manager's Name column.
-    LayerColumn,
+    /// Sizing a Layer Manager column: the Name column (`None`) or another.
+    LayerColumn(Option<crate::ui::window::layers::LayerSortCol>),
+    /// Sizing a Layer Walk column: 0 the name, 1 the object count.
+    WalkColumn(usize),
     /// Moving the floating Quick Properties panel.
     QuickProperties,
 }
@@ -1131,31 +1181,38 @@ pub const DOCK_MIN_W: f32 = 200.0;
 pub const DOCK_MAX_W: f32 = 600.0;
 /// Width of the band along an empty edge that docks a dragged panel there.
 pub const DOCK_EDGE_ZONE: f32 = 48.0;
-/// Width of the grabbable divider between a docked group and the viewport.
+/// Width of the grab band that sizes a docked group: over the drawing's
+/// edge beside the group (or, on an auto-hiding edge, beside the revealed
+/// group), taking no room of its own.
 pub const DOCK_DIVIDER_W: f32 = 5.0;
-/// Width of a floating panel's vertical title bar.
-pub const DOCK_FLOAT_BAR_W: f32 = 28.0;
-/// Width of an edge's vertical icon strip.
-pub const DOCK_STRIP_W: f32 = 40.0;
+/// Width of a floating panel's vertical title bar: 22 px and the 1 px dark
+/// line parting it from the panel.
+pub const DOCK_FLOAT_BAR_W: f32 =
+    crate::ui::style::kit_metrics::FLOAT_BAR_W + crate::ui::style::kit_metrics::LINE;
+/// Width of an edge's vertical icon strip: its light part and the 1 px
+/// edge line on the palette side.
+pub const DOCK_STRIP_W: f32 = crate::ui::style::kit_metrics::STRIP_W;
 /// Height of one pallet icon in the strip.
-pub const STRIP_CELL_H: f32 = 32.0;
+pub const STRIP_CELL_H: f32 = crate::ui::style::kit_metrics::STRIP_CELL_H;
 /// Size of a pallet icon in the strip.
-pub const RAIL_ICON: f32 = 20.0;
-/// Text size of a strip tab's name.
-pub const STRIP_LABEL_SIZE: f32 = 13.0;
-/// Space after a strip tab's name.
-const STRIP_LABEL_PAD: f32 = 12.0;
+pub const RAIL_ICON: f32 = crate::ui::style::kit_metrics::STRIP_ICON;
+/// Text size of a strip tab's name (shown in capitals).
+pub const STRIP_LABEL_SIZE: f32 = crate::ui::style::text::UI;
 /// Height of the + button below a strip's groups.
-pub const STRIP_PLUS_H: f32 = 28.0;
-/// Space above and below a group's icons, inside the group.
-pub const STRIP_PAD: f32 = 6.0;
-/// Hairline divider between groups.
-pub const STRIP_DIVIDER_H: f32 = 1.0;
+pub const STRIP_PLUS_H: f32 = crate::ui::style::kit_metrics::STRIP_PLUS_H;
+/// Room above a group's first icon and below its last, inside those cells.
+pub const STRIP_PAD: f32 = crate::ui::style::kit_metrics::STRIP_GROUP_PAD;
+/// Line between groups.
+pub const STRIP_DIVIDER_H: f32 = crate::ui::style::kit_metrics::LINE;
 /// Space between the last group and the + button.
-pub const STRIP_PLUS_GAP: f32 = 8.0;
+pub const STRIP_PLUS_GAP: f32 = crate::ui::style::kit_metrics::STRIP_GROUP_PAD;
 /// Width of the band along a group's window-side edge that drags the whole
-/// group (the icons drag single pallets).
-pub const STRIP_GRIP_W: f32 = 8.0;
+/// group (the icons drag single pallets). Narrow, so a press meant for a
+/// tab does not catch it.
+pub const STRIP_GRIP_W: f32 = 4.0;
+/// How long the pointer rests on a group grip before it lights: passing
+/// over it on the way to a tab leaves it dark.
+pub const GRIP_LIT_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 /// How far the "new group" zone around a divider reaches into the icons on
 /// either side.
 const STRIP_NEW_GROUP_SLOP: f32 = 4.0;
@@ -1229,15 +1286,23 @@ pub fn strip_menu_top(y: f32, menu_h: f32, strip_h: f32) -> f32 {
     y.min(strip_h - menu_h).max(0.0)
 }
 
-/// Length of a pallet's tab in the strip: the icon alone, or labelled, the
-/// icon followed by its name read upward, as long as the name is.
-pub fn strip_tab_h(title: &str, labelled: bool) -> f32 {
-    if !labelled {
+/// Length of a pallet's tab in the strip: the icon cell alone, or with
+/// names, the name (in capitals, read upward) above the icon, or the name
+/// alone, with equal room above and below.
+pub fn strip_tab_h(title: &str, names: StripNames) -> f32 {
+    use crate::ui::style::kit_metrics as km;
+    if !names.names() {
         return STRIP_CELL_H;
     }
-    STRIP_CELL_H - 4.0
-        + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
-        + STRIP_LABEL_PAD
+    let name =
+        crate::ui::style::text_metrics::width(&title.to_uppercase(), STRIP_LABEL_SIZE, false)
+            .ceil();
+    let icon = if names.icons() {
+        km::STRIP_ICON + km::STRIP_NAME_GAP
+    } else {
+        0.0
+    };
+    2.0 * km::STRIP_NAME_PAD + icon + name
 }
 
 /// What a dragged pallet released at height `y` over the icon strip joins.
@@ -1279,7 +1344,7 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
 
 use crate::app::Message;
 use iced::widget::{button, container, mouse_area, row, text, tooltip, Space};
-use iced::{Background, Border, Color, Element, Length, Theme};
+use iced::{Background, Element, Length, Theme};
 
 /// How a panel is framed where it is shown, passed to its view so the shared
 /// chrome can adapt.
@@ -1301,34 +1366,47 @@ pub fn title_bar<'a>(id: PanelId, title: String, chrome: Chrome) -> Element<'a, 
     title_bar_with(id, title, chrome, None)
 }
 
-/// [`title_bar`] with a pallet's own control (a menu button) before the pin
-/// and close, shown like them only while the bar is hovered. A floating
-/// pallet has no title bar, so the control then sits alone at the top right.
+/// [`title_bar`] with a pallet's own control (its ☰ menu button) before the
+/// close. Every palette uses this one bar: 23 px on the surface, the
+/// title in 13 px capitals, the ☰ menu and close always shown, pin
+/// (auto-hide) and detach only while the bar is hovered. The pin stands
+/// upright while docked and lies turned 90° while the palette auto-hides. A
+/// floating pallet has no title bar, so the control then sits alone at the
+/// top right.
 pub fn title_bar_with<'a>(
     id: PanelId,
     title: String,
     chrome: Chrome,
     extra: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    use crate::ui::style::{chrome as tokens, kit_metrics as km, text as ui_text};
     if chrome.floating {
         return match extra {
             Some(extra) => row![Space::new().width(Length::Fill), extra]
-                .padding([3, 6])
+                .padding([km::TOOL_GAP, km::TOOL_GAP])
                 .into(),
             None => Space::new().width(0).height(0).into(),
         };
     }
-    // The pallet's control and pin only show while the pointer is over the
-    // bar; close always shows. The fixed height keeps the bar from jumping
-    // when they appear.
-    let mut bar = row![text(title).size(12), Space::new().width(Length::Fill)]
-        .spacing(3)
-        .height(Length::Fixed(TITLE_BUTTON_H))
+    // The title's line box is placed at a whole pixel so its capitals sit
+    // centred on the bar, level with the buttons (centring the 16 px line
+    // in the 23 px bar would land on a half pixel, above the middle).
+    let title = container(
+        text(title.to_uppercase())
+            .size(ui_text::UI_TITLE)
+            .line_height(ui_text::large_line())
+            .wrapping(iced::widget::text::Wrapping::None)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(tokens::title_text(theme)),
+            }),
+    )
+    .height(Length::Fixed(km::TITLE_H))
+    .padding(iced::Padding::ZERO.top(km::TITLE_TEXT_TOP));
+    let mut bar = row![title, Space::new().width(Length::Fill)]
+        .height(Length::Fixed(km::TITLE_H))
+        .padding(iced::Padding::ZERO.left(km::TITLE_PAD_X).right(TITLE_PAD_R))
         .align_y(iced::Center);
     if chrome.title_hovered {
-        if let Some(extra) = extra {
-            bar = bar.push(extra);
-        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             bar = bar.push(detach_button(id, tooltip::Position::Bottom));
@@ -1339,15 +1417,17 @@ pub fn title_bar_with<'a>(
             tooltip::Position::Bottom,
         ));
     }
+    if let Some(extra) = extra {
+        bar = bar.push(extra);
+    }
     bar = bar.push(close_button(id, tooltip::Position::Bottom));
     mouse_area(
         container(bar)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.weak.color)),
+                background: Some(Background::Color(tokens::surface(theme))),
                 ..Default::default()
             })
-            .width(Length::Fill)
-            .padding([3, 6]),
+            .width(Length::Fill),
     )
     .on_press(Message::Dock(DockMsg::DockGrab(id)))
     .on_double_click(Message::Dock(DockMsg::FloatOut(id)))
@@ -1357,125 +1437,201 @@ pub fn title_bar_with<'a>(
     .into()
 }
 
-/// Height of a title bar's button row.
-const TITLE_BUTTON_H: f32 = 20.0;
+/// Room after the last title-bar button.
+const TITLE_PAD_R: f32 = 2.0;
 
-/// The auto-hide pin. While auto-hide is on the pin is drawn tilted instead
-/// of on a coloured background.
+/// The square button every title-bar control is: `icon` centred in a
+/// `TITLE_BUTTON` square, lit by `chrome::hover` while hovered.
+pub fn title_button<'a>(
+    icon: Element<'a, Message>,
+    message: Message,
+) -> button::Button<'a, Message> {
+    use crate::ui::style::{chrome as tokens, kit_metrics as km};
+    button(container(icon).center(Length::Fill))
+        .on_press(message)
+        .width(Length::Fixed(km::TITLE_BUTTON))
+        .height(Length::Fixed(km::TITLE_BUTTON))
+        .padding(0)
+        .style(|theme: &Theme, status| button::Style {
+            background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                .then(|| Background::Color(tokens::hover(theme))),
+            text_color: tokens::text(theme),
+            ..Default::default()
+        })
+}
+
+/// A title-bar icon in the title-bar tint.
+fn title_icon<'a>(art: &'static [u8]) -> Element<'a, Message> {
+    title_icon_sized(art, crate::ui::style::kit_metrics::TITLE_ICON)
+}
+
+/// [`title_icon`] at `size`.
+fn title_icon_sized<'a>(art: &'static [u8], size: f32) -> Element<'a, Message> {
+    crate::ui::icons::tinted(art, size, crate::ui::style::chrome::title_text)
+}
+
+/// A tooltip on a title-bar button.
+fn title_tip<'a>(
+    content: impl Into<Element<'a, Message>>,
+    tip: String,
+    position: tooltip::Position,
+) -> Element<'a, Message> {
+    use crate::ui::style::{kit_metrics as km, text as ui_text};
+    tooltip(
+        content,
+        text(tip)
+            .size(ui_text::UI_SMALL)
+            .line_height(ui_text::line()),
+        position,
+    )
+    .gap(km::TOOL_GAP)
+    .into()
+}
+
+/// The auto-hide pin: upright while docked, turned 90° while the palette
+/// auto-hides.
 pub fn pin_button<'a>(
     id: PanelId,
     auto_collapse: bool,
     tip: tooltip::Position,
 ) -> Element<'a, Message> {
-    let icon = crate::ui::icons::themed_secondary(
-        if auto_collapse {
-            crate::ui::icons::PIN_ACTIVE
-        } else {
-            crate::ui::icons::PIN
-        },
-        12.0,
-    );
-    let pin = button(icon)
-        .on_press(Message::Dock(DockMsg::AutoCollapseToggle(id)))
-        .style(button::subtle)
-        .padding([3, 5]);
-    tooltip(pin, text(crate::t!("Auto-hide")).size(10), tip)
-        .gap(4)
-        .into()
+    pin_button_sized(
+        id,
+        auto_collapse,
+        tip,
+        crate::ui::style::kit_metrics::TITLE_ICON,
+    )
 }
 
-/// The close button of a panel's title bar.
+/// [`pin_button`] with an `icon`-sized pin (a floating palette's bar).
+pub fn pin_button_sized<'a>(
+    id: PanelId,
+    auto_collapse: bool,
+    tip: tooltip::Position,
+    icon: f32,
+) -> Element<'a, Message> {
+    let art = if auto_collapse {
+        crate::ui::icons::PIN_SIDE
+    } else {
+        crate::ui::icons::PIN
+    };
+    title_tip(
+        title_button(
+            title_icon_sized(art, icon),
+            Message::Dock(DockMsg::AutoCollapseToggle(id)),
+        ),
+        crate::t!("Auto-hide").into_owned(),
+        tip,
+    )
+}
+
 /// Desktop: move the pallet into a window of its own.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn detach_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
-    let detach = button(crate::ui::icons::themed_secondary(
-        crate::ui::icons::DETACH,
-        12.0,
-    ))
-    .on_press(Message::Dock(DockMsg::Detach(id)))
-    .style(button::subtle)
-    .padding([3, 5]);
+    let detach = title_button(
+        title_icon(crate::ui::icons::DETACH),
+        Message::Dock(DockMsg::Detach(id)),
+    );
     let detach = container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
-    tooltip(
+    title_tip(
         detach,
-        text(crate::t!("Open in its own window")).size(10),
+        crate::t!("Open in its own window").into_owned(),
         tip,
     )
-    .gap(4)
-    .into()
 }
 
+/// The close button of a panel's title bar.
 pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
-    let close = button(crate::ui::icons::themed_secondary(
-        crate::ui::icons::CLOSE,
-        12.0,
-    ))
-    .on_press(Message::Dock(DockMsg::Close(id)))
-    .style(button::subtle)
-    .padding([3, 5]);
-    tooltip(close, text(crate::t!("Close")).size(10), tip)
-        .gap(4)
-        .into()
+    close_button_sized(id, tip, crate::ui::style::kit_metrics::TITLE_ICON)
 }
 
-/// Side length of a panel toolbar button's icon.
-pub const TOOL_H: f32 = 22.0;
-
-/// A panel toolbar icon button, placed on the row under the title bar.
-pub fn tool_button<'a>(
-    icon: Element<'a, Message>,
-    tip: String,
-    message: Message,
+/// [`close_button`] with an `icon`-sized cross (a floating palette's bar).
+pub fn close_button_sized<'a>(
+    id: PanelId,
+    tip: tooltip::Position,
+    icon: f32,
 ) -> Element<'a, Message> {
-    let button = button(icon)
-        .on_press(message)
-        .width(Length::Fixed(TOOL_H + 8.0))
-        .height(Length::Fixed(TOOL_H + 8.0))
-        .style(|theme: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    theme.palette().background.strong.color
-                }
-                _ => Color::TRANSPARENT,
-            })),
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            text_color: crate::ui::window::block_palette::block_icon_button_text_color(
-                theme, status,
-            ),
-            ..Default::default()
-        });
-    tooltip(button, text(tip).size(10), tooltip::Position::Bottom)
-        .gap(4)
-        .into()
+    title_tip(
+        title_button(
+            title_icon_sized(crate::ui::icons::CLOSE, icon),
+            Message::Dock(DockMsg::Close(id)),
+        ),
+        crate::t!("Close").into_owned(),
+        tip,
+    )
 }
 
-/// A docked panel's body: its title bar flush along the top (as on the
-/// Properties panel), then the padded content; fixed width, full height, on
-/// the base background with a neutral edge.
-pub fn frame<'a>(
-    title_bar: Element<'a, Message>,
-    content: impl Into<Element<'a, Message>>,
-    width: f32,
-) -> Element<'a, Message> {
-    container(iced::widget::column![
-        title_bar,
-        container(content).padding(6).height(Length::Fill)
-    ])
-    .width(Length::Fixed(width))
-    .height(Length::Fill)
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
-        border: Border {
-            color: theme.palette().background.neutral.color,
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    })
-    .into()
+/// A palette's ☰ menu button for its title bar (the `extra` of
+/// [`title_bar_with`]).
+pub fn menu_button<'a>(message: Message, tip: String) -> Element<'a, Message> {
+    title_tip(
+        title_button(title_icon(crate::ui::icons::MENU), message),
+        tip,
+        tooltip::Position::Bottom,
+    )
+}
+
+/// The splitter between stacked palettes: a `SPLITTER_H` bar in
+/// `surface_raised` with five grip dots centred, lit in the accent while
+/// hovered or dragged (`active`). One widget for every palette.
+pub struct SplitterGrip {
+    /// The splitter is being dragged.
+    pub active: bool,
+}
+
+impl iced::widget::canvas::Program<Message> for SplitterGrip {
+    /// Whether the pointer was over the splitter at the last event.
+    type State = bool;
+
+    fn update(
+        &self,
+        hovered: &mut bool,
+        _event: &iced::widget::canvas::Event,
+        bounds: iced::Rectangle,
+        cursor: iced::advanced::mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        let over = cursor.is_over(bounds);
+        (over != *hovered).then(|| {
+            *hovered = over;
+            iced::widget::Action::request_redraw()
+        })
+    }
+
+    fn draw(
+        &self,
+        hovered: &bool,
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        cursor: iced::advanced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use crate::ui::style::{chrome as tokens, kit_metrics as km, text::snap_px};
+        let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            bounds.size(),
+            tokens::surface_raised(theme),
+        );
+        let lit = self.active || *hovered || cursor.is_over(bounds);
+        let color = if lit {
+            tokens::accent(theme)
+        } else {
+            tokens::muted(theme)
+        };
+        let n = km::SPLITTER_DOTS as f32;
+        let span = n * km::SPLITTER_DOT + (n - 1.0) * km::SPLITTER_DOT_GAP;
+        let x0 = snap_px((bounds.width - span) / 2.0);
+        let y = snap_px((bounds.height - km::SPLITTER_DOT) / 2.0);
+        for i in 0..km::SPLITTER_DOTS {
+            let x = x0 + i as f32 * (km::SPLITTER_DOT + km::SPLITTER_DOT_GAP);
+            frame.fill_rectangle(
+                iced::Point::new(x, y),
+                iced::Size::new(km::SPLITTER_DOT, km::SPLITTER_DOT),
+                color,
+            );
+        }
+        vec![frame.into_geometry()]
+    }
 }
 
 /// Rotated label shared by floating dock title bars and palette categories.
@@ -1509,7 +1665,7 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
             };
             frame.fill_text(iced::widget::canvas::Text {
                 content: self.text.clone(),
-                position: iced::Point::new(start, 0.0),
+                position: crate::ui::style::text::snap_point(iced::Point::new(start, 0.0)),
                 color: crate::ui::style::readable::muted_text(theme),
                 size: iced::Pixels(STRIP_LABEL_SIZE),
                 align_x,

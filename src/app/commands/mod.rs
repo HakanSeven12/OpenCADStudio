@@ -1432,6 +1432,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "3O",
         "ABOUT",
         "CHECKFORUPDATES",
+        "POPMENU",
         "ATTACH",
         "ATTDISP",
         "ATTEXT",

@@ -5211,6 +5211,13 @@ impl Scene {
                         *handle,
                     )
                     .is_empty();
+                    // The fresh picture stores each cell's raw text; a formula
+                    // cell's picture must carry its computed value instead.
+                    rebuilt |= !crate::entities::table::refresh_picture_formulas(
+                        &mut self.document,
+                        *handle,
+                    )
+                    .is_empty();
                     // A reader may rebuild the table from its TABLECONTENT
                     // copy: keep the copy in step, with its old value on record.
                     if let Some((content, before)) =
@@ -9291,7 +9298,9 @@ impl Scene {
         Some((effective - expected).abs() <= 1.0e-6 * expected.max(1.0))
     }
     pub fn sync_viewport_annotation_scale(&mut self) -> bool {
-        let Some(viewport) = self.explicit_viewport_handle() else {
+        // Same fallback as the pill and the displayed scale name: an active
+        // viewport wins, then a picked one, then the first with content.
+        let Some(viewport) = self.target_viewport_handle() else {
             return false;
         };
         let Some(scale_handle) = self.viewport_scale_handle(viewport) else {

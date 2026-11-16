@@ -2,7 +2,7 @@ use super::status_menu::{self, Entry};
 use crate::app::Message;
 use crate::input::spacemouse::{NavigationMode, Preferences, Status};
 use iced::widget::{button, row, text};
-use iced::{Element, Fill};
+use iced::Element;
 
 pub(crate) fn view(
     preferences: Preferences,
@@ -22,57 +22,36 @@ pub(crate) fn view(
     )
     .padding([3, 6])
     .style(button::subtle);
-    let mut entries = vec![Entry::stay(
-        text(format!("SpaceMouse · {}", crate::t!(status.label()))).size(11),
-    )];
+    use crate::ui::kit::menu::{entry, Item, Mark};
+    let mut entries = vec![Entry::stay(entry(Item::Heading(format!(
+        "SpaceMouse · {}",
+        crate::t!(status.label())
+    ))))];
     for mode in NavigationMode::ALL {
-        let label = format!(
-            "{}  {}",
-            if mode == preferences.mode {
-                "●"
-            } else {
-                "○"
-            },
-            crate::t!(mode.label())
-        );
-        entries.push(Entry::close(
-            button(text(label).size(12))
-                .width(Fill)
-                .padding([7, 10])
-                .style(button::text)
-                .on_press(Message::SpaceMouseMode(mode)),
-        ));
+        entries.push(Entry::close(entry(
+            Item::new(crate::t!(mode.label()), Message::SpaceMouseMode(mode))
+                .mark(Mark::Radio(mode == preferences.mode)),
+        )));
     }
     if sheet {
-        entries.push(Entry::stay(
-            text(crate::t!("Paper sheets keep rotation locked.")).size(11),
-        ));
+        entries.push(Entry::stay(entry(Item::Heading(
+            crate::t!("Paper sheets keep rotation locked.").into_owned(),
+        ))));
     }
-    entries.push(Entry::close(
-        button(
-            text(crate::t!(if paused {
-                "Resume SpaceMouse"
-            } else {
-                "Pause SpaceMouse"
-            }))
-            .size(12),
-        )
-        .on_press(Message::SpaceMousePause)
-        .style(button::text)
-        .width(Fill)
-        .padding([7, 10]),
-    ));
+    entries.push(Entry::stay(entry(Item::Separator)));
+    entries.push(Entry::close(entry(Item::new(
+        crate::t!(if paused {
+            "Resume SpaceMouse"
+        } else {
+            "Pause SpaceMouse"
+        }),
+        Message::SpaceMousePause,
+    ))));
     for (label, message) in [
         ("SpaceMouse preferences…", Message::SpaceMousePreferences),
         ("3Dconnexion settings…", Message::SpaceMouseDriverSettings),
     ] {
-        entries.push(Entry::close(
-            button(text(crate::t!(label)).size(12))
-                .on_press(message)
-                .style(button::text)
-                .width(Fill)
-                .padding([7, 10]),
-        ));
+        entries.push(Entry::close(entry(Item::new(crate::t!(label), message))));
     }
     status_menu::menu_bar(root, entries, 260.)
 }

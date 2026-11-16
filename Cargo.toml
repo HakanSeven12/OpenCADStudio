@@ -1,6 +1,6 @@
 [package]
 name = "OpenCADStudio"
-version = "2026.45.0"
+version = "2026.46.0"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
@@ -56,10 +56,9 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
 hayro = "0.7.1"
 kurbo = "0.13"
-# Pure-Rust CRS resolution and projection for document GEODATA. Keep the
-# embedded EPSG data and WKT parser on the same native/wasm path.
+# Pure-Rust CRS resolution and projection for document GEODATA. The embedded
+# EPSG data runs on native and wasm; the WKT parser is native-only (below).
 proj4rs = { version = "0.3", default-features = false, features = ["crs-definitions", "wasm-strict"] }
-proj4wkt = { version = "0.2", default-features = false, features = ["wasm-strict"] }
 crs-definitions = "0.6"
 # DWF/DWFx packages, their XPS pages and DWF/DGN underlay rasters.
 zip = { version = "8", default-features = false, features = ["deflate"] }
@@ -138,6 +137,13 @@ i18n-embed = { version = "0.16", features = ["desktop-requester"] }
 rayon = "1"
 open = "5"
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "win-system-proxy"] }
+# Text inside SVG images (plugin charts: `DialogControl::Svg`). iced's `svg`
+# feature leaves usvg without text shaping, so every <text> was dropped. Named
+# here only to switch the renderer's `svg-text` feature on (wgpu and tiny-skia).
+iced_renderer = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39", features = ["svg-text"] }
+# WKT to PROJ for GEODATA without an EPSG authority. Native-only: on wasm the
+# crate always exports its own `main`, which breaks linking the web app.
+proj4wkt = { version = "0.2", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 ocs_plugin_api = { path = "crates/ocs_plugin_api" }

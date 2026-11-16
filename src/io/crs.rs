@@ -45,8 +45,7 @@ impl CrsDefinition {
                 );
             }
         }
-        let proj4 = proj4wkt::wkt_to_projstring(wkt)
-            .map_err(|error| format!("Cannot parse the CRS WKT: {error}"))?;
+        let proj4 = wkt_to_proj4(wkt)?;
         Self::from_parts(None, proj4, Some(wkt.to_string()))
     }
 
@@ -58,8 +57,7 @@ impl CrsDefinition {
         if wkt.is_empty() {
             return Err("The CRS WKT is empty".to_string());
         }
-        let proj4 = proj4wkt::wkt_to_projstring(wkt)
-            .map_err(|error| format!("Cannot parse the CRS WKT: {error}"))?;
+        let proj4 = wkt_to_proj4(wkt)?;
         Self::from_parts(root_epsg_code(wkt), proj4, Some(wkt.to_string()))
     }
 
@@ -566,6 +564,18 @@ fn crs_name(wkt: &str) -> Option<String> {
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
     Some(rest[..end].trim().to_string()).filter(|name| !name.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn wkt_to_proj4(wkt: &str) -> Result<String, String> {
+    proj4wkt::wkt_to_projstring(wkt).map_err(|error| format!("Cannot parse the CRS WKT: {error}"))
+}
+
+/// The WKT parser cannot link into the web build; WKT naming an EPSG
+/// authority still resolves through the embedded registry.
+#[cfg(target_arch = "wasm32")]
+fn wkt_to_proj4(_wkt: &str) -> Result<String, String> {
+    Err("WKT without an EPSG authority is not supported on the web; use an EPSG code".to_string())
 }
 
 /// The EPSG AUTHORITY/ID directly on the root WKT node. A nested GEOGCS

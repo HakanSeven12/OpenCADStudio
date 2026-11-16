@@ -14,6 +14,7 @@ use iced::widget::{container, mouse_area, row, text, text_input};
 use iced::{Background, Element, Fill, Theme};
 
 const LOCK: &[u8] = include_bytes!("../../../assets/icons/ui/lock.svg");
+const ANNOTATIVE: &[u8] = include_bytes!("../../../assets/icons/ui/annotative.svg");
 
 /// Shared id for the inline rename field, so the rename-start handler can focus
 /// it the moment the row turns editable.
@@ -36,6 +37,7 @@ pub fn item<'a>(
     rename_buf: &'a str,
     can_rename: bool,
     info: Option<StyleRow>,
+    on_right: Option<Message>,
 ) -> Element<'a, Message> {
     if rename_active == Some(name) {
         text_input("", rename_buf)
@@ -69,7 +71,14 @@ pub fn item<'a>(
         } else {
             name_text
         };
-        let mut label = row![mark, name_text].spacing(4).align_y(iced::Center);
+        let mut label = row![mark].spacing(4).align_y(iced::Center);
+        // An annotative style carries the annotative mark before its name.
+        if info.is_some_and(|info| info.annotative) {
+            label = label.push(crate::ui::icons::tinted(ANNOTATIVE, 11.0, |theme: &Theme| {
+                theme.palette().primary.base.color
+            }));
+        }
+        let mut label = label.push(name_text);
         if let Some(info) = info {
             let count = text(info.count.to_string())
                 .size(10)
@@ -101,7 +110,10 @@ pub fn item<'a>(
                     ..Default::default()
                 }
             });
-        let area = mouse_area(cell).on_press(on_select);
+        let mut area = mouse_area(cell).on_press(on_select);
+        if let Some(message) = on_right {
+            area = area.on_right_press(message);
+        }
         let area: Element<'a, Message> = if can_rename {
             area.on_double_click(Message::StyleRenameStart(kind, name.to_string()))
                 .into()

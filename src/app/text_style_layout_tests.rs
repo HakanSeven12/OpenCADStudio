@@ -184,9 +184,9 @@ fn a_shape_file_entry_is_not_listed_or_offered_for_comparison() {
 }
 
 #[test]
-fn delete_is_off_for_standard_and_a_style_texts_use() {
+fn delete_is_off_for_standard_and_a_style_in_use_says_why() {
     let mut app = manager();
-    for (style, on) in [("Standard", false), ("Notes", false), ("Spare", true)] {
+    for (style, on) in [("Standard", false), ("Notes", true), ("Spare", true)] {
         let _ = app.update(Message::TextStyleDialogSelect(style.into()));
         let mut ui = window(&app, 1280.0);
         let _ = ui.click("Delete");
@@ -195,6 +195,14 @@ fn delete_is_off_for_standard_and_a_style_texts_use() {
             .any(|message| matches!(message, Message::TextStyleDialogDelete));
         assert_eq!(deleted, on, "{style}");
     }
+    // A style texts use answers why it stays.
+    let _ = app.update(Message::TextStyleDialogSelect("Notes".into()));
+    let _ = app.update(Message::TextStyleDialogDelete);
+    assert!(matches!(
+        app.textstyle_card,
+        Some(crate::ui::style::textstyle::Card::InUse)
+    ));
+    assert!(app.style_exists(StyleKind::Text, "Notes"));
 }
 
 #[test]

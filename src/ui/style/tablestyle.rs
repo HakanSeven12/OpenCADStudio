@@ -320,7 +320,7 @@ fn draw_cell_text(
         frame.rotate(-cell.angle);
         frame.fill_text(canvas::Text {
             content,
-            position: Point::ORIGIN,
+            position: crate::ui::style::text::snap_point(Point::ORIGIN),
             color: cell.text_color.unwrap_or(ink),
             size: iced::Pixels(size),
             align_x,
@@ -1041,6 +1041,10 @@ pub fn view_window<'a>(
         apply_blocked: None,
         rows: None,
         compact: false,
+        apply_pending: true,
+        delete_in_use: false,
+        on_context: None,
+        context_menu: None,
         editor,
     })
 }

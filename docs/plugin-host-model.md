@@ -81,8 +81,9 @@ recorded, so a failure changes nothing and leaves the history alone.
 - **Linetypes:** simple dash, gap and dot patterns; rename follows layers and
   entities; delete is refused while anything uses it.
 - **Layouts:** create with the default page setup and sheet viewport, rename, delete,
-  switch (through OCS's own layout switch), and page setup (paper size, rotation,
-  custom scale). `Model` is protected.
+  switch (through OCS's own layout switch), page setup (paper size, rotation,
+  custom scale) and the order of the layout tabs (API v23, one undo step).
+  `Model` is protected.
 
 Style and layout operations act on the active document, because they use the
 application's shared style and view machinery.

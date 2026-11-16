@@ -7,12 +7,13 @@ use crate::command::CmdOption;
 use crate::t;
 use iced::widget::{
     button, column, container, opaque, row, rule, scrollable, stack, text, text_editor, text_input,
-    tooltip, Space,
+    Space,
 };
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 use std::ops::Range;
 
 use crate::ui::style::common::accessible_accent_threshold;
+use crate::ui::style::{kit_metrics as km, text as ui_text};
 
 /// Maximum entries kept for the context menu's "Recent Input" list.
 pub const RECENT_INPUT_CAP: usize = 10;
@@ -47,6 +48,28 @@ pub fn history_max_height(window_height: f32) -> f32 {
 /// How many autocomplete matches the suggestion popup shows at once.
 const AUTOCOMPLETE_LIMIT: usize = 8;
 
+// ── The bar's sizes ────────────────────────────────────────────────────────
+/// A history line's padding, and a suggestion row's.
+const LINE_PAD: [f32; 2] = [km::LINE, km::GRID_INSET_L];
+const ROW_PAD: [f32; 2] = [2.0 * km::LINE, km::GRID_INSET_L];
+/// An option pill's padding, and a small button's.
+const PILL_PAD: [f32; 2] = [km::LINE, crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X];
+const BUTTON_PAD: [f32; 2] = [
+    2.0 * km::LINE,
+    crate::ui::style::kit_metrics::DROPDOWN_ITEM_PAD_X,
+];
+/// Around the "Command:" prompt, and around the autocomplete list.
+const PROMPT_PAD: [f32; 2] = [5.0, km::GRID_INSET_L];
+const LIST_PAD: [f32; 2] = [km::TOOL_GAP, km::GRID_INSET_L];
+/// Between a row's parts, and between the bar's buttons.
+const ITEM_GAP: f32 = km::TAB_INNER_GAP;
+const BUTTON_GAP: f32 = 2.0 * km::LINE;
+/// A colour swatch in a suggestion row, and the slot its icon takes.
+const SWATCH: f32 = 12.0;
+const ICON_SLOT: f32 = km::CHECK;
+/// The input row: the drawing tab bar's and status bar's height.
+const BAR_H: f32 = 30.0;
+
 fn cmd_input_id() -> iced::widget::Id {
     iced::widget::Id::new(CMD_INPUT_ID)
 }
@@ -55,21 +78,20 @@ fn cmd_input_id() -> iced::widget::Id {
 /// `user_select` / `getpoint` is parked and the person at the screen must
 /// answer — outranks `busy`: the screen has to say "act now", not just
 /// "something is running".
-fn mcp_status(enabled: bool, busy: bool, waiting: bool) -> (&'static str, Color) {
+fn mcp_status(enabled: bool, busy: bool, waiting: bool) -> (&'static str, fn(&Theme) -> Color) {
     if !enabled {
-        ("MCP control is off", Color::from_rgb(0.90, 0.35, 0.35))
+        ("MCP control is off", crate::ui::style::chrome::danger)
     } else if waiting {
         (
             "MCP is waiting for you to pick — Enter confirms, Esc cancels",
-            Color::from_rgb(0.30, 0.55, 0.98),
+            crate::ui::style::chrome::accent,
         )
     } else if busy {
-        (
-            "MCP is handling a request",
-            Color::from_rgb(0.95, 0.72, 0.25),
-        )
+        ("MCP is handling a request", |theme: &Theme| {
+            theme.palette().warning.base.color
+        })
     } else {
-        ("MCP control is ready", Color::from_rgb(0.35, 0.85, 0.55))
+        ("MCP control is ready", crate::ui::style::chrome::success)
     }
 }
 
@@ -161,6 +183,9 @@ fn format_error(msg: &str) -> String {
 }
 
 const MAX_HISTORY: usize = 64;
+
+/// Opacity of the accent behind selected history text.
+const HISTORY_SELECTION_ALPHA: f32 = 0.5;
 
 #[derive(Clone)]
 pub struct CommandLine {
@@ -871,6 +896,7 @@ impl CommandLine {
     /// The Command History pallet: the whole log in one read-only editor
     /// (select across lines, Ctrl+C), with Copy and Clear, filling the
     /// pallet. It stays open beside the drawing or in a window of its own.
+    /// The Command History palette: a toolbar (copy, clear) over the log.
     pub fn history_panel<'a>(
         &'a self,
         history_content: &'a text_editor::Content,
@@ -882,62 +908,59 @@ impl CommandLine {
             t!("Command History").into_owned(),
             chrome,
         );
+        use crate::ui::kit;
+        use crate::ui::style::{chrome, kit_metrics as km};
         let log = text_editor(history_content)
             .on_action(Message::CommandHistoryEdit)
-            .size(11)
-            .padding([2, 8])
+            .size(crate::ui::style::text::UI)
+            .line_height(crate::ui::style::text::line())
+            .padding(0)
             .height(Length::Shrink)
             .highlight_with::<HistoryHighlighter>(
                 self.history_highlight_settings(),
                 history_highlight_format,
             )
-            .style(|theme: &Theme, _status| {
-                let palette = theme.palette();
-                text_editor::Style {
-                    background: Background::Color(palette.background.base.color),
-                    border: Border::default(),
-                    placeholder: crate::ui::style::readable::hint_text(theme),
-                    value: palette.background.base.text,
-                    selection: palette.primary.base.color.scale_alpha(0.5),
-                }
+            .style(|theme: &Theme, _status| text_editor::Style {
+                background: Background::Color(chrome::surface(theme)),
+                border: Border::default(),
+                placeholder: chrome::muted(theme),
+                value: chrome::text(theme),
+                selection: chrome::accent(theme).scale_alpha(HISTORY_SELECTION_ALPHA),
             });
-        let log = scrollable(log)
-            .height(Length::Fill)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(8).scroller_width(6),
-            ))
-            .anchor_bottom();
-        let tool = |icon: Element<'a, Message>, label: String, msg: Message| {
-            button(
-                row![icon, text(label).size(11)]
-                    .spacing(4)
-                    .align_y(iced::Center),
-            )
-            .on_press(msg)
-            .style(header_btn_style)
-            .padding([2, 6])
-        };
-        let header = container(
-            row![
-                Space::new().width(Length::Fill),
-                tool(
-                    crate::ui::icons::themed_success(crate::ui::icons::COPY, 11.0),
-                    t!("Copy").into_owned(),
-                    Message::CommandHistoryCopy,
-                ),
-                tool(
-                    crate::ui::icons::themed_warning(crate::ui::icons::TRASH, 11.0),
-                    t!("Clear").into_owned(),
-                    Message::CommandHistoryClear,
-                ),
-            ]
-            .spacing(6)
-            .align_y(iced::Center),
+        // The log scrolls like a palette's grid, kept at its newest line.
+        let log = scrollable(container(log).padding(iced::Padding {
+            left: km::GRID_INSET_L,
+            right: km::GRID_INSET_R,
+            ..iced::Padding::ZERO
+        }))
+        .height(Length::Fill)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(km::SCROLLBAR_W)
+                .scroller_width(km::SCROLL_THUMB_W)
+                .margin(0),
+        ))
+        .style(kit::scroll_style)
+        .anchor_bottom();
+        let tools = kit::toolbar(vec![
+            kit::tool_button(
+                kit::tool_icon(crate::ui::icons::COPY),
+                t!("Copy").into_owned(),
+                Some(Message::CommandHistoryCopy),
+                false,
+            ),
+            kit::tool_button(
+                kit::tool_icon(crate::ui::icons::TRASH),
+                t!("Clear").into_owned(),
+                Some(Message::CommandHistoryClear),
+                false,
+            ),
+        ]);
+        kit::palette(
+            title_bar,
+            column![tools, Space::new().height(km::TOOL_GAP), log],
+            width,
         )
-        .width(Length::Fill)
-        .padding([2, 8]);
-        let body = container(column![header, log]).height(Length::Fill);
-        crate::ui::dock::frame(title_bar, body, width)
     }
 
     pub fn view<'a>(
@@ -1003,18 +1026,20 @@ impl CommandLine {
                 // listing is dropped here (the history log keeps the full text).
                 if entry.pinned && !self.step_options.is_empty() {
                     let shown = strip_option_listing(&entry.text, &self.step_options);
-                    let mut r = row![entry_text(shown)].spacing(6).align_y(iced::Center);
+                    let mut r = row![entry_text(shown)]
+                        .spacing(ITEM_GAP)
+                        .align_y(iced::Center);
                     for opt in &self.step_options {
                         // The letters to type are drawn in the accent colour,
                         // so the short form of each option can be seen.
                         let (before, short, after) = option_shortcut(&opt.label);
                         let part = |s: &str| {
                             text(s.to_string())
-                                .size(11)
+                                .size(ui_text::UI)
                                 .wrapping(iced::widget::text::Wrapping::None)
                         };
                         let accent = |theme: &Theme| iced::widget::text::Style {
-                            color: Some(theme.palette().primary.base.color),
+                            color: Some(crate::ui::style::chrome::accent(theme)),
                         };
                         // A translated label whose capitals are not what is
                         // typed shows the keyword itself instead.
@@ -1037,23 +1062,28 @@ impl CommandLine {
                         };
                         let btn = button(label)
                             .on_press(Message::CommandOptionPick(opt.keyword.clone()))
-                            .padding([1, 6])
+                            .padding(PILL_PAD)
                             .style(|theme: &Theme, status| {
-                                let palette = theme.palette();
                                 let pair = if matches!(
                                     status,
                                     button::Status::Hovered | button::Status::Pressed
                                 ) {
-                                    palette.primary.weak
+                                    iced::theme::palette::Pair::new(
+                                        crate::ui::style::chrome::lit(theme),
+                                        crate::ui::style::chrome::strong(theme),
+                                    )
                                 } else {
-                                    palette.background.weakest
+                                    iced::theme::palette::Pair::new(
+                                        crate::ui::style::chrome::surface_raised(theme),
+                                        crate::ui::style::chrome::text(theme),
+                                    )
                                 };
                                 button::Style {
                                     background: Some(Background::Color(pair.color)),
                                     text_color: pair.text,
                                     border: Border {
-                                        color: palette.background.neutral.color,
-                                        width: 1.0,
+                                        color: crate::ui::style::chrome::border(theme),
+                                        width: km::line(),
                                         radius: 3.0.into(),
                                     },
                                     ..Default::default()
@@ -1065,9 +1095,9 @@ impl CommandLine {
                     // long option ("Select Multiple Text") moves to the next
                     // line rather than being squeezed until its text spills
                     // out of its border.
-                    col.push(container(r.wrap().vertical_spacing(2.0)).padding([1, 8]))
+                    col.push(container(r.wrap().vertical_spacing(BUTTON_GAP)).padding(LINE_PAD))
                 } else {
-                    col.push(container(entry_text(entry.text.clone())).padding([1, 8]))
+                    col.push(container(entry_text(entry.text.clone())).padding(LINE_PAD))
                 }
             });
         let prompt = container(
@@ -1078,47 +1108,56 @@ impl CommandLine {
                     let p = theme.palette();
                     let color = accessible_accent_threshold(
                         p.success.base.color,
-                        p.background.base.color,
-                        p.background.base.text,
+                        crate::ui::style::chrome::surface(theme),
+                        crate::ui::style::chrome::text(theme),
                         4.5,
                     );
                     iced::widget::text::Style { color: Some(color) }
                 }),
         )
-        .padding([5, 8]);
+        .padding(PROMPT_PAD);
         // Literal-space toggle: while active, every line behaves as if it
         // started with `>` — Space stays in the line instead of submitting, so
         // arguments with spaces (text strings, paths, `UCS Z 90` as one line)
         // can be typed. Persists until toggled off; a hand-typed leading `>`
         // lights the button too (same mode, one line only).
         let literal_active = self.literal_spaces || self.input.starts_with('>');
-        let literal_btn = button(text(">").size(11))
+        let literal_btn = button(text(">").size(ui_text::UI))
             .on_press(Message::CommandLiteralToggle)
-            .padding([2, 6])
+            .padding(BUTTON_PAD)
             .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
                 let pair = if literal_active {
-                    palette.primary.weak
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::lit(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    )
                 } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    palette.background.weak
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::hover(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    )
                 } else {
-                    palette.background.weakest
+                    iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::surface_raised(theme),
+                        crate::ui::style::chrome::text(theme),
+                    )
                 };
                 button::Style {
                     background: Some(Background::Color(pair.color)),
                     text_color: pair.text,
                     border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
+                        color: crate::ui::style::chrome::border(theme),
+                        width: km::line(),
                         radius: 3.0.into(),
                     },
                     ..Default::default()
                 }
             });
-        let literal_tip = container(text(crate::tr!("command-line", "literal-spaces")).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box);
-        let literal_btn = tooltip(literal_btn, literal_tip, tooltip::Position::Top).gap(4);
+        let literal_btn = crate::ui::kit::tooltip(
+            literal_btn,
+            crate::tr!("command-line", "literal-spaces"),
+            crate::ui::kit::TipPosition::Top,
+        );
         // While dynamic input is capturing keystrokes, the command-line
         // text field is left without an `on_input` handler so it can't
         // grab focus or swallow numeric keys — those flow through the
@@ -1164,7 +1203,7 @@ impl CommandLine {
                     let is_selected = idx == cursor;
                     let details = self.contextual_suggestions.get(idx);
 
-                    let mut label = row![].spacing(6).align_y(iced::Center);
+                    let mut label = row![].spacing(ITEM_GAP).align_y(iced::Center);
 
                     if let Some(details) = details {
                         if let Some(visible) = details.visible {
@@ -1196,14 +1235,14 @@ impl CommandLine {
                                 .style(move |theme: &Theme| container::Style {
                                     background: Some(Background::Color(swatch_color)),
                                     border: Border {
-                                        color: theme.palette().background.strong.color,
-                                        width: 1.0,
+                                        color: crate::ui::style::chrome::border(theme),
+                                        width: km::line(),
                                         radius: 1.0.into(),
                                     },
                                     ..Default::default()
                                 })
-                                .width(12)
-                                .height(12);
+                                .width(SWATCH)
+                                .height(SWATCH);
 
                             label = label.push(swatch);
                         }
@@ -1218,13 +1257,13 @@ impl CommandLine {
                             });
                         let icon: Element<'_, Message> = match icon_bytes {
                             Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
-                            None => Space::new().width(14.0).into(),
+                            None => Space::new().width(ICON_SLOT).into(),
                         };
 
                         label = label.push(icon);
                     }
 
-                    label = label.push(text(cmd.clone()).size(11));
+                    label = label.push(text(cmd.clone()).size(ui_text::UI));
                     if details.is_none() {
                         let target = self.command_aliases.get(cmd.as_str()).map(String::as_str);
                         if let Some(summary) =
@@ -1232,14 +1271,13 @@ impl CommandLine {
                         {
                             label = label.push(
                                 text(summary)
-                                    .size(11)
+                                    .size(ui_text::UI)
                                     .wrapping(iced::widget::text::Wrapping::None)
                                     .style(move |theme: &Theme| {
-                                        let palette = theme.palette();
                                         let base = if is_selected {
-                                            palette.primary.weak.text
+                                            crate::ui::style::chrome::strong(theme)
                                         } else {
-                                            palette.background.base.text
+                                            crate::ui::style::chrome::text(theme)
                                         };
                                         iced::widget::text::Style {
                                             color: Some(Color { a: 0.7, ..base }),
@@ -1252,18 +1290,26 @@ impl CommandLine {
                     let row = button(label)
                         .on_press(Message::CommandSuggestionPick(cmd.clone()))
                         .width(Length::Fill)
-                        .padding([2, 8])
+                        .padding(ROW_PAD)
                         .style(move |theme: &Theme, status| {
-                            let palette = theme.palette();
                             let pair = if is_selected {
-                                palette.primary.weak
+                                iced::theme::palette::Pair::new(
+                                    crate::ui::style::chrome::lit(theme),
+                                    crate::ui::style::chrome::strong(theme),
+                                )
                             } else if matches!(
                                 status,
                                 button::Status::Hovered | button::Status::Pressed
                             ) {
-                                palette.background.weak
+                                iced::theme::palette::Pair::new(
+                                    crate::ui::style::chrome::hover(theme),
+                                    crate::ui::style::chrome::strong(theme),
+                                )
                             } else {
-                                palette.background.base
+                                iced::theme::palette::Pair::new(
+                                    crate::ui::style::chrome::surface(theme),
+                                    crate::ui::style::chrome::text(theme),
+                                )
                             };
                             button::Style {
                                 background: Some(Background::Color(pair.color)),
@@ -1295,7 +1341,7 @@ impl CommandLine {
         let dropdown_btn = button(dropdown_icon)
             .on_press(Message::CommandHistoryToggle)
             .style(button::text)
-            .padding([4, 8]);
+            .padding(LIST_PAD);
         let input_with_history = stack![
             input,
             container(dropdown_btn)
@@ -1306,60 +1352,66 @@ impl CommandLine {
         ]
         .width(Length::Fill);
         let (mcp_tooltip, mcp_color) = mcp_status(control_enabled, control_busy, pick_pending);
-        let mcp_btn = button(text("MCP").size(11))
+        let mcp_btn = button(text("MCP").size(ui_text::UI))
             .on_press(Message::ControlToggle)
             .style(move |theme: &Theme, status| {
+                let mcp_color = mcp_color(theme);
                 let mut style = button::subtle(theme, status);
                 style.background = Some(Background::Color(mcp_color));
                 style.text_color = Color::from_rgb(0.08, 0.08, 0.10);
                 style.border.color = mcp_color;
-                style.border.width = 1.0;
+                style.border.width = km::line();
                 style
             })
-            .padding([2, 6]);
-        let mcp_tip = container(text(t!(mcp_tooltip)).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box);
-        let mcp_btn = tooltip(mcp_btn, mcp_tip, tooltip::Position::Top).gap(4);
-        let mcp_copy_btn = button(crate::ui::icons::themed(crate::ui::icons::COPY, 13.0))
-            .on_press(Message::ControlCopySetup)
-            .style(button::subtle)
-            .padding([2, 6]);
-        let mcp_copy_tip = container(text(t!("Copy MCP client setup")).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box);
-        let mcp_copy_btn = tooltip(mcp_copy_btn, mcp_copy_tip, tooltip::Position::Top).gap(4);
-        let mcp_btn = container(row![mcp_btn, mcp_copy_btn].spacing(2).align_y(iced::Center))
-            .padding(Padding {
-                top: 0.0,
-                right: 6.0,
-                bottom: 0.0,
-                left: 0.0,
-            });
-        let graph_btn = button(crate::ui::icons::themed(crate::ui::icons::NODE_GRAPH, 13.0))
-            .on_press(Message::Graph(crate::ui::node_graph::GraphMsg::Toggle))
-            .style(move |theme: &Theme, status| {
-                if graph_open {
-                    button::primary(theme, status)
-                } else {
-                    button::subtle(theme, status)
-                }
-            })
-            .padding([2, 6]);
-        let graph_tip = container(text(t!("Node graph")).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box);
-        let graph_btn = tooltip(graph_btn, graph_tip, tooltip::Position::Top).gap(4);
+            .padding(BUTTON_PAD);
+        let mcp_btn =
+            crate::ui::kit::tooltip(mcp_btn, t!(mcp_tooltip), crate::ui::kit::TipPosition::Top);
+        let mcp_copy_btn = button(crate::ui::icons::themed(
+            crate::ui::icons::COPY,
+            km::BAR_ICON,
+        ))
+        .on_press(Message::ControlCopySetup)
+        .style(crate::ui::kit::flat_button_style(false))
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
+        let mcp_copy_btn = crate::ui::kit::tooltip(
+            mcp_copy_btn,
+            t!("Copy MCP client setup"),
+            crate::ui::kit::TipPosition::Top,
+        );
+        let mcp_btn = container(
+            row![mcp_btn, mcp_copy_btn]
+                .spacing(BUTTON_GAP)
+                .align_y(iced::Center),
+        )
+        .padding(Padding {
+            top: 0.0,
+            right: 6.0,
+            bottom: 0.0,
+            left: 0.0,
+        });
+        let graph_btn = button(crate::ui::icons::themed(
+            crate::ui::icons::NODE_GRAPH,
+            km::BAR_ICON,
+        ))
+        .on_press(Message::Graph(crate::ui::node_graph::GraphMsg::Toggle))
+        .style(crate::ui::kit::flat_button_style(graph_open))
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
+        let graph_btn = crate::ui::kit::tooltip(
+            graph_btn,
+            t!("Node graph"),
+            crate::ui::kit::TipPosition::Top,
+        );
         // Enter without a keyboard (touch screens): the same as the context
         // menu's Enter.
-        let enter_btn = button(crate::ui::icons::themed(crate::ui::icons::CHECK, 13.0))
-            .on_press(Message::CommandFinalize)
-            .style(button::subtle)
-            .padding([2, 6]);
-        let enter_tip = container(text(t!("Enter")).size(11))
-            .padding([3, 6])
-            .style(container::bordered_box);
-        let enter_btn = tooltip(enter_btn, enter_tip, tooltip::Position::Top).gap(4);
+        let enter_btn = button(crate::ui::icons::themed(
+            crate::ui::icons::CHECK,
+            km::BAR_ICON,
+        ))
+        .on_press(Message::CommandFinalize)
+        .style(crate::ui::kit::flat_button_style(false))
+        .padding([km::LINE * 2.0, km::TOOL_GAP]);
+        let enter_btn =
+            crate::ui::kit::tooltip(enter_btn, t!("Enter"), crate::ui::kit::TipPosition::Top);
         let input_row = row![
             prompt,
             literal_btn,
@@ -1368,7 +1420,7 @@ impl CommandLine {
             graph_btn,
             mcp_btn
         ]
-        .spacing(4)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
 
         // Full backlog dropdown — appears ABOVE the input pill when open. The
@@ -1384,58 +1436,57 @@ impl CommandLine {
                 .clamp(HISTORY_HEIGHT_MIN, history_max_height(window_height));
             let log = text_editor(history_content)
                 .on_action(Message::CommandHistoryEdit)
-                .size(11)
-                .padding([2, 8])
+                .size(ui_text::UI)
+                .padding(ROW_PAD)
                 .height(Length::Shrink)
                 .highlight_with::<HistoryHighlighter>(
                     self.history_highlight_settings(),
                     history_highlight_format,
                 )
-                .style(|theme: &Theme, _status| {
-                    let palette = theme.palette();
-                    text_editor::Style {
-                        background: Background::Color(palette.background.base.color),
-                        border: Border::default(),
-                        placeholder: crate::ui::style::readable::hint_text(theme),
-                        value: palette.background.base.text,
-                        selection: palette.primary.base.color.scale_alpha(0.5),
-                    }
+                .style(|theme: &Theme, _status| text_editor::Style {
+                    background: Background::Color(crate::ui::style::chrome::surface(theme)),
+                    border: Border::default(),
+                    placeholder: crate::ui::style::readable::hint_text(theme),
+                    value: crate::ui::style::chrome::text(theme),
+                    selection: crate::ui::style::chrome::accent(theme).scale_alpha(0.5),
                 });
             let log = scrollable(log)
                 .id(iced::widget::Id::new(HISTORY_SCROLL_ID))
                 .height(Length::Fixed(history_height))
                 .direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new().width(8).scroller_width(6),
+                    scrollable::Scrollbar::new()
+                        .width(km::SCROLL_THUMB_W + 2.0 * km::LINE)
+                        .scroller_width(km::SCROLL_THUMB_W),
                 ))
                 .anchor_bottom();
             // Header strip: a Copy-all and a Clear button pinned above the log.
             let copy_btn = button(
                 row![
                     crate::ui::icons::themed_success(crate::ui::icons::COPY, 11.0),
-                    text(t!("Copy")).size(11),
+                    text(t!("Copy")).size(ui_text::UI),
                 ]
-                .spacing(4)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center),
             )
             .on_press(Message::CommandHistoryCopy)
             .style(header_btn_style)
-            .padding([2, 6]);
+            .padding(BUTTON_PAD);
             let clear_btn = button(
                 row![
                     crate::ui::icons::themed_warning(crate::ui::icons::TRASH, 11.0),
-                    text(t!("Clear")).size(11),
+                    text(t!("Clear")).size(ui_text::UI),
                 ]
-                .spacing(4)
+                .spacing(km::TOOL_GAP)
                 .align_y(iced::Center),
             )
             .on_press(Message::CommandHistoryClear)
             .style(header_btn_style)
-            .padding([2, 6]);
+            .padding(BUTTON_PAD);
             // Collapses the console back to the single input line (#1094).
             let collapse_btn = button(crate::ui::icons::themed_arrow_down(11.0))
                 .on_press(Message::CommandHistoryToggle)
                 .style(header_btn_style)
-                .padding([2, 6]);
+                .padding(BUTTON_PAD);
             let header = container(
                 row![
                     Space::new().width(Length::Fill),
@@ -1443,11 +1494,11 @@ impl CommandLine {
                     clear_btn,
                     collapse_btn
                 ]
-                .spacing(6)
+                .spacing(ITEM_GAP)
                 .align_y(iced::Center),
             )
             .width(Length::Fill)
-            .padding([2, 8]);
+            .padding(ROW_PAD);
             let panel = container(column![header, log])
                 .width(Length::Fill)
                 .padding(Padding {
@@ -1490,12 +1541,12 @@ impl CommandLine {
                 container(history_rows)
                     .style(move |theme: &Theme| container::Style {
                         background: Some(Background::Color(
-                            theme.palette().background.base.color.scale_alpha(opacity),
+                            crate::ui::style::chrome::surface(theme).scale_alpha(opacity),
                         )),
                         ..Default::default()
                     })
                     .width(Length::Fill)
-                    .padding([2, 0]),
+                    .padding([2.0 * km::LINE, 0.0]),
             )
             .on_enter(Message::CommandHistoryHover(true))
             .on_exit(Message::CommandHistoryHover(false))
@@ -1516,8 +1567,8 @@ impl CommandLine {
                 history_divider,
                 container(input_row)
                     .style(move |theme: &Theme| {
-                        let palette = theme.palette();
-                        let color = palette.background.weakest.color.scale_alpha(opacity);
+                        let color =
+                            crate::ui::style::chrome::surface_raised(theme).scale_alpha(opacity);
                         container::Style {
                             background: Some(Background::Color(color)),
                             ..Default::default()
@@ -1526,23 +1577,20 @@ impl CommandLine {
                     .width(Length::Fill)
                     // Match the drawing tab bar / status bar height, and vertically
                     // centre the prompt/input/dropdown within it (issue #216).
-                    .center_y(Length::Fixed(30.0)),
+                    .center_y(Length::Fixed(BAR_H)),
             ]
             .width(Length::Fill),
         )
-        .style(move |theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(
-                    palette.background.base.color.scale_alpha(opacity),
-                )),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: if history_open { 1.0 } else { 0.0 },
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(
+                crate::ui::style::chrome::surface(theme).scale_alpha(opacity),
+            )),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: if history_open { km::line() } else { 0.0 },
+                radius: 4.0.into(),
+            },
+            ..Default::default()
         })
         .width(Length::Fill.max(720.0))
         .into()
@@ -1607,18 +1655,23 @@ pub fn ranked_matches(
 /// Flat button style for the history dropdown's Copy / Clear strip: a subtle
 /// filled pill that brightens on hover.
 fn header_btn_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
     let pair = if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        palette.background.weak
+        iced::theme::palette::Pair::new(
+            crate::ui::style::chrome::hover(theme),
+            crate::ui::style::chrome::strong(theme),
+        )
     } else {
-        palette.background.weakest
+        iced::theme::palette::Pair::new(
+            crate::ui::style::chrome::surface_raised(theme),
+            crate::ui::style::chrome::text(theme),
+        )
     };
     button::Style {
         background: Some(Background::Color(pair.color)),
         text_color: pair.text,
         border: Border {
-            color: palette.background.neutral.color,
-            width: 1.0,
+            color: crate::ui::style::chrome::border(theme),
+            width: km::line(),
             radius: 3.0.into(),
         },
         ..Default::default()
@@ -1645,7 +1698,7 @@ fn user_text_color() -> Option<Color> {
 }
 
 fn text_color(theme: &Theme) -> Color {
-    user_text_color().unwrap_or(theme.palette().background.base.text)
+    user_text_color().unwrap_or(crate::ui::style::chrome::text(theme))
 }
 
 fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
@@ -1657,9 +1710,9 @@ fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
         EntryKind::Warning => palette.warning.base.color,
         EntryKind::Info => user_text_color().unwrap_or_else(|| {
             accessible_accent_threshold(
-                palette.primary.base.color,
-                palette.background.base.color,
-                palette.background.base.text,
+                crate::ui::style::chrome::accent(theme),
+                crate::ui::style::chrome::surface(theme),
+                crate::ui::style::chrome::text(theme),
                 4.5,
             )
         }),

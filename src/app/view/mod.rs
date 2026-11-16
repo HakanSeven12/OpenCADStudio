@@ -285,7 +285,7 @@ mod modal;
 pub(in crate::app) mod overlay;
 mod viewcube;
 
-use controls::{dyn_component_value, viewport_controls};
+use controls::{dyn_component_value, viewport_controls, VP_INSET};
 use overlay::{
     mtext_editor_overlay, position_canvas_overlay, position_canvas_overlay_near_cursor,
     qselect_overlay, text_inline_overlay, viewport_context_menu_overlay, viewport_quad_overlay,
@@ -955,7 +955,8 @@ impl OpenCADStudio {
         let viewcube_visible = self.show_viewcube
             && !thumbnail_capture_clean
             && !tab.is_start
-            && viewcube_has_room(render_bar_w, active_vp_w);
+            // The bar sits `VP_INSET` in from the viewport's left edge.
+            && viewcube_has_room(render_bar_w + VP_INSET, active_vp_w);
         // Start tab: render welcome page in place of the viewport.
         // Surrounding chrome (tab bar, status bar) stays; the welcome widget
         // returned here also flags the rest of `view` to skip drawing-only
@@ -2617,10 +2618,16 @@ bg={bg_ms:.1}ms n={view_count}"
                 .into();
                 // Pin the bar to the active model tile's top-left corner so it
                 // follows the active panel in a tiled layout.
+                // It sits `VP_INSET` in from the tile's corner; the fit
+                // decision gets the width left after that inset.
                 let bar_layer = iced::widget::pin(
-                    container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
+                    container(adaptive)
+                        .width(iced::Length::Fixed((rect.width - VP_INSET).max(1.0))),
                 )
-                .position(iced::Point::new(rect.x.max(0.0), rect.y.max(0.0)));
+                .position(iced::Point::new(
+                    rect.x.max(0.0) + VP_INSET,
+                    rect.y.max(0.0) + VP_INSET,
+                ));
                 viewport_stack = viewport_stack.push(bar_layer);
             }
 
@@ -2705,9 +2712,10 @@ bg={bg_ms:.1}ms n={view_count}"
                     .report_width0(self.render_bar_w.clone())
                     .into();
                     let picker_layer = iced::widget::pin(
-                        container(adaptive).width(iced::Length::Fixed(rect.width.max(1.0))),
+                        container(adaptive)
+                            .width(iced::Length::Fixed((rect.width - VP_INSET).max(1.0))),
                     )
-                    .position(iced::Point::new(x + 4.0, y + 4.0));
+                    .position(iced::Point::new(x + VP_INSET, y + VP_INSET));
                     viewport_stack = viewport_stack.push(picker_layer);
                 }
 
@@ -3443,9 +3451,27 @@ bg={bg_ms:.1}ms n={view_count}"
         if let Some(e) = left_edge {
             parts.push(e);
         }
-        parts.push(
-            crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into(),
-        );
+        let viewport: Element<'_, Message> =
+            crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into();
+        // The drawing tabs sit over the drawing, between the docks, unless
+        // they are set to run across the window above the palettes.
+        parts.push(if self.doc_tabs_in_center() {
+            column![
+                doc_tab_bar(
+                    &self.tabs,
+                    self.active_tab,
+                    self.hovered_doc_tab,
+                    self.doc_tab_menu,
+                    self.file_tabs_above_docks,
+                ),
+                viewport
+            ]
+            .width(Fill)
+            .height(Fill)
+            .into()
+        } else {
+            viewport
+        });
         if let Some(e) = right_edge {
             parts.push(e);
         }
@@ -3464,23 +3490,9 @@ bg={bg_ms:.1}ms n={view_count}"
         );
         let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
             workspace
-        } else if tab.is_start {
-            column![
-                workspace,
-                iced::widget::container(command_line)
-                    .width(Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .padding(iced::Padding {
-                        top: 0.0,
-                        right: 0.0,
-                        bottom: 2.0,
-                        left: 0.0,
-                    }),
-            ]
-            .width(Fill)
-            .height(Fill)
-            .into()
         } else {
+            // The command line floats over the bottom of the workspace, on
+            // the Start page as over a drawing, so no band runs under it.
             // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
             // collapsed, so it keeps the keyboard; Dynamic Input shows the
             // prompt and the typing at the cursor.
@@ -3554,11 +3566,14 @@ bg={bg_ms:.1}ms n={view_count}"
             // ribbon vs status-bar construction separately (both gated on
             // PERF; zero cost otherwise).
             mark("ribbon");
-            if self.show_file_tabs {
+            // The ribbon's own 1 px bottom line runs across the docks too.
+            if self.show_file_tabs && self.file_tabs_above_docks {
                 col = col.push(doc_tab_bar(
                     &self.tabs,
                     self.active_tab,
                     self.hovered_doc_tab,
+                    self.doc_tab_menu,
+                    self.file_tabs_above_docks,
                 ));
             }
             col.push(center_stack)
@@ -3854,12 +3869,16 @@ bg={bg_ms:.1}ms n={view_count}"
                 )
             });
 
+        let doc_tab_layouts_layer = self.doc_tab_layouts_layer();
+        let doc_tab_menu_layer = self.doc_tab_menu_layer();
         let composed = stack![
             main_ui,
             floating_layer,
             pinned_layer,
             ribbon_popup_layer,
             keytip_bar,
+            doc_tab_layouts_layer,
+            doc_tab_menu_layer,
             dropdown_layer,
             search_layer,
             ribbon_menu_layer,
@@ -4362,62 +4381,34 @@ fn doc_tab_context_menu(
     has_current_path: bool,
     has_other_drawings: bool,
 ) -> Element<'static, Message> {
-    const MENU_W: f32 = 210.0;
-
-    let item = |label: &'static str, msg: Option<Message>| -> Element<'static, Message> {
-        let enabled = msg.is_some();
-
-        let content = container(text(t!(label)).size(12))
-            .padding([4, 12])
-            .width(Fill)
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-
-                container::Style {
-                    text_color: Some(if enabled {
-                        palette.background.base.text
-                    } else {
-                        palette.background.base.text.scale_alpha(0.42)
-                    }),
-                    ..Default::default()
-                }
-            });
-
-        if let Some(msg) = msg {
-            mouse_area(content)
-                .on_press(msg)
-                .interaction(iced::mouse::Interaction::Pointer)
-                .into()
-        } else {
-            content.into()
-        }
-    };
-
-    let mut menu = column![
-        item("Save All", Some(Message::DocTabSaveAll)),
-        item("Close All", Some(Message::DocTabCloseAll)),
-        item(
-            "Close All Other Drawings",
-            has_other_drawings.then_some(Message::DocTabCloseOthers(tab_idx)),
-        ),
+    use crate::ui::kit::menu::Item;
+    let mut items = vec![
+        Item::new(t!("Save All"), Message::DocTabSaveAll),
+        Item::new(t!("Close All"), Message::DocTabCloseAll),
+        Item::new(
+            t!("Close All Other Drawings"),
+            Message::DocTabCloseOthers(tab_idx),
+        )
+        .enabled(has_other_drawings),
     ];
     if cfg!(not(target_arch = "wasm32")) {
-        menu = menu
-            .push(item(
-                "Copy Full File Path",
-                has_current_path.then_some(Message::DocTabCopyFullPath(tab_idx)),
-            ))
-            .push(item(
-                "Open File Location",
-                has_current_path.then_some(Message::DocTabOpenFileLocation(tab_idx)),
-            ));
+        items.push(Item::Separator);
+        items.push(
+            Item::new(
+                t!("Copy Full File Path"),
+                Message::DocTabCopyFullPath(tab_idx),
+            )
+            .enabled(has_current_path),
+        );
+        items.push(
+            Item::new(
+                t!("Open File Location"),
+                Message::DocTabOpenFileLocation(tab_idx),
+            )
+            .enabled(has_current_path),
+        );
     }
-
-    container(menu.spacing(0).width(MENU_W))
-        .style(container::bordered_box)
-        .padding([4, 0])
-        .width(iced::Length::Fixed(MENU_W))
-        .into()
+    crate::ui::kit::menu::view(items)
 }
 
 impl OpenCADStudio {
@@ -4442,13 +4433,173 @@ impl OpenCADStudio {
     }
 }
 
+/// The ☰ menu of the drawing-tab bar (also the bar's right-click menu):
+/// Start, the open drawings (a check on the current one, a dot on unsaved
+/// ones), then New, Open, Save All and Close All.
+fn doc_tab_menu_items(
+    tabs: &[DocumentTab],
+    active_tab: usize,
+    above_docks: bool,
+) -> Vec<crate::ui::kit::menu::Item> {
+    use crate::ui::kit::menu::{Item, Mark};
+    let mut items = Vec::new();
+    if let Some(start) = tabs.iter().position(|tab| tab.is_start) {
+        items.push(
+            Item::new(t!("Start"), Message::DocTabMenu(false, Some(start)))
+                .mark(Mark::Check(start == active_tab)),
+        );
+    }
+    let drawings: Vec<_> = tabs
+        .iter()
+        .enumerate()
+        .filter(|(_, tab)| !tab.is_start)
+        .collect();
+    if !drawings.is_empty() {
+        items.push(Item::Separator);
+    }
+    for (idx, tab) in drawings {
+        items.push(
+            Item::new(
+                tab.tab_display_name(),
+                Message::DocTabMenu(false, Some(idx)),
+            )
+            .mark(Mark::Check(idx == active_tab))
+            .dirty(tab.dirty),
+        );
+    }
+    items.push(Item::Separator);
+    items.push(Item::new(t!("New"), Message::TabNew));
+    items.push(Item::new(t!("Open"), Message::OpenFile));
+    items.push(Item::new(t!("Save All"), Message::DocTabSaveAll));
+    items.push(Item::new(t!("Close All"), Message::DocTabCloseAll));
+    items.push(Item::Separator);
+    items.push(
+        Item::new(
+            crate::tr!("doc-tabs", "above-palettes"),
+            Message::DocTabsAboveDocks(!above_docks),
+        )
+        .mark(Mark::Check(above_docks)),
+    );
+    items
+}
+
+/// The layouts of drawing `idx` shown under its hovered tab: Model and its
+/// paper layouts, a check on the current one; a pick switches drawing and
+/// layout.
+impl OpenCADStudio {
+    /// The open ☰ menu of the drawing-tab bar: under the bar (and its line),
+    /// its right edge on the ☰ button's, kept inside the window. A press
+    /// anywhere else closes it and still reaches what is under it.
+    fn doc_tab_menu_layer(&self) -> Element<'_, Message> {
+        use crate::ui::style::kit_metrics as km;
+        let layer = self.doc_tab_menu.then_some(()).and_then(|()| {
+            let bounds = crate::ui::wrap_bar::dropdown_bounds(DOC_TAB_MENU_ID)?;
+            let items = doc_tab_menu_items(&self.tabs, self.active_tab, self.file_tabs_above_docks);
+            let width = crate::ui::kit::menu::width(&items);
+            let x = (bounds.x + bounds.width - width)
+                .min(self.win_size.0 - width)
+                .max(0.0);
+            let y = bounds.y + km::TAB_H + km::TAB_LINE;
+            let menu = container(crate::ui::kit::menu::view(items))
+                .padding(iced::Padding::ZERO.top(y).left(x))
+                .width(Fill)
+                .height(Fill);
+            let close = crate::ui::kit::press_first(
+                Space::new().width(Fill).height(Fill),
+                iced::mouse::Button::Left,
+                Message::DocTabMenu(false, None),
+            );
+            Some(stack![close, menu].into())
+        });
+        layer.unwrap_or_else(|| Space::new().width(0).height(0).into())
+    }
+
+    /// The open layouts list of a drawing tab: under the tab bar (and its
+    /// line), from the tab's left edge, kept inside the window. A press
+    /// anywhere else closes it and still reaches what is under it, so a
+    /// press on another tab switches to it at once.
+    fn doc_tab_layouts_layer(&self) -> Element<'_, Message> {
+        use crate::ui::style::kit_metrics as km;
+        let layer = self.doc_tab_layouts.and_then(|idx| {
+            let tab = self.tabs.get(idx)?;
+            let bounds = crate::ui::wrap_bar::dropdown_bounds(&format!("DOC_TAB:{idx}"))?;
+            let items = doc_tab_layout_items(tab, idx, idx == self.active_tab);
+            let width = crate::ui::kit::menu::width(&items);
+            let x = bounds.x.min(self.win_size.0 - width).max(0.0);
+            let y = bounds.y + km::TAB_H + km::TAB_LINE;
+            let menu = container(crate::ui::kit::menu::view(items))
+                .padding(iced::Padding::ZERO.top(y).left(x))
+                .width(Fill)
+                .height(Fill);
+            let close = crate::ui::kit::press_first(
+                Space::new().width(Fill).height(Fill),
+                iced::mouse::Button::Left,
+                Message::DocTabLayoutsClose,
+            );
+            Some(stack![close, menu].into())
+        });
+        layer.unwrap_or_else(|| Space::new().width(0).height(0).into())
+    }
+}
+
+/// Where the drawing-tab bar's ☰ button reports its bounds, so its menu
+/// opens under it.
+const DOC_TAB_MENU_ID: &str = "DOC_TAB_MENU";
+
+fn doc_tab_layout_items(
+    tab: &DocumentTab,
+    idx: usize,
+    active: bool,
+) -> Vec<crate::ui::kit::menu::Item> {
+    use crate::ui::kit::menu::{Item, Mark};
+    tab.scene
+        .cached_layout_names()
+        .iter()
+        .map(|name| {
+            let label = if name == "Model" {
+                t!("Model").into_owned()
+            } else {
+                name.clone()
+            };
+            Item::new(label, Message::DocTabLayout(idx, name.clone()))
+                .mark(Mark::Check(active && *name == tab.scene.current_layout))
+        })
+        .collect()
+}
+
+
+/// A flat square button of the tab bar (+, ☰, a tab's ×): lit by
+/// `chrome::hover` while hovered.
+fn tab_bar_button_style(theme: &Theme, status: button::Status) -> button::Style {
+    use crate::ui::style::chrome;
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| Background::Color(chrome::hover(theme))),
+        text_color: chrome::text(theme),
+        ..Default::default()
+    }
+}
+
+/// The drawing-tab bar (variant C of the prototype): 24 px on `strip`,
+/// tabs filling it — the inactive ones `tab_inactive`, the active one
+/// `surface` joined to the 2 px `surface` line under the bar —
+/// 1 px apart, a + after the last tab and a ☰ menu at the far right. A tab
+/// shows its whole file name, a dot before it while unsaved, and always
+/// the palette's close button. The Start
+/// page lives in the ☰ menu, which a right-click on the empty bar opens at
+/// the pointer too; it also sets whether the bar runs above the palettes
+/// or (by default) between them. Resting on a tab lists its drawing's
+/// layouts. Tabs
+/// keep their drag-to-reorder; the row wraps only when the tabs overflow.
 pub(super) fn doc_tab_bar<'a>(
     tabs: &'a [DocumentTab],
     active_tab: usize,
     hovered_tab: Option<usize>,
+    menu_open: bool,
+    above_docks: bool,
 ) -> Element<'a, Message> {
-    // Document tabs live in a flex-wrap flow so they spill onto lower rows when
-    // there are more tabs than the width can hold on one line.
+    use crate::ui::kit::menu;
+    use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
     let mut items: Vec<Element<'_, Message>> = Vec::new();
     let drag_targets: std::sync::Arc<[usize]> = tabs
         .iter()
@@ -4458,138 +4609,83 @@ pub(super) fn doc_tab_bar<'a>(
         .into();
 
     for (idx, tab) in tabs.iter().enumerate() {
+        if tab.is_start {
+            continue;
+        }
         let is_active = idx == active_tab;
         let is_hovered = hovered_tab == Some(idx);
-        let name = crate::ui::text_util::elide(&tab.tab_display_name(), 24);
-        let title_inner: Element<'_, Message> = if tab.dirty {
-            row![
-                crate::ui::icons::themed_warning(crate::ui::icons::DIRTY_DOT, 14.0),
-                text(name).size(12),
-            ]
-            .spacing(5)
-            .align_y(iced::Center)
-            .into()
+        let tab_text: fn(&Theme) -> Color = if is_active {
+            chrome::strong
         } else {
-            text(name).size(12).into()
+            chrome::tab_text
         };
-
-        let title_btn = button(title_inner)
+        // The whole file name, always: no shortening, so no tooltip either.
+        let name = tab.tab_display_name();
+        let mut title = row![].spacing(km::TAB_INNER_GAP).align_y(iced::Center);
+        if tab.dirty {
+            title = title.push(menu::dot(km::DIRTY_DOT, tab_text));
+        }
+        title = title.push(
+            text(name)
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
+                .wrapping(iced::widget::text::Wrapping::None),
+        );
+        // The row fills the tab's height so the name sits centred in it.
+        let title_btn = button(title.height(Fill))
             .on_press(Message::TabSwitch(idx))
             .height(Fill)
-            .padding([5, 14])
-            .style(move |theme: &Theme, _status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: None,
-                    text_color: if is_active {
-                        palette.primary.weak.text
-                    } else if is_hovered {
-                        palette.background.weak.text
-                    } else {
-                        crate::ui::style::readable::muted_text(theme)
-                    },
-                    border: Border::default(),
-                    shadow: iced::Shadow::default(),
-                    snap: false,
-                }
+            .padding(iced::Padding::ZERO.left(km::TAB_PAD_X))
+            .style(move |theme: &Theme, _status| button::Style {
+                text_color: tab_text(theme),
+                ..Default::default()
             });
-        let title_btn: Element<'_, Message> = if tab.is_start {
-            title_btn.into()
+        let title_btn: Element<'_, Message> =
+            crate::ui::wrap_bar::ReorderTab::document(idx, drag_targets.clone(), title_btn).into();
+        let close: fn(&Theme) -> Color = if is_active {
+            chrome::text
         } else {
-            crate::ui::wrap_bar::ReorderTab::document(idx, drag_targets.clone(), title_btn).into()
+            chrome::muted
         };
-
-        // Start tab is fixed — no close button. Every other tab gets a close.
-        let row_inner: Row<'_, Message> = if tab.is_start {
-            row![title_btn].spacing(0).align_y(iced::Center)
-        } else {
-            let close_btn = button(text("×").size(12))
-                .on_press(Message::TabClose(tab.id))
-                .height(Fill)
-                .padding([5, 9])
-                .style(move |theme: &Theme, status| {
-                    let palette = theme.palette();
-                    button::Style {
-                        background: matches!(
-                            status,
-                            button::Status::Hovered | button::Status::Pressed
-                        )
-                        .then_some(Background::Color(palette.warning.weak.color)),
-                        text_color: if matches!(
-                            status,
-                            button::Status::Hovered | button::Status::Pressed
-                        ) {
-                            palette.warning.weak.text
-                        } else if is_active {
-                            palette.primary.weak.text
-                        } else if is_hovered {
-                            palette.background.weak.text
-                        } else {
-                            crate::ui::style::readable::muted_text(theme)
-                        },
-                        border: Border::default(),
-                        shadow: iced::Shadow::default(),
-                        snap: false,
-                    }
-                });
-            row![title_btn, close_btn]
-                .spacing(0)
-                .height(Fill)
-                .align_y(iced::Center)
-        };
-
-        let tab_container = container(row_inner)
-            .height(iced::Length::Fixed(28.0))
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-                let background = if is_active {
-                    palette.primary.weak.color
-                } else if is_hovered {
-                    palette.background.weak.color
-                } else {
-                    palette.background.base.color
-                };
-                container::Style {
-                    background: Some(Background::Color(background)),
-                    border: Border {
-                        color: if is_active {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.neutral.color
-                        },
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-
-        let tab_element: Element<'_, Message> = if tab.is_start {
-            tab_container.into()
-        } else {
-            let has_current_path = tab.current_path.is_some();
-            let has_other_drawings = drag_targets.len() > 1;
-            let tab_target: Element<'_, Message> = if let Some(path) = &tab.current_path {
-                iced::widget::tooltip(
-                    tab_container,
-                    container(text(path.to_string_lossy().into_owned()).size(11))
-                        .style(container::bordered_box)
-                        .padding([4, 8]),
-                    iced::widget::tooltip::Position::Bottom,
-                )
-                .gap(4)
-                .into()
+        // The same close button as a palette's title bar.
+        let close_btn = crate::ui::dock::title_button(
+            crate::ui::icons::tinted(crate::ui::icons::CLOSE, km::TITLE_ICON, close),
+            Message::TabClose(tab.id),
+        );
+        let tab_container = container(
+            row![
+                title_btn,
+                Space::new().width(km::TAB_INNER_GAP),
+                close_btn,
+                Space::new().width(km::TOOL_GAP)
+            ]
+            .height(Fill)
+            .align_y(iced::Center),
+        )
+        .height(iced::Length::Fixed(km::TAB_H))
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(if is_active {
+                chrome::surface(theme)
+            } else if is_hovered {
+                chrome::open_panel(theme)
             } else {
-                tab_container.into()
-            };
-            crate::ui::wrap_bar::PosReport::owned(
-                format!("DOC_TAB:{idx}"),
-                ContextMenu::new(tab_target, move || {
-                    doc_tab_context_menu(idx, has_current_path, has_other_drawings)
-                }),
-            )
-            .into()
-        };
+                chrome::tab_inactive(theme)
+            })),
+            ..Default::default()
+        });
+
+        let has_current_path = tab.current_path.is_some();
+        let has_other_drawings = drag_targets.len() > 1;
+        // Resting on the tab lists its layouts, in a layer of its own
+        // under the bar (`doc_tab_layouts_layer`). The tab shows the whole
+        // file name, so it carries no tooltip.
+        let tab_element: Element<'_, Message> = crate::ui::wrap_bar::PosReport::owned(
+            format!("DOC_TAB:{idx}"),
+            ContextMenu::new(tab_container, move || {
+                doc_tab_context_menu(idx, has_current_path, has_other_drawings)
+            }),
+        )
+        .into();
         items.push(
             mouse_area(tab_element)
                 .on_enter(Message::DocTabHover(Some(idx)))
@@ -4598,59 +4694,90 @@ pub(super) fn doc_tab_bar<'a>(
         );
     }
 
-    let new_btn = button(text("+").size(14))
-        .on_press(Message::TabNew)
-        .height(iced::Length::Fixed(28.0))
-        .padding([4, 8])
-        .style(|theme: &Theme, status| {
-            let palette = theme.palette();
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: Some(Background::Color(if hovered {
-                    palette.background.weak.color
-                } else {
-                    palette.background.base.color
-                })),
-                text_color: palette.background.base.text,
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                snap: false,
-            }
-        });
-
-    items.push(
-        container(new_btn)
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-                left: 2.0,
-            })
-            .into(),
-    );
-
-    container(
-        Row::with_children(items)
-            .spacing(0.0)
-            .align_y(iced::Center)
-            .wrap()
-            .vertical_spacing(2.0),
+    let new_btn = button(
+        container(crate::ui::icons::tinted(
+            crate::ui::icons::PLUS,
+            km::STRIP_PLUS_ICON,
+            chrome::tab_text,
+        ))
+        .center(Fill),
     )
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
-        border: Border {
-            color: theme.palette().background.neutral.color,
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    })
-    .width(Fill)
-    .padding([2, 2])
+    .on_press(Message::TabNew)
+    .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+    .height(iced::Length::Fixed(km::TAB_H))
+    .padding(0)
+    .style(tab_bar_button_style);
+    items.push(new_btn.into());
+
+    let menu_btn = button(
+        container(crate::ui::icons::tinted(
+            crate::ui::icons::MENU,
+            km::TITLE_ICON,
+            chrome::tab_text,
+        ))
+        .center(Fill),
+    )
+    .on_press(Message::DocTabMenu(!menu_open, None))
+    .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+    .height(iced::Length::Fixed(km::TAB_H))
+    .padding(0)
+    .style(tab_bar_button_style);
+    // Its menu is a layer of its own under the bar (`doc_tab_menu_layer`),
+    // placed from where the button is drawn.
+    let menu_btn = crate::ui::wrap_bar::PosReport::new(DOC_TAB_MENU_ID, menu_btn);
+
+    let tabs_row = Row::with_children(items)
+        .spacing(km::TAB_GAP)
+        .align_y(iced::Center);
+    let bar = if above_docks {
+        // Across the window: the tabs wrap onto more lines when they
+        // overflow (the docks start under the bar, whatever its height).
+        // The empty part of the bar, after the tabs, opens the same menu at
+        // the pointer; it fills what is left of the row.
+        let empty = ContextMenu::new(
+            container(Space::new())
+                .width(Fill)
+                .height(iced::Length::Fixed(km::TAB_H)),
+            move || menu::view(doc_tab_menu_items(tabs, active_tab, above_docks)),
+        );
+        row![
+            tabs_row.wrap().vertical_spacing(km::TAB_GAP),
+            empty,
+            menu_btn
+        ]
+        .align_y(iced::alignment::Vertical::Top)
+    } else {
+        // Between the docks: one line, its height part of the docks'
+        // workspace (`dock_workspace_size`). Tabs past the end scroll
+        // sideways and are all listed in the ☰ menu; a right-click on the
+        // bar outside a tab opens that menu at the pointer.
+        let strip = ContextMenu::new(
+            scrollable(tabs_row)
+                .direction(iced::widget::scrollable::Direction::Horizontal(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(0.0)
+                        .scroller_width(0.0),
+                ))
+                .width(Fill)
+                .height(iced::Length::Fixed(km::TAB_H)),
+            move || menu::view(doc_tab_menu_items(tabs, active_tab, above_docks)),
+        );
+        row![strip, menu_btn].align_y(iced::alignment::Vertical::Top)
+    };
+    column![
+        container(bar)
+            .width(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(chrome::strip(theme))),
+                ..Default::default()
+            }),
+        container(Space::new().width(Fill).height(km::TAB_LINE)).style(|theme: &Theme| {
+            container::Style {
+                background: Some(Background::Color(chrome::surface(theme))),
+                ..Default::default()
+            }
+        }),
+    ]
     .into()
 }
 
@@ -4680,7 +4807,7 @@ fn start_muted_style(theme: &Theme) -> iced::widget::text::Style {
 
 fn start_primary_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().primary.base.color),
+        color: Some(crate::ui::style::chrome::accent(theme)),
     }
 }
 
@@ -4704,7 +4831,7 @@ fn pane_mouse_area<'a>(idx: usize) -> Element<'a, Message> {
     .into()
 }
 
-const START_ACTION_RADIUS: f32 = 6.0;
+const START_ACTION_RADIUS: f32 = crate::ui::style::start_metrics::ACTION_RADIUS;
 
 fn start_action_shape(mut style: button::Style) -> button::Style {
     style.border.radius = START_ACTION_RADIUS.into();
@@ -4766,25 +4893,32 @@ fn start_page_content<'a>(
     active: super::StartSection,
     templates: Option<&'a [std::path::PathBuf]>,
 ) -> Element<'a, Message> {
-    let headline = text("Open CAD Studio").size(40).style(start_primary_style);
+    let headline = text("Open CAD Studio")
+        .size(crate::ui::style::start_metrics::HEADLINE)
+        .style(start_primary_style);
 
     // Plain outlined button (Open / New / Help / Contribute).
     let outline_btn = |label: String, msg: Message| {
-        button(text(label).size(14))
+        button(text(label).size(crate::ui::style::start_metrics::ACTION_TEXT))
             .on_press(msg)
-            .padding([10, 22])
+            .padding(crate::ui::style::start_metrics::ACTION_PAD)
             .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
                 let pair = match status {
-                    button::Status::Hovered => palette.background.strong,
-                    _ => palette.background.weak,
+                    button::Status::Hovered => iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::hover(theme),
+                        crate::ui::style::chrome::strong(theme),
+                    ),
+                    _ => iced::theme::palette::Pair::new(
+                        crate::ui::style::chrome::panel(theme),
+                        crate::ui::style::chrome::text(theme),
+                    ),
                 };
                 start_action_shape(button::Style {
                     background: Some(Background::Color(pair.color)),
                     text_color: pair.text,
                     border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
+                        color: crate::ui::style::chrome::border(theme),
+                        width: crate::ui::style::kit_metrics::line(),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -4797,7 +4931,8 @@ fn start_page_content<'a>(
         button(
             row![
                 crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 14.0),
-                text(crate::tr!("start", "donate")).size(14),
+                text(crate::tr!("start", "donate"))
+                    .size(crate::ui::style::start_metrics::ACTION_TEXT),
             ]
             .spacing(5)
             .align_y(iced::Center),
@@ -4806,7 +4941,7 @@ fn start_page_content<'a>(
             tool_id: "DONATE".to_string(),
             event: crate::modules::ModuleEvent::Command("DONATE".to_string()),
         })
-        .padding([10, 22])
+        .padding(crate::ui::style::start_metrics::ACTION_PAD)
         .style(|theme: &Theme, status| start_action_shape(button::danger(theme, status)))
     };
 
@@ -4828,30 +4963,34 @@ fn start_page_content<'a>(
                             .map(|stem| stem.to_string_lossy().into_owned())
                             .unwrap_or_default();
                         list = list.push(
-                            button(text(name).size(13))
+                            button(text(name).size(crate::ui::style::text::UI_TITLE))
                                 .on_press(Message::NewFromTemplate(Some(path.clone())))
-                                .style(crate::ui::color_select::list_row_style)
-                                .padding([4, 10])
+                                .style(crate::ui::kit::dropdown_row_style)
+                                .padding(crate::ui::style::start_metrics::ROW_PAD)
                                 .width(Fill),
                         );
                     }
                     list = list.push(
-                        button(text(crate::t!("Browse...")).size(13))
+                        button(text(crate::t!("Browse...")).size(crate::ui::style::text::UI_TITLE))
                             .on_press(Message::RibbonToolClick {
                                 tool_id: "NEW".to_string(),
                                 event: crate::modules::ModuleEvent::Command("NEW".to_string()),
                             })
-                            .style(crate::ui::color_select::list_row_style)
-                            .padding([4, 10])
+                            .style(crate::ui::kit::dropdown_row_style)
+                            .padding(crate::ui::style::start_metrics::ROW_PAD)
                             .width(Fill),
                     );
-                    let height = ((templates.len() + 1) as f32 * 26.0).min(360.0);
+                    let height = ((templates.len() + 1) as f32
+                        * crate::ui::style::start_metrics::TEMPLATE_ROW_H)
+                        .min(360.0);
                     let popup = container(scrollable(list).height(height))
-                        .style(crate::ui::color_select::popup_panel_style)
+                        .style(crate::ui::kit::menu::frame_style)
                         .padding(2);
                     crate::ui::drop_down_fit::drop_down_fit(
                         iced_aw::DropDown::new(head, popup, true)
-                            .width(iced::Length::Fixed(260.0))
+                            .width(iced::Length::Fixed(
+                                crate::ui::style::start_metrics::TEMPLATE_LIST_W,
+                            ))
                             .alignment(iced_aw::drop_down::Alignment::Bottom)
                             .offset(2.0)
                             .on_dismiss(Message::StartTemplates(false)),
@@ -4863,7 +5002,7 @@ fn start_page_content<'a>(
         outline_btn(crate::tr!("start", "open-file"), Message::OpenFile).into(),
         donate_btn.into(),
     ])
-    .spacing_x(12.0)
+    .spacing_x(crate::ui::style::start_metrics::ACTION_GAP)
     .row_h(48.0)
     .report_natural_width(action_width_out.clone());
 
@@ -4887,28 +5026,28 @@ fn start_page_content<'a>(
     {
         // Filled with the active theme's primary colour.
         secondary_items.push(
-            button(text(crate::t!("OCS Web")).size(14))
+            button(text(crate::t!("OCS Web")).size(crate::ui::style::start_metrics::ACTION_TEXT))
                 .on_press(Message::RibbonToolClick {
                     tool_id: "WEBVERSION".to_string(),
                     event: crate::modules::ModuleEvent::Command("WEBVERSION".to_string()),
                 })
-                .padding([10, 22])
+                .padding(crate::ui::style::start_metrics::ACTION_PAD)
                 .style(|theme: &Theme, status| start_action_shape(button::primary(theme, status)))
                 .into(),
         );
     }
     #[cfg(target_arch = "wasm32")]
     secondary_items.push(
-        button(text(crate::t!("OCS Desktop")).size(14))
+        button(text(crate::t!("OCS Desktop")).size(crate::ui::style::start_metrics::ACTION_TEXT))
             .on_press(Message::OpenUrl(
                 "https://github.com/HakanSeven12/OpenCADStudio/releases/latest".to_string(),
             ))
-            .padding([10, 22])
+            .padding(crate::ui::style::start_metrics::ACTION_PAD)
             .style(|theme: &Theme, status| start_action_shape(button::primary(theme, status)))
             .into(),
     );
     let secondary_row = WrapFlow::new(secondary_items)
-        .spacing_x(12.0)
+        .spacing_x(crate::ui::style::start_metrics::ACTION_GAP)
         .row_h(44.0)
         .report_natural_width(action_width_out.clone());
 
@@ -4917,9 +5056,9 @@ fn start_page_content<'a>(
             iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                 "../../../assets/icons/reddit.svg"
             )))
-            .width(20)
-            .height(20),
-            text("r/OpenCADStudio").size(14),
+            .width(crate::ui::style::start_metrics::ACTION_ICON)
+            .height(crate::ui::style::start_metrics::ACTION_ICON),
+            text("r/OpenCADStudio").size(crate::ui::style::start_metrics::ACTION_TEXT),
         ]
         .spacing(7)
         .align_y(iced::Center),
@@ -4927,19 +5066,24 @@ fn start_page_content<'a>(
     .on_press(Message::OpenUrl(
         "https://www.reddit.com/r/OpenCADStudio/".to_string(),
     ))
-    .padding([10, 22])
+    .padding(crate::ui::style::start_metrics::ACTION_PAD)
     .style(|theme: &Theme, status| {
-        let palette = theme.palette();
         let pair = match status {
-            button::Status::Hovered => palette.background.strong,
-            _ => palette.background.weak,
+            button::Status::Hovered => iced::theme::palette::Pair::new(
+                crate::ui::style::chrome::hover(theme),
+                crate::ui::style::chrome::strong(theme),
+            ),
+            _ => iced::theme::palette::Pair::new(
+                crate::ui::style::chrome::panel(theme),
+                crate::ui::style::chrome::text(theme),
+            ),
         };
         start_action_shape(button::Style {
             background: Some(Background::Color(pair.color)),
             text_color: pair.text,
             border: Border {
                 color: Color::from_rgb8(255, 69, 0),
-                width: 1.0,
+                width: crate::ui::style::kit_metrics::line(),
                 ..Default::default()
             },
             ..Default::default()
@@ -4947,14 +5091,16 @@ fn start_page_content<'a>(
     });
 
     let sponsors = column![
-        text(crate::tr!("start", "sponsors")).size(15),
+        text(crate::tr!("start", "sponsors")).size(crate::ui::style::start_metrics::SECTION_TITLE),
         mouse_area(
             container(
                 iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                     "../../../assets/sponsors/openaec-logo-dark-on-light.svg"
                 )))
                 .width(Fill)
-                .height(iced::Length::Fixed(120.0))
+                .height(iced::Length::Fixed(
+                    crate::ui::style::start_metrics::SPONSOR_H
+                ))
                 .content_fit(iced::ContentFit::Contain),
             )
             .width(Fill.max(300.0)),
@@ -4962,7 +5108,7 @@ fn start_page_content<'a>(
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl("https://open-aec.com/".to_string())),
     ]
-    .spacing(10)
+    .spacing(crate::ui::style::start_metrics::GAP_L)
     .align_x(iced::alignment::Horizontal::Center)
     .width(Fill);
 
@@ -4971,9 +5117,9 @@ fn start_page_content<'a>(
         container(headline).center_x(Fill),
         Space::new().height(iced::Length::Fixed(22.0)),
         container(primary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(10.0)),
+        Space::new().height(iced::Length::Fixed(crate::ui::style::start_metrics::GAP_L)),
         container(secondary_row).center_x(Fill),
-        Space::new().height(iced::Length::Fixed(10.0)),
+        Space::new().height(iced::Length::Fixed(crate::ui::style::start_metrics::GAP_L)),
         container(reddit_btn).center_x(Fill),
         Space::new().height(iced::Length::Fixed(20.0)),
         sponsors,
@@ -5050,16 +5196,19 @@ fn start_page_content<'a>(
         // Derive the 16:9 cover box from the actual shared list width so the
         // whole thumbnail remains visible when that width changes.
         let thumb_h = (panel_w - VIDEO_PANEL_PADDING * 2.0 - VIDEO_SCROLL_GUTTER) * 9.0 / 16.0;
-        let mut list = column![text(crate::tr!("start", "tutorials")).size(15)]
-            .spacing(10)
-            .width(Fill)
-            // Keep the scrollbar off the thumbnails.
-            .padding(iced::Padding {
-                right: VIDEO_SCROLL_GUTTER,
-                ..iced::Padding::ZERO
-            });
+        let mut list = column![text(crate::tr!("start", "tutorials"))
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)]
+        .spacing(crate::ui::style::start_metrics::GAP_L)
+        .width(Fill)
+        // Keep the scrollbar off the thumbnails.
+        .padding(iced::Padding {
+            right: VIDEO_SCROLL_GUTTER,
+            ..iced::Padding::ZERO
+        });
         for v in videos {
-            let mut card = column![].spacing(6).width(Fill);
+            let mut card = column![]
+                .spacing(crate::ui::style::start_metrics::GAP)
+                .width(Fill);
             if let Some(handle) = video_thumbs.get(&v.id) {
                 card = card.push(
                     container(
@@ -5072,8 +5221,8 @@ fn start_page_content<'a>(
                     .height(iced::Length::Fixed(thumb_h))
                     .style(|theme: &Theme| container::Style {
                         border: Border {
-                            color: theme.palette().background.neutral.color,
-                            width: 1.0,
+                            color: crate::ui::style::chrome::border(theme),
+                            width: crate::ui::style::kit_metrics::line(),
                             radius: 6.0.into(),
                         },
                         ..Default::default()
@@ -5081,7 +5230,11 @@ fn start_page_content<'a>(
                     .clip(true),
                 );
             }
-            card = card.push(text(v.title.clone()).size(12).style(start_muted_style));
+            card = card.push(
+                text(v.title.clone())
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
             list = list.push(
                 mouse_area(card)
                     .interaction(iced::mouse::Interaction::Pointer)
@@ -5094,32 +5247,40 @@ fn start_page_content<'a>(
             } else {
                 crate::tr!("start", "videos-online")
             };
-            list = list.push(text(note).size(12).style(start_muted_style));
+            list = list.push(
+                text(note)
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
         }
         let playlist_btn = mouse_area(
-            container(text(crate::tr!("start", "open-playlist")).size(12))
-                .padding([6, 10])
-                .width(Fill)
-                .center_x(Fill)
-                .style(|theme: &Theme| {
-                    let pair = theme.palette().danger.base;
-                    container::Style {
-                        background: Some(Background::Color(pair.color)),
-                        border: Border {
-                            color: Color::TRANSPARENT,
-                            width: 0.0,
-                            radius: 6.0.into(),
-                        },
-                        text_color: Some(pair.text),
-                        ..Default::default()
-                    }
-                }),
+            container(
+                text(crate::tr!("start", "open-playlist")).size(crate::ui::style::text::UI_LARGE),
+            )
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
+            .width(Fill)
+            .center_x(Fill)
+            .style(|theme: &Theme| {
+                let pair = theme.palette().danger.base;
+                container::Style {
+                    background: Some(Background::Color(pair.color)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 6.0.into(),
+                    },
+                    text_color: Some(pair.text),
+                    ..Default::default()
+                }
+            }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl(crate::videos::PLAYLIST_URL.to_string()));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             playlist_btn,
         ])
         .width(match start_layout {
@@ -5131,17 +5292,14 @@ fn start_page_content<'a>(
         })
         .height(Fill)
         .padding(VIDEO_PANEL_PADDING)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::kit_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5150,47 +5308,50 @@ fn start_page_content<'a>(
     // web builds read the CI-generated snapshot. Both sources mark pinned
     // discussions and sort them before the rest of the list.
     let discussions_panel: Element<'a, Message> = {
-        let mut list = column![text(crate::tr!("start", "discussions")).size(15)]
-            .spacing(8)
-            .width(Fill);
+        let mut list = column![text(crate::tr!("start", "discussions"))
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)]
+        .spacing(crate::ui::style::start_metrics::GAP_M)
+        .width(Fill);
         for discussion in discussions {
             let mut meta = iced::widget::row![text(format!("#{}", discussion.number))
-                .size(10)
+                .size(crate::ui::style::text::UI_SMALL)
                 .style(start_muted_style),]
-            .spacing(6)
+            .spacing(crate::ui::style::start_metrics::GAP)
             .align_y(iced::Center);
             if discussion.pinned {
                 meta = meta.push(
                     text(crate::tr!("start", "pinned"))
-                        .size(10)
+                        .size(crate::ui::style::text::UI_SMALL)
                         .style(start_primary_style),
                 );
             }
             if !discussion.author.is_empty() {
                 meta = meta.push(
                     text(format!("@{}", discussion.author))
-                        .size(10)
+                        .size(crate::ui::style::text::UI_SMALL)
                         .style(start_muted_style),
                 );
             }
-            let card =
-                container(column![text(discussion.title.clone()).size(12), meta,].spacing(4))
-                    .padding([8, 10])
-                    .width(Fill)
-                    .style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(Background::Color(
-                                palette.background.base.color.scale_alpha(0.42),
-                            )),
-                            border: Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 6.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    });
+            let card = container(
+                column![
+                    text(discussion.title.clone()).size(crate::ui::style::text::UI_LARGE),
+                    meta,
+                ]
+                .spacing(crate::ui::style::start_metrics::GAP_S),
+            )
+            .padding([8, 10])
+            .width(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(
+                    crate::ui::style::chrome::page(theme).scale_alpha(0.42),
+                )),
+                border: Border {
+                    color: crate::ui::style::chrome::border(theme),
+                    width: crate::ui::style::kit_metrics::line(),
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            });
             list = list.push(
                 mouse_area(card)
                     .interaction(iced::mouse::Interaction::Pointer)
@@ -5203,26 +5364,36 @@ fn start_page_content<'a>(
             } else {
                 crate::tr!("start", "discussions-online")
             };
-            list = list.push(text(note).size(12).style(start_muted_style));
+            list = list.push(
+                text(note)
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(start_muted_style),
+            );
         }
         let open_btn = mouse_area(
-            container(text(crate::tr!("start", "open-discussions")).size(12))
-                .padding([6, 10])
-                .width(Fill)
-                .center_x(Fill)
-                .style(|theme: &Theme| {
-                    let pair = theme.palette().primary.base;
-                    container::Style {
-                        background: Some(Background::Color(pair.color)),
-                        border: Border {
-                            color: Color::TRANSPARENT,
-                            width: 0.0,
-                            radius: 6.0.into(),
-                        },
-                        text_color: Some(pair.text),
-                        ..Default::default()
-                    }
-                }),
+            container(
+                text(crate::tr!("start", "open-discussions"))
+                    .size(crate::ui::style::text::UI_LARGE),
+            )
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
+            .width(Fill)
+            .center_x(Fill)
+            .style(|theme: &Theme| {
+                let pair = iced::theme::palette::Pair::new(
+                    crate::ui::style::chrome::accent(theme),
+                    crate::ui::style::chrome::on_accent(theme),
+                );
+                container::Style {
+                    background: Some(Background::Color(pair.color)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 6.0.into(),
+                    },
+                    text_color: Some(pair.text),
+                    ..Default::default()
+                }
+            }),
         )
         .interaction(iced::mouse::Interaction::Pointer)
         .on_press(Message::OpenUrl(
@@ -5230,7 +5401,9 @@ fn start_page_content<'a>(
         ));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             open_btn,
         ])
         .width(match start_layout {
@@ -5240,18 +5413,15 @@ fn start_page_content<'a>(
             | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
-        .padding(16)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .padding(crate::ui::style::start_metrics::CARD_PAD)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::kit_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5261,10 +5431,13 @@ fn start_page_content<'a>(
     // shows, so the rail always invites support.
     let supporters: Element<'a, Message> = {
         let mut list = column![
-            text(crate::tr!("start", "supporters")).size(15),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            text(crate::tr!("start", "supporters"))
+                .size(crate::ui::style::start_metrics::SECTION_TITLE),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
         ]
-        .spacing(6)
+        .spacing(crate::ui::style::start_metrics::GAP)
         .padding(iced::Padding {
             right: 12.0,
             ..iced::Padding::ZERO
@@ -5276,22 +5449,28 @@ fn start_page_content<'a>(
             let amount = format!("${:.2}", *cents as f64 / 100.0);
             list = list.push(
                 iced::widget::row![
-                    text(name).size(12).style(start_muted_style).width(Fill),
-                    text(amount).size(12).style(start_muted_style),
+                    text(name)
+                        .size(crate::ui::style::text::UI_LARGE)
+                        .style(start_muted_style)
+                        .width(Fill),
+                    text(amount)
+                        .size(crate::ui::style::text::UI_LARGE)
+                        .style(start_muted_style),
                 ]
-                .spacing(6),
+                .spacing(crate::ui::style::start_metrics::GAP),
             );
         }
         let support_btn = mouse_area(
             container(
                 iced::widget::row![
                     crate::ui::icons::themed_danger_text(crate::ui::icons::HEART, 13.0),
-                    text(crate::tr!("start", "support-on-patreon")).size(12),
+                    text(crate::tr!("start", "support-on-patreon"))
+                        .size(crate::ui::style::text::UI_LARGE),
                 ]
-                .spacing(6)
+                .spacing(crate::ui::style::start_metrics::GAP)
                 .align_y(iced::Center),
             )
-            .padding([6, 10])
+            .padding(crate::ui::style::start_metrics::TAB_PAD)
             .width(Fill)
             .center_x(Fill)
             .style(|theme: &Theme| {
@@ -5314,7 +5493,9 @@ fn start_page_content<'a>(
         ));
         container(column![
             iced::widget::scrollable(list).height(Fill),
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             support_btn,
         ])
         .width(match start_layout {
@@ -5324,18 +5505,15 @@ fn start_page_content<'a>(
             StartLayout::RecentAndWelcome | StartLayout::Compact => iced::Length::Fill,
         })
         .height(Fill)
-        .padding(20)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            }
+        .padding(crate::ui::style::start_metrics::PANEL_PAD)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: crate::ui::style::kit_metrics::line(),
+                radius: 8.0.into(),
+            },
+            ..Default::default()
         })
         .into()
     };
@@ -5343,35 +5521,42 @@ fn start_page_content<'a>(
     let body: Element<'a, Message> = match start_layout {
         StartLayout::AllPanels => {
             iced::widget::row![recent, videos_panel, welcome, discussions_panel, supporters,]
-                .spacing(16)
+                .spacing(crate::ui::style::start_metrics::GAP_XL)
                 .height(Fill)
                 .into()
         }
         StartLayout::WithoutVideos => {
             iced::widget::row![recent, welcome, discussions_panel, supporters]
-                .spacing(16)
+                .spacing(crate::ui::style::start_metrics::GAP_XL)
                 .height(Fill)
                 .into()
         }
         StartLayout::WithoutVideosAndDiscussions => iced::widget::row![recent, welcome, supporters]
-            .spacing(16)
+            .spacing(crate::ui::style::start_metrics::GAP_XL)
             .height(Fill)
             .into(),
         StartLayout::RecentAndWelcome => iced::widget::row![recent, welcome]
-            .spacing(16)
+            .spacing(crate::ui::style::start_metrics::GAP_XL)
             .height(Fill)
             .into(),
         StartLayout::Compact => {
             let tab_btn = |label: String, section: super::StartSection| {
                 let is_active = active == section;
-                button(text(label).size(14))
+                button(text(label).size(crate::ui::style::start_metrics::ACTION_TEXT))
                     .on_press(Message::StartSectionSelect(section))
                     .padding([8, 18])
                     .style(move |theme: &Theme, status| {
-                        let palette = theme.palette();
                         let pair = match (is_active, status) {
-                            (true, _) => Some(palette.primary.weak),
-                            (false, button::Status::Hovered) => Some(palette.background.strong),
+                            (true, _) => Some(iced::theme::palette::Pair::new(
+                                crate::ui::style::chrome::lit(theme),
+                                crate::ui::style::chrome::strong(theme),
+                            )),
+                            (false, button::Status::Hovered) => {
+                                Some(iced::theme::palette::Pair::new(
+                                    crate::ui::style::chrome::hover(theme),
+                                    crate::ui::style::chrome::strong(theme),
+                                ))
+                            }
                             _ => None,
                         };
                         button::Style {
@@ -5381,7 +5566,7 @@ fn start_page_content<'a>(
                                 .unwrap_or(crate::ui::style::readable::muted_text(theme)),
                             border: Border {
                                 color: if is_active {
-                                    palette.primary.base.color
+                                    crate::ui::style::chrome::accent(theme)
                                 } else {
                                     Color::TRANSPARENT
                                 },
@@ -5411,7 +5596,7 @@ fn start_page_content<'a>(
                 )
                 .into(),
             ])
-            .spacing(6.0)
+            .spacing(crate::ui::style::start_metrics::GAP)
             .align_y(iced::Center)
             .wrap()
             .vertical_spacing(0.0);
@@ -5440,7 +5625,9 @@ fn start_page_content<'a>(
             };
             column![
                 container(tab_bar).center_x(Fill),
-                Space::new().height(iced::Length::Fixed(12.0)),
+                Space::new().height(iced::Length::Fixed(
+                    crate::ui::style::start_metrics::SECTION_GAP
+                )),
                 section_body,
             ]
             .width(Fill)
@@ -5451,7 +5638,7 @@ fn start_page_content<'a>(
 
     container(body)
         .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
+            background: Some(Background::Color(crate::ui::style::chrome::page(theme))),
             ..Default::default()
         })
         .padding(iced::Padding {
@@ -5480,9 +5667,17 @@ fn recent_tiles<'a>(
     large: bool,
 ) -> iced::widget::Column<'a, Message> {
     let (thumb_w, thumb_h, name_chars) = if large {
-        (Fill, iced::Length::Fixed(180.0), 40)
+        (
+            Fill,
+            iced::Length::Fixed(crate::ui::style::start_metrics::TILE_PREVIEW_H),
+            40,
+        )
     } else {
-        (iced::Length::Fixed(72.0), iced::Length::Fixed(54.0), 11)
+        (
+            iced::Length::Fixed(crate::ui::style::start_metrics::SMALL_TILE_W),
+            iced::Length::Fixed(crate::ui::style::start_metrics::SMALL_TILE_H),
+            11,
+        )
     };
     let tile = |path: &'a std::path::PathBuf| -> Element<'a, Message> {
         let name = path
@@ -5503,15 +5698,16 @@ fn recent_tiles<'a>(
             .center_x(thumb_w)
             .center_y(thumb_h)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.base.color)),
+                background: Some(Background::Color(crate::ui::style::chrome::page(theme))),
                 border: Border {
-                    color: theme.palette().background.neutral.color,
-                    width: 1.0,
+                    color: crate::ui::style::chrome::border(theme),
+                    width: crate::ui::style::kit_metrics::line(),
                     radius: 4.0.into(),
                 },
                 ..Default::default()
             });
-        let mut label = column![text(crate::ui::text_util::elide(&name, name_chars)).size(12)];
+        let mut label = column![text(crate::ui::text_util::elide(&name, name_chars))
+            .size(crate::ui::style::text::UI_LARGE)];
         if large {
             let dir = path
                 .parent()
@@ -5519,34 +5715,37 @@ fn recent_tiles<'a>(
                 .unwrap_or_default();
             label = label.push(
                 text(crate::ui::text_util::elide(&dir, 52))
-                    .size(10)
+                    .size(crate::ui::style::text::UI_SMALL)
                     .style(start_muted_style),
             );
         }
-        button(column![picture, label.spacing(2)].spacing(4))
-            .on_press(Message::OpenRecent(path.clone()))
-            .padding(6)
-            .width(if large { Fill } else { iced::Length::Shrink })
-            .style(|theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: matches!(status, button::Status::Hovered)
-                        .then_some(Background::Color(palette.background.strong.color)),
-                    text_color: palette.background.base.text,
-                    border: Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
+        button(
+            column![
+                picture,
+                label.spacing(crate::ui::style::start_metrics::GAP_XS)
+            ]
+            .spacing(crate::ui::style::start_metrics::GAP_S),
+        )
+        .on_press(Message::OpenRecent(path.clone()))
+        .padding(6)
+        .width(if large { Fill } else { iced::Length::Shrink })
+        .style(|theme: &Theme, status| button::Style {
+            background: matches!(status, button::Status::Hovered)
+                .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+            text_color: crate::ui::style::chrome::text(theme),
+            border: Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
     };
     if large {
-        column(recents.iter().map(tile)).spacing(6)
+        column(recents.iter().map(tile)).spacing(crate::ui::style::start_metrics::GAP)
     } else {
         column![iced::widget::Row::with_children(recents.iter().map(tile))
-            .spacing(4)
+            .spacing(crate::ui::style::start_metrics::GAP_S)
             .wrap()]
         .width(Fill)
     }
@@ -5571,16 +5770,15 @@ pub(super) fn recent_files_panel<'a>(
                 .on_press(Message::SetRecentView(mode))
                 .padding([3, 5])
                 .style(move |theme: &Theme, status| {
-                    let palette = theme.palette();
                     let background = if active {
-                        Some(palette.primary.weak.color)
+                        Some(crate::ui::style::chrome::lit(theme))
                     } else {
                         matches!(status, button::Status::Hovered)
-                            .then_some(palette.background.strong.color)
+                            .then_some(crate::ui::style::chrome::hover(theme))
                     };
                     button::Style {
                         background: background.map(Background::Color),
-                        text_color: palette.background.base.text,
+                        text_color: crate::ui::style::chrome::text(theme),
                         border: Border {
                             radius: 3.0.into(),
                             ..Default::default()
@@ -5588,15 +5786,15 @@ pub(super) fn recent_files_panel<'a>(
                         ..Default::default()
                     }
                 }),
-            container(text(tip).size(11))
-                .padding([2, 6])
+            container(text(tip).size(crate::ui::style::text::UI))
+                .padding(crate::ui::style::start_metrics::CHIP_PAD)
                 .style(container::rounded_box),
             iced::widget::tooltip::Position::Bottom,
         )
     };
     let title = row![
         text(crate::tr!("start", "recent-documents"))
-            .size(15)
+            .size(crate::ui::style::start_metrics::SECTION_TITLE)
             .width(Fill),
         mode_button(
             crate::ui::icons::MENU,
@@ -5614,13 +5812,13 @@ pub(super) fn recent_files_panel<'a>(
             crate::tr!("start", "view-preview"),
         ),
     ]
-    .spacing(2)
+    .spacing(crate::ui::style::start_metrics::GAP_XS)
     .align_y(iced::Center);
 
     let body: Element<'a, Message> = if recents.is_empty() {
         container(
             text(crate::tr!("start", "no-recent-files"))
-                .size(12)
+                .size(crate::ui::style::text::UI_LARGE)
                 .style(start_muted_style),
         )
         .height(Fill)
@@ -5671,10 +5869,13 @@ pub(super) fn recent_files_panel<'a>(
                         .width(Fill)
                         .height(Fill),
                 )
-                .width(46)
-                .height(34)
+                .width(crate::ui::style::start_metrics::THUMB_W)
+                .height(crate::ui::style::start_metrics::THUMB_H)
                 .into(),
-                None => iced::widget::Space::new().width(46).height(34).into(),
+                None => iced::widget::Space::new()
+                    .width(crate::ui::style::start_metrics::THUMB_W)
+                    .height(crate::ui::style::start_metrics::THUMB_H)
+                    .into(),
             };
 
             let path_for_open = path.clone();
@@ -5682,32 +5883,30 @@ pub(super) fn recent_files_panel<'a>(
                 row![
                     thumb,
                     column![
-                        text(crate::ui::text_util::elide(&name, 28)).size(12),
+                        text(crate::ui::text_util::elide(&name, 28))
+                            .size(crate::ui::style::text::UI_LARGE),
                         text(crate::ui::text_util::elide(&dir, 38))
-                            .size(10)
+                            .size(crate::ui::style::text::UI_SMALL)
                             .style(start_muted_style),
                     ]
-                    .spacing(2),
+                    .spacing(crate::ui::style::start_metrics::GAP_XS),
                 ]
-                .spacing(8)
+                .spacing(crate::ui::style::start_metrics::GAP_M)
                 .align_y(iced::Center),
             )
             .on_press(Message::OpenRecent(path_for_open))
             .padding([6, 12])
             .width(Fill)
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: matches!(status, button::Status::Hovered)
-                        .then_some(Background::Color(palette.background.strong.color)),
-                    text_color: palette.background.base.text,
-                    border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }
+            .style(move |theme: &Theme, status| button::Style {
+                background: matches!(status, button::Status::Hovered)
+                    .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+                text_color: crate::ui::style::chrome::text(theme),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
             });
 
             let path_for_remove = path.clone();
@@ -5742,73 +5941,73 @@ pub(super) fn recent_files_panel<'a>(
     // update handler clamps to [MIN, MAX] and persists (see `set_recent_limit`),
     // so an over-max entry snaps to the max.
     const STEP: usize = 5;
-    let step_style = |theme: &Theme, status: button::Status| {
-        let palette = theme.palette();
-        button::Style {
-            background: matches!(status, button::Status::Hovered)
-                .then_some(Background::Color(palette.background.strong.color)),
-            text_color: palette.background.base.text,
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        }
+    let step_style = |theme: &Theme, status: button::Status| button::Style {
+        background: matches!(status, button::Status::Hovered)
+            .then_some(Background::Color(crate::ui::style::chrome::hover(theme))),
+        text_color: crate::ui::style::chrome::text(theme),
+        border: Border {
+            color: crate::ui::style::chrome::border(theme),
+            width: crate::ui::style::kit_metrics::line(),
+            radius: 4.0.into(),
+        },
+        ..Default::default()
     };
     // +/- step from whatever is currently shown in the box (mid-edit included).
     let shown = limit_input.parse::<usize>().unwrap_or(limit);
     let count_box = iced::widget::text_input("", limit_input)
         .on_input(Message::RecentLimitInput)
         .on_submit(Message::SetRecentLimit(shown))
-        .size(13)
-        .padding([2, 6])
-        .width(iced::Length::Fixed(46.0));
+        .size(crate::ui::style::text::UI_TITLE)
+        .padding(crate::ui::style::start_metrics::CHIP_PAD)
+        .width(iced::Length::Fixed(
+            crate::ui::style::start_metrics::THUMB_W,
+        ));
     let limit_row = row![
         text(crate::tr!("start", "keep-recent-files"))
-            .size(11)
+            .size(crate::ui::style::text::UI)
             .style(start_muted_style)
             .width(Fill),
         button(crate::ui::icons::themed(crate::ui::icons::MINUS, 11.0))
             .on_press(Message::SetRecentLimit(shown.saturating_sub(STEP)))
-            .padding([3, 6])
+            .padding(crate::ui::style::start_metrics::BADGE_PAD)
             .style(step_style),
         count_box,
         button(crate::ui::icons::themed(crate::ui::icons::PLUS, 11.0))
             .on_press(Message::SetRecentLimit(shown.saturating_add(STEP)))
-            .padding([3, 6])
+            .padding(crate::ui::style::start_metrics::BADGE_PAD)
             .style(step_style),
         text(format!("/ {}", super::recent::RECENT_MAX))
-            .size(11)
+            .size(crate::ui::style::text::UI)
             .style(start_muted_style),
     ]
-    .spacing(6)
+    .spacing(crate::ui::style::start_metrics::GAP)
     .align_y(iced::Center);
 
     container(
         column![
             title,
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             body,
-            Space::new().height(iced::Length::Fixed(12.0)),
+            Space::new().height(iced::Length::Fixed(
+                crate::ui::style::start_metrics::SECTION_GAP
+            )),
             limit_row,
         ]
         .width(Fill),
     )
     .width(width)
     .height(Fill)
-    .padding(20)
-    .style(|theme: &Theme| {
-        let palette = theme.palette();
-        container::Style {
-            background: Some(Background::Color(palette.background.weak.color)),
-            border: Border {
-                color: palette.background.neutral.color,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        }
+    .padding(crate::ui::style::start_metrics::PANEL_PAD)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(crate::ui::style::chrome::panel(theme))),
+        border: Border {
+            color: crate::ui::style::chrome::border(theme),
+            width: crate::ui::style::kit_metrics::line(),
+            radius: 8.0.into(),
+        },
+        ..Default::default()
     })
     .into()
 }

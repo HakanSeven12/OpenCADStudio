@@ -85,6 +85,13 @@ mod tests {
             ("hover", chrome::hover(&theme), 0x4a5566),
             ("border", chrome::border(&theme), 0x56606f),
             ("hover_border", chrome::hover_border(&theme), 0x5b6779),
+            // The palette area of the prototype.
+            ("surface", chrome::surface(&theme), 0x3b4453),
+            ("surface_raised", chrome::surface_raised(&theme), 0x2e3440),
+            ("strip", chrome::strip(&theme), 0x2b313b),
+            ("edge", chrome::edge(&theme), 0x202731),
+            ("strip_divider", chrome::strip_divider(&theme), 0x4a5463),
+            ("tab_inactive", chrome::tab_inactive(&theme), 0x333b47),
         ] {
             let [r, g, b, _] = color.into_rgba8();
             let want = [(design >> 16) as u8, (design >> 8) as u8, design as u8];

@@ -517,11 +517,13 @@ def coverage_from_lcov(root: Path, text: str, cfg):
 def churn(root: Path, days: int = 28):
     """{src file: landings on main's first-parent line} in the `days` days
     before HEAD's commit date (a merged pull request counts once)."""
-    head = run(["git", "log", "-1", "--format=%cI", "HEAD"], root).stdout.strip()
+    # The commit time in seconds: `%cI` gives `Z` for a UTC commit (the
+    # release bot's), which `fromisoformat` rejects before Python 3.11.
+    head = run(["git", "log", "-1", "--format=%ct", "HEAD"], root).stdout.strip()
     if not head:
         return {}
-    from datetime import datetime, timedelta
-    since = (datetime.fromisoformat(head) - timedelta(days=days)).isoformat()
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.fromtimestamp(int(head), timezone.utc) - timedelta(days=days)).isoformat()
     log = run(["git", "log", "--first-parent", "--diff-merges=first-parent", "--no-renames", f"--since={since}",
                "--numstat", "--format=@%H", "HEAD", "--", "src"], root).stdout
     out = Counter()

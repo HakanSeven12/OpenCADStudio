@@ -9,6 +9,9 @@ pub(super) struct Pan {
     axes: [i16; 6],
     received: Option<Instant>,
     frame_time: Option<f64>,
+    /// The source reports only changes and always sends the release, so a
+    /// steady hold must not go stale (spacenavd forwards evdev changes).
+    latched: bool,
 }
 impl Pan {
     pub fn clear(&mut self) {
@@ -24,37 +27,69 @@ impl Pan {
             (Some(2), 7..) => (3, 3),
             _ => return false,
         };
+        let mut axes = self.axes;
         for i in 0..count {
-            self.axes[start + i] = i16::from_le_bytes([report[1 + i * 2], report[2 + i * 2]]);
+            axes[start + i] = i16::from_le_bytes([report[1 + i * 2], report[2 + i * 2]]);
         }
-        self.received = Some(Instant::now());
-        if !self.moving(true) {
-            self.frame_time = None;
-        }
+        self.set_axes(axes, false);
         true
     }
-    pub fn moving(&self, zoom: bool) -> bool {
-        direction(self.axes) != DVec2::ZERO || (zoom && response(self.axes[2] as f64) != 0.)
+    /// One full sample in HID axis order (x right, y toward the user, z down;
+    /// rotations about the same axes).
+    pub fn set_axes(&mut self, axes: [i16; 6], latched: bool) {
+        self.axes = axes;
+        self.latched = latched;
+        self.received = Some(Instant::now());
+        if !self.moving(true, true) {
+            self.frame_time = None;
+        }
+    }
+    /// `orbit`: tilt and twist rotate the view, so only pushes pan.
+    pub fn moving(&self, zoom: bool, orbit: bool) -> bool {
+        self.pan(orbit) != DVec2::ZERO
+            || (zoom && response(self.axes[2] as f64) != 0.)
+            || (orbit && self.rotation() != DVec2::ZERO)
+    }
+    fn pan(&self, orbit: bool) -> DVec2 {
+        if orbit {
+            DVec2::new(
+                response(self.axes[0] as f64),
+                response(-(self.axes[1] as f64)),
+            )
+            .clamp_length_max(1.)
+        } else {
+            direction(self.axes)
+        }
+    }
+    /// (pitch about screen right, yaw about world up) in -1..=1.
+    fn rotation(&self) -> DVec2 {
+        DVec2::new(
+            response(-(self.axes[3] as f64)),
+            response(-(self.axes[5] as f64)),
+        )
     }
 
-    pub fn frame(&mut self, milliseconds: f64, zoom: bool) -> DVec3 {
+    /// Per-frame (pan x/y + zoom, orbit pitch/yaw), scaled by the frame time.
+    pub fn frame(&mut self, milliseconds: f64, zoom: bool, orbit: bool) -> (DVec3, DVec2) {
         if !milliseconds.is_finite()
             || self
                 .received
-                .is_none_or(|t| t.elapsed() > Duration::from_millis(350))
+                .is_none_or(|t| !self.latched && t.elapsed() > Duration::from_millis(350))
         {
             self.clear();
-            return DVec3::ZERO;
+            return (DVec3::ZERO, DVec2::ZERO);
         }
         let dt = self.frame_time.map_or(1. / 60., |old| {
             ((milliseconds - old) / 1000.).clamp(0., 0.05)
         });
         self.frame_time = Some(milliseconds);
-        direction(self.axes).extend(if zoom {
+        let rotation = if orbit { self.rotation() } else { DVec2::ZERO };
+        let zoom = if zoom {
             response(self.axes[2] as f64)
         } else {
             0.
-        }) * dt
+        };
+        (self.pan(orbit).extend(zoom) * dt, rotation * dt)
     }
 }
 
@@ -112,15 +147,15 @@ mod tests {
         let mut pan = Pan::default();
         assert!(pan.report(&report([350, 0, 0, 0, 0, 0])));
         for frame in 0..20 {
-            assert!(pan.frame(frame as f64 * 16., false).x > 0.);
+            assert!(pan.frame(frame as f64 * 16., false, false).0.x > 0.);
         }
         assert!(pan.report(&report([0; 6])));
-        assert!(!pan.moving(false));
-        assert_eq!(pan.frame(400., false), DVec3::ZERO);
+        assert!(!pan.moving(false, false));
+        assert_eq!(pan.frame(400., false, false).0, DVec3::ZERO);
         pan.report(&report([350, 0, 0, 0, 0, 0]));
         pan.received = Some(Instant::now() - Duration::from_secs(1));
-        assert_eq!(pan.frame(500., false), DVec3::ZERO);
-        assert!(!pan.moving(false));
+        assert_eq!(pan.frame(500., false, false).0, DVec3::ZERO);
+        assert!(!pan.moving(false, false));
     }
     #[test]
     fn split_and_combined_reports_agree_and_other_reports_are_ignored() {

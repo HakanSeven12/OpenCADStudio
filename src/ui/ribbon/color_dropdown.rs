@@ -7,11 +7,11 @@
 //! 4. Recent Colors row (up to 9 swatches)
 //! 5. "Select Color..." action to open the full Select Color dialog
 
-use super::widgets::{muted_text_style, popup_panel_style, popup_row_style};
+use super::widgets::muted_text_style;
 use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
-use crate::ui::style::chrome;
+use crate::ui::style::{chrome, text as ui_text};
 use document::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Background, Border, Element, Length, Padding, Theme};
@@ -182,24 +182,24 @@ fn logical_row<'a>(
     });
 
     button(
-        row![swatch, text(t!(label)).size(11),]
+        row![swatch, text(t!(label)).size(ui_text::UI),]
             .spacing(8)
             .align_y(iced::Center),
     )
     .on_press(Message::RibbonColorChanged(color))
-    .style(popup_row_style)
+    .style(crate::ui::kit::dropdown_row_style)
     .padding([3, 4])
     .width(Length::Fill)
     .into()
 }
 
 fn more_colors_row<'a>(active_color: AcadColor) -> Element<'a, Message> {
-    button(row![text(t!("Select Color...")).size(11)].align_y(iced::Center))
+    button(row![text(t!("Select Color...")).size(ui_text::UI)].align_y(iced::Center))
         .on_press(Message::OpenColorWindow(
             crate::app::ColorPickTarget::Ribbon,
             active_color,
         ))
-        .style(popup_row_style)
+        .style(crate::ui::kit::dropdown_row_style)
         .padding([4, 4])
         .width(Length::Fill)
         .into()
@@ -260,7 +260,9 @@ fn color_panel<'a>(
     }
 
     // 3. Standard Index Colors (ACI 1..=9)
-    let index_header = text(t!("Index Color")).size(10).style(muted_text_style);
+    let index_header = text(t!("Index Color"))
+        .size(ui_text::UI_SMALL)
+        .style(muted_text_style);
     let mut standard_row = row![].spacing(SWATCH_GAP);
     for idx in 1u8..=9 {
         let color = AcadColor::Index(idx);
@@ -269,7 +271,9 @@ fn color_panel<'a>(
     let section3 = column![index_header, standard_row].spacing(4);
 
     // 4. Recent Colors row (up to 9 swatches; pad with placeholders if fewer)
-    let recent_header = text(t!("Recent Colors")).size(10).style(muted_text_style);
+    let recent_header = text(t!("Recent Colors"))
+        .size(ui_text::UI_SMALL)
+        .style(muted_text_style);
     let mut recent_row = row![].spacing(SWATCH_GAP);
     let mut count = 0;
     for &color in recent_colors.iter().take(9) {
@@ -310,7 +314,7 @@ fn color_panel<'a>(
             right: 12.0,
         })
         .width(Length::Fixed(PANEL_W))
-        .style(popup_panel_style)
+        .style(crate::ui::kit::menu::frame_style)
         .into()
 }
 

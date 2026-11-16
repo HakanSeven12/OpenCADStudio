@@ -435,6 +435,33 @@ fn the_rename_command_also_reaches_attributes() {
     );
 }
 
+#[test]
+fn rename_keeps_quoted_names_with_spaces_whole() {
+    let mut app = with_fence();
+    run(&mut app, r#"RENAME LINETYPE FENCE "Fence posts""#);
+    assert!(
+        doc(&app).line_types.contains("Fence posts"),
+        "{}",
+        output(&app)
+    );
+    run(&mut app, r#"RENAME LINETYPE "Fence posts" POSTS"#);
+    assert!(doc(&app).line_types.contains("POSTS"), "{}", output(&app));
+}
+
+#[test]
+fn stepped_rename_accepts_a_name_with_spaces() {
+    let mut app = with_fence();
+    run(&mut app, "-RENAME");
+    for answer in ["LINETYPE", "FENCE", "Fence posts"] {
+        let _ = app.feed_command(crate::command::StepInput::Text(answer.into()));
+    }
+    assert!(
+        doc(&app).line_types.contains("Fence posts"),
+        "{}",
+        output(&app)
+    );
+}
+
 // ── Delete ───────────────────────────────────────────────────────────────
 
 fn assert_delete_refused(app: &mut OpenCADStudio, label: &str) {

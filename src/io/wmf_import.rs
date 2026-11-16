@@ -515,10 +515,15 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
     let mut current = [0.0, 0.0];
     for (function, p) in &records {
         let s = |k: usize| p.get(k).map(|w| *w as i16 as f64).unwrap_or(0.0);
-        let points = |from: usize, count: usize| -> Vec<[f64; 2]> {
-            (0..count)
-                .map(|k| [s(from + 2 * k), s(from + 2 * k + 1)])
-                .collect()
+        // `None` when the record holds fewer points than it claims: a
+        // record cut short is skipped, so a count read from the file
+        // never makes more points than the file has.
+        let points = |from: usize, count: usize| -> Option<Vec<[f64; 2]>> {
+            (from + 2 * count <= p.len()).then(|| {
+                (0..count)
+                    .map(|k| [s(from + 2 * k), s(from + 2 * k + 1)])
+                    .collect()
+            })
         };
         let create = |table: &mut Vec<Option<Object>>, object: Object| match table
             .iter()
@@ -606,24 +611,32 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
             // POLYLINE
             0x0325 => {
                 if !pen.null {
-                    let line = points(1, s(0) as usize);
-                    player.polyline(&line, false, pen.width, pen.rgb);
+                    if let Some(line) = points(1, s(0) as usize) {
+                        player.polyline(&line, false, pen.width, pen.rgb);
+                    }
                 }
             }
             // POLYGON
             0x0324 => {
-                let ring = points(1, s(0) as usize);
-                player.shape(&ring, &pen, &brush);
+                if let Some(ring) = points(1, s(0) as usize) {
+                    player.shape(&ring, &pen, &brush);
+                }
             }
-            // POLYPOLYGON: counts, then every ring's points
+            // POLYPOLYGON: counts, then every ring's points; one ring cut
+            // short skips them all
             0x0538 => {
                 let rings = s(0) as usize;
                 let mut from = 1 + rings;
-                for k in 0..rings {
-                    let count = s(1 + k) as usize;
-                    let ring = points(from, count);
+                let shapes: Option<Vec<_>> = (0..rings)
+                    .map(|k| {
+                        let count = s(1 + k) as usize;
+                        let ring = points(from, count);
+                        from += 2 * count;
+                        ring
+                    })
+                    .collect();
+                for ring in shapes.unwrap_or_default() {
                     player.shape(&ring, &pen, &brush);
-                    from += 2 * count;
                 }
             }
             // RECTANGLE, ROUNDRECT (bottom, right, top, left; corner
@@ -738,4 +751,777 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
         fonts: player.fonts,
         text_fonts: player.text_fonts,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const POLYGON: u16 = 0x0324;
+    const POLYLINE: u16 = 0x0325;
+    const POLYPOLYGON: u16 = 0x0538;
+    /// Three points (x, y): (0, 0), (500, 0), (500, 500).
+    const TRIANGLE: [u16; 6] = [0, 0, 500, 0, 500, 500];
+
+    /// A record: its size in words, its function, its parameters.
+    fn record(function: u16, params: &[u16]) -> Vec<u8> {
+        let mut out = (3 + params.len() as u32).to_le_bytes().to_vec();
+        out.extend(function.to_le_bytes());
+        for p in params {
+            out.extend(p.to_le_bytes());
+        }
+        out
+    }
+
+    /// A metafile: the header, a 1000 by 1000 window, `records`, the end.
+    fn metafile(records: &[Vec<u8>]) -> Vec<u8> {
+        bare_metafile(&[&[record(0x020C, &[1000, 1000])][..], records].concat())
+    }
+
+    /// A metafile: the header, `records`, the end.
+    fn bare_metafile(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for r in records {
+            body.extend(r);
+        }
+        body.extend(record(0x0000, &[]));
+        let mut out = Vec::new();
+        for word in [1u16, 9, 0x0300] {
+            out.extend(word.to_le_bytes());
+        }
+        out.extend(((18 + body.len() as u32) / 2).to_le_bytes());
+        out.extend([0; 8]); // objects, largest record, parameters: not read
+        out.extend(body);
+        out
+    }
+
+    /// The vertex count of each polyline the file gives, in order.
+    fn polylines(bytes: &[u8]) -> Vec<usize> {
+        read(bytes, [100.0, 100.0])
+            .expect("a metafile")
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                EntityType::Polyline2D(p) => Some(p.vertices.len()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn with_count(count: u16, points: &[u16]) -> Vec<u16> {
+        [&[count][..], points].concat()
+    }
+
+    #[test]
+    fn records_that_hold_their_points_are_drawn() {
+        let rings = [&[2, 3, 3][..], &TRIANGLE, &TRIANGLE].concat();
+        let file = metafile(&[
+            record(POLYLINE, &with_count(3, &TRIANGLE)),
+            record(POLYGON, &with_count(3, &TRIANGLE)),
+            record(POLYPOLYGON, &rings),
+        ]);
+        assert_eq!(polylines(&file), [3, 3, 3, 3]);
+    }
+
+    #[test]
+    fn a_record_cut_short_is_skipped() {
+        // Each claims more points than it holds; the triangle after them
+        // is still drawn.
+        let file = metafile(&[
+            record(POLYLINE, &with_count(4, &TRIANGLE)),
+            record(POLYGON, &with_count(4, &TRIANGLE)),
+            record(POLYLINE, &[32767]),
+            record(POLYLINE, &with_count(3, &TRIANGLE)),
+        ]);
+        assert_eq!(polylines(&file), [3]);
+    }
+
+    #[test]
+    fn a_polypolygon_cut_short_is_skipped_whole() {
+        // The second ring is one point short; then ring counts that are
+        // not all there.
+        let short_ring = [&[2, 3, 4][..], &TRIANGLE, &TRIANGLE].concat();
+        let file = metafile(&[
+            record(POLYPOLYGON, &short_ring),
+            record(POLYPOLYGON, &[3, 3]),
+        ]);
+        assert_eq!(polylines(&file), [0usize; 0]);
+    }
+
+    #[test]
+    fn no_file_gives_more_points_than_it_holds() {
+        let mut records = vec![record(POLYLINE, &[32767]); 100];
+        records.push(record(POLYPOLYGON, &[&[100][..], &[32767; 100]].concat()));
+        let file = metafile(&records);
+        let vertices: usize = polylines(&file).iter().sum();
+        assert!(
+            vertices <= file.len() / 4,
+            "{vertices} vertices from {} bytes",
+            file.len()
+        );
+    }
+
+    // Exports of independent writers; `tests/fixtures/wmf/README.md` says
+    // what each holds.
+    const SHAPES: &[u8] = include_bytes!("../../tests/fixtures/wmf/shapes.wmf");
+    const RINGS: &[u8] = include_bytes!("../../tests/fixtures/wmf/rings.wmf");
+    const CURVES: &[u8] = include_bytes!("../../tests/fixtures/wmf/curves.wmf");
+    const TEXT: &[u8] = include_bytes!("../../tests/fixtures/wmf/text.wmf");
+
+    const ARC: u16 = 0x0817;
+    const CREATEBRUSHINDIRECT: u16 = 0x02FC;
+    const CREATEPALETTE: u16 = 0x00F7;
+    const CREATEPENINDIRECT: u16 = 0x02FA;
+    const DELETEOBJECT: u16 = 0x01F0;
+    const ELLIPSE: u16 = 0x0418;
+    const EXTTEXTOUT: u16 = 0x0A32;
+    const LINETO: u16 = 0x0213;
+    const MOVETO: u16 = 0x0214;
+    const PIE: u16 = 0x081A;
+    const RECTANGLE: u16 = 0x041B;
+    const ROUNDRECT: u16 = 0x061C;
+    const SELECTOBJECT: u16 = 0x012D;
+    const SETTEXTALIGN: u16 = 0x012E;
+    const SETWINDOWEXT: u16 = 0x020C;
+    const SETWINDOWORG: u16 = 0x020B;
+    const TEXTOUT: u16 = 0x0521;
+
+    /// A pen: style (0 solid, 5 none), width, colour.
+    fn pen(style: u16, width: u16, [r, g, b]: [u8; 3]) -> Vec<u8> {
+        record(
+            CREATEPENINDIRECT,
+            &[style, width, 0, u16::from_le_bytes([r, g]), u16::from(b)],
+        )
+    }
+
+    /// A brush: style (0 solid, 1 none), colour.
+    fn brush(style: u16, [r, g, b]: [u8; 3]) -> Vec<u8> {
+        record(
+            CREATEBRUSHINDIRECT,
+            &[style, u16::from_le_bytes([r, g]), u16::from(b), 0],
+        )
+    }
+
+    /// A string as the words a text record holds, padded to a whole word.
+    fn string_words(value: &str) -> Vec<u16> {
+        value
+            .as_bytes()
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c.get(1).copied().unwrap_or(0)]))
+            .collect()
+    }
+
+    /// A TEXTOUT record: count, string, y, x.
+    fn textout(value: &str, x: u16, y: u16) -> Vec<u8> {
+        let mut params = vec![value.len() as u16];
+        params.extend(string_words(value));
+        params.extend([y, x]);
+        record(TEXTOUT, &params)
+    }
+
+    /// An EXTTEXTOUT record: `head` (y, x, count, options and the
+    /// rectangle, if any), then the string.
+    fn exttextout(head: &[u16], value: &str) -> Vec<u8> {
+        record(EXTTEXTOUT, &[head, &string_words(value)[..]].concat())
+    }
+
+    /// A placeable header with the given bounds, before the metafile.
+    fn placeable(bounds: [i16; 4], file: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for w in [0xCDD7u16, 0x9AC6, 0] {
+            out.extend(w.to_le_bytes());
+        }
+        for b in bounds {
+            out.extend(b.to_le_bytes());
+        }
+        out.extend([0; 8]); // units per inch, reserved, checksum: not read
+        out.extend(file);
+        out
+    }
+
+    fn picture(bytes: &[u8], fit: [f64; 2]) -> Picture {
+        read(bytes, fit).expect("a metafile")
+    }
+
+    fn lines(picture: &Picture) -> Vec<&Polyline2D> {
+        picture
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                EntityType::Polyline2D(p) => Some(p),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn texts(picture: &Picture) -> Vec<&Text> {
+        picture
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                EntityType::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn points(line: &Polyline2D) -> Vec<[f64; 2]> {
+        line.vertices
+            .iter()
+            .map(|v| [v.location.x, v.location.y])
+            .collect()
+    }
+
+    fn assert_near(actual: [f64; 2], expected: [f64; 2], tolerance: f64, what: &str) {
+        assert!(
+            (actual[0] - expected[0]).abs() <= tolerance
+                && (actual[1] - expected[1]).abs() <= tolerance,
+            "{what}: {actual:?}, expected {expected:?}"
+        );
+    }
+
+    /// The smallest and largest x and y of the points.
+    fn extent(points: &[[f64; 2]]) -> [f64; 4] {
+        points.iter().fold(
+            [
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ],
+            |[x0, y0, x1, y1], [x, y]| [x0.min(*x), y0.min(*y), x1.max(*x), y1.max(*y)],
+        )
+    }
+
+    /// Inkscape's unit, 1/1200 inch, in millimetres: what it rounds to.
+    const INKSCAPE_UNIT: f64 = 25.4 / 1200.0;
+
+    /// The points, in drawing units, of a picture fitted to the size it
+    /// was drawn at (Inkscape writes 1/1200 inch; a fit of the drawing's
+    /// own size in millimetres gives millimetres back, y up).
+    #[test]
+    fn an_inkscape_drawing_is_read_at_its_size_with_its_pens_and_brushes() {
+        // 200 × 120 mm.
+        let picture = picture(SHAPES, [200.0, 120.0]);
+        let lines = lines(&picture);
+        // A polyline, a triangle, a rectangle, a circle, and the seven
+        // letters of "WMF text" Inkscape wrote as outlines (the "e" with
+        // its hole: two rings).
+        assert_eq!(lines.len(), 12);
+        assert!(texts(&picture).is_empty());
+
+        // The polyline: open, in its pen (black, 1 mm).
+        let polyline = lines[0];
+        assert!(!polyline.is_closed());
+        let expected = [[10.0, -10.0], [60.0, -10.0], [60.0, -50.0], [90.0, -30.0]];
+        assert_eq!(polyline.vertices.len(), expected.len());
+        for (p, e) in points(polyline).into_iter().zip(expected) {
+            assert_near(p, e, 0.05, "polyline vertex");
+        }
+        assert!((polyline.start_width - 1.0).abs() <= INKSCAPE_UNIT);
+        assert_eq!(polyline.common.color, color([0, 0, 0]));
+
+        // The triangle: filled red, outlined blue 2 mm; drawn as its fill,
+        // closed, at the pen's width.
+        let triangle = lines[1];
+        assert!(triangle.is_closed());
+        assert_eq!(triangle.common.color, color([204, 0, 0]));
+        assert_ne!(triangle.common.color, color([0, 0, 204]));
+        assert!((triangle.start_width - 2.0).abs() <= INKSCAPE_UNIT);
+        let [x0, y0, x1, y1] = extent(&points(triangle));
+        assert_near([x0, y0], [110.0, -60.0], 0.05, "triangle corner");
+        assert_near([x1, y1], [190.0, -10.0], 0.05, "triangle corner");
+
+        // The rectangle, filled green.
+        let rectangle = lines[2];
+        assert!(rectangle.is_closed());
+        assert_eq!(rectangle.common.color, color([0, 170, 0]));
+        let [x0, y0, x1, y1] = extent(&points(rectangle));
+        assert_near([x0, y0], [10.0, -100.0], 0.05, "rectangle corner");
+        assert_near([x1, y1], [50.0, -70.0], 0.05, "rectangle corner");
+
+        // The circle has no fill: its outline in the pen's purple.
+        let circle = lines[3];
+        assert!(circle.is_closed());
+        assert_eq!(circle.common.color, color([170, 0, 170]));
+        assert!((circle.start_width - 1.5).abs() <= INKSCAPE_UNIT);
+        for [x, y] in points(circle) {
+            let r = (x - 90.0).hypot(y + 90.0);
+            assert!((r - 20.0).abs() < 0.1, "circle point at radius {r}");
+        }
+
+        // The letters, filled black, with no outline.
+        for letter in &lines[4..] {
+            assert!(letter.is_closed());
+            assert_eq!(letter.common.color, color([0, 0, 0]));
+            assert_eq!(letter.start_width, 0.0);
+        }
+    }
+
+    #[test]
+    fn a_polypolygon_gives_each_ring_and_freed_slots_are_reused() {
+        // 100 × 100 mm. A square with a square hole, filled dark blue and
+        // outlined black; then three triangles in brown, with no outline.
+        // The brown brush goes into the slot the blue one left.
+        let picture = picture(RINGS, [100.0, 100.0]);
+        let lines = lines(&picture);
+        assert_eq!(lines.len(), 5);
+        let squares = [
+            ([10.0, -90.0], [90.0, -10.0]),
+            ([30.0, -70.0], [70.0, -30.0]),
+        ];
+        for (ring, (low, high)) in lines[..2].iter().zip(squares) {
+            assert!(ring.is_closed());
+            assert_eq!(ring.common.color, color([0, 68, 136]));
+            assert!((ring.start_width - 1.0).abs() <= INKSCAPE_UNIT);
+            let [x0, y0, x1, y1] = extent(&points(ring));
+            assert_near([x0, y0], low, 0.05, "square corner");
+            assert_near([x1, y1], high, 0.05, "square corner");
+        }
+        let tips = [[20.0, -80.0], [55.0, -80.0], [90.0, -80.0]];
+        for (triangle, tip) in lines[2..].iter().zip(tips) {
+            assert!(triangle.is_closed());
+            assert_eq!(triangle.vertices.len(), 3);
+            assert_eq!(triangle.common.color, color([136, 68, 0]));
+            assert_eq!(triangle.start_width, 0.0);
+            assert_near(points(triangle)[1], tip, 0.05, "triangle tip");
+        }
+    }
+
+    #[test]
+    fn curves_are_read_as_the_writer_flattened_them() {
+        // 150 × 80 mm: a Bézier curve, and an ellipse filled yellow.
+        let picture = picture(CURVES, [150.0, 80.0]);
+        let lines = lines(&picture);
+        assert_eq!(lines.len(), 2);
+        let curve = points(lines[0]);
+        assert!(!lines[0].is_closed());
+        assert_eq!(curve.len(), 79);
+        assert_near(curve[0], [10.0, -70.0], 0.05, "curve start");
+        assert_near(curve[78], [145.0, -40.0], 0.05, "curve end");
+        assert!((lines[0].start_width - 0.8).abs() <= INKSCAPE_UNIT);
+
+        let ellipse = lines[1];
+        assert!(ellipse.is_closed());
+        assert_eq!(ellipse.common.color, color([255, 255, 0]));
+        let [x0, y0, x1, y1] = extent(&points(ellipse));
+        assert_near([x0, y0], [10.0, -55.0], 0.05, "ellipse extent");
+        assert_near([x1, y1], [70.0, -25.0], 0.05, "ellipse extent");
+    }
+
+    /// LibreOffice writes each text as a TEXTOUT on the baseline, in units
+    /// of 1/100 mm, cropped to what it draws.
+    #[test]
+    fn text_from_libreoffice_keeps_its_string_font_colour_and_angle() {
+        let picture = picture(TEXT, [92.62, 72.62]);
+        assert!(lines(&picture).is_empty());
+        let texts = texts(&picture);
+        let values: Vec<&str> = texts.iter().map(|t| t.value.as_str()).collect();
+        assert_eq!(values, ["Plain", "Bold italic", "Tilted"]);
+        assert_eq!(
+            picture.fonts,
+            [
+                Face {
+                    name: "Arial".into(),
+                    bold: false,
+                    italic: false,
+                },
+                Face {
+                    name: "Times New Roman".into(),
+                    bold: true,
+                    italic: true,
+                },
+            ]
+        );
+        assert_eq!(picture.text_fonts, [(0, 0), (1, 1), (2, 0)]);
+        let colors: Vec<Color> = texts.iter().map(|t| t.common.color).collect();
+        assert_eq!(
+            colors,
+            [color([0, 0, 0]), color([0, 0, 204]), color([204, 0, 0])]
+        );
+
+        // The file holds the escapement 29.9°.
+        assert_eq!(texts[0].rotation, 0.0);
+        assert_eq!(texts[1].rotation, 0.0);
+        assert!((texts[2].rotation - 29.9f64.to_radians()).abs() < 1e-9);
+
+        // On the baseline, each text sits on its point, so the texts are
+        // as far apart as in the drawing: 20 mm down, then 40 mm right
+        // and 50 mm down (to the unit LibreOffice rounds to).
+        let at: Vec<[f64; 2]> = texts
+            .iter()
+            .map(|t| [t.insertion_point.x, t.insertion_point.y])
+            .collect();
+        let apart = |k: usize| [at[k][0] - at[0][0], at[k][1] - at[0][1]];
+        assert_near(apart(1), [0.0, -20.0], 0.011, "second text");
+        assert_near(apart(2), [40.0, -50.0], 0.011, "third text");
+
+        // Sizes 8 and 6 mm: heights in about that ratio, whichever faces
+        // this system has.
+        assert!(texts.iter().all(|t| t.height > 0.0));
+        let ratio = texts[0].height / texts[1].height;
+        assert!((1.2..1.5).contains(&ratio), "height ratio {ratio}");
+    }
+
+    // The records below are ones neither Inkscape nor LibreOffice writes
+    // (both draw shapes as polygons); their meanings were checked by having
+    // LibreOffice read the same records.
+
+    #[test]
+    fn rectangles_and_ellipses_fill_their_bounds() {
+        let file = metafile(&[
+            pen(0, 10, [255, 0, 0]),
+            record(SELECTOBJECT, &[0]),
+            brush(1, [0, 0, 0]),
+            record(SELECTOBJECT, &[1]),
+            // Bottom, right, top, left.
+            record(RECTANGLE, &[400, 300, 100, 100]),
+            // The corner ellipse's height and width first.
+            record(ROUNDRECT, &[50, 50, 400, 800, 100, 500]),
+            record(ELLIPSE, &[900, 900, 600, 100]),
+        ]);
+        // A 1000-unit window fitted to 1000: drawing units are metafile
+        // units, y up.
+        let picture = picture(&file, [1000.0, 1000.0]);
+        let lines = lines(&picture);
+        assert_eq!(lines.len(), 3);
+        for line in &lines {
+            assert_eq!(line.common.color, color([255, 0, 0]));
+            assert_eq!(line.start_width, 10.0);
+        }
+        assert!(lines[0].is_closed());
+        assert_eq!(extent(&points(lines[0])), [100.0, -400.0, 300.0, -100.0]);
+        assert!(lines[1].is_closed());
+        assert_eq!(extent(&points(lines[1])), [500.0, -400.0, 800.0, -100.0]);
+
+        // The ellipse round (500, 750), 400 by 150, back to its start.
+        let ring = points(lines[2]);
+        assert_near(ring[0], *ring.last().unwrap(), 1e-9, "ellipse closes");
+        for [x, y] in &ring {
+            let r = ((x - 500.0) / 400.0).hypot((y + 750.0) / 150.0);
+            assert!((r - 1.0).abs() < 1e-9, "ellipse point {x}, {y}");
+        }
+        let [x0, y0, x1, y1] = extent(&ring);
+        assert_near([x0, y0], [100.0, -900.0], 1.0, "ellipse extent");
+        assert_near([x1, y1], [900.0, -600.0], 1.0, "ellipse extent");
+    }
+
+    /// The points of an arc record round the ellipse in `(0, 0)–(1000,
+    /// 500)`: from the ray through `start` counter-clockwise (as seen on
+    /// the screen) to the ray through `end`.
+    fn arc(function: u16, start: [i16; 2], end: [i16; 2]) -> Picture {
+        let w = |v: i16| v as u16;
+        picture(
+            &metafile(&[
+                pen(0, 1, [0, 0, 255]),
+                record(SELECTOBJECT, &[0]),
+                brush(0, [0, 255, 0]),
+                record(SELECTOBJECT, &[1]),
+                // End y, x; start y, x; bottom, right, top, left.
+                record(
+                    function,
+                    &[
+                        w(end[1]),
+                        w(end[0]),
+                        w(start[1]),
+                        w(start[0]),
+                        500,
+                        1000,
+                        0,
+                        0,
+                    ],
+                ),
+            ]),
+            [1000.0, 1000.0],
+        )
+    }
+
+    /// Whether a point (drawing units) lies on the ellipse round (500, 250),
+    /// 500 by 250, to the whole unit the points are cut to.
+    fn on_the_ellipse([x, y]: [f64; 2]) -> bool {
+        (((x - 500.0) / 500.0).hypot((y + 250.0) / 250.0) - 1.0).abs() < 0.01
+    }
+
+    #[test]
+    fn an_arc_runs_counter_clockwise_from_its_start_to_its_end() {
+        // One step of the arc is 1/99 turn, about 32 units on this ellipse.
+        let step = 35.0;
+
+        // From the top to the left: the upper left quarter.
+        let picture = arc(ARC, [500, -100], [0, 250]);
+        let drawn = lines(&picture);
+        assert_eq!(drawn.len(), 1);
+        assert!(!drawn[0].is_closed());
+        assert_eq!(drawn[0].common.color, color([0, 0, 255]));
+        let quarter = points(drawn[0]);
+        assert!(quarter.len() > 20, "{} points", quarter.len());
+        assert_near(quarter[0], [500.0, 0.0], step, "arc start");
+        assert_near(*quarter.last().unwrap(), [0.0, -250.0], step, "arc end");
+        for p in &quarter {
+            assert!(on_the_ellipse(*p), "{p:?} is not on the ellipse");
+            assert!(
+                p[0] <= 500.0 && p[1] >= -250.0,
+                "{p:?} is outside the quarter"
+            );
+        }
+        // Counter-clockwise: leftwards along the top.
+        assert!(quarter[1][0] < quarter[0][0]);
+
+        // From the bottom past zero degrees to the top: the right half.
+        let picture = arc(ARC, [500, 600], [500, -100]);
+        let half = points(lines(&picture)[0]);
+        assert_near(half[0], [500.0, -500.0], step, "arc start");
+        assert_near(*half.last().unwrap(), [500.0, 0.0], step, "arc end");
+        for p in &half {
+            assert!(on_the_ellipse(*p), "{p:?} is not on the ellipse");
+            assert!(p[0] >= 500.0, "{p:?} is outside the right half");
+        }
+        assert!(half.iter().any(|p| p[0] == 1000.0));
+    }
+
+    #[test]
+    fn a_pie_is_its_arc_closed_through_the_centre_in_its_brush() {
+        let picture = arc(PIE, [500, -100], [0, 250]);
+        let drawn = lines(&picture);
+        assert_eq!(drawn.len(), 1);
+        let pie = drawn[0];
+        assert!(pie.is_closed());
+        assert_eq!(pie.common.color, color([0, 255, 0]));
+        assert_eq!(pie.start_width, 1.0);
+        let ring = points(pie);
+        assert_eq!(ring[0], [500.0, -250.0]);
+        // The rest is the arc of the same record.
+        let quarter = points(lines(&arc(ARC, [500, -100], [0, 250]))[0]);
+        assert_eq!(ring[1..], quarter[..]);
+    }
+
+    #[test]
+    fn lines_run_on_from_the_current_point() {
+        // MOVETO and LINETO take y, then x.
+        let file = metafile(&[
+            record(MOVETO, &[100, 100]),
+            record(LINETO, &[100, 900]),
+            record(LINETO, &[900, 900]),
+        ]);
+        let picture = picture(&file, [1000.0, 1000.0]);
+        let segments: Vec<Vec<[f64; 2]>> = lines(&picture).into_iter().map(points).collect();
+        assert_eq!(
+            segments,
+            [
+                [[100.0, -100.0], [900.0, -100.0]],
+                [[900.0, -100.0], [900.0, -900.0]],
+            ]
+        );
+        // The default pen: black, one unit wide.
+        assert!(lines(&picture)
+            .iter()
+            .all(|l| l.common.color == color([0, 0, 0]) && l.start_width == 1.0));
+    }
+
+    #[test]
+    fn null_pens_and_brushes_leave_out_what_they_would_draw() {
+        let triangle = record(POLYGON, &with_count(3, &TRIANGLE));
+        let file = metafile(&[
+            pen(5, 1, [0, 0, 0]),   // slot 0: no pen
+            brush(1, [0, 0, 0]),    // slot 1: no brush
+            pen(0, 3, [0, 0, 255]), // slot 2: blue
+            brush(0, [255, 0, 0]),  // slot 3: red
+            record(SELECTOBJECT, &[0]),
+            record(SELECTOBJECT, &[1]),
+            triangle.clone(),                            // nothing
+            record(POLYLINE, &with_count(3, &TRIANGLE)), // nothing
+            record(LINETO, &[500, 500]),                 // nothing, but moves
+            record(SELECTOBJECT, &[3]),
+            triangle.clone(), // red, no outline
+            record(SELECTOBJECT, &[2]),
+            record(SELECTOBJECT, &[1]),
+            triangle,                // blue outline
+            record(LINETO, &[0, 0]), // from (500, 500)
+        ]);
+        let picture = picture(&file, [1000.0, 1000.0]);
+        let lines = lines(&picture);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].common.color, color([255, 0, 0]));
+        assert_eq!(lines[0].start_width, 0.0);
+        assert_eq!(lines[1].common.color, color([0, 0, 255]));
+        assert_eq!(lines[1].start_width, 3.0);
+        assert!(lines[0].is_closed() && lines[1].is_closed());
+        assert_eq!(points(lines[2]), [[500.0, -500.0], [0.0, 0.0]]);
+    }
+
+    #[test]
+    fn a_new_object_takes_the_first_free_slot() {
+        let triangle = record(POLYGON, &with_count(3, &TRIANGLE));
+        let file = metafile(&[
+            record(CREATEPALETTE, &[0x0300, 0]), // slot 0
+            pen(0, 1, [255, 0, 0]),              // slot 1
+            brush(1, [0, 0, 0]),                 // slot 2: no brush
+            record(SELECTOBJECT, &[2]),
+            record(SELECTOBJECT, &[1]),
+            triangle.clone(), // red
+            record(DELETEOBJECT, &[0]),
+            pen(0, 1, [0, 0, 255]), // slot 0, where the palette was
+            record(SELECTOBJECT, &[0]),
+            triangle.clone(), // blue
+            record(DELETEOBJECT, &[1]),
+            record(SELECTOBJECT, &[1]), // empty: the pen stays blue
+            triangle,
+        ]);
+        let colors: Vec<Color> = lines(&picture(&file, [1000.0, 1000.0]))
+            .iter()
+            .map(|l| l.common.color)
+            .collect();
+        assert_eq!(
+            colors,
+            [color([255, 0, 0]), color([0, 0, 255]), color([0, 0, 255])]
+        );
+    }
+
+    /// The baseline of a text whose point is at its top lies the font's
+    /// ascent below it; the text is four fifths of the ascent tall.
+    #[test]
+    fn text_is_placed_by_the_alignment_its_record_has() {
+        let file = metafile(&[
+            // A fresh device context aligns text by its top.
+            textout("Top", 100, 200),
+            record(SETTEXTALIGN, &[24]),
+            textout("Baseline", 100, 400),
+            // EXTTEXTOUT: y, x, count, options, then the string, after a
+            // rectangle when the options ask for one.
+            exttextout(&[600, 100, 5, 0], "Plain"),
+            exttextout(&[800, 100, 7, 4, 500, 50, 700, 900], "Clipped"),
+        ]);
+        let picture = picture(&file, [1000.0, 1000.0]);
+        let texts = texts(&picture);
+        let values: Vec<&str> = texts.iter().map(|t| t.value.as_str()).collect();
+        assert_eq!(values, ["Top", "Baseline", "Plain", "Clipped"]);
+        // No font was selected: the device context's default face.
+        assert_eq!(picture.fonts.len(), 1);
+        assert!(texts.iter().all(|t| t.insertion_point.x == 100.0));
+        let ascent = texts[0].height / 0.8;
+        assert!(ascent > 0.0);
+        assert!((texts[0].insertion_point.y - (-200.0 - ascent)).abs() < 1e-9);
+        for (text, y) in texts[1..].iter().zip([400.0, 600.0, 800.0]) {
+            assert_eq!(text.insertion_point.y, -y, "{}", text.value);
+            assert_eq!(text.height, texts[0].height);
+        }
+    }
+
+    #[test]
+    fn the_window_sets_the_scale_and_the_placeable_bounds_stand_in_for_it() {
+        let diagonal = [record(MOVETO, &[200, 100]), record(LINETO, &[400, 500])];
+        let end = |file: &[u8], fit: [f64; 2]| points(lines(&picture(file, fit))[0]);
+
+        // No window: the placeable bounds (left, top, right, bottom) give
+        // its origin and size; 400 × 200 fitted to 100 × 100 is a quarter.
+        let file = placeable([100, 200, 500, 400], &bare_metafile(&diagonal));
+        assert_eq!(end(&file, [100.0, 100.0]), [[0.0, 0.0], [100.0, -50.0]]);
+
+        // A window origin and size override the bounds; the narrower fit
+        // sets the scale.
+        let window = [
+            record(SETWINDOWORG, &[0, 100]),
+            record(SETWINDOWEXT, &[1000, 2000]),
+        ];
+        let file = placeable(
+            [100, 200, 500, 400],
+            &bare_metafile(&[&window[..], &diagonal].concat()),
+        );
+        assert_eq!(end(&file, [100.0, 100.0]), [[0.0, -10.0], [20.0, -20.0]]);
+
+        // A window extent with y negative runs y up: no flip.
+        let file = bare_metafile(
+            &[
+                &[record(SETWINDOWEXT, &[(-1000i16) as u16, 1000])][..],
+                &diagonal,
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            end(&file, [1000.0, 1000.0]),
+            [[100.0, 200.0], [500.0, 400.0]]
+        );
+    }
+
+    #[test]
+    fn what_is_not_a_metafile_gives_none() {
+        let fit = [100.0, 100.0];
+        assert!(read(&[], fit).is_none());
+        assert!(read(b"not a metafile at all", fit).is_none());
+        // A header of type 3.
+        let mut wrong_type = metafile(&[]);
+        wrong_type[0] = 3;
+        assert!(read(&wrong_type, fit).is_none());
+        // No window and no placeable bounds: no size to fit.
+        assert!(read(&bare_metafile(&[]), fit).is_none());
+        // A window of no width.
+        assert!(read(&bare_metafile(&[record(SETWINDOWEXT, &[1000, 0])]), fit).is_none());
+        // The smallest metafile there is.
+        assert!(read(&metafile(&[]), fit).is_some_and(|p| p.entities.is_empty()));
+    }
+
+    /// Every record kind the reader plays, in one file.
+    fn every_record() -> Vec<u8> {
+        let w = |v: i16| v as u16;
+        placeable(
+            [0, 0, 1000, 1000],
+            &metafile(&[
+                record(SETWINDOWORG, &[0, 0]),
+                record(CREATEPALETTE, &[0x0300, 0]),
+                pen(0, 2, [255, 0, 0]),
+                brush(0, [0, 255, 0]),
+                record(
+                    0x02FB,
+                    &[w(-12), 0, 300, 0, 700, 1, 0, 0, 0, 0x7241, 0x6169, 0x006C],
+                ),
+                record(SELECTOBJECT, &[1]),
+                record(SELECTOBJECT, &[2]),
+                record(SELECTOBJECT, &[3]),
+                record(0x0209, &[0x00FF, 0]),
+                record(MOVETO, &[10, 10]),
+                record(LINETO, &[20, 30]),
+                record(POLYLINE, &with_count(3, &TRIANGLE)),
+                record(POLYGON, &with_count(3, &TRIANGLE)),
+                record(
+                    POLYPOLYGON,
+                    &[&[2, 3, 3][..], &TRIANGLE, &TRIANGLE].concat(),
+                ),
+                record(RECTANGLE, &[400, 300, 100, 100]),
+                record(ROUNDRECT, &[50, 50, 400, 800, 100, 500]),
+                record(ELLIPSE, &[900, 900, 600, 100]),
+                record(ARC, &[250, 0, w(-100), 500, 500, 1000, 0, 0]),
+                record(PIE, &[w(-100), 500, 600, 500, 500, 1000, 0, 0]),
+                textout("Top", 100, 200),
+                record(SETTEXTALIGN, &[6 | 8]),
+                exttextout(&[800, 100, 7, 4, 500, 50, 700, 900], "Clipped"),
+                record(DELETEOBJECT, &[1]),
+            ]),
+        )
+    }
+
+    /// Every truncation of every file, and every byte of each set to 0,
+    /// to 0xFF and with its top bit flipped, reads without a panic.
+    #[test]
+    fn damaged_files_never_panic() {
+        let mut cases = 0;
+        let mut check = |bytes: &[u8]| {
+            cases += 1;
+            let _ = read(bytes, [100.0, 100.0]);
+        };
+        let every_record = every_record();
+        for file in [SHAPES, RINGS, CURVES, TEXT, &every_record] {
+            for end in 0..file.len() {
+                check(&file[..end]);
+            }
+            let mut damaged = file.to_vec();
+            for at in 0..file.len() {
+                for value in [0x00, 0xFF, file[at] ^ 0x80] {
+                    damaged[at] = value;
+                    check(&damaged);
+                }
+                damaged[at] = file[at];
+            }
+        }
+        assert!(cases > 25_000, "{cases} damaged files");
+    }
 }

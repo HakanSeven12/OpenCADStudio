@@ -45,6 +45,28 @@ fn source(app: &OpenCADStudio, handle: Handle) -> String {
     table.cell(0, 0).unwrap().contents[0].value.text.clone()
 }
 
+/// The code of the formula field in cell A1, if the cell holds one.
+fn formula_code(app: &OpenCADStudio, handle: Handle) -> Option<String> {
+    use document::objects::ObjectType;
+    let document = &app.tabs[app.active_tab].scene.document;
+    let Some(EntityType::Table(table)) = document.get_entity(handle) else {
+        panic!("table")
+    };
+    let container = table.cell(0, 0)?.contents.first()?.field_handle?;
+    let Some(ObjectType::Field(container)) = document.objects.get(&container) else {
+        return None;
+    };
+    let [child] = container.child_fields.as_slice() else {
+        return None;
+    };
+    match document.objects.get(child) {
+        Some(ObjectType::Field(child)) if child.evaluator_id == "AcExpr" => {
+            Some(child.code.clone())
+        }
+        _ => None,
+    }
+}
+
 fn entities(app: &OpenCADStudio) -> Vec<EntityType> {
     app.tabs[app.active_tab]
         .scene
@@ -109,7 +131,10 @@ fn formula_character_edit_outside_commit_and_drawing_undo() {
     let _ = app.update(Message::TableEditorClick(iced::Point::new(
         -1000.0, -1000.0,
     )));
-    assert_eq!(source(&app, handle), "=SUM(A1:D2)");
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (SUM(A1:D2))")
+    );
     assert!(app.table_cell_editor.is_none());
     assert!(app.mtext_editor.is_none());
     assert!(app.tabs[app.active_tab].active_cmd.is_none());
@@ -980,4 +1005,115 @@ fn a_table_in_an_associative_array_keeps_its_fields() {
 "
         )
     );
+}
+
+/// A formula typed in the cell editor: the edit drops the picture handle, the
+/// picture is redrawn by name, and its MTEXT must carry the computed value.
+#[test]
+fn a_formula_typed_in_a_cell_is_saved_in_the_picture_as_its_value() {
+    let (mut app, handle) = fixture("=C1+D2");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    start(&mut app, handle);
+    let _ = app.update(Message::CommandBackspace);
+    let _ = app.update(Message::CommandAppendChar("1".into()));
+    let _ = app.update(Message::TableEditorClick(iced::Point::new(
+        -1000.0, -1000.0,
+    )));
+    let document = &app.tabs[app.active_tab].scene.document;
+    let texts = picture_texts(document, table_in(document, handle)).expect("picture");
+    assert!(
+        texts.iter().any(|t| t.starts_with("\"5\"")),
+        "the picture should hold the value 5: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains("=C1+D1")),
+        "the picture holds the formula text: {texts:?}"
+    );
+}
+
+/// A formula typed in the cell editor is stored as a formula field, so a
+/// program that rebuilds the table from its cells computes it instead of
+/// showing the typed text. Editing a referenced cell updates the value.
+#[test]
+fn a_formula_typed_in_a_cell_is_stored_as_a_formula_field() {
+    let (mut app, handle) = fixture("=C1+D2");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    start(&mut app, handle);
+    let _ = app.update(Message::CommandBackspace);
+    let _ = app.update(Message::CommandAppendChar("1".into()));
+    let _ = app.update(Message::TableEditorClick(iced::Point::new(
+        -1000.0, -1000.0,
+    )));
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (C1+D1)")
+    );
+    assert_eq!(source(&app, handle), "5");
+    let document = &app.tabs[app.active_tab].scene.document;
+    let table = table_in(document, handle);
+    let container = table.cell(0, 0).unwrap().contents[0].field_handle.unwrap();
+    assert!(table.field_handles.contains(&container));
+    let texts = picture_texts(document, table).expect("picture");
+    assert!(
+        texts.iter().any(|t| t.starts_with("\"5\"")),
+        "the picture should hold the value 5: {texts:?}"
+    );
+
+    // Edit a referenced cell: the formula follows.
+    let i = app.active_tab;
+    let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle) else {
+        panic!("table")
+    };
+    table.cell_mut(0, 2).unwrap().set_text("10");
+    table.block_record_handle = None;
+    app.tabs[i]
+        .scene
+        .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+    let document = &app.tabs[i].scene.document;
+    let texts = picture_texts(document, table_in(document, handle)).expect("picture");
+    assert!(
+        texts.iter().any(|t| t.starts_with("\"13\"")),
+        "the picture should follow C1: {texts:?}"
+    );
+}
+
+/// A formula entered on the command line (TABLEDIT, scripts) is stored as
+/// a formula field too, and undo brings back the cell as it was.
+#[test]
+fn a_formula_entered_on_the_command_line_is_stored_as_a_formula_field() {
+    let (mut app, handle) = fixture("before");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    let _ = app.run_command_line("TABLEDIT 10,-5 =C1+D1");
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (C1+D1)")
+    );
+    assert_eq!(source(&app, handle), "5");
+    let _ = app.update(Message::Undo);
+    assert_eq!(formula_code(&app, handle), None);
+    assert_eq!(source(&app, handle), "before");
 }

@@ -763,22 +763,6 @@ pub(super) fn subscription(service: &Service) -> impl Stream<Item = ()> + use<> 
         std::future::pending::<()>().await;
     })
 }
-fn publish_status(shared: &Mutex<Bridge>, status: Status) {
-    let mut bridge = shared.lock().unwrap();
-    bridge.ever_connected |= status == Status::Ready;
-    if bridge.status.as_ref() != Some(&status) {
-        if status != Status::Ready {
-            bridge.pending_view = None;
-            bridge.commands.clear();
-            bridge.moving = false;
-            bridge.in_transaction = false;
-            bridge.pan.clear();
-        }
-        bridge.status = Some(status);
-        bridge.wake();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

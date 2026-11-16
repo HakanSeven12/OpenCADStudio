@@ -224,12 +224,12 @@ fn input(shared: &Mutex<Bridge>, handle: HRAWINPUT) {
         return;
     }
     let zoom = bridge.view.as_ref().unwrap().zoom;
-    let was_moving = bridge.pan.moving(zoom);
+    let was_moving = bridge.pan.moving(zoom, false);
     let mut accepted = false;
     for report in bytes[header_size + 8..].chunks_exact(width).take(count) {
         accepted |= bridge.pan.report(report);
     }
-    if accepted && (was_moving || bridge.pan.moving(zoom)) {
+    if accepted && (was_moving || bridge.pan.moving(zoom, false)) {
         bridge.wake();
     }
 }

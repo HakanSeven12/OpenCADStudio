@@ -175,28 +175,33 @@
 /// notification (`tab_id`, monotonic per-tab `revision`, exact `count`) routed
 /// INSTEAD OF the legacy handle-list selection variants to plugins that report
 /// v22+; older plugins keep the exact legacy streams.
-/// v23 crosses the scene/widget wire (ADR-008: the reviewed, approved append
+/// v23 appends `TableOperation::LayoutSetTabOrder`: a plugin sets the order of
+/// the paper-space layout tabs in one undo step. A v22 host cannot decode it,
+/// so a plugin that sends it declares v23.
+/// v24 crosses the scene/widget wire (ADR-008: the reviewed, approved append
 /// plan): panels expose their BOUNDED semantic state to out-of-process plugins
-/// — `PluginRequest::PanelScenePublish` (publish-or-patch: the first publish
+/// — the append tail pesticide-pinned at requests 63..=66
+/// (`PluginRequest::PanelScenePublish` — publish-or-patch: the first publish
 /// carries the full bounded `PanelScene`/`WidgetSurface` snapshot, later state
 /// moves use `PluginRequest::PanelScenePatch` with a `base_revision` and are
-/// applied atomically; a stale base answers the structured
+/// applied atomically — responses 49..=51: `PatchApplied` / the structured
 /// `PluginResponse::PatchRejected` with a bounded
-/// [`crate::ipc::protocol::PatchRejectReport`]), bounded store reads
-/// (`PanelStoreRead` / `PluginResponse::StorePage` — windowed rows, lazy
-/// children, scene regions; page width capped) and the bounded recovery
-/// snapshot (`PanelSceneSnapshot2` — digest summaries plus a leading window,
-/// never a full dump). Host→plugin, `HostNotification::PanelSceneEvents`
-/// carries the small semantic widget events and `PanelStoreDemand` the lazy
-/// fetch demands; both are routed only to plugins reporting v23+ (per-plugin
-/// routing, no duplicated variants). TRANSPORT-ONLY in v23: the
-/// host-UI/mount publisher attach (holding the mounted surfaces, forwarding
-/// events) is a recorded follow-up; the wire layer validates and answers
-/// honestly (`PublisherUnattached`) until it lands. A v22 host cannot decode
-/// any of these requests, so a plugin that sends them declares v23; v22 and
-/// older plugins remain supported unchanged (`API_VERSION_MIN_SUPPORTED`
-/// untouched).
-pub const API_VERSION: u32 = 23;
+/// [`crate::ipc::protocol::PatchRejectReport`] / `PluginResponse::StorePage` —,
+/// `PanelStoreRead` — windowed rows, lazy children, scene regions; page width
+/// capped — and the bounded recovery snapshot `PanelSceneSnapshot2` — digest
+/// summaries plus a leading window, never a full dump). Host→plugin,
+/// `HostNotification::PanelSceneEvents` carries the small semantic widget
+/// events and `PanelStoreDemand` the lazy fetch demands (notifications
+/// 15..=16); both are routed only to plugins reporting v24+ (per-plugin
+/// routing, no duplicated variants). The host-UI/mount publisher attach is
+/// LIVE (SCN-025): panels holding a mounted body publish/patch through the
+/// app-owned surface store and the drained event/demand batches forward
+/// through the notify routers; a panel without an attached publisher still
+/// gets the honest structured answers (`PublisherUnattached` /
+/// `StoreAttachedElsewhere`). A v23 host cannot decode any of these requests,
+/// so a plugin that sends them declares v24; v23 and older plugins remain
+/// supported unchanged (`API_VERSION_MIN_SUPPORTED` untouched).
+pub const API_VERSION: u32 = 24;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

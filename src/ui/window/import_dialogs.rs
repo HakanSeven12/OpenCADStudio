@@ -885,7 +885,7 @@ pub fn view_tds_material<'a>(
             list = list.push(
                 button(head_label(k.checked_sub(1).and_then(|j| materials.get(j))))
                     .on_press(msg(ImportDialogMsg::TdsMatPick(k)))
-                    .style(crate::ui::color_select::list_row_style)
+                    .style(crate::ui::kit::dropdown_row_style)
                     .padding([4, 8])
                     .width(Fill),
             );
@@ -893,7 +893,7 @@ pub fn view_tds_material<'a>(
         iced_aw::DropDown::new(
             head,
             container(list)
-                .style(crate::ui::color_select::popup_panel_style)
+                .style(crate::ui::kit::menu::frame_style)
                 .padding(2),
             true,
         )

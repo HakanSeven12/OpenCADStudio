@@ -1843,7 +1843,8 @@ impl<'a> HostSession<'a> {
             | TableOperation::LayoutRename { .. }
             | TableOperation::LayoutDelete { .. }
             | TableOperation::LayoutSetCurrent { .. }
-            | TableOperation::LayoutSetPage { .. }) => self.layout_operation(other),
+            | TableOperation::LayoutSetPage { .. }
+            | TableOperation::LayoutSetTabOrder { .. }) => self.layout_operation(other),
             other => self.style_operation(other),
         }
     }
@@ -2318,6 +2319,37 @@ impl<'a> HostSession<'a> {
                 }
                 self.finish_layout_change();
                 Ok(handle)
+            }
+            TableOperation::LayoutSetTabOrder { names } => {
+                let current: Vec<String> = self.app.tabs[self.tab]
+                    .scene
+                    .layout_names()
+                    .into_iter()
+                    .filter(|name| !name.eq_ignore_ascii_case("Model"))
+                    .collect();
+                let mut ordered = Vec::with_capacity(names.len());
+                for name in &names {
+                    let name = name.trim();
+                    let Some(found) = current.iter().find(|n| n.eq_ignore_ascii_case(name)) else {
+                        return Err(format!("layout {name:?} is not a paper-space layout"));
+                    };
+                    if ordered.contains(found) {
+                        return Err(format!("layout {found:?} is listed twice"));
+                    }
+                    ordered.push(found.clone());
+                }
+                if let Some(missing) = current.iter().find(|n| !ordered.contains(n)) {
+                    return Err(format!(
+                        "the order must list every paper-space layout; {missing:?} is missing"
+                    ));
+                }
+                if ordered == current {
+                    return Ok(Handle::NULL);
+                }
+                self.push_undo("Layout order");
+                self.app.tabs[self.tab].scene.set_layout_tab_order(&ordered);
+                self.finish_layout_change();
+                Ok(Handle::NULL)
             }
             TableOperation::LayoutSetCurrent { name } => {
                 let name = name.trim();
@@ -5398,7 +5430,7 @@ impl HostApi for HostSession<'_> {
         self.validate_parametric_chain(chain, tolerance)
     }
 
-    // ── V23 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
+    // ── V24 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
     //
     // The real attach. ACCESS PATH (inspected + recorded): `HostSession`
     // reaches ALL app state through `self.app` (private-field access, this
@@ -6269,6 +6301,70 @@ mod tests {
         .unwrap();
         drop(host);
         assert_eq!(tabs(&app), before);
+    }
+
+    /// A plugin puts the paper-space layout tabs in a new order in one undo
+    /// step, and a list that is not exactly the paper-space layouts is refused.
+    #[test]
+    fn plugin_sets_the_layout_tab_order_in_one_undo_step() {
+        use ocs_plugin_api::host::TableOperation as Op;
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let tabs = |app: &OpenCADStudio| app.tabs[0].scene.cached_layout_names().to_vec();
+        let mut host = HostSession::new(&mut app, 0);
+        for name in ["Sheet A", "Sheet B"] {
+            host.layout_operation(Op::LayoutCreate {
+                name: name.to_owned(),
+            })
+            .unwrap();
+        }
+        drop(host);
+        let before = tabs(&app);
+        let paper: Vec<String> = before.iter().skip(1).cloned().collect();
+        assert!(paper.len() >= 3, "{before:?}");
+        let mut wanted = paper.clone();
+        wanted.reverse();
+
+        let order = |names: &[&str]| Op::LayoutSetTabOrder {
+            names: names.iter().map(|n| (*n).to_owned()).collect(),
+        };
+        let mut host = HostSession::new(&mut app, 0);
+        let first = paper[0].as_str();
+        assert!(
+            host.table_operation(order(&[first])).is_err(),
+            "a layout left out"
+        );
+        assert!(
+            host.table_operation(order(&[first, first])).is_err(),
+            "a layout listed twice"
+        );
+        let mut with_model: Vec<&str> = paper.iter().map(String::as_str).collect();
+        with_model.push("Model");
+        assert!(
+            host.table_operation(order(&with_model)).is_err(),
+            "Model listed"
+        );
+        drop(host);
+        assert_eq!(tabs(&app), before, "a refused order changes nothing");
+
+        app.finish_pending_history(0);
+        let undo_before = app.tabs[0].history.undo_stack.len();
+        let mut host = HostSession::new(&mut app, 0);
+        let lower: Vec<String> = wanted.iter().map(|n| n.to_lowercase()).collect();
+        let lower: Vec<&str> = lower.iter().map(String::as_str).collect();
+        host.table_operation(order(&lower)).unwrap();
+        drop(host);
+        app.finish_pending_history(0);
+        let after = tabs(&app);
+        assert_eq!(after[0], "Model");
+        assert_eq!(after[1..], wanted[..], "the tab bar shows the new order");
+        assert_eq!(
+            app.tabs[0].history.undo_stack.len(),
+            undo_before + 1,
+            "one undo step"
+        );
+        app.undo_steps(1);
+        assert_eq!(tabs(&app), before, "one undo restores the old order");
     }
 
     #[test]
@@ -13387,8 +13483,8 @@ mod tests {
             r#"
 L.create('Walls', color=1, lineweight=50, description='load bearing', transparency=30)
 L.create('Grid', color=(10, 200, 30), linetype='Continuous', off=True, plottable=False)
-L.modify('Walls', color=5, locked=True)
 doc.create_entity('Line', start=P(0, 0, 0), end=P(1, 0, 0), layer='Walls')
+L.modify('Walls', color=5, locked=True)
 L.rename('Walls', 'Structure')
 check('dup', lambda: L.create('structure'))
 check('badname', lambda: L.create('a<b'))
@@ -18708,7 +18804,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 
-    // ── SCN-025: the v23 wire attach (the mount/publisher goes LIVE) ────────
+    // ── SCN-025: the v24 wire attach (the mount/publisher goes LIVE) ────────
     //
     // The full attach is exercised through THE wire entry the plugin
     // transport uses: `handle_plugin_request` (the ipc arms delegate to the

@@ -26,10 +26,13 @@ jobs:
   source:
     # Which release to build: the published release, the latest release after
     # a weekly run (a cancelled run is skipped; a failed build still leaves a
-    # published release), or the commit a manual run was started on.
+    # published release), or the commit a manual run was started on. A weekly
+    # run that published nothing (it failed before publishing) builds nothing:
+    # the latest release is then an older one, already built.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     outputs:
+      build: ${{ steps.pick.outputs.build }}
       ref: ${{ steps.pick.outputs.ref }}
       label: ${{ steps.pick.outputs.label }}
     steps:
@@ -38,21 +41,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RUN_CREATED: ${{ github.event.workflow_run.created_at }}
         run: |
+          BUILD=true
           case "$EVENT" in
             release)      REF="$RELEASE_TAG"; LABEL="$RELEASE_TAG" ;;
-            workflow_run) REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName); LABEL="$REF" ;;
+            workflow_run)
+              read -r REF PUBLISHED < <(gh release view --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt --jq '"\(.tagName) \(.publishedAt)"')
+              LABEL="$REF"
+              # Both are UTC timestamps in the same form, so they compare as text.
+              if [[ "$PUBLISHED" < "$RUN_CREATED" ]]; then
+                BUILD=false
+                echo "::notice::The Weekly release run of $RUN_CREATED published no release (the latest, $REF, is from $PUBLISHED); nothing to rebuild."
+              fi ;;
             *)            REF="$GITHUB_SHA"; LABEL="${GITHUB_REF_NAME}@${GITHUB_SHA::9}" ;;
           esac
           test -n "$REF"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+          {
+            echo "build=$BUILD"
+            echo "ref=$REF"
+            echo "label=$LABEL"
+          } >> "$GITHUB_OUTPUT"
 
   health:
-    # Measures the release for the Code Health page. Its failure never stops
-    # the wiki from publishing: every step carries continue-on-error and the
-    # publish job runs either way.
+    # Measures the release for the Code Health page. A failure turns this job
+    # red but never stops the wiki from publishing: the publish job runs
+    # either way, and builds the Code Health page if a measurement was
+    # uploaded (without a thanks list if the replay failed).
     needs: source
+    if: needs.source.outputs.build == 'true'
     runs-on: ubuntu-22.04
     # Clippy, the test build and coverage take about half an hour; the replay
     # of a week of commits (about 500) has its own limit below.
@@ -87,19 +104,16 @@ jobs:
           tool: cargo-llvm-cov,cargo-audit
 
       - name: Measure
-        continue-on-error: true
         run: python3 scripts/health.py measure --cargo --coverage --out health.json
 
       # Uploaded before the replay, so the page is published even if the
       # replay is slow or fails; it then only lacks the thanks list.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        continue-on-error: true
         with:
           name: health
           path: health.json
 
       - name: Pull requests that improved a measure since the previous release
-        continue-on-error: true
         timeout-minutes: 45
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,14 +130,13 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        continue-on-error: true
         with:
           name: health-credits
           path: credits.json
 
   publish:
     needs: [source, health]
-    if: always() && needs.source.result == 'success'
+    if: always() && needs.source.result == 'success' && needs.source.outputs.build == 'true'
     runs-on: ubuntu-latest
     env:
       LABEL: ${{ needs.source.outputs.label }}
@@ -138,7 +151,8 @@ jobs:
           git -C wiki config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       # The Code Health page is published on its own, before the reference
-      # pages are rebuilt, so neither can hold the other up.
+      # pages are rebuilt, so neither can hold the other up; if it fails, the
+      # last step turns this job red once the reference pages are published.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
@@ -146,9 +160,14 @@ jobs:
           merge-multiple: true
           path: health
       - name: Code Health page
+        id: code_health
         continue-on-error: true
         run: |
-          test -f health/health.json
+          if [ ! -f health/health.json ]; then
+            echo "::error::No health.json: the health job did not measure $LABEL, so the Code Health page was not updated."
+            exit 1
+          fi
+          test -f health/credits.json || echo "::warning::No credits.json: the Code Health page for $LABEL has no thanks list."
           CREDITS=""; test -f health/credits.json && CREDITS="--credits health/credits.json"
           python3 tools/wiki/code_health.py wiki health/health.json $CREDITS --release "$LABEL"
           cd wiki
@@ -164,3 +183,9 @@ jobs:
           git add -A
           git diff --cached --quiet || git commit -m "Wiki: rebuild for $LABEL"
           git push
+      - name: Report the Code Health page failure
+        if: steps.code_health.outcome == 'failure'
+        run: |
+          echo "::error::The reference pages were rebuilt for $LABEL, but the Code Health page was not (see the Code Health page step)."
+          echo "The Code Health page was not updated for $LABEL; see the Code Health page step." >> "$GITHUB_STEP_SUMMARY"
+          exit 1

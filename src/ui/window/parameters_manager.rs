@@ -2,9 +2,9 @@
 use crate::app::Message;
 use crate::scene::block_parameters_manager::{self as manager, Group, Row};
 use crate::ui::dock::{self, Chrome, PanelId};
-use iced::widget::{
-    button, canvas, column, container, mouse_area, row, scrollable, text, text_input,
-};
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km};
+use iced::widget::{button, canvas, column, container, mouse_area, row, text, text_input, Space};
 use iced::{Element, Fill, Length, Point, Rectangle, Size};
 
 /// Every column stays visible in the panel's default width, so the fixed cells
@@ -77,6 +77,8 @@ const SPACING: f32 = 2.0;
 /// The leading glyph column. Its width is fixed so a row without a glyph keeps
 /// the same cells in the same places as one with a glyph.
 const GLYPH_WIDTH: f32 = 16.0;
+/// Width of the filter field beside the search.
+const FILTER_W: f32 = 96.0;
 
 /// The shapes the pane draws in its fixed-width leading cell: a group header's
 /// box, a row kind's glyph, and the toolbar's funnel. Every other row kind (a
@@ -116,8 +118,7 @@ impl<Message> canvas::Program<Message> for Glyph {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let palette = theme.palette();
-        let line = palette.background.base.text;
+        let line = chrome::text(theme);
         let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
         let reach = bounds.width.min(bounds.height) / 2.0 - 1.0;
         let stroke = canvas::Stroke::default().with_color(line).with_width(1.0);
@@ -150,7 +151,7 @@ impl<Message> canvas::Program<Message> for Glyph {
                 frame.fill(&canvas::Path::circle(centre, 1.6), line);
             }
             GlyphKind::Xy => {
-                let colour = palette.primary.strong.color;
+                let colour = chrome::accent(theme);
                 let gap = 1.0;
                 let cell = reach - gap / 2.0;
                 let left = centre.x - reach;
@@ -207,17 +208,50 @@ fn glyph_cell(kind: GlyphKind, id: String) -> Element<'static, Message> {
     container(
         canvas(Glyph(kind))
             .width(Length::Fixed(GLYPH_WIDTH))
-            .height(Length::Fixed(14.0)),
+            .height(Length::Fixed(km::CHECK)),
     )
     .width(Length::Fixed(GLYPH_WIDTH))
+    .height(Length::Fixed(km::ROW_H))
+    .align_y(iced::Center)
     .id(iced::widget::Id::from(id))
     .into()
 }
 
 fn glyph_spacer() -> Element<'static, Message> {
-    container(text(" ").size(11))
+    container(ui_text(" "))
         .width(Length::Fixed(GLYPH_WIDTH))
         .into()
+}
+
+/// Text of a cell or a menu entry: 11 px on a whole-pixel line.
+fn ui_text(value: impl Into<String>) -> iced::widget::Text<'static> {
+    text(value.into())
+        .size(crate::ui::style::text::UI)
+        .line_height(crate::ui::style::text::line())
+}
+
+/// A cell's printed value that opens its field: flat until hovered.
+fn cell_button(value: &str, message: Message) -> button::Button<'static, Message> {
+    button(ui_text(
+        if value.is_empty() { " " } else { value }.to_owned(),
+    ))
+    .clip(true)
+    .padding([0.0, km::CELL_PAD_X])
+    .height(Length::Fixed(km::ROW_H))
+    .style(kit::flat_button_style(false))
+    .on_press(message)
+}
+
+/// The field a cell opens, in the grid's field style.
+fn cell_field(placeholder: &str, value: &str) -> iced::widget::TextInput<'static, Message> {
+    text_input(placeholder, value)
+        .id(edit_input_id())
+        .on_input(Message::ParametersManagerInput)
+        .on_submit(Message::ParametersManagerCommit)
+        .size(crate::ui::style::text::UI)
+        .line_height(crate::ui::style::text::line())
+        .padding(kit::FIELD_PAD)
+        .style(kit::field_style)
 }
 
 /// The cells of a row that open a field. The two numeric cells print the same
@@ -311,7 +345,7 @@ pub fn edit_input_id() -> iced::widget::Id {
 }
 
 fn cell(value: &str, width: f32) -> Element<'static, Message> {
-    let body = text(if value.is_empty() { " " } else { value }.to_owned()).size(11);
+    let body = ui_text(if value.is_empty() { " " } else { value }.to_owned());
     if width > 0.0 {
         container(body.width(Length::Fixed(width - 8.0)))
             .width(Length::Fixed(width))
@@ -334,21 +368,17 @@ fn number_cell(
     if panel.is_open(definition, name, which) {
         // The field starts empty — a typed number replaces the printed one
         // without first deleting it — but it shows what it will replace.
-        return container(
-            text_input(if value.is_empty() { " " } else { value }, &panel.edit_buf)
-                .id(edit_input_id())
-                .on_input(Message::ParametersManagerInput)
-                .on_submit(Message::ParametersManagerCommit)
-                .size(11),
-        )
+        return container(cell_field(
+            if value.is_empty() { " " } else { value },
+            &panel.edit_buf,
+        ))
         .width(Length::Fixed(width))
         .into();
     }
-    container(
-        button(text(if value.is_empty() { " " } else { value }.to_owned()).size(11))
-            .clip(true)
-            .on_press(Message::ParametersManagerEdit(name.to_owned(), which)),
-    )
+    container(cell_button(
+        value,
+        Message::ParametersManagerEdit(name.to_owned(), which),
+    ))
     .width(Length::Fixed(width))
     .into()
 }
@@ -370,13 +400,7 @@ fn text_cell(
         return cell(value, width);
     }
     if panel.is_open(definition, name, which) {
-        let field = container(
-            text_input(" ", &panel.edit_buf)
-                .id(edit_input_id())
-                .on_input(Message::ParametersManagerInput)
-                .on_submit(Message::ParametersManagerCommit)
-                .size(11),
-        );
+        let field = container(cell_field(" ", &panel.edit_buf));
         return if width > 0.0 {
             field.width(Length::Fixed(width)).into()
         } else {
@@ -384,10 +408,11 @@ fn text_cell(
         };
     }
     let printed = container(
-        button(text(if value.is_empty() { " " } else { value }.to_owned()).size(11))
-            .width(Fill)
-            .clip(true)
-            .on_press(Message::ParametersManagerEdit(name.to_owned(), which)),
+        cell_button(
+            value,
+            Message::ParametersManagerEdit(name.to_owned(), which),
+        )
+        .width(Fill),
     );
     if width > 0.0 {
         printed.width(Length::Fixed(width)).into()
@@ -397,11 +422,10 @@ fn text_cell(
 }
 
 fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
-    container(
-        button(text(crate::t!(if show { "Yes" } else { "No" }).into_owned()).size(11))
-            .clip(true)
-            .on_press(Message::ParametersManagerShow(name.to_owned())),
-    )
+    container(cell_button(
+        &crate::t!(if show { "Yes" } else { "No" }),
+        Message::ParametersManagerShow(name.to_owned()),
+    ))
     .width(Length::Fixed(width))
     .id(iced::widget::Id::from(format!(
         "parameters-manager-show-{name}"
@@ -433,7 +457,17 @@ fn header_line(panel: &Panel) -> Element<'static, Message> {
             ));
         }
     }
-    row(cells).spacing(SPACING).into()
+    // The kit's column header look: titles on the bar colour, semibold.
+    container(row(cells).spacing(SPACING).align_y(iced::Center))
+        .width(Fill)
+        .height(Length::Fixed(km::ROW_H))
+        .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(chrome::surface_raised(theme))),
+            text_color: Some(chrome::text(theme)),
+            ..Default::default()
+        })
+        .into()
 }
 
 /// The header row is the surface the menu opens from; the id sits on the whole
@@ -450,14 +484,29 @@ fn group_line(group: Group) -> Element<'static, Message> {
         Group::ActionParameters => crate::tr!("parameters-manager", "action-parameters"),
         Group::Attributes => crate::t!(group.name()).into_owned(),
     };
-    row(vec![
-        glyph_cell(
-            GlyphKind::GroupBox,
-            format!("parameters-manager-group-{:?}", group),
-        ),
-        container(text(label).size(11)).padding([6, 0]).into(),
-    ])
-    .spacing(SPACING)
+    // A section bar: the gap above, the group on the bar colour.
+    column![
+        Space::new().height(km::CATEGORY_GAP),
+        container(
+            row(vec![
+                glyph_cell(
+                    GlyphKind::GroupBox,
+                    format!("parameters-manager-group-{:?}", group),
+                ),
+                ui_text(label).font(kit::SEMIBOLD).into(),
+            ])
+            .spacing(SPACING)
+            .align_y(iced::Center),
+        )
+        .width(Fill)
+        .height(Length::Fixed(km::CATEGORY_H))
+        .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(chrome::surface_raised(theme))),
+            text_color: Some(chrome::text(theme)),
+            ..Default::default()
+        }),
+    ]
     .into()
 }
 
@@ -468,32 +517,39 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
     row(vec![
         container(
             button(
-                canvas(Glyph(GlyphKind::Funnel))
-                    .width(Length::Fixed(12.0))
-                    .height(Length::Fixed(12.0)),
+                container(
+                    canvas(Glyph(GlyphKind::Funnel))
+                        .width(Length::Fixed(km::BAR_ICON))
+                        .height(Length::Fixed(km::BAR_ICON)),
+                )
+                .center(Fill),
             )
             .on_press(Message::ParametersManagerFilterMenu)
-            .padding([2, 4]),
+            .width(Length::Fixed(km::TOOL_H))
+            .height(Length::Fixed(km::TOOL_H))
+            .padding(0)
+            .style(kit::flat_button_style(panel.filter_menu)),
         )
-        .width(Length::Fixed(24.0))
+        .width(Length::Fixed(km::TOOL_H))
         .id(iced::widget::Id::from("parameters-manager-funnel"))
         .into(),
-        container(
-            text_input(&crate::tr!("parameters-manager", "filter"), &panel.filter)
-                .on_input(Message::ParametersManagerFilter)
-                .size(11),
-        )
-        .width(Length::Fixed(96.0))
+        container(kit::search_field(
+            &crate::tr!("parameters-manager", "filter"),
+            &panel.filter,
+            Message::ParametersManagerFilter,
+        ))
+        .width(Length::Fixed(FILTER_W))
         .into(),
-        container(
-            text_input(&crate::tr!("parameters-manager", "search"), &panel.search)
-                .on_input(Message::ParametersManagerSearch)
-                .size(11),
-        )
+        container(kit::search_field(
+            &crate::tr!("parameters-manager", "search"),
+            &panel.search,
+            Message::ParametersManagerSearch,
+        ))
         .width(Fill)
         .into(),
     ])
-    .spacing(SPACING)
+    .spacing(km::TOOL_GAP)
+    .align_y(iced::Center)
     .into()
 }
 
@@ -501,7 +557,7 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
 /// entry is what sets the filter; the menu then closes. Only the active entry
 /// carries the tick's id, so a test can tell which one is marked.
 fn filter_menu(panel: &Panel) -> Element<'static, Message> {
-    let mut list = column![].spacing(2);
+    let mut list = column![];
     for mode in manager::FilterMode::ALL {
         let active = mode == panel.mode;
         let tick = container(crate::ui::icons::themed_check_cell::<Message>(active));
@@ -514,19 +570,20 @@ fn filter_menu(panel: &Panel) -> Element<'static, Message> {
         };
         list = list.push(
             button(
-                row![tick, text(mode.menu_label()).size(11)]
-                    .spacing(4)
+                row![tick, ui_text(mode.menu_label())]
+                    .spacing(km::TOOL_GAP)
                     .align_y(iced::Center),
             )
             .on_press(Message::ParametersManagerFilterMode(mode))
-            .style(button::text)
-            .padding([2, 4])
+            .style(kit::flat_button_style(false))
+            .padding([0.0, km::CELL_PAD_X])
+            .height(Length::Fixed(km::MENU_ITEM_H))
             .width(Fill),
         );
     }
     container(list)
-        .style(container::bordered_box)
-        .padding(4)
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
         .width(Fill)
         .into()
 }
@@ -535,11 +592,17 @@ fn filter_menu(panel: &Panel) -> Element<'static, Message> {
 /// can hide, ticked while it is shown. Picking one toggles it and closes the
 /// menu, as the reference's own list does.
 fn column_menu(panel: &Panel) -> Element<'static, Message> {
-    let mut list = column![].spacing(2);
+    let mut list = column![];
     list = list.push(
-        container(text(crate::t!("Name").into_owned()).size(11))
-            .padding([2, 4])
-            .id(iced::widget::Id::new("parameters-manager-column-Name")),
+        container(
+            ui_text(crate::t!("Name").into_owned()).style(|theme: &iced::Theme| text::Style {
+                color: Some(chrome::muted(theme)),
+            }),
+        )
+        .padding([0.0, km::CELL_PAD_X])
+        .height(Length::Fixed(km::MENU_ITEM_H))
+        .align_y(iced::Center)
+        .id(iced::widget::Id::new("parameters-manager-column-Name")),
     );
     for column in Column::ALL {
         let shown = panel.columns[column.index()];
@@ -555,13 +618,14 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
         list = list.push(
             container(
                 button(
-                    row![tick, text(column.label()).size(11)]
-                        .spacing(4)
+                    row![tick, ui_text(column.label())]
+                        .spacing(km::TOOL_GAP)
                         .align_y(iced::Center),
                 )
                 .on_press(Message::ParametersManagerColumn(column))
-                .style(button::text)
-                .padding([2, 4])
+                .style(kit::flat_button_style(false))
+                .padding([0.0, km::CELL_PAD_X])
+                .height(Length::Fixed(km::MENU_ITEM_H))
                 .width(Fill),
             )
             .width(Fill)
@@ -572,8 +636,8 @@ fn column_menu(panel: &Panel) -> Element<'static, Message> {
         );
     }
     container(list)
-        .style(container::bordered_box)
-        .padding(4)
+        .style(crate::ui::kit::menu::frame_style)
+        .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
         .width(Fill)
         .into()
 }
@@ -652,7 +716,11 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
             COLUMNS[6].0,
         ));
     }
-    row(cells).spacing(SPACING).into()
+    row(cells)
+        .spacing(SPACING)
+        .height(Length::Fixed(km::ROW_H))
+        .align_y(iced::Center)
+        .into()
 }
 
 pub fn view(
@@ -679,30 +747,23 @@ pub fn view(
         }
     }
     let footer = manager::footer(panel.mode, rows.len(), listed.len());
-    let mut body = column![container(toolbar(panel)).width(Fill).padding([2, 2])].spacing(2);
+    let mut body = column![kit::band(toolbar(panel))];
     if panel.filter_menu {
-        body = body.push(container(filter_menu(panel)).width(Fill).padding([0, 2]));
+        body = body.push(kit::band(filter_menu(panel)));
     }
     if panel.header_menu {
-        body = body.push(container(column_menu(panel)).width(Fill).padding([0, 2]));
+        body = body.push(kit::band(column_menu(panel)));
     }
-    dock::frame(
+    kit::palette(
         dock::title_bar(
             PanelId::ParametersManager,
             crate::t!("Parameters Manager").into_owned(),
             chrome,
         ),
-        body.push(
-            container(
-                scrollable(column(lines).spacing(2))
-                    .width(Fill)
-                    .height(Fill),
-            )
-            .width(Fill)
+        body.push(Space::new().height(km::TOOL_GAP))
+            .push(container(kit::scroll_area(column(lines).spacing(km::line()))).height(Fill))
+            .push(kit::footer(kit::footer_text(footer)))
             .height(Fill),
-        )
-        .push(container(text(footer).size(11)).width(Fill).padding([2, 2]))
-        .height(Fill),
         width,
     )
 }

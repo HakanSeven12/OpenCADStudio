@@ -321,6 +321,10 @@ pub enum TableOperation {
         rotation: Option<u16>,
         scale: Option<[f64; 2]>,
     },
+    /// Put the paper-space layout tabs in this order (API v23). `names` lists
+    /// every paper-space layout once, in the new order; `Model` stays first
+    /// and is not listed. One undo step.
+    LayoutSetTabOrder { names: Vec<String> },
 }
 
 /// The style tables `TableOperation` can rename, delete or make current.
@@ -514,7 +518,7 @@ pub enum HostNotification {
         revision: u64,
         count: u64,
     },
-    /// V23 scene/widget semantic events for an attach-routed panel: the
+    /// V24 scene/widget semantic events for an attach-routed panel: the
     /// SMALL semantic events the host produces and the owning plugin
     /// consumes (tree expansions, selections, activations, command
     /// invocations, cell facts) — the notify leg of the widgets module's
@@ -525,19 +529,21 @@ pub enum HostNotification {
     /// ([`crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS`]). Older plugins
     /// decode it through the `Unknown` passthrough. Discriminant 15.
     ///
-    /// Boundary (recorded): the host-UI/mount publisher that ATTACHES this
-    /// notification to live widget mounts is a recorded follow-up — v23
-    /// ships the wire tail, gate rows, and routing only; nothing here
-    /// touches host-UI state.
+    /// Boundary (landed, SCN-025): the host-UI/mount publisher ATTACHES
+    /// this notification to live widget mounts — the drained batches
+    /// forward through the manager's v24 notify router. The crossing was
+    /// re-versioned 23 → 24 at the SCN-026 upstream merge (upstream's v23
+    /// = `TableOperation::LayoutSetTabOrder`); nothing here touches
+    /// host-UI state itself.
     PanelSceneEvents {
-        /// Panel id (wire-capped like the v23 request tails).
+        /// Panel id (wire-capped like the v24 request tails).
         panel_id: String,
         /// The `WidgetSurface` identity within the panel's event stream.
         surface_id: crate::scene::StableId,
         /// The bounded semantic event batch.
         events: Vec<crate::widgets::WidgetEvent>,
     },
-    /// V23 host-driven lazy fetch demand: the host asks the owning plugin
+    /// V24 host-driven lazy fetch demand: the host asks the owning plugin
     /// to publish a bounded page of a store the plugin owns — a lazy
     /// tree-branch's children, an item-list window, a typed-table window,
     /// or a scene region (`parent_id` + `range`, the exact shape
@@ -550,10 +556,10 @@ pub enum HostNotification {
     /// [`crate::widgets::MAX_WIDGET_RANGE_LEN`]: an over-cap demand is a
     /// structured refusal, never a bigger page. Older plugins decode it
     /// through the `Unknown` passthrough; the runner gate rows
-    /// (notifications 15/16 ⇒ 23) hold both v23 tails back from pre-v23
+    /// (notifications 15/16 ⇒ 24) hold both v24 tails back from pre-v24
     /// plugins. Discriminant 16.
     PanelStoreDemand {
-        /// Panel id (wire-capped like the v23 request tails).
+        /// Panel id (wire-capped like the v24 request tails).
         panel_id: String,
         /// The `WidgetSurface` identity the demand addresses.
         surface_id: crate::scene::StableId,
@@ -795,7 +801,7 @@ impl<'de> Deserialize<'de> for HostNotification {
                 })
                 .map_err(serde::de::Error::custom),
             15 => {
-                // The v23 event batch: bounded at decode like the request
+                // The v24 event batch: bounded at decode like the request
                 // tails — a past-cap batch (or a past-cap panel id) is a
                 // structured refusal, never materialized bigger.
                 let (panel_id, surface_id, events): (
@@ -824,7 +830,7 @@ impl<'de> Deserialize<'de> for HostNotification {
                 })
             }
             16 => {
-                // The v23 store demand: same wire caps as the request tail.
+                // The v24 store demand: same wire caps as the request tail.
                 let (panel_id, surface_id, parent_id, range): (
                     String,
                     crate::scene::StableId,
@@ -1514,7 +1520,7 @@ macro_rules! export_plugin {
     };
 }
 
-/// The transport's structural gate for one v23 publish frame: `false` when
+/// The transport's structural gate for one v24 publish frame: `false` when
 /// the carried surface passes the crate's own `validate()` (structural
 /// validity only — budgets ran at frame decode). The trait's DEFAULT
 /// publish body runs it (the honest stub kept here so an out-of-crate
@@ -2332,10 +2338,10 @@ pub trait HostApi {
         Err("Geographic location writes are not supported by this host".to_owned())
     }
 
-    // ── Panel surface attach (API v23, additive defaults; appended at the
+    // ── Panel surface attach (API v24, additive defaults; appended at the
     //    ABI tail) ─────────────────────────────────────────────────────────
     //
-    // The v23 publish-or-patch contract's HOST side. The wire layer decodes
+    // The v24 publish-or-patch contract's HOST side. The wire layer decodes
     // and budget-gates the four tails and routes them here; `plugin_id` is
     // the transport-authenticated caller (the same identity law as
     // `register_panel_for_plugin`).
@@ -2350,7 +2356,7 @@ pub trait HostApi {
     // (`src/app/plugin_host.rs`): publishes store, patches apply, reads
     // page, and the widget-surface mount goes live.
 
-    /// V23 publish (the snapshot leg of the publish-or-patch contract):
+    /// V24 publish (the snapshot leg of the publish-or-patch contract):
     /// `surface` stores host-side for `panel_id` and a `WidgetSurface`
     /// registers into the host's mount. The default is the transport-era
     /// stub: structurally invalid payloads refuse `InvalidOp`, everything
@@ -2377,7 +2383,7 @@ pub trait HostApi {
         }
     }
 
-    /// V23 patch (the incremental leg): `patch` applies ATOMICALLY via the
+    /// V24 patch (the incremental leg): `patch` applies ATOMICALLY via the
     /// crate's `apply_patch(_report)` over the stored surface for
     /// `panel_id`. The default is the transport-era stub: no publisher is
     /// attached, so the frame refuses `PublisherUnattached` with zero
@@ -2397,7 +2403,7 @@ pub trait HostApi {
         }
     }
 
-    /// V23 bounded store read: one window of the addressed store kind
+    /// V24 bounded store read: one window of the addressed store kind
     /// ([`PanelStoreKind`]) for `panel_id`, resolved with checked
     /// arithmetic (a past-the-end window is an empty page, never a panic;
     /// the width already rides its decode cap — a host never answers a
@@ -2416,7 +2422,7 @@ pub trait HostApi {
         }
     }
 
-    /// V23 bounded recovery read: the current state of `panel_id`'s
+    /// V24 bounded recovery read: the current state of `panel_id`'s
     /// surfaces as [`StoreRow::State`] digest plus the LEADING window of
     /// the scene — never a full dump. The default is the transport-era
     /// stub: the empty digest only.

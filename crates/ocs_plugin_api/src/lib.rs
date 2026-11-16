@@ -115,7 +115,7 @@ pub(crate) mod test_lock {
 #[cfg(feature = "host")]
 pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};
 
-// V23 scene/widget wire vocabulary (add-only re-exports; the request/
+// V24 scene/widget wire vocabulary (add-only re-exports; the request/
 // response/notification variants themselves live on `ipc::protocol::…`).
 #[cfg(feature = "host")]
 pub use ipc::protocol::{

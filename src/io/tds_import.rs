@@ -137,7 +137,7 @@ impl Reader<'_> {
                 break;
             };
             let len = len as usize;
-            if len < 6 || at + len > to {
+            if len < 6 || len > to - at {
                 break;
             }
             out.push((id, at + 6, at + len));
@@ -625,4 +625,447 @@ pub fn convert(scene: &TdsScene, options: &TdsOptions) -> TdsImport {
     out.messages
         .push("3D Studio file import completed".to_string());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOX: &[u8] = include_bytes!("../../tests/fixtures/tds/box.3ds");
+    const TWO_MATERIALS: &[u8] = include_bytes!("../../tests/fixtures/tds/two_materials.3ds");
+    const LIGHTS_CAMERA: &[u8] = include_bytes!("../../tests/fixtures/tds/lights_camera.3ds");
+    const TEXTURED: &[u8] = include_bytes!("../../tests/fixtures/tds/textured.3ds");
+    const OBJECTS: &[u8] = include_bytes!("../../tests/fixtures/tds/objects.3ds");
+
+    /// The file holds single-precision numbers (Blender writes the camera's
+    /// target z as -20.000023).
+    fn assert_close(actual: [f64; 3], expected: [f64; 3], what: &str) {
+        let near = (0..3).all(|k| (actual[k] - expected[k]).abs() < 1e-4);
+        assert!(near, "{what}: {actual:?}, expected {expected:?}");
+    }
+
+    fn bounds(points: &[[f64; 3]]) -> ([f64; 3], [f64; 3]) {
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        for p in points {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        (lo, hi)
+    }
+
+    fn options(selected: &[&str]) -> TdsOptions {
+        TdsOptions {
+            selected: selected.iter().map(|s| s.to_string()).collect(),
+            layers: LayerMode::ByObject,
+            multi: HashMap::new(),
+            compact: false,
+            single_layer: "IMPORTED".to_string(),
+            stop_at: None,
+        }
+    }
+
+    fn object<'a>(scene: &'a TdsScene, name: &str) -> &'a TdsObject {
+        &scene
+            .objects
+            .iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("no object {name}"))
+            .1
+    }
+
+    fn layers(import: &TdsImport) -> Vec<&str> {
+        import.parts.iter().map(|p| p.layer.as_str()).collect()
+    }
+
+    /// A chunk: its id, its length (header included), its body.
+    fn chunk(id: u16, body: &[u8]) -> Vec<u8> {
+        let mut out = id.to_le_bytes().to_vec();
+        out.extend((6 + body.len() as u32).to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    #[test]
+    fn a_box_is_read_with_its_material() {
+        let scene = read(BOX).expect("a 3D Studio file");
+        let [red] = &scene.materials[..] else {
+            panic!("one material");
+        };
+        assert_eq!(red.name, "Red");
+        assert_eq!(red.ambient, Some([255, 255, 255]));
+        assert_eq!(red.diffuse, Some([204, 25, 25]));
+        assert_eq!(red.specular, Some([255, 255, 255]));
+        assert_eq!(red.shininess, Some(0.6));
+        assert_eq!(red.transparency, Some(0.25));
+        assert_eq!(red.shading, Some(3));
+        assert!(red.map.is_none());
+        let [(name, TdsObject::Mesh(mesh))] = &scene.objects[..] else {
+            panic!("one mesh");
+        };
+        assert_eq!(name, "Box");
+        assert_eq!((mesh.vertices.len(), mesh.faces.len()), (14, 12));
+        let (lo, hi) = bounds(&mesh.vertices);
+        assert_close(lo, [9.0, 18.5, 28.0], "lowest corner");
+        assert_close(hi, [11.0, 21.5, 32.0], "highest corner");
+        assert!(mesh.faces.iter().flatten().all(|v| *v < 14));
+        let [(material, faces)] = &mesh.groups[..] else {
+            panic!("one material group");
+        };
+        assert_eq!(material, "Red");
+        let mut faces = faces.clone();
+        faces.sort_unstable();
+        assert_eq!(faces, (0..12).collect::<Vec<_>>());
+        assert_eq!(mesh.color, None);
+    }
+
+    #[test]
+    fn lights_and_a_camera_are_read() {
+        let scene = read(LIGHTS_CAMERA).expect("a 3D Studio file");
+        let kinds: Vec<(&str, &str)> = scene
+            .objects
+            .iter()
+            .map(|(name, o)| (name.as_str(), o.kind()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("Floor", "Mesh"),
+                ("Lamp", "Light"),
+                ("Spot", "Light"),
+                ("Camera", "Camera")
+            ]
+        );
+        // The mesh's own vertices, not the keyframer section that follows.
+        let TdsObject::Mesh(floor) = object(&scene, "Floor") else {
+            panic!("a mesh");
+        };
+        let (lo, hi) = bounds(&floor.vertices);
+        assert_close(lo, [-5.0, -5.0, -0.2], "floor, lowest corner");
+        assert_close(hi, [5.0, 5.0, 0.0], "floor, highest corner");
+        let TdsObject::Light(lamp) = object(&scene, "Lamp") else {
+            panic!("a light");
+        };
+        assert_close(lamp.position, [4.0, -3.0, 5.0], "lamp position");
+        assert_close(lamp.color, [1.0, 0.5, 0.25], "lamp colour");
+        assert!(lamp.spot.is_none());
+        let TdsObject::Light(spot) = object(&scene, "Spot") else {
+            panic!("a light");
+        };
+        assert_close(spot.position, [0.0, 0.0, 8.0], "spot position");
+        assert_close(spot.color, [0.25, 0.5, 1.0], "spot colour");
+        let (target, hotspot, falloff) = spot.spot.expect("a spotlight");
+        assert_close(target, [0.0, 0.0, -8.0], "spot target");
+        assert_eq!((hotspot, falloff), (45.0, 60.0));
+        let TdsObject::Camera(camera) = object(&scene, "Camera") else {
+            panic!("a camera");
+        };
+        assert_close(camera.position, [0.0, -20.0, 10.0], "camera position");
+        assert_close(camera.target, [0.0, 20.0, -20.0], "camera target");
+        assert_eq!(camera.lens, 35.0);
+    }
+
+    #[test]
+    fn a_texture_map_is_read_and_a_missing_one_reported() {
+        let scene = read(TEXTURED).expect("a 3D Studio file");
+        assert_eq!(
+            scene.materials[0].map,
+            Some(("checker.png".to_string(), 1.0))
+        );
+        let import = convert(&scene, &options(&["Tile"]));
+        assert_eq!(
+            import.missing_maps,
+            [("checker.png".to_string(), "Checker".to_string())]
+        );
+        assert!(import
+            .messages
+            .contains(&"Cannot find texture map file \"checker.png\".".to_string()));
+    }
+
+    #[test]
+    fn a_mesh_with_two_materials_is_split_or_given_one() {
+        let scene = read(TWO_MATERIALS).expect("a 3D Studio file");
+        let TdsObject::Mesh(mesh) = object(&scene, "Crate") else {
+            panic!("a mesh");
+        };
+        assert_eq!(scene.mesh_materials(mesh), ["Green", "Blue"]);
+        let parts = |import: &TdsImport| -> Vec<(Option<String>, usize, usize)> {
+            import
+                .parts
+                .iter()
+                .map(|p| {
+                    let m = &p.mesh;
+                    (p.material.clone(), m.faces.len(), m.vertices.len())
+                })
+                .collect()
+        };
+
+        // Split, the default: one mesh per material, each with only the
+        // vertices its faces use.
+        let split = convert(&scene, &options(&["Crate"]));
+        let got = parts(&split);
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].0.as_deref(), got[0].1), (Some("Green"), 8));
+        assert_eq!((got[1].0.as_deref(), got[1].1), (Some("Blue"), 4));
+        for part in &split.parts {
+            let mut used: Vec<i16> = part
+                .mesh
+                .faces
+                .iter()
+                .flat_map(|f| [f.index1, f.index2, f.index3])
+                .collect();
+            used.sort_unstable();
+            used.dedup();
+            assert_eq!(
+                used,
+                (1..=part.mesh.vertices.len() as i16).collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(split.materials, ["Green", "Blue"]);
+        let order: Vec<String> = split
+            .steps
+            .iter()
+            .map(|s| match s {
+                TdsStep::Part(k) => format!("part {k}"),
+                TdsStep::Material(m) => format!("material {m}"),
+                TdsStep::Light { name, .. } => format!("light {name}"),
+            })
+            .collect();
+        assert_eq!(
+            order,
+            ["part 0", "material Green", "part 1", "material Blue"]
+        );
+
+        let mut by_material = options(&["Crate"]);
+        by_material.layers = LayerMode::ByMaterial;
+        assert_eq!(layers(&convert(&scene, &by_material)), ["GREEN", "BLUE"]);
+
+        // One mesh: the first material the file defines, or a chosen one,
+        // or none; all faces and the file's vertex list.
+        for (choice, material) in [
+            (MultiMaterial::First, Some("Green")),
+            (
+                MultiMaterial::Material(Some("Blue".to_string())),
+                Some("Blue"),
+            ),
+            (MultiMaterial::Material(None), None),
+        ] {
+            let mut one = options(&["Crate"]);
+            one.multi.insert("Crate".to_string(), choice);
+            let import = convert(&scene, &one);
+            assert_eq!(parts(&import), [(material.map(String::from), 12, 14)]);
+        }
+    }
+
+    #[test]
+    fn objects_are_taken_by_name_onto_layers() {
+        let scene = read(OBJECTS).expect("a 3D Studio file");
+        let all = ["zeta", "Alpha", "mid/part", "Beta"];
+        // In name order, whatever order the file has; `/` cannot be in a
+        // layer name.
+        let import = convert(&scene, &options(&all));
+        assert_eq!(layers(&import), ["ALPHA", "BETA", "MID_PART", "ZETA"]);
+        let materials: Vec<Option<&str>> =
+            import.parts.iter().map(|p| p.material.as_deref()).collect();
+        assert_eq!(
+            materials,
+            [
+                Some("M_Alpha"),
+                Some("None"),
+                Some("M_mid_part"),
+                Some("M_zeta")
+            ]
+        );
+        assert_eq!(
+            import.messages.last().map(String::as_str),
+            Some("3D Studio file import completed")
+        );
+
+        assert_eq!(
+            layers(&convert(&scene, &options(&["zeta", "Beta"]))),
+            ["BETA", "ZETA"]
+        );
+
+        let mut stopped = options(&all);
+        stopped.stop_at = Some("mid/part".to_string());
+        let import = convert(&scene, &stopped);
+        assert_eq!(layers(&import), ["ALPHA", "BETA"]);
+        assert_eq!(
+            import.messages.last().map(String::as_str),
+            Some("Import stopped at mid/part")
+        );
+
+        let mut single = options(&all);
+        single.layers = LayerMode::Single;
+        assert_eq!(layers(&convert(&scene, &single)), ["IMPORTED"; 4]);
+        let mut by_colour = options(&all);
+        by_colour.layers = LayerMode::ByObjectColor;
+        assert_eq!(layers(&convert(&scene, &by_colour)), ["COLORNONE"; 4]);
+    }
+
+    #[test]
+    fn a_camera_becomes_a_view_and_lights_become_steps() {
+        let scene = read(LIGHTS_CAMERA).expect("a 3D Studio file");
+        let import = convert(&scene, &options(&["Camera", "Lamp", "Spot"]));
+        assert!(import.parts.is_empty());
+        let [view] = &import.views[..] else {
+            panic!("one view");
+        };
+        assert_eq!(view.name, "CAMERA");
+        assert_close(view.target, [0.0, 20.0, -20.0], "view target");
+        assert_close(view.direction, [0.0, -40.0, 30.0], "view direction");
+        assert_eq!(view.lens, 35.0);
+        // 50 units from the target with a 35 mm lens.
+        assert!((view.height - 50.0 * 17.6141 / 35.0).abs() < 1e-4);
+        let lights: Vec<(&str, bool)> = import
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                TdsStep::Light { name, spot, .. } => Some((name.as_str(), spot.is_some())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lights, [("LAMP", false), ("SPOT", true)]);
+    }
+
+    /// A mesh with more vertices than a polyface mesh can number (32,767)
+    /// goes on several, and an object colour picks the index colour; built
+    /// here, since Blender writes neither.
+    #[test]
+    fn a_mesh_too_big_for_one_polyface_mesh_is_split() {
+        const TRIANGLES: usize = 13_334;
+        let vertex_count = 3 * TRIANGLES;
+        let mut vertices = (vertex_count as u16).to_le_bytes().to_vec();
+        for k in 0..vertex_count {
+            for c in [k as f32, (k % 7) as f32, 1.0] {
+                vertices.extend(c.to_le_bytes());
+            }
+        }
+        // Each triangle has its own three vertices; one more face names a
+        // vertex the mesh does not have and is left out.
+        let mut faces = ((TRIANGLES + 1) as u16).to_le_bytes().to_vec();
+        for t in 0..TRIANGLES {
+            for v in [3 * t, 3 * t + 1, 3 * t + 2] {
+                faces.extend((v as u16).to_le_bytes());
+            }
+            faces.extend(0u16.to_le_bytes());
+        }
+        for v in [0u16, 1, 65_000, 0] {
+            faces.extend(v.to_le_bytes());
+        }
+        let mesh = [
+            chunk(0x4110, &vertices),
+            chunk(0x4120, &faces),
+            chunk(0x4165, &[2]),
+        ]
+        .concat();
+        let object = [b"Big\0".as_slice(), &chunk(0x4100, &mesh)].concat();
+        let file = chunk(0x4D4D, &chunk(0x3D3D, &chunk(0x4000, &object)));
+
+        let scene = read(&file).expect("a 3D Studio file");
+        let mut colours = options(&["Big"]);
+        colours.layers = LayerMode::ByObjectColor;
+        let import = convert(&scene, &colours);
+        assert_eq!(import.parts.len(), 2);
+        let faces: usize = import.parts.iter().map(|p| p.mesh.faces.len()).sum();
+        let vertices: usize = import.parts.iter().map(|p| p.mesh.vertices.len()).sum();
+        assert_eq!((faces, vertices), (TRIANGLES, vertex_count));
+        for part in &import.parts {
+            assert!(part.mesh.vertices.len() <= 32_767);
+            assert_eq!((part.layer.as_str(), part.color), ("COLOR02", Some(1)));
+        }
+        let last = import.parts[1].mesh.vertices.last().expect("vertices");
+        let k = (vertex_count - 1) as f64;
+        assert_close(
+            [last.location.x, last.location.y, last.location.z],
+            [k, k % 7.0, 1.0],
+            "last vertex",
+        );
+    }
+
+    /// Colours and percentages in the forms Blender does not write: float
+    /// and linear colours, a 24-bit colour preferred to a float one, float
+    /// percentages, a texture map without a strength (full strength), and a
+    /// light's 24-bit colour; built here.
+    #[test]
+    fn colours_and_percentages_in_their_other_forms_are_read() {
+        let floats = |v: [f32; 3]| -> Vec<u8> { v.iter().flat_map(|c| c.to_le_bytes()).collect() };
+        let material = [
+            chunk(0xA000, b"Other\0"),
+            // Ambient: linear float only.
+            chunk(0xA010, &chunk(0x0013, &floats([0.2, 0.4, 0.6]))),
+            // Diffuse: a float colour and a 24-bit one; the 24-bit one wins.
+            chunk(
+                0xA020,
+                &[
+                    chunk(0x0010, &floats([0.5, 0.25, 1.0])),
+                    chunk(0x0011, &[10, 20, 30]),
+                ]
+                .concat(),
+            ),
+            // Specular: a float colour, clamped to 0-1.
+            chunk(0xA030, &chunk(0x0010, &floats([0.5, -1.0, 2.0]))),
+            chunk(0xA040, &chunk(0x0031, &37.5f32.to_le_bytes())),
+            chunk(0xA050, &chunk(0x0031, &12.5f32.to_le_bytes())),
+        ]
+        .concat();
+        let light = [floats([1.0, 2.0, 3.0]), chunk(0x0011, &[255, 51, 0])].concat();
+        let bulb = [b"Bulb\0".as_slice(), &chunk(0x4600, &light)].concat();
+        let mapped = [
+            chunk(0xA000, b"Mapped\0"),
+            chunk(0xA200, &chunk(0xA300, b"wood.jpg\0")),
+        ]
+        .concat();
+        let editor = [
+            chunk(0xAFFF, &material),
+            chunk(0xAFFF, &mapped),
+            chunk(0x4000, &bulb),
+        ]
+        .concat();
+        let scene = read(&chunk(0x4D4D, &chunk(0x3D3D, &editor))).expect("a 3D Studio file");
+
+        let m = &scene.materials[0];
+        assert_eq!(m.name, "Other");
+        assert_eq!(m.ambient, Some([51, 102, 153]));
+        assert_eq!(m.diffuse, Some([10, 20, 30]));
+        assert_eq!(m.specular, Some([128, 0, 255]));
+        assert_eq!((m.shininess, m.transparency), (Some(0.375), Some(0.125)));
+        assert_eq!(scene.materials[1].map, Some(("wood.jpg".to_string(), 1.0)));
+        let TdsObject::Light(bulb) = object(&scene, "Bulb") else {
+            panic!("a light");
+        };
+        assert_close(bulb.position, [1.0, 2.0, 3.0], "light position");
+        assert_close(bulb.color, [1.0, 0.2, 0.0], "light colour");
+    }
+
+    /// Every truncation of every fixture, and every byte of each set to 0,
+    /// to 0xFF and with its top bit flipped, is read and converted without
+    /// a panic.
+    #[test]
+    fn damaged_files_never_panic() {
+        let mut cases = 0;
+        let mut check = |bytes: &[u8]| {
+            cases += 1;
+            if let Some(scene) = read(bytes) {
+                let names: Vec<&str> = scene.objects.iter().map(|(n, _)| n.as_str()).collect();
+                let _ = convert(&scene, &options(&names));
+            }
+        };
+        for fixture in [BOX, TWO_MATERIALS, LIGHTS_CAMERA, TEXTURED, OBJECTS] {
+            for end in 0..fixture.len() {
+                check(&fixture[..end]);
+            }
+            let mut damaged = fixture.to_vec();
+            for at in 0..fixture.len() {
+                for value in [0x00, 0xFF, fixture[at] ^ 0x80] {
+                    damaged[at] = value;
+                    check(&damaged);
+                }
+                damaged[at] = fixture[at];
+            }
+        }
+        assert!(cases > 25_000, "{cases} damaged files");
+    }
 }

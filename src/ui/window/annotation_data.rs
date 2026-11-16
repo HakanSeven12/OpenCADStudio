@@ -615,7 +615,7 @@ impl iced::widget::canvas::Program<Message> for InsertTablePreview {
         let label = |frame: &mut Frame, content: String, x: f32, y: f32, size: f32| {
             frame.fill_text(Text {
                 content,
-                position: Point::new(x, y),
+                position: crate::ui::style::text::snap_point(Point::new(x, y)),
                 color: ink,
                 size: iced::Pixels(size),
                 align_x: iced::advanced::text::Alignment::Center,

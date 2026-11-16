@@ -7,14 +7,12 @@
 
 use crate::app::settings::BlockInsertOptions;
 use crate::app::{ClipboardDeps, Message};
-use crate::ui::dock::{self, Chrome, PanelId, VerticalLabel};
-use crate::ui::ribbon::{tooltip_content, tooltip_style};
+use crate::ui::dock::{self, Chrome, PanelId};
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::block_palette::{preview_canvas, BlockPreview};
-use iced::widget::{
-    button, canvas, checkbox, column, container, pick_list, row, rule, scrollable, text,
-    text_input, tooltip, Space,
-};
-use iced::{Background, Border, Element, Fill, Length, Theme};
+use iced::widget::{button, checkbox, column, container, pick_list, row, text, Space};
+use iced::{Background, Element, Fill, Length, Theme};
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
@@ -231,6 +229,10 @@ pub fn user_block_names(doc: &document::Document) -> Vec<String> {
     names
 }
 
+/// Size of a tool's preview thumbnail.
+const THUMB_W: f32 = 44.0;
+const THUMB_H: f32 = 36.0;
+
 /// Render the dockable Tool Palettes panel.
 pub fn view<'a>(
     state: &'a ToolPalettesState,
@@ -252,32 +254,22 @@ pub fn view<'a>(
         .or_else(|| available_blocks.first().cloned());
 
     // Top controls: filter + add from selection + add from current drawing
-    let search_bar = text_input(
+    let search_bar = kit::search_field(
         &crate::tr!("tool-palettes", "search-placeholder"),
         &state.search,
-    )
-    .on_input(|s| tm(ToolPalettesMsg::SearchChanged(s)))
-    .size(12)
-    .padding([4, 6])
-    .width(Fill);
+        |s| tm(ToolPalettesMsg::SearchChanged(s)),
+    );
 
-    let add_selected_btn = {
-        let btn = button(
-            text(crate::tr!("tool-palettes", "add-selected"))
-                .size(11)
-                .center(),
-        )
-        .padding([4, 8])
-        .width(Fill)
-        .on_press_maybe(has_selected_insert.then_some(tm(ToolPalettesMsg::AddFromSelection)));
-        tooltip(
-            container(btn).id("tool-palettes-add-selected"),
-            tooltip_content(crate::tr!("tool-palettes", "add-selected-hint")),
-            tooltip::Position::Bottom,
-        )
-        .gap(4.0)
-        .style(tooltip_style)
-    };
+    let add_selected_btn = kit::tooltip(
+        container(kit::text_button(
+            crate::tr!("tool-palettes", "add-selected"),
+            has_selected_insert.then_some(tm(ToolPalettesMsg::AddFromSelection)),
+            false,
+        ))
+        .id("tool-palettes-add-selected"),
+        crate::tr!("tool-palettes", "add-selected-hint"),
+        kit::TipPosition::Bottom,
+    );
 
     let add_drawing_row: Element<'a, Message> = if available_blocks.is_empty() {
         Space::new().height(0).into()
@@ -286,45 +278,51 @@ pub fn view<'a>(
             name.clone()
         })
         .on_select(|name| tm(ToolPalettesMsg::SelectDrawingBlock(name)))
-        .text_size(11)
-        .padding([3, 6])
+        .text_size(crate::ui::style::text::UI)
+        .padding(kit::BOX_PAD)
+        .style(kit::pick_list_style)
+        .menu_style(kit::pick_menu_style)
         .width(Fill);
 
-        let add_btn = button(text("+").size(12).center())
-            .padding([3, 8])
-            .on_press_maybe(chosen_block.map(|n| tm(ToolPalettesMsg::AddDrawingBlock(n))));
+        let add_btn = kit::tool_button(
+            kit::tool_icon(crate::ui::icons::PLUS),
+            crate::t!("Add").into_owned(),
+            chosen_block.map(|n| tm(ToolPalettesMsg::AddDrawingBlock(n))),
+            false,
+        );
 
         row![
             picker,
             container(add_btn).id("tool-palettes-add-drawing-block")
         ]
-        .spacing(4)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .into()
     };
 
     // Palette tab management bar (new palette input + button)
     let new_tab_row = row![
-        text_input(
+        kit::search_field(
             &crate::tr!("tool-palettes", "new-palette"),
             &state.new_palette_name,
+            |s| tm(ToolPalettesMsg::NewPaletteNameChanged(s)),
         )
-        .on_input(|s| tm(ToolPalettesMsg::NewPaletteNameChanged(s)))
-        .on_submit(tm(ToolPalettesMsg::NewPalette))
-        .size(11)
-        .padding([3, 6])
-        .width(Fill),
-        button(text("+").size(12).center())
-            .padding([3, 8])
-            .on_press(tm(ToolPalettesMsg::NewPalette)),
-        button(text("−").size(12).center())
-            .padding([3, 8])
-            .on_press_maybe(
-                (state.palettes.len() > 1)
-                    .then_some(tm(ToolPalettesMsg::DeletePalette(state.active_palette))),
-            ),
+        .on_submit(tm(ToolPalettesMsg::NewPalette)),
+        kit::tool_button(
+            kit::tool_icon(crate::ui::icons::PLUS),
+            crate::tr!("tool-palettes", "new-palette"),
+            Some(tm(ToolPalettesMsg::NewPalette)),
+            false,
+        ),
+        kit::tool_button(
+            kit::tool_icon(crate::ui::icons::MINUS),
+            crate::t!("Delete").into_owned(),
+            (state.palettes.len() > 1)
+                .then_some(tm(ToolPalettesMsg::DeletePalette(state.active_palette))),
+            false,
+        ),
     ]
-    .spacing(4)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
 
     // Tool list for the active palette
@@ -343,9 +341,9 @@ pub fn view<'a>(
         }
         let is_placing = state.placing.as_deref() == Some(tool.name.as_str());
         let wires = tool.preview.wires().unwrap_or_default();
-        let thumb: Element<'a, Message> = container(preview_canvas(wires, 36.0))
-            .width(Length::Fixed(44.0))
-            .height(Length::Fixed(36.0))
+        let thumb: Element<'a, Message> = container(preview_canvas(wires, THUMB_H))
+            .width(Length::Fixed(THUMB_W))
+            .height(Length::Fixed(THUMB_H))
             .into();
 
         let mut badges = Vec::new();
@@ -364,43 +362,59 @@ pub fn view<'a>(
         let main_btn = button(
             row![
                 thumb,
-                column![text(tool.label.clone()).size(12), text(subtitle).size(10),]
-                    .spacing(2)
-                    .width(Fill),
+                column![
+                    kit::value_text(tool.label.clone(), false),
+                    text(subtitle)
+                        .size(crate::ui::style::text::UI_SMALL)
+                        .line_height(crate::ui::style::text::line())
+                        .style(|theme: &Theme| text::Style {
+                            color: Some(chrome::muted(theme)),
+                        }),
+                ]
+                .width(Fill),
             ]
-            .spacing(8)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         )
         .on_press(tm(ToolPalettesMsg::InsertTool(idx)))
-        .padding([4, 6])
+        .padding(km::TOOL_GAP)
         .width(Fill)
         .style(move |theme: &Theme, status| {
-            let mut s = button::text(theme, status);
-            if is_placing {
-                s.border = Border {
-                    color: theme.palette().primary.base.color,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                };
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: if is_placing {
+                    Some(Background::Color(chrome::row_selected(theme)))
+                } else if hovered {
+                    Some(Background::Color(chrome::hover(theme)))
+                } else {
+                    None
+                },
+                text_color: chrome::text(theme),
+                ..Default::default()
             }
-            s
         });
 
-        let up_btn = button(text("↑").size(10).center())
-            .padding([2, 5])
-            .on_press_maybe((idx > 0).then_some(tm(ToolPalettesMsg::MoveToolUp(idx))));
-        let down_btn = button(text("↓").size(10).center())
-            .padding([2, 5])
-            .on_press_maybe(
-                (idx + 1 < total_tools).then_some(tm(ToolPalettesMsg::MoveToolDown(idx))),
-            );
-        let del_btn = button(text("×").size(11).center())
-            .padding([2, 5])
-            .on_press(tm(ToolPalettesMsg::RemoveTool(idx)));
+        let small = |label: &'static str, message: Option<Message>| {
+            button(container(text(label).size(crate::ui::style::text::UI)).center(Fill))
+                .on_press_maybe(message)
+                .width(km::BAR_BUTTON)
+                .height(km::BAR_BUTTON)
+                .padding(0)
+                .style(kit::flat_button_style(false))
+        };
+        let up_btn = small(
+            "↑",
+            (idx > 0).then_some(tm(ToolPalettesMsg::MoveToolUp(idx))),
+        );
+        let down_btn = small(
+            "↓",
+            (idx + 1 < total_tools).then_some(tm(ToolPalettesMsg::MoveToolDown(idx))),
+        );
+        let del_btn = small("×", Some(tm(ToolPalettesMsg::RemoveTool(idx))));
 
         let row_el = container(
             row![main_btn, up_btn, down_btn, del_btn]
-                .spacing(2)
+                .spacing(km::line())
                 .align_y(iced::Center),
         )
         .id(format!("tool-palette-item-{idx}"))
@@ -410,94 +424,71 @@ pub fn view<'a>(
     }
 
     let tools_list: Element<'a, Message> = if tool_rows.is_empty() {
-        container(
-            text(crate::tr!("tool-palettes", "no-tools"))
-                .size(11)
-                .color(iced::Color::from_rgb(0.6, 0.6, 0.6)),
-        )
-        .padding(10)
-        .width(Fill)
-        .into()
+        kit::empty_state(crate::tr!("tool-palettes", "no-tools"))
     } else {
-        scrollable(column(tool_rows).spacing(3).padding([2, 4]))
-            .width(Fill)
-            .height(Fill)
-            .into()
+        kit::scroll_area(column(tool_rows).spacing(km::line()))
     };
 
-    // Vertical palette tabs along the right side (matching Authoring Palettes chrome)
+    // Vertical palette tabs along the right side, like the palette strip.
     let side_tabs = column(state.palettes.iter().enumerate().map(|(idx, tab)| {
-        let selected = idx == state.active_palette;
-        let label = tab.name.clone();
-        let tab_h = ((label.chars().count() as f32) * 7.0 + 12.0).max(40.0);
-        container(
-            button(
-                canvas(VerticalLabel {
-                    text: label,
-                    centered: false,
-                })
-                .width(16)
-                .height(tab_h),
-            )
-            .on_press(tm(ToolPalettesMsg::SelectPalette(idx)))
-            .padding([6, 4])
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: Some(Background::Color(
-                        if selected || status == button::Status::Hovered {
-                            palette.background.base.color
-                        } else {
-                            palette.background.weak.color
-                        },
-                    )),
-                    border: Border {
-                        color: if selected {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.neutral.color
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            }),
-        )
+        container(kit::side_tab(
+            &tab.name,
+            idx == state.active_palette,
+            tm(ToolPalettesMsg::SelectPalette(idx)),
+        ))
         .id(format!("tool-palette-tab-{idx}"))
         .into()
     }))
-    .spacing(2)
+    .spacing(km::line())
     .push(Space::new().height(Fill));
 
     // Placement options footer
-    let options_footer = column![
-        rule::horizontal(1),
-        checkbox(state.options.insertion_point)
-            .label(crate::t!("Insertion point").into_owned())
-            .on_toggle(|v| tm(ToolPalettesMsg::TogglePromptInsertionPoint(v)))
-            .size(13)
-            .text_size(11),
-        checkbox(state.options.explode)
-            .label(crate::t!("Explode").into_owned())
-            .on_toggle(|v| tm(ToolPalettesMsg::ToggleExplode(v)))
-            .size(13)
-            .text_size(11),
-    ]
-    .spacing(4)
-    .padding([4, 6]);
+    let option = |label: String, on: bool, message: fn(bool) -> ToolPalettesMsg| {
+        kit::row_view(
+            kit::name_text(label),
+            container(
+                checkbox(on)
+                    .on_toggle(move |v| tm(message(v)))
+                    .size(km::CHECK),
+            )
+            .padding(iced::Padding::ZERO.left(km::CELL_PAD_X))
+            .into(),
+            false,
+            None,
+        )
+    };
+    let options_footer = container(column![
+        kit::section_bar(crate::t!("Options").into_owned(), Vec::new()),
+        option(
+            crate::t!("Insertion point").into_owned(),
+            state.options.insertion_point,
+            ToolPalettesMsg::TogglePromptInsertionPoint,
+        ),
+        option(
+            crate::t!("Explode").into_owned(),
+            state.options.explode,
+            ToolPalettesMsg::ToggleExplode,
+        ),
+    ])
+    .padding(iced::Padding {
+        bottom: km::TOOL_GAP,
+        left: km::GRID_INSET_L,
+        right: km::GRID_INSET_R,
+        ..iced::Padding::ZERO
+    });
 
     let body = column![
-        column![search_bar, add_selected_btn, add_drawing_row, new_tab_row]
-            .spacing(4)
-            .padding([6, 6]),
-        rule::horizontal(1),
-        row![tools_list, side_tabs].spacing(4).height(Fill),
+        kit::band(search_bar),
+        kit::band(add_selected_btn),
+        kit::band(add_drawing_row),
+        kit::band(new_tab_row),
+        Space::new().height(km::TOOL_GAP),
+        row![container(tools_list).width(Fill), side_tabs].height(Fill),
         options_footer,
     ]
     .height(Fill);
 
-    dock::frame(
+    kit::palette(
         dock::title_bar(
             PanelId::ToolPalettes,
             crate::tr!("tool-palettes", "title"),

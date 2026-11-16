@@ -219,14 +219,14 @@ impl crate::app::OpenCADStudio {
     }
 
     /// The tab stops of every paragraph the selection (or caret) touches:
-    /// `\pxt<n>,c<n>,r<n>,D<n>;`, or none (`t0`).
+    /// `\pxt<n>,c<n>,r<n>,D<n>;`, or none (`tz`).
     pub(in crate::app) fn raw_paragraph_tabs(
         &mut self,
         tabs: &[document::entities::mtext_format::TabStop],
     ) {
         let list: Vec<String> = tabs.iter().map(|tab| tab.to_string()).collect();
         let code = if list.is_empty() {
-            "\\pxt0;".to_string()
+            "\\pxtz;".to_string()
         } else {
             format!("\\pxt{};", list.join(","))
         };

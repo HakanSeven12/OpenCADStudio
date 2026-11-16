@@ -533,3 +533,92 @@ fn draw_order_preserves_clip_boundaries_sorting_and_mesh_occlusion() {
         );
     }
 }
+
+/// The page of a layout is its canvas: whatever the sheet holds is drawn on
+/// it, at any Z. Paper space is seen straight down, and a sheet can hold
+/// objects far off its plane (a legend placed at Z = -6040); the page,
+/// drawn at Z = 0 with the lowest draw order, hid everything behind that
+/// plane as soon as the depth range was sized to reach it.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn layout_page_stays_behind_what_the_sheet_holds_at_any_depth() {
+    use crate::scene::model::hatch_model::HatchPattern;
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    for packed in [false, true] {
+        let mut limits = adapter.limits();
+        if packed {
+            limits.max_storage_buffers_per_shader_stage = 0;
+        }
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("GPU device");
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let bounds = Rectangle::with_size(Size::new(SIZE as f32, SIZE as f32));
+        let mut uniforms = Uniforms::new(&Camera::default(), bounds, false);
+        uniforms.view_rot = glam::Mat4::IDENTITY;
+        uniforms.eye_high = [0.; 3];
+        uniforms.eye_low = [0.; 3];
+        // The page as `Scene::paper_sheet_fill` builds it: a white solid
+        // fill on the sheet plane with draw order -2.
+        let page = HatchModel {
+            entity: None,
+            effective_layer: None,
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![
+                [-0.9, -0.9],
+                [0.9, -0.9],
+                [0.9, 0.9],
+                [-0.9, 0.9],
+                [-0.9, -0.9],
+            ]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Solid,
+            name: "SOLID".into(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            aci: 0,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: -2.0,
+        };
+        pipeline.upload_hatches(&device, &queue, &[page]);
+        pipeline.compute_hatch_lod(&queue, uniforms.view_rot, glam::DVec3::ZERO, SIZE, SIZE);
+        // A red line on the sheet, halfway down the depth range: behind the
+        // page's plane, in front of the far plane.
+        let mut line = WireModel::solid("1".to_string(), Vec::new(), [1.0, 0.0, 0.0, 1.0], false);
+        line.points = vec![[0.0, -0.65, 0.5], [0.0, 0.65, 0.5]];
+        let depths = rustc_hash::FxHashMap::default();
+        let bytes = pixels(&device, &queue, &mut pipeline, &uniforms, &[line], &depths);
+        // The line is one pixel wide and may share it with the page: some
+        // pixel of the middle row near x = 0 must be redder than the white
+        // page.
+        let row = SIZE as usize / 2 * SIZE as usize;
+        let middle = SIZE as usize / 2;
+        let line_drawn = (middle - 2..=middle + 2).any(|column| {
+            let offset = (row + column) * 4;
+            bytes[offset] > 200 && bytes[offset + 1] < 200 && bytes[offset + 2] < 200
+        });
+        assert!(
+            line_drawn,
+            "the line is hidden by the page {:?}, packed={packed}",
+            color_at(&bytes, 0.0)
+        );
+        assert!(
+            block_on(validation.pop()).is_none(),
+            "GPU validation failed"
+        );
+    }
+}

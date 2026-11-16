@@ -813,6 +813,15 @@ fn assign_pens(
                 path.move_to(p);
                 current = p;
             }
+            // A segment or a close with no current point (no `m` before
+            // it, as in a damaged file) is left out, as the interpreter
+            // leaves it.
+            TypedInstruction::LineTo(_)
+            | TypedInstruction::CubicTo(_)
+            | TypedInstruction::CubicStartTo(_)
+            | TypedInstruction::CubicEndTo(_)
+            | TypedInstruction::ClosePath(_)
+                if path.elements().is_empty() => {}
             TypedInstruction::LineTo(m) => {
                 let p = Point::new(f(&m.0), f(&m.1));
                 path.line_to(p);
@@ -866,7 +875,8 @@ fn assign_pens(
                     op,
                     TypedInstruction::CloseFillAndStrokeNonZero(_)
                         | TypedInstruction::CloseFillAndStrokeEvenOdd(_)
-                ) {
+                ) && !path.elements().is_empty()
+                {
                     path.close_path();
                 }
                 let fill = (std::mem::take(&mut path), stack[top].ctm);
@@ -1633,4 +1643,99 @@ pub fn underlay_snap_geometry(
         }
     }
     out
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// A one-page PDF, 8 × 6 inches, holding `content`.
+    fn pdf(content: &str) -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 576 432] /Contents 4 0 R >>".to_string(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            ),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (k, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n{object}\nendobj\n", k + 1).bytes());
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
+        for offset in offsets {
+            out.extend(format!("{offset:010} 00000 n \n").bytes());
+        }
+        out.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .bytes(),
+        );
+        out
+    }
+
+    /// Page 1 of `bytes`, registered under a name of its own.
+    fn read(name: &str, bytes: Vec<u8>) -> Option<PageVectors> {
+        let path = format!("pdf-vector-test-{name}.pdf");
+        crate::scene::model::pdf_raster::register_source(&path, Arc::new(bytes));
+        page_content(&path, "1")
+    }
+
+    #[test]
+    fn a_segment_with_no_current_point_is_left_out() {
+        // Each segment or close comes before any `m`; the line after it is
+        // read with its own pen, and the line filled after that (a fill with
+        // no area) as the path that was filled.
+        for (k, stray) in [
+            "72 72 l S",
+            "h S",
+            "72 72 144 144 216 72 c S",
+            "144 144 216 72 v S",
+            "72 72 216 72 y S",
+            "72 72 l f",
+            "b",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let content =
+                format!("{stray} 0 0 1 RG 3 w 72 144 m 144 144 l S 0 1 0 rg 72 216 m 144 216 l f");
+            let page = read(&format!("no-current-point-{k}"), pdf(&content))
+                .unwrap_or_else(|| panic!("{stray:?}: no page"));
+            // (The interpreter draws the fill of an empty path as a hairline
+            // at the page's origin, which is read as it is drawn.)
+            let expected = if stray.ends_with('f') || stray == "b" {
+                3
+            } else {
+                2
+            };
+            assert_eq!(page.paths.len(), expected, "{stray:?}");
+            let line = &page.paths[expected - 2];
+            assert_eq!(
+                line.subpaths[0].segments,
+                [Segment::Line([1.0, 2.0], [2.0, 2.0])],
+                "{stray:?}"
+            );
+            assert_eq!(line.stroke, Some(([0, 0, 255], 3.0)), "{stray:?}");
+            assert_eq!(line.pen, line.stroke, "{stray:?}");
+            let filled = &page.paths[expected - 1];
+            assert_eq!(
+                filled.subpaths[0].segments,
+                [Segment::Line([1.0, 3.0], [2.0, 3.0])],
+                "{stray:?}"
+            );
+            assert_eq!(
+                (filled.fill, filled.stroke),
+                (Some([0, 255, 0]), None),
+                "{stray:?}"
+            );
+        }
+    }
 }

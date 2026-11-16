@@ -1341,9 +1341,11 @@ fn join_strokes(strokes: Vec<Stroke>, join: bool) -> Vec<Stroke> {
     let mut open: Vec<Option<Stroke>> = open.into_iter().map(Some).collect();
     // The earliest drawn unused stroke of the chain's kind with an end at `p`.
     let find = |open: &[Option<Stroke>], chain: &Stroke, p: [f64; 2]| {
+        // A coordinate too far out for a cell saturates to the last one,
+        // so the neighbours are taken without going past it.
         let (cx, cy) = cell(p);
-        (cx - 1..=cx + 1)
-            .flat_map(|x| (cy - 1..=cy + 1).map(move |y| (x, y)))
+        (cx.saturating_sub(1)..=cx.saturating_add(1))
+            .flat_map(|x| (cy.saturating_sub(1)..=cy.saturating_add(1)).map(move |y| (x, y)))
             .filter_map(|key| ends.get(&key))
             .flatten()
             .copied()
@@ -2229,3 +2231,6 @@ fn fill_entities(
 inventory::submit!(crate::command::CommandRegistration {
     names: &["PDFIMPORT", "-PDFIMPORT"]
 });
+
+#[cfg(test)]
+mod tests;

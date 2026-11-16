@@ -2980,6 +2980,7 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         }
     }
     let attributes_ms = crate::perf::elapsed_ms(attributes_started);
+    sync_justified_text_insertion(&mut doc);
     if perf {
         crate::perf_record!(
             "[perf] save-prepare styles={:.1} dimensions={:.1} attributes={:.1} entities={} objects={}",
@@ -2991,6 +2992,43 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         );
     }
     doc
+}
+
+/// A justified TEXT is drawn from its alignment point, but readers that do not
+/// lay text out (viewers, DWG consumers) draw it from the insertion point,
+/// which must be the left end of the baseline. Text placed here kept the
+/// alignment point in both, so it showed left-aligned elsewhere (#3130).
+/// Only that stale case is filled in; a computed insertion point is kept.
+fn sync_justified_text_insertion(doc: &mut Document) {
+    use document::entities::{TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+    let stale: Vec<(document::Handle, [f64; 2])> = doc
+        .entities()
+        .filter_map(|entity| {
+            let document::EntityType::Text(t) = entity else {
+                return None;
+            };
+            if matches!(t.horizontal_alignment, HA::Aligned | HA::Fit)
+                || matches!(
+                    (t.horizontal_alignment, t.vertical_alignment),
+                    (HA::Left, VA::Baseline)
+                )
+            {
+                return None;
+            }
+            let a = t.alignment_point?;
+            let same = (a.x - t.insertion_point.x).hypot(a.y - t.insertion_point.y) <= 1e-9;
+            let origin = crate::entities::text::text_run_placement_at_scale(t, doc, 1.0).origin;
+            let moved = (origin[0] - a.x).hypot(origin[1] - a.y) > 1e-9;
+            (same && moved && origin.iter().all(|v| v.is_finite()))
+                .then(|| (t.common.handle, origin))
+        })
+        .collect();
+    for (handle, [x, y]) in stale {
+        if let Some(document::EntityType::Text(t)) = doc.get_entity_mut(handle) {
+            t.insertion_point.x = x;
+            t.insertion_point.y = y;
+        }
+    }
 }
 
 /// Web SAVE/AUTOSAVE: offload the DWG/DXF writer pass to the browser worker.

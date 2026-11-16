@@ -532,7 +532,7 @@ impl PluginDialogState {
                     continue;
                 }
                 any_visible = true;
-                let control_element = self.view_control_inner(control, false);
+                let control_element = self.as_form_view().view_control_inner(control, false);
                 row_widget = row_widget.push(control_element);
             }
             if !any_visible && !r.controls.is_empty() {
@@ -596,8 +596,44 @@ impl PluginDialogState {
         }
     }
 
-    fn view_field_item<'a>(
-        &'a self,
+    fn as_form_view(&self) -> FormControlView<'_> {
+        FormControlView {
+            panel_id: None,
+            text_values: &self.text_values,
+            bool_values: &self.bool_values,
+            choice_values: &self.choice_values,
+            color_values: &self.color_values,
+            file_values: &self.file_values,
+            table_values: &self.table_values,
+            collapsed_sections: &self.collapsed_sections,
+            disabled_controls: &self.disabled_controls,
+            hidden_controls: &self.hidden_controls,
+            dynamic_choice_options: &self.dynamic_choice_options,
+            svg_handles: &self.svg_handles,
+        }
+    }
+}
+
+/// Shared form-style control renderer used by modal dialogs (`panel_id == None`)
+/// and dockable side panels configured with `PanelStyle::Form` (`panel_id == Some(..)`).
+pub(crate) struct FormControlView<'a> {
+    pub panel_id: Option<&'a str>,
+    pub text_values: &'a HashMap<String, String>,
+    pub bool_values: &'a HashMap<String, bool>,
+    pub choice_values: &'a HashMap<String, usize>,
+    pub color_values: &'a HashMap<String, [u8; 3]>,
+    pub file_values: &'a HashMap<String, String>,
+    pub table_values: &'a HashMap<String, Vec<Vec<String>>>,
+    pub collapsed_sections: &'a HashSet<String>,
+    pub disabled_controls: &'a HashSet<String>,
+    pub hidden_controls: &'a HashSet<String>,
+    pub dynamic_choice_options: &'a HashMap<String, Vec<String>>,
+    pub svg_handles: &'a HashMap<String, iced::widget::svg::Handle>,
+}
+
+impl<'a> FormControlView<'a> {
+    fn view_field_item(
+        &self,
         control: &'a DialogControl,
         parent_disabled: bool,
     ) -> Element<'a, Message> {
@@ -608,18 +644,25 @@ impl PluginDialogState {
         }
         let is_disabled =
             parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let panel_id = self.panel_id.map(str::to_string);
         const LABEL_WIDTH: f32 = 110.0;
         match control {
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
                 let mut input = text_input("", current)
                     .padding([3, 6])
                     .size(12)
                     .style(field_style);
                 if !is_disabled {
-                    input = input
-                        .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val));
+                    input = input.on_input(move |val| {
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelTextChange(p, id_clone.clone(), val)
+                        } else {
+                            Message::PluginDialogTextChange(id_clone.clone(), val)
+                        }
+                    });
                 }
 
                 row![
@@ -634,13 +677,18 @@ impl PluginDialogState {
             DialogControl::Checkbox { id, label, .. } => {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
                 let mut cb = checkbox(current)
                     .label(label)
                     .size(14)
                     .text_size(12);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
-                        Message::PluginDialogBoolToggle(id_clone.clone(), checked)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelBoolToggle(p, id_clone.clone(), checked)
+                        } else {
+                            Message::PluginDialogBoolToggle(id_clone.clone(), checked)
+                        }
                     });
                 }
 
@@ -665,13 +713,23 @@ impl PluginDialogState {
                     .collect();
                 let selected = choice_opts.get(current_idx).cloned();
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
 
                 let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
                     .padding([3, 6])
                     .text_size(12);
                 if !is_disabled {
                     picker = picker.on_select(move |opt| {
-                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelChoiceSelect(
+                                p,
+                                id_clone.clone(),
+                                opt.index,
+                                opt.label.clone(),
+                            )
+                        } else {
+                            Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                        }
                     });
                 }
 
@@ -715,6 +773,8 @@ impl PluginDialogState {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
+                let pid = panel_id.clone();
+                let pid_pick = panel_id.clone();
 
                 let mut input = text_input("", current)
                     .padding([3, 6])
@@ -722,7 +782,11 @@ impl PluginDialogState {
                     .style(field_style);
                 if !is_disabled {
                     input = input.on_input(move |val| {
-                        Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelFileTextChange(p, id_clone.clone(), val)
+                        } else {
+                            Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                        }
                     });
                 }
 
@@ -730,7 +794,12 @@ impl PluginDialogState {
                     .style(button_style(false))
                     .padding([3, 6]);
                 if !is_disabled {
-                    browse_btn = browse_btn.on_press(Message::PluginDialogFilePick(id_for_pick));
+                    let msg = if let Some(p) = pid_pick {
+                        Message::PluginPanelFilePick(p, id_for_pick)
+                    } else {
+                        Message::PluginDialogFilePick(id_for_pick)
+                    };
+                    browse_btn = browse_btn.on_press(msg);
                 }
 
                 row![
@@ -748,8 +817,8 @@ impl PluginDialogState {
         }
     }
 
-    fn view_control_inner<'a>(
-        &'a self,
+    pub(crate) fn view_control_inner(
+        &self,
         control: &'a DialogControl,
         parent_disabled: bool,
     ) -> Element<'a, Message> {
@@ -760,6 +829,7 @@ impl PluginDialogState {
         }
         let is_disabled =
             parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let panel_id = self.panel_id.map(str::to_string);
         match control {
             DialogControl::InfoText { text: msg, align_h }
             | DialogControl::Label {
@@ -880,6 +950,7 @@ impl PluginDialogState {
             } => {
                 let cid = id.clone();
                 let act = action.clone();
+                let pid = panel_id.clone();
                 let mut label_txt = text(label).size(12);
                 if let Some(h) = align_h {
                     match h {
@@ -893,28 +964,46 @@ impl PluginDialogState {
                             label_txt = label_txt.align_x(iced::alignment::Horizontal::Right);
                         }
                     }
+                } else if self.panel_id.is_some() {
+                    label_txt = label_txt.align_x(iced::alignment::Horizontal::Center);
+                }
+                if self.panel_id.is_some() && width.is_none() {
+                    label_txt = label_txt.width(Fill);
                 }
                 let mut btn = button(label_txt)
                     .style(button_style(false))
                     .padding([5, 10]);
                 if !is_disabled {
-                    btn = btn.on_press(Message::PluginDialogButtonClick(cid, act));
+                    let msg = if let Some(p) = pid {
+                        Message::PluginPanelButtonClick(p, cid, act)
+                    } else {
+                        Message::PluginDialogButtonClick(cid, act)
+                    };
+                    btn = btn.on_press(msg);
                 }
                 if let Some(w) = width {
                     btn = btn.width(Length::Fixed(*w));
+                } else if self.panel_id.is_some() {
+                    btn = btn.width(Fill);
                 }
                 btn.into()
             }
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
                 let mut input = text_input("", current)
                     .padding(5)
                     .size(12)
                     .style(field_style);
                 if !is_disabled {
-                    input = input
-                        .on_input(move |val| Message::PluginDialogTextChange(id_clone.clone(), val));
+                    input = input.on_input(move |val| {
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelTextChange(p, id_clone.clone(), val)
+                        } else {
+                            Message::PluginDialogTextChange(id_clone.clone(), val)
+                        }
+                    });
                 }
 
                 column![text(label).size(11), input]
@@ -925,13 +1014,18 @@ impl PluginDialogState {
             DialogControl::Checkbox { id, label, .. } => {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
                 let mut cb = checkbox(current)
                     .label(label)
                     .size(14)
                     .text_size(12);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
-                        Message::PluginDialogBoolToggle(id_clone.clone(), checked)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelBoolToggle(p, id_clone.clone(), checked)
+                        } else {
+                            Message::PluginDialogBoolToggle(id_clone.clone(), checked)
+                        }
                     });
                 }
                 cb.into()
@@ -951,13 +1045,23 @@ impl PluginDialogState {
                     .collect();
                 let selected = choice_opts.get(current_idx).cloned();
                 let id_clone = id.clone();
+                let pid = panel_id.clone();
 
                 let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
                     .padding([3, 6])
                     .text_size(12);
                 if !is_disabled {
                     picker = picker.on_select(move |opt| {
-                        Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelChoiceSelect(
+                                p,
+                                id_clone.clone(),
+                                opt.index,
+                                opt.label.clone(),
+                            )
+                        } else {
+                            Message::PluginDialogChoiceSelect(id_clone.clone(), opt.index)
+                        }
                     });
                 }
 
@@ -995,6 +1099,8 @@ impl PluginDialogState {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let id_clone = id.clone();
                 let id_for_pick = id.clone();
+                let pid = panel_id.clone();
+                let pid_pick = panel_id.clone();
 
                 let mut input = text_input("", current)
                     .padding(5)
@@ -1002,7 +1108,11 @@ impl PluginDialogState {
                     .style(field_style);
                 if !is_disabled {
                     input = input.on_input(move |val| {
-                        Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                        if let Some(p) = pid.clone() {
+                            Message::PluginPanelFileTextChange(p, id_clone.clone(), val)
+                        } else {
+                            Message::PluginDialogFileTextChange(id_clone.clone(), val)
+                        }
                     });
                 }
 
@@ -1010,7 +1120,12 @@ impl PluginDialogState {
                     .style(button_style(false))
                     .padding([4, 8]);
                 if !is_disabled {
-                    browse_btn = browse_btn.on_press(Message::PluginDialogFilePick(id_for_pick));
+                    let msg = if let Some(p) = pid_pick {
+                        Message::PluginPanelFilePick(p, id_for_pick)
+                    } else {
+                        Message::PluginDialogFilePick(id_for_pick)
+                    };
+                    browse_btn = browse_btn.on_press(msg);
                 }
 
                 column![
@@ -1034,7 +1149,13 @@ impl PluginDialogState {
 
                 if let Some(t) = title {
                     let id_for_toggle = id.clone();
+                    let pid = panel_id.clone();
 
+                    let toggle_msg = if let Some(p) = pid {
+                        Message::PluginPanelSectionToggle(p, id_for_toggle)
+                    } else {
+                        Message::PluginDialogSectionToggle(id_for_toggle)
+                    };
                     let header_btn = button(
                         row![
                             if is_collapsed {
@@ -1047,7 +1168,7 @@ impl PluginDialogState {
                         .spacing(6)
                         .align_y(iced::Alignment::Center)
                     )
-                    .on_press(Message::PluginDialogSectionToggle(id_for_toggle))
+                    .on_press(toggle_msg)
                     .style(button::text)
                     .padding([2, 4]);
 
@@ -1162,6 +1283,7 @@ impl PluginDialogState {
                             .width(Fill);
                         for (c_idx, cell_text) in row_cells.iter().enumerate() {
                             let id_clone = id.clone();
+                            let pid_cell = panel_id.clone();
                             let mut ti = text_input("", cell_text.as_str())
                                 .style(|theme: &Theme, status| {
                                     let palette = theme.palette();
@@ -1221,7 +1343,22 @@ impl PluginDialogState {
                                 .width(Fill);
                             if !is_disabled {
                                 ti = ti.on_input(move |val| {
-                                    Message::PluginDialogTableCellChange(id_clone.clone(), r_idx, c_idx, val)
+                                    if let Some(p) = pid_cell.clone() {
+                                        Message::PluginPanelTableCellChange(
+                                            p,
+                                            id_clone.clone(),
+                                            r_idx,
+                                            c_idx,
+                                            val,
+                                        )
+                                    } else {
+                                        Message::PluginDialogTableCellChange(
+                                            id_clone.clone(),
+                                            r_idx,
+                                            c_idx,
+                                            val,
+                                        )
+                                    }
                                 });
                             }
 
@@ -1245,13 +1382,19 @@ impl PluginDialogState {
                         }
                         if *allow_delete {
                             let id_del = id.clone();
+                            let pid_del = panel_id.clone();
                             let mut del_btn = button(
                                 crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 10.0)
                             )
                             .style(button::text)
                             .padding([3, 8]);
                             if !is_disabled {
-                                del_btn = del_btn.on_press(Message::PluginDialogTableRemoveRow(id_del, r_idx));
+                                let msg = if let Some(p) = pid_del {
+                                    Message::PluginPanelTableRemoveRow(p, id_del, r_idx)
+                                } else {
+                                    Message::PluginDialogTableRemoveRow(id_del, r_idx)
+                                };
+                                del_btn = del_btn.on_press(msg);
                             }
                             r_widget = r_widget.push(del_btn);
                         }
@@ -1309,11 +1452,17 @@ impl PluginDialogState {
 
                 if *allow_add {
                     let id_add = id.clone();
+                    let pid_add = panel_id.clone();
                     let mut add_btn = button(text(crate::t!("Add row").into_owned()).size(11))
                         .style(button_style(false))
                         .padding([4, 10]);
                     if !is_disabled {
-                        add_btn = add_btn.on_press(Message::PluginDialogTableAddRow(id_add));
+                        let msg = if let Some(p) = pid_add {
+                            Message::PluginPanelTableAddRow(p, id_add)
+                        } else {
+                            Message::PluginDialogTableAddRow(id_add)
+                        };
+                        add_btn = add_btn.on_press(msg);
                     }
                     table_col = table_col.push(
                         row![Space::new().width(Fill), add_btn].width(Fill)

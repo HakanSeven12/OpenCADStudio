@@ -164,6 +164,11 @@ fn commands(d: &Drawing) -> Vec<String> {
         "-LAYER OFF Walls ".to_string(),
         "-LAYER COLOR 1 Walls ".to_string(),
         "-LAYER FREEZE Walls ".to_string(),
+        "LAYER NEW Doors".to_string(),
+        "LAYER OFF Walls".to_string(),
+        "LAYER COLOR 1 Walls".to_string(),
+        "LAYER FREEZE Walls".to_string(),
+        "LAYER LOCK Walls".to_string(),
     ]
 }
 

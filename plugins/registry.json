@@ -47,7 +47,7 @@
   {
     "repo": "BeeBeeSix/OCS_Plugin_RasterTools",
     "name": "Raster Tools",
-    "description": "Raster images: insert by size, width, DPI , pixel or World File; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent or use alpha channel; relink and find moved image files. Add OpenStreetMap Basemaps to EPSG codes. English and Italian."
+    "description": "Raster images: insert by size, width, DPI, pixel or World File; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent or use alpha channel; relink and find moved image files. Add OpenStreetMap Basemaps to EPSG codes. English and Italian."
   },
   {
     "repo": "Macchecaspita/opencad-rilievo-plugin",

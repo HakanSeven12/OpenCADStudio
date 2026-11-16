@@ -575,6 +575,9 @@ pub enum MTextRunKind {
         numerator: String,
         denominator: String,
         bar: bool,
+        /// A decimal stack (`\S1.5~.2.25;`): the halves line up on their
+        /// decimal points.
+        decimal: bool,
     },
 }
 
@@ -919,6 +922,7 @@ pub fn adapt_mtext_paragraphs(
                             numerator: st.numerator.clone(),
                             denominator: st.denominator.clone(),
                             bar: matches!(st.stacking_type, StackingType::Horizontal),
+                            decimal: matches!(st.stacking_type, StackingType::Decimal),
                         },
                         state,
                     });
@@ -994,6 +998,9 @@ pub enum AtomKind {
         numerator: String,
         denominator: String,
         bar: bool,
+        /// A decimal stack (`\S1.5~.2.25;`): the halves line up on their
+        /// decimal points.
+        decimal: bool,
     },
 }
 
@@ -1369,16 +1376,41 @@ pub fn atom_width(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &st
         AtomKind::Stack {
             numerator,
             denominator,
-            ..
+            bar,
+            decimal,
         } => {
-            // Both halves start at the slot's left edge, so the slot is as wide
-            // as the wider one — measured at the shrunk height they draw at.
+            // Measured at the shrunk height the halves draw at.
             let mut half = atom.state.clone();
             half.height_mul *= STACK_HALF_SCALE;
-            let n = measure_word(numerator, &half, entity_h, base_wf, base_font);
-            let d = measure_word(denominator, &half, entity_h, base_wf, base_font);
-            n.max(d)
+            let w = |t: &str| measure_word(t, &half, entity_h, base_wf, base_font);
+            stack_slot(numerator, denominator, *bar, *decimal, w).0
         }
+    }
+}
+
+/// A stack's slot width and each half's offset into it. Halves start at the
+/// slot's left edge; a fraction (`/`) centres them; a decimal stack lines
+/// their decimal points up when both have one.
+pub fn stack_slot(
+    numerator: &str,
+    denominator: &str,
+    bar: bool,
+    decimal: bool,
+    w: impl Fn(&str) -> f32,
+) -> (f32, f32, f32) {
+    let (n, d) = (w(numerator), w(denominator));
+    if decimal {
+        if let (Some(np), Some(dp)) = (numerator.find('.'), denominator.find('.')) {
+            let (np, dp) = (w(&numerator[..np]), w(&denominator[..dp]));
+            let pre = np.max(dp);
+            return ((n - np).max(d - dp) + pre, pre - np, pre - dp);
+        }
+    }
+    let slot = n.max(d);
+    if bar {
+        (slot, (slot - n) * 0.5, (slot - d) * 0.5)
+    } else {
+        (slot, 0.0, 0.0)
     }
 }
 
@@ -2007,6 +2039,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     numerator,
                     denominator,
                     bar,
+                    decimal,
                 } => {
                     let slots = numerator.chars().count()
                         + denominator.chars().count()
@@ -2016,6 +2049,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             numerator: numerator.clone(),
                             denominator: denominator.clone(),
                             bar: *bar,
+                            decimal: *decimal,
                         },
                         state: run.state.clone(),
                         char_offset: doc_char_offset,
@@ -3025,6 +3059,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     numerator,
                     denominator,
                     bar,
+                    decimal,
                 } => {
                     let run_h = atom.state.height_mul * entity_h;
                     let signed_wf = base_wf.signum() * atom.state.width_mul * base_wf.abs();
@@ -3049,20 +3084,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     half_state.height_mul *= STACK_HALF_SCALE;
                     let half_h = run_h * STACK_HALF_SCALE;
 
-                    let slot_w = atom_width(atom, entity_h, base_wf, &base_font_name);
-
                     // A fraction (`/`, with its rule) centres each half over
-                    // the slot; a `^` stack (tolerance, index) stays left.
-                    let indent = |text: &str| {
-                        if *bar {
-                            let w =
-                                measure_word(text, &half_state, entity_h, base_wf, &base_font_name);
-                            ((slot_w - w) * 0.5).max(0.0)
-                        } else {
-                            0.0
-                        }
-                    };
-                    let (num_dx, den_dx) = (indent(numerator), indent(denominator));
+                    // the slot; a decimal stack lines up the decimal points;
+                    // a `^` stack (tolerance, index) stays left.
+                    let (slot_w, num_dx, den_dx) =
+                        stack_slot(numerator, denominator, *bar, *decimal, |t: &str| {
+                            measure_word(t, &half_state, entity_h, base_wf, &base_font_name)
+                        });
                     let mut emit = |text: &str, ly: f32, dx: f32| {
                         if text.is_empty() {
                             return;
@@ -3714,12 +3742,25 @@ mod adapter_tests {
                 numerator,
                 denominator,
                 bar,
+                ..
             } => {
                 assert_eq!((numerator.as_str(), denominator.as_str()), ("1", "2"));
                 assert!(*bar, "`/` draws a fraction rule");
             }
             other => panic!("expected a stack run, got {other:?}"),
         }
+
+        // A decimal stack lines its halves up on the decimal point: `12.5`
+        // over `3.125` puts `3` under `2`; with a point missing they stay
+        // left, as the reference lays out `\S10~.2.25;`.
+        let digit = |t: &str| t.chars().count() as f32;
+        assert_eq!(stack_slot("12.5", "3.125", false, true, digit), (6.0, 0.0, 1.0));
+        assert_eq!(stack_slot("10", "2.25", false, true, digit), (4.0, 0.0, 0.0));
+        let lines = adapt_mtext_paragraphs("\\S1.5~.2.25;", 2.5, true);
+        assert!(matches!(
+            &lines[0].runs[0].kind,
+            MTextRunKind::Stack { decimal: true, bar: false, .. }
+        ));
 
         // `^` is the same stack without the rule.
         let lines = adapt_mtext_paragraphs("\\S1^2;", 2.5, true);

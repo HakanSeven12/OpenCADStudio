@@ -16387,6 +16387,99 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         );
     }
 
+    /// A plugin command that collects points; with `steps_back` it takes
+    /// Ctrl+Z itself and drops its last point.
+    struct CollectPoints {
+        points: std::sync::Arc<std::sync::Mutex<Vec<[f64; 3]>>>,
+        steps_back: bool,
+    }
+    impl ocs_plugin_api::host::InteractiveCommand for CollectPoints {
+        fn prompt(&self) -> String {
+            format!("Point {}", self.points.lock().unwrap().len() + 1)
+        }
+        fn on_point(&mut self, pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
+            self.points.lock().unwrap().push(pt);
+            ocs_plugin_api::host::CommandStep::NeedPoint
+        }
+        fn on_undo_step(&mut self) -> Option<ocs_plugin_api::host::CommandStep> {
+            if !self.steps_back {
+                return None;
+            }
+            self.points
+                .lock()
+                .unwrap()
+                .pop()
+                .map(|_| ocs_plugin_api::host::CommandStep::NeedPoint)
+        }
+    }
+
+    /// A drawing with one committed point (one undo step), then a running
+    /// `CollectPoints` command that has taken two points.
+    fn app_collecting_two_points(
+        steps_back: bool,
+    ) -> (
+        OpenCADStudio,
+        std::sync::Arc<std::sync::Mutex<Vec<[f64; 3]>>>,
+    ) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(PlacePoint { got_first: false }));
+        }
+        for pt in [
+            glam::DVec3::new(0.0, 0.0, 0.0),
+            glam::DVec3::new(5.0, 5.0, 0.0),
+        ] {
+            let r = app.tabs[0].active_cmd.as_mut().unwrap().on_point(pt);
+            let _ = app.apply_cmd_result(r);
+        }
+        assert_eq!(app.tabs[0].scene.document.entities().count(), 1);
+        let points = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let mut host = HostSession::new(&mut app, 0);
+            host.start_interactive(Box::new(CollectPoints {
+                points: points.clone(),
+                steps_back,
+            }));
+        }
+        for pt in [
+            glam::DVec3::new(1.0, 0.0, 0.0),
+            glam::DVec3::new(2.0, 0.0, 0.0),
+        ] {
+            let r = app.tabs[0].active_cmd.as_mut().unwrap().on_point(pt);
+            let _ = app.apply_cmd_result(r);
+        }
+        assert_eq!(points.lock().unwrap().len(), 2);
+        (app, points)
+    }
+
+    /// Ctrl+Z inside a plugin command that collects points drops its last
+    /// point, the way PLINE pops a vertex, and leaves the drawing alone.
+    #[test]
+    fn ctrl_z_steps_a_plugin_command_back_without_undoing_the_drawing() {
+        let (mut app, points) = app_collecting_two_points(true);
+        let _ = app.update(crate::app::Message::Undo);
+        assert_eq!(*points.lock().unwrap(), vec![[1.0, 0.0, 0.0]]);
+        assert_eq!(
+            app.tabs[0].scene.document.entities().count(),
+            1,
+            "the committed point survives"
+        );
+        let cmd = app.tabs[0].active_cmd.as_ref().expect("still running");
+        assert_eq!(cmd.prompt(), "Point 2");
+    }
+
+    /// A plugin command that does not take the step back keeps the document
+    /// undo it gets today.
+    #[test]
+    fn ctrl_z_runs_the_document_undo_when_the_plugin_command_declines() {
+        let (mut app, points) = app_collecting_two_points(false);
+        let _ = app.update(crate::app::Message::Undo);
+        assert_eq!(points.lock().unwrap().len(), 2);
+        assert_eq!(app.tabs[0].scene.document.entities().count(), 0);
+    }
+
     /// A plugin command that previews a rubber-band line to the cursor.
     struct PreviewLine {
         start: [f64; 3],

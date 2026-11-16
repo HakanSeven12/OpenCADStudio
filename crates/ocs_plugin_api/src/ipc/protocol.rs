@@ -629,6 +629,11 @@ mod tests {
             }),
             15
         );
+        assert_eq!(
+            discriminant_of(&HostRequest::UndoStep { command_id: 1 }),
+            16
+        );
+        assert_eq!(discriminant(&HostResponse::UndoStep(None)), 11);
     }
 
     fn discriminant<T: serde::Serialize>(value: &T) -> u32 {

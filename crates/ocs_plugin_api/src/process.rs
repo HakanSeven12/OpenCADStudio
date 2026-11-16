@@ -2229,6 +2229,67 @@ mod timeout_tests {
         }
     }
 
+    fn kill_fake_runner(process: &PluginProcess) {
+        if let Some(mut runner) = process
+            .child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            let _ = runner.child.kill();
+        }
+    }
+
+    #[test]
+    fn undo_step_asks_a_v24_runner_and_returns_its_step() {
+        let (mut process, runner_stream) = fake_process();
+        process.manifest.api_version = 24;
+        let runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            let req = recv::<HostToPlugin>(&mut peer).expect("read undo step");
+            assert!(matches!(
+                req,
+                HostToPlugin::Request(HostRequest::UndoStep { command_id: 5 })
+            ));
+            send(
+                &mut peer,
+                &PluginToHost::Response(HostResponse::UndoStep(Some(Box::new(
+                    CommandStep::NeedPoint,
+                )))),
+            )
+            .expect("send step");
+        });
+        let step = process.undo_step(5).expect("undo step answered");
+        assert!(matches!(step, Some(CommandStep::NeedPoint)));
+        kill_fake_runner(&process);
+        runner.join().expect("runner thread");
+    }
+
+    /// A runner built against API v23 cannot decode the request, so a plugin
+    /// whose manifest declares v23 is never sent it.
+    #[test]
+    fn undo_step_never_reaches_a_runner_older_than_v24() {
+        let (mut process, runner_stream) = fake_process();
+        process.manifest.api_version = 23;
+        let runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            let req = recv::<HostToPlugin>(&mut peer).expect("read first request");
+            assert!(
+                matches!(req, HostToPlugin::Request(HostRequest::GetPrompt { command_id: 5 })),
+                "the first frame must be the prompt query, got {req:?}"
+            );
+            send(
+                &mut peer,
+                &PluginToHost::Response(HostResponse::Text("Point 3".into())),
+            )
+            .expect("send prompt");
+        });
+        assert!(matches!(process.undo_step(5), Ok(None)));
+        assert_eq!(process.get_prompt(5).expect("prompt"), "Point 3");
+        kill_fake_runner(&process);
+        runner.join().expect("runner thread");
+    }
+
     #[test]
     fn runner_handshake_wrong_token_is_rejected() {
         let result = verify_runner_handshake(

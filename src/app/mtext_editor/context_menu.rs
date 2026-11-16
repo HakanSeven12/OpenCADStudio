@@ -106,9 +106,9 @@ impl OpenCADStudio {
         self.dispatch_command(command)
     }
 
-    /// Paste Special: the clipboard text as plain characters (`PLAIN`), or
-    /// pasted as copied with its character (`NOCHAR`) or paragraph
-    /// (`NOPARA`) formatting cleared again.
+    /// Paste Special: the clipboard text pasted as copied, then its
+    /// character (`NOCHAR`), paragraph (`NOPARA`) or all (`PLAIN`) formatting
+    /// cleared again; the paragraphs it lands in lose theirs with it.
     pub(in crate::app) fn mtext_paste_as(&mut self, mode: &str, text: Option<String>) {
         let Some(text) = text.filter(|t| !t.is_empty()).map(|t| t.replace('\r', "")) else {
             return;
@@ -118,30 +118,28 @@ impl OpenCADStudio {
             None => return,
         };
         match self.mtext_clipboard.clone() {
-            Some((plain, fragment)) if mode != "PLAIN" && plain.replace('\r', "") == text => {
+            Some((plain, fragment)) if plain.replace('\r', "") == text => {
                 self.raw_paste_fragment(&fragment)
             }
             _ => self.mtext_type(&text),
         }
-        if mode != "PLAIN" {
-            let Some(end) = self.mtext_editor.as_ref().map(|ed| ed.caret) else {
-                return;
-            };
-            if let Some(ed) = self.mtext_editor.as_mut() {
-                ed.sel = Some((start, end));
-                ed.sel_anchor = start;
-            }
-            self.mtext_clear(if mode == "NOPARA" {
-                ClearMode::Paragraph
-            } else {
-                ClearMode::Character
-            });
-            if let Some(ed) = self.mtext_editor.as_mut() {
-                let end = ed.caret.max(ed.selected_range().end);
-                ed.sel = Some((end, end));
-                ed.sel_anchor = end;
-                ed.caret = end;
-            }
+        let Some(end) = self.mtext_editor.as_ref().map(|ed| ed.caret) else {
+            return;
+        };
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.sel = Some((start, end));
+            ed.sel_anchor = start;
+        }
+        self.mtext_clear(match mode {
+            "NOCHAR" => ClearMode::Character,
+            "NOPARA" => ClearMode::Paragraph,
+            _ => ClearMode::All,
+        });
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            let end = ed.caret.max(ed.selected_range().end);
+            ed.sel = Some((end, end));
+            ed.sel_anchor = end;
+            ed.caret = end;
         }
         self.rebuild_mtext_preview();
     }

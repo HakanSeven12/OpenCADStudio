@@ -1312,7 +1312,7 @@ impl OpenCADStudio {
     /// Discard staged changes (window closed without Apply): restore the
     /// snapshot taken when the manager opened.
     pub(super) fn style_stage_discard(&mut self) {
-        let Some(mut stage) = self.style_stage.take() else {
+        let Some(stage) = self.style_stage.take() else {
             return;
         };
         let i = self.active_tab;

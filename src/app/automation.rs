@@ -496,6 +496,20 @@ pub(crate) fn entity_json(
             map.insert("leader_count".into(), json!(leaders.len()));
             map.insert("leaders".into(), json!(leaders));
         }
+        E::Dimension(dimension) => {
+            map.insert("measurement".into(), json!(dimension.measurement()));
+            map.insert("style".into(), json!(dimension.base().style_name));
+            // A text override replaces the measured value in the display;
+            // reporting it lets a caller tell an edited dimension from a
+            // plain one without reading the entity record.
+            let text = &dimension.base().text;
+            if !text.is_empty() {
+                map.insert(
+                    "text".into(),
+                    json!(crate::entities::text_support::resolve_dxf_special_chars(text)),
+                );
+            }
+        }
         _ => {}
     }
     if matches!(e, E::Hatch(_)) {

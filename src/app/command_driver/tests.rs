@@ -9673,3 +9673,31 @@ mod copy_draw_order_tests {
         assert!(eff(cp_a) < eff(cp_c), "the copy of A must stay behind the copy of C");
     }
 }
+
+#[cfg(test)]
+mod dimension_query_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// The automation query answers for a dimension like it does for the
+    /// other entity families: the measured value and the style it was
+    /// drawn with, so a caller can read a drawing's dimensions without
+    /// opening each entity record.
+    #[test]
+    fn a_dimension_query_reports_its_measurement_and_style() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+
+        let r = app.automation_op(
+            r#"{"op":"query","type":"DIMENSION","detail":"full","fields":["measurement","style"]}"#,
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let entity = &r["entities"][0];
+        let measurement = entity["measurement"]
+            .as_f64()
+            .expect("measurement is numeric");
+        assert!((measurement - 10.0).abs() < 1e-6, "measurement: {measurement}");
+        assert_eq!(entity["style"], "ISO-25", "the drawing's current style");
+    }
+}

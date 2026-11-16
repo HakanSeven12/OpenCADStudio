@@ -6974,9 +6974,10 @@ impl Scene {
             angle_offset: 0.0,
             scale: 1.0,
             // Draw-order bias is signed: entity fills/wires land in (-1, 1)
-            // (0 = neutral). A value below -1 forces the sheet strictly behind
-            // EVERY object, in every case, with a tiny z offset (BIAS = 0.001,
-            // so no far-plane clipping). The sheet is the canvas, never on top.
+            // (0 = neutral). A value below -1 marks the page: the draw-order
+            // shader puts it at the far end of the depth range, behind every
+            // object the sheet holds, whatever its Z. The sheet is the
+            // canvas, never on top.
             draw_depth: -2.0,
         })
     }

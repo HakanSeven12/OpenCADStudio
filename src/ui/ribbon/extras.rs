@@ -642,8 +642,10 @@ mod tests {
             std::iter::once(tool.command()).chain(tool.options.iter().map(|o| o.0))
         }) {
             // A command line answers prompts after `;`; DIMTEDIT_LEFT and
-            // the like are DIMTEDIT with an answer.
+            // the like are DIMTEDIT with an answer, `_MTED PARAGRAPH` the
+            // Text Editor's `_MTED` with its tool.
             let verb = command.split(';').next().unwrap_or(command);
+            let verb = verb.split_whitespace().next().unwrap_or(verb);
             let base = verb.split('_').next().unwrap_or(verb);
             assert!(
                 registered.contains(&verb) || registered.contains(&base),

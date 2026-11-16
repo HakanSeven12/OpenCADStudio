@@ -124,6 +124,11 @@ objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSFont", "NSRes
 block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
+# The at-least paragraph line spacing (`sa<n>`) and decimal stacks of the
+# MTEXT codes.
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "08b87046" }
+
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }

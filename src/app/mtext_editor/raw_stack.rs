@@ -61,7 +61,7 @@ pub enum FractionPart {
 fn storable(part: &str) -> bool {
     !part
         .chars()
-        .any(|c| matches!(c, '/' | '#' | '^' | '%' | ';' | '\\' | '{' | '}') || c.is_control())
+        .any(|c| matches!(c, '/' | '#' | '^' | '~' | '%' | ';' | '\\' | '{' | '}') || c.is_control())
 }
 
 /// The `\S` code of a stack. The `^` carries no space: in a DXF file a bare
@@ -80,6 +80,8 @@ fn stack_code(data: &StackingData) -> Result<String, EditError> {
         StackingType::Horizontal => ("/", true),
         StackingType::Diagonal => ("#", true),
         StackingType::Limit => ("^", false),
+        // The halves line up on the point named after `~`.
+        StackingType::Decimal => ("~.", true),
     };
     let empty = |s: &str| s.trim().is_empty();
     if (both && (empty(&data.numerator) || empty(&data.denominator)))

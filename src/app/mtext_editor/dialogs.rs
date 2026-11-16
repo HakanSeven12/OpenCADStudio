@@ -64,6 +64,7 @@ impl OpenCADStudio {
                     .collect();
                 let (line_on, line_mode, line_at) = match props.line_spacing {
                     Some(MTextLineSpacing::Exact(v)) => (true, LineMode::Exactly, v * h),
+                    Some(MTextLineSpacing::AtLeast(v)) => (true, LineMode::AtLeast, v * h),
                     Some(MTextLineSpacing::Multiple(v)) => (true, LineMode::Multiple, v),
                     _ => (false, LineMode::Multiple, 1.0),
                 };
@@ -279,10 +280,12 @@ impl OpenCADStudio {
                 }
                 if d.line_on {
                     let at = parse(d.line_at.trim().trim_end_matches(['x', 'X'])).unwrap_or(1.0);
-                    // Exactly is a distance; a multiple is a factor.
+                    // Exactly and at least are distances; a multiple is a
+                    // factor.
                     self.raw_paragraph_line_spacing(match d.line_mode {
                         LineMode::Exactly => MTextLineSpacing::Exact(round(at / h)),
-                        LineMode::AtLeast | LineMode::Multiple => MTextLineSpacing::Multiple(at),
+                        LineMode::AtLeast => MTextLineSpacing::AtLeast(round(at / h)),
+                        LineMode::Multiple => MTextLineSpacing::Multiple(at),
                     });
                 }
                 let tabs: Vec<TabStop> = d

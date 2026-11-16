@@ -25,6 +25,7 @@ mod raw_edit;
 mod raw_field;
 mod raw_geometry;
 mod raw_list;
+mod raw_paragraph_codes;
 mod ribbon;
 mod dialogs;
 mod raw_operations;
@@ -507,6 +508,7 @@ fn flatten_stack(st: &StackingData) -> String {
         StackingType::Limit => '^',
         StackingType::Diagonal => '#',
         StackingType::Horizontal => '/',
+        StackingType::Decimal => '~',
     };
     let mut flat = st.numerator.clone();
     if !st.denominator.is_empty() {

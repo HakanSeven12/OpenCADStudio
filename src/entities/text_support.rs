@@ -622,6 +622,9 @@ pub enum ParaLineSpacing {
     /// each line's baseline sits `#` entity heights below the top of its
     /// slot instead of one, so the first line drops `# - 1` heights.
     Exact(f32),
+    /// `sa#`: at least `#` entity heights' default pitch; a line holding
+    /// taller text takes its own.
+    AtLeast(f32),
 }
 
 impl MTextLine {
@@ -696,7 +699,7 @@ pub fn adapt_mtext_paragraphs(
 ) -> Vec<MTextLine> {
     use document::entities::mtext_format::{
         parse_mtext, MTextColor, MTextLineAlignment, MTextLineSpacing, MTextParagraphAlignment,
-        MTextScalar, ParagraphProperties, SpanProperties, StackingType,
+        MTextScalar, SpanProperties, StackingType,
     };
 
     let entity_height = entity_height.max(1e-6);
@@ -753,24 +756,20 @@ pub fn adapt_mtext_paragraphs(
         }
     }
 
-    // A `\p...;` block sets the paragraph's alignment/indents/tabs and stays in
-    // force until the next `\p` — a paragraph opened by a bare `\P` / `\N`
-    // inherits it. The parser records only the literal codes (a paragraph with
-    // no `\p` carries none), so persistence is applied here: without it, the
-    // second line of a centred or right column (`\pxqc;col2\P≡`) would fall back
-    // to the left edge while its heading stayed aligned.
-    let has_own_props = |p: &ParagraphProperties| {
-        p.alignment
-            .as_ref()
-            .is_some_and(|a| !matches!(a, MTextParagraphAlignment::Default))
-            || p.first_line_indent.is_some()
-            || p.left_margin.is_some()
-            || p.right_margin.is_some()
-            || !p.tab_stops.is_empty()
-    };
-
+    // Each value a `\p...;` code sets stays in force until a later `\p` sets
+    // that same value again — a paragraph opened by a bare `\P` / `\N`
+    // inherits them all, and `\pql;` changes the alignment only, keeping the
+    // indents and tabs set before it. The parser records only the literal codes
+    // (a paragraph with no `\p` carries none), so persistence is applied here:
+    // without it, the second line of a centred or right column
+    // (`\pxqc;col2\P≡`) would fall back to the left edge while its heading
+    // stayed aligned.
     let mut lines: Vec<MTextLine> = Vec::new();
-    let mut carried: Option<(Option<ParagraphAlign>, f32, f32, f32, Vec<TabStop>)> = None;
+    let mut carried_align: Option<ParagraphAlign> = None;
+    let mut carried_first = 0.0_f32;
+    let mut carried_left = 0.0_f32;
+    let mut carried_right = 0.0_f32;
+    let mut carried_tabs: Vec<TabStop> = Vec::new();
     // Paragraph spacing (`b`/`a`) and line spacing (`sm`/`se`) are sticky
     // per-field: a `\p…;` block that names some codes leaves the rest at their
     // previous value, so spacing set once (`\pxb0.25;`) applies to every later
@@ -795,46 +794,55 @@ pub fn adapt_mtext_paragraphs(
                 carried_ls = Some(ParaLineSpacing::Multiple(m as f32))
             }
             Some(MTextLineSpacing::Exact(e)) => carried_ls = Some(ParaLineSpacing::Exact(e as f32)),
+            Some(MTextLineSpacing::AtLeast(a)) => {
+                carried_ls = Some(ParaLineSpacing::AtLeast(a as f32))
+            }
             Some(MTextLineSpacing::Default) => carried_ls = None,
             None => {}
         }
-        let (align, indent_first, indent_left, indent_right, tab_stops) =
-            if has_own_props(props) || carried.is_none() {
-                // Values are in `para_unit`, and the first-line indent is
-                // relative to the left indent (a numbered list's hanging
-                // indent is `i-1.5,l1.5`: number at the margin, wrapped lines
-                // 1.5 units in).
-                let left = props.left_margin.unwrap_or(0.0) as f32 * para_unit;
-                let v = (
-                    props.alignment.and_then(map_align),
-                    left + props.first_line_indent.unwrap_or(0.0) as f32 * para_unit,
-                    left,
-                    props.right_margin.unwrap_or(0.0) as f32 * para_unit,
-                    props
-                        .tab_stops
-                        .iter()
-                        .map(|ts| {
-                            use document::entities::mtext_format::TabStop as ATab;
-                            let kind = match ts {
-                                ATab::Left(_) => TabKind::Left,
-                                ATab::Center(_) => TabKind::Center,
-                                ATab::Right(_) => TabKind::Right,
-                                ATab::Decimal(..) | ATab::DecimalWithCharacter { .. } => {
-                                    TabKind::Decimal
-                                }
-                            };
-                            TabStop {
-                                position: ts.position() as f32 * para_unit,
-                                kind,
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                carried = Some(v.clone());
-                v
-            } else {
-                carried.clone().unwrap()
-            };
+        // Values are in `para_unit`, and the first-line indent is relative to
+        // the left indent (a numbered list's hanging indent is `i-3,l3`:
+        // number at the margin, wrapped lines 3 units in).
+        if let Some(alignment) = props.alignment {
+            carried_align = map_align(alignment);
+        }
+        if let Some(first) = props.first_line_indent {
+            carried_first = first as f32 * para_unit;
+        }
+        if let Some(left) = props.left_margin {
+            carried_left = left as f32 * para_unit;
+        }
+        if let Some(right) = props.right_margin {
+            carried_right = right as f32 * para_unit;
+        }
+        if !props.tab_stops.is_empty() {
+            carried_tabs = props
+                .tab_stops
+                .iter()
+                .map(|ts| {
+                    use document::entities::mtext_format::TabStop as ATab;
+                    let kind = match ts {
+                        ATab::Left(_) => TabKind::Left,
+                        ATab::Center(_) => TabKind::Center,
+                        ATab::Right(_) => TabKind::Right,
+                        ATab::Decimal(..) | ATab::DecimalWithCharacter { .. } => {
+                            TabKind::Decimal
+                        }
+                    };
+                    TabStop {
+                        position: ts.position() as f32 * para_unit,
+                        kind,
+                    }
+                })
+                .collect();
+        }
+        let (align, indent_first, indent_left, indent_right, tab_stops) = (
+            carried_align,
+            carried_left + carried_first,
+            carried_left,
+            carried_right,
+            carried_tabs.clone(),
+        );
         let mut line = MTextLine {
             align,
             starts_column: para.starts_column,
@@ -2195,6 +2203,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 }
                 Some(ParaLineSpacing::Multiple(m)) if m > 0.0 => {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
+                }
+                Some(ParaLineSpacing::AtLeast(a)) if a > 0.0 => {
+                    (entity_h * a).max(mh) * (5.0 / 3.0) * base_font.line_spacing()
                 }
                 _ if opts.exact_line_spacing => entity_gap,
                 _ => mh * ls_factor * (5.0 / 3.0) * base_font.line_spacing(),

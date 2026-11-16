@@ -475,6 +475,10 @@ impl CadCommand for MLeaderCommand {
         "MLEADER"
     }
 
+    fn has_first_point(&self) -> bool {
+        !self.verts.is_empty()
+    }
+
     /// The leader points refuse with "Invalid Input."; content first's text
     /// corner is a plain keyword point prompt (measured).
     fn point_rejection(&self) -> Option<String> {

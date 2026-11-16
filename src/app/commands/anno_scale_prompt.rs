@@ -2,10 +2,11 @@
 //! asked for: the scale picked becomes the current annotation scale
 //! (CANNOSCALE). "Don't ask again" turns the question off for good.
 //!
-//! TEXT and MTEXT with an annotative text style, the dimension commands with
-//! an annotative dimension style and MLEADER with an annotative multileader
-//! style ask when they start; an annotative block reference asks once it is
-//! placed. Hatches and attribute definitions do not ask.
+//! TEXT and MTEXT with an annotative text style and the dimension commands
+//! with an annotative dimension style ask when they start; MLEADER with an
+//! annotative multileader style asks once its first point is given; an
+//! annotative block reference asks once it is placed. Hatches and attribute
+//! definitions do not ask.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -18,6 +19,8 @@ use crate::ui::window::anno_scale_prompt::{AnnoScaleMsg, AnnoScalePrompt};
 static ON: AtomicBool = AtomicBool::new(true);
 /// It was asked in this session.
 static ASKED: AtomicBool = AtomicBool::new(false);
+/// A running MLEADER asks once it has its first point.
+static AFTER_FIRST_POINT: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn annotation_scale_prompt() -> bool {
     ON.load(Ordering::Relaxed)
@@ -48,15 +51,37 @@ impl OpenCADStudio {
                 doc,
                 &doc.header.current_dimstyle_name,
             ),
-            "MLEADER" => doc.objects.values().any(|object| {
-                matches!(object, document::objects::ObjectType::MultiLeaderStyle(style)
-                    if style.is_annotative
-                        && style.name.eq_ignore_ascii_case(&doc.header.current_mleader_style_name))
-            }),
+            "MLEADER" => {
+                let annotative = doc.objects.values().any(|object| {
+                    matches!(object, document::objects::ObjectType::MultiLeaderStyle(style)
+                        if style.is_annotative
+                            && style.name.eq_ignore_ascii_case(&doc.header.current_mleader_style_name))
+                });
+                AFTER_FIRST_POINT.store(annotative, Ordering::Relaxed);
+                false
+            }
             _ => false,
         };
         if annotative {
             self.ask_annotation_scale();
+        }
+    }
+
+    /// After a command result: the MLEADER waiting for its first point asks
+    /// once it has it; a finished one stops waiting.
+    pub(in crate::app) fn ask_annotation_scale_after_first_point(&mut self) {
+        if !AFTER_FIRST_POINT.load(Ordering::Relaxed) {
+            return;
+        }
+        let i = self.active_tab;
+        match self.tabs[i].active_cmd.as_ref() {
+            Some(command) if command.name() == "MLEADER" => {
+                if command.has_first_point() {
+                    AFTER_FIRST_POINT.store(false, Ordering::Relaxed);
+                    self.ask_annotation_scale();
+                }
+            }
+            _ => AFTER_FIRST_POINT.store(false, Ordering::Relaxed),
         }
     }
 

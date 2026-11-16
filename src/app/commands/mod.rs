@@ -1525,6 +1525,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "MS",
         "MSPACE",
         "CHSPACE",
+        "ALIGNSPACE",
         "NAVVCUBE",
         "NEW",
         "QNEW",

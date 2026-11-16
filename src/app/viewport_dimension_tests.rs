@@ -1523,3 +1523,46 @@ fn layer_state_restored_in_a_viewport_turns_off_only_there() {
     };
     assert!(vp.frozen_layers.contains(&red.handle));
 }
+
+#[test]
+fn alignspace_puts_model_points_on_paper_points() {
+    use glam::DVec2;
+    let (mut app, _, initial) = fixture();
+    let scene = &mut app.tabs[app.active_tab].scene;
+    let model = [DVec2::new(10.0, 20.0), DVec2::new(110.0, 20.0)];
+    let paper = [DVec2::new(40.0, 50.0), DVec2::new(40.0, 70.0)];
+    assert!(scene.align_viewport_view(initial.viewport, &model, &paper));
+    let frame = scene.viewport_frame(initial.viewport).unwrap();
+    for (m, p) in model.iter().zip(paper) {
+        let got = frame.model_to_paper(m.extend(0.0)).truncate();
+        assert!((got - p).length() < 1e-4, "{m} -> {got}, want {p}");
+    }
+    // One pair pans and keeps the new scale and twist.
+    let paper = [DVec2::new(30.0, 30.0)];
+    assert!(scene.align_viewport_view(initial.viewport, &model[..1], &paper));
+    let after = scene.viewport_frame(initial.viewport).unwrap();
+    assert!((after.model_to_paper(model[0].extend(0.0)).truncate() - paper[0]).length() < 1e-4);
+    assert!((after.scale - frame.scale).abs() < 1e-6 && (after.twist - frame.twist).abs() < 1e-6);
+}
+
+#[test]
+fn alignspace_command_picks_model_then_paper_points() {
+    use super::Message;
+    let (mut app, _, initial) = fixture();
+    let i = app.active_tab;
+    let _ = app.update(Message::Command("ALIGNSPACE".into()));
+    // The command asks for the viewport switch; the runtime would deliver it.
+    let _ = app.update(Message::EnterViewport(initial.viewport));
+    assert_eq!(app.tabs[i].scene.active_viewport, Some(initial.viewport));
+    let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 20.0, 0.0)));
+    let _ = app.feed_command(StepInput::Point(DVec3::new(110.0, 20.0, 0.0)));
+    let _ = app.update(Message::ExitViewport);
+    assert_eq!(app.tabs[i].scene.active_viewport, None);
+    assert!(app.tabs[i].active_cmd.is_some(), "the paper half survives the switch");
+    let _ = app.feed_command(StepInput::Point(DVec3::new(40.0, 50.0, 0.0)));
+    let _ = app.feed_command(StepInput::Point(DVec3::new(40.0, 70.0, 0.0)));
+    assert!(app.tabs[i].active_cmd.is_none());
+    let frame = app.tabs[i].scene.viewport_frame(initial.viewport).unwrap();
+    let got = frame.model_to_paper(DVec3::new(110.0, 20.0, 0.0));
+    assert!((got - DVec3::new(40.0, 70.0, 0.0)).length() < 1e-4, "{got}");
+}

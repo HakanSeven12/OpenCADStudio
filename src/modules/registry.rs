@@ -289,6 +289,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("PSPACE", "MVIEW"),
     ("PS", "MVIEW"),
     ("CHSPACE", "MVIEW"),
+    ("ALIGNSPACE", "MVIEW"),
     ("MVSETUP", "MVIEW"),
     ("LAYOUTMANAGER", "LAYOUT"),
     ("LAYOUTPANEL", "LAYOUT"),

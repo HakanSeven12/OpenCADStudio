@@ -2423,6 +2423,9 @@ pub(super) struct OpenCADStudio {
     viewport_switch_keeps_command: bool,
     /// CHSPACE from paper space waiting for its target viewport: the objects.
     chspace_pending: Option<Vec<document::Handle>>,
+    /// ALIGNSPACE between its model and paper halves: the viewport and the
+    /// model points picked in it.
+    alignspace_pending: Option<(document::Handle, Vec<glam::DVec2>)>,
 }
 
 /// What triggered the "unsaved changes" dialog.
@@ -6945,6 +6948,7 @@ impl OpenCADStudio {
             dsd: Default::default(),
             viewport_switch_keeps_command: false,
             chspace_pending: None,
+            alignspace_pending: None,
         };
         crate::sys::startup_times::mark("App::new: struct built");
         // Restore the consolidated user config (settings.json) into live state

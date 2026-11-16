@@ -14090,7 +14090,8 @@ impl OpenCADStudio {
             Message::ExitViewport => {
                 let i = self.active_tab;
                 let context_changed = self.tabs[i].scene.active_viewport.is_some();
-                let cancel_task = if context_changed {
+                let keep_command = std::mem::take(&mut self.viewport_switch_keeps_command);
+                let cancel_task = if context_changed && !keep_command {
                     self.cancel_active_command_for_space_change()
                 } else {
                     Task::none()

@@ -178,6 +178,9 @@
 /// v23 appends `TableOperation::LayoutSetTabOrder`: a plugin sets the order of
 /// the paper-space layout tabs in one undo step. A v22 host cannot decode it,
 /// so a plugin that sends it declares v23.
+/// Also additive on `PanelDef`: `PanelDef::style` (`PanelStyle::Palette`
+/// default, `PanelStyle::Form` for dialog-like form rendering); older payloads
+/// decode as `PanelStyle::Palette` via `deserialize_panel_style`.
 pub const API_VERSION: u32 = 23;
 
 /// Oldest plugin API major the current host still loads. This keeps previously

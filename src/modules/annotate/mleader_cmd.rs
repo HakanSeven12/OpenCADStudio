@@ -1207,11 +1207,12 @@ fn place_block_content(
         return;
     };
     let dir = root.direction;
+    // The block sits one landing gap past the landing's end.
     let landing = if ml.enable_landing {
         root.landing_distance
     } else {
         0.0
-    };
+    } + ml.context.landing_gap.max(0.0);
     let factor = if ml.context.scale_factor.abs() > 1.0e-12 {
         ml.context.scale_factor
     } else {

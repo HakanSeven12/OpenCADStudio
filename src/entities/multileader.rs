@@ -2064,15 +2064,33 @@ pub(crate) fn block_content_insert(
     );
     let mut insertion = ml.context.block_content_location;
     if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
-        // Other writers store the block's insertion point in the block content
-        // location, already moved off the landing by the extents; derive it
-        // again from the content base point so it is not moved twice.
+        // The block's edge facing the arrow sits one landing gap past the end
+        // of the first root's landing. Derived from the root, not the content
+        // base point: AutoCAD stores that at the block's left edge even when
+        // the leader comes from the right, while this program stores the
+        // landing end (#2640).
         insertion = ml.context.content_base_point;
-        if let Some(bounds) = block_content_bounds(document, record) {
+        let root = ml
+            .context
+            .leader_roots
+            .first()
+            .filter(|root| root.direction.x.hypot(root.direction.y) > 1.0e-9);
+        let mut from_left = true;
+        if let Some(root) = root {
+            let length = root.direction.x.hypot(root.direction.y);
+            let (ux, uy) = (root.direction.x / length, root.direction.y / length);
+            let landing = if draws_landing(ml, root) {
+                root.landing_distance
+            } else {
+                0.0
+            };
+            let reach = landing + ml.context.landing_gap.max(0.0);
+            insertion.x = root.connection_point.x + ux * reach;
+            insertion.y = root.connection_point.y + uy * reach;
             let to_block = Transform::rotation(-ml.block_rotation);
-            let from_left = ml.context.leader_roots.first().is_none_or(|root| {
-                to_block.apply_vector([root.direction.x, root.direction.y])[0] >= 0.0
-            });
+            from_left = to_block.apply_vector([ux, uy])[0] >= 0.0;
+        }
+        if let Some(bounds) = block_content_bounds(document, record) {
             let anchor_x = if from_left { bounds[0] } else { bounds[2] };
             let anchor_y = (bounds[1] + bounds[3]) * 0.5;
             let local_x = (anchor_x - record.base_point.x) * scale.x;
@@ -4128,9 +4146,27 @@ mod tests {
         let root = ml.context.add_leader_root();
         root.connection_point = Vector3::new(60.0, 5.0, 0.0);
         root.direction = Vector3::new(1.0, 0.0, 0.0);
+        root.landing_distance = 0.0;
+        ml.context.landing_gap = 0.36;
         let insert = block_content_insert(&doc, &ml).expect("block content");
         assert!(
             (insert.insert_point - Vector3::new(64.36, 5.0, 0.0)).length() < 1e-4,
+            "insertion {:?}",
+            insert.insert_point
+        );
+        // A leader from the right (#2640): AutoCAD keeps the content base
+        // point at the block's left edge; the circle still meets the landing.
+        ml.context.landing_gap = 0.0;
+        ml.context.content_base_point = Vector3::new(52.0, 5.0, 0.0);
+        let root = &mut ml.context.leader_roots[0];
+        root.connection_point = Vector3::new(70.0, 5.0, 0.0);
+        root.direction = Vector3::new(-1.0, 0.0, 0.0);
+        root.landing_distance = 10.0;
+        ml.enable_landing = true;
+        ml.enable_dogleg = true;
+        let insert = block_content_insert(&doc, &ml).expect("block content");
+        assert!(
+            (insert.insert_point - Vector3::new(56.0, 5.0, 0.0)).length() < 1e-4,
             "insertion {:?}",
             insert.insert_point
         );

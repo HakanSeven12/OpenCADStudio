@@ -512,8 +512,8 @@ pub fn view_stack<'a>(d: &'a StackDraft) -> Element<'a, Message> {
         card(
             t("Text"),
             column![
-                number_field(t("Upper"), &d.upper, M::StackUpper),
-                number_field(t("Lower"), &d.lower, M::StackLower),
+                number_field(t("Upper text"), &d.upper, M::StackUpper),
+                number_field(t("Lower text"), &d.lower, M::StackLower),
             ]
             .spacing(6),
         ),

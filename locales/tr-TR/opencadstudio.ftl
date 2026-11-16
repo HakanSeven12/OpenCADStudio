@@ -9971,3 +9971,7 @@ text-editor-tools =
     .text-file-txt = Metin dosyası (*.txt)
     .dictionaries = Sözlükler
     .select-file = Dosya Seç
+
+text-editor-stack =
+    .upper-text = Üst metin
+    .lower-text = Alt metin

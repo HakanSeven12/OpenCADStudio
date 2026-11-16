@@ -7549,6 +7549,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Text file (*.txt)" => Some(("text-editor-tools", "text-file-txt")),
         "Dictionaries" => Some(("text-editor-tools", "dictionaries")),
         "Select File" => Some(("text-editor-tools", "select-file")),
+        "Upper text" => Some(("text-editor-stack", "upper-text")),
+        "Lower text" => Some(("text-editor-stack", "lower-text")),
         _ => None,
     }
 }

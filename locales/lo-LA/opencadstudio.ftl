@@ -10043,3 +10043,7 @@ text-editor-tools =
     .text-file-txt = Text file (*.txt)
     .dictionaries = Dictionaries
     .select-file = Select File
+
+text-editor-stack =
+    .upper-text = Upper text
+    .lower-text = Lower text

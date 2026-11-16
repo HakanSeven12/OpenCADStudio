@@ -432,10 +432,10 @@ pub(super) fn pending_changes<'s, 'b>(
 /// "Height: 2.5 → 3.5. 4 texts that follow the style are updated. …"
 fn value_line(label: &str, from: &str, to: &str, change: &ValueChange) -> String {
     let (value, count) = (label, change.updated);
-    let mut line = if count == 1 {
-        crate::tf!("{value}: {from} → {to}. 1 text that follows the style is updated.")
-    } else {
-        crate::tf!("{value}: {from} → {to}. {count} texts that follow the style are updated.")
+    let mut line = match count {
+        0 => crate::tf!("{value}: {from} → {to}."),
+        1 => crate::tf!("{value}: {from} → {to}. 1 text that follows the style is updated."),
+        _ => crate::tf!("{value}: {from} → {to}. {count} texts that follow the style are updated."),
     }
     .into_owned();
     if change.in_blocks > 0 {

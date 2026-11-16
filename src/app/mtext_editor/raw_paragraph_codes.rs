@@ -197,8 +197,3 @@ pub(super) fn rewrite(
     }
     Ok(out)
 }
-
-/// `raw` with its paragraph settings rewritten where it can be, else as it is.
-pub(super) fn normalized(raw: String) -> String {
-    rewrite(&raw, |_, _| {}).unwrap_or(raw)
-}
